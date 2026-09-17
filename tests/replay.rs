@@ -71,7 +71,7 @@ fn replay_send_interleaving() {
     let sink = Arc::new(MemorySink::new());
     let dyn_sink: Arc<dyn quill::diagnostics::DiagnosticSink> = sink.clone();
     let mut session = Session::new(AccountKey::primary(), dyn_sink);
-    let extra = session.request(RequestPurpose::SendText, Some(quill::ids::ChatId(7)));
+    let extra = session.request(RequestPurpose::SendMessage, Some(quill::ids::ChatId(7)));
     apply_all(
         &mut session,
         &sink,
@@ -130,7 +130,7 @@ fn replay_ready_load_chats_select_and_send() {
             .messages
             .contains_key(&50)
     );
-    let send_extra = session.request(RequestPurpose::SendText, Some(quill::ids::ChatId(7)));
+    let send_extra = session.request(RequestPurpose::SendMessage, Some(quill::ids::ChatId(7)));
     apply_all_seq(
         &mut session,
         &sink,
@@ -311,6 +311,81 @@ fn replay_view_messages_error_allows_retry() {
         vec![quill::ids::MessageId(11)]
     );
     assert!(!sink.rendered().contains("CANARY_VIEW_REPLAY"));
+}
+
+#[test]
+fn replay_send_photo_then_document_succeed() {
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn quill::diagnostics::DiagnosticSink> = sink.clone();
+    let mut session = Session::new(AccountKey::primary(), dyn_sink);
+    let seq = AtomicU64::new(0);
+    apply_all_seq(
+        &mut session,
+        &sink,
+        &seq,
+        &[
+            r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+            r#"{"@type":"updateNewChat","chat":{"id":7,"title":"Alice","type":{"@type":"chatTypePrivate","user_id":7},"unread_count":0}}"#,
+        ],
+    );
+    session.open_chat(quill::ids::ChatId(7));
+    let photo_extra = session.request(RequestPurpose::SendMessage, Some(quill::ids::ChatId(7)));
+    apply_all_seq(
+        &mut session,
+        &sink,
+        &seq,
+        &[
+            &format!(
+                r#"{{"@type":"message","@extra":"{}","id":-20,"chat_id":7,"is_outgoing":true,"content":{{"@type":"messagePhoto","photo":{{"@type":"photo","has_stickers":false,"sizes":[{{"@type":"photoSize","type":"m","photo":{{"@type":"file","id":70,"size":10,"expected_size":10,"local":{{"@type":"localFile","path":"","can_be_downloaded":false,"can_be_deleted":false,"is_downloading_active":false,"is_downloading_completed":false,"download_offset":0,"downloaded_prefix_size":0,"downloaded_size":0}},"remote":{{"@type":"remoteFile","id":"CANARY_REMOTE","unique_id":"u","is_uploading_active":true,"is_uploading_completed":false,"uploaded_size":0}}}},"width":100,"height":80,"progressive_sizes":[]}}]}},"caption":{{"@type":"formattedText","text":"CANARY_REPLAY_out_photo","entities":[]}},"has_spoiler":false,"is_secret":false}}}}"#,
+                photo_extra.0
+            ),
+            r#"{"@type":"updateMessageSendSucceeded","old_message_id":-20,"message":{"id":60,"chat_id":7,"is_outgoing":true,"content":{"@type":"messagePhoto","photo":{"@type":"photo","has_stickers":false,"sizes":[{"@type":"photoSize","type":"m","photo":{"@type":"file","id":70,"size":10,"expected_size":10,"local":{"@type":"localFile","path":"/tmp/quill-out.jpg","can_be_downloaded":true,"can_be_deleted":false,"is_downloading_active":false,"is_downloading_completed":true,"download_offset":0,"downloaded_prefix_size":10,"downloaded_size":10},"remote":{"@type":"remoteFile","id":"CANARY_REMOTE","unique_id":"u","is_uploading_active":false,"is_uploading_completed":true,"uploaded_size":10}},"width":100,"height":80,"progressive_sizes":[]}]},"caption":{"@type":"formattedText","text":"CANARY_REPLAY_out_photo","entities":[]},"has_spoiler":false,"is_secret":false}}}"#,
+        ],
+    );
+    let photo = session
+        .histories
+        .get(&7)
+        .unwrap()
+        .messages
+        .get(&60)
+        .unwrap();
+    assert!(!photo.pending);
+    assert!(photo.is_outgoing);
+    assert!(matches!(
+        photo.content,
+        quill::telegram::envelope::MessageContent::Photo(_)
+    ));
+
+    let doc_extra = session.request(RequestPurpose::SendMessage, Some(quill::ids::ChatId(7)));
+    apply_all_seq(
+        &mut session,
+        &sink,
+        &seq,
+        &[
+            &format!(
+                r#"{{"@type":"message","@extra":"{}","id":-21,"chat_id":7,"is_outgoing":true,"content":{{"@type":"messageDocument","document":{{"@type":"document","file_name":"out.txt","mime_type":"text/plain","document":{{"@type":"file","id":71,"size":4,"expected_size":4,"local":{{"@type":"localFile","path":"","can_be_downloaded":false,"can_be_deleted":false,"is_downloading_active":false,"is_downloading_completed":false,"download_offset":0,"downloaded_prefix_size":0,"downloaded_size":0}},"remote":{{"@type":"remoteFile","id":"CANARY_REMOTE","unique_id":"u","is_uploading_active":true,"is_uploading_completed":false,"uploaded_size":0}}}}}},"caption":{{"@type":"formattedText","text":"","entities":[]}}}}}}"#,
+                doc_extra.0
+            ),
+            r#"{"@type":"updateMessageSendSucceeded","old_message_id":-21,"message":{"id":61,"chat_id":7,"is_outgoing":true,"content":{"@type":"messageDocument","document":{"@type":"document","file_name":"out.txt","mime_type":"text/plain","document":{"@type":"file","id":71,"size":4,"expected_size":4,"local":{"@type":"localFile","path":"","can_be_downloaded":true,"can_be_deleted":false,"is_downloading_active":false,"is_downloading_completed":false,"download_offset":0,"downloaded_prefix_size":0,"downloaded_size":0},"remote":{"@type":"remoteFile","id":"CANARY_REMOTE","unique_id":"u","is_uploading_active":false,"is_uploading_completed":true,"uploaded_size":4}}},"caption":{"@type":"formattedText","text":"","entities":[]}}}}"#,
+        ],
+    );
+    let doc = session
+        .histories
+        .get(&7)
+        .unwrap()
+        .messages
+        .get(&61)
+        .unwrap();
+    match &doc.content {
+        quill::telegram::envelope::MessageContent::Document(d) => {
+            assert_eq!(d.file_name, "out.txt");
+            assert!(doc.is_outgoing);
+            assert!(!doc.pending);
+        }
+        other => panic!("{other:?}"),
+    }
+    assert!(!sink.rendered().contains("CANARY_REPLAY"));
+    assert!(!sink.rendered().contains("CANARY_REMOTE"));
 }
 
 #[test]

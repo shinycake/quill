@@ -87,5 +87,10 @@ pub const REQUIRED_SCHEMA_CONSTRUCTORS: &[&str] = &[
     "updateFile",
     "downloadFile",
     "inputMessageText",
+    "inputMessagePhoto",
+    "inputMessageDocument",
+    "inputPhoto",
+    "inputDocument",
+    "inputFileLocal",
     "formattedText",
 ];

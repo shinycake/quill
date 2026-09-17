@@ -1,4 +1,4 @@
-//! Display-path sandbox: only files under allowed roots (account `tdlib_files`, demo allowlist).
+//! Path sandbox: display only under allowed roots; send only via explicit user pick.
 
 use std::path::{Path, PathBuf};
 
@@ -20,6 +20,29 @@ pub fn sandboxed_display_path(candidate: &str, allowed_roots: &[PathBuf]) -> Opt
         }
     }
     None
+}
+
+/// Validate a path the user explicitly picked for sending.
+///
+/// Returns the canonical file path, or `None` if missing / not a file.
+/// Callers must invoke this only from an explicit attach action — never from
+/// untrusted TDLib JSON `local.path` values when building `sendMessage`.
+pub fn pick_send_path(candidate: &Path) -> Option<PathBuf> {
+    canonical_file(candidate)
+}
+
+/// True when `path` equals a previously picked canonical send path.
+///
+/// Send builders should only embed paths that pass this check against the
+/// attachment frozen at composer submit (not arbitrary strings from JSON).
+pub fn is_explicit_send_path(path: &Path, picked: &Path) -> bool {
+    let Some(candidate) = canonical_file(path) else {
+        return false;
+    };
+    let Ok(picked_canon) = std::fs::canonicalize(picked) else {
+        return false;
+    };
+    candidate == picked_canon && picked_canon.is_file()
 }
 
 fn canonical_file(path: &Path) -> Option<PathBuf> {
@@ -100,6 +123,34 @@ mod tests {
         assert_eq!(got, Some(std::fs::canonicalize(&nested).unwrap()));
         let _ = fs::remove_dir_all(&root);
         let _ = fs::remove_dir_all(&dir_root);
+    }
+
+    #[test]
+    fn pick_send_path_requires_existing_file() {
+        let root = scratch("pick");
+        let file = root.join("photo.png");
+        fs::write(&file, [1]).unwrap();
+        let got = pick_send_path(&file).unwrap();
+        assert_eq!(got, std::fs::canonicalize(&file).unwrap());
+        assert!(pick_send_path(&root.join("missing.png")).is_none());
+        assert!(!is_explicit_send_path(Path::new("/etc/passwd"), &file));
+        assert!(is_explicit_send_path(&file, &got));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn pick_send_path_is_independent_of_display_roots() {
+        // Sending uses the explicit pick, not the display allowlist.
+        let root = scratch("send-any");
+        let outside = root.join("picked.bin");
+        fs::write(&outside, [2]).unwrap();
+        let picked = pick_send_path(&outside).unwrap();
+        assert!(is_explicit_send_path(&outside, &picked));
+        assert_eq!(
+            sandboxed_display_path(outside.to_str().unwrap(), &[root.join("files")]),
+            None
+        );
+        let _ = fs::remove_dir_all(&root);
     }
 
     #[cfg(unix)]

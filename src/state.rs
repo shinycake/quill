@@ -20,7 +20,8 @@ pub enum RequestPurpose {
     CheckAuthenticationPassword,
     LoadChats,
     GetHistory,
-    SendText,
+    /// Any `sendMessage` (text / photo / document). Response `message` is pending.
+    SendMessage,
     OpenChat,
     CloseChat,
     ViewMessages,
@@ -578,7 +579,7 @@ impl Session {
                 }
             }
             EnvelopePayload::Message(message) => {
-                if pending.map(|p| p.purpose) == Some(RequestPurpose::SendText) {
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::SendMessage) {
                     self.upsert_message(message, true);
                 } else {
                     self.upsert_message(message, false);

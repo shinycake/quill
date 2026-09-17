@@ -211,6 +211,76 @@ pub fn send_text(extra: RequestId, chat_id: ChatId, text: &str) -> String {
     .to_string()
 }
 
+/// `sendMessage` + `inputMessagePhoto` / `inputPhoto` / `inputFileLocal` (1.8.67).
+/// `path` must already be an explicitly picked local file — never a JSON `local.path`.
+pub fn send_photo(extra: RequestId, chat_id: ChatId, path: &str, caption: &str) -> String {
+    json!({
+        "@type": "sendMessage",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0,
+        "topic_id": Value::Null,
+        "reply_to": Value::Null,
+        "options": Value::Null,
+        "reply_markup": Value::Null,
+        "input_message_content": {
+            "@type": "inputMessagePhoto",
+            "photo": {
+                "@type": "inputPhoto",
+                "photo": {
+                    "@type": "inputFileLocal",
+                    "path": path
+                },
+                "thumbnail": Value::Null,
+                "video": Value::Null,
+                "added_sticker_file_ids": [],
+                "width": 0,
+                "height": 0
+            },
+            "caption": {
+                "@type": "formattedText",
+                "text": caption,
+                "entities": []
+            },
+            "show_caption_above_media": false,
+            "self_destruct_type": Value::Null,
+            "has_spoiler": false
+        }
+    })
+    .to_string()
+}
+
+/// `sendMessage` + `inputMessageDocument` / `inputDocument` / `inputFileLocal` (1.8.67).
+/// `path` must already be an explicitly picked local file — never a JSON `local.path`.
+pub fn send_document(extra: RequestId, chat_id: ChatId, path: &str, caption: &str) -> String {
+    json!({
+        "@type": "sendMessage",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0,
+        "topic_id": Value::Null,
+        "reply_to": Value::Null,
+        "options": Value::Null,
+        "reply_markup": Value::Null,
+        "input_message_content": {
+            "@type": "inputMessageDocument",
+            "document": {
+                "@type": "inputDocument",
+                "document": {
+                    "@type": "inputFileLocal",
+                    "path": path
+                },
+                "thumbnail": Value::Null,
+                "disable_content_type_detection": false
+            },
+            "caption": {
+                "@type": "formattedText",
+                "text": caption,
+                "entities": []
+            }
+        }
+    })
+    .to_string()
+}
+
 pub fn runtime_version_request() -> String {
     json!({
         "@type": "getOption",
@@ -234,6 +304,65 @@ mod tests {
         assert!(json.contains("\"topic_id\":null"));
         assert!(!json.contains("message_thread_id"));
         assert!(json.contains("\"@extra\":\"9\""));
+    }
+
+    #[test]
+    fn send_photo_shape_matches_1_8_67() {
+        let json = send_photo(RequestId(11), ChatId(7), "/tmp/picked.png", "CANARY_CAP");
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "sendMessage");
+        assert_eq!(v["@extra"], "11");
+        assert_eq!(v["chat_id"], 7);
+        assert_eq!(v["topic_id"], Value::Null);
+        assert_eq!(v["input_message_content"]["@type"], "inputMessagePhoto");
+        assert_eq!(
+            v["input_message_content"]["photo"]["photo"]["@type"],
+            "inputFileLocal"
+        );
+        assert_eq!(
+            v["input_message_content"]["photo"]["photo"]["path"],
+            "/tmp/picked.png"
+        );
+        assert_eq!(
+            v["input_message_content"]["photo"]["thumbnail"],
+            Value::Null
+        );
+        assert_eq!(v["input_message_content"]["photo"]["video"], Value::Null);
+        assert_eq!(v["input_message_content"]["photo"]["width"], 0);
+        assert_eq!(v["input_message_content"]["photo"]["height"], 0);
+        assert_eq!(v["input_message_content"]["caption"]["text"], "CANARY_CAP");
+        assert_eq!(
+            v["input_message_content"]["show_caption_above_media"],
+            false
+        );
+        assert_eq!(v["input_message_content"]["has_spoiler"], false);
+        assert_eq!(
+            v["input_message_content"]["self_destruct_type"],
+            Value::Null
+        );
+        assert!(!json.contains("message_thread_id"));
+    }
+
+    #[test]
+    fn send_document_shape_matches_1_8_67() {
+        let json = send_document(RequestId(12), ChatId(7), "/tmp/picked.txt", "");
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "sendMessage");
+        assert_eq!(v["input_message_content"]["@type"], "inputMessageDocument");
+        assert_eq!(
+            v["input_message_content"]["document"]["document"]["@type"],
+            "inputFileLocal"
+        );
+        assert_eq!(
+            v["input_message_content"]["document"]["document"]["path"],
+            "/tmp/picked.txt"
+        );
+        assert_eq!(
+            v["input_message_content"]["document"]["disable_content_type_detection"],
+            false
+        );
+        assert_eq!(v["input_message_content"]["caption"]["text"], "");
+        assert!(!json.contains("CANARY"));
     }
 
     #[test]

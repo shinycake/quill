@@ -1,7 +1,7 @@
 //! Live TDLib connect gate: credentials + tdjson → setTdlibParameters → auth updates.
 //! Never logs api_hash, phone numbers, or codes.
 
-use crate::composer::ComposerSnapshot;
+use crate::composer::{AttachmentKind, ComposerSnapshot};
 use crate::credentials::TelegramCredentials;
 use crate::diagnostics::DiagnosticSink;
 use crate::ids::{AccountKey, ChatId, FileId, MessageId, RequestId};
@@ -15,8 +15,8 @@ use crate::telegram::ffi::{LibraryOrigin, TdJsonError, resolve_tdjson_path};
 use crate::telegram::requests::{
     SetTdlibParameters, check_authentication_code, check_authentication_password, close_chat,
     close_request, download_file as download_file_request, get_authorization_state,
-    get_chat_history, load_chats, open_chat, send_text, set_authentication_phone_number,
-    view_messages,
+    get_chat_history, load_chats, open_chat, send_document, send_photo, send_text,
+    set_authentication_phone_number, view_messages,
 };
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -543,8 +543,16 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     /// Send `sendMessage` for a snapshot frozen at composer submit.
-    /// `snapshot.text` is not logged.
+    /// Caption / path are not logged.
     pub fn send_text_snapshot(
+        &mut self,
+        snapshot: &ComposerSnapshot,
+    ) -> Result<RequestId, ConnectSendError> {
+        self.send_snapshot(snapshot)
+    }
+
+    /// Send text, photo, or document via `sendMessage` (TDLib 1.8.67).
+    pub fn send_snapshot(
         &mut self,
         snapshot: &ComposerSnapshot,
     ) -> Result<RequestId, ConnectSendError> {
@@ -563,13 +571,40 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !supported {
             return Err(ConnectSendError::InvalidRequest);
         }
+        let caption = snapshot.caption();
+        if snapshot.attachment.is_none() && caption.is_empty() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        // Validate the picked path before allocating `@extra`.
+        let media_path = match snapshot.attachment.as_ref() {
+            Some(att) => Some(
+                att.send_path_str()
+                    .ok_or(ConnectSendError::InvalidRequest)?,
+            ),
+            None => None,
+        };
         let extra = self
             .session
-            .request(RequestPurpose::SendText, Some(chat_id));
-        // Contains message text — do not log `json`.
-        self.sender
-            .send_json(&send_text(extra, chat_id, snapshot.text.trim()))?;
-        Ok(extra)
+            .request(RequestPurpose::SendMessage, Some(chat_id));
+        // Contains caption / path — do not log `json`.
+        let json = match (snapshot.attachment.as_ref(), media_path.as_deref()) {
+            (Some(att), Some(path)) => match att.kind {
+                AttachmentKind::Photo => send_photo(extra, chat_id, path, caption),
+                AttachmentKind::Document => send_document(extra, chat_id, path, caption),
+            },
+            (None, None) => send_text(extra, chat_id, caption),
+            _ => {
+                self.session.requests.take(extra);
+                return Err(ConnectSendError::InvalidRequest);
+            }
+        };
+        match self.sender.send_json(&json) {
+            Ok(()) => Ok(extra),
+            Err(err) => {
+                self.session.requests.take(extra);
+                Err(err)
+            }
+        }
     }
 
     /// Send `setAuthenticationPhoneNumber` when auth is WaitPhoneNumber.
@@ -1623,6 +1658,145 @@ mod tests {
         );
         assert!(!sink.rendered().contains("CANARY_MEDIA"));
         assert!(!sink.rendered().contains("CANARY_REMOTE"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn driver_sends_photo_and_document_from_picked_paths() {
+        use crate::composer::{AttachmentKind, ComposerAttachment, ComposerSnapshot};
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = Arc::new(RecordingSender::new());
+        let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+        let mut driver =
+            ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+        let seq = AtomicU64::new(0);
+        driver
+            .ingest(
+                copy_and_parse(
+                    r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        driver
+            .ingest(
+                copy_and_parse(
+                    r#"{"@type":"updateNewChat","chat":{"id":7,"title":"Alice","type":{"@type":"chatTypePrivate","user_id":7},"unread_count":0}}"#,
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        driver.select_chat(ChatId(7)).unwrap();
+
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let pick_dir =
+            std::env::temp_dir().join(format!("quill-send-pick-{}-{}", std::process::id(), nanos));
+        std::fs::create_dir_all(&pick_dir).unwrap();
+        let photo = pick_dir.join("out.png");
+        let doc = pick_dir.join("notes.txt");
+        std::fs::write(&photo, [1, 2, 3]).unwrap();
+        std::fs::write(&doc, b"hello").unwrap();
+
+        let photo_att = ComposerAttachment::pick(&photo, AttachmentKind::Photo).unwrap();
+        let photo_path = photo_att.send_path_str().unwrap();
+        let snap = ComposerSnapshot::capture_with_attachment(
+            ChatId(7),
+            driver.session.view_generation,
+            "CANARY_PHOTO_CAP",
+            Some(photo_att),
+        );
+        let extra = driver.send_snapshot(&snap).unwrap();
+        let last = recorder.snapshot();
+        let send_json = last.last().unwrap();
+        let v: Value = serde_json::from_str(send_json).unwrap();
+        assert_eq!(v["@type"], "sendMessage");
+        assert_eq!(v["@extra"], extra.0.to_string());
+        assert_eq!(v["input_message_content"]["@type"], "inputMessagePhoto");
+        assert_eq!(
+            v["input_message_content"]["photo"]["photo"]["path"],
+            photo_path
+        );
+        assert_eq!(
+            v["input_message_content"]["caption"]["text"],
+            "CANARY_PHOTO_CAP"
+        );
+
+        // Pending message response upserts outgoing media.
+        let pending = copy_and_parse(
+            &format!(
+                r#"{{"@type":"message","@extra":"{}","id":-5,"chat_id":7,"is_outgoing":true,"content":{{"@type":"messagePhoto","photo":{{"@type":"photo","has_stickers":false,"sizes":[{{"@type":"photoSize","type":"m","photo":{{"@type":"file","id":50,"size":3,"expected_size":3,"local":{{"@type":"localFile","path":"","can_be_downloaded":false,"can_be_deleted":false,"is_downloading_active":false,"is_downloading_completed":false,"download_offset":0,"downloaded_prefix_size":0,"downloaded_size":0}},"remote":{{"@type":"remoteFile","id":"x","unique_id":"u","is_uploading_active":true,"is_uploading_completed":false,"uploaded_size":0}}}},"width":100,"height":80,"progressive_sizes":[]}}]}},"caption":{{"@type":"formattedText","text":"CANARY_PHOTO_CAP","entities":[]}},"has_spoiler":false,"is_secret":false}}}}"#,
+                extra.0
+            ),
+            &seq,
+            &dyn_sink,
+        )
+        .unwrap();
+        driver.ingest(pending).unwrap();
+        let msg = driver
+            .session
+            .histories
+            .get(&7)
+            .unwrap()
+            .messages
+            .get(&-5)
+            .unwrap();
+        assert!(msg.pending);
+        assert!(msg.is_outgoing);
+        assert!(matches!(
+            msg.content,
+            crate::telegram::envelope::MessageContent::Photo(_)
+        ));
+
+        let doc_att = ComposerAttachment::pick(&doc, AttachmentKind::Document).unwrap();
+        let doc_path = doc_att.send_path_str().unwrap();
+        let doc_snap = ComposerSnapshot::capture_with_attachment(
+            ChatId(7),
+            driver.session.view_generation,
+            "",
+            Some(doc_att),
+        );
+        let doc_extra = driver.send_snapshot(&doc_snap).unwrap();
+        let doc_json: Value = serde_json::from_str(recorder.snapshot().last().unwrap()).unwrap();
+        assert_eq!(doc_json["@extra"], doc_extra.0.to_string());
+        assert_eq!(
+            doc_json["input_message_content"]["@type"],
+            "inputMessageDocument"
+        );
+        assert_eq!(
+            doc_json["input_message_content"]["document"]["document"]["path"],
+            doc_path
+        );
+        assert_eq!(doc_json["input_message_content"]["caption"]["text"], "");
+
+        // Reject paths that were not picked through ComposerAttachment.
+        let forged = ComposerSnapshot::capture_with_attachment(
+            ChatId(7),
+            driver.session.view_generation,
+            "",
+            Some(crate::composer::ComposerAttachment {
+                path: pick_dir.join("missing-forged.bin"),
+                kind: AttachmentKind::Document,
+                file_name: "missing-forged.bin".into(),
+            }),
+        );
+        assert_eq!(
+            driver.send_snapshot(&forged),
+            Err(ConnectSendError::InvalidRequest)
+        );
+        assert!(!sink.rendered().contains("CANARY_PHOTO"));
+        let _ = std::fs::remove_dir_all(&pick_dir);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
