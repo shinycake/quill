@@ -57,3 +57,4 @@ Research snapshot 2026-09-16, pin recheck **2026-09-17**.
 2. VoiceOver + real IME on a Mac (this environment cannot prove them).
 3. Native tdjson build + rpath verification on Apple Silicon (`docs/native-bundle.md`).
 4. Signing / notarization / public brand: deferred.
+5. **GitHub Actions did not run** on 2026-09-17: both `linux-fmt-clippy-test` and `macos-compile-smoke` failed immediately with “The job was not started because recent account payments have failed or your spending limit needs to be increased.” Local equivalent passed on this agent: `cargo fmt --all -- --check`, `cargo clippy --no-default-features --all-targets --locked -- -D warnings`, `cargo test --no-default-features --locked` (43 lib + 6 replay). UI compile: `cargo build --features ui --locked`.
