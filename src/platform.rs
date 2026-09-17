@@ -120,6 +120,39 @@ pub fn account_item_name(account: &AccountKey) -> String {
     format!("db-key:{account}")
 }
 
+/// Classify a Security.framework OSStatus from `SecItemCopyMatching`.
+///
+/// Missing (`errSecItemNotFound`) is `Ok(None)`. User cancel / lock /
+/// interaction-not-allowed is `Locked`. Other failures stay `Platform`.
+pub fn classify_keychain_status(code: i32) -> Result<(), SecretStoreError> {
+    match code {
+        // errSecItemNotFound — caller maps this to Ok(None), not an error.
+        ERR_SEC_ITEM_NOT_FOUND => Err(SecretStoreError::Missing),
+        ERR_SEC_USER_CANCELED
+        | ERR_SEC_AUTH_FAILED
+        | ERR_SEC_INTERACTION_NOT_ALLOWED
+        | ERR_SEC_NOT_AVAILABLE => Err(SecretStoreError::Locked),
+        _ => Err(SecretStoreError::Platform),
+    }
+}
+
+/// Map a Keychain get failure: missing vs locked vs platform.
+pub fn map_keychain_get_error(code: i32) -> Result<Option<DatabaseKey>, SecretStoreError> {
+    match classify_keychain_status(code) {
+        Err(SecretStoreError::Missing) => Ok(None),
+        Err(other) => Err(other),
+        Ok(()) => Err(SecretStoreError::Platform),
+    }
+}
+
+// Apple OSStatus values (Security.framework). Kept as integers so Linux tests
+// can prove Locked vs Missing without linking the macOS SDK.
+const ERR_SEC_ITEM_NOT_FOUND: i32 = -25300;
+const ERR_SEC_USER_CANCELED: i32 = -128;
+const ERR_SEC_AUTH_FAILED: i32 = -25293;
+const ERR_SEC_INTERACTION_NOT_ALLOWED: i32 = -25308;
+const ERR_SEC_NOT_AVAILABLE: i32 = -25291;
+
 /// Load an existing key, or create one only when no database directory exists.
 pub fn load_or_create_key<S: SecretStore>(
     store: &S,
@@ -150,7 +183,7 @@ pub enum KeyDecision {
 pub mod keychain {
     use super::*;
     use security_framework::passwords::{
-        delete_generic_password, generic_password, set_generic_password,
+        delete_generic_password, get_generic_password, set_generic_password,
     };
 
     pub struct KeychainSecretStore;
@@ -158,9 +191,9 @@ pub mod keychain {
     impl SecretStore for KeychainSecretStore {
         fn get(&self, account: &AccountKey) -> Result<Option<DatabaseKey>, SecretStoreError> {
             let item = account_item_name(account);
-            match generic_password(KEYCHAIN_SERVICE, &item) {
+            match get_generic_password(KEYCHAIN_SERVICE, &item) {
                 Ok(bytes) => Ok(Some(DatabaseKey::from_bytes(bytes)?)),
-                Err(_) => Ok(None),
+                Err(err) => map_keychain_get_error(err.code()),
             }
         }
 
@@ -217,5 +250,32 @@ mod tests {
     fn debug_redacts_key_bytes() {
         let key = DatabaseKey::generate();
         assert_eq!(format!("{key:?}"), "DatabaseKey(<redacted>)");
+    }
+
+    #[test]
+    fn keychain_missing_is_not_locked() {
+        assert!(matches!(map_keychain_get_error(-25300), Ok(None)));
+        assert_eq!(
+            classify_keychain_status(-25300),
+            Err(SecretStoreError::Missing)
+        );
+    }
+
+    #[test]
+    fn keychain_user_denial_is_locked() {
+        for code in [-128, -25293, -25308, -25291] {
+            assert!(
+                matches!(map_keychain_get_error(code), Err(SecretStoreError::Locked)),
+                "status {code}"
+            );
+        }
+    }
+
+    #[test]
+    fn keychain_other_errors_are_platform() {
+        assert!(matches!(
+            map_keychain_get_error(-50),
+            Err(SecretStoreError::Platform)
+        ));
     }
 }

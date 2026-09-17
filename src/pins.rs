@@ -12,9 +12,16 @@ pub const TDLIB_GIT_COMMIT: &str = "d1085f9cebc5a62379991ae1652673954f229c1f";
 /// CMake `project(TDLib VERSION …)` at [`TDLIB_GIT_COMMIT`].
 pub const TDLIB_CMAKE_VERSION: &str = "1.8.67";
 
-/// SHA-256 of `schema/td_api.tl` fetched from that commit.
+/// Official `td/generate/scheme/td_api.tl` at [`TDLIB_GIT_COMMIT`].
+/// SHA-256 of the **upstream** file (not of a locally truncated copy).
 pub const TD_API_TL_SHA256: &str =
-    "4a637fab0cd33e5be6460128865bb403d259ff3a054c14a55d27e6b04f008cb5";
+    "326b65b41442901ad6bf0ca2f7c356ae54365d6c343956a62e06a8b3cb305e87";
+
+/// Byte length of that official schema file.
+pub const TD_API_TL_BYTES: usize = 1_152_505;
+
+/// Raw GitHub URL for the official schema at [`TDLIB_GIT_COMMIT`].
+pub const TD_API_TL_UPSTREAM_URL: &str = "https://raw.githubusercontent.com/tdlib/td/d1085f9cebc5a62379991ae1652673954f229c1f/td/generate/scheme/td_api.tl";
 
 /// Relative path of the vendored schema.
 pub const TD_API_TL_PATH: &str = "schema/td_api.tl";

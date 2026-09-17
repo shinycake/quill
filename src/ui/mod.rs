@@ -5,7 +5,7 @@ use gpui_kit::component::input::{InputEvent, Textarea, TextareaState};
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::auth::{AuthAction, AuthView, view_for};
-use quill::composer::{EnterEvent, should_send_on_enter};
+use quill::composer::should_send_on_enter;
 use quill::telegram::envelope::AuthorizationState;
 use synthetic::SyntheticChat;
 
@@ -44,17 +44,16 @@ impl QuillApp {
             &composer,
             window,
             |this, state, event: &InputEvent, window, cx| {
-                if let InputEvent::PressEnter { secondary, shift } = event
-                    && should_send_on_enter(EnterEvent {
-                        composing: false,
-                        shift: *shift,
-                        secondary: *secondary,
-                    })
-                {
-                    let text = state.read(cx).value().to_string();
-                    if !text.trim().is_empty() {
-                        this.chat.update(cx, |chat, cx| chat.send_text(text, cx));
-                        state.update(cx, |input, cx| input.set_value("", window, cx));
+                if let InputEvent::PressEnter { secondary, shift } = event {
+                    let marked = state.update(cx, |input, cx| input.marked_text_range(window, cx));
+                    if should_send_on_enter(quill::composer::enter_event_from_kit(
+                        *shift, *secondary, marked,
+                    )) {
+                        let text = state.read(cx).value().to_string();
+                        if !text.trim().is_empty() {
+                            this.chat.update(cx, |chat, cx| chat.send_text(text, cx));
+                            state.update(cx, |input, cx| input.set_value("", window, cx));
+                        }
                     }
                 }
             },
