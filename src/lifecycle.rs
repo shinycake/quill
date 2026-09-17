@@ -32,7 +32,7 @@ pub enum ShutdownKind {
     LogOut,
 }
 
-pub fn plan_restore<S: SecretStore>(
+pub fn plan_restore<S: SecretStore + ?Sized>(
     app_root: &std::path::Path,
     account: AccountKey,
     store: &S,

@@ -103,7 +103,7 @@ pub struct PreparedConnect {
 }
 
 /// Resolve account paths and DB key. Credentials must already be validated.
-pub fn prepare_connect<S: SecretStore>(
+pub fn prepare_connect<S: SecretStore + ?Sized>(
     app_root: &Path,
     account: AccountKey,
     store: &S,
@@ -349,7 +349,7 @@ pub struct LiveConnect {
 
 pub fn start_live_connect(
     credentials: TelegramCredentials,
-    store: &impl SecretStore,
+    store: &(impl SecretStore + ?Sized),
     diagnostics: Arc<dyn DiagnosticSink>,
 ) -> Result<LiveConnect, ConnectBlocker> {
     match evaluate_gate(true) {

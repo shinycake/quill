@@ -273,7 +273,7 @@ pub fn live_secret_store() -> Box<dyn SecretStore> {
 }
 
 /// Load an existing key, or create one only when no database directory exists.
-pub fn load_or_create_key<S: SecretStore>(
+pub fn load_or_create_key<S: SecretStore + ?Sized>(
     store: &S,
     account: &AccountKey,
     database_exists: bool,
