@@ -12,7 +12,7 @@ cargo test --no-default-features
 cargo run --features ui
 ```
 
-The window is a GPUI Kit `Root` wrapping a mixed-height synthetic chat and composer. It does **not** connect to Telegram.
+The window is a GPUI Kit `Root` wrapping a mixed-height synthetic chat and composer. With credentials **and** tdjson available it also opens a live TDLib client and drives auth to WaitPhoneNumber; otherwise it shows a credentials or tdjson halt.
 
 ## Tests (Linux CI)
 
@@ -40,10 +40,11 @@ Ordinary `cargo test` / `cargo run` do **not** fetch or execute tdjson. To build
 
 The loader searches, in order: `QUILL_TDJSON_PATH`, then paths relative to the executable (`Contents/Frameworks`, …). It does **not** search Homebrew prefixes.
 
-## Next live step (blocked on credentials)
+## Live connect
 
-Quill will not call Telegram until the owner provides **their own** `api_id` / `api_hash` from https://my.telegram.org (never commit them). After that:
+Provide **your own** `api_id` / `api_hash` from https://my.telegram.org (never commit them) and a local tdjson build:
 
-- macOS Keychain holds the per-account database encryption key
+- macOS Keychain (or `MemorySecretStore` on Linux) holds the per-account database encryption key
 - `setTdlibParameters` uses the pinned signature with `use_secret_chats=false`
-- First request after `td_create_client_id` must be sent so updates start (`getAuthorizationState`)
+- First request after `td_create_client_id` is `getAuthorizationState` so updates start
+- Phone submit sends `setAuthenticationPhoneNumber`; code / 2FA entry is still a follow-up

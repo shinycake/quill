@@ -8,7 +8,7 @@ Research snapshot 2026-09-16, pin recheck **2026-09-17**.
 - **Repo visibility: Public.**
 - **Primary runners: Idan's personal Mac + Linux** (supported build/run targets, not deferred). GHA remains best-effort when billing allows; Linux CI runs unit/replay tests; `macos-latest` can compile the GPUI binary and assemble a dummy `.app` when jobs start.
 - **No App Store / notarization / distribution pipeline.** Ad-hoc Apple Developer signing only if needed for Idan's personal Mac.
-- **Credentials:** `TELEGRAM_API_ID` / `TELEGRAM_API_HASH` (or gitignored local `.env` / `quill.local.env`) may load into the app; UI reports **credentials loaded** only. Live TDLib connect / phone auth is **not** wired yet. Still no secrets in git. See `docs/credentials.md`.
+- **Credentials:** `TELEGRAM_API_ID` / `TELEGRAM_API_HASH` (or gitignored local `.env` / `quill.local.env`) load into the app. When credentials are present **and** `tdjson` is available (`QUILL_TDJSON_PATH` or bundled next to the executable), Quill opens `LiveTdJson`, sends `setTdlibParameters`, and drives auth updates to `WaitPhoneNumber`. Missing tdjson shows an honest install/build halt. Still no secrets in git. See `docs/credentials.md`.
 - One account, cloud chats only. Channels/bots gated until sponsored-content handling exists. No secret chats, calls, telemetry, or AI.
 - Storage: TDLib DB + small prefs. No second message database.
 
@@ -39,7 +39,7 @@ Research snapshot 2026-09-16, pin recheck **2026-09-17**.
 - Database key: 32 random bytes in Keychain on macOS (`org.shinycake.quill` / `db-key:{account}`); `MemorySecretStore` + tests elsewhere. `KeychainSecretStore::get` maps `errSecItemNotFound` to missing (`Ok(None)`) and user-cancel / auth-failed / interaction-not-allowed / keychain-unavailable to `Locked`. Missing key + existing DB → halt, never mint a replacement.
 - Auth view is a pure function of `updateAuthorizationState`. Premium / email / registration / unknown → unsupported halt UI. No payments, auto-register, or password reset.
 - Chat list / history / send reducers with replay fixtures. Logout invalidates pending requests. Close ≠ logOut.
-- Credentials may load from owner `TELEGRAM_API_ID` / `TELEGRAM_API_HASH` (or local gitignored env files); that is not live login until TDLib connect is implemented (see `docs/credentials.md`). Never pasted into this repo.
+- Credentials load from owner `TELEGRAM_API_ID` / `TELEGRAM_API_HASH` (or local gitignored env files). Connect path: `evaluate_gate` → `prepare_connect` (paths + DB key) → `LiveTdJson` + `setTdlibParameters` → session auth reducers. Phone submit sends `setAuthenticationPhoneNumber` (code/2FA still manual). Never pasted into this repo.
 
 ## Licenses
 
@@ -53,12 +53,12 @@ Research snapshot 2026-09-16, pin recheck **2026-09-17**.
 - GPUI Kit 0.6.1 hello-world (`application` + `init` + `Root`) compiles on this Linux agent after `libfontconfig1-dev` and Vulkan lavapipe. Linux CI still runs **core only** (`--no-default-features`) so GitHub Ubuntu does not need a GPU.
 - `MessageScroller` mixed-height prepend/remeasure works in the live window. Default tail-follow hides the first row when content is taller than the pane; the prototype scrolls to item 0 so the short row is visible in screenshots.
 - Kit `TextareaState::submit_on_enter(true)` plus `should_send_on_enter` / `enter_event_from_kit(marked_text_range)` is the composer policy. Kit does not put composing on `PressEnter`; we use the IME mark.
-- Official tdjson is **not** compiled here. The ordered receive bridge is proven with injected JSON. Native bundle steps are documented for Apple Silicon.
+- Official tdjson is **not** compiled here. Connect is proven with injected JSON (`ConnectDriver` + `RecordingSender`): parameter send shape, credential/tdjson gate, WaitPhoneNumber transition. Live `ReceiveBridge::spawn_live` is wired for machines with tdjson. Native bundle steps are documented for Apple Silicon.
 
 ## Blockers / follow-up
 
-1. Wire live TDLib connect (`LiveTdJson` / `setTdlibParameters` / phone auth) after credentials load — see `docs/credentials.md`. UI currently only reports credentials loaded. No secrets in git.
+1. Live TDLib connect is implemented (`src/connect.rs`): credentials + tdjson → `setTdlibParameters` → `WaitPhoneNumber`. Still manual: verification code / 2FA UI submit, and building/bundling tdjson on each machine (`docs/native-bundle.md`). No secrets in git.
 2. VoiceOver + real IME on a Mac (this environment cannot prove them). Primary Mac runner is Idan's personal machine.
-3. Native tdjson build + rpath verification on Apple Silicon (`docs/native-bundle.md`).
+3. Native tdjson build + rpath verification on Apple Silicon (`docs/native-bundle.md`). This Linux agent has no tdjson; UI shows the MissingTdjson halt when credentials are loaded.
 4. **No App Store / notarization / distribution pipeline.** Ad-hoc Apple Developer signing only if needed for Idan's personal Mac. Public repo; brand polish is still a follow-up.
-5. **GitHub Actions did not run** on 2026-09-17: both `linux-fmt-clippy-test` and `macos-compile-smoke` failed immediately with “The job was not started because recent account payments have failed or your spending limit needs to be increased.” Local equivalent passed on this agent: `cargo fmt --all -- --check`, `cargo clippy --no-default-features --all-targets --locked -- -D warnings`, `cargo test --no-default-features --locked` (43 lib + 6 replay). UI compile: `cargo build --features ui --locked`.
+5. **GitHub Actions did not run** on 2026-09-17: billing/spending limit. Re-run after billing is fixed. Local gates: `cargo fmt`, `clippy -D warnings`, `cargo test --no-default-features --locked`.

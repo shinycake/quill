@@ -50,6 +50,27 @@ impl ReceiveBridge {
         }
     }
 
+    /// Live `td_receive` loop on a dedicated thread. JSON is copied before the next receive.
+    pub fn spawn_live(api: Arc<TdJson>, sink: Arc<dyn DiagnosticSink>) -> Self {
+        let (tx_out, rx_out) = mpsc::channel();
+        let (tx_cmd, _rx_cmd) = mpsc::channel();
+        let seq = Arc::new(AtomicU64::new(0));
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let seq_thread = seq.clone();
+        let shutdown_thread = shutdown.clone();
+        let thread = thread::Builder::new()
+            .name("quill-td-receive".into())
+            .spawn(move || ordered_receive_loop(api, tx_out, seq_thread, shutdown_thread, sink))
+            .expect("receive thread");
+        Self {
+            rx: rx_out,
+            tx_cmd,
+            seq,
+            shutdown,
+            thread: Some(thread),
+        }
+    }
+
     pub fn inject(&self, json: impl Into<String>) {
         let _ = self.tx_cmd.send(BridgeCommand::Json(json.into()));
     }
@@ -140,13 +161,13 @@ pub fn copy_and_parse(
 }
 
 pub struct LiveTdJson {
-    pub api: TdJson,
+    pub api: Arc<TdJson>,
     pub client_id: i32,
 }
 
 impl LiveTdJson {
     pub fn connect() -> Result<Self, crate::telegram::ffi::TdJsonError> {
-        let api = TdJson::load_default()?;
+        let api = Arc::new(TdJson::load_default()?);
         api.install_redacted_log(1);
         let client_id = api.create_client_id();
         Ok(Self { api, client_id })

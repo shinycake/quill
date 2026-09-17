@@ -3,13 +3,23 @@ mod synthetic;
 use gpui_kit::component::button::*;
 use gpui_kit::component::input::{InputEvent, Textarea, TextareaState};
 use gpui_kit::component::*;
+use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::auth::{AuthAction, AuthView, view_for};
 use quill::composer::should_send_on_enter;
+use quill::connect::{ConnectBlocker, ConnectGate, LiveConnect, evaluate_gate, start_live_connect};
+use quill::credentials::TelegramCredentials;
+use quill::diagnostics::{DiagnosticSink, MemorySink};
+use quill::platform::MemorySecretStore;
 use quill::telegram::envelope::AuthorizationState;
+use std::sync::Arc;
+use std::time::Duration;
 use synthetic::SyntheticChat;
 
-actions!(quill_ui, [FocusSidebar, FocusComposer, LoadOlder, QuitApp]);
+actions!(
+    quill_ui,
+    [FocusSidebar, FocusComposer, LoadOlder, QuitApp, SubmitPhone]
+);
 
 pub fn bind_keys(cx: &mut App) {
     cx.bind_keys([
@@ -24,22 +34,43 @@ pub fn bind_keys(cx: &mut App) {
     ]);
 }
 
+/// Startup connect classification for the status bar (no secrets).
+#[derive(Clone, PartialEq, Eq)]
+pub enum ConnectUiStatus {
+    NeedCredentials,
+    NeedTdjson,
+    RestoreBlocked(&'static str),
+    Live,
+}
+
 pub struct QuillApp {
     chat: Entity<SyntheticChat>,
     composer: Entity<TextareaState>,
+    phone_input: Entity<TextareaState>,
     auth_demo: AuthorizationState,
     focus_sidebar: FocusHandle,
-    /// True when TELEGRAM_* (or local .env) credentials loaded; never stores secret values.
-    credentials_present: bool,
+    connect_status: ConnectUiStatus,
+    live: Option<LiveConnect>,
+    status_note: String,
 }
 
 impl QuillApp {
-    pub fn new(window: &mut Window, cx: &mut Context<Self>, credentials_present: bool) -> Self {
+    pub fn new(
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        credentials: Option<TelegramCredentials>,
+    ) -> Self {
         let chat = cx.new(|cx| SyntheticChat::new(cx));
         let composer = cx.new(|cx| {
             TextareaState::new(window, cx)
                 .placeholder("Message — Enter sends, Shift+Enter newline. IME Enter must not send.")
                 .auto_grow(2, 6)
+                .submit_on_enter(true)
+        });
+        let phone_input = cx.new(|cx| {
+            TextareaState::new(window, cx)
+                .placeholder("Phone (+country code)")
+                .auto_grow(1, 1)
                 .submit_on_enter(true)
         });
         cx.subscribe_in(
@@ -61,16 +92,88 @@ impl QuillApp {
             },
         )
         .detach();
-        Self {
+        cx.subscribe_in(
+            &phone_input,
+            window,
+            |this, state, event: &InputEvent, window, cx| {
+                if let InputEvent::PressEnter { secondary, shift } = event {
+                    let marked = state.update(cx, |input, cx| input.marked_text_range(window, cx));
+                    if should_send_on_enter(quill::composer::enter_event_from_kit(
+                        *shift, *secondary, marked,
+                    )) {
+                        this.submit_phone(window, cx);
+                    }
+                }
+            },
+        )
+        .detach();
+
+        let (connect_status, live, status_note, auth_demo) = bootstrap_connect(credentials);
+
+        let mut app = Self {
             chat,
             composer,
-            auth_demo: AuthorizationState::WaitPhoneNumber,
+            phone_input,
+            auth_demo,
             focus_sidebar: cx.focus_handle(),
-            credentials_present,
+            connect_status,
+            live,
+            status_note,
+        };
+        if app.live.is_some() {
+            app.spawn_poll_loop(cx);
+        }
+        app
+    }
+
+    fn spawn_poll_loop(&mut self, cx: &mut Context<Self>) {
+        cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor()
+                    .timer(Duration::from_millis(40))
+                    .await;
+                let cont = this
+                    .update(cx, |this, cx| {
+                        this.poll_live(cx);
+                        this.live.is_some()
+                    })
+                    .unwrap_or(false);
+                if !cont {
+                    break;
+                }
+            }
+        })
+        .detach();
+    }
+
+    fn poll_live(&mut self, cx: &mut Context<Self>) {
+        let Some(live) = self.live.as_mut() else {
+            return;
+        };
+        let mut progressed = false;
+        while let Some(owned) = live.bridge.next_timeout(Duration::from_millis(0)) {
+            if live.driver.ingest(owned).is_err() {
+                self.status_note = "failed to send TDLib request".into();
+            }
+            progressed = true;
+        }
+        if progressed {
+            cx.notify();
+        }
+    }
+
+    fn current_auth(&self) -> AuthorizationState {
+        if let Some(live) = self.live.as_ref() {
+            live.driver.session.auth.clone()
+        } else {
+            self.auth_demo.clone()
         }
     }
 
     fn cycle_auth(&mut self, cx: &mut Context<Self>) {
+        if self.live.is_some() {
+            return;
+        }
         self.auth_demo = match &self.auth_demo {
             AuthorizationState::WaitPhoneNumber => AuthorizationState::WaitCode {
                 code_length: Some(5),
@@ -85,11 +188,103 @@ impl QuillApp {
         };
         cx.notify();
     }
+
+    fn submit_phone(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(live) = self.live.as_mut() else {
+            return;
+        };
+        if !matches!(
+            live.driver.session.auth,
+            AuthorizationState::WaitPhoneNumber
+        ) {
+            return;
+        }
+        let phone = self.phone_input.read(cx).value().to_string();
+        match live.driver.submit_phone(&phone) {
+            Ok(_) => {
+                self.phone_input
+                    .update(cx, |input, cx| input.set_value("", window, cx));
+                self.status_note = "phone submitted — waiting for Telegram".into();
+            }
+            Err(_) => {
+                self.status_note = "could not submit phone".into();
+            }
+        }
+        cx.notify();
+    }
+}
+
+fn bootstrap_connect(
+    credentials: Option<TelegramCredentials>,
+) -> (
+    ConnectUiStatus,
+    Option<LiveConnect>,
+    String,
+    AuthorizationState,
+) {
+    let auth_demo = AuthorizationState::WaitPhoneNumber;
+    match evaluate_gate(credentials.is_some()) {
+        ConnectGate::Blocked(ConnectBlocker::MissingCredentials) => (
+            ConnectUiStatus::NeedCredentials,
+            None,
+            ConnectBlocker::MissingCredentials.user_message().into(),
+            auth_demo,
+        ),
+        ConnectGate::Blocked(ConnectBlocker::MissingTdjson) => (
+            ConnectUiStatus::NeedTdjson,
+            None,
+            ConnectBlocker::MissingTdjson.user_message().into(),
+            auth_demo,
+        ),
+        ConnectGate::Blocked(other) => (
+            ConnectUiStatus::RestoreBlocked(other.user_message()),
+            None,
+            other.user_message().into(),
+            auth_demo,
+        ),
+        ConnectGate::Ready { .. } => {
+            let Some(credentials) = credentials else {
+                return (
+                    ConnectUiStatus::NeedCredentials,
+                    None,
+                    ConnectBlocker::MissingCredentials.user_message().into(),
+                    auth_demo,
+                );
+            };
+            let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+            #[cfg(target_os = "macos")]
+            let store = quill::platform::keychain::KeychainSecretStore;
+            #[cfg(not(target_os = "macos"))]
+            let store = MemorySecretStore::new();
+            match start_live_connect(credentials, &store, sink) {
+                Ok(live) => (
+                    ConnectUiStatus::Live,
+                    Some(live),
+                    "TDLib connected — waiting for authorization updates".into(),
+                    auth_demo,
+                ),
+                Err(ConnectBlocker::MissingTdjson) => (
+                    ConnectUiStatus::NeedTdjson,
+                    None,
+                    ConnectBlocker::MissingTdjson.user_message().into(),
+                    auth_demo,
+                ),
+                Err(err) => (
+                    ConnectUiStatus::RestoreBlocked(err.user_message()),
+                    None,
+                    err.user_message().into(),
+                    auth_demo,
+                ),
+            }
+        }
+    }
 }
 
 impl Render for QuillApp {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let auth = view_for(&self.auth_demo);
+        let auth_state = self.current_auth();
+        let auth = view_for(&auth_state);
+        let show_phone = self.live.is_some() && matches!(auth.action, AuthAction::EnterPhone);
         div()
             .flex()
             .flex_col()
@@ -110,7 +305,10 @@ impl Render for QuillApp {
             .on_action(cx.listener(|this, _: &LoadOlder, _, cx| {
                 this.chat.update(cx, |chat, cx| chat.prepend_older(cx));
             }))
-            .child(title_bar(cx))
+            .on_action(cx.listener(|this, _: &SubmitPhone, window, cx| {
+                this.submit_phone(window, cx);
+            }))
+            .child(title_bar(self.live.is_some(), cx))
             .child(
                 div()
                     .id("quill-shell")
@@ -119,13 +317,21 @@ impl Render for QuillApp {
                     .min_h_0()
                     .child(sidebar(
                         &auth,
-                        self.credentials_present,
+                        &self.connect_status,
+                        &self.status_note,
+                        show_phone,
+                        &self.phone_input,
                         &self.focus_sidebar,
                         cx,
                     ))
                     .child(self.conversation(cx)),
             )
-            .child(status_bar(&auth, self.credentials_present, cx))
+            .child(status_bar(
+                &auth,
+                &self.connect_status,
+                &self.status_note,
+                cx,
+            ))
     }
 }
 
@@ -156,7 +362,12 @@ impl QuillApp {
     }
 }
 
-fn title_bar(cx: &mut Context<QuillApp>) -> impl IntoElement {
+fn title_bar(live: bool, cx: &mut Context<QuillApp>) -> impl IntoElement {
+    let title = if live {
+        "Quill — live TDLib"
+    } else {
+        "Quill — synthetic chat"
+    };
     div()
         .id("title")
         .h(px(44.))
@@ -166,7 +377,7 @@ fn title_bar(cx: &mut Context<QuillApp>) -> impl IntoElement {
         .justify_between()
         .border_b_1()
         .border_color(cx.theme().border)
-        .child(div().font_semibold().child("Quill — synthetic chat"))
+        .child(div().font_semibold().child(title))
         .child(
             div()
                 .flex()
@@ -181,25 +392,30 @@ fn title_bar(cx: &mut Context<QuillApp>) -> impl IntoElement {
                             this.chat.update(cx, |chat, cx| chat.prepend_older(cx));
                         })),
                 )
-                .child(
-                    Button::new("cycle-auth")
-                        .label("Cycle auth")
-                        .ghost()
-                        .on_click(cx.listener(|this, _, _, cx| this.cycle_auth(cx))),
-                ),
+                .when(!live, |this| {
+                    this.child(
+                        Button::new("cycle-auth")
+                            .label("Cycle auth")
+                            .ghost()
+                            .on_click(cx.listener(|this, _, _, cx| this.cycle_auth(cx))),
+                    )
+                }),
         )
 }
 
 fn sidebar(
     auth: &AuthView,
-    credentials_present: bool,
+    connect_status: &ConnectUiStatus,
+    status_note: &str,
+    show_phone: bool,
+    phone_input: &Entity<TextareaState>,
     focus: &FocusHandle,
     cx: &mut Context<QuillApp>,
 ) -> impl IntoElement {
     div()
         .id("sidebar")
         .track_focus(focus)
-        .w(px(260.))
+        .w(px(280.))
         .h_full()
         .p_3()
         .border_r_1()
@@ -225,7 +441,25 @@ fn sidebar(
                 .text_color(cx.theme().muted_foreground)
                 .child(auth.body.clone()),
         )
-        .child(auth_action_note(auth, credentials_present))
+        .child(auth_action_note(auth, connect_status))
+        .child(
+            div()
+                .text_xs()
+                .text_color(cx.theme().muted_foreground)
+                .child(status_note.to_string()),
+        )
+        .when(show_phone, |this| {
+            this.child(div().mt_2().font_semibold().text_sm().child("Phone"))
+                .child(Textarea::new(phone_input).h(px(40.)))
+                .child(
+                    Button::new("submit-phone")
+                        .label("Submit phone")
+                        .ghost()
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.submit_phone(window, cx);
+                        })),
+                )
+        })
 }
 
 fn chat_row(
@@ -253,36 +487,42 @@ fn chat_row(
         )
 }
 
-fn auth_action_note(auth: &AuthView, credentials_present: bool) -> impl IntoElement {
-    let cred = if credentials_present {
-        "credentials loaded"
-    } else {
-        "set TELEGRAM_API_ID/HASH"
+fn auth_action_note(auth: &AuthView, connect_status: &ConnectUiStatus) -> impl IntoElement {
+    let gate = match connect_status {
+        ConnectUiStatus::NeedCredentials => "need credentials",
+        ConnectUiStatus::NeedTdjson => "need tdjson",
+        ConnectUiStatus::RestoreBlocked(_) => "restore blocked",
+        ConnectUiStatus::Live => "live TDLib",
     };
     let label = match &auth.action {
         AuthAction::UnsupportedHalt { reason } => format!("Blocked: {reason}"),
-        AuthAction::Ready => "Ready (synthetic)".into(),
-        AuthAction::EnterPhone => format!("Phone entry ({cred}) · TDLib connect not wired yet"),
-        AuthAction::EnterCode => format!("Code entry ({cred}) · TDLib connect not wired yet"),
-        AuthAction::EnterPassword => {
-            format!("Password entry ({cred}) · TDLib connect not wired yet")
-        }
-        other => format!("{other:?}"),
+        AuthAction::Ready => format!("Ready ({gate})"),
+        AuthAction::EnterPhone => format!("Phone entry ({gate})"),
+        AuthAction::EnterCode => format!("Code entry ({gate})"),
+        AuthAction::EnterPassword => format!("Password entry ({gate})"),
+        AuthAction::ProvideParameters => format!("Sending TDLib parameters ({gate})"),
+        other => format!("{other:?} ({gate})"),
     };
     div().text_xs().child(label)
 }
 
-fn credentials_status_label(credentials_present: bool) -> &'static str {
-    if credentials_present {
-        "credentials loaded · TDLib connect not wired yet"
-    } else {
-        "set TELEGRAM_API_ID / TELEGRAM_API_HASH (or local .env)"
+fn connect_status_label(status: &ConnectUiStatus) -> String {
+    match status {
+        ConnectUiStatus::NeedCredentials => {
+            "set TELEGRAM_API_ID / TELEGRAM_API_HASH (or local .env)".into()
+        }
+        ConnectUiStatus::NeedTdjson => {
+            "credentials loaded · tdjson missing (QUILL_TDJSON_PATH / bundle)".into()
+        }
+        ConnectUiStatus::RestoreBlocked(msg) => format!("credentials loaded · {msg}"),
+        ConnectUiStatus::Live => "credentials loaded · TDLib live".into(),
     }
 }
 
 fn status_bar(
     auth: &AuthView,
-    credentials_present: bool,
+    connect_status: &ConnectUiStatus,
+    status_note: &str,
     cx: &mut Context<QuillApp>,
 ) -> impl IntoElement {
     div()
@@ -296,9 +536,10 @@ fn status_bar(
         .text_xs()
         .text_color(cx.theme().muted_foreground)
         .child(format!(
-            "Auth: {} · {} · Keyboard: ⌘1 sidebar, ⌘L composer, ⌘↑ older · VoiceOver: macOS follow-up",
+            "Auth: {} · {} · {} · Keyboard: ⌘1 sidebar, ⌘L composer, ⌘↑ older · VoiceOver: macOS follow-up",
             auth.title,
-            credentials_status_label(credentials_present)
+            connect_status_label(connect_status),
+            status_note
         ))
 }
 

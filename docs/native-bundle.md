@@ -36,3 +36,14 @@ otool -L dist/Quill.app/Contents/Frameworks/libtdjson.dylib
 Reject the bundle if `otool -L` shows `/opt/homebrew` or `/usr/local/opt` for tdjson.
 
 Signing/notarization is deferred (no Developer ID in this phase).
+
+## Connect path (runtime)
+
+With credentials loaded, Quill calls `resolve_tdjson_path()` then `LiveTdJson::connect()`:
+
+1. `QUILL_TDJSON_PATH` if it points at an existing file, else
+2. Bundled names next to the executable / `Frameworks` / `Resources/tdjson`.
+
+On success it creates a client, spawns `ReceiveBridge::spawn_live`, sends `getAuthorizationState`, and on `authorizationStateWaitTdlibParameters` sends `setTdlibParameters` (api_hash never logged). Auth updates feed the session reducer; `WaitPhoneNumber` enables phone submit.
+
+If the library is missing, the UI halts with an actionable message — it does not search Homebrew.

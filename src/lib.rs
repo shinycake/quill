@@ -3,6 +3,7 @@
 
 pub mod auth;
 pub mod composer;
+pub mod connect;
 pub mod credentials;
 pub mod diagnostics;
 pub mod ids;

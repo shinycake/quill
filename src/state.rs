@@ -13,6 +13,7 @@ use std::sync::Arc;
 pub enum RequestPurpose {
     GetAuthorizationState,
     SetParameters,
+    SetPhoneNumber,
     LoadChats,
     GetHistory,
     SendText,

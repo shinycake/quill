@@ -11,5 +11,5 @@ pub use envelope::{
 pub use ffi::{LibraryOrigin, TdJson, loaded_library_origin, resolve_tdjson_path};
 pub use requests::{
     SetTdlibParameters, close_request, get_authorization_state, get_chat_history, load_chats,
-    log_out, send_text,
+    log_out, send_text, set_authentication_phone_number,
 };

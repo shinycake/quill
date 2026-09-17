@@ -47,6 +47,26 @@ pub fn get_authorization_state(extra: RequestId) -> String {
     .to_string()
 }
 
+/// `setAuthenticationPhoneNumber`. Callers must not log `phone_number`.
+pub fn set_authentication_phone_number(extra: RequestId, phone_number: &str) -> String {
+    json!({
+        "@type": "setAuthenticationPhoneNumber",
+        "@extra": extra.as_extra(),
+        "phone_number": phone_number,
+        "settings": {
+            "@type": "phoneNumberAuthenticationSettings",
+            "allow_flash_call": false,
+            "allow_missed_call": false,
+            "is_current_phone_number": false,
+            "has_unknown_phone_number": false,
+            "allow_sms_retriever_api": false,
+            "firebase_authentication_settings": Value::Null,
+            "authentication_tokens": []
+        }
+    })
+    .to_string()
+}
+
 pub fn close_request(extra: RequestId) -> String {
     json!({
         "@type": "close",
@@ -147,5 +167,14 @@ mod tests {
         let json = get_authorization_state(RequestId(9007199254740993));
         assert!(json.contains("\"@extra\":\"9007199254740993\""));
         assert!(!json.contains("\"@extra\":9007199254740993"));
+    }
+
+    #[test]
+    fn set_phone_shape_does_not_use_message_thread_id() {
+        let json = set_authentication_phone_number(RequestId(3), "+10001112222");
+        assert!(json.contains("\"@type\":\"setAuthenticationPhoneNumber\""));
+        assert!(json.contains("\"phone_number\":\"+10001112222\""));
+        assert!(json.contains("phoneNumberAuthenticationSettings"));
+        assert!(json.contains("\"@extra\":\"3\""));
     }
 }

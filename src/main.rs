@@ -3,7 +3,7 @@ mod ui;
 use gpui_kit::*;
 
 fn main() {
-    let credentials_present = quill::credentials::load().is_some();
+    let credentials = quill::credentials::load();
     gpui_kit::application()
         .with_assets(gpui_kit::assets::Assets)
         .run(move |cx| {
@@ -24,7 +24,7 @@ fn main() {
                         ..Default::default()
                     },
                     move |window, cx| {
-                        let view = cx.new(|cx| ui::QuillApp::new(window, cx, credentials_present));
+                        let view = cx.new(|cx| ui::QuillApp::new(window, cx, credentials.clone()));
                         cx.new(|cx| gpui_kit::component::Root::new(view, window, cx))
                     },
                 )
