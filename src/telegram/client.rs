@@ -82,15 +82,25 @@ impl ReceiveBridge {
     pub fn current_seq(&self) -> u64 {
         self.seq.load(Ordering::SeqCst)
     }
-}
 
-impl Drop for ReceiveBridge {
-    fn drop(&mut self) {
+    /// Signal the receive loop and join it. Safe to call twice.
+    /// Live mode only notices this after the current `td_receive` timeout (~200ms).
+    pub fn shutdown(&mut self) {
         self.shutdown.store(true, Ordering::SeqCst);
         let _ = self.tx_cmd.send(BridgeCommand::Shutdown);
         if let Some(thread) = self.thread.take() {
             let _ = thread.join();
         }
+    }
+
+    pub fn is_joined(&self) -> bool {
+        self.thread.is_none()
+    }
+}
+
+impl Drop for ReceiveBridge {
+    fn drop(&mut self) {
+        self.shutdown();
     }
 }
 
@@ -101,7 +111,7 @@ fn injected_loop(
     shutdown: Arc<AtomicBool>,
     sink: Arc<dyn DiagnosticSink>,
 ) {
-    while !shutdown.load(Ordering::Relaxed) {
+    while !shutdown.load(Ordering::SeqCst) {
         match rx_cmd.recv_timeout(Duration::from_millis(50)) {
             Ok(BridgeCommand::Shutdown) | Err(RecvTimeoutError::Disconnected) => break,
             Err(RecvTimeoutError::Timeout) => continue,
@@ -186,7 +196,7 @@ pub fn ordered_receive_loop(
     shutdown: Arc<AtomicBool>,
     sink: Arc<dyn DiagnosticSink>,
 ) {
-    while !shutdown.load(Ordering::Relaxed) {
+    while !shutdown.load(Ordering::SeqCst) {
         let Some(json) = api.receive(0.2) else {
             continue;
         };
@@ -244,5 +254,17 @@ mod tests {
         assert!(!rendered.contains("CANARY_MSG"));
         assert!(!rendered.contains("+15551212"));
         assert!(rendered.contains("updateSomethingSecret"));
+    }
+
+    #[test]
+    fn drop_injected_bridge_joins_without_panic() {
+        let sink = Arc::new(MemorySink::new());
+        let mut bridge = ReceiveBridge::spawn_injected(sink);
+        bridge.inject(r#"{"@type":"ok"}"#);
+        let _ = bridge.next_timeout(Duration::from_secs(1));
+        bridge.shutdown();
+        assert!(bridge.is_joined());
+        bridge.shutdown();
+        drop(bridge);
     }
 }

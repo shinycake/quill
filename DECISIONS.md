@@ -64,7 +64,7 @@ Research snapshot 2026-09-16, pin recheck **2026-09-17**.
 
 ## Blockers / follow-up
 
-1. Live TDLib connect is implemented (`src/connect.rs`): credentials + tdjson → `setTdlibParameters` → `WaitPhoneNumber`. Phone / code / 2FA UI submits the matching TDLib requests. Headless proof: `quill --connect-smoke` (requires `QUILL_TDJSON_PATH`; no secrets in the one-line result). Still machine-local: building/bundling tdjson (`docs/native-bundle.md`). No secrets in git.
+1. Live TDLib connect is implemented (`src/connect.rs`): credentials + tdjson → `setTdlibParameters` → `WaitPhoneNumber`. Phone / code / 2FA UI submits the matching TDLib requests. Headless proof: `quill --connect-smoke` (requires `QUILL_TDJSON_PATH`; no secrets in the one-line result). Teardown sends `close` and waits for `authorizationStateClosed` before joining the receive thread and unloading tdjson (unloading earlier SIGSEGV'd after `SMOKE_OK`). Still machine-local: building/bundling tdjson (`docs/native-bundle.md`). No secrets in git.
 2. VoiceOver + real IME on a Mac (this environment cannot prove them). Primary Mac runner is Idan's personal machine.
 3. Native tdjson build + rpath verification on Apple Silicon (`docs/native-bundle.md`). This Linux agent has no tdjson; UI shows the MissingTdjson halt when credentials are loaded.
 4. **No App Store / notarization / distribution pipeline.** Ad-hoc Apple Developer signing only if needed for Idan's personal Mac. Public repo; brand polish is still a follow-up.

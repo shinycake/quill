@@ -65,7 +65,7 @@ Prints **one** redacted line to stdout, for example:
 - `SMOKE_BLOCKED missing-tdjson`
 - `SMOKE_FAIL timeout`
 
-Exit status is 0 only on `SMOKE_OK …`. Nothing in that line is an `api_hash`, phone number, code, or password.
+Exit status is 0 only on `SMOKE_OK …`. After that line, smoke sends TDLib `close` and waits for `authorizationStateClosed` so `libtdjson` can unload without crashing (do not `dlclose` while TDLib worker threads are still running). Nothing in that line is an `api_hash`, phone number, code, or password.
 
 Other values typed into the app (never committed):
 

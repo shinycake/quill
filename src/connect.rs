@@ -12,11 +12,12 @@ use crate::telegram::client::{LiveTdJson, OwnedEnvelope, ReceiveBridge};
 use crate::telegram::envelope::AuthorizationState;
 use crate::telegram::ffi::{LibraryOrigin, TdJsonError, resolve_tdjson_path};
 use crate::telegram::requests::{
-    SetTdlibParameters, check_authentication_code, check_authentication_password,
+    SetTdlibParameters, check_authentication_code, check_authentication_password, close_request,
     get_authorization_state, set_authentication_phone_number,
 };
 use std::path::Path;
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 /// Why Quill will not open a live tdjson client.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -338,13 +339,89 @@ impl<S: JsonSender> ConnectDriver<S> {
             .send_json(&check_authentication_password(extra, password))?;
         Ok(extra)
     }
+
+    /// Send `close` (not `logOut`). Callers must keep receiving until Closed.
+    pub fn request_close(&mut self) -> Result<RequestId, ConnectSendError> {
+        if matches!(
+            self.session.auth,
+            AuthorizationState::Closed | AuthorizationState::Closing
+        ) {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        self.session.begin_close();
+        let extra = self.session.request(RequestPurpose::Close, None);
+        self.sender.send_json(&close_request(extra))?;
+        Ok(extra)
+    }
+}
+
+/// How long Drop / `--connect-smoke` waits for `authorizationStateClosed`.
+pub const CLIENT_CLOSE_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Send `close` and ingest until Closed. Does not join a receive thread or
+/// unload tdjson. Returns whether Closed was observed.
+pub fn wait_closed<S: JsonSender>(
+    driver: &mut ConnectDriver<S>,
+    mut recv: impl FnMut(Duration) -> Option<OwnedEnvelope>,
+    timeout: Duration,
+) -> bool {
+    if matches!(driver.session.auth, AuthorizationState::Closed) {
+        return true;
+    }
+    let _ = driver.request_close();
+    let deadline = Instant::now() + timeout;
+    loop {
+        if matches!(driver.session.auth, AuthorizationState::Closed) {
+            return true;
+        }
+        let now = Instant::now();
+        if now >= deadline {
+            return false;
+        }
+        let slice = deadline
+            .saturating_duration_since(now)
+            .min(Duration::from_millis(50));
+        if let Some(owned) = recv(slice) {
+            let _ = driver.ingest(owned);
+        }
+    }
 }
 
 /// Open LiveTdJson + receive bridge when gate + restore succeed.
+///
+/// Drop / [`LiveConnect::shutdown`] send `close`, wait for
+/// `authorizationStateClosed`, then join the receive thread **before**
+/// `libtdjson` is unloaded. Unloading while TDLib worker threads are still
+/// running is what produced SIGSEGV (exit 139) after `--connect-smoke`.
+///
+/// Field order: `bridge` is dropped before `_live` (declaration order) so
+/// `td_receive` is not in-flight during `dlclose`.
 pub struct LiveConnect {
     pub driver: ConnectDriver<LiveSender>,
     pub bridge: ReceiveBridge,
     _live: LiveTdJson,
+}
+
+impl LiveConnect {
+    /// Close the TDLib client and join the receive thread. Safe to call twice.
+    /// Does not panic; a timeout still joins the thread so Drop can unload.
+    pub fn shutdown(&mut self, wait: Duration) {
+        if self.bridge.is_joined() {
+            return;
+        }
+        let _ = wait_closed(
+            &mut self.driver,
+            |timeout| self.bridge.next_timeout(timeout),
+            wait,
+        );
+        self.bridge.shutdown();
+    }
+}
+
+impl Drop for LiveConnect {
+    fn drop(&mut self) {
+        self.shutdown(CLIENT_CLOSE_TIMEOUT);
+    }
 }
 
 pub fn start_live_connect(
@@ -593,6 +670,60 @@ mod tests {
         assert!(!sink.rendered().contains("unit-pw"));
         assert!(!sink.rendered().contains("CANARY_HINT"));
 
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn wait_closed_sends_close_and_reaches_closed_via_injection() {
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = Arc::new(RecordingSender::new());
+        let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+        let mut driver =
+            ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+
+        let seq = AtomicU64::new(0);
+        let wait_phone = copy_and_parse(
+            r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateWaitPhoneNumber"}}"#,
+            &seq,
+            &dyn_sink,
+        )
+        .unwrap();
+        driver.ingest(wait_phone).unwrap();
+
+        let envelopes = vec![
+            copy_and_parse(
+                r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateClosing"}}"#,
+                &seq,
+                &dyn_sink,
+            )
+            .unwrap(),
+            copy_and_parse(
+                r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateClosed"}}"#,
+                &seq,
+                &dyn_sink,
+            )
+            .unwrap(),
+        ];
+        let mut iter = envelopes.into_iter();
+        assert!(wait_closed(
+            &mut driver,
+            |_| iter.next(),
+            Duration::from_secs(2)
+        ));
+        assert!(matches!(driver.session.auth, AuthorizationState::Closed));
+        let sent = recorder.snapshot();
+        let close_json = sent.last().expect("close request");
+        assert!(close_json.contains("\"@type\":\"close\""));
+        assert!(!sink.rendered().contains("unit-test-hash"));
+        // Second call is a no-op once Closed (no extra send).
+        let before = sent.len();
+        assert!(wait_closed(&mut driver, |_| None, Duration::ZERO));
+        assert_eq!(recorder.snapshot().len(), before);
+        drop(driver);
+        drop(recorder);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

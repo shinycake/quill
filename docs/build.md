@@ -56,4 +56,4 @@ Provide **your own** `api_id` / `api_hash` from https://my.telegram.org (never c
 - `setTdlibParameters` uses the pinned signature with `use_secret_chats=false`
 - First request after `td_create_client_id` is `getAuthorizationState` so updates start
 - Phone submit sends `setAuthenticationPhoneNumber`; WaitCode / WaitPassword UI send `checkAuthenticationCode` / `checkAuthenticationPassword`
-- `quill --connect-smoke` is the headless gate (no window): credentials + `QUILL_TDJSON_PATH` → ingest until WaitPhoneNumber or a clear blocker (30s timeout)
+- `quill --connect-smoke` is the headless gate (no window): credentials + `QUILL_TDJSON_PATH` → ingest until WaitPhoneNumber or a clear blocker (30s timeout). Before exit it sends `close` and waits for `authorizationStateClosed` so unloading tdjson does not SIGSEGV.

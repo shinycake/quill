@@ -2,7 +2,10 @@
 //! clear blocker). No GPUI. Never prints api_hash, phone numbers, codes, or
 //! passwords.
 
-use crate::connect::{ConnectBlocker, ConnectDriver, JsonSender, LiveConnect, start_live_connect};
+use crate::connect::{
+    CLIENT_CLOSE_TIMEOUT, ConnectBlocker, ConnectDriver, JsonSender, LiveConnect,
+    start_live_connect,
+};
 use crate::credentials::{self, TelegramCredentials};
 use crate::platform::live_secret_store;
 use crate::telegram::client::OwnedEnvelope;
@@ -137,11 +140,15 @@ pub fn run_connect_smoke(timeout: Duration) -> SmokeOutcome {
         Ok(live) => live,
         Err(blocker) => return SmokeOutcome::Blocked(blocker),
     };
-    drive_until_terminal(
+    let outcome = drive_until_terminal(
         &mut live.driver,
         |wait| live.bridge.next_timeout(wait),
         timeout,
-    )
+    );
+    // Close + join receive *before* `LiveConnect` drops `libtdjson`. Skipping
+    // this is what segfaulted after `SMOKE_OK wait-phone` (exit 139).
+    live.shutdown(CLIENT_CLOSE_TIMEOUT);
+    outcome
 }
 
 /// Parse args, run smoke, print one redacted line, return the process exit code.
