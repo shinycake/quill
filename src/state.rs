@@ -118,6 +118,10 @@ impl RequestRegistry {
         self.pending.is_empty()
     }
 
+    pub fn purpose(&self, id: RequestId) -> Option<RequestPurpose> {
+        self.pending.get(&id.0).map(|p| p.purpose)
+    }
+
     pub fn has_purpose(&self, purpose: RequestPurpose) -> bool {
         self.pending.values().any(|p| p.purpose == purpose)
     }
@@ -374,13 +378,8 @@ impl Session {
                     .as_ref()
                     .map(|message| preview_from_content(&message.content))
                     .unwrap_or_default();
-                let saw_main = positions.iter().any(|pos| pos.list == ChatList::Main);
-                for pos in positions {
-                    self.apply_position_fields(pos);
-                }
-                if !saw_main && let Some(chat) = self.chats.get_mut(&chat_id.0) {
-                    chat.in_main_list = false;
-                }
+                // `positions` is the full set of lists this chat belongs to.
+                self.replace_main_list_from_positions(chat_id, &positions);
                 self.rebuild_main_order();
             }
             EnvelopePayload::UpdateChatPosition(pos) => {
@@ -519,10 +518,10 @@ impl Session {
     }
 
     fn apply_position_fields(&mut self, pos: ChatPositionUpdate) {
+        // A position on Archive / a folder is not a Main-list eviction.
+        // Main membership changes only via a Main `updateChatPosition`, a full
+        // `updateChatLastMessage` positions set, or add/remove-from-list.
         if pos.list != ChatList::Main {
-            if let Some(chat) = self.chats.get_mut(&pos.chat_id.0) {
-                chat.in_main_list = false;
-            }
             return;
         }
         let chat = self
@@ -535,6 +534,25 @@ impl Session {
             chat.order = pos.order;
             chat.is_pinned = pos.is_pinned;
             chat.in_main_list = true;
+        }
+    }
+
+    fn replace_main_list_from_positions(
+        &mut self,
+        chat_id: ChatId,
+        positions: &[ChatPositionUpdate],
+    ) {
+        match positions
+            .iter()
+            .find(|pos| pos.list == ChatList::Main)
+            .cloned()
+        {
+            Some(pos) => self.apply_position_fields(pos),
+            None => {
+                if let Some(chat) = self.chats.get_mut(&chat_id.0) {
+                    chat.in_main_list = false;
+                }
+            }
         }
     }
 
@@ -871,6 +889,66 @@ mod tests {
         assert!(!session.chats.get(&3).unwrap().in_main_list);
         assert!(session.ordered_chats().is_empty());
         assert!(!sink.rendered().contains("CANARY_PREVIEW"));
+    }
+
+    #[test]
+    fn archive_position_does_not_clear_main_list() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateNewChat","chat":{"id":5,"title":"keep","type":{"@type":"chatTypePrivate","user_id":5},"unread_count":0}}"#,
+        );
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateChatPosition","chat_id":5,"position":{"@type":"chatPosition","list":{"@type":"chatListMain"},"order":"6","is_pinned":false}}"#,
+        );
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateChatPosition","chat_id":5,"position":{"@type":"chatPosition","list":{"@type":"chatListArchive"},"order":"3","is_pinned":false}}"#,
+        );
+        let chat = session.chats.get(&5).unwrap();
+        assert!(chat.in_main_list);
+        assert_eq!(chat.order, 6);
+        assert_eq!(session.ordered_chats().len(), 1);
+    }
+
+    #[test]
+    fn last_message_positions_are_a_full_set_including_archive() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateNewChat","chat":{"id":6,"title":"mixed","type":{"@type":"chatTypePrivate","user_id":6},"unread_count":0}}"#,
+        );
+        // Archive after Main in the array must not wipe Main membership.
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateChatLastMessage","chat_id":6,"last_message":{"id":2,"chat_id":6,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"hi","entities":[]}}},"positions":[{"@type":"chatPosition","list":{"@type":"chatListMain"},"order":"9","is_pinned":true},{"@type":"chatPosition","list":{"@type":"chatListArchive"},"order":"1","is_pinned":false}]}"#,
+        );
+        let chat = session.chats.get(&6).unwrap();
+        assert!(chat.in_main_list);
+        assert!(chat.is_pinned);
+        assert_eq!(chat.order, 9);
+        // Full set without Main removes from the main list.
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateChatLastMessage","chat_id":6,"last_message":null,"positions":[{"@type":"chatPosition","list":{"@type":"chatListArchive"},"order":"1","is_pinned":false}]}"#,
+        );
+        assert!(!session.chats.get(&6).unwrap().in_main_list);
+        assert!(session.ordered_chats().is_empty());
     }
 
     #[test]

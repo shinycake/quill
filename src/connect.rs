@@ -10,7 +10,7 @@ use crate::platform::{DatabaseKey, KeyDecision, SecretStore, load_or_create_key}
 use crate::settings::{AccountPaths, default_app_root};
 use crate::state::{RequestPurpose, Session, ShutdownPhase};
 use crate::telegram::client::{LiveTdJson, OwnedEnvelope, ReceiveBridge};
-use crate::telegram::envelope::AuthorizationState;
+use crate::telegram::envelope::{AuthorizationState, EnvelopePayload};
 use crate::telegram::ffi::{LibraryOrigin, TdJsonError, resolve_tdjson_path};
 use crate::telegram::requests::{
     SetTdlibParameters, check_authentication_code, check_authentication_password, close_request,
@@ -270,9 +270,19 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     pub fn ingest(&mut self, owned: OwnedEnvelope) -> Result<(), ConnectSendError> {
+        let was_ready = matches!(self.session.auth, AuthorizationState::Ready);
+        // Continue paging only when this envelope completes an in-flight loadChats
+        // with ok. Unrelated ingest ticks and non-404 errors must not re-issue.
+        let load_chats_ok = matches!(owned.envelope.payload, EnvelopePayload::Ok)
+            && owned.envelope.extra.is_some_and(|id| {
+                self.session.requests.purpose(id) == Some(RequestPurpose::LoadChats)
+            });
         self.session.apply(owned);
         self.maybe_send_parameters()?;
-        self.maybe_load_main_chats()?;
+        let became_ready = !was_ready && matches!(self.session.auth, AuthorizationState::Ready);
+        if became_ready || load_chats_ok {
+            self.maybe_load_main_chats()?;
+        }
         Ok(())
     }
 
@@ -297,7 +307,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             && matches!(self.session.shutdown, ShutdownPhase::Running)
     }
 
-    /// After Ready, keep paging `loadChats` until TDLib returns 404 (exhausted).
+    /// First page on Ready; further pages only when a `loadChats` request returns ok.
     pub fn maybe_load_main_chats(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
         if !self.chats_path_active() {
             return Ok(None);
@@ -914,53 +924,64 @@ mod tests {
             .count();
         assert_eq!(loads_before, 1);
 
-        let extra = driver
-            .session
-            .requests
-            .has_purpose(RequestPurpose::LoadChats);
-        assert!(extra);
+        assert!(
+            driver
+                .session
+                .requests
+                .has_purpose(RequestPurpose::LoadChats)
+        );
         let load_ok = copy_and_parse(r#"{"@type":"ok","@extra":"1"}"#, &seq, &dyn_sink).unwrap();
         driver.ingest(load_ok).unwrap();
-        // @extra "1" may not match the loadChats extra (kickoff wasn't called, first request is LoadChats extra 1).
-        // If it matched, a second loadChats is sent until 404.
+        // ok on loadChats means more may exist — one continuation page, not a per-tick loop.
         let loads_after_ok = recorder
             .snapshot()
             .iter()
             .filter(|j| j.contains("loadChats"))
             .count();
-        assert!(loads_after_ok >= 1);
+        assert_eq!(loads_after_ok, 2);
 
-        // Exhaust with the current pending extra if any.
-        if driver
-            .session
-            .requests
-            .has_purpose(RequestPurpose::LoadChats)
-        {
-            // Find the extra from the last loadChats JSON.
-            let last_load = recorder
-                .snapshot()
-                .into_iter()
-                .rev()
-                .find(|j| j.contains("loadChats"))
-                .unwrap();
-            let v: Value = serde_json::from_str(&last_load).unwrap();
-            let extra = v["@extra"].as_str().unwrap();
-            let err404 = copy_and_parse(
-                &format!(
-                    r#"{{"@type":"error","code":404,"message":"Not Found","@extra":"{extra}"}}"#
-                ),
-                &seq,
-                &dyn_sink,
+        driver
+            .ingest(
+                copy_and_parse(
+                    r#"{"@type":"updateConnectionState","state":{"@type":"connectionStateUpdating"}}"#,
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
             )
             .unwrap();
-            driver.ingest(err404).unwrap();
-        }
+        assert_eq!(
+            recorder
+                .snapshot()
+                .iter()
+                .filter(|j| j.contains("loadChats"))
+                .count(),
+            2,
+            "unrelated ingest must not re-page loadChats"
+        );
+
+        let last_load = recorder
+            .snapshot()
+            .into_iter()
+            .rev()
+            .find(|j| j.contains("loadChats"))
+            .unwrap();
+        let v: Value = serde_json::from_str(&last_load).unwrap();
+        let extra = v["@extra"].as_str().unwrap();
+        let err404 = copy_and_parse(
+            &format!(r#"{{"@type":"error","code":404,"message":"Not Found","@extra":"{extra}"}}"#),
+            &seq,
+            &dyn_sink,
+        )
+        .unwrap();
+        driver.ingest(err404).unwrap();
         assert!(driver.session.chats_exhausted);
         let loads_done = recorder
             .snapshot()
             .iter()
             .filter(|j| j.contains("loadChats"))
             .count();
+        assert_eq!(loads_done, 2);
         driver
             .ingest(
                 copy_and_parse(
