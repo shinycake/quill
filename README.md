@@ -25,6 +25,7 @@ Toolchain: Rust **1.98.1**. UI pin: **gpui-kit 0.6.1**. TDLib schema: **1.8.67**
 - [x] Ready → `loadChats` main list, select chat, composer `sendMessage` (injected/replay; live needs tdjson)
 - [x] Unread counts + `viewMessages` mark-read + outbox read receipts (injected/replay; live needs tdjson)
 - [x] Photo / document receive + display (`downloadFile` / `updateFile`; injected/replay; live needs tdjson)
+- [x] Composer attach + send local photo / document (`inputMessagePhoto` / `inputMessageDocument`; injected/replay; live needs tdjson)
 - [ ] VoiceOver pass on macOS
 - [ ] Channels / bots (blocked on sponsored-content implementation)
 
