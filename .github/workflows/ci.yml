@@ -1,0 +1,45 @@
+name: ci
+
+on:
+  push:
+    branches: [main, "cursor/**"]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  linux:
+    name: linux-fmt-clippy-test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.98.1
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: fmt
+        run: cargo fmt --all -- --check
+      - name: clippy (core)
+        run: cargo clippy --no-default-features --all-targets --locked -- -D warnings
+      - name: tests (core + replay)
+        run: cargo test --no-default-features --locked -- --nocapture
+
+  macos:
+    name: macos-compile-smoke
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.98.1
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: compile ui
+        run: cargo build --features ui --locked
+      - name: compile release ui
+        run: cargo build --features ui --release --locked
+      - name: package smoke
+        run: bash scripts/macos-package-smoke.sh

@@ -1,0 +1,16 @@
+/target
+/dist
+/native/td
+/native/build
+/native/prefix
+**/*.rs.bk
+.DS_Store
+.env
+.env.*
+credentials.toml
+credentials.json
+*.pem
+*.p12
+.idea
+.vscode
+quill.local.env
