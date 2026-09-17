@@ -13,9 +13,9 @@ use crate::telegram::client::{LiveTdJson, OwnedEnvelope, ReceiveBridge};
 use crate::telegram::envelope::{AuthorizationState, EnvelopePayload};
 use crate::telegram::ffi::{LibraryOrigin, TdJsonError, resolve_tdjson_path};
 use crate::telegram::requests::{
-    SetTdlibParameters, check_authentication_code, check_authentication_password, close_request,
-    get_authorization_state, get_chat_history, load_chats, send_text,
-    set_authentication_phone_number,
+    SetTdlibParameters, check_authentication_code, check_authentication_password, close_chat,
+    close_request, get_authorization_state, get_chat_history, load_chats, open_chat, send_text,
+    set_authentication_phone_number, view_messages,
 };
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -277,11 +277,25 @@ impl<S: JsonSender> ConnectDriver<S> {
             && owned.envelope.extra.is_some_and(|id| {
                 self.session.requests.purpose(id) == Some(RequestPurpose::LoadChats)
             });
+        let view_after = match &owned.envelope.payload {
+            EnvelopePayload::Messages(_) | EnvelopePayload::UpdateNewMessage(_) => true,
+            EnvelopePayload::Ok
+                if owned.envelope.extra.is_some_and(|id| {
+                    self.session.requests.purpose(id) == Some(RequestPurpose::ViewMessages)
+                }) =>
+            {
+                true
+            }
+            _ => false,
+        };
         self.session.apply(owned);
         self.maybe_send_parameters()?;
         let became_ready = !was_ready && matches!(self.session.auth, AuthorizationState::Ready);
         if became_ready || load_chats_ok {
             self.maybe_load_main_chats()?;
+        }
+        if view_after {
+            self.maybe_view_open_messages()?;
         }
         Ok(())
     }
@@ -324,11 +338,17 @@ impl<S: JsonSender> ConnectDriver<S> {
         Ok(Some(extra))
     }
 
-    /// Select a chat and request history. Returns `None` if history is already complete.
+    /// Select a chat, inform TDLib it is open, and request history.
+    /// Returns `None` if history is already complete or the chat is gated.
     pub fn select_chat(&mut self, chat_id: ChatId) -> Result<Option<RequestId>, ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
+        if self.session.open_chat == Some(chat_id) {
+            self.maybe_view_open_messages()?;
+            return self.fetch_history();
+        }
+        self.close_open_chat()?;
         self.session.open_chat(chat_id);
         if !self
             .session
@@ -338,7 +358,71 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             return Ok(None);
         }
+        self.send_open_chat(chat_id)?;
+        self.maybe_view_open_messages()?;
         self.fetch_history()
+    }
+
+    fn close_open_chat(&mut self) -> Result<(), ConnectSendError> {
+        let Some(prev) = self.session.open_chat else {
+            return Ok(());
+        };
+        if !self
+            .session
+            .chats
+            .get(&prev.0)
+            .is_some_and(|chat| chat.supported())
+        {
+            return Ok(());
+        }
+        let extra = self.session.request(RequestPurpose::CloseChat, Some(prev));
+        self.sender.send_json(&close_chat(extra, prev))?;
+        Ok(())
+    }
+
+    fn send_open_chat(&mut self, chat_id: ChatId) -> Result<RequestId, ConnectSendError> {
+        let extra = self
+            .session
+            .request(RequestPurpose::OpenChat, Some(chat_id));
+        self.sender.send_json(&open_chat(extra, chat_id))?;
+        Ok(extra)
+    }
+
+    /// `viewMessages` for loaded history in the open chat (TDLib 1.8.67).
+    /// Unread counts change only when `updateChatReadInbox` arrives.
+    pub fn maybe_view_open_messages(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Ok(None);
+        }
+        let Some(chat_id) = self.session.open_chat else {
+            return Ok(None);
+        };
+        if !self
+            .session
+            .chats
+            .get(&chat_id.0)
+            .is_some_and(|chat| chat.supported())
+        {
+            return Ok(None);
+        }
+        if self
+            .session
+            .requests
+            .has_purpose_for_chat(RequestPurpose::ViewMessages, chat_id)
+        {
+            return Ok(None);
+        }
+        let ids = self.session.message_ids_to_view(chat_id);
+        if ids.is_empty() {
+            return Ok(None);
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::ViewMessages, Some(chat_id));
+        self.session.mark_viewed(chat_id, &ids);
+        self.sender
+            .send_json(&view_messages(extra, chat_id, &ids, true))?;
+        Ok(Some(extra))
     }
 
     /// Load another page of history for the open chat (`from_message_id` = oldest, or 0).
@@ -1004,6 +1088,11 @@ mod tests {
 
         let history_extra = driver.select_chat(ChatId(7)).unwrap().expect("history");
         let sent = recorder.snapshot();
+        assert!(
+            sent.iter()
+                .any(|j| j.contains("\"@type\":\"openChat\"") && j.contains("\"chat_id\":7")),
+            "select_chat must send openChat"
+        );
         let history_json = sent.last().unwrap();
         assert!(history_json.contains("getChatHistory"));
         assert!(history_json.contains("\"chat_id\":7"));
@@ -1028,6 +1117,19 @@ mod tests {
                 .messages
                 .contains_key(&11)
         );
+        let view_json = recorder
+            .snapshot()
+            .into_iter()
+            .rev()
+            .find(|j| j.contains("viewMessages"))
+            .expect("viewMessages after history");
+        let view: Value = serde_json::from_str(&view_json).unwrap();
+        assert_eq!(view["@type"], "viewMessages");
+        assert_eq!(view["chat_id"], 7);
+        assert_eq!(view["message_ids"], serde_json::json!([11]));
+        assert_eq!(view["source"]["@type"], "messageSourceChatHistory");
+        assert_eq!(view["force_read"], true);
+        assert!(!view_json.contains("hi"));
 
         let snap = crate::composer::ComposerSnapshot::capture(
             ChatId(7),
@@ -1061,6 +1163,76 @@ mod tests {
         );
         assert!(!sink.rendered().contains("CANARY_SEND"));
 
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn select_chat_closes_previous_and_does_not_mark_unread_locally() {
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = Arc::new(RecordingSender::new());
+        let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+        let mut driver =
+            ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+        let seq = AtomicU64::new(0);
+        driver
+            .ingest(
+                copy_and_parse(
+                    r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        driver
+            .ingest(
+                copy_and_parse(
+                    r#"{"@type":"updateNewChat","chat":{"id":7,"title":"Alice","type":{"@type":"chatTypePrivate","user_id":7},"unread_count":3,"last_read_inbox_message_id":1}}"#,
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        driver
+            .ingest(
+                copy_and_parse(
+                    r#"{"@type":"updateNewChat","chat":{"id":8,"title":"Bob","type":{"@type":"chatTypePrivate","user_id":8},"unread_count":1}}"#,
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        driver.select_chat(ChatId(7)).unwrap();
+        assert_eq!(driver.session.chats.get(&7).unwrap().unread_count, 3);
+        driver.select_chat(ChatId(8)).unwrap();
+        let sent = recorder.snapshot();
+        assert!(
+            sent.iter()
+                .any(|j| j.contains("\"@type\":\"closeChat\"") && j.contains("\"chat_id\":7"))
+        );
+        assert!(
+            sent.iter()
+                .any(|j| j.contains("\"@type\":\"openChat\"") && j.contains("\"chat_id\":8"))
+        );
+        // Unread is TDLib-authoritative; opening must not zero it locally.
+        assert_eq!(driver.session.chats.get(&7).unwrap().unread_count, 3);
+        driver
+            .ingest(
+                copy_and_parse(
+                    r#"{"@type":"updateChatReadInbox","chat_id":7,"last_read_inbox_message_id":9,"unread_count":0}"#,
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        assert_eq!(driver.session.chats.get(&7).unwrap().unread_count, 0);
+        assert!(!sink.rendered().contains("Alice"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 

@@ -151,6 +151,62 @@ fn replay_ready_load_chats_select_and_send() {
 }
 
 #[test]
+fn replay_unread_then_mark_read_and_outbox_receipt() {
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn quill::diagnostics::DiagnosticSink> = sink.clone();
+    let mut session = Session::new(AccountKey::primary(), dyn_sink);
+    let seq = AtomicU64::new(0);
+    apply_all_seq(
+        &mut session,
+        &sink,
+        &seq,
+        &[
+            r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+            r#"{"@type":"updateNewChat","chat":{"id":7,"title":"Alice","type":{"@type":"chatTypePrivate","user_id":7},"unread_count":2,"last_read_inbox_message_id":40,"last_read_outbox_message_id":0}}"#,
+            r#"{"@type":"updateChatPosition","chat_id":7,"position":{"@type":"chatPosition","list":{"@type":"chatListMain"},"order":"9","is_pinned":false}}"#,
+            r#"{"@type":"updateNewMessage","message":{"id":41,"chat_id":7,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"CANARY_UNREAD_one","entities":[]}}}}"#,
+            r#"{"@type":"updateNewMessage","message":{"id":42,"chat_id":7,"is_outgoing":true,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"CANARY_UNREAD_reply","entities":[]}}}}"#,
+        ],
+    );
+    let chat = session.ordered_chats()[0];
+    assert_eq!(chat.unread_count, 2);
+    assert_eq!(
+        quill::state::unread_badge_text(chat.unread_count).as_deref(),
+        Some("2")
+    );
+    session.open_chat(quill::ids::ChatId(7));
+    let ids = session.message_ids_to_view(quill::ids::ChatId(7));
+    assert_eq!(ids.len(), 2);
+    session.mark_viewed(quill::ids::ChatId(7), &ids);
+    // Local view does not invent a zero unread count.
+    assert_eq!(session.chats.get(&7).unwrap().unread_count, 2);
+    apply_all_seq(
+        &mut session,
+        &sink,
+        &seq,
+        &[
+            r#"{"@type":"updateChatReadInbox","chat_id":7,"last_read_inbox_message_id":41,"unread_count":0}"#,
+            r#"{"@type":"updateChatReadOutbox","chat_id":7,"last_read_outbox_message_id":42}"#,
+        ],
+    );
+    let chat = session.chats.get(&7).unwrap();
+    assert_eq!(chat.unread_count, 0);
+    assert_eq!(quill::state::unread_badge_text(chat.unread_count), None);
+    let outgoing = session
+        .histories
+        .get(&7)
+        .unwrap()
+        .messages
+        .get(&42)
+        .unwrap();
+    assert_eq!(
+        chat.outbox_receipt(outgoing),
+        quill::state::OutboxReceipt::Read
+    );
+    assert!(!sink.rendered().contains("CANARY_UNREAD"));
+}
+
+#[test]
 fn logout_invalidates_pending_requests() {
     let sink = Arc::new(MemorySink::new());
     let dyn_sink: Arc<dyn quill::diagnostics::DiagnosticSink> = sink.clone();
