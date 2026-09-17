@@ -63,4 +63,6 @@ capture_one() {
 cd "$ROOT"
 capture_one need-tdjson "$OUT/connect-need-tdjson.png"
 capture_one wait-phone "$OUT/connect-wait-phone.png"
+capture_one wait-code "$OUT/connect-wait-code.png"
+capture_one wait-password "$OUT/connect-wait-password.png"
 echo "done"

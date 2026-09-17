@@ -2,7 +2,7 @@
 
 Independent, keyboard-friendly **Telegram desktop client** written in Rust (**GPUI Kit + official TDLib**). Working name **Quill**. Not a ZapFast fork.
 
-Phase 0 is in progress: synthetic GPUI chat, ordered tdjson bridge, replay reducers. **Live Telegram login is disabled.**
+Phase 0 is in progress: synthetic GPUI chat, ordered tdjson bridge, replay reducers. Live connect (phone / code / 2FA) needs owner credentials + tdjson.
 
 ## Build
 
@@ -10,7 +10,8 @@ See [docs/build.md](docs/build.md). Short version:
 
 ```bash
 cargo test --no-default-features
-cargo run --features ui          # synthetic chat; no network login
+cargo run --features ui          # synthetic chat; live connect if credentials + tdjson
+cargo run --no-default-features -- --connect-smoke   # headless WaitPhoneNumber gate
 ```
 
 Toolchain: Rust **1.98.1**. UI pin: **gpui-kit 0.6.1**. TDLib schema: **1.8.67** (`d1085f9cebc5a62379991ae1652673954f229c1f`).
@@ -20,7 +21,7 @@ Toolchain: Rust **1.98.1**. UI pin: **gpui-kit 0.6.1**. TDLib schema: **1.8.67**
 - [x] GPUI Kit hello-world shell + synthetic mixed-height chat / composer
 - [x] Official tdjson ordered receive bridge (no raw-response logging)
 - [x] Auth / chat / history / send reducers with replay tests
-- [ ] Live login (needs owner `api_id` / `api_hash`)
+- [x] Live connect gate + phone / code / 2FA submit (owner `api_id` / `api_hash` + tdjson)
 - [ ] VoiceOver pass on macOS
 - [ ] Channels / bots (blocked on sponsored-content implementation)
 

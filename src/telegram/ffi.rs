@@ -159,6 +159,17 @@ impl TdJson {
     }
 }
 
+impl Drop for TdJson {
+    fn drop(&mut self) {
+        // Clear the native log callback before `dlclose`. Do not call other
+        // TDLib methods from a log callback; this runs on the owner thread
+        // after the receive loop has joined.
+        unsafe {
+            (self.set_log_message_callback)(0, None);
+        }
+    }
+}
+
 static NATIVE_LOG_COUNT: AtomicU64 = AtomicU64::new(0);
 
 unsafe extern "C" fn redacted_native_log(_verbosity: c_int, _message: *const c_char) {

@@ -12,10 +12,12 @@ use crate::telegram::client::{LiveTdJson, OwnedEnvelope, ReceiveBridge};
 use crate::telegram::envelope::AuthorizationState;
 use crate::telegram::ffi::{LibraryOrigin, TdJsonError, resolve_tdjson_path};
 use crate::telegram::requests::{
-    SetTdlibParameters, get_authorization_state, set_authentication_phone_number,
+    SetTdlibParameters, check_authentication_code, check_authentication_password, close_request,
+    get_authorization_state, set_authentication_phone_number,
 };
 use std::path::Path;
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 /// Why Quill will not open a live tdjson client.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -45,6 +47,18 @@ impl ConnectBlocker {
             ConnectBlocker::TdjsonLoad => {
                 "tdjson library found but failed to load (missing symbols or wrong arch)"
             }
+        }
+    }
+
+    /// One-token label for `--connect-smoke` (no secrets).
+    pub fn slug(&self) -> &'static str {
+        match self {
+            ConnectBlocker::MissingCredentials => "missing-credentials",
+            ConnectBlocker::MissingTdjson => "missing-tdjson",
+            ConnectBlocker::MissingKeyAgainstExistingDb => "missing-key",
+            ConnectBlocker::LockedStore => "locked-store",
+            ConnectBlocker::StoreError => "store-error",
+            ConnectBlocker::TdjsonLoad => "tdjson-load",
         }
     }
 }
@@ -90,7 +104,7 @@ pub struct PreparedConnect {
 }
 
 /// Resolve account paths and DB key. Credentials must already be validated.
-pub fn prepare_connect<S: SecretStore>(
+pub fn prepare_connect<S: SecretStore + ?Sized>(
     app_root: &Path,
     account: AccountKey,
     store: &S,
@@ -281,23 +295,138 @@ impl<S: JsonSender> ConnectDriver<S> {
         if phone.is_empty() {
             return Err(ConnectSendError::InvalidRequest);
         }
+        self.session.last_auth_error = None;
         let extra = self.session.request(RequestPurpose::SetPhoneNumber, None);
         self.sender
             .send_json(&set_authentication_phone_number(extra, phone))?;
         Ok(extra)
     }
+
+    /// Send `checkAuthenticationCode` when auth is WaitCode.
+    /// The code is never stored on the session or diagnostics.
+    pub fn submit_code(&mut self, code: &str) -> Result<RequestId, ConnectSendError> {
+        if !matches!(self.session.auth, AuthorizationState::WaitCode { .. }) {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let code = code.trim();
+        if code.is_empty() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        self.session.last_auth_error = None;
+        let extra = self
+            .session
+            .request(RequestPurpose::CheckAuthenticationCode, None);
+        self.sender
+            .send_json(&check_authentication_code(extra, code))?;
+        Ok(extra)
+    }
+
+    /// Send `checkAuthenticationPassword` when auth is WaitPassword.
+    /// The password is never stored on the session or diagnostics. Not trimmed
+    /// (leading/trailing spaces can be significant).
+    pub fn submit_password(&mut self, password: &str) -> Result<RequestId, ConnectSendError> {
+        if !matches!(self.session.auth, AuthorizationState::WaitPassword { .. }) {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if password.is_empty() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        self.session.last_auth_error = None;
+        let extra = self
+            .session
+            .request(RequestPurpose::CheckAuthenticationPassword, None);
+        self.sender
+            .send_json(&check_authentication_password(extra, password))?;
+        Ok(extra)
+    }
+
+    /// Send `close` (not `logOut`). Callers must keep receiving until Closed.
+    pub fn request_close(&mut self) -> Result<RequestId, ConnectSendError> {
+        if matches!(
+            self.session.auth,
+            AuthorizationState::Closed | AuthorizationState::Closing
+        ) {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        self.session.begin_close();
+        let extra = self.session.request(RequestPurpose::Close, None);
+        self.sender.send_json(&close_request(extra))?;
+        Ok(extra)
+    }
+}
+
+/// How long Drop / `--connect-smoke` waits for `authorizationStateClosed`.
+pub const CLIENT_CLOSE_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Send `close` and ingest until Closed. Does not join a receive thread or
+/// unload tdjson. Returns whether Closed was observed.
+pub fn wait_closed<S: JsonSender>(
+    driver: &mut ConnectDriver<S>,
+    mut recv: impl FnMut(Duration) -> Option<OwnedEnvelope>,
+    timeout: Duration,
+) -> bool {
+    if matches!(driver.session.auth, AuthorizationState::Closed) {
+        return true;
+    }
+    let _ = driver.request_close();
+    let deadline = Instant::now() + timeout;
+    loop {
+        if matches!(driver.session.auth, AuthorizationState::Closed) {
+            return true;
+        }
+        let now = Instant::now();
+        if now >= deadline {
+            return false;
+        }
+        let slice = deadline
+            .saturating_duration_since(now)
+            .min(Duration::from_millis(50));
+        if let Some(owned) = recv(slice) {
+            let _ = driver.ingest(owned);
+        }
+    }
 }
 
 /// Open LiveTdJson + receive bridge when gate + restore succeed.
+///
+/// Drop / [`LiveConnect::shutdown`] send `close`, wait for
+/// `authorizationStateClosed`, then join the receive thread **before**
+/// `libtdjson` is unloaded. Unloading while TDLib worker threads are still
+/// running is what produced SIGSEGV (exit 139) after `--connect-smoke`.
+///
+/// Field order: `bridge` is dropped before `_live` (declaration order) so
+/// `td_receive` is not in-flight during `dlclose`.
 pub struct LiveConnect {
     pub driver: ConnectDriver<LiveSender>,
     pub bridge: ReceiveBridge,
     _live: LiveTdJson,
 }
 
+impl LiveConnect {
+    /// Close the TDLib client and join the receive thread. Safe to call twice.
+    /// Does not panic; a timeout still joins the thread so Drop can unload.
+    pub fn shutdown(&mut self, wait: Duration) {
+        if self.bridge.is_joined() {
+            return;
+        }
+        let _ = wait_closed(
+            &mut self.driver,
+            |timeout| self.bridge.next_timeout(timeout),
+            wait,
+        );
+        self.bridge.shutdown();
+    }
+}
+
+impl Drop for LiveConnect {
+    fn drop(&mut self) {
+        self.shutdown(CLIENT_CLOSE_TIMEOUT);
+    }
+}
+
 pub fn start_live_connect(
     credentials: TelegramCredentials,
-    store: &impl SecretStore,
+    store: &(impl SecretStore + ?Sized),
     diagnostics: Arc<dyn DiagnosticSink>,
 ) -> Result<LiveConnect, ConnectBlocker> {
     match evaluate_gate(true) {
@@ -467,6 +596,134 @@ mod tests {
         assert!(phone_json.contains("+15551212"));
         assert!(!sink.rendered().contains("+15551212"));
 
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn driver_submits_code_and_password_only_in_matching_states() {
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = Arc::new(RecordingSender::new());
+        let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+        let mut driver =
+            ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+
+        assert_eq!(
+            driver.submit_code("12345"),
+            Err(ConnectSendError::InvalidRequest)
+        );
+        assert_eq!(
+            driver.submit_password("secret"),
+            Err(ConnectSendError::InvalidRequest)
+        );
+
+        let seq = AtomicU64::new(0);
+        let wait_code = copy_and_parse(
+            r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateWaitCode","code_info":{"@type":"authenticationCodeInfo","type":{"@type":"authenticationCodeTypeSms","length":5}}}}"#,
+            &seq,
+            &dyn_sink,
+        )
+        .unwrap();
+        driver.ingest(wait_code).unwrap();
+        assert!(matches!(
+            driver.session.auth,
+            AuthorizationState::WaitCode {
+                code_length: Some(5)
+            }
+        ));
+        assert_eq!(
+            driver.submit_password("secret"),
+            Err(ConnectSendError::InvalidRequest)
+        );
+        assert_eq!(
+            driver.submit_code("  "),
+            Err(ConnectSendError::InvalidRequest)
+        );
+        let code_extra = driver.submit_code("  12345 ").unwrap();
+        let sent = recorder.snapshot();
+        let code_json = sent.last().unwrap();
+        assert!(code_json.contains("checkAuthenticationCode"));
+        assert!(code_json.contains(&format!("\"@extra\":\"{}\"", code_extra.0)));
+        assert!(code_json.contains("\"code\":\"12345\""));
+        assert!(!sink.rendered().contains("12345"));
+
+        let wait_password = copy_and_parse(
+            r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateWaitPassword","password_hint":"CANARY_HINT","has_recovery_email_address":true}}"#,
+            &seq,
+            &dyn_sink,
+        )
+        .unwrap();
+        driver.ingest(wait_password).unwrap();
+        assert_eq!(
+            driver.submit_code("12345"),
+            Err(ConnectSendError::InvalidRequest)
+        );
+        let pw_extra = driver.submit_password(" unit-pw ").unwrap();
+        let sent = recorder.snapshot();
+        let pw_json = sent.last().unwrap();
+        assert!(pw_json.contains("checkAuthenticationPassword"));
+        assert!(pw_json.contains(&format!("\"@extra\":\"{}\"", pw_extra.0)));
+        // Password is not trimmed.
+        assert!(pw_json.contains("\"password\":\" unit-pw \""));
+        assert!(!sink.rendered().contains("unit-pw"));
+        assert!(!sink.rendered().contains("CANARY_HINT"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn wait_closed_sends_close_and_reaches_closed_via_injection() {
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = Arc::new(RecordingSender::new());
+        let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+        let mut driver =
+            ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+
+        let seq = AtomicU64::new(0);
+        let wait_phone = copy_and_parse(
+            r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateWaitPhoneNumber"}}"#,
+            &seq,
+            &dyn_sink,
+        )
+        .unwrap();
+        driver.ingest(wait_phone).unwrap();
+
+        let envelopes = vec![
+            copy_and_parse(
+                r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateClosing"}}"#,
+                &seq,
+                &dyn_sink,
+            )
+            .unwrap(),
+            copy_and_parse(
+                r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateClosed"}}"#,
+                &seq,
+                &dyn_sink,
+            )
+            .unwrap(),
+        ];
+        let mut iter = envelopes.into_iter();
+        assert!(wait_closed(
+            &mut driver,
+            |_| iter.next(),
+            Duration::from_secs(2)
+        ));
+        assert!(matches!(driver.session.auth, AuthorizationState::Closed));
+        let sent = recorder.snapshot();
+        let close_json = sent.last().expect("close request");
+        assert!(close_json.contains("\"@type\":\"close\""));
+        assert!(!sink.rendered().contains("unit-test-hash"));
+        // Second call is a no-op once Closed (no extra send).
+        let before = sent.len();
+        assert!(wait_closed(&mut driver, |_| None, Duration::ZERO));
+        assert_eq!(recorder.snapshot().len(), before);
+        drop(driver);
+        drop(recorder);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

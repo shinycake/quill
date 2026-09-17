@@ -1,13 +1,29 @@
+#[cfg(feature = "ui")]
 mod ui;
-
-use gpui_kit::*;
-use std::path::PathBuf;
-use std::time::Duration;
-use ui::ScreenshotDemo;
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
-    if let Some(demo) = parse_screenshot_demo(&args) {
+    if args.iter().skip(1).any(|a| a == "--connect-smoke") {
+        std::process::exit(quill::connect_smoke::cli_exit_code());
+    }
+
+    #[cfg(feature = "ui")]
+    {
+        ui_main(&args);
+    }
+
+    #[cfg(not(feature = "ui"))]
+    {
+        eprintln!("quill: UI not compiled. Pass --connect-smoke, or rebuild with --features ui.");
+        std::process::exit(2);
+    }
+}
+
+#[cfg(feature = "ui")]
+fn ui_main(args: &[String]) {
+    use gpui_kit::*;
+
+    if let Some(demo) = parse_screenshot_demo(args) {
         run_screenshot_demo(demo);
         return;
     }
@@ -43,7 +59,11 @@ fn main() {
         });
 }
 
-fn parse_screenshot_demo(args: &[String]) -> Option<(ScreenshotDemo, PathBuf)> {
+#[cfg(feature = "ui")]
+fn parse_screenshot_demo(args: &[String]) -> Option<(ui::ScreenshotDemo, std::path::PathBuf)> {
+    use std::path::PathBuf;
+    use ui::ScreenshotDemo;
+
     let mut iter = args.iter().skip(1);
     while let Some(arg) = iter.next() {
         if arg == "--screenshot-demo" {
@@ -55,8 +75,12 @@ fn parse_screenshot_demo(args: &[String]) -> Option<(ScreenshotDemo, PathBuf)> {
             let demo = match kind {
                 "need-tdjson" => ScreenshotDemo::NeedTdjson,
                 "wait-phone" => ScreenshotDemo::WaitPhone,
+                "wait-code" => ScreenshotDemo::WaitCode,
+                "wait-password" => ScreenshotDemo::WaitPassword,
                 _ => {
-                    eprintln!("unknown screenshot demo '{kind}' (expected need-tdjson|wait-phone)");
+                    eprintln!(
+                        "unknown screenshot demo '{kind}' (expected need-tdjson|wait-phone|wait-code|wait-password)"
+                    );
                     std::process::exit(2);
                 }
             };
@@ -68,12 +92,19 @@ fn parse_screenshot_demo(args: &[String]) -> Option<(ScreenshotDemo, PathBuf)> {
 
 /// Open a real GPUI window in the requested demo state, linger so an external
 /// capture (ffmpeg x11grab) can snap docs/screenshots/*.png, then quit.
-fn run_screenshot_demo(demo: (ScreenshotDemo, PathBuf)) {
+#[cfg(feature = "ui")]
+fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
+    use gpui_kit::*;
+    use std::time::Duration;
+    use ui::ScreenshotDemo;
+
     let (kind, out_dir) = demo;
     let _ = std::fs::create_dir_all(&out_dir);
     let marker = out_dir.join(match kind {
         ScreenshotDemo::NeedTdjson => ".quill-ready-need-tdjson",
         ScreenshotDemo::WaitPhone => ".quill-ready-wait-phone",
+        ScreenshotDemo::WaitCode => ".quill-ready-wait-code",
+        ScreenshotDemo::WaitPassword => ".quill-ready-wait-password",
     });
     let _ = std::fs::remove_file(&marker);
     let marker_for_spawn = marker.clone();

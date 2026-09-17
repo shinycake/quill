@@ -3,8 +3,8 @@ use crate::diagnostics::{Diagnostic, DiagnosticSink};
 use crate::ids::{AccountGeneration, AccountKey, ChatId, MessageId, RequestId, ViewGeneration};
 use crate::telegram::client::OwnedEnvelope;
 use crate::telegram::envelope::{
-    AuthorizationState, ChatKind, ChatList, ConnectionState, EnvelopePayload, MessageContent,
-    ParsedMessage,
+    AuthorizationState, ChatKind, ChatList, ConnectionState, EnvelopePayload, ErrorClass,
+    MessageContent, ParsedMessage,
 };
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
@@ -14,12 +14,54 @@ pub enum RequestPurpose {
     GetAuthorizationState,
     SetParameters,
     SetPhoneNumber,
+    CheckAuthenticationCode,
+    CheckAuthenticationPassword,
     LoadChats,
     GetHistory,
     SendText,
     Close,
     LogOut,
     Other,
+}
+
+fn is_auth_submit(purpose: RequestPurpose) -> bool {
+    matches!(
+        purpose,
+        RequestPurpose::SetPhoneNumber
+            | RequestPurpose::CheckAuthenticationCode
+            | RequestPurpose::CheckAuthenticationPassword
+    )
+}
+
+/// Classified TDLib error for an auth submit. Never includes the native message
+/// (codes, passwords, and phone numbers live there).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AuthRequestError {
+    pub purpose: RequestPurpose,
+    pub class: ErrorClass,
+}
+
+impl AuthRequestError {
+    pub fn user_message(self) -> &'static str {
+        match (self.purpose, self.class) {
+            (RequestPurpose::SetPhoneNumber, ErrorClass::Invalid) => "phone not accepted",
+            (RequestPurpose::SetPhoneNumber, ErrorClass::Flood) => {
+                "too many phone attempts — wait and try again"
+            }
+            (RequestPurpose::CheckAuthenticationCode, ErrorClass::Invalid) => "code not accepted",
+            (RequestPurpose::CheckAuthenticationCode, ErrorClass::Flood) => {
+                "too many code attempts — wait and try again"
+            }
+            (RequestPurpose::CheckAuthenticationPassword, ErrorClass::Invalid) => {
+                "password not accepted"
+            }
+            (RequestPurpose::CheckAuthenticationPassword, ErrorClass::Flood) => {
+                "too many password attempts — wait and try again"
+            }
+            (_, ErrorClass::Unauthorized) => "session is no longer authorized",
+            _ => "Telegram rejected the request",
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -159,6 +201,8 @@ pub struct Session {
     pub chats_exhausted: bool,
     pub shutdown: ShutdownPhase,
     pub last_seq: u64,
+    /// Last classified error for phone / code / password submit. Never a secret.
+    pub last_auth_error: Option<AuthRequestError>,
     diagnostics: Arc<dyn DiagnosticSink>,
 }
 
@@ -180,6 +224,7 @@ impl Session {
             chats_exhausted: false,
             shutdown: ShutdownPhase::Running,
             last_seq: 0,
+            last_auth_error: None,
             diagnostics,
         }
     }
@@ -350,11 +395,22 @@ impl Session {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::LoadChats) {
                     // A short OK is not exhaustion; 404 is.
                 }
+                if pending.is_some_and(|p| is_auth_submit(p.purpose)) {
+                    self.last_auth_error = None;
+                }
             }
             EnvelopePayload::Error(err) => {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::LoadChats) && err.code == 404
                 {
                     self.chats_exhausted = true;
+                }
+                if let Some(pending) = pending
+                    && is_auth_submit(pending.purpose)
+                {
+                    self.last_auth_error = Some(AuthRequestError {
+                        purpose: pending.purpose,
+                        class: err.class,
+                    });
                 }
             }
             EnvelopePayload::Unknown(kind) => {
@@ -383,6 +439,7 @@ impl Session {
         }
         self.auth = state;
         self.auth_view = view_for(&self.auth);
+        self.last_auth_error = None;
     }
 
     fn upsert_message(&mut self, message: ParsedMessage, pending: bool) {
@@ -638,5 +695,56 @@ mod tests {
         );
         assert!(session.chats_exhausted);
         assert!(!sink.rendered().contains("Not Found"));
+    }
+
+    #[test]
+    fn auth_code_error_is_classified_without_native_message() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        let extra = session.request(RequestPurpose::CheckAuthenticationCode, None);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"error","code":400,"message":"PHONE_CODE_INVALID CANARY_CODE_999","@extra":"{}"}}"#,
+                extra.0
+            ),
+        );
+        let err = session.last_auth_error.expect("classified auth error");
+        assert_eq!(err.purpose, RequestPurpose::CheckAuthenticationCode);
+        assert_eq!(err.class, ErrorClass::Invalid);
+        assert_eq!(err.user_message(), "code not accepted");
+        let logs = sink.rendered();
+        assert!(!logs.contains("CANARY_CODE"));
+        assert!(!logs.contains("PHONE_CODE_INVALID"));
+        let debug = format!("{err:?}");
+        assert!(!debug.contains("CANARY_CODE"));
+    }
+
+    #[test]
+    fn auth_password_ok_clears_last_error() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        let extra = session.request(RequestPurpose::CheckAuthenticationPassword, None);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"error","code":400,"message":"PASSWORD_HASH_INVALID CANARY_PW","@extra":"{}"}}"#,
+                extra.0
+            ),
+        );
+        assert!(session.last_auth_error.is_some());
+        let extra = session.request(RequestPurpose::CheckAuthenticationPassword, None);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
+        );
+        assert!(session.last_auth_error.is_none());
+        assert!(!sink.rendered().contains("CANARY_PW"));
     }
 }
