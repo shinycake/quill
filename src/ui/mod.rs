@@ -29,10 +29,12 @@ pub struct QuillApp {
     composer: Entity<TextareaState>,
     auth_demo: AuthorizationState,
     focus_sidebar: FocusHandle,
+    /// True when TELEGRAM_* (or local .env) credentials loaded; never stores secret values.
+    credentials_present: bool,
 }
 
 impl QuillApp {
-    pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+    pub fn new(window: &mut Window, cx: &mut Context<Self>, credentials_present: bool) -> Self {
         let chat = cx.new(|cx| SyntheticChat::new(cx));
         let composer = cx.new(|cx| {
             TextareaState::new(window, cx)
@@ -64,6 +66,7 @@ impl QuillApp {
             composer,
             auth_demo: AuthorizationState::WaitPhoneNumber,
             focus_sidebar: cx.focus_handle(),
+            credentials_present,
         }
     }
 
@@ -114,10 +117,15 @@ impl Render for QuillApp {
                     .flex()
                     .flex_1()
                     .min_h_0()
-                    .child(sidebar(&auth, &self.focus_sidebar, cx))
+                    .child(sidebar(
+                        &auth,
+                        self.credentials_present,
+                        &self.focus_sidebar,
+                        cx,
+                    ))
                     .child(self.conversation(cx)),
             )
-            .child(status_bar(&auth, cx))
+            .child(status_bar(&auth, self.credentials_present, cx))
     }
 }
 
@@ -158,11 +166,7 @@ fn title_bar(cx: &mut Context<QuillApp>) -> impl IntoElement {
         .justify_between()
         .border_b_1()
         .border_color(cx.theme().border)
-        .child(
-            div()
-                .font_semibold()
-                .child("Quill — synthetic chat (no live Telegram)"),
-        )
+        .child(div().font_semibold().child("Quill — synthetic chat"))
         .child(
             div()
                 .flex()
@@ -186,7 +190,12 @@ fn title_bar(cx: &mut Context<QuillApp>) -> impl IntoElement {
         )
 }
 
-fn sidebar(auth: &AuthView, focus: &FocusHandle, cx: &mut Context<QuillApp>) -> impl IntoElement {
+fn sidebar(
+    auth: &AuthView,
+    credentials_present: bool,
+    focus: &FocusHandle,
+    cx: &mut Context<QuillApp>,
+) -> impl IntoElement {
     div()
         .id("sidebar")
         .track_focus(focus)
@@ -216,7 +225,7 @@ fn sidebar(auth: &AuthView, focus: &FocusHandle, cx: &mut Context<QuillApp>) -> 
                 .text_color(cx.theme().muted_foreground)
                 .child(auth.body.clone()),
         )
-        .child(auth_action_note(auth))
+        .child(auth_action_note(auth, credentials_present))
 }
 
 fn chat_row(
@@ -244,19 +253,36 @@ fn chat_row(
         )
 }
 
-fn auth_action_note(auth: &AuthView) -> impl IntoElement {
+fn auth_action_note(auth: &AuthView, credentials_present: bool) -> impl IntoElement {
+    let live = if credentials_present {
+        "live login ready"
+    } else {
+        "set TELEGRAM_API_ID/HASH"
+    };
     let label = match &auth.action {
         AuthAction::UnsupportedHalt { reason } => format!("Blocked: {reason}"),
         AuthAction::Ready => "Ready (synthetic)".into(),
-        AuthAction::EnterPhone => "Phone entry (live login disabled)".into(),
-        AuthAction::EnterCode => "Code entry (live login disabled)".into(),
-        AuthAction::EnterPassword => "Password entry (live login disabled)".into(),
+        AuthAction::EnterPhone => format!("Phone entry ({live})"),
+        AuthAction::EnterCode => format!("Code entry ({live})"),
+        AuthAction::EnterPassword => format!("Password entry ({live})"),
         other => format!("{other:?}"),
     };
     div().text_xs().child(label)
 }
 
-fn status_bar(auth: &AuthView, cx: &mut Context<QuillApp>) -> impl IntoElement {
+fn credentials_status_label(credentials_present: bool) -> &'static str {
+    if credentials_present {
+        "credentials present · live login ready"
+    } else {
+        "set TELEGRAM_API_ID / TELEGRAM_API_HASH (or local .env)"
+    }
+}
+
+fn status_bar(
+    auth: &AuthView,
+    credentials_present: bool,
+    cx: &mut Context<QuillApp>,
+) -> impl IntoElement {
     div()
         .id("status")
         .h(px(28.))
@@ -268,8 +294,9 @@ fn status_bar(auth: &AuthView, cx: &mut Context<QuillApp>) -> impl IntoElement {
         .text_xs()
         .text_color(cx.theme().muted_foreground)
         .child(format!(
-            "Auth: {} · Keyboard: ⌘1 sidebar, ⌘L composer, ⌘↑ older · VoiceOver: macOS follow-up",
-            auth.title
+            "Auth: {} · {} · Keyboard: ⌘1 sidebar, ⌘L composer, ⌘↑ older · VoiceOver: macOS follow-up",
+            auth.title,
+            credentials_status_label(credentials_present)
         ))
 }
 

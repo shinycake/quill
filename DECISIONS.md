@@ -5,7 +5,10 @@ Research snapshot 2026-09-16, pin recheck **2026-09-17**.
 ## Product
 
 - Fresh MIT repository **Quill**. Ideas-only from ZapFast / Paper Plane / Mezon / Coop. Not a fork.
-- Platform 1: macOS Apple Silicon. Linux CI runs unit/replay tests. `macos-latest` GHA compiles the GPUI binary and assembles a dummy `.app`.
+- **Repo visibility: Public.**
+- **Primary runners: Idan's personal Mac + Linux** (supported build/run targets, not deferred). GHA remains best-effort when billing allows; Linux CI runs unit/replay tests; `macos-latest` can compile the GPUI binary and assemble a dummy `.app` when jobs start.
+- **No App Store / notarization / distribution pipeline.** Ad-hoc Apple Developer signing only if needed for Idan's personal Mac.
+- **Live login:** enabled only when `TELEGRAM_API_ID` / `TELEGRAM_API_HASH` (or gitignored local `.env` / `quill.local.env`) are present; still no secrets in git. See `docs/credentials.md`.
 - One account, cloud chats only. Channels/bots gated until sponsored-content handling exists. No secret chats, calls, telemetry, or AI.
 - Storage: TDLib DB + small prefs. No second message database.
 
@@ -36,7 +39,7 @@ Research snapshot 2026-09-16, pin recheck **2026-09-17**.
 - Database key: 32 random bytes in Keychain on macOS (`org.shinycake.quill` / `db-key:{account}`); `MemorySecretStore` + tests elsewhere. `KeychainSecretStore::get` maps `errSecItemNotFound` to missing (`Ok(None)`) and user-cancel / auth-failed / interaction-not-allowed / keychain-unavailable to `Locked`. Missing key + existing DB → halt, never mint a replacement.
 - Auth view is a pure function of `updateAuthorizationState`. Premium / email / registration / unknown → unsupported halt UI. No payments, auto-register, or password reset.
 - Chat list / history / send reducers with replay fixtures. Logout invalidates pending requests. Close ≠ logOut.
-- **Stop:** live login needs owner `api_id` / `api_hash` (see `docs/credentials.md`). Never pasted into this repo.
+- Live login gate: unlocked only when owner `TELEGRAM_API_ID` / `TELEGRAM_API_HASH` (or local gitignored env files) load successfully (see `docs/credentials.md`). Never pasted into this repo.
 
 ## Licenses
 
@@ -54,8 +57,8 @@ Research snapshot 2026-09-16, pin recheck **2026-09-17**.
 
 ## Blockers / follow-up
 
-1. Live Telegram credentials (owner) — see `docs/credentials.md`. **Stop before live login.**
-2. VoiceOver + real IME on a Mac (this environment cannot prove them).
+1. Live Telegram credentials (owner) — see `docs/credentials.md`. Soft-unlocked in UI when `TELEGRAM_*` (or local `.env`) load; still no secrets in git and no live TDLib login until the owner supplies them out of tree.
+2. VoiceOver + real IME on a Mac (this environment cannot prove them). Primary Mac runner is Idan's personal machine.
 3. Native tdjson build + rpath verification on Apple Silicon (`docs/native-bundle.md`).
-4. Signing / notarization / public brand: deferred.
+4. **No App Store / notarization / distribution pipeline.** Ad-hoc Apple Developer signing only if needed for Idan's personal Mac. Public repo; brand polish is still a follow-up.
 5. **GitHub Actions did not run** on 2026-09-17: both `linux-fmt-clippy-test` and `macos-compile-smoke` failed immediately with “The job was not started because recent account payments have failed or your spending limit needs to be increased.” Local equivalent passed on this agent: `cargo fmt --all -- --check`, `cargo clippy --no-default-features --all-targets --locked -- -D warnings`, `cargo test --no-default-features --locked` (43 lib + 6 replay). UI compile: `cargo build --features ui --locked`.

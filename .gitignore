@@ -13,3 +13,4 @@ credentials.json
 *.p12
 .idea
 .vscode
+quill.local.env
