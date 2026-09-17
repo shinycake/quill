@@ -30,6 +30,10 @@ pub struct MessageId(pub i64);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct UserId(pub i64);
 
+/// TDLib `int32` file identifier (`file.id`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct FileId(pub i32);
+
 /// Cross-chat identity: a message ID alone is not enough.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct MessageKey {

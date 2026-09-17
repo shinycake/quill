@@ -179,16 +179,32 @@ pub(crate) fn session_text_bubble(
     body: impl Into<SharedString>,
     outgoing: bool,
 ) -> AnyElement {
-    message_bubble(row(id, sender, body, SyntheticKind::Text, outgoing))
+    session_bubble(id, sender, body, outgoing, None)
+}
+
+pub(crate) fn session_bubble(
+    id: u64,
+    sender: impl Into<SharedString>,
+    body: impl Into<SharedString>,
+    outgoing: bool,
+    extra: Option<AnyElement>,
+) -> AnyElement {
+    message_bubble_with_extra(row(id, sender, body, SyntheticKind::Text, outgoing), extra)
 }
 
 fn message_bubble(row: SyntheticRow) -> AnyElement {
+    message_bubble_with_extra(row, None)
+}
+
+fn message_bubble_with_extra(row: SyntheticRow, extra: Option<AnyElement>) -> AnyElement {
     let image_h = match row.kind {
         SyntheticKind::Image { loaded: false } => px(40.),
         SyntheticKind::Image { loaded: true } => px(96.),
         _ => px(0.),
     };
     let rtl = matches!(row.kind, SyntheticKind::Rtl | SyntheticKind::Emoji);
+    let body = row.body.clone();
+    let has_body = !body.is_empty();
     let bubble = div()
         .id(("bubble", row.id))
         .max_w(px(520.))
@@ -203,7 +219,7 @@ fn message_bubble(row: SyntheticRow) -> AnyElement {
         .text_color(rgb(0xffffff))
         .when(rtl, |this| this.text_right())
         .child(div().text_xs().opacity(0.8).child(row.sender.clone()))
-        .child(div().text_sm().child(row.body.clone()))
+        .when(has_body, |this| this.child(div().text_sm().child(body)))
         .when(image_h > px(0.), |this| {
             this.child(
                 div()
@@ -223,7 +239,8 @@ fn message_bubble(row: SyntheticRow) -> AnyElement {
                         },
                     ),
             )
-        });
+        })
+        .when_some(extra, |this, el| this.child(el));
     let row_el = div().id(("row", row.id)).w_full().flex().py_1();
     if row.outgoing {
         row_el.justify_end().child(bubble).into_any_element()

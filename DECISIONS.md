@@ -70,3 +70,11 @@ Research snapshot 2026-09-16, pin recheck **2026-09-17**.
 3. Native tdjson build + rpath verification on Apple Silicon (`docs/native-bundle.md`). This Linux agent has no tdjson; UI shows the MissingTdjson halt when credentials are loaded.
 4. **No App Store / notarization / distribution pipeline.** Ad-hoc Apple Developer signing only if needed for Idan's personal Mac. Public repo; brand polish is still a follow-up.
 5. **GitHub Actions did not run** on 2026-09-17: billing/spending limit. Re-run after billing is fixed. Local gates: `cargo fmt`, `clippy -D warnings`, `cargo test --no-default-features --locked`.
+
+## Photo / document receive (2026-09-17)
+
+- **Schema (1.8.67, not invented):** `messagePhoto` (`photo.sizes[]` of `photoSize` + `file` / `localFile`, `caption`, `has_spoiler`, `is_secret`) and `messageDocument` (`document.file_name`, `mime_type`, `document` file, `caption`). Progress is `updateFile`; fetch is `downloadFile` (`file_id:int32`, `priority:1-32`, `offset`/`limit` int53, `synchronous:Bool`). `remoteFile.id` is not stored (it can be an HTTP URL).
+- **State:** session `files` map keyed by `file.id`. History rows keep file ids only. Unread/read path unchanged.
+- **Downloads:** open-chat photo thumbs auto-download at priority 1 (skip secret/spoiler). User click on a placeholder or document chip sends priority 32. `synchronous: false` — completion is `updateFile` / the immediate `file` reply.
+- **UI:** image thumb when `local.is_downloading_completed` and `path` is non-empty; otherwise an honest “not downloaded” / “downloading…” placeholder. Documents are chips (`file_name` · mime · size · state).
+- **Out of this slice:** video/voice, sending a local file, fullscreen viewer, App Store, vendoring tdjson.

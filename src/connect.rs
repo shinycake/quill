@@ -4,7 +4,7 @@
 use crate::composer::ComposerSnapshot;
 use crate::credentials::TelegramCredentials;
 use crate::diagnostics::DiagnosticSink;
-use crate::ids::{AccountKey, ChatId, MessageId, RequestId};
+use crate::ids::{AccountKey, ChatId, FileId, MessageId, RequestId};
 use crate::lifecycle::{RestoreBlocker, plan_restore};
 use crate::platform::{DatabaseKey, KeyDecision, SecretStore, load_or_create_key};
 use crate::settings::{AccountPaths, default_app_root};
@@ -14,8 +14,9 @@ use crate::telegram::envelope::{AuthorizationState, EnvelopePayload};
 use crate::telegram::ffi::{LibraryOrigin, TdJsonError, resolve_tdjson_path};
 use crate::telegram::requests::{
     SetTdlibParameters, check_authentication_code, check_authentication_password, close_chat,
-    close_request, get_authorization_state, get_chat_history, load_chats, open_chat, send_text,
-    set_authentication_phone_number, view_messages,
+    close_request, download_file as download_file_request, get_authorization_state,
+    get_chat_history, load_chats, open_chat, send_text, set_authentication_phone_number,
+    view_messages,
 };
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -25,6 +26,10 @@ use std::time::{Duration, Instant};
 pub const MAIN_CHAT_LOAD_LIMIT: i32 = 100;
 /// Page size for `getChatHistory`.
 pub const HISTORY_PAGE_SIZE: i32 = 50;
+/// `downloadFile.priority` for automatic photo thumbs (schema: 1–32).
+pub const THUMB_DOWNLOAD_PRIORITY: i32 = 1;
+/// `downloadFile.priority` when the user opens media.
+pub const USER_DOWNLOAD_PRIORITY: i32 = 32;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConnectBlocker {
     MissingCredentials,
@@ -290,6 +295,13 @@ impl<S: JsonSender> ConnectDriver<S> {
             }
             _ => false,
         };
+        let thumbs_after = matches!(
+            owned.envelope.payload,
+            EnvelopePayload::Messages(_)
+                | EnvelopePayload::UpdateNewMessage(_)
+                | EnvelopePayload::UpdateFile(_)
+                | EnvelopePayload::File(_)
+        );
         self.session.apply(owned);
         self.maybe_send_parameters()?;
         let became_ready = !was_ready && matches!(self.session.auth, AuthorizationState::Ready);
@@ -298,6 +310,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         if view_after {
             self.maybe_view_open_messages()?;
+        }
+        if thumbs_after {
+            self.maybe_download_open_thumbs()?;
         }
         Ok(())
     }
@@ -348,6 +363,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         if self.session.open_chat == Some(chat_id) {
             self.maybe_view_open_messages()?;
+            self.maybe_download_open_thumbs()?;
             return self.fetch_history();
         }
         self.close_open_chat()?;
@@ -362,6 +378,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         self.send_open_chat(chat_id)?;
         self.maybe_view_open_messages()?;
+        self.maybe_download_open_thumbs()?;
         self.fetch_history()
     }
 
@@ -431,6 +448,48 @@ impl<S: JsonSender> ConnectDriver<S> {
             }
             Err(err) => {
                 self.session.requests.take(extra);
+                Err(err)
+            }
+        }
+    }
+
+    /// Auto-download photo thumbs in the open chat (`priority` 1). Skips secret/spoiler.
+    pub fn maybe_download_open_thumbs(&mut self) -> Result<Vec<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Ok(Vec::new());
+        }
+        let ids = self.session.thumb_file_ids_to_download();
+        let mut extras = Vec::new();
+        for file_id in ids {
+            if let Some(extra) = self.download_file(file_id, THUMB_DOWNLOAD_PRIORITY)? {
+                extras.push(extra);
+            }
+        }
+        Ok(extras)
+    }
+
+    /// Send `downloadFile` (`synchronous: false`). No-op if already local or in flight.
+    pub fn download_file(
+        &mut self,
+        file_id: FileId,
+        priority: i32,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if !self.session.should_download(file_id) {
+            return Ok(None);
+        }
+        let extra = self.session.request_download(file_id);
+        self.session.begin_download(file_id);
+        match self
+            .sender
+            .send_json(&download_file_request(extra, file_id, priority))
+        {
+            Ok(()) => Ok(Some(extra)),
+            Err(err) => {
+                self.session.requests.take(extra);
+                self.session.abort_download(file_id);
                 Err(err)
             }
         }
@@ -1479,6 +1538,87 @@ mod tests {
                 .has_purpose_for_chat(RequestPurpose::ViewMessages, ChatId(7))
         );
         assert!(!sink.rendered().contains("CANARY_VIEW_TD"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn photo_history_auto_downloads_thumb_and_user_open_sends_full() {
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = Arc::new(RecordingSender::new());
+        let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+        let mut driver =
+            ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+        let seq = AtomicU64::new(0);
+        driver
+            .ingest(
+                copy_and_parse(
+                    r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        driver
+            .ingest(
+                copy_and_parse(
+                    r#"{"@type":"updateNewChat","chat":{"id":7,"title":"Alice","type":{"@type":"chatTypePrivate","user_id":7},"unread_count":0}}"#,
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        let history_extra = driver.select_chat(ChatId(7)).unwrap().expect("history");
+        let thumb = r#"{"@type":"file","id":1,"size":10,"expected_size":10,"local":{"@type":"localFile","path":"","can_be_downloaded":true,"can_be_deleted":false,"is_downloading_active":false,"is_downloading_completed":false,"download_offset":0,"downloaded_prefix_size":0,"downloaded_size":0},"remote":{"@type":"remoteFile","id":"CANARY_REMOTE","unique_id":"u","is_uploading_active":false,"is_uploading_completed":true,"uploaded_size":10}}"#;
+        let full = r#"{"@type":"file","id":2,"size":80,"expected_size":80,"local":{"@type":"localFile","path":"","can_be_downloaded":true,"can_be_deleted":false,"is_downloading_active":false,"is_downloading_completed":false,"download_offset":0,"downloaded_prefix_size":0,"downloaded_size":0},"remote":{"@type":"remoteFile","id":"CANARY_REMOTE","unique_id":"u","is_uploading_active":false,"is_uploading_completed":true,"uploaded_size":80}}"#;
+        driver
+            .ingest(
+                copy_and_parse(
+                    &format!(
+                        r#"{{"@type":"messages","@extra":"{extra}","messages":[{{"id":20,"chat_id":7,"is_outgoing":false,"content":{{"@type":"messagePhoto","photo":{{"@type":"photo","has_stickers":false,"sizes":[{{"@type":"photoSize","type":"m","photo":{thumb},"width":320,"height":240,"progressive_sizes":[]}},{{"@type":"photoSize","type":"x","photo":{full},"width":800,"height":600,"progressive_sizes":[]}}]}},"caption":{{"@type":"formattedText","text":"CANARY_MEDIA","entities":[]}},"has_spoiler":false,"is_secret":false}}}}]}}"#,
+                        extra = history_extra.0,
+                    ),
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        let sent = recorder.snapshot();
+        let thumb_req = sent
+            .iter()
+            .rev()
+            .find(|j| j.contains("downloadFile") && j.contains("\"file_id\":1"))
+            .expect("auto thumb downloadFile");
+        let thumb_json: Value = serde_json::from_str(thumb_req).unwrap();
+        assert_eq!(thumb_json["priority"], THUMB_DOWNLOAD_PRIORITY);
+        assert_eq!(thumb_json["synchronous"], false);
+        assert!(
+            !sent.iter().any(|j| j.contains("\"file_id\":2")),
+            "must not auto-download the full size"
+        );
+        let user = driver
+            .download_file(FileId(2), USER_DOWNLOAD_PRIORITY)
+            .unwrap()
+            .expect("user download");
+        let last = recorder.snapshot();
+        let user_req = last.last().unwrap();
+        assert!(user_req.contains("downloadFile"));
+        assert!(user_req.contains("\"file_id\":2"));
+        assert!(user_req.contains(&format!("\"@extra\":\"{}\"", user.0)));
+        let user_json: Value = serde_json::from_str(user_req).unwrap();
+        assert_eq!(user_json["priority"], USER_DOWNLOAD_PRIORITY);
+        assert_eq!(
+            driver.download_file(FileId(2), USER_DOWNLOAD_PRIORITY),
+            Ok(None),
+            "in-flight download must not duplicate"
+        );
+        assert!(!sink.rendered().contains("CANARY_MEDIA"));
+        assert!(!sink.rendered().contains("CANARY_REMOTE"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

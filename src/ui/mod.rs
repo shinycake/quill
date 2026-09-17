@@ -7,20 +7,25 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::auth::{AuthAction, AuthView, view_for};
 use quill::composer::{ComposerSnapshot, should_send_on_enter};
-use quill::connect::{ConnectBlocker, ConnectGate, LiveConnect, evaluate_gate, start_live_connect};
+use quill::connect::{
+    ConnectBlocker, ConnectGate, LiveConnect, USER_DOWNLOAD_PRIORITY, evaluate_gate,
+    start_live_connect,
+};
 use quill::credentials::TelegramCredentials;
 use quill::diagnostics::{DiagnosticSink, MemorySink};
-use quill::ids::{AccountKey, ChatId};
+use quill::ids::{AccountKey, ChatId, FileId};
 use quill::platform::live_secret_store;
 use quill::state::{
     ChatSummary, HistoryMessage, OutboxReceipt, Session, outgoing_status_label, unread_badge_text,
 };
 use quill::telegram::client::copy_and_parse;
-use quill::telegram::envelope::{AuthorizationState, MessageContent};
+use quill::telegram::envelope::{AuthorizationState, MessageContent, ParsedFile};
+use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 use std::time::Duration;
-use synthetic::{SyntheticChat, session_text_bubble};
+use synthetic::{SyntheticChat, session_bubble, session_text_bubble};
 use zeroize::Zeroize;
 
 actions!(
@@ -96,6 +101,7 @@ pub enum ScreenshotDemo {
     ReadyChatsComposer,
     ReadyUnread,
     ReadyUnreadRead,
+    ReadyMedia,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -264,6 +270,15 @@ impl QuillApp {
                     ConnectUiStatus::DemoReadyChats,
                     None,
                     "screenshot demo — after mark-read (injected updates, no live Telegram)".into(),
+                    AuthorizationState::Ready,
+                )
+            }
+            Some(ScreenshotDemo::ReadyMedia) => {
+                demo_session = Some(seed_ready_media_session(demo_sink.clone()));
+                (
+                    ConnectUiStatus::DemoReadyChats,
+                    None,
+                    "screenshot demo — photo/document (injected updates, no live Telegram)".into(),
                     AuthorizationState::Ready,
                 )
             }
@@ -492,6 +507,23 @@ impl QuillApp {
             };
         } else if let Some(session) = self.demo_session.as_mut() {
             session.open_chat(chat_id);
+        }
+        cx.notify();
+    }
+
+    fn request_media_download(&mut self, file_id: FileId, cx: &mut Context<Self>) {
+        if file_id.0 == 0 {
+            return;
+        }
+        if let Some(live) = self.live.as_mut() {
+            let result = live.driver.download_file(file_id, USER_DOWNLOAD_PRIORITY);
+            self.status_note = match result {
+                Ok(Some(_)) => "downloading…".into(),
+                Ok(None) => "already local or in progress".into(),
+                Err(_) => "could not download".into(),
+            };
+        } else if self.demo_session.is_some() {
+            self.status_note = "demo — downloadFile runs with live TDLib".into();
         }
         cx.notify();
     }
@@ -843,6 +875,9 @@ impl QuillApp {
             .flatten()
             .collect();
         let chat = open.and_then(|id| session.and_then(|s| s.chats.get(&id.0)));
+        let files: HashMap<i32, ParsedFile> = session.map(|s| s.files.clone()).unwrap_or_default();
+        let downloading: std::collections::HashSet<i32> =
+            session.map(|s| s.downloading.clone()).unwrap_or_default();
         let sender_name = title.clone();
         div()
             .id("conversation-history")
@@ -894,12 +929,6 @@ impl QuillApp {
                     .pt_2()
                     .gap_1();
                 for message in messages {
-                    let body = match &message.content {
-                        MessageContent::Text(text) => text.clone(),
-                        MessageContent::Unsupported { type_name } => {
-                            format!("({type_name})")
-                        }
-                    };
                     let label = if message.is_outgoing {
                         let receipt = chat
                             .map(|summary| summary.outbox_receipt(&message))
@@ -908,11 +937,12 @@ impl QuillApp {
                     } else {
                         sender_name.clone()
                     };
-                    list = list.child(session_text_bubble(
-                        message.id.0 as u64,
+                    list = list.child(session_history_row(
+                        &message,
+                        &files,
+                        &downloading,
                         label,
-                        body,
-                        message.is_outgoing,
+                        cx,
                     ));
                 }
                 list.into_any_element()
@@ -1070,11 +1100,16 @@ fn seed_ready_unread_read_session(sink: Arc<MemorySink>) -> Session {
     seed_demo_session(sink, DemoSeed::AfterMarkRead)
 }
 
+fn seed_ready_media_session(sink: Arc<MemorySink>) -> Session {
+    seed_demo_session(sink, DemoSeed::Media)
+}
+
 #[derive(Clone, Copy)]
 enum DemoSeed {
     ReadyChats,
     UnreadBadge,
     AfterMarkRead,
+    Media,
 }
 
 fn seed_demo_session(sink: Arc<MemorySink>, kind: DemoSeed) -> Session {
@@ -1082,7 +1117,7 @@ fn seed_demo_session(sink: Arc<MemorySink>, kind: DemoSeed) -> Session {
     let mut session = Session::new(AccountKey::primary(), dyn_sink.clone());
     let seq = AtomicU64::new(0);
     let a_unread = match kind {
-        DemoSeed::ReadyChats => 1,
+        DemoSeed::ReadyChats | DemoSeed::Media => 1,
         DemoSeed::UnreadBadge => 3,
         DemoSeed::AfterMarkRead => 3,
     };
@@ -1116,6 +1151,13 @@ fn seed_demo_session(sink: Arc<MemorySink>, kind: DemoSeed) -> Session {
             .to_string(),
     ];
     for json in jsons {
+        if matches!(kind, DemoSeed::Media)
+            && (json.contains(r#""id":101"#)
+                || json.contains(r#""id":102"#)
+                || json.contains(r#""id":103"#))
+        {
+            continue;
+        }
         if let Some(owned) = copy_and_parse(&json, &seq, &dyn_sink) {
             session.apply(owned);
         }
@@ -1140,8 +1182,49 @@ fn seed_demo_session(sink: Arc<MemorySink>, kind: DemoSeed) -> Session {
             }
             session.open_chat(ChatId(11));
         }
+        DemoSeed::Media => {
+            let thumb_path = demo_thumb_png_path();
+            let loaded = demo_file_json(21, &thumb_path, true);
+            let pending = demo_file_json(22, "", false);
+            let full_pending = demo_file_json(23, "", false);
+            let doc = demo_file_json(24, "", false);
+            let follow = [
+                format!(
+                    r#"{{"@type":"updateNewMessage","message":{{"id":201,"chat_id":11,"is_outgoing":false,"content":{{"@type":"messagePhoto","photo":{{"@type":"photo","has_stickers":false,"sizes":[{{"@type":"photoSize","type":"m","photo":{loaded},"width":240,"height":160,"progressive_sizes":[]}}]}},"caption":{{"@type":"formattedText","text":"Loaded photo","entities":[]}},"has_spoiler":false,"is_secret":false}}}}}}"#
+                ),
+                format!(
+                    r#"{{"@type":"updateNewMessage","message":{{"id":202,"chat_id":11,"is_outgoing":false,"content":{{"@type":"messagePhoto","photo":{{"@type":"photo","has_stickers":false,"sizes":[{{"@type":"photoSize","type":"m","photo":{pending},"width":320,"height":240,"progressive_sizes":[]}},{{"@type":"photoSize","type":"x","photo":{full_pending},"width":800,"height":600,"progressive_sizes":[]}}]}},"caption":{{"@type":"formattedText","text":"Pending photo","entities":[]}},"has_spoiler":false,"is_secret":false}}}}}}"#
+                ),
+                format!(
+                    r#"{{"@type":"updateNewMessage","message":{{"id":203,"chat_id":11,"is_outgoing":false,"content":{{"@type":"messageDocument","document":{{"@type":"document","file_name":"notes.txt","mime_type":"text/plain","document":{doc}}},"caption":{{"@type":"formattedText","text":"","entities":[]}}}}}}}}"#
+                ),
+                r#"{"@type":"updateChatLastMessage","chat_id":11,"last_message":{"id":203,"chat_id":11,"is_outgoing":false,"content":{"@type":"messageDocument","document":{"@type":"document","file_name":"notes.txt","mime_type":"text/plain","document":{"@type":"file","id":24,"size":24,"expected_size":24,"local":{"@type":"localFile","path":"","can_be_downloaded":true,"can_be_deleted":false,"is_downloading_active":false,"is_downloading_completed":false,"download_offset":0,"downloaded_prefix_size":0,"downloaded_size":0},"remote":{"@type":"remoteFile","id":"x","unique_id":"u","is_uploading_active":false,"is_uploading_completed":true,"uploaded_size":24}}}},"caption":{"@type":"formattedText","text":"","entities":[]}}},"positions":[{"@type":"chatPosition","list":{"@type":"chatListMain"},"order":"30","is_pinned":true}]}"#
+                    .to_string(),
+            ];
+            for json in follow {
+                if let Some(owned) = copy_and_parse(&json, &seq, &dyn_sink) {
+                    session.apply(owned);
+                }
+            }
+            session.open_chat(ChatId(11));
+        }
     }
     session
+}
+
+fn demo_thumb_png_path() -> String {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("docs/screenshots/fixtures/demo-thumb.png")
+        .to_string_lossy()
+        .into_owned()
+}
+
+fn demo_file_json(id: i32, path: &str, completed: bool) -> String {
+    format!(
+        r#"{{"@type":"file","id":{id},"size":24,"expected_size":24,"local":{{"@type":"localFile","path":{path},"can_be_downloaded":true,"can_be_deleted":false,"is_downloading_active":false,"is_downloading_completed":{completed},"download_offset":0,"downloaded_prefix_size":0,"downloaded_size":0}},"remote":{{"@type":"remoteFile","id":"x","unique_id":"u","is_uploading_active":false,"is_uploading_completed":true,"uploaded_size":24}}}}"#,
+        path = serde_json::to_string(path).unwrap(),
+        completed = completed,
+    )
 }
 
 fn pane_placeholder(
@@ -1300,6 +1383,218 @@ fn unread_badge(label: String, chat_id: ChatId) -> impl IntoElement {
         .text_xs()
         .font_semibold()
         .child(label)
+}
+
+fn session_history_row(
+    message: &HistoryMessage,
+    files: &HashMap<i32, ParsedFile>,
+    downloading: &std::collections::HashSet<i32>,
+    label: String,
+    cx: &mut Context<QuillApp>,
+) -> AnyElement {
+    match &message.content {
+        MessageContent::Text(text) => session_text_bubble(
+            message.id.0 as u64,
+            label,
+            text.clone(),
+            message.is_outgoing,
+        ),
+        MessageContent::Unsupported { type_name } => session_text_bubble(
+            message.id.0 as u64,
+            label,
+            format!("({type_name})"),
+            message.is_outgoing,
+        ),
+        MessageContent::Photo(photo) => {
+            let extra = photo_attachment(message.id.0 as u64, photo, files, downloading, cx);
+            session_bubble(
+                message.id.0 as u64,
+                label,
+                photo.caption.clone(),
+                message.is_outgoing,
+                Some(extra),
+            )
+        }
+        MessageContent::Document(doc) => {
+            let extra = document_chip(message.id.0 as u64, doc, files, downloading, cx);
+            session_bubble(
+                message.id.0 as u64,
+                label,
+                doc.caption.clone(),
+                message.is_outgoing,
+                Some(extra),
+            )
+        }
+    }
+}
+
+fn photo_display_path<'a>(
+    photo: &quill::telegram::envelope::PhotoContent,
+    files: &'a HashMap<i32, ParsedFile>,
+) -> Option<&'a str> {
+    let mut ids = Vec::new();
+    if let Some(size) = photo.thumb_size() {
+        ids.push(size.file_id);
+    }
+    if let Some(size) = photo.largest_size() {
+        ids.push(size.file_id);
+    }
+    for id in ids {
+        if let Some(path) = files.get(&id.0).and_then(|f| f.usable_path()) {
+            return Some(path);
+        }
+    }
+    for size in &photo.sizes {
+        if let Some(path) = files.get(&size.file_id.0).and_then(|f| f.usable_path()) {
+            return Some(path);
+        }
+    }
+    None
+}
+
+fn file_is_downloading(
+    file_id: FileId,
+    files: &HashMap<i32, ParsedFile>,
+    downloading: &std::collections::HashSet<i32>,
+) -> bool {
+    downloading.contains(&file_id.0)
+        || files
+            .get(&file_id.0)
+            .is_some_and(|f| f.local.is_downloading_active)
+}
+
+fn photo_attachment(
+    row_id: u64,
+    photo: &quill::telegram::envelope::PhotoContent,
+    files: &HashMap<i32, ParsedFile>,
+    downloading: &std::collections::HashSet<i32>,
+    cx: &mut Context<QuillApp>,
+) -> AnyElement {
+    let open_id = photo.open_file_id().unwrap_or(FileId(0));
+    if !photo.is_secret
+        && !photo.has_spoiler
+        && let Some(path) = photo_display_path(photo, files)
+    {
+        return img(PathBuf::from(path))
+            .id(("photo-img", row_id))
+            .mt_2()
+            .w(px(240.))
+            .h(px(140.))
+            .rounded_md()
+            .object_fit(ObjectFit::Cover)
+            .with_fallback(|| {
+                div()
+                    .w(px(240.))
+                    .h(px(140.))
+                    .rounded_md()
+                    .bg(rgb(0x444c56))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child("Photo")
+                    .into_any_element()
+            })
+            .into_any_element();
+    }
+    let (w, h) = photo
+        .largest_size()
+        .or_else(|| photo.thumb_size())
+        .map(|s| (s.width, s.height))
+        .unwrap_or((0, 0));
+    let downloading_now = file_is_downloading(open_id, files, downloading);
+    let status = if photo.is_secret {
+        "Secret photo".to_string()
+    } else if photo.has_spoiler {
+        "Photo (spoiler) — not downloaded".into()
+    } else if downloading_now {
+        "Photo — downloading…".into()
+    } else if w > 0 && h > 0 {
+        format!("Photo {w}×{h} — not downloaded")
+    } else {
+        "Photo — not downloaded".into()
+    };
+    div()
+        .id(("photo-ph", row_id))
+        .mt_2()
+        .w(px(240.))
+        .h(px(88.))
+        .rounded_md()
+        .bg(rgb(0x444c56))
+        .flex()
+        .items_center()
+        .justify_center()
+        .cursor_pointer()
+        .on_click(cx.listener(move |this, _, _, cx| {
+            this.request_media_download(open_id, cx);
+        }))
+        .child(div().text_xs().text_color(rgb(0xffffff)).child(status))
+        .into_any_element()
+}
+
+fn document_chip(
+    row_id: u64,
+    doc: &quill::telegram::envelope::DocumentContent,
+    files: &HashMap<i32, ParsedFile>,
+    downloading: &std::collections::HashSet<i32>,
+    cx: &mut Context<QuillApp>,
+) -> AnyElement {
+    let file_id = doc.file_id;
+    let file = files.get(&file_id.0);
+    let ready = file.and_then(|f| f.usable_path()).is_some();
+    let downloading_now = file_is_downloading(file_id, files, downloading);
+    let size = file.map(|f| f.display_size()).unwrap_or(0);
+    let size_label = format_bytes(size);
+    let state = if ready {
+        "ready"
+    } else if downloading_now {
+        "downloading…"
+    } else {
+        "not downloaded"
+    };
+    let mut detail = doc.mime_type.clone();
+    if !size_label.is_empty() {
+        if !detail.is_empty() {
+            detail.push_str(" · ");
+        }
+        detail.push_str(&size_label);
+    }
+    if !detail.is_empty() {
+        detail.push_str(" · ");
+    }
+    detail.push_str(state);
+    let name = if doc.file_name.is_empty() {
+        "Document".to_string()
+    } else {
+        doc.file_name.clone()
+    };
+    div()
+        .id(("doc-chip", row_id))
+        .mt_2()
+        .px_3()
+        .py_2()
+        .rounded_md()
+        .border_1()
+        .border_color(rgb(0x8b949e))
+        .bg(rgb(0x21262d))
+        .cursor_pointer()
+        .on_click(cx.listener(move |this, _, _, cx| {
+            this.request_media_download(file_id, cx);
+        }))
+        .child(div().text_sm().font_medium().child(name))
+        .child(div().text_xs().text_color(rgb(0xc9d1d9)).child(detail))
+        .into_any_element()
+}
+
+fn format_bytes(n: i64) -> String {
+    if n <= 0 {
+        String::new()
+    } else if n < 1024 {
+        format!("{n} B")
+    } else if n < 1024 * 1024 {
+        format!("{} KB", n / 1024)
+    } else {
+        format!("{:.1} MB", n as f64 / (1024.0 * 1024.0))
+    }
 }
 
 fn auth_action_note(auth: &AuthView, connect_status: &ConnectUiStatus) -> impl IntoElement {
