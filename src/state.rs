@@ -345,8 +345,10 @@ pub struct Session {
     pub last_auth_error: Option<AuthRequestError>,
     /// TDLib `file.id` → latest `file` / `localFile` snapshot.
     pub files: HashMap<i32, ParsedFile>,
-    /// `downloadFile` in flight (until completed, undownloadable, or error).
+    /// `downloadFile` in flight (until completed, undownloadable, idle, or error).
     pub downloading: HashSet<i32>,
+    /// `@extra` → `file.id` until the download unsticks (survives `file@extra` consuming pending).
+    download_extras: HashMap<u64, i32>,
     diagnostics: Arc<dyn DiagnosticSink>,
 }
 
@@ -371,6 +373,7 @@ impl Session {
             last_auth_error: None,
             files: HashMap::new(),
             downloading: HashSet::new(),
+            download_extras: HashMap::new(),
             diagnostics,
         }
     }
@@ -387,7 +390,8 @@ impl Session {
             return;
         }
         self.last_seq = owned.seq;
-        let pending = owned.envelope.extra.and_then(|id| self.requests.take(id));
+        let extra = owned.envelope.extra;
+        let pending = extra.and_then(|id| self.requests.take(id));
         if let Some(pending) = pending.as_ref()
             && pending.account_generation != self.account_generation
         {
@@ -400,13 +404,14 @@ impl Session {
             });
             return;
         }
-        self.apply_payload(owned.envelope.payload, pending.as_ref(), owned.seq);
+        self.apply_payload(owned.envelope.payload, pending.as_ref(), extra, owned.seq);
     }
 
     fn apply_payload(
         &mut self,
         payload: EnvelopePayload,
         pending: Option<&PendingRequest>,
+        extra: Option<RequestId>,
         seq: u64,
     ) {
         match payload {
@@ -580,7 +585,7 @@ impl Session {
                 }
             }
             EnvelopePayload::UpdateFile(file) | EnvelopePayload::File(file) => {
-                self.upsert_file(file);
+                self.upsert_file(file, true);
             }
             EnvelopePayload::Ok => {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::LoadChats) {
@@ -605,10 +610,12 @@ impl Session {
                 {
                     self.abort_viewing(chat_id);
                 }
-                if pending.map(|p| p.purpose) == Some(RequestPurpose::DownloadFile)
-                    && let Some(file_id) = pending.and_then(|p| p.file_id)
-                {
-                    self.downloading.remove(&file_id);
+                let download_id = pending
+                    .filter(|p| p.purpose == RequestPurpose::DownloadFile)
+                    .and_then(|p| p.file_id)
+                    .or_else(|| extra.and_then(|id| self.download_extras.get(&id.0).copied()));
+                if let Some(file_id) = download_id {
+                    self.unstick_download(file_id);
                 }
                 if let Some(pending) = pending
                     && is_auth_submit(pending.purpose)
@@ -638,6 +645,7 @@ impl Session {
             self.account_generation.bump();
             self.files.clear();
             self.downloading.clear();
+            self.download_extras.clear();
         }
         if matches!(state, AuthorizationState::LoggingOut) {
             self.requests.invalidate_account();
@@ -697,15 +705,25 @@ impl Session {
 
     fn remember_files(&mut self, files: &[ParsedFile]) {
         for file in files {
-            self.upsert_file(file.clone());
+            // Nested message files can still be idle while a download is in flight.
+            self.upsert_file(file.clone(), false);
         }
     }
 
-    fn upsert_file(&mut self, file: ParsedFile) {
-        if file.local.is_downloading_completed || !file.local.can_be_downloaded {
-            self.downloading.remove(&file.id.0);
+    fn upsert_file(&mut self, file: ParsedFile, from_file_update: bool) {
+        let idle_incomplete = file.local.is_idle_incomplete();
+        if file.local.is_downloading_completed
+            || !file.local.can_be_downloaded
+            || (from_file_update && idle_incomplete)
+        {
+            self.unstick_download(file.id.0);
         }
         self.files.insert(file.id.0, file);
+    }
+
+    fn unstick_download(&mut self, file_id: i32) {
+        self.downloading.remove(&file_id);
+        self.download_extras.retain(|_, id| *id != file_id);
     }
 
     pub fn file(&self, id: FileId) -> Option<&ParsedFile> {
@@ -732,7 +750,7 @@ impl Session {
     }
 
     pub fn abort_download(&mut self, file_id: FileId) {
-        self.downloading.remove(&file_id.0);
+        self.unstick_download(file_id.0);
     }
 
     /// Photo thumbs in the open chat that are not secret/spoiler and still need a download.
@@ -763,8 +781,11 @@ impl Session {
     }
 
     pub fn request_download(&mut self, file_id: FileId) -> RequestId {
-        self.requests
-            .register_download(self.account_generation, file_id)
+        let extra = self
+            .requests
+            .register_download(self.account_generation, file_id);
+        self.download_extras.insert(extra.0, file_id.0);
+        extra
     }
 
     fn rebuild_main_order(&mut self) {
@@ -1553,5 +1574,87 @@ mod tests {
         assert!(session.should_download(FileId(4)));
         assert!(!session.downloading.contains(&4));
         assert!(!sink.rendered().contains("CANARY_FILE_ERR"));
+    }
+
+    fn file_reply_json(extra: u64, id: i32, active: bool) -> String {
+        format!(
+            r#"{{"@type":"file","@extra":"{extra}","id":{id},"size":24,"expected_size":24,"local":{{"@type":"localFile","path":"","can_be_downloaded":true,"can_be_deleted":false,"is_downloading_active":{active},"is_downloading_completed":false,"download_offset":0,"downloaded_prefix_size":0,"downloaded_size":0}},"remote":{{"@type":"remoteFile","id":"CANARY_REMOTE","unique_id":"u","is_uploading_active":false,"is_uploading_completed":true,"uploaded_size":24}}}}"#
+        )
+    }
+
+    #[test]
+    fn download_unsticks_after_file_extra_then_idle_update_or_error() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+
+        let extra = session.request_download(FileId(4));
+        session.begin_download(FileId(4));
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &file_reply_json(extra.0, 4, true),
+        );
+        assert!(session.requests.take(extra).is_none());
+        assert!(!session.should_download(FileId(4)));
+        assert!(session.downloading.contains(&4));
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"updateFile","file":{}}}"#,
+                media_file_json(4, "", false)
+            ),
+        );
+        assert!(session.should_download(FileId(4)));
+        assert!(!session.downloading.contains(&4));
+
+        let extra = session.request_download(FileId(5));
+        session.begin_download(FileId(5));
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &file_reply_json(extra.0, 5, true),
+        );
+        assert!(!session.should_download(FileId(5)));
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"error","code":400,"message":"CANARY_FILE_ERR2","@extra":"{}"}}"#,
+                extra.0
+            ),
+        );
+        assert!(session.should_download(FileId(5)));
+        assert!(!session.downloading.contains(&5));
+        assert!(!sink.rendered().contains("CANARY_FILE_ERR2"));
+    }
+
+    #[test]
+    fn nested_idle_message_file_does_not_unstick_in_flight_download() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        let extra = session.request_download(FileId(6));
+        session.begin_download(FileId(6));
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &file_reply_json(extra.0, 6, true),
+        );
+        let file = media_file_json(6, "", false);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"updateNewMessage","message":{{"id":13,"chat_id":1,"is_outgoing":false,"content":{{"@type":"messagePhoto","photo":{{"@type":"photo","has_stickers":false,"sizes":[{{"@type":"photoSize","type":"m","photo":{file},"width":100,"height":80,"progressive_sizes":[]}}]}},"caption":{{"@type":"formattedText","text":"","entities":[]}},"has_spoiler":false,"is_secret":false}}}}}}"#
+            ),
+        );
+        assert!(session.downloading.contains(&6));
+        assert!(!session.should_download(FileId(6)));
     }
 }

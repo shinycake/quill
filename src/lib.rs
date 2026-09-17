@@ -10,6 +10,7 @@ pub mod diagnostics;
 pub mod ids;
 pub mod layout;
 pub mod lifecycle;
+pub mod local_path;
 pub mod pins;
 pub mod platform;
 pub mod settings;

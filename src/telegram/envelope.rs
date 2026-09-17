@@ -272,6 +272,30 @@ impl PhotoContent {
             .or_else(|| self.thumb_size())
             .map(|size| size.file_id)
     }
+
+    /// Secret photos must not download on placeholder click (schema: show only while tapped).
+    pub fn click_requests_download(&self) -> bool {
+        !self.is_secret
+    }
+
+    /// Placeholder copy follows file state for secret and spoiler photos.
+    pub fn placeholder_label(&self, downloading: bool, ready: bool) -> String {
+        let kind = if self.is_secret {
+            "Secret photo"
+        } else if self.has_spoiler {
+            "Photo (spoiler)"
+        } else {
+            "Photo"
+        };
+        let state = if ready {
+            "ready"
+        } else if downloading {
+            "downloading…"
+        } else {
+            "not downloaded"
+        };
+        format!("{kind} — {state}")
+    }
 }
 
 /// `photoSize` fields used for display / download (schema: type, photo, width, height).
@@ -329,6 +353,13 @@ pub struct LocalFileState {
     pub can_be_downloaded: bool,
     pub is_downloading_active: bool,
     pub is_downloading_completed: bool,
+}
+
+impl LocalFileState {
+    /// Download is neither in flight nor finished (`file` / `updateFile` idle).
+    pub fn is_idle_incomplete(&self) -> bool {
+        !self.is_downloading_active && !self.is_downloading_completed
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -1104,6 +1135,46 @@ mod tests {
                 };
                 assert!(photo.is_secret);
                 assert!(photo.has_spoiler);
+                assert!(!photo.click_requests_download());
+                assert_eq!(
+                    photo.placeholder_label(false, false),
+                    "Secret photo — not downloaded"
+                );
+                assert_eq!(
+                    photo.placeholder_label(true, false),
+                    "Secret photo — downloading…"
+                );
+                assert_eq!(photo.placeholder_label(false, true), "Secret photo — ready");
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn spoiler_placeholder_follows_file_state_and_may_download() {
+        let file = local_file_json(1, "", false, true);
+        let json = format!(
+            r#"{{"@type":"updateNewMessage","message":{{"id":1,"chat_id":1,"is_outgoing":false,"content":{{"@type":"messagePhoto","photo":{{"@type":"photo","has_stickers":false,"sizes":[{{"@type":"photoSize","type":"m","photo":{file},"width":100,"height":80,"progressive_sizes":[]}}]}},"caption":{{"@type":"formattedText","text":"","entities":[]}},"has_spoiler":true,"is_secret":false}}}}}}"#
+        );
+        let env = parse_envelope(&json).unwrap();
+        match env.payload {
+            EnvelopePayload::UpdateNewMessage(message) => {
+                let MessageContent::Photo(photo) = message.content else {
+                    panic!("{:?}", message.content);
+                };
+                assert!(photo.click_requests_download());
+                assert_eq!(
+                    photo.placeholder_label(false, false),
+                    "Photo (spoiler) — not downloaded"
+                );
+                assert_eq!(
+                    photo.placeholder_label(true, false),
+                    "Photo (spoiler) — downloading…"
+                );
+                assert_eq!(
+                    photo.placeholder_label(false, true),
+                    "Photo (spoiler) — ready"
+                );
             }
             other => panic!("{other:?}"),
         }

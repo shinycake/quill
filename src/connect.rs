@@ -265,6 +265,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.parameters_sent
     }
 
+    pub fn tdlib_files(&self) -> &Path {
+        &self.paths.tdlib_files
+    }
+
     /// Kick the JSON client so authorization updates start flowing.
     pub fn kickoff(&mut self) -> Result<RequestId, ConnectSendError> {
         let extra = self

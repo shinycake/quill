@@ -14,6 +14,7 @@ use quill::connect::{
 use quill::credentials::TelegramCredentials;
 use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::{AccountKey, ChatId, FileId};
+use quill::local_path::sandboxed_display_path;
 use quill::platform::live_secret_store;
 use quill::state::{
     ChatSummary, HistoryMessage, OutboxReceipt, Session, outgoing_status_label, unread_badge_text,
@@ -391,6 +392,16 @@ impl QuillApp {
             .as_ref()
             .map(|live| &live.driver.session)
             .or(self.demo_session.as_ref())
+    }
+
+    fn media_display_roots(&self) -> Vec<PathBuf> {
+        if let Some(live) = self.live.as_ref() {
+            vec![live.driver.tdlib_files().to_path_buf()]
+        } else if self.demo_session.is_some() {
+            vec![demo_media_allowlist()]
+        } else {
+            Vec::new()
+        }
     }
 
     fn pane_mode(&self) -> PaneMode {
@@ -878,6 +889,7 @@ impl QuillApp {
         let files: HashMap<i32, ParsedFile> = session.map(|s| s.files.clone()).unwrap_or_default();
         let downloading: std::collections::HashSet<i32> =
             session.map(|s| s.downloading.clone()).unwrap_or_default();
+        let media_roots = self.media_display_roots();
         let sender_name = title.clone();
         div()
             .id("conversation-history")
@@ -941,6 +953,7 @@ impl QuillApp {
                         &message,
                         &files,
                         &downloading,
+                        &media_roots,
                         label,
                         cx,
                     ));
@@ -1213,10 +1226,14 @@ fn seed_demo_session(sink: Arc<MemorySink>, kind: DemoSeed) -> Session {
 }
 
 fn demo_thumb_png_path() -> String {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("docs/screenshots/fixtures/demo-thumb.png")
+    demo_media_allowlist()
+        .join("demo-thumb.png")
         .to_string_lossy()
         .into_owned()
+}
+
+fn demo_media_allowlist() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("docs/screenshots/fixtures")
 }
 
 fn demo_file_json(id: i32, path: &str, completed: bool) -> String {
@@ -1389,6 +1406,7 @@ fn session_history_row(
     message: &HistoryMessage,
     files: &HashMap<i32, ParsedFile>,
     downloading: &std::collections::HashSet<i32>,
+    media_roots: &[PathBuf],
     label: String,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
@@ -1406,7 +1424,14 @@ fn session_history_row(
             message.is_outgoing,
         ),
         MessageContent::Photo(photo) => {
-            let extra = photo_attachment(message.id.0 as u64, photo, files, downloading, cx);
+            let extra = photo_attachment(
+                message.id.0 as u64,
+                photo,
+                files,
+                downloading,
+                media_roots,
+                cx,
+            );
             session_bubble(
                 message.id.0 as u64,
                 label,
@@ -1428,10 +1453,11 @@ fn session_history_row(
     }
 }
 
-fn photo_display_path<'a>(
+fn photo_display_path(
     photo: &quill::telegram::envelope::PhotoContent,
-    files: &'a HashMap<i32, ParsedFile>,
-) -> Option<&'a str> {
+    files: &HashMap<i32, ParsedFile>,
+    roots: &[PathBuf],
+) -> Option<PathBuf> {
     let mut ids = Vec::new();
     if let Some(size) = photo.thumb_size() {
         ids.push(size.file_id);
@@ -1440,13 +1466,17 @@ fn photo_display_path<'a>(
         ids.push(size.file_id);
     }
     for id in ids {
-        if let Some(path) = files.get(&id.0).and_then(|f| f.usable_path()) {
-            return Some(path);
+        if let Some(path) = files.get(&id.0).and_then(|f| f.usable_path())
+            && let Some(safe) = sandboxed_display_path(path, roots)
+        {
+            return Some(safe);
         }
     }
     for size in &photo.sizes {
-        if let Some(path) = files.get(&size.file_id.0).and_then(|f| f.usable_path()) {
-            return Some(path);
+        if let Some(path) = files.get(&size.file_id.0).and_then(|f| f.usable_path())
+            && let Some(safe) = sandboxed_display_path(path, roots)
+        {
+            return Some(safe);
         }
     }
     None
@@ -1468,14 +1498,15 @@ fn photo_attachment(
     photo: &quill::telegram::envelope::PhotoContent,
     files: &HashMap<i32, ParsedFile>,
     downloading: &std::collections::HashSet<i32>,
+    media_roots: &[PathBuf],
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
     let open_id = photo.open_file_id().unwrap_or(FileId(0));
     if !photo.is_secret
         && !photo.has_spoiler
-        && let Some(path) = photo_display_path(photo, files)
+        && let Some(path) = photo_display_path(photo, files, media_roots)
     {
-        return img(PathBuf::from(path))
+        return img(path)
             .id(("photo-img", row_id))
             .mt_2()
             .w(px(240.))
@@ -1502,10 +1533,12 @@ fn photo_attachment(
         .map(|s| (s.width, s.height))
         .unwrap_or((0, 0));
     let downloading_now = file_is_downloading(open_id, files, downloading);
-    let status = if photo.is_secret {
-        "Secret photo".to_string()
-    } else if photo.has_spoiler {
-        "Photo (spoiler) — not downloaded".into()
+    let ready = files
+        .get(&open_id.0)
+        .and_then(|f| f.usable_path())
+        .is_some();
+    let status = if photo.is_secret || photo.has_spoiler {
+        photo.placeholder_label(downloading_now, ready)
     } else if downloading_now {
         "Photo — downloading…".into()
     } else if w > 0 && h > 0 {
@@ -1523,10 +1556,12 @@ fn photo_attachment(
         .flex()
         .items_center()
         .justify_center()
-        .cursor_pointer()
-        .on_click(cx.listener(move |this, _, _, cx| {
-            this.request_media_download(open_id, cx);
-        }))
+        .when(photo.click_requests_download(), |this| {
+            this.cursor_pointer()
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.request_media_download(open_id, cx);
+                }))
+        })
         .child(div().text_xs().text_color(rgb(0xffffff)).child(status))
         .into_any_element()
 }
