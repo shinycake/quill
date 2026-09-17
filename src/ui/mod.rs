@@ -1275,7 +1275,7 @@ fn session_chat_row(
                 .justify_between()
                 .gap_2()
                 .child(div().font_medium().min_w_0().child(title))
-                .when_some(badge, |this, label| this.child(unread_badge(label, id, cx))),
+                .when_some(badge, |this, label| this.child(unread_badge(label, id))),
         )
         .child(
             div()
@@ -1285,17 +1285,17 @@ fn session_chat_row(
         )
 }
 
-fn unread_badge(label: String, chat_id: ChatId, cx: &mut Context<QuillApp>) -> impl IntoElement {
+fn unread_badge(label: String, chat_id: ChatId) -> impl IntoElement {
     div()
         .id(("unread-badge", chat_id.0 as u64))
-        .h(px(18.))
-        .min_w(px(18.))
+        .h(px(20.))
+        .min_w(px(20.))
         .px_1()
         .rounded_md()
         .flex()
         .items_center()
         .justify_center()
-        .bg(cx.theme().accent)
+        .bg(rgb(0x1f6feb))
         .text_color(rgb(0xffffff))
         .text_xs()
         .font_semibold()
