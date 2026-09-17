@@ -1,6 +1,6 @@
-# Credentials required for live Telegram (not in this tree)
+# Credentials for Telegram (not in this tree)
 
-Live login unlocks **only when** `TELEGRAM_API_ID` and `TELEGRAM_API_HASH` are present in the process environment or a gitignored local env file. Do not paste secrets into source, fixtures, CI, or chat. Never commit credentials.
+`TELEGRAM_API_ID` and `TELEGRAM_API_HASH` may be present in the process environment or a gitignored local env file. That only means **credentials loaded** — it does **not** start TDLib, `setTdlibParameters`, or phone auth until that connect path is wired. Do not paste secrets into source, fixtures, CI, or chat. Never commit credentials.
 
 ## Exact names
 

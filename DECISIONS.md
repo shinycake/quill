@@ -8,7 +8,7 @@ Research snapshot 2026-09-16, pin recheck **2026-09-17**.
 - **Repo visibility: Public.**
 - **Primary runners: Idan's personal Mac + Linux** (supported build/run targets, not deferred). GHA remains best-effort when billing allows; Linux CI runs unit/replay tests; `macos-latest` can compile the GPUI binary and assemble a dummy `.app` when jobs start.
 - **No App Store / notarization / distribution pipeline.** Ad-hoc Apple Developer signing only if needed for Idan's personal Mac.
-- **Live login:** enabled only when `TELEGRAM_API_ID` / `TELEGRAM_API_HASH` (or gitignored local `.env` / `quill.local.env`) are present; still no secrets in git. See `docs/credentials.md`.
+- **Credentials:** `TELEGRAM_API_ID` / `TELEGRAM_API_HASH` (or gitignored local `.env` / `quill.local.env`) may load into the app; UI reports **credentials loaded** only. Live TDLib connect / phone auth is **not** wired yet. Still no secrets in git. See `docs/credentials.md`.
 - One account, cloud chats only. Channels/bots gated until sponsored-content handling exists. No secret chats, calls, telemetry, or AI.
 - Storage: TDLib DB + small prefs. No second message database.
 
@@ -39,7 +39,7 @@ Research snapshot 2026-09-16, pin recheck **2026-09-17**.
 - Database key: 32 random bytes in Keychain on macOS (`org.shinycake.quill` / `db-key:{account}`); `MemorySecretStore` + tests elsewhere. `KeychainSecretStore::get` maps `errSecItemNotFound` to missing (`Ok(None)`) and user-cancel / auth-failed / interaction-not-allowed / keychain-unavailable to `Locked`. Missing key + existing DB → halt, never mint a replacement.
 - Auth view is a pure function of `updateAuthorizationState`. Premium / email / registration / unknown → unsupported halt UI. No payments, auto-register, or password reset.
 - Chat list / history / send reducers with replay fixtures. Logout invalidates pending requests. Close ≠ logOut.
-- Live login gate: unlocked only when owner `TELEGRAM_API_ID` / `TELEGRAM_API_HASH` (or local gitignored env files) load successfully (see `docs/credentials.md`). Never pasted into this repo.
+- Credentials may load from owner `TELEGRAM_API_ID` / `TELEGRAM_API_HASH` (or local gitignored env files); that is not live login until TDLib connect is implemented (see `docs/credentials.md`). Never pasted into this repo.
 
 ## Licenses
 
@@ -57,7 +57,7 @@ Research snapshot 2026-09-16, pin recheck **2026-09-17**.
 
 ## Blockers / follow-up
 
-1. Live Telegram credentials (owner) — see `docs/credentials.md`. Soft-unlocked in UI when `TELEGRAM_*` (or local `.env`) load; still no secrets in git and no live TDLib login until the owner supplies them out of tree.
+1. Wire live TDLib connect (`LiveTdJson` / `setTdlibParameters` / phone auth) after credentials load — see `docs/credentials.md`. UI currently only reports credentials loaded. No secrets in git.
 2. VoiceOver + real IME on a Mac (this environment cannot prove them). Primary Mac runner is Idan's personal machine.
 3. Native tdjson build + rpath verification on Apple Silicon (`docs/native-bundle.md`).
 4. **No App Store / notarization / distribution pipeline.** Ad-hoc Apple Developer signing only if needed for Idan's personal Mac. Public repo; brand polish is still a follow-up.

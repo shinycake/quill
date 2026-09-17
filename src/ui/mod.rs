@@ -254,17 +254,17 @@ fn chat_row(
 }
 
 fn auth_action_note(auth: &AuthView, credentials_present: bool) -> impl IntoElement {
-    let live = if credentials_present {
-        "live login ready"
+    let cred = if credentials_present {
+        "credentials loaded"
     } else {
         "set TELEGRAM_API_ID/HASH"
     };
     let label = match &auth.action {
         AuthAction::UnsupportedHalt { reason } => format!("Blocked: {reason}"),
         AuthAction::Ready => "Ready (synthetic)".into(),
-        AuthAction::EnterPhone => format!("Phone entry ({live})"),
-        AuthAction::EnterCode => format!("Code entry ({live})"),
-        AuthAction::EnterPassword => format!("Password entry ({live})"),
+        AuthAction::EnterPhone => format!("Phone entry ({cred}) · TDLib connect not wired yet"),
+        AuthAction::EnterCode => format!("Code entry ({cred}) · TDLib connect not wired yet"),
+        AuthAction::EnterPassword => format!("Password entry ({cred}) · TDLib connect not wired yet"),
         other => format!("{other:?}"),
     };
     div().text_xs().child(label)
@@ -272,7 +272,7 @@ fn auth_action_note(auth: &AuthView, credentials_present: bool) -> impl IntoElem
 
 fn credentials_status_label(credentials_present: bool) -> &'static str {
     if credentials_present {
-        "credentials present · live login ready"
+        "credentials loaded · TDLib connect not wired yet"
     } else {
         "set TELEGRAM_API_ID / TELEGRAM_API_HASH (or local .env)"
     }
