@@ -1,0 +1,46 @@
+[package]
+name = "quill"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.92"
+license = "MIT"
+description = "Independent GPUI + TDLib Telegram desktop client (working name Quill)"
+repository = "https://github.com/shinycake/quill"
+publish = false
+
+[features]
+default = ["ui"]
+ui = ["dep:gpui-kit"]
+
+[dependencies]
+base64 = "0.22"
+directories = "6"
+libloading = "0.8"
+rand = "0.8"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+thiserror = "2"
+zeroize = { version = "1", features = ["zeroize_derive"] }
+
+[dependencies.gpui-kit]
+version = "=0.6.1"
+optional = true
+default-features = false
+features = ["component", "assets"]
+
+[target.'cfg(target_os = "macos")'.dependencies]
+security-framework = "3"
+
+[dev-dependencies]
+pretty_assertions = "1"
+
+[[bin]]
+name = "quill"
+path = "src/main.rs"
+required-features = ["ui"]
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "debuginfo"
