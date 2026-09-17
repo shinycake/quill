@@ -3,8 +3,8 @@ use crate::diagnostics::{Diagnostic, DiagnosticSink};
 use crate::ids::{AccountGeneration, AccountKey, ChatId, MessageId, RequestId, ViewGeneration};
 use crate::telegram::client::OwnedEnvelope;
 use crate::telegram::envelope::{
-    AuthorizationState, ChatKind, ChatList, ConnectionState, EnvelopePayload, ErrorClass,
-    MessageContent, ParsedMessage,
+    AuthorizationState, ChatKind, ChatList, ChatPositionUpdate, ConnectionState, EnvelopePayload,
+    ErrorClass, MessageContent, ParsedMessage,
 };
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
@@ -117,6 +117,16 @@ impl RequestRegistry {
     pub fn is_empty(&self) -> bool {
         self.pending.is_empty()
     }
+
+    pub fn has_purpose(&self, purpose: RequestPurpose) -> bool {
+        self.pending.values().any(|p| p.purpose == purpose)
+    }
+
+    pub fn has_purpose_for_chat(&self, purpose: RequestPurpose, chat_id: ChatId) -> bool {
+        self.pending
+            .values()
+            .any(|p| p.purpose == purpose && p.chat_id == Some(chat_id))
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -128,11 +138,46 @@ pub struct ChatSummary {
     pub order: i64,
     pub is_pinned: bool,
     pub in_main_list: bool,
+    /// Sidebar preview from `updateChatLastMessage`. Not logged.
+    pub last_preview: String,
 }
 
 impl ChatSummary {
     pub fn supported(&self) -> bool {
         self.kind.is_supported_cloud_chat()
+    }
+
+    pub fn sidebar_preview(&self) -> String {
+        if let Some(reason) = self.kind.gate_reason() {
+            return reason.to_string();
+        }
+        if !self.last_preview.is_empty() {
+            return self.last_preview.clone();
+        }
+        if self.unread_count > 0 {
+            return format!("{} unread", self.unread_count);
+        }
+        "cloud chat".into()
+    }
+}
+
+fn placeholder_chat(chat_id: ChatId) -> ChatSummary {
+    ChatSummary {
+        id: chat_id,
+        title: format!("chat {}", chat_id.0),
+        kind: ChatKind::Unknown,
+        unread_count: 0,
+        order: 0,
+        is_pinned: false,
+        in_main_list: false,
+        last_preview: String::new(),
+    }
+}
+
+fn preview_from_content(content: &MessageContent) -> String {
+    match content {
+        MessageContent::Text(text) => text.chars().take(80).collect(),
+        MessageContent::Unsupported { type_name } => format!("({type_name})"),
     }
 }
 
@@ -156,6 +201,10 @@ pub struct HistoryState {
 impl HistoryState {
     pub fn ordered(&self) -> Vec<&HistoryMessage> {
         self.messages.values().collect()
+    }
+
+    pub fn oldest_id(&self) -> Option<MessageId> {
+        self.messages.keys().next().copied().map(MessageId)
     }
 
     fn upsert(&mut self, message: HistoryMessage) {
@@ -272,43 +321,70 @@ impl Session {
                 kind,
                 unread_count,
             } => {
-                self.chats.insert(
-                    chat_id.0,
-                    ChatSummary {
-                        id: chat_id,
-                        title,
-                        kind,
-                        unread_count,
-                        order: 0,
-                        is_pinned: false,
-                        in_main_list: false,
-                    },
-                );
+                let chat = self
+                    .chats
+                    .entry(chat_id.0)
+                    .or_insert_with(|| placeholder_chat(chat_id));
+                chat.title = title;
+                chat.kind = kind;
+                chat.unread_count = unread_count;
+            }
+            EnvelopePayload::UpdateChatTitle { chat_id, title } => {
+                self.chats
+                    .entry(chat_id.0)
+                    .or_insert_with(|| placeholder_chat(chat_id))
+                    .title = title;
+            }
+            EnvelopePayload::UpdateChatReadInbox {
+                chat_id,
+                unread_count,
+            } => {
+                self.chats
+                    .entry(chat_id.0)
+                    .or_insert_with(|| placeholder_chat(chat_id))
+                    .unread_count = unread_count;
+            }
+            EnvelopePayload::UpdateChatAddedToList { chat_id, list } => {
+                if list == ChatList::Main {
+                    self.chats
+                        .entry(chat_id.0)
+                        .or_insert_with(|| placeholder_chat(chat_id))
+                        .in_main_list = true;
+                    self.rebuild_main_order();
+                }
+            }
+            EnvelopePayload::UpdateChatRemovedFromList { chat_id, list } => {
+                if list == ChatList::Main
+                    && let Some(chat) = self.chats.get_mut(&chat_id.0)
+                {
+                    chat.in_main_list = false;
+                    self.rebuild_main_order();
+                }
+            }
+            EnvelopePayload::UpdateChatLastMessage {
+                chat_id,
+                last_message,
+                positions,
+            } => {
+                let chat = self
+                    .chats
+                    .entry(chat_id.0)
+                    .or_insert_with(|| placeholder_chat(chat_id));
+                chat.last_preview = last_message
+                    .as_ref()
+                    .map(|message| preview_from_content(&message.content))
+                    .unwrap_or_default();
+                let saw_main = positions.iter().any(|pos| pos.list == ChatList::Main);
+                for pos in positions {
+                    self.apply_position_fields(pos);
+                }
+                if !saw_main && let Some(chat) = self.chats.get_mut(&chat_id.0) {
+                    chat.in_main_list = false;
+                }
+                self.rebuild_main_order();
             }
             EnvelopePayload::UpdateChatPosition(pos) => {
-                if pos.list != ChatList::Main {
-                    if let Some(chat) = self.chats.get_mut(&pos.chat_id.0) {
-                        chat.in_main_list = false;
-                    }
-                    self.rebuild_main_order();
-                    return;
-                }
-                let chat = self.chats.entry(pos.chat_id.0).or_insert(ChatSummary {
-                    id: pos.chat_id,
-                    title: format!("chat {}", pos.chat_id.0),
-                    kind: ChatKind::Unknown,
-                    unread_count: 0,
-                    order: 0,
-                    is_pinned: false,
-                    in_main_list: false,
-                });
-                if pos.order == 0 {
-                    chat.in_main_list = false;
-                } else {
-                    chat.order = pos.order;
-                    chat.is_pinned = pos.is_pinned;
-                    chat.in_main_list = true;
-                }
+                self.apply_position_fields(pos);
                 self.rebuild_main_order();
             }
             EnvelopePayload::UpdateNewMessage(message) => {
@@ -440,6 +516,26 @@ impl Session {
         self.auth = state;
         self.auth_view = view_for(&self.auth);
         self.last_auth_error = None;
+    }
+
+    fn apply_position_fields(&mut self, pos: ChatPositionUpdate) {
+        if pos.list != ChatList::Main {
+            if let Some(chat) = self.chats.get_mut(&pos.chat_id.0) {
+                chat.in_main_list = false;
+            }
+            return;
+        }
+        let chat = self
+            .chats
+            .entry(pos.chat_id.0)
+            .or_insert_with(|| placeholder_chat(pos.chat_id));
+        if pos.order == 0 {
+            chat.in_main_list = false;
+        } else {
+            chat.order = pos.order;
+            chat.is_pinned = pos.is_pinned;
+            chat.in_main_list = true;
+        }
     }
 
     fn upsert_message(&mut self, message: ParsedMessage, pending: bool) {
@@ -720,6 +816,102 @@ mod tests {
         assert!(!logs.contains("PHONE_CODE_INVALID"));
         let debug = format!("{err:?}");
         assert!(!debug.contains("CANARY_CODE"));
+    }
+
+    #[test]
+    fn new_chat_after_position_keeps_main_list_membership() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateChatPosition","chat_id":9,"position":{"@type":"chatPosition","list":{"@type":"chatListMain"},"order":"4","is_pinned":true}}"#,
+        );
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateNewChat","chat":{"id":9,"title":"after","type":{"@type":"chatTypePrivate","user_id":9},"unread_count":2}}"#,
+        );
+        let chat = session.chats.get(&9).unwrap();
+        assert_eq!(chat.title, "after");
+        assert!(chat.in_main_list);
+        assert!(chat.is_pinned);
+        assert_eq!(chat.order, 4);
+        assert_eq!(session.ordered_chats().len(), 1);
+    }
+
+    #[test]
+    fn last_message_positions_replace_main_list_membership() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateNewChat","chat":{"id":3,"title":"c","type":{"@type":"chatTypePrivate","user_id":3},"unread_count":0}}"#,
+        );
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateChatLastMessage","chat_id":3,"last_message":{"id":1,"chat_id":3,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"CANARY_PREVIEW_hi","entities":[]}}},"positions":[{"@type":"chatPosition","list":{"@type":"chatListMain"},"order":"8","is_pinned":false}]}"#,
+        );
+        let chat = session.chats.get(&3).unwrap();
+        assert!(chat.in_main_list);
+        assert_eq!(chat.last_preview, "CANARY_PREVIEW_hi");
+        assert_eq!(session.ordered_chats()[0].id.0, 3);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateChatLastMessage","chat_id":3,"last_message":null,"positions":[]}"#,
+        );
+        assert!(!session.chats.get(&3).unwrap().in_main_list);
+        assert!(session.ordered_chats().is_empty());
+        assert!(!sink.rendered().contains("CANARY_PREVIEW"));
+    }
+
+    #[test]
+    fn chat_title_and_unread_updates() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateNewChat","chat":{"id":4,"title":"old","type":{"@type":"chatTypePrivate","user_id":4},"unread_count":0}}"#,
+        );
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateChatTitle","chat_id":4,"title":"new title"}"#,
+        );
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateChatReadInbox","chat_id":4,"last_read_inbox_message_id":1,"unread_count":7}"#,
+        );
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateChatAddedToList","chat_id":4,"chat_list":{"@type":"chatListMain"}}"#,
+        );
+        let chat = session.chats.get(&4).unwrap();
+        assert_eq!(chat.title, "new title");
+        assert_eq!(chat.unread_count, 7);
+        assert!(chat.in_main_list);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateChatRemovedFromList","chat_id":4,"chat_list":{"@type":"chatListMain"}}"#,
+        );
+        assert!(!session.chats.get(&4).unwrap().in_main_list);
     }
 
     #[test]

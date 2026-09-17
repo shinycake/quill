@@ -21,7 +21,7 @@ Research snapshot 2026-09-16, pin recheck **2026-09-17**.
 - Composer send policy is tested without GPU: IME composition and Shift/secondary Enter do not send.
 - Kit `InputEvent::PressEnter` (**gpui-base 0.6.1**) has `{ secondary, shift }` only — no composing flag. `InputBaseState::enter` always emits `PressEnter` and does **not** consult `ime_marked_range` (Escape does). Quill reads `EntityInputHandler::marked_text_range` at PressEnter time via `enter_event_from_kit`. Do not hardcode `composing: false`.
 - **VoiceOver** is a manual macOS follow-up. This agent has no GUI/VoiceOver runner on Linux. Do not claim the Phase 0 a11y gate until a Mac session records it.
-- **Screenshots:** real GPUI window on Linux xvfb + lavapipe, `docs/screenshots/synthetic-chat.png` (plus composer and unsupported-auth shots), plus connect surfaces `connect-need-tdjson.png` / `connect-wait-phone.png` via `quill --screenshot-demo` + `scripts/capture-connect-screenshots.sh`. The stray “X” in an early capture was the X11 cursor, not a jump button. VoiceOver remains a macOS follow-up.
+- **Screenshots:** real GPUI window on Linux xvfb + lavapipe, `docs/screenshots/synthetic-chat.png` (plus composer and unsupported-auth shots), connect surfaces via `quill --screenshot-demo`, and Phase 1 `ready-chats` / `ready-chats-composer` (injected Ready + `loadChats` updates, no live Telegram). The stray “X” in an early capture was the X11 cursor, not a jump button. VoiceOver remains a macOS follow-up.
 
 ## TDLib
 
@@ -38,7 +38,7 @@ Research snapshot 2026-09-16, pin recheck **2026-09-17**.
 - Account-scoped directories under the app data dir.
 - Database key: 32 random bytes in Keychain on macOS (`org.shinycake.quill` / `db-key:{account}`). **Linux live path:** `FileSecretStore` — `{app_data}/accounts/{account}/db-encryption.key`, mode `0600`, zeroize after read into `DatabaseKey`. `MemorySecretStore` is **tests only** (not `bootstrap_connect` on Linux). `KeychainSecretStore::get` maps `errSecItemNotFound` to missing (`Ok(None)`) and user-cancel / auth-failed / interaction-not-allowed / keychain-unavailable to `Locked`. Missing key + existing DB → halt, never mint a replacement.
 - Auth view is a pure function of `updateAuthorizationState`. Premium / email / registration / unknown → unsupported halt UI. No payments, auto-register, or password reset.
-- Chat list / history / send reducers with replay fixtures. Logout invalidates pending requests. Close ≠ logOut.
+- Chat list / history / send reducers with replay fixtures. After `Ready`, `ConnectDriver` pages `loadChats` until 404; UI reads `Session::ordered_chats()`. Composer submit freezes a `ComposerSnapshot` and sends `sendMessage`. Logout invalidates pending requests. Close ≠ logOut.
 - Credentials load from owner `TELEGRAM_API_ID` / `TELEGRAM_API_HASH` (or local gitignored env files). Connect path: `evaluate_gate` → `prepare_connect` (paths + DB key) → `LiveTdJson` + `setTdlibParameters` → session auth reducers. Phone submit sends `setAuthenticationPhoneNumber`; WaitCode / WaitPassword submit `checkAuthenticationCode` / `checkAuthenticationPassword`. Never pasted into this repo.
 
 
@@ -64,7 +64,7 @@ Research snapshot 2026-09-16, pin recheck **2026-09-17**.
 
 ## Blockers / follow-up
 
-1. Live TDLib connect is implemented (`src/connect.rs`): credentials + tdjson → `setTdlibParameters` → `WaitPhoneNumber`. Phone / code / 2FA UI submits the matching TDLib requests. Headless proof: `quill --connect-smoke` (requires `QUILL_TDJSON_PATH`; no secrets in the one-line result). Teardown sends `close` and waits for `authorizationStateClosed` before joining the receive thread and unloading tdjson (unloading earlier SIGSEGV'd after `SMOKE_OK`). Still machine-local: building/bundling tdjson (`docs/native-bundle.md`). No secrets in git.
+1. Live TDLib connect is implemented (`src/connect.rs`): credentials + tdjson → `setTdlibParameters` → auth UI. After Ready, `loadChats` + chat list / `sendMessage`. Headless proof: `quill --connect-smoke` (requires `QUILL_TDJSON_PATH`; no secrets in the one-line result). Teardown sends `close` and waits for `authorizationStateClosed` before joining the receive thread and unloading tdjson. Still machine-local: building/bundling tdjson (`docs/native-bundle.md`). No secrets in git.
 2. VoiceOver + real IME on a Mac (this environment cannot prove them). Primary Mac runner is Idan's personal machine.
 3. Native tdjson build + rpath verification on Apple Silicon (`docs/native-bundle.md`). This Linux agent has no tdjson; UI shows the MissingTdjson halt when credentials are loaded.
 4. **No App Store / notarization / distribution pipeline.** Ad-hoc Apple Developer signing only if needed for Idan's personal Mac. Public repo; brand polish is still a follow-up.

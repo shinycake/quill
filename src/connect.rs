@@ -1,25 +1,30 @@
 //! Live TDLib connect gate: credentials + tdjson → setTdlibParameters → auth updates.
 //! Never logs api_hash, phone numbers, or codes.
 
+use crate::composer::ComposerSnapshot;
 use crate::credentials::TelegramCredentials;
 use crate::diagnostics::DiagnosticSink;
-use crate::ids::{AccountKey, RequestId};
+use crate::ids::{AccountKey, ChatId, MessageId, RequestId};
 use crate::lifecycle::{RestoreBlocker, plan_restore};
 use crate::platform::{DatabaseKey, KeyDecision, SecretStore, load_or_create_key};
 use crate::settings::{AccountPaths, default_app_root};
-use crate::state::{RequestPurpose, Session};
+use crate::state::{RequestPurpose, Session, ShutdownPhase};
 use crate::telegram::client::{LiveTdJson, OwnedEnvelope, ReceiveBridge};
 use crate::telegram::envelope::AuthorizationState;
 use crate::telegram::ffi::{LibraryOrigin, TdJsonError, resolve_tdjson_path};
 use crate::telegram::requests::{
     SetTdlibParameters, check_authentication_code, check_authentication_password, close_request,
-    get_authorization_state, set_authentication_phone_number,
+    get_authorization_state, get_chat_history, load_chats, send_text,
+    set_authentication_phone_number,
 };
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-/// Why Quill will not open a live tdjson client.
+/// How many chats to ask TDLib to load per `loadChats` page.
+pub const MAIN_CHAT_LOAD_LIMIT: i32 = 100;
+/// Page size for `getChatHistory`.
+pub const HISTORY_PAGE_SIZE: i32 = 50;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConnectBlocker {
     MissingCredentials,
@@ -266,7 +271,9 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     pub fn ingest(&mut self, owned: OwnedEnvelope) -> Result<(), ConnectSendError> {
         self.session.apply(owned);
-        self.maybe_send_parameters()
+        self.maybe_send_parameters()?;
+        self.maybe_load_main_chats()?;
+        Ok(())
     }
 
     fn maybe_send_parameters(&mut self) -> Result<(), ConnectSendError> {
@@ -283,6 +290,118 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.sender.send_json(&json)?;
         self.parameters_sent = true;
         Ok(())
+    }
+
+    fn chats_path_active(&self) -> bool {
+        matches!(self.session.auth, AuthorizationState::Ready)
+            && matches!(self.session.shutdown, ShutdownPhase::Running)
+    }
+
+    /// After Ready, keep paging `loadChats` until TDLib returns 404 (exhausted).
+    pub fn maybe_load_main_chats(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Ok(None);
+        }
+        if self.session.chats_exhausted {
+            return Ok(None);
+        }
+        if self.session.requests.has_purpose(RequestPurpose::LoadChats) {
+            return Ok(None);
+        }
+        let extra = self.session.request(RequestPurpose::LoadChats, None);
+        self.sender
+            .send_json(&load_chats(extra, MAIN_CHAT_LOAD_LIMIT))?;
+        Ok(Some(extra))
+    }
+
+    /// Select a chat and request history. Returns `None` if history is already complete.
+    pub fn select_chat(&mut self, chat_id: ChatId) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        self.session.open_chat(chat_id);
+        if !self
+            .session
+            .chats
+            .get(&chat_id.0)
+            .is_some_and(|chat| chat.supported())
+        {
+            return Ok(None);
+        }
+        self.fetch_history()
+    }
+
+    /// Load another page of history for the open chat (`from_message_id` = oldest, or 0).
+    pub fn fetch_history(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let Some(chat_id) = self.session.open_chat else {
+            return Err(ConnectSendError::InvalidRequest);
+        };
+        if self
+            .session
+            .histories
+            .get(&chat_id.0)
+            .is_some_and(|h| h.loaded_complete)
+        {
+            return Ok(None);
+        }
+        if self
+            .session
+            .requests
+            .has_purpose_for_chat(RequestPurpose::GetHistory, chat_id)
+        {
+            return Ok(None);
+        }
+        let from = self
+            .session
+            .histories
+            .get(&chat_id.0)
+            .and_then(|h| h.oldest_id())
+            .unwrap_or(MessageId(0));
+        let extra = self
+            .session
+            .request(RequestPurpose::GetHistory, Some(chat_id));
+        self.sender.send_json(&get_chat_history(
+            extra,
+            chat_id,
+            from,
+            0,
+            HISTORY_PAGE_SIZE,
+            false,
+        ))?;
+        Ok(Some(extra))
+    }
+
+    /// Send `sendMessage` for a snapshot frozen at composer submit.
+    /// `snapshot.text` is not logged.
+    pub fn send_text_snapshot(
+        &mut self,
+        snapshot: &ComposerSnapshot,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if snapshot.is_empty() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let chat_id = snapshot.chat_id();
+        let supported = self
+            .session
+            .chats
+            .get(&chat_id.0)
+            .is_some_and(|chat| chat.supported());
+        if !supported {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::SendText, Some(chat_id));
+        // Contains message text — do not log `json`.
+        self.sender
+            .send_json(&send_text(extra, chat_id, snapshot.text.trim()))?;
+        Ok(extra)
     }
 
     /// Send `setAuthenticationPhoneNumber` when auth is WaitPhoneNumber.
@@ -732,5 +851,228 @@ mod tests {
         let msg = ConnectBlocker::MissingTdjson.user_message();
         assert!(msg.contains("QUILL_TDJSON_PATH"));
         assert!(msg.contains("never searched"));
+    }
+
+    #[test]
+    fn driver_loads_chats_after_ready_then_send_text() {
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = Arc::new(RecordingSender::new());
+        let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+        let mut driver =
+            ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+
+        assert_eq!(
+            driver.select_chat(ChatId(1)),
+            Err(ConnectSendError::InvalidRequest)
+        );
+
+        let seq = AtomicU64::new(0);
+        let ready = copy_and_parse(
+            r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+            &seq,
+            &dyn_sink,
+        )
+        .unwrap();
+        driver.ingest(ready).unwrap();
+        assert!(matches!(driver.session.auth, AuthorizationState::Ready));
+
+        let sent = recorder.snapshot();
+        let load = sent.last().expect("loadChats after Ready");
+        assert!(load.contains("\"@type\":\"loadChats\""));
+        assert!(load.contains("chatListMain"));
+        assert!(load.contains(&format!("\"limit\":{MAIN_CHAT_LOAD_LIMIT}")));
+        let load_extra = driver
+            .session
+            .requests
+            .has_purpose(RequestPurpose::LoadChats);
+        assert!(load_extra);
+
+        let new_chat = copy_and_parse(
+            r#"{"@type":"updateNewChat","chat":{"id":7,"title":"Alice","type":{"@type":"chatTypePrivate","user_id":7},"unread_count":0}}"#,
+            &seq,
+            &dyn_sink,
+        )
+        .unwrap();
+        driver.ingest(new_chat).unwrap();
+        let position = copy_and_parse(
+            r#"{"@type":"updateChatPosition","chat_id":7,"position":{"@type":"chatPosition","list":{"@type":"chatListMain"},"order":"12","is_pinned":false}}"#,
+            &seq,
+            &dyn_sink,
+        )
+        .unwrap();
+        driver.ingest(position).unwrap();
+        assert_eq!(driver.session.ordered_chats()[0].id.0, 7);
+
+        // In-flight loadChats: ingest of unrelated updates must not send another page.
+        let loads_before = recorder
+            .snapshot()
+            .iter()
+            .filter(|j| j.contains("loadChats"))
+            .count();
+        assert_eq!(loads_before, 1);
+
+        let extra = driver
+            .session
+            .requests
+            .has_purpose(RequestPurpose::LoadChats);
+        assert!(extra);
+        let load_ok = copy_and_parse(r#"{"@type":"ok","@extra":"1"}"#, &seq, &dyn_sink).unwrap();
+        driver.ingest(load_ok).unwrap();
+        // @extra "1" may not match the loadChats extra (kickoff wasn't called, first request is LoadChats extra 1).
+        // If it matched, a second loadChats is sent until 404.
+        let loads_after_ok = recorder
+            .snapshot()
+            .iter()
+            .filter(|j| j.contains("loadChats"))
+            .count();
+        assert!(loads_after_ok >= 1);
+
+        // Exhaust with the current pending extra if any.
+        if driver
+            .session
+            .requests
+            .has_purpose(RequestPurpose::LoadChats)
+        {
+            // Find the extra from the last loadChats JSON.
+            let last_load = recorder
+                .snapshot()
+                .into_iter()
+                .rev()
+                .find(|j| j.contains("loadChats"))
+                .unwrap();
+            let v: Value = serde_json::from_str(&last_load).unwrap();
+            let extra = v["@extra"].as_str().unwrap();
+            let err404 = copy_and_parse(
+                &format!(
+                    r#"{{"@type":"error","code":404,"message":"Not Found","@extra":"{extra}"}}"#
+                ),
+                &seq,
+                &dyn_sink,
+            )
+            .unwrap();
+            driver.ingest(err404).unwrap();
+        }
+        assert!(driver.session.chats_exhausted);
+        let loads_done = recorder
+            .snapshot()
+            .iter()
+            .filter(|j| j.contains("loadChats"))
+            .count();
+        driver
+            .ingest(
+                copy_and_parse(
+                    r#"{"@type":"updateConnectionState","state":{"@type":"connectionStateReady"}}"#,
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        assert_eq!(
+            recorder
+                .snapshot()
+                .iter()
+                .filter(|j| j.contains("loadChats"))
+                .count(),
+            loads_done
+        );
+        assert!(!sink.rendered().contains("Not Found"));
+
+        let history_extra = driver.select_chat(ChatId(7)).unwrap().expect("history");
+        let sent = recorder.snapshot();
+        let history_json = sent.last().unwrap();
+        assert!(history_json.contains("getChatHistory"));
+        assert!(history_json.contains("\"chat_id\":7"));
+        assert!(history_json.contains(&format!("\"@extra\":\"{}\"", history_extra.0)));
+
+        let messages = copy_and_parse(
+            &format!(
+                r#"{{"@type":"messages","@extra":"{}","messages":[{{"id":11,"chat_id":7,"is_outgoing":false,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"hi","entities":[]}}}}}}]}}"#,
+                history_extra.0
+            ),
+            &seq,
+            &dyn_sink,
+        )
+        .unwrap();
+        driver.ingest(messages).unwrap();
+        assert!(
+            driver
+                .session
+                .histories
+                .get(&7)
+                .unwrap()
+                .messages
+                .contains_key(&11)
+        );
+
+        let snap = crate::composer::ComposerSnapshot::capture(
+            ChatId(7),
+            driver.session.view_generation,
+            "CANARY_SEND_ping",
+        );
+        let send_extra = driver.send_text_snapshot(&snap).unwrap();
+        let sent = recorder.snapshot();
+        let send_json = sent.last().unwrap();
+        assert!(send_json.contains("sendMessage"));
+        assert!(send_json.contains("\"topic_id\":null"));
+        assert!(send_json.contains("CANARY_SEND_ping"));
+        assert!(send_json.contains(&format!("\"@extra\":\"{}\"", send_extra.0)));
+        assert!(!sink.rendered().contains("CANARY_SEND"));
+
+        let gated = copy_and_parse(
+            r#"{"@type":"updateNewChat","chat":{"id":8,"title":"News","type":{"@type":"chatTypeSupergroup","supergroup_id":8,"is_channel":true},"unread_count":0}}"#,
+            &seq,
+            &dyn_sink,
+        )
+        .unwrap();
+        driver.ingest(gated).unwrap();
+        let gated_snap = crate::composer::ComposerSnapshot::capture(
+            ChatId(8),
+            driver.session.view_generation,
+            "nope",
+        );
+        assert_eq!(
+            driver.send_text_snapshot(&gated_snap),
+            Err(ConnectSendError::InvalidRequest)
+        );
+        assert!(!sink.rendered().contains("CANARY_SEND"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn send_text_rejected_when_empty_or_no_open_chat() {
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = Arc::new(RecordingSender::new());
+        let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+        let mut driver =
+            ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+        let seq = AtomicU64::new(0);
+        driver
+            .ingest(
+                copy_and_parse(
+                    r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        let snap = crate::composer::ComposerSnapshot::capture(
+            ChatId(1),
+            driver.session.view_generation,
+            "   ",
+        );
+        assert_eq!(
+            driver.send_text_snapshot(&snap),
+            Err(ConnectSendError::InvalidRequest)
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

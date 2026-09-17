@@ -35,6 +35,27 @@ pub enum EnvelopePayload {
         from_cache: bool,
     },
     UpdateChatPosition(ChatPositionUpdate),
+    UpdateChatTitle {
+        chat_id: ChatId,
+        title: String,
+    },
+    UpdateChatLastMessage {
+        chat_id: ChatId,
+        last_message: Option<ParsedMessage>,
+        positions: Vec<ChatPositionUpdate>,
+    },
+    UpdateChatAddedToList {
+        chat_id: ChatId,
+        list: ChatList,
+    },
+    UpdateChatRemovedFromList {
+        chat_id: ChatId,
+        list: ChatList,
+    },
+    UpdateChatReadInbox {
+        chat_id: ChatId,
+        unread_count: i32,
+    },
     UpdateConnectionState(ConnectionState),
     UpdateNewChat {
         chat_id: ChatId,
@@ -266,6 +287,40 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
                 .unwrap_or(false),
         }),
         "updateChatPosition" => Ok(EnvelopePayload::UpdateChatPosition(parse_position(&value)?)),
+        "updateChatTitle" => Ok(EnvelopePayload::UpdateChatTitle {
+            chat_id: ChatId(int53(value.get("chat_id"))?),
+            title: value
+                .get("title")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string(),
+        }),
+        "updateChatLastMessage" => {
+            let chat_id = ChatId(int53(value.get("chat_id"))?);
+            Ok(EnvelopePayload::UpdateChatLastMessage {
+                chat_id,
+                last_message: match value.get("last_message") {
+                    None | Some(Value::Null) => None,
+                    Some(message) => parse_message(message).ok(),
+                },
+                positions: parse_position_list(chat_id, value.get("positions")),
+            })
+        }
+        "updateChatAddedToList" => Ok(EnvelopePayload::UpdateChatAddedToList {
+            chat_id: ChatId(int53(value.get("chat_id"))?),
+            list: parse_chat_list(value.get("chat_list")),
+        }),
+        "updateChatRemovedFromList" => Ok(EnvelopePayload::UpdateChatRemovedFromList {
+            chat_id: ChatId(int53(value.get("chat_id"))?),
+            list: parse_chat_list(value.get("chat_list")),
+        }),
+        "updateChatReadInbox" => Ok(EnvelopePayload::UpdateChatReadInbox {
+            chat_id: ChatId(int53(value.get("chat_id"))?),
+            unread_count: value
+                .get("unread_count")
+                .and_then(Value::as_i64)
+                .unwrap_or(0) as i32,
+        }),
         "updateConnectionState" => Ok(EnvelopePayload::UpdateConnectionState(parse_connection(
             value.get("state"),
         ))),
@@ -381,16 +436,30 @@ fn parse_chat_kind(value: Option<&Value>) -> ChatKind {
 }
 
 fn parse_position(value: &Value) -> Result<ChatPositionUpdate, ParseError> {
+    let chat_id = ChatId(int53(value.get("chat_id"))?);
     let position = value.get("position").unwrap_or(value);
-    Ok(ChatPositionUpdate {
-        chat_id: ChatId(int53(value.get("chat_id"))?),
+    Ok(parse_position_entry(chat_id, position))
+}
+
+fn parse_position_entry(chat_id: ChatId, position: &Value) -> ChatPositionUpdate {
+    ChatPositionUpdate {
+        chat_id,
         list: parse_chat_list(position.get("list")),
         order: int64(position.get("order")).unwrap_or(0),
         is_pinned: position
             .get("is_pinned")
             .and_then(Value::as_bool)
             .unwrap_or(false),
-    })
+    }
+}
+
+fn parse_position_list(chat_id: ChatId, value: Option<&Value>) -> Vec<ChatPositionUpdate> {
+    value
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .map(|position| parse_position_entry(chat_id, position))
+        .collect()
 }
 
 fn parse_chat_list(value: Option<&Value>) -> ChatList {
@@ -528,5 +597,29 @@ mod tests {
             .expect("sendMessage");
         assert!(send.contains("topic_id:MessageTopic"));
         assert!(!send.contains("message_thread_id"));
+    }
+
+    #[test]
+    fn last_message_positions_are_typed() {
+        let json = r#"{"@type":"updateChatLastMessage","chat_id":3,"last_message":{"id":1,"chat_id":3,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"preview","entities":[]}}},"positions":[{"@type":"chatPosition","list":{"@type":"chatListMain"},"order":"5","is_pinned":true}]}"#;
+        let env = parse_envelope(json).unwrap();
+        match env.payload {
+            EnvelopePayload::UpdateChatLastMessage {
+                chat_id,
+                last_message,
+                positions,
+            } => {
+                assert_eq!(chat_id.0, 3);
+                assert_eq!(
+                    last_message.unwrap().content,
+                    MessageContent::Text("preview".into())
+                );
+                assert_eq!(positions.len(), 1);
+                assert_eq!(positions[0].order, 5);
+                assert!(positions[0].is_pinned);
+                assert_eq!(positions[0].list, ChatList::Main);
+            }
+            other => panic!("{other:?}"),
+        }
     }
 }
