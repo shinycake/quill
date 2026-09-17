@@ -1,5 +1,7 @@
 //! Composer send policy. IME composition must never send.
 
+use crate::ids::{ChatId, ViewGeneration};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct EnterEvent {
     /// True while an IME composition is marked (CJK/Hangul/etc.).
@@ -42,6 +44,23 @@ pub struct ComposerSnapshot {
 }
 
 impl ComposerSnapshot {
+    /// Freeze destination + text at submit time (chat switches must not redirect).
+    pub fn capture(
+        chat_id: ChatId,
+        view_generation: ViewGeneration,
+        text: impl Into<String>,
+    ) -> Self {
+        Self {
+            chat_id: chat_id.0,
+            view_generation: view_generation.0,
+            text: text.into(),
+        }
+    }
+
+    pub fn chat_id(&self) -> ChatId {
+        ChatId(self.chat_id)
+    }
+
     pub fn is_empty(&self) -> bool {
         self.text.trim().is_empty()
     }
@@ -97,5 +116,14 @@ mod tests {
         let idle = enter_event_from_kit(false, false, None);
         assert!(!idle.composing);
         assert!(should_send_on_enter(idle));
+    }
+
+    #[test]
+    fn snapshot_freezes_destination() {
+        let snap = ComposerSnapshot::capture(ChatId(7), ViewGeneration(3), "  hi  ");
+        assert_eq!(snap.chat_id(), ChatId(7));
+        assert_eq!(snap.view_generation, 3);
+        assert!(!snap.is_empty());
+        assert!(ComposerSnapshot::capture(ChatId(1), ViewGeneration(1), "   ").is_empty());
     }
 }

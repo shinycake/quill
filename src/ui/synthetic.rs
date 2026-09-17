@@ -173,6 +173,15 @@ impl Render for SyntheticChat {
     }
 }
 
+pub(crate) fn session_text_bubble(
+    id: u64,
+    sender: impl Into<SharedString>,
+    body: impl Into<SharedString>,
+    outgoing: bool,
+) -> AnyElement {
+    message_bubble(row(id, sender, body, SyntheticKind::Text, outgoing))
+}
+
 fn message_bubble(row: SyntheticRow) -> AnyElement {
     let image_h = match row.kind {
         SyntheticKind::Image { loaded: false } => px(40.),

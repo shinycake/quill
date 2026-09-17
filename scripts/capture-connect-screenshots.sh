@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Capture NeedTdjson + WaitPhoneNumber GPUI surfaces under Xvfb + lavapipe.
+# Capture connect + Ready chat-list GPUI surfaces under Xvfb + lavapipe.
 # Usage: bash scripts/capture-connect-screenshots.sh [outdir]
 set -euo pipefail
 
@@ -65,4 +65,6 @@ capture_one need-tdjson "$OUT/connect-need-tdjson.png"
 capture_one wait-phone "$OUT/connect-wait-phone.png"
 capture_one wait-code "$OUT/connect-wait-code.png"
 capture_one wait-password "$OUT/connect-wait-password.png"
+capture_one ready-chats "$OUT/ready-chats.png"
+capture_one ready-chats-composer "$OUT/ready-chats-composer.png"
 echo "done"

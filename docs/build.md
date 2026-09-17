@@ -12,7 +12,7 @@ cargo test --no-default-features
 cargo run --features ui
 ```
 
-The window is a GPUI Kit `Root` wrapping a mixed-height synthetic chat and composer. With credentials **and** tdjson available it also opens a live TDLib client and drives auth to WaitPhoneNumber; otherwise it shows a credentials or tdjson halt. Phone, verification code, and 2FA password fields submit the matching TDLib requests (`setAuthenticationPhoneNumber` / `checkAuthenticationCode` / `checkAuthenticationPassword`).
+The window is a GPUI Kit `Root` wrapping a mixed-height synthetic chat and composer when credentials are absent. With credentials **and** tdjson it opens a live TDLib client. After `authorizationStateReady` it pages `loadChats` for `chatListMain` (updates: `updateNewChat`, `updateChatPosition`, `updateChatLastMessage`, … — **not** `getChats`). Selecting a chat sends `getChatHistory`; the composer sends `sendMessage` (`topic_id` null) for supported cloud chats. Phone, verification code, and 2FA password fields submit the matching TDLib requests. Before Ready the sidebar does not pretend an inbox exists.
 
 Headless (no GPUI) live-connect check:
 
@@ -56,4 +56,5 @@ Provide **your own** `api_id` / `api_hash` from https://my.telegram.org (never c
 - `setTdlibParameters` uses the pinned signature with `use_secret_chats=false`
 - First request after `td_create_client_id` is `getAuthorizationState` so updates start
 - Phone submit sends `setAuthenticationPhoneNumber`; WaitCode / WaitPassword UI send `checkAuthenticationCode` / `checkAuthenticationPassword`
+- After `authorizationStateReady`, Quill pages `loadChats` (`chatListMain`) until TDLib returns 404. Chat rows come from `updateNewChat` / `updateChatPosition` / `updateChatLastMessage` (schema: do **not** use `getChats` to maintain the list). Select → `getChatHistory`. Composer Enter → `sendMessage` with `topic_id` null. Message text is never written to diagnostics.
 - `quill --connect-smoke` is the headless gate (no window): credentials + `QUILL_TDJSON_PATH` → ingest until WaitPhoneNumber or a clear blocker (30s timeout). Before exit it sends `close` and waits for `authorizationStateClosed` so unloading tdjson does not SIGSEGV.

@@ -73,6 +73,8 @@ Other values typed into the app (never committed):
 - SMS / Telegram verification code (`checkAuthenticationCode` when auth is WaitCode)
 - 2FA password if enabled (`checkAuthenticationPassword` when auth is WaitPassword; Keychain / Linux file store is only for the TDLib **database** key)
 
+After `authorizationStateReady`, the live client pages `loadChats` for the main list and the composer sends `sendMessage`. Chat titles and message text are not written to diagnostics.
+
 Optional later (not required for personal Mac runs): Apple Developer ID, notarization credentials, a dedicated test chat with a second account. There is **no** App Store / notarization / distribution pipeline; ad-hoc Apple Developer signing only if needed on Idan's personal Mac.
 
 Quill still will not enable channels/bots until sponsored-content handling exists.
