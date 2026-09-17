@@ -207,6 +207,47 @@ fn replay_unread_then_mark_read_and_outbox_receipt() {
 }
 
 #[test]
+fn replay_view_messages_error_allows_retry() {
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn quill::diagnostics::DiagnosticSink> = sink.clone();
+    let mut session = Session::new(AccountKey::primary(), dyn_sink);
+    let seq = AtomicU64::new(0);
+    apply_all_seq(
+        &mut session,
+        &sink,
+        &seq,
+        &[
+            r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+            r#"{"@type":"updateNewChat","chat":{"id":7,"title":"Alice","type":{"@type":"chatTypePrivate","user_id":7},"unread_count":1}}"#,
+            r#"{"@type":"updateNewMessage","message":{"id":11,"chat_id":7,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"CANARY_VIEW_REPLAY","entities":[]}}}}"#,
+        ],
+    );
+    session.open_chat(quill::ids::ChatId(7));
+    let extra = session.request(RequestPurpose::ViewMessages, Some(quill::ids::ChatId(7)));
+    session.begin_viewing(quill::ids::ChatId(7), &[quill::ids::MessageId(11)]);
+    assert!(
+        session
+            .message_ids_to_view(quill::ids::ChatId(7))
+            .is_empty()
+    );
+    apply_all_seq(
+        &mut session,
+        &sink,
+        &seq,
+        &[&format!(
+            r#"{{"@type":"error","code":400,"message":"CANARY_VIEW_REPLAY_ERR","@extra":"{}"}}"#,
+            extra.0
+        )],
+    );
+    assert!(!session.requests.has_purpose(RequestPurpose::ViewMessages));
+    assert_eq!(
+        session.message_ids_to_view(quill::ids::ChatId(7)),
+        vec![quill::ids::MessageId(11)]
+    );
+    assert!(!sink.rendered().contains("CANARY_VIEW_REPLAY"));
+}
+
+#[test]
 fn logout_invalidates_pending_requests() {
     let sink = Arc::new(MemorySink::new());
     let dyn_sink: Arc<dyn quill::diagnostics::DiagnosticSink> = sink.clone();

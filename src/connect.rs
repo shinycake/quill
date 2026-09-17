@@ -277,12 +277,14 @@ impl<S: JsonSender> ConnectDriver<S> {
             && owned.envelope.extra.is_some_and(|id| {
                 self.session.requests.purpose(id) == Some(RequestPurpose::LoadChats)
             });
+        let view_purpose = owned
+            .envelope
+            .extra
+            .and_then(|id| self.session.requests.purpose(id));
         let view_after = match &owned.envelope.payload {
             EnvelopePayload::Messages(_) | EnvelopePayload::UpdateNewMessage(_) => true,
-            EnvelopePayload::Ok
-                if owned.envelope.extra.is_some_and(|id| {
-                    self.session.requests.purpose(id) == Some(RequestPurpose::ViewMessages)
-                }) =>
+            EnvelopePayload::Ok | EnvelopePayload::Error(_)
+                if view_purpose == Some(RequestPurpose::ViewMessages) =>
             {
                 true
             }
@@ -419,10 +421,19 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request(RequestPurpose::ViewMessages, Some(chat_id));
-        self.session.mark_viewed(chat_id, &ids);
-        self.sender
-            .send_json(&view_messages(extra, chat_id, &ids, true))?;
-        Ok(Some(extra))
+        match self
+            .sender
+            .send_json(&view_messages(extra, chat_id, &ids, true))
+        {
+            Ok(()) => {
+                self.session.begin_viewing(chat_id, &ids);
+                Ok(Some(extra))
+            }
+            Err(err) => {
+                self.session.requests.take(extra);
+                Err(err)
+            }
+        }
     }
 
     /// Load another page of history for the open chat (`from_message_id` = oldest, or 0).
@@ -1266,6 +1277,208 @@ mod tests {
             driver.send_text_snapshot(&snap),
             Err(ConnectSendError::InvalidRequest)
         );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    struct ViewCtlSender {
+        sent: Mutex<Vec<String>>,
+        fail_view: Mutex<bool>,
+    }
+
+    impl ViewCtlSender {
+        fn new() -> Arc<Self> {
+            Arc::new(Self {
+                sent: Mutex::new(Vec::new()),
+                fail_view: Mutex::new(false),
+            })
+        }
+
+        fn snapshot(&self) -> Vec<String> {
+            self.sent.lock().expect("view ctl sender").clone()
+        }
+
+        fn set_fail_view(&self, fail: bool) {
+            *self.fail_view.lock().expect("view ctl sender") = fail;
+        }
+
+        fn view_count(&self) -> usize {
+            self.snapshot()
+                .iter()
+                .filter(|j| j.contains("viewMessages"))
+                .count()
+        }
+    }
+
+    impl JsonSender for Arc<ViewCtlSender> {
+        fn send_json(&self, request: &str) -> Result<(), ConnectSendError> {
+            if request.contains("viewMessages") && *self.fail_view.lock().expect("view ctl sender")
+            {
+                return Err(ConnectSendError::Native);
+            }
+            self.sent
+                .lock()
+                .expect("view ctl sender")
+                .push(request.to_string());
+            Ok(())
+        }
+    }
+
+    fn ready_private_chat(
+        driver: &mut ConnectDriver<Arc<ViewCtlSender>>,
+        seq: &AtomicU64,
+        sink: &Arc<dyn DiagnosticSink>,
+    ) {
+        driver
+            .ingest(
+                copy_and_parse(
+                    r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+                    seq,
+                    sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        driver
+            .ingest(
+                copy_and_parse(
+                    r#"{"@type":"updateNewChat","chat":{"id":7,"title":"Alice","type":{"@type":"chatTypePrivate","user_id":7},"unread_count":1}}"#,
+                    seq,
+                    sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        driver
+            .ingest(
+                copy_and_parse(
+                    r#"{"@type":"updateNewMessage","message":{"id":11,"chat_id":7,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"hi","entities":[]}}}}"#,
+                    seq,
+                    sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn view_messages_send_failure_unsticks_gate_and_retries() {
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let sender = ViewCtlSender::new();
+        let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+        let mut driver = ConnectDriver::new(session, sender.clone(), test_credentials(), prepared);
+        let seq = AtomicU64::new(0);
+        ready_private_chat(&mut driver, &seq, &dyn_sink);
+
+        sender.set_fail_view(true);
+        assert_eq!(driver.select_chat(ChatId(7)), Err(ConnectSendError::Native));
+        assert!(
+            !driver
+                .session
+                .requests
+                .has_purpose(RequestPurpose::ViewMessages)
+        );
+        assert_eq!(
+            driver.session.message_ids_to_view(ChatId(7)),
+            vec![MessageId(11)]
+        );
+        assert_eq!(sender.view_count(), 0);
+
+        sender.set_fail_view(false);
+        let extra = driver
+            .maybe_view_open_messages()
+            .unwrap()
+            .expect("retry viewMessages");
+        assert!(
+            driver
+                .session
+                .requests
+                .has_purpose_for_chat(RequestPurpose::ViewMessages, ChatId(7))
+        );
+        assert!(driver.session.message_ids_to_view(ChatId(7)).is_empty());
+        assert_eq!(sender.view_count(), 1);
+        assert!(
+            sender
+                .snapshot()
+                .last()
+                .unwrap()
+                .contains(&format!("\"@extra\":\"{}\"", extra.0))
+        );
+        assert!(!sink.rendered().contains("hi"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn view_messages_tdlib_error_unsticks_gate_and_retries() {
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let sender = ViewCtlSender::new();
+        let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+        let mut driver = ConnectDriver::new(session, sender.clone(), test_credentials(), prepared);
+        let seq = AtomicU64::new(0);
+        ready_private_chat(&mut driver, &seq, &dyn_sink);
+
+        let _history = driver
+            .select_chat(ChatId(7))
+            .unwrap()
+            .expect("history after view");
+        assert_eq!(sender.view_count(), 1);
+        let view_extra = sender
+            .snapshot()
+            .iter()
+            .find(|j| j.contains("viewMessages"))
+            .and_then(|j| serde_json::from_str::<Value>(j).ok())
+            .and_then(|v| v["@extra"].as_str().map(str::to_string))
+            .expect("view extra");
+        assert!(
+            driver
+                .session
+                .requests
+                .has_purpose_for_chat(RequestPurpose::ViewMessages, ChatId(7))
+        );
+        assert!(driver.session.message_ids_to_view(ChatId(7)).is_empty());
+
+        driver
+            .ingest(
+                copy_and_parse(
+                    &format!(
+                        r#"{{"@type":"error","code":400,"message":"CANARY_VIEW_TD","@extra":"{view_extra}"}}"#
+                    ),
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        assert_eq!(
+            sender.view_count(),
+            2,
+            "TDLib error must retry viewMessages"
+        );
+        let retry_extra = sender
+            .snapshot()
+            .into_iter()
+            .rev()
+            .find(|j| j.contains("viewMessages"))
+            .and_then(|j| serde_json::from_str::<Value>(&j).ok())
+            .and_then(|v| v["@extra"].as_str().map(str::to_string))
+            .expect("retry extra");
+        assert_ne!(
+            retry_extra, view_extra,
+            "retry must not reuse the failed extra"
+        );
+        assert!(driver.session.message_ids_to_view(ChatId(7)).is_empty());
+        assert!(
+            driver
+                .session
+                .requests
+                .has_purpose_for_chat(RequestPurpose::ViewMessages, ChatId(7))
+        );
+        assert!(!sink.rendered().contains("CANARY_VIEW_TD"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

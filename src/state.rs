@@ -254,8 +254,10 @@ pub struct HistoryState {
     pub tombstones: HashSet<i64>,
     pub loaded_complete: bool,
     pub view_generation: ViewGeneration,
-    /// Message ids already sent to `viewMessages` for this open generation.
+    /// Message ids TDLib has accepted for `viewMessages` this open generation.
     pub viewed: HashSet<i64>,
+    /// In-flight `viewMessages` ids. Cleared on send failure or TDLib error so we can retry.
+    pub viewing: HashSet<i64>,
 }
 
 impl HistoryState {
@@ -542,6 +544,11 @@ impl Session {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::LoadChats) {
                     // A short OK is not exhaustion; 404 is.
                 }
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::ViewMessages)
+                    && let Some(chat_id) = pending.and_then(|p| p.chat_id)
+                {
+                    self.commit_viewed(chat_id);
+                }
                 if pending.is_some_and(|p| is_auth_submit(p.purpose)) {
                     self.last_auth_error = None;
                 }
@@ -550,6 +557,11 @@ impl Session {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::LoadChats) && err.code == 404
                 {
                     self.chats_exhausted = true;
+                }
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::ViewMessages)
+                    && let Some(chat_id) = pending.and_then(|p| p.chat_id)
+                {
+                    self.abort_viewing(chat_id);
                 }
                 if let Some(pending) = pending
                     && is_auth_submit(pending.purpose)
@@ -650,6 +662,7 @@ impl Session {
         let history = self.histories.entry(chat_id.0).or_default();
         history.view_generation = self.view_generation;
         history.viewed.clear();
+        history.viewing.clear();
     }
 
     /// Server message ids in the open history that have not yet been sent to `viewMessages`.
@@ -660,7 +673,11 @@ impl Session {
         history
             .messages
             .values()
-            .filter(|message| message.id.0 > 0 && !history.viewed.contains(&message.id.0))
+            .filter(|message| {
+                message.id.0 > 0
+                    && !history.viewed.contains(&message.id.0)
+                    && !history.viewing.contains(&message.id.0)
+            })
             .map(|message| message.id)
             .collect()
     }
@@ -668,7 +685,27 @@ impl Session {
     pub fn mark_viewed(&mut self, chat_id: ChatId, ids: &[MessageId]) {
         let history = self.histories.entry(chat_id.0).or_default();
         for id in ids {
+            history.viewing.remove(&id.0);
             history.viewed.insert(id.0);
+        }
+    }
+
+    /// After a successful `viewMessages` send, hold ids until TDLib ok/error.
+    pub fn begin_viewing(&mut self, chat_id: ChatId, ids: &[MessageId]) {
+        let history = self.histories.entry(chat_id.0).or_default();
+        for id in ids {
+            history.viewing.insert(id.0);
+        }
+    }
+
+    fn commit_viewed(&mut self, chat_id: ChatId) {
+        let history = self.histories.entry(chat_id.0).or_default();
+        history.viewed.extend(history.viewing.drain());
+    }
+
+    fn abort_viewing(&mut self, chat_id: ChatId) {
+        if let Some(history) = self.histories.get_mut(&chat_id.0) {
+            history.viewing.clear();
         }
     }
 
@@ -1231,5 +1268,52 @@ mod tests {
         assert_eq!(session.message_ids_to_view(ChatId(1)), vec![MessageId(5)]);
         session.mark_viewed(ChatId(1), &[MessageId(5)]);
         assert!(session.message_ids_to_view(ChatId(1)).is_empty());
+    }
+
+    #[test]
+    fn view_messages_tdlib_error_releases_in_flight_ids() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        session.open_chat(ChatId(1));
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateNewMessage","message":{"id":5,"chat_id":1,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"hi","entities":[]}}}}"#,
+        );
+        let extra = session.request(RequestPurpose::ViewMessages, Some(ChatId(1)));
+        session.begin_viewing(ChatId(1), &[MessageId(5)]);
+        assert!(session.message_ids_to_view(ChatId(1)).is_empty());
+        assert!(
+            session
+                .requests
+                .has_purpose_for_chat(RequestPurpose::ViewMessages, ChatId(1))
+        );
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"error","code":400,"message":"CANARY_VIEW_FAIL","@extra":"{}"}}"#,
+                extra.0
+            ),
+        );
+        assert!(!session.requests.has_purpose(RequestPurpose::ViewMessages));
+        assert_eq!(session.message_ids_to_view(ChatId(1)), vec![MessageId(5)]);
+        assert!(session.histories.get(&1).unwrap().viewing.is_empty());
+        assert!(!session.histories.get(&1).unwrap().viewed.contains(&5));
+        assert!(!sink.rendered().contains("CANARY_VIEW_FAIL"));
+
+        let extra = session.request(RequestPurpose::ViewMessages, Some(ChatId(1)));
+        session.begin_viewing(ChatId(1), &[MessageId(5)]);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
+        );
+        assert!(session.message_ids_to_view(ChatId(1)).is_empty());
+        assert!(session.histories.get(&1).unwrap().viewed.contains(&5));
+        assert!(session.histories.get(&1).unwrap().viewing.is_empty());
     }
 }
