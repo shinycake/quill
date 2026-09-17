@@ -1,4 +1,4 @@
-use crate::ids::{ChatId, MessageId, RequestId};
+use crate::ids::{ChatId, FileId, MessageId, RequestId};
 use crate::pins::{TDLIB_CMAKE_VERSION, TDLIB_GIT_COMMIT};
 use serde_json::{Value, json};
 
@@ -172,6 +172,21 @@ pub fn view_messages(
     .to_string()
 }
 
+/// `downloadFile` (TDLib 1.8.67). `synchronous: false` returns the current
+/// `file` immediately; progress continues on `updateFile`.
+pub fn download_file(extra: RequestId, file_id: FileId, priority: i32) -> String {
+    json!({
+        "@type": "downloadFile",
+        "@extra": extra.as_extra(),
+        "file_id": file_id.0,
+        "priority": priority,
+        "offset": 0,
+        "limit": 0,
+        "synchronous": false,
+    })
+    .to_string()
+}
+
 /// `sendMessage` for the pinned 1.8.67 schema: typed `topic_id`, not `message_thread_id`.
 pub fn send_text(extra: RequestId, chat_id: ChatId, text: &str) -> String {
     json!({
@@ -270,6 +285,20 @@ mod tests {
         assert_eq!(v["message_ids"], serde_json::json!([11, 12]));
         assert_eq!(v["source"]["@type"], "messageSourceChatHistory");
         assert_eq!(v["force_read"], true);
+        assert!(!json.contains("CANARY"));
+    }
+
+    #[test]
+    fn download_file_shape_matches_1_8_67() {
+        let json = download_file(RequestId(12), FileId(44), 32);
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "downloadFile");
+        assert_eq!(v["@extra"], "12");
+        assert_eq!(v["file_id"], 44);
+        assert_eq!(v["priority"], 32);
+        assert_eq!(v["offset"], 0);
+        assert_eq!(v["limit"], 0);
+        assert_eq!(v["synchronous"], false);
         assert!(!json.contains("CANARY"));
     }
 

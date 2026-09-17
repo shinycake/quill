@@ -207,6 +207,72 @@ fn replay_unread_then_mark_read_and_outbox_receipt() {
 }
 
 #[test]
+fn replay_photo_then_update_file_and_document() {
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn quill::diagnostics::DiagnosticSink> = sink.clone();
+    let mut session = Session::new(AccountKey::primary(), dyn_sink);
+    let seq = AtomicU64::new(0);
+    apply_all_seq(
+        &mut session,
+        &sink,
+        &seq,
+        &[
+            r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+            r#"{"@type":"updateNewChat","chat":{"id":7,"title":"Alice","type":{"@type":"chatTypePrivate","user_id":7},"unread_count":0}}"#,
+            r#"{"@type":"updateNewMessage","message":{"id":20,"chat_id":7,"is_outgoing":false,"content":{"@type":"messagePhoto","photo":{"@type":"photo","has_stickers":false,"sizes":[{"@type":"photoSize","type":"m","photo":{"@type":"file","id":1,"size":10,"expected_size":10,"local":{"@type":"localFile","path":"","can_be_downloaded":true,"can_be_deleted":false,"is_downloading_active":false,"is_downloading_completed":false,"download_offset":0,"downloaded_prefix_size":0,"downloaded_size":0},"remote":{"@type":"remoteFile","id":"CANARY_REMOTE","unique_id":"u","is_uploading_active":false,"is_uploading_completed":true,"uploaded_size":10}},"width":320,"height":240,"progressive_sizes":[]}]},"caption":{"@type":"formattedText","text":"CANARY_REPLAY_photo","entities":[]},"has_spoiler":false,"is_secret":false}}}"#,
+            r#"{"@type":"updateNewMessage","message":{"id":21,"chat_id":7,"is_outgoing":false,"content":{"@type":"messageDocument","document":{"@type":"document","file_name":"notes.txt","mime_type":"text/plain","document":{"@type":"file","id":9,"size":24,"expected_size":24,"local":{"@type":"localFile","path":"","can_be_downloaded":true,"can_be_deleted":false,"is_downloading_active":false,"is_downloading_completed":false,"download_offset":0,"downloaded_prefix_size":0,"downloaded_size":0},"remote":{"@type":"remoteFile","id":"CANARY_REMOTE","unique_id":"u","is_uploading_active":false,"is_uploading_completed":true,"uploaded_size":24}}},"caption":{"@type":"formattedText","text":"","entities":[]}}}}"#,
+        ],
+    );
+    session.open_chat(quill::ids::ChatId(7));
+    assert_eq!(
+        session.thumb_file_ids_to_download(),
+        vec![quill::ids::FileId(1)]
+    );
+    assert!(
+        session
+            .file(quill::ids::FileId(1))
+            .unwrap()
+            .needs_download()
+    );
+    apply_all_seq(
+        &mut session,
+        &sink,
+        &seq,
+        &[
+            r#"{"@type":"updateFile","file":{"@type":"file","id":1,"size":10,"expected_size":10,"local":{"@type":"localFile","path":"/tmp/quill-replay-thumb.jpg","can_be_downloaded":true,"can_be_deleted":false,"is_downloading_active":false,"is_downloading_completed":true,"download_offset":0,"downloaded_prefix_size":10,"downloaded_size":10},"remote":{"@type":"remoteFile","id":"CANARY_REMOTE","unique_id":"u","is_uploading_active":false,"is_uploading_completed":true,"uploaded_size":10}}}"#,
+        ],
+    );
+    assert_eq!(
+        session.file(quill::ids::FileId(1)).unwrap().usable_path(),
+        Some("/tmp/quill-replay-thumb.jpg")
+    );
+    assert!(session.thumb_file_ids_to_download().is_empty());
+    let doc = session
+        .histories
+        .get(&7)
+        .unwrap()
+        .messages
+        .get(&21)
+        .unwrap();
+    match &doc.content {
+        quill::telegram::envelope::MessageContent::Document(d) => {
+            assert_eq!(d.file_name, "notes.txt");
+            assert_eq!(d.mime_type, "text/plain");
+            assert_eq!(d.file_id.0, 9);
+        }
+        other => panic!("{other:?}"),
+    }
+    assert!(
+        session
+            .file(quill::ids::FileId(9))
+            .unwrap()
+            .needs_download()
+    );
+    assert!(!sink.rendered().contains("CANARY_REPLAY"));
+    assert!(!sink.rendered().contains("CANARY_REMOTE"));
+}
+
+#[test]
 fn replay_view_messages_error_allows_retry() {
     let sink = Arc::new(MemorySink::new());
     let dyn_sink: Arc<dyn quill::diagnostics::DiagnosticSink> = sink.clone();

@@ -1,4 +1,4 @@
-use crate::ids::{ChatId, MessageId, RequestId, UserId};
+use crate::ids::{ChatId, FileId, MessageId, RequestId, UserId};
 use serde::Deserialize;
 use serde_json::Value;
 use std::str::FromStr;
@@ -74,6 +74,8 @@ pub enum EnvelopePayload {
     Error(TdError),
     Messages(Vec<ParsedMessage>),
     Message(ParsedMessage),
+    UpdateFile(ParsedFile),
+    File(ParsedFile),
     Unknown(UnknownKind),
 }
 
@@ -202,12 +204,162 @@ pub struct ParsedMessage {
     pub chat_id: ChatId,
     pub is_outgoing: bool,
     pub content: MessageContent,
+    pub files: Vec<ParsedFile>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MessageContent {
     Text(String),
+    Photo(PhotoContent),
+    Document(DocumentContent),
     Unsupported { type_name: String },
+}
+
+impl MessageContent {
+    pub fn preview(&self) -> String {
+        match self {
+            MessageContent::Text(text) => text.chars().take(80).collect(),
+            MessageContent::Photo(photo) if photo.caption.is_empty() => "Photo".into(),
+            MessageContent::Photo(photo) => photo.caption.chars().take(80).collect(),
+            MessageContent::Document(doc) if !doc.caption.is_empty() => {
+                doc.caption.chars().take(80).collect()
+            }
+            MessageContent::Document(doc) if !doc.file_name.is_empty() => {
+                doc.file_name.chars().take(80).collect()
+            }
+            MessageContent::Document(_) => "Document".into(),
+            MessageContent::Unsupported { type_name } => format!("({type_name})"),
+        }
+    }
+}
+
+/// `photo` + caption flags from `messagePhoto` (TDLib 1.8.67).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PhotoContent {
+    pub caption: String,
+    pub sizes: Vec<PhotoSizeView>,
+    pub is_secret: bool,
+    pub has_spoiler: bool,
+}
+
+impl PhotoContent {
+    /// Prefer `photoSize.type == "m"` (box 320), else the largest size ≤ 320px wide.
+    pub fn thumb_size(&self) -> Option<&PhotoSizeView> {
+        self.sizes
+            .iter()
+            .find(|size| size.type_name == "m")
+            .or_else(|| {
+                self.sizes
+                    .iter()
+                    .filter(|size| size.width > 0 && size.width <= 320)
+                    .max_by_key(|size| size.width)
+            })
+            .or_else(|| {
+                self.sizes
+                    .iter()
+                    .min_by_key(|size| (size.width, size.height))
+            })
+    }
+
+    pub fn largest_size(&self) -> Option<&PhotoSizeView> {
+        self.sizes
+            .iter()
+            .max_by_key(|size| i64::from(size.width) * i64::from(size.height))
+    }
+
+    pub fn open_file_id(&self) -> Option<FileId> {
+        self.largest_size()
+            .or_else(|| self.thumb_size())
+            .map(|size| size.file_id)
+    }
+
+    /// Secret photos must not download on placeholder click (schema: show only while tapped).
+    pub fn click_requests_download(&self) -> bool {
+        !self.is_secret
+    }
+
+    /// Placeholder copy follows file state for secret and spoiler photos.
+    pub fn placeholder_label(&self, downloading: bool, ready: bool) -> String {
+        let kind = if self.is_secret {
+            "Secret photo"
+        } else if self.has_spoiler {
+            "Photo (spoiler)"
+        } else {
+            "Photo"
+        };
+        let state = if ready {
+            "ready"
+        } else if downloading {
+            "downloading…"
+        } else {
+            "not downloaded"
+        };
+        format!("{kind} — {state}")
+    }
+}
+
+/// `photoSize` fields used for display / download (schema: type, photo, width, height).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PhotoSizeView {
+    pub type_name: String,
+    pub width: i32,
+    pub height: i32,
+    pub file_id: FileId,
+}
+
+/// `document` + caption from `messageDocument`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DocumentContent {
+    pub file_name: String,
+    pub mime_type: String,
+    pub caption: String,
+    pub file_id: FileId,
+}
+
+/// Typed `file` + `localFile` (no `remoteFile.id` — that can be an HTTP URL).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParsedFile {
+    pub id: FileId,
+    pub size: i64,
+    pub expected_size: i64,
+    pub local: LocalFileState,
+}
+
+impl ParsedFile {
+    pub fn usable_path(&self) -> Option<&str> {
+        if self.local.is_downloading_completed && !self.local.path.is_empty() {
+            Some(self.local.path.as_str())
+        } else {
+            None
+        }
+    }
+
+    pub fn needs_download(&self) -> bool {
+        self.usable_path().is_none() && self.local.can_be_downloaded
+    }
+
+    pub fn display_size(&self) -> i64 {
+        if self.size > 0 {
+            self.size
+        } else {
+            self.expected_size
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LocalFileState {
+    pub path: String,
+    pub can_be_downloaded: bool,
+    pub is_downloading_active: bool,
+    pub is_downloading_completed: bool,
+}
+
+impl LocalFileState {
+    /// Download is neither in flight nor finished (`file` / `updateFile` idle).
+    pub fn is_idle_incomplete(&self) -> bool {
+        !self.is_downloading_active && !self.is_downloading_completed
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -377,6 +529,8 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
             Ok(EnvelopePayload::Messages(parsed))
         }
         "message" => Ok(EnvelopePayload::Message(parse_message(&value)?)),
+        "updateFile" => Ok(EnvelopePayload::UpdateFile(parse_file(value.get("file"))?)),
+        "file" => Ok(EnvelopePayload::File(parse_file(Some(&value))?)),
         other => Ok(EnvelopePayload::Unknown(UnknownKind {
             type_name: other.to_string(),
         })),
@@ -499,6 +653,7 @@ fn parse_chat_list(value: Option<&Value>) -> ChatList {
 }
 
 fn parse_message(value: &Value) -> Result<ParsedMessage, ParseError> {
+    let (content, files) = parse_content(value.get("content"));
     Ok(ParsedMessage {
         id: MessageId(int53(value.get("id"))?),
         chat_id: ChatId(int53(value.get("chat_id"))?),
@@ -506,33 +661,152 @@ fn parse_message(value: &Value) -> Result<ParsedMessage, ParseError> {
             .get("is_outgoing")
             .and_then(Value::as_bool)
             .unwrap_or(false),
-        content: parse_content(value.get("content")),
+        content,
+        files,
     })
 }
 
-fn parse_content(value: Option<&Value>) -> MessageContent {
+fn parse_content(value: Option<&Value>) -> (MessageContent, Vec<ParsedFile>) {
     let Some(value) = value else {
-        return MessageContent::Unsupported {
-            type_name: "missing".into(),
-        };
+        return (
+            MessageContent::Unsupported {
+                type_name: "missing".into(),
+            },
+            Vec::new(),
+        );
     };
     match value.get("@type").and_then(Value::as_str) {
-        Some("messageText") => {
-            let text = value
-                .get("text")
-                .and_then(|t| t.get("text"))
+        Some("messageText") => (
+            MessageContent::Text(parse_formatted_text(value.get("text"))),
+            Vec::new(),
+        ),
+        Some("messagePhoto") => parse_message_photo(value),
+        Some("messageDocument") => parse_message_document(value),
+        Some(other) => (
+            MessageContent::Unsupported {
+                type_name: other.to_string(),
+            },
+            Vec::new(),
+        ),
+        None => (
+            MessageContent::Unsupported {
+                type_name: "unknown".into(),
+            },
+            Vec::new(),
+        ),
+    }
+}
+
+fn parse_formatted_text(value: Option<&Value>) -> String {
+    value
+        .and_then(|text| text.get("text"))
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string()
+}
+
+fn parse_message_photo(value: &Value) -> (MessageContent, Vec<ParsedFile>) {
+    let photo = value.get("photo");
+    let mut files = Vec::new();
+    let mut sizes = Vec::new();
+    if let Some(entries) = photo.and_then(|p| p.get("sizes")).and_then(Value::as_array) {
+        for entry in entries {
+            let Ok(file) = parse_file(entry.get("photo")) else {
+                continue;
+            };
+            sizes.push(PhotoSizeView {
+                type_name: entry
+                    .get("type")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string(),
+                width: int53_or_zero(entry.get("width")) as i32,
+                height: int53_or_zero(entry.get("height")) as i32,
+                file_id: file.id,
+            });
+            files.push(file);
+        }
+    }
+    (
+        MessageContent::Photo(PhotoContent {
+            caption: parse_formatted_text(value.get("caption")),
+            sizes,
+            is_secret: value
+                .get("is_secret")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            has_spoiler: value
+                .get("has_spoiler")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+        }),
+        files,
+    )
+}
+
+fn parse_message_document(value: &Value) -> (MessageContent, Vec<ParsedFile>) {
+    let document = value.get("document");
+    let mut files = Vec::new();
+    let file_id = match document.and_then(|d| parse_file(d.get("document")).ok()) {
+        Some(file) => {
+            let id = file.id;
+            files.push(file);
+            id
+        }
+        None => FileId(0),
+    };
+    if let Some(thumb) = document.and_then(|d| d.get("thumbnail"))
+        && let Ok(thumb_file) = parse_file(thumb.get("file"))
+    {
+        files.push(thumb_file);
+    }
+    (
+        MessageContent::Document(DocumentContent {
+            file_name: document
+                .and_then(|d| d.get("file_name"))
                 .and_then(Value::as_str)
                 .unwrap_or("")
-                .to_string();
-            MessageContent::Text(text)
-        }
-        Some(other) => MessageContent::Unsupported {
-            type_name: other.to_string(),
+                .to_string(),
+            mime_type: document
+                .and_then(|d| d.get("mime_type"))
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string(),
+            caption: parse_formatted_text(value.get("caption")),
+            file_id,
+        }),
+        files,
+    )
+}
+
+fn parse_file(value: Option<&Value>) -> Result<ParsedFile, ParseError> {
+    let value = value.ok_or(ParseError::MissingField)?;
+    let id = i32::try_from(int53(value.get("id"))?).map_err(|_| ParseError::BadInt)?;
+    let local = value.get("local");
+    Ok(ParsedFile {
+        id: FileId(id),
+        size: int53_or_zero(value.get("size")),
+        expected_size: int53_or_zero(value.get("expected_size")),
+        local: LocalFileState {
+            path: local
+                .and_then(|l| l.get("path"))
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string(),
+            can_be_downloaded: local
+                .and_then(|l| l.get("can_be_downloaded"))
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            is_downloading_active: local
+                .and_then(|l| l.get("is_downloading_active"))
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            is_downloading_completed: local
+                .and_then(|l| l.get("is_downloading_completed"))
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
         },
-        None => MessageContent::Unsupported {
-            type_name: "unknown".into(),
-        },
-    }
+    })
 }
 
 fn parse_error(value: Option<&Value>) -> TdError {
@@ -721,6 +995,186 @@ mod tests {
                 assert_eq!(positions[0].order, 5);
                 assert!(positions[0].is_pinned);
                 assert_eq!(positions[0].list, ChatList::Main);
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    fn local_file_json(id: i32, path: &str, completed: bool, can_download: bool) -> String {
+        format!(
+            r#"{{"@type":"file","id":{id},"size":12,"expected_size":12,"local":{{"@type":"localFile","path":{path},"can_be_downloaded":{can_download},"can_be_deleted":false,"is_downloading_active":false,"is_downloading_completed":{completed},"download_offset":0,"downloaded_prefix_size":0,"downloaded_size":0}},"remote":{{"@type":"remoteFile","id":"CANARY_REMOTE_ID","unique_id":"u","is_uploading_active":false,"is_uploading_completed":true,"uploaded_size":12}}}}"#,
+            path = serde_json::to_string(path).unwrap(),
+            can_download = can_download,
+            completed = completed,
+        )
+    }
+
+    #[test]
+    fn message_photo_parses_sizes_caption_and_flags() {
+        let thumb = local_file_json(1, "", false, true);
+        let full = local_file_json(2, "/tmp/quill-photo.jpg", true, true);
+        let json = format!(
+            r#"{{"@type":"updateNewMessage","message":{{"id":9,"chat_id":4,"is_outgoing":false,"content":{{"@type":"messagePhoto","photo":{{"@type":"photo","has_stickers":false,"sizes":[{{"@type":"photoSize","type":"m","photo":{thumb},"width":320,"height":240,"progressive_sizes":[]}},{{"@type":"photoSize","type":"x","photo":{full},"width":800,"height":600,"progressive_sizes":[]}}]}},"caption":{{"@type":"formattedText","text":"CANARY_PHOTO_caption","entities":[]}},"show_caption_above_media":false,"has_spoiler":false,"is_secret":false}}}}}}"#
+        );
+        let env = parse_envelope(&json).unwrap();
+        match &env.payload {
+            EnvelopePayload::UpdateNewMessage(message) => {
+                let MessageContent::Photo(photo) = &message.content else {
+                    panic!("{:?}", message.content);
+                };
+                assert_eq!(photo.caption, "CANARY_PHOTO_caption");
+                assert!(!photo.is_secret);
+                assert!(!photo.has_spoiler);
+                assert_eq!(photo.sizes.len(), 2);
+                assert_eq!(photo.thumb_size().unwrap().type_name, "m");
+                assert_eq!(photo.thumb_size().unwrap().file_id.0, 1);
+                assert_eq!(photo.largest_size().unwrap().file_id.0, 2);
+                assert_eq!(photo.open_file_id().unwrap().0, 2);
+                assert_eq!(message.files.len(), 2);
+                assert_eq!(message.files[0].id.0, 1);
+                assert!(message.files[0].needs_download());
+                assert_eq!(message.files[1].usable_path(), Some("/tmp/quill-photo.jpg"));
+            }
+            other => panic!("{other:?}"),
+        }
+        let debug = format!("{env:?}");
+        assert!(!debug.contains("CANARY_REMOTE_ID"));
+    }
+
+    #[test]
+    fn message_document_parses_name_mime_and_file() {
+        let file = local_file_json(8, "", false, true);
+        let json = format!(
+            r#"{{"@type":"updateNewMessage","message":{{"id":3,"chat_id":4,"is_outgoing":false,"content":{{"@type":"messageDocument","document":{{"@type":"document","file_name":"notes.txt","mime_type":"text/plain","document":{file}}},"caption":{{"@type":"formattedText","text":"CANARY_DOC_caption","entities":[]}}}}}}}}"#
+        );
+        let env = parse_envelope(&json).unwrap();
+        match env.payload {
+            EnvelopePayload::UpdateNewMessage(message) => {
+                let MessageContent::Document(doc) = message.content else {
+                    panic!("{:?}", message.content);
+                };
+                assert_eq!(doc.file_name, "notes.txt");
+                assert_eq!(doc.mime_type, "text/plain");
+                assert_eq!(doc.caption, "CANARY_DOC_caption");
+                assert_eq!(doc.file_id.0, 8);
+                assert_eq!(message.files[0].id.0, 8);
+                assert!(message.files[0].needs_download());
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn update_file_and_file_response_are_typed() {
+        let file = local_file_json(4, "/tmp/done.bin", true, true);
+        let update = parse_envelope(&format!(r#"{{"@type":"updateFile","file":{file}}}"#)).unwrap();
+        match update.payload {
+            EnvelopePayload::UpdateFile(parsed) => {
+                assert_eq!(parsed.id.0, 4);
+                assert_eq!(parsed.usable_path(), Some("/tmp/done.bin"));
+            }
+            other => panic!("{other:?}"),
+        }
+        let response = parse_envelope(
+            r#"{"@type":"file","@extra":"12","id":4,"size":12,"expected_size":12,"local":{"@type":"localFile","path":"","can_be_downloaded":true,"can_be_deleted":false,"is_downloading_active":true,"is_downloading_completed":false,"download_offset":0,"downloaded_prefix_size":0,"downloaded_size":0},"remote":{"@type":"remoteFile","id":"x","unique_id":"u","is_uploading_active":false,"is_uploading_completed":true,"uploaded_size":12}}"#,
+        )
+        .unwrap();
+        match response.payload {
+            EnvelopePayload::File(parsed) => {
+                assert_eq!(parsed.id.0, 4);
+                assert!(parsed.local.is_downloading_active);
+                assert!(parsed.needs_download());
+            }
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(response.extra, Some(crate::ids::RequestId(12)));
+    }
+
+    #[test]
+    fn media_schema_matches_1_8_67() {
+        let schema = include_str!("../../schema/td_api.tl");
+        let photo = schema
+            .lines()
+            .find(|l| l.starts_with("messagePhoto "))
+            .expect("messagePhoto");
+        assert!(photo.contains("photo:photo"));
+        assert!(photo.contains("caption:formattedText"));
+        assert!(photo.contains("is_secret:Bool"));
+        assert!(photo.contains("has_spoiler:Bool"));
+        let document = schema
+            .lines()
+            .find(|l| l.starts_with("messageDocument "))
+            .expect("messageDocument");
+        assert!(document.contains("document:document"));
+        assert!(document.contains("caption:formattedText"));
+        let download = schema
+            .lines()
+            .find(|l| l.starts_with("downloadFile "))
+            .expect("downloadFile");
+        assert!(download.contains("file_id:int32"));
+        assert!(download.contains("priority:int32"));
+        assert!(download.contains("offset:int53"));
+        assert!(download.contains("limit:int53"));
+        assert!(download.contains("synchronous:Bool"));
+        assert!(schema.lines().any(|l| l.starts_with("updateFile ")));
+        assert!(schema.lines().any(|l| l.starts_with("localFile ")));
+        assert!(schema.lines().any(|l| l.starts_with("photoSize ")));
+    }
+
+    #[test]
+    fn secret_photo_is_flagged() {
+        let file = local_file_json(1, "", false, true);
+        let json = format!(
+            r#"{{"@type":"updateNewMessage","message":{{"id":1,"chat_id":1,"is_outgoing":false,"content":{{"@type":"messagePhoto","photo":{{"@type":"photo","has_stickers":false,"sizes":[{{"@type":"photoSize","type":"m","photo":{file},"width":100,"height":80,"progressive_sizes":[]}}]}},"caption":{{"@type":"formattedText","text":"","entities":[]}},"has_spoiler":true,"is_secret":true}}}}}}"#
+        );
+        let env = parse_envelope(&json).unwrap();
+        match env.payload {
+            EnvelopePayload::UpdateNewMessage(message) => {
+                let MessageContent::Photo(photo) = message.content else {
+                    panic!("{:?}", message.content);
+                };
+                assert!(photo.is_secret);
+                assert!(photo.has_spoiler);
+                assert!(!photo.click_requests_download());
+                assert_eq!(
+                    photo.placeholder_label(false, false),
+                    "Secret photo — not downloaded"
+                );
+                assert_eq!(
+                    photo.placeholder_label(true, false),
+                    "Secret photo — downloading…"
+                );
+                assert_eq!(photo.placeholder_label(false, true), "Secret photo — ready");
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn spoiler_placeholder_follows_file_state_and_may_download() {
+        let file = local_file_json(1, "", false, true);
+        let json = format!(
+            r#"{{"@type":"updateNewMessage","message":{{"id":1,"chat_id":1,"is_outgoing":false,"content":{{"@type":"messagePhoto","photo":{{"@type":"photo","has_stickers":false,"sizes":[{{"@type":"photoSize","type":"m","photo":{file},"width":100,"height":80,"progressive_sizes":[]}}]}},"caption":{{"@type":"formattedText","text":"","entities":[]}},"has_spoiler":true,"is_secret":false}}}}}}"#
+        );
+        let env = parse_envelope(&json).unwrap();
+        match env.payload {
+            EnvelopePayload::UpdateNewMessage(message) => {
+                let MessageContent::Photo(photo) = message.content else {
+                    panic!("{:?}", message.content);
+                };
+                assert!(photo.click_requests_download());
+                assert_eq!(
+                    photo.placeholder_label(false, false),
+                    "Photo (spoiler) — not downloaded"
+                );
+                assert_eq!(
+                    photo.placeholder_label(true, false),
+                    "Photo (spoiler) — downloading…"
+                );
+                assert_eq!(
+                    photo.placeholder_label(false, true),
+                    "Photo (spoiler) — ready"
+                );
             }
             other => panic!("{other:?}"),
         }
