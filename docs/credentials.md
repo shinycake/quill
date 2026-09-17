@@ -47,11 +47,31 @@ ENV
 
 Do **not** borrow another client's `api_id`/`api_hash`. Do **not** copy sample IDs from tutorials.
 
+## Headless connect smoke
+
+`--connect-smoke` on the `quill` binary does **not** open a GPUI window. It loads credentials from the environment / gitignored `.env` / `quill.local.env`, **requires** `QUILL_TDJSON_PATH` pointing at a real `libtdjson` file, starts `start_live_connect`, and ingests updates until `WaitPhoneNumber` (or another terminal auth state / clear blocker). Timeout is 30 seconds.
+
+```bash
+export QUILL_TDJSON_PATH=$PWD/native/prefix/lib/libtdjson.so   # or .dylib
+# TELEGRAM_API_ID / TELEGRAM_API_HASH already in env or quill.local.env
+cargo run --no-default-features -- --connect-smoke
+# UI feature may be enabled; the flag still skips GPUI:
+cargo run --features ui -- --connect-smoke
+```
+
+Prints **one** redacted line to stdout, for example:
+
+- `SMOKE_OK wait-phone`
+- `SMOKE_BLOCKED missing-tdjson`
+- `SMOKE_FAIL timeout`
+
+Exit status is 0 only on `SMOKE_OK …`. Nothing in that line is an `api_hash`, phone number, code, or password.
+
 Other values typed into the app (never committed):
 
 - Test account phone (`setAuthenticationPhoneNumber` when auth is WaitPhoneNumber)
-- SMS / Telegram verification code (submit UI still follow-up)
-- 2FA password if enabled (Keychain is only for the TDLib **database** key)
+- SMS / Telegram verification code (`checkAuthenticationCode` when auth is WaitCode)
+- 2FA password if enabled (`checkAuthenticationPassword` when auth is WaitPassword; Keychain / Linux file store is only for the TDLib **database** key)
 
 Optional later (not required for personal Mac runs): Apple Developer ID, notarization credentials, a dedicated test chat with a second account. There is **no** App Store / notarization / distribution pipeline; ad-hoc Apple Developer signing only if needed on Idan's personal Mac.
 

@@ -254,6 +254,24 @@ const ERR_SEC_AUTH_FAILED: i32 = -25293;
 const ERR_SEC_INTERACTION_NOT_ALLOWED: i32 = -25308;
 const ERR_SEC_NOT_AVAILABLE: i32 = -25291;
 
+/// Secret store used by live connect (GPUI and `--connect-smoke`).
+/// macOS Keychain, Linux file store under the app data dir. Memory is only
+/// for hosts that are neither (not the Linux/macOS live path).
+pub fn live_secret_store() -> Box<dyn SecretStore> {
+    #[cfg(target_os = "macos")]
+    {
+        Box::new(keychain::KeychainSecretStore)
+    }
+    #[cfg(target_os = "linux")]
+    {
+        Box::new(FileSecretStore::new(crate::settings::default_app_root()))
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    {
+        Box::new(MemorySecretStore::new())
+    }
+}
+
 /// Load an existing key, or create one only when no database directory exists.
 pub fn load_or_create_key<S: SecretStore>(
     store: &S,

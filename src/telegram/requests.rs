@@ -67,6 +67,26 @@ pub fn set_authentication_phone_number(extra: RequestId, phone_number: &str) -> 
     .to_string()
 }
 
+/// `checkAuthenticationCode`. Callers must not log `code`.
+pub fn check_authentication_code(extra: RequestId, code: &str) -> String {
+    json!({
+        "@type": "checkAuthenticationCode",
+        "@extra": extra.as_extra(),
+        "code": code,
+    })
+    .to_string()
+}
+
+/// `checkAuthenticationPassword`. Callers must not log `password`.
+pub fn check_authentication_password(extra: RequestId, password: &str) -> String {
+    json!({
+        "@type": "checkAuthenticationPassword",
+        "@extra": extra.as_extra(),
+        "password": password,
+    })
+    .to_string()
+}
+
 pub fn close_request(extra: RequestId) -> String {
     json!({
         "@type": "close",
@@ -176,5 +196,23 @@ mod tests {
         assert!(json.contains("\"phone_number\":\"+10001112222\""));
         assert!(json.contains("phoneNumberAuthenticationSettings"));
         assert!(json.contains("\"@extra\":\"3\""));
+    }
+
+    #[test]
+    fn check_authentication_code_shape() {
+        let json = check_authentication_code(RequestId(4), "12345");
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "checkAuthenticationCode");
+        assert_eq!(v["@extra"], "4");
+        assert_eq!(v["code"], "12345");
+    }
+
+    #[test]
+    fn check_authentication_password_shape() {
+        let json = check_authentication_password(RequestId(5), "unit-test-password");
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "checkAuthenticationPassword");
+        assert_eq!(v["@extra"], "5");
+        assert_eq!(v["password"], "unit-test-password");
     }
 }

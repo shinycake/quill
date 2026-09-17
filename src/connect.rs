@@ -12,7 +12,8 @@ use crate::telegram::client::{LiveTdJson, OwnedEnvelope, ReceiveBridge};
 use crate::telegram::envelope::AuthorizationState;
 use crate::telegram::ffi::{LibraryOrigin, TdJsonError, resolve_tdjson_path};
 use crate::telegram::requests::{
-    SetTdlibParameters, get_authorization_state, set_authentication_phone_number,
+    SetTdlibParameters, check_authentication_code, check_authentication_password,
+    get_authorization_state, set_authentication_phone_number,
 };
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -45,6 +46,18 @@ impl ConnectBlocker {
             ConnectBlocker::TdjsonLoad => {
                 "tdjson library found but failed to load (missing symbols or wrong arch)"
             }
+        }
+    }
+
+    /// One-token label for `--connect-smoke` (no secrets).
+    pub fn slug(&self) -> &'static str {
+        match self {
+            ConnectBlocker::MissingCredentials => "missing-credentials",
+            ConnectBlocker::MissingTdjson => "missing-tdjson",
+            ConnectBlocker::MissingKeyAgainstExistingDb => "missing-key",
+            ConnectBlocker::LockedStore => "locked-store",
+            ConnectBlocker::StoreError => "store-error",
+            ConnectBlocker::TdjsonLoad => "tdjson-load",
         }
     }
 }
@@ -281,9 +294,48 @@ impl<S: JsonSender> ConnectDriver<S> {
         if phone.is_empty() {
             return Err(ConnectSendError::InvalidRequest);
         }
+        self.session.last_auth_error = None;
         let extra = self.session.request(RequestPurpose::SetPhoneNumber, None);
         self.sender
             .send_json(&set_authentication_phone_number(extra, phone))?;
+        Ok(extra)
+    }
+
+    /// Send `checkAuthenticationCode` when auth is WaitCode.
+    /// The code is never stored on the session or diagnostics.
+    pub fn submit_code(&mut self, code: &str) -> Result<RequestId, ConnectSendError> {
+        if !matches!(self.session.auth, AuthorizationState::WaitCode { .. }) {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let code = code.trim();
+        if code.is_empty() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        self.session.last_auth_error = None;
+        let extra = self
+            .session
+            .request(RequestPurpose::CheckAuthenticationCode, None);
+        self.sender
+            .send_json(&check_authentication_code(extra, code))?;
+        Ok(extra)
+    }
+
+    /// Send `checkAuthenticationPassword` when auth is WaitPassword.
+    /// The password is never stored on the session or diagnostics. Not trimmed
+    /// (leading/trailing spaces can be significant).
+    pub fn submit_password(&mut self, password: &str) -> Result<RequestId, ConnectSendError> {
+        if !matches!(self.session.auth, AuthorizationState::WaitPassword { .. }) {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if password.is_empty() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        self.session.last_auth_error = None;
+        let extra = self
+            .session
+            .request(RequestPurpose::CheckAuthenticationPassword, None);
+        self.sender
+            .send_json(&check_authentication_password(extra, password))?;
         Ok(extra)
     }
 }
@@ -466,6 +518,80 @@ mod tests {
         assert!(phone_json.contains(&format!("\"@extra\":\"{}\"", phone_extra.0)));
         assert!(phone_json.contains("+15551212"));
         assert!(!sink.rendered().contains("+15551212"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn driver_submits_code_and_password_only_in_matching_states() {
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = Arc::new(RecordingSender::new());
+        let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+        let mut driver =
+            ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+
+        assert_eq!(
+            driver.submit_code("12345"),
+            Err(ConnectSendError::InvalidRequest)
+        );
+        assert_eq!(
+            driver.submit_password("secret"),
+            Err(ConnectSendError::InvalidRequest)
+        );
+
+        let seq = AtomicU64::new(0);
+        let wait_code = copy_and_parse(
+            r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateWaitCode","code_info":{"@type":"authenticationCodeInfo","type":{"@type":"authenticationCodeTypeSms","length":5}}}}"#,
+            &seq,
+            &dyn_sink,
+        )
+        .unwrap();
+        driver.ingest(wait_code).unwrap();
+        assert!(matches!(
+            driver.session.auth,
+            AuthorizationState::WaitCode {
+                code_length: Some(5)
+            }
+        ));
+        assert_eq!(
+            driver.submit_password("secret"),
+            Err(ConnectSendError::InvalidRequest)
+        );
+        assert_eq!(
+            driver.submit_code("  "),
+            Err(ConnectSendError::InvalidRequest)
+        );
+        let code_extra = driver.submit_code("  12345 ").unwrap();
+        let sent = recorder.snapshot();
+        let code_json = sent.last().unwrap();
+        assert!(code_json.contains("checkAuthenticationCode"));
+        assert!(code_json.contains(&format!("\"@extra\":\"{}\"", code_extra.0)));
+        assert!(code_json.contains("\"code\":\"12345\""));
+        assert!(!sink.rendered().contains("12345"));
+
+        let wait_password = copy_and_parse(
+            r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateWaitPassword","password_hint":"CANARY_HINT","has_recovery_email_address":true}}"#,
+            &seq,
+            &dyn_sink,
+        )
+        .unwrap();
+        driver.ingest(wait_password).unwrap();
+        assert_eq!(
+            driver.submit_code("12345"),
+            Err(ConnectSendError::InvalidRequest)
+        );
+        let pw_extra = driver.submit_password(" unit-pw ").unwrap();
+        let sent = recorder.snapshot();
+        let pw_json = sent.last().unwrap();
+        assert!(pw_json.contains("checkAuthenticationPassword"));
+        assert!(pw_json.contains(&format!("\"@extra\":\"{}\"", pw_extra.0)));
+        // Password is not trimmed.
+        assert!(pw_json.contains("\"password\":\" unit-pw \""));
+        assert!(!sink.rendered().contains("unit-pw"));
+        assert!(!sink.rendered().contains("CANARY_HINT"));
 
         let _ = std::fs::remove_dir_all(&dir);
     }

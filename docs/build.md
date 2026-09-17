@@ -12,7 +12,15 @@ cargo test --no-default-features
 cargo run --features ui
 ```
 
-The window is a GPUI Kit `Root` wrapping a mixed-height synthetic chat and composer. With credentials **and** tdjson available it also opens a live TDLib client and drives auth to WaitPhoneNumber; otherwise it shows a credentials or tdjson halt.
+The window is a GPUI Kit `Root` wrapping a mixed-height synthetic chat and composer. With credentials **and** tdjson available it also opens a live TDLib client and drives auth to WaitPhoneNumber; otherwise it shows a credentials or tdjson halt. Phone, verification code, and 2FA password fields submit the matching TDLib requests (`setAuthenticationPhoneNumber` / `checkAuthenticationCode` / `checkAuthenticationPassword`).
+
+Headless (no GPUI) live-connect check:
+
+```bash
+cargo run --no-default-features -- --connect-smoke
+```
+
+See `docs/credentials.md`. Requires `QUILL_TDJSON_PATH` and owner credentials. Prints one redacted line (`SMOKE_OK wait-phone` / `SMOKE_BLOCKED …`).
 
 ## Tests (Linux CI)
 
@@ -47,4 +55,5 @@ Provide **your own** `api_id` / `api_hash` from https://my.telegram.org (never c
 - macOS Keychain (or Linux `FileSecretStore` under the account app-data dir, mode 0600) holds the per-account database encryption key; `MemorySecretStore` is tests-only
 - `setTdlibParameters` uses the pinned signature with `use_secret_chats=false`
 - First request after `td_create_client_id` is `getAuthorizationState` so updates start
-- Phone submit sends `setAuthenticationPhoneNumber`; code / 2FA entry is still a follow-up
+- Phone submit sends `setAuthenticationPhoneNumber`; WaitCode / WaitPassword UI send `checkAuthenticationCode` / `checkAuthenticationPassword`
+- `quill --connect-smoke` is the headless gate (no window): credentials + `QUILL_TDJSON_PATH` → ingest until WaitPhoneNumber or a clear blocker (30s timeout)

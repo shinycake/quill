@@ -10,16 +10,24 @@ use quill::composer::should_send_on_enter;
 use quill::connect::{ConnectBlocker, ConnectGate, LiveConnect, evaluate_gate, start_live_connect};
 use quill::credentials::TelegramCredentials;
 use quill::diagnostics::{DiagnosticSink, MemorySink};
-#[cfg(target_os = "linux")]
-use quill::platform::FileSecretStore;
+use quill::platform::live_secret_store;
 use quill::telegram::envelope::AuthorizationState;
 use std::sync::Arc;
 use std::time::Duration;
 use synthetic::SyntheticChat;
+use zeroize::Zeroize;
 
 actions!(
     quill_ui,
-    [FocusSidebar, FocusComposer, LoadOlder, QuitApp, SubmitPhone]
+    [
+        FocusSidebar,
+        FocusComposer,
+        LoadOlder,
+        QuitApp,
+        SubmitPhone,
+        SubmitCode,
+        SubmitPassword
+    ]
 );
 
 pub fn bind_keys(cx: &mut App) {
@@ -43,6 +51,10 @@ pub enum ConnectUiStatus {
     RestoreBlocked(&'static str),
     /// Synthetic WaitPhoneNumber surface for screenshot proof (no live TDLib).
     DemoWaitPhone,
+    /// Synthetic WaitCode surface for screenshot proof (no live TDLib).
+    DemoWaitCode,
+    /// Synthetic WaitPassword surface for screenshot proof (no live TDLib).
+    DemoWaitPassword,
     Live,
 }
 
@@ -50,13 +62,15 @@ pub struct QuillApp {
     chat: Entity<SyntheticChat>,
     composer: Entity<TextareaState>,
     phone_input: Entity<TextareaState>,
+    code_input: Entity<TextareaState>,
+    password_input: Entity<TextareaState>,
     auth_demo: AuthorizationState,
     focus_sidebar: FocusHandle,
     connect_status: ConnectUiStatus,
     live: Option<LiveConnect>,
     status_note: String,
-    /// Screenshot / synthetic demo: show phone entry without a live client.
-    demo_show_phone: bool,
+    /// Screenshot / synthetic demo: show the matching auth field without a live client.
+    demo_auth_inputs: bool,
 }
 
 /// Forced UI surfaces for screenshot proof (no live Telegram / no real credentials).
@@ -64,6 +78,8 @@ pub struct QuillApp {
 pub enum ScreenshotDemo {
     NeedTdjson,
     WaitPhone,
+    WaitCode,
+    WaitPassword,
 }
 
 impl QuillApp {
@@ -91,6 +107,18 @@ impl QuillApp {
         let phone_input = cx.new(|cx| {
             TextareaState::new(window, cx)
                 .placeholder("Phone (+country code)")
+                .auto_grow(1, 1)
+                .submit_on_enter(true)
+        });
+        let code_input = cx.new(|cx| {
+            TextareaState::new(window, cx)
+                .placeholder("Verification code")
+                .auto_grow(1, 1)
+                .submit_on_enter(true)
+        });
+        let password_input = cx.new(|cx| {
+            TextareaState::new(window, cx)
+                .placeholder("Two-step password")
                 .auto_grow(1, 1)
                 .submit_on_enter(true)
         });
@@ -128,6 +156,36 @@ impl QuillApp {
             },
         )
         .detach();
+        cx.subscribe_in(
+            &code_input,
+            window,
+            |this, state, event: &InputEvent, window, cx| {
+                if let InputEvent::PressEnter { secondary, shift } = event {
+                    let marked = state.update(cx, |input, cx| input.marked_text_range(window, cx));
+                    if should_send_on_enter(quill::composer::enter_event_from_kit(
+                        *shift, *secondary, marked,
+                    )) {
+                        this.submit_code(window, cx);
+                    }
+                }
+            },
+        )
+        .detach();
+        cx.subscribe_in(
+            &password_input,
+            window,
+            |this, state, event: &InputEvent, window, cx| {
+                if let InputEvent::PressEnter { secondary, shift } = event {
+                    let marked = state.update(cx, |input, cx| input.marked_text_range(window, cx));
+                    if should_send_on_enter(quill::composer::enter_event_from_kit(
+                        *shift, *secondary, marked,
+                    )) {
+                        this.submit_password(window, cx);
+                    }
+                }
+            },
+        )
+        .detach();
 
         let (connect_status, live, status_note, auth_demo) = match demo {
             Some(ScreenshotDemo::NeedTdjson) => (
@@ -142,6 +200,22 @@ impl QuillApp {
                 "screenshot demo — WaitPhoneNumber (injected auth, no live Telegram)".into(),
                 AuthorizationState::WaitPhoneNumber,
             ),
+            Some(ScreenshotDemo::WaitCode) => (
+                ConnectUiStatus::DemoWaitCode,
+                None,
+                "screenshot demo — WaitCode (injected auth, no live Telegram)".into(),
+                AuthorizationState::WaitCode {
+                    code_length: Some(5),
+                },
+            ),
+            Some(ScreenshotDemo::WaitPassword) => (
+                ConnectUiStatus::DemoWaitPassword,
+                None,
+                "screenshot demo — WaitPassword (injected auth, no live Telegram)".into(),
+                AuthorizationState::WaitPassword {
+                    has_recovery_email: true,
+                },
+            ),
             None => bootstrap_connect(credentials),
         };
 
@@ -149,12 +223,21 @@ impl QuillApp {
             chat,
             composer,
             phone_input,
+            code_input,
+            password_input,
             auth_demo,
             focus_sidebar: cx.focus_handle(),
             connect_status,
             live,
             status_note,
-            demo_show_phone: matches!(demo, Some(ScreenshotDemo::WaitPhone)),
+            demo_auth_inputs: matches!(
+                demo,
+                Some(
+                    ScreenshotDemo::WaitPhone
+                        | ScreenshotDemo::WaitCode
+                        | ScreenshotDemo::WaitPassword
+                )
+            ),
         };
         if app.live.is_some() {
             app.spawn_poll_loop(cx);
@@ -186,14 +269,27 @@ impl QuillApp {
         let Some(live) = self.live.as_mut() else {
             return;
         };
+        let prev_auth = live.driver.session.auth.clone();
         let mut progressed = false;
+        let mut send_failed = false;
         while let Some(owned) = live.bridge.next_timeout(Duration::from_millis(0)) {
             if live.driver.ingest(owned).is_err() {
-                self.status_note = "failed to send TDLib request".into();
+                send_failed = true;
             }
             progressed = true;
         }
-        if progressed {
+        let err = live.driver.session.last_auth_error;
+        let new_auth = live.driver.session.auth.clone();
+        if send_failed {
+            self.status_note = "failed to send TDLib request".into();
+        } else if progressed {
+            if let Some(err) = err {
+                self.status_note = err.user_message().into();
+            } else if new_auth != prev_auth {
+                self.status_note = live_status_for(&new_auth);
+            }
+        }
+        if progressed || send_failed {
             cx.notify();
         }
     }
@@ -248,6 +344,58 @@ impl QuillApp {
         }
         cx.notify();
     }
+
+    fn submit_code(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(live) = self.live.as_mut() else {
+            return;
+        };
+        if !matches!(
+            live.driver.session.auth,
+            AuthorizationState::WaitCode { .. }
+        ) {
+            return;
+        }
+        let mut code = self.code_input.read(cx).value().to_string();
+        let result = live.driver.submit_code(&code);
+        code.zeroize();
+        match result {
+            Ok(_) => {
+                self.code_input
+                    .update(cx, |input, cx| input.set_value("", window, cx));
+                self.status_note = "code submitted — waiting for Telegram".into();
+            }
+            Err(_) => {
+                self.status_note = "could not submit code".into();
+            }
+        }
+        cx.notify();
+    }
+
+    fn submit_password(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(live) = self.live.as_mut() else {
+            return;
+        };
+        if !matches!(
+            live.driver.session.auth,
+            AuthorizationState::WaitPassword { .. }
+        ) {
+            return;
+        }
+        let mut password = self.password_input.read(cx).value().to_string();
+        let result = live.driver.submit_password(&password);
+        password.zeroize();
+        match result {
+            Ok(_) => {
+                self.password_input
+                    .update(cx, |input, cx| input.set_value("", window, cx));
+                self.status_note = "password submitted — waiting for Telegram".into();
+            }
+            Err(_) => {
+                self.status_note = "could not submit password".into();
+            }
+        }
+        cx.notify();
+    }
 }
 
 fn bootstrap_connect(
@@ -288,13 +436,8 @@ fn bootstrap_connect(
                 );
             };
             let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
-            #[cfg(target_os = "macos")]
-            let store = quill::platform::keychain::KeychainSecretStore;
-            #[cfg(target_os = "linux")]
-            let store = FileSecretStore::new(quill::settings::default_app_root());
-            #[cfg(not(any(target_os = "macos", target_os = "linux")))]
-            let store = quill::platform::MemorySecretStore::new();
-            match start_live_connect(credentials, &store, sink) {
+            let store = live_secret_store();
+            match start_live_connect(credentials, store.as_ref(), sink) {
                 Ok(live) => (
                     ConnectUiStatus::Live,
                     Some(live),
@@ -318,12 +461,35 @@ fn bootstrap_connect(
     }
 }
 
+fn live_status_for(auth: &AuthorizationState) -> String {
+    match auth {
+        AuthorizationState::WaitTdlibParameters => {
+            "TDLib connected — waiting for authorization updates".into()
+        }
+        AuthorizationState::WaitPhoneNumber => "enter phone number".into(),
+        AuthorizationState::WaitCode { .. } => "enter the verification code from Telegram".into(),
+        AuthorizationState::WaitPassword { .. } => {
+            "enter your two-step verification password".into()
+        }
+        AuthorizationState::Ready => "signed in — cloud chats only".into(),
+        AuthorizationState::WaitOtherDeviceConfirmation => {
+            "confirm on another device (QR payload is not logged)".into()
+        }
+        AuthorizationState::LoggingOut => "signing out".into(),
+        AuthorizationState::Closing => "TDLib is closing".into(),
+        AuthorizationState::Closed => "session closed".into(),
+        other => view_for(other).body,
+    }
+}
+
 impl Render for QuillApp {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let auth_state = self.current_auth();
         let auth = view_for(&auth_state);
-        let show_phone = (self.live.is_some() || self.demo_show_phone)
-            && matches!(auth.action, AuthAction::EnterPhone);
+        let inputs_live = self.live.is_some() || self.demo_auth_inputs;
+        let show_phone = inputs_live && matches!(auth.action, AuthAction::EnterPhone);
+        let show_code = inputs_live && matches!(auth.action, AuthAction::EnterCode);
+        let show_password = inputs_live && matches!(auth.action, AuthAction::EnterPassword);
         div()
             .flex()
             .flex_col()
@@ -347,6 +513,12 @@ impl Render for QuillApp {
             .on_action(cx.listener(|this, _: &SubmitPhone, window, cx| {
                 this.submit_phone(window, cx);
             }))
+            .on_action(cx.listener(|this, _: &SubmitCode, window, cx| {
+                this.submit_code(window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &SubmitPassword, window, cx| {
+                this.submit_password(window, cx);
+            }))
             .child(title_bar(self.live.is_some(), cx))
             .child(
                 div()
@@ -360,6 +532,10 @@ impl Render for QuillApp {
                         &self.status_note,
                         show_phone,
                         &self.phone_input,
+                        show_code,
+                        &self.code_input,
+                        show_password,
+                        &self.password_input,
                         &self.focus_sidebar,
                         cx,
                     ))
@@ -448,6 +624,10 @@ fn sidebar(
     status_note: &str,
     show_phone: bool,
     phone_input: &Entity<TextareaState>,
+    show_code: bool,
+    code_input: &Entity<TextareaState>,
+    show_password: bool,
+    password_input: &Entity<TextareaState>,
     focus: &FocusHandle,
     cx: &mut Context<QuillApp>,
 ) -> impl IntoElement {
@@ -499,6 +679,42 @@ fn sidebar(
                         })),
                 )
         })
+        .when(show_code, |this| {
+            this.child(div().mt_2().font_semibold().text_sm().child("Code"))
+                .child(Textarea::new(code_input).h(px(40.)))
+                .child(
+                    Button::new("submit-code")
+                        .label("Submit code")
+                        .ghost()
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.submit_code(window, cx);
+                        })),
+                )
+        })
+        .when(show_password, |this| {
+            this.child(
+                div()
+                    .mt_2()
+                    .font_semibold()
+                    .text_sm()
+                    .child("Two-step password"),
+            )
+            .child(Textarea::new(password_input).h(px(40.)))
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("Sent to TDLib only — never logged"),
+            )
+            .child(
+                Button::new("submit-password")
+                    .label("Submit password")
+                    .ghost()
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.submit_password(window, cx);
+                    })),
+            )
+        })
 }
 
 fn chat_row(
@@ -532,6 +748,8 @@ fn auth_action_note(auth: &AuthView, connect_status: &ConnectUiStatus) -> impl I
         ConnectUiStatus::NeedTdjson => "need tdjson",
         ConnectUiStatus::RestoreBlocked(_) => "restore blocked",
         ConnectUiStatus::DemoWaitPhone => "demo wait-phone",
+        ConnectUiStatus::DemoWaitCode => "demo wait-code",
+        ConnectUiStatus::DemoWaitPassword => "demo wait-password",
         ConnectUiStatus::Live => "live TDLib",
     };
     let label = match &auth.action {
@@ -557,6 +775,10 @@ fn connect_status_label(status: &ConnectUiStatus) -> String {
         ConnectUiStatus::RestoreBlocked(msg) => format!("credentials loaded · {msg}"),
         ConnectUiStatus::DemoWaitPhone => {
             "credentials loaded · WaitPhoneNumber (screenshot demo)".into()
+        }
+        ConnectUiStatus::DemoWaitCode => "credentials loaded · WaitCode (screenshot demo)".into(),
+        ConnectUiStatus::DemoWaitPassword => {
+            "credentials loaded · WaitPassword (screenshot demo)".into()
         }
         ConnectUiStatus::Live => "credentials loaded · TDLib live".into(),
     }
