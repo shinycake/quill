@@ -44,7 +44,7 @@ The loader searches, in order: `QUILL_TDJSON_PATH`, then paths relative to the e
 
 Provide **your own** `api_id` / `api_hash` from https://my.telegram.org (never commit them) and a local tdjson build:
 
-- macOS Keychain (or `MemorySecretStore` on Linux) holds the per-account database encryption key
+- macOS Keychain (or Linux `FileSecretStore` under the account app-data dir, mode 0600) holds the per-account database encryption key; `MemorySecretStore` is tests-only
 - `setTdlibParameters` uses the pinned signature with `use_secret_chats=false`
 - First request after `td_create_client_id` is `getAuthorizationState` so updates start
 - Phone submit sends `setAuthenticationPhoneNumber`; code / 2FA entry is still a follow-up

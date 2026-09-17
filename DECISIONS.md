@@ -21,7 +21,7 @@ Research snapshot 2026-09-16, pin recheck **2026-09-17**.
 - Composer send policy is tested without GPU: IME composition and Shift/secondary Enter do not send.
 - Kit `InputEvent::PressEnter` (**gpui-base 0.6.1**) has `{ secondary, shift }` only — no composing flag. `InputBaseState::enter` always emits `PressEnter` and does **not** consult `ime_marked_range` (Escape does). Quill reads `EntityInputHandler::marked_text_range` at PressEnter time via `enter_event_from_kit`. Do not hardcode `composing: false`.
 - **VoiceOver** is a manual macOS follow-up. This agent has no GUI/VoiceOver runner on Linux. Do not claim the Phase 0 a11y gate until a Mac session records it.
-- **Screenshots:** real GPUI window on Linux xvfb + lavapipe, `docs/screenshots/synthetic-chat.png` (plus composer and unsupported-auth shots). The stray “X” in an early capture was the X11 cursor, not a jump button. VoiceOver remains a macOS follow-up.
+- **Screenshots:** real GPUI window on Linux xvfb + lavapipe, `docs/screenshots/synthetic-chat.png` (plus composer and unsupported-auth shots), plus connect surfaces `connect-need-tdjson.png` / `connect-wait-phone.png` via `quill --screenshot-demo` + `scripts/capture-connect-screenshots.sh`. The stray “X” in an early capture was the X11 cursor, not a jump button. VoiceOver remains a macOS follow-up.
 
 ## TDLib
 
@@ -36,10 +36,17 @@ Research snapshot 2026-09-16, pin recheck **2026-09-17**.
 ## Phase 1 (no secrets)
 
 - Account-scoped directories under the app data dir.
-- Database key: 32 random bytes in Keychain on macOS (`org.shinycake.quill` / `db-key:{account}`); `MemorySecretStore` + tests elsewhere. `KeychainSecretStore::get` maps `errSecItemNotFound` to missing (`Ok(None)`) and user-cancel / auth-failed / interaction-not-allowed / keychain-unavailable to `Locked`. Missing key + existing DB → halt, never mint a replacement.
+- Database key: 32 random bytes in Keychain on macOS (`org.shinycake.quill` / `db-key:{account}`). **Linux live path:** `FileSecretStore` — `{app_data}/accounts/{account}/db-encryption.key`, mode `0600`, zeroize after read into `DatabaseKey`. `MemorySecretStore` is **tests only** (not `bootstrap_connect` on Linux). `KeychainSecretStore::get` maps `errSecItemNotFound` to missing (`Ok(None)`) and user-cancel / auth-failed / interaction-not-allowed / keychain-unavailable to `Locked`. Missing key + existing DB → halt, never mint a replacement.
 - Auth view is a pure function of `updateAuthorizationState`. Premium / email / registration / unknown → unsupported halt UI. No payments, auto-register, or password reset.
 - Chat list / history / send reducers with replay fixtures. Logout invalidates pending requests. Close ≠ logOut.
 - Credentials load from owner `TELEGRAM_API_ID` / `TELEGRAM_API_HASH` (or local gitignored env files). Connect path: `evaluate_gate` → `prepare_connect` (paths + DB key) → `LiveTdJson` + `setTdlibParameters` → session auth reducers. Phone submit sends `setAuthenticationPhoneNumber` (code/2FA still manual). Never pasted into this repo.
+
+
+## Linux DB key persistence (2026-09-17)
+
+- **Problem:** `bootstrap_connect` used process-local `MemorySecretStore` on Linux. First live run minted a TDLib DB encryption key, then lost it on quit → `MissingKeyAgainstExistingDb` on the next launch.
+- **Decision:** `FileSecretStore` under the account-scoped app data dir (`directories` ProjectDirs / `Quill`), file `db-encryption.key`, `0600`, atomic write (temp + rename), zeroize the read buffer after constructing `DatabaseKey`. Wired as the Linux live-connect store; macOS stays Keychain.
+- **Tests:** round-trip across a new store instance (simulates restart); `MissingAgainstExistingDb` when the key file is absent but `tdlib/` already exists; mode `0600` asserted on Unix.
 
 ## Licenses
 

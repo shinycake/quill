@@ -1,11 +1,15 @@
 //! OS credential store for the TDLib database encryption key.
 //!
-//! macOS uses Keychain. Other platforms expose an in-memory / test stub.
+//! macOS uses Keychain. Linux uses a 0600 file under the account-scoped app data
+//! directory (`FileSecretStore`). `MemorySecretStore` remains for unit tests only
+//! and must not be the live-connect path on Linux.
 //! A missing or locked item must never be replaced silently against an existing DB.
 
 use crate::ids::AccountKey;
+use crate::settings::AccountPaths;
 use rand::RngCore;
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use thiserror::Error;
 use zeroize::{Zeroize, ZeroizeOnDrop};
@@ -63,7 +67,7 @@ pub trait SecretStore: Send + Sync {
     fn delete(&self, account: &AccountKey) -> Result<(), SecretStoreError>;
 }
 
-/// In-memory store used by tests and non-macOS developer builds.
+/// In-memory store for unit tests. Not used for live connect on Linux or macOS.
 #[derive(Clone, Default)]
 pub struct MemorySecretStore {
     inner: Arc<Mutex<HashMap<String, Vec<u8>>>>,
@@ -114,6 +118,103 @@ impl SecretStore for MemorySecretStore {
         self.inner.lock().expect("store").remove(&account.0);
         Ok(())
     }
+}
+
+/// Persistent file-backed store for Linux (and other non-Keychain hosts in tests).
+///
+/// Key path: `{app_root}/accounts/{account}/db-encryption.key`, mode `0600`.
+/// Bytes read from disk are zeroized after copying into `DatabaseKey`.
+#[derive(Clone, Debug)]
+pub struct FileSecretStore {
+    app_root: PathBuf,
+}
+
+impl FileSecretStore {
+    pub fn new(app_root: impl Into<PathBuf>) -> Self {
+        Self {
+            app_root: app_root.into(),
+        }
+    }
+
+    pub fn app_root(&self) -> &Path {
+        &self.app_root
+    }
+
+    pub(crate) fn key_path(&self, account: &AccountKey) -> PathBuf {
+        AccountPaths::for_root(&self.app_root, account)
+            .root
+            .join("db-encryption.key")
+    }
+}
+
+impl SecretStore for FileSecretStore {
+    fn get(&self, account: &AccountKey) -> Result<Option<DatabaseKey>, SecretStoreError> {
+        let path = self.key_path(account);
+        if !path.exists() {
+            return Ok(None);
+        }
+        let mut bytes = std::fs::read(&path).map_err(|_| SecretStoreError::Platform)?;
+        let key = DatabaseKey::from_bytes(bytes.clone());
+        bytes.zeroize();
+        Ok(Some(key?))
+    }
+
+    fn put(&self, account: &AccountKey, key: &DatabaseKey) -> Result<(), SecretStoreError> {
+        let path = self.key_path(account);
+        let parent = path.parent().ok_or(SecretStoreError::Platform)?;
+        std::fs::create_dir_all(parent).map_err(|_| SecretStoreError::Platform)?;
+        let tmp = path.with_extension("key.tmp");
+        write_key_file_0600(&tmp, key.as_bytes())?;
+        std::fs::rename(&tmp, &path).map_err(|_| SecretStoreError::Platform)?;
+        set_mode_0600(&path)?;
+        Ok(())
+    }
+
+    fn delete(&self, account: &AccountKey) -> Result<(), SecretStoreError> {
+        let path = self.key_path(account);
+        match std::fs::remove_file(&path) {
+            Ok(()) => Ok(()),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(_) => Err(SecretStoreError::Platform),
+        }
+    }
+}
+
+fn write_key_file_0600(path: &Path, bytes: &[u8]) -> Result<(), SecretStoreError> {
+    use std::io::Write;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(path)
+            .map_err(|_| SecretStoreError::Platform)?;
+        file.write_all(bytes)
+            .map_err(|_| SecretStoreError::Platform)?;
+        file.sync_all().map_err(|_| SecretStoreError::Platform)?;
+    }
+    #[cfg(not(unix))]
+    {
+        let mut file = std::fs::File::create(path).map_err(|_| SecretStoreError::Platform)?;
+        file.write_all(bytes)
+            .map_err(|_| SecretStoreError::Platform)?;
+        file.sync_all().map_err(|_| SecretStoreError::Platform)?;
+    }
+    set_mode_0600(path)
+}
+
+fn set_mode_0600(path: &Path) -> Result<(), SecretStoreError> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let perms = std::fs::Permissions::from_mode(0o600);
+        std::fs::set_permissions(path, perms).map_err(|_| SecretStoreError::Platform)?;
+    }
+    let _ = path;
+    Ok(())
 }
 
 pub fn account_item_name(account: &AccountKey) -> String {
@@ -277,5 +378,78 @@ mod tests {
             map_keychain_get_error(-50),
             Err(SecretStoreError::Platform)
         ));
+    }
+
+    fn tmp_app_root(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "quill-file-store-{}-{}-{}",
+            tag,
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn file_store_round_trip_survives_new_store_instance() {
+        let root = tmp_app_root("roundtrip");
+        let account = AccountKey::primary();
+        let key = DatabaseKey::generate();
+        {
+            let store = FileSecretStore::new(&root);
+            store.put(&account, &key).unwrap();
+        }
+        // Simulate process restart: new store, same app_root on disk.
+        let store = FileSecretStore::new(&root);
+        let loaded = store.get(&account).unwrap().expect("persisted key");
+        assert_eq!(loaded.as_bytes(), key.as_bytes());
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let path = root
+                .join("accounts")
+                .join(&account.0)
+                .join("db-encryption.key");
+            let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o600, "key file must be owner-read/write only");
+        }
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn file_store_missing_against_existing_db_does_not_mint() {
+        let root = tmp_app_root("missing-db");
+        let account = AccountKey::primary();
+        let paths = AccountPaths::for_root(&root, &account);
+        std::fs::create_dir_all(&paths.tdlib_database).unwrap();
+        std::fs::write(paths.tdlib_database.join("td.binlog"), b"x").unwrap();
+        assert!(paths.database_exists());
+
+        let store = FileSecretStore::new(&root);
+        assert!(store.get(&account).unwrap().is_none());
+        let err = load_or_create_key(&store, &account, true).unwrap_err();
+        assert_eq!(err, KeyDecision::MissingAgainstExistingDb);
+        assert!(store.get(&account).unwrap().is_none());
+        assert!(!store.key_path(&account).exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn file_store_creates_key_for_fresh_account() {
+        let root = tmp_app_root("fresh");
+        let account = AccountKey::primary();
+        let store = FileSecretStore::new(&root);
+        let key = load_or_create_key(&store, &account, false).unwrap();
+        let again = FileSecretStore::new(&root)
+            .get(&account)
+            .unwrap()
+            .expect("key on disk");
+        assert_eq!(again.as_bytes(), key.as_bytes());
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

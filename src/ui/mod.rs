@@ -10,7 +10,8 @@ use quill::composer::should_send_on_enter;
 use quill::connect::{ConnectBlocker, ConnectGate, LiveConnect, evaluate_gate, start_live_connect};
 use quill::credentials::TelegramCredentials;
 use quill::diagnostics::{DiagnosticSink, MemorySink};
-use quill::platform::MemorySecretStore;
+#[cfg(target_os = "linux")]
+use quill::platform::FileSecretStore;
 use quill::telegram::envelope::AuthorizationState;
 use std::sync::Arc;
 use std::time::Duration;
@@ -40,6 +41,8 @@ pub enum ConnectUiStatus {
     NeedCredentials,
     NeedTdjson,
     RestoreBlocked(&'static str),
+    /// Synthetic WaitPhoneNumber surface for screenshot proof (no live TDLib).
+    DemoWaitPhone,
     Live,
 }
 
@@ -52,6 +55,15 @@ pub struct QuillApp {
     connect_status: ConnectUiStatus,
     live: Option<LiveConnect>,
     status_note: String,
+    /// Screenshot / synthetic demo: show phone entry without a live client.
+    demo_show_phone: bool,
+}
+
+/// Forced UI surfaces for screenshot proof (no live Telegram / no real credentials).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ScreenshotDemo {
+    NeedTdjson,
+    WaitPhone,
 }
 
 impl QuillApp {
@@ -60,7 +72,16 @@ impl QuillApp {
         cx: &mut Context<Self>,
         credentials: Option<TelegramCredentials>,
     ) -> Self {
-        let chat = cx.new(|cx| SyntheticChat::new(cx));
+        Self::new_with_demo(window, cx, credentials, None)
+    }
+
+    pub fn new_with_demo(
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        credentials: Option<TelegramCredentials>,
+        demo: Option<ScreenshotDemo>,
+    ) -> Self {
+        let chat = cx.new(SyntheticChat::new);
         let composer = cx.new(|cx| {
             TextareaState::new(window, cx)
                 .placeholder("Message — Enter sends, Shift+Enter newline. IME Enter must not send.")
@@ -108,7 +129,21 @@ impl QuillApp {
         )
         .detach();
 
-        let (connect_status, live, status_note, auth_demo) = bootstrap_connect(credentials);
+        let (connect_status, live, status_note, auth_demo) = match demo {
+            Some(ScreenshotDemo::NeedTdjson) => (
+                ConnectUiStatus::NeedTdjson,
+                None,
+                ConnectBlocker::MissingTdjson.user_message().into(),
+                AuthorizationState::WaitPhoneNumber,
+            ),
+            Some(ScreenshotDemo::WaitPhone) => (
+                ConnectUiStatus::DemoWaitPhone,
+                None,
+                "screenshot demo — WaitPhoneNumber (injected auth, no live Telegram)".into(),
+                AuthorizationState::WaitPhoneNumber,
+            ),
+            None => bootstrap_connect(credentials),
+        };
 
         let mut app = Self {
             chat,
@@ -119,6 +154,7 @@ impl QuillApp {
             connect_status,
             live,
             status_note,
+            demo_show_phone: matches!(demo, Some(ScreenshotDemo::WaitPhone)),
         };
         if app.live.is_some() {
             app.spawn_poll_loop(cx);
@@ -254,8 +290,10 @@ fn bootstrap_connect(
             let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
             #[cfg(target_os = "macos")]
             let store = quill::platform::keychain::KeychainSecretStore;
-            #[cfg(not(target_os = "macos"))]
-            let store = MemorySecretStore::new();
+            #[cfg(target_os = "linux")]
+            let store = FileSecretStore::new(quill::settings::default_app_root());
+            #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+            let store = quill::platform::MemorySecretStore::new();
             match start_live_connect(credentials, &store, sink) {
                 Ok(live) => (
                     ConnectUiStatus::Live,
@@ -284,7 +322,8 @@ impl Render for QuillApp {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let auth_state = self.current_auth();
         let auth = view_for(&auth_state);
-        let show_phone = self.live.is_some() && matches!(auth.action, AuthAction::EnterPhone);
+        let show_phone = (self.live.is_some() || self.demo_show_phone)
+            && matches!(auth.action, AuthAction::EnterPhone);
         div()
             .flex()
             .flex_col()
@@ -492,6 +531,7 @@ fn auth_action_note(auth: &AuthView, connect_status: &ConnectUiStatus) -> impl I
         ConnectUiStatus::NeedCredentials => "need credentials",
         ConnectUiStatus::NeedTdjson => "need tdjson",
         ConnectUiStatus::RestoreBlocked(_) => "restore blocked",
+        ConnectUiStatus::DemoWaitPhone => "demo wait-phone",
         ConnectUiStatus::Live => "live TDLib",
     };
     let label = match &auth.action {
@@ -515,6 +555,9 @@ fn connect_status_label(status: &ConnectUiStatus) -> String {
             "credentials loaded · tdjson missing (QUILL_TDJSON_PATH / bundle)".into()
         }
         ConnectUiStatus::RestoreBlocked(msg) => format!("credentials loaded · {msg}"),
+        ConnectUiStatus::DemoWaitPhone => {
+            "credentials loaded · WaitPhoneNumber (screenshot demo)".into()
+        }
         ConnectUiStatus::Live => "credentials loaded · TDLib live".into(),
     }
 }
