@@ -10,7 +10,7 @@ pub use envelope::{
 };
 pub use ffi::{LibraryOrigin, TdJson, loaded_library_origin, resolve_tdjson_path};
 pub use requests::{
-    SetTdlibParameters, check_authentication_code, check_authentication_password, close_request,
-    get_authorization_state, get_chat_history, load_chats, log_out, send_text,
-    set_authentication_phone_number,
+    SetTdlibParameters, check_authentication_code, check_authentication_password, close_chat,
+    close_request, get_authorization_state, get_chat_history, load_chats, log_out, open_chat,
+    send_text, set_authentication_phone_number, view_messages,
 };

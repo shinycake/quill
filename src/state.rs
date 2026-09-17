@@ -19,6 +19,9 @@ pub enum RequestPurpose {
     LoadChats,
     GetHistory,
     SendText,
+    OpenChat,
+    CloseChat,
+    ViewMessages,
     Close,
     LogOut,
     Other,
@@ -133,12 +136,48 @@ impl RequestRegistry {
     }
 }
 
+/// Outgoing read-receipt state from `last_read_outbox_message_id`.
+/// Schema supports this; `0` means nothing outgoing has been read yet.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OutboxReceipt {
+    /// Not an outgoing server message (incoming or still pending).
+    None,
+    /// Reached the server; peer has not read past this id.
+    Sent,
+    /// `last_read_outbox_message_id` is >= this outgoing id.
+    Read,
+}
+
+/// Badge label for the chat list. `None` when the chat is fully read.
+pub fn unread_badge_text(count: i32) -> Option<String> {
+    if count <= 0 {
+        None
+    } else if count > 99 {
+        Some("99+".into())
+    } else {
+        Some(count.to_string())
+    }
+}
+
+pub fn outgoing_status_label(pending: bool, receipt: OutboxReceipt) -> &'static str {
+    if pending {
+        "You (sending)"
+    } else {
+        match receipt {
+            OutboxReceipt::Read => "You · read",
+            OutboxReceipt::Sent | OutboxReceipt::None => "You · sent",
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ChatSummary {
     pub id: ChatId,
     pub title: String,
     pub kind: ChatKind,
     pub unread_count: i32,
+    pub last_read_inbox_message_id: MessageId,
+    pub last_read_outbox_message_id: MessageId,
     pub order: i64,
     pub is_pinned: bool,
     pub in_main_list: bool,
@@ -163,6 +202,19 @@ impl ChatSummary {
         }
         "cloud chat".into()
     }
+
+    pub fn outbox_receipt(&self, message: &HistoryMessage) -> OutboxReceipt {
+        if !message.is_outgoing || message.pending {
+            return OutboxReceipt::None;
+        }
+        if self.last_read_outbox_message_id.0 > 0
+            && message.id.0 <= self.last_read_outbox_message_id.0
+        {
+            OutboxReceipt::Read
+        } else {
+            OutboxReceipt::Sent
+        }
+    }
 }
 
 fn placeholder_chat(chat_id: ChatId) -> ChatSummary {
@@ -171,6 +223,8 @@ fn placeholder_chat(chat_id: ChatId) -> ChatSummary {
         title: format!("chat {}", chat_id.0),
         kind: ChatKind::Unknown,
         unread_count: 0,
+        last_read_inbox_message_id: MessageId(0),
+        last_read_outbox_message_id: MessageId(0),
         order: 0,
         is_pinned: false,
         in_main_list: false,
@@ -200,6 +254,10 @@ pub struct HistoryState {
     pub tombstones: HashSet<i64>,
     pub loaded_complete: bool,
     pub view_generation: ViewGeneration,
+    /// Message ids TDLib has accepted for `viewMessages` this open generation.
+    pub viewed: HashSet<i64>,
+    /// In-flight `viewMessages` ids. Cleared on send failure or TDLib error so we can retry.
+    pub viewing: HashSet<i64>,
 }
 
 impl HistoryState {
@@ -324,6 +382,8 @@ impl Session {
                 title,
                 kind,
                 unread_count,
+                last_read_inbox_message_id,
+                last_read_outbox_message_id,
             } => {
                 let chat = self
                     .chats
@@ -332,6 +392,8 @@ impl Session {
                 chat.title = title;
                 chat.kind = kind;
                 chat.unread_count = unread_count;
+                chat.last_read_inbox_message_id = last_read_inbox_message_id;
+                chat.last_read_outbox_message_id = last_read_outbox_message_id;
             }
             EnvelopePayload::UpdateChatTitle { chat_id, title } => {
                 self.chats
@@ -341,12 +403,24 @@ impl Session {
             }
             EnvelopePayload::UpdateChatReadInbox {
                 chat_id,
+                last_read_inbox_message_id,
                 unread_count,
+            } => {
+                let chat = self
+                    .chats
+                    .entry(chat_id.0)
+                    .or_insert_with(|| placeholder_chat(chat_id));
+                chat.last_read_inbox_message_id = last_read_inbox_message_id;
+                chat.unread_count = unread_count;
+            }
+            EnvelopePayload::UpdateChatReadOutbox {
+                chat_id,
+                last_read_outbox_message_id,
             } => {
                 self.chats
                     .entry(chat_id.0)
                     .or_insert_with(|| placeholder_chat(chat_id))
-                    .unread_count = unread_count;
+                    .last_read_outbox_message_id = last_read_outbox_message_id;
             }
             EnvelopePayload::UpdateChatAddedToList { chat_id, list } => {
                 if list == ChatList::Main {
@@ -470,6 +544,11 @@ impl Session {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::LoadChats) {
                     // A short OK is not exhaustion; 404 is.
                 }
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::ViewMessages)
+                    && let Some(chat_id) = pending.and_then(|p| p.chat_id)
+                {
+                    self.commit_viewed(chat_id);
+                }
                 if pending.is_some_and(|p| is_auth_submit(p.purpose)) {
                     self.last_auth_error = None;
                 }
@@ -478,6 +557,11 @@ impl Session {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::LoadChats) && err.code == 404
                 {
                     self.chats_exhausted = true;
+                }
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::ViewMessages)
+                    && let Some(chat_id) = pending.and_then(|p| p.chat_id)
+                {
+                    self.abort_viewing(chat_id);
                 }
                 if let Some(pending) = pending
                     && is_auth_submit(pending.purpose)
@@ -575,7 +659,54 @@ impl Session {
     pub fn open_chat(&mut self, chat_id: ChatId) {
         self.open_chat = Some(chat_id);
         self.view_generation.bump();
-        self.histories.entry(chat_id.0).or_default().view_generation = self.view_generation;
+        let history = self.histories.entry(chat_id.0).or_default();
+        history.view_generation = self.view_generation;
+        history.viewed.clear();
+        history.viewing.clear();
+    }
+
+    /// Server message ids in the open history that have not yet been sent to `viewMessages`.
+    pub fn message_ids_to_view(&self, chat_id: ChatId) -> Vec<MessageId> {
+        let Some(history) = self.histories.get(&chat_id.0) else {
+            return Vec::new();
+        };
+        history
+            .messages
+            .values()
+            .filter(|message| {
+                message.id.0 > 0
+                    && !history.viewed.contains(&message.id.0)
+                    && !history.viewing.contains(&message.id.0)
+            })
+            .map(|message| message.id)
+            .collect()
+    }
+
+    pub fn mark_viewed(&mut self, chat_id: ChatId, ids: &[MessageId]) {
+        let history = self.histories.entry(chat_id.0).or_default();
+        for id in ids {
+            history.viewing.remove(&id.0);
+            history.viewed.insert(id.0);
+        }
+    }
+
+    /// After a successful `viewMessages` send, hold ids until TDLib ok/error.
+    pub fn begin_viewing(&mut self, chat_id: ChatId, ids: &[MessageId]) {
+        let history = self.histories.entry(chat_id.0).or_default();
+        for id in ids {
+            history.viewing.insert(id.0);
+        }
+    }
+
+    fn commit_viewed(&mut self, chat_id: ChatId) {
+        let history = self.histories.entry(chat_id.0).or_default();
+        history.viewed.extend(history.viewing.drain());
+    }
+
+    fn abort_viewing(&mut self, chat_id: ChatId) {
+        if let Some(history) = self.histories.get_mut(&chat_id.0) {
+            history.viewing.clear();
+        }
     }
 
     pub fn ordered_chats(&self) -> Vec<&ChatSummary> {
@@ -982,6 +1113,7 @@ mod tests {
         let chat = session.chats.get(&4).unwrap();
         assert_eq!(chat.title, "new title");
         assert_eq!(chat.unread_count, 7);
+        assert_eq!(chat.last_read_inbox_message_id.0, 1);
         assert!(chat.in_main_list);
         apply_json(
             &mut session,
@@ -1016,5 +1148,172 @@ mod tests {
         );
         assert!(session.last_auth_error.is_none());
         assert!(!sink.rendered().contains("CANARY_PW"));
+    }
+
+    #[test]
+    fn unread_badge_hides_when_zero_and_caps_at_99() {
+        assert_eq!(unread_badge_text(0), None);
+        assert_eq!(unread_badge_text(-1), None);
+        assert_eq!(unread_badge_text(1).as_deref(), Some("1"));
+        assert_eq!(unread_badge_text(3).as_deref(), Some("3"));
+        assert_eq!(unread_badge_text(99).as_deref(), Some("99"));
+        assert_eq!(unread_badge_text(100).as_deref(), Some("99+"));
+    }
+
+    #[test]
+    fn read_inbox_and_outbox_update_cursors() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateNewChat","chat":{"id":4,"title":"inbox","type":{"@type":"chatTypePrivate","user_id":4},"unread_count":3,"last_read_inbox_message_id":10,"last_read_outbox_message_id":0}}"#,
+        );
+        let chat = session.chats.get(&4).unwrap();
+        assert_eq!(chat.unread_count, 3);
+        assert_eq!(chat.last_read_inbox_message_id.0, 10);
+        assert_eq!(chat.last_read_outbox_message_id.0, 0);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateChatReadInbox","chat_id":4,"last_read_inbox_message_id":13,"unread_count":0}"#,
+        );
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateChatReadOutbox","chat_id":4,"last_read_outbox_message_id":12}"#,
+        );
+        let chat = session.chats.get(&4).unwrap();
+        assert_eq!(chat.unread_count, 0);
+        assert_eq!(unread_badge_text(chat.unread_count), None);
+        assert_eq!(chat.last_read_inbox_message_id.0, 13);
+        assert_eq!(chat.last_read_outbox_message_id.0, 12);
+        assert!(!sink.rendered().contains("CANARY"));
+    }
+
+    #[test]
+    fn outbox_receipt_is_honest_when_cursor_is_zero() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        session.open_chat(ChatId(1));
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateNewChat","chat":{"id":1,"title":"dm","type":{"@type":"chatTypePrivate","user_id":1},"unread_count":0,"last_read_outbox_message_id":0}}"#,
+        );
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateNewMessage","message":{"id":20,"chat_id":1,"is_outgoing":true,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"CANARY_OUTBOX_hi","entities":[]}}}}"#,
+        );
+        let chat = session.chats.get(&1).unwrap();
+        let message = session
+            .histories
+            .get(&1)
+            .unwrap()
+            .messages
+            .get(&20)
+            .unwrap();
+        assert_eq!(chat.outbox_receipt(message), OutboxReceipt::Sent);
+        assert_eq!(
+            outgoing_status_label(false, chat.outbox_receipt(message)),
+            "You · sent"
+        );
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateChatReadOutbox","chat_id":1,"last_read_outbox_message_id":20}"#,
+        );
+        let chat = session.chats.get(&1).unwrap();
+        let message = session
+            .histories
+            .get(&1)
+            .unwrap()
+            .messages
+            .get(&20)
+            .unwrap();
+        assert_eq!(chat.outbox_receipt(message), OutboxReceipt::Read);
+        assert_eq!(
+            outgoing_status_label(false, chat.outbox_receipt(message)),
+            "You · read"
+        );
+        assert_eq!(
+            outgoing_status_label(true, OutboxReceipt::None),
+            "You (sending)"
+        );
+        assert!(!sink.rendered().contains("CANARY_OUTBOX"));
+    }
+
+    #[test]
+    fn opening_a_chat_clears_viewed_ids_for_that_generation() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        session.open_chat(ChatId(1));
+        session.mark_viewed(ChatId(1), &[MessageId(5)]);
+        assert!(session.histories.get(&1).unwrap().viewed.contains(&5));
+        session.open_chat(ChatId(1));
+        assert!(session.histories.get(&1).unwrap().viewed.is_empty());
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateNewMessage","message":{"id":5,"chat_id":1,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"hi","entities":[]}}}}"#,
+        );
+        assert_eq!(session.message_ids_to_view(ChatId(1)), vec![MessageId(5)]);
+        session.mark_viewed(ChatId(1), &[MessageId(5)]);
+        assert!(session.message_ids_to_view(ChatId(1)).is_empty());
+    }
+
+    #[test]
+    fn view_messages_tdlib_error_releases_in_flight_ids() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        session.open_chat(ChatId(1));
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateNewMessage","message":{"id":5,"chat_id":1,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"hi","entities":[]}}}}"#,
+        );
+        let extra = session.request(RequestPurpose::ViewMessages, Some(ChatId(1)));
+        session.begin_viewing(ChatId(1), &[MessageId(5)]);
+        assert!(session.message_ids_to_view(ChatId(1)).is_empty());
+        assert!(
+            session
+                .requests
+                .has_purpose_for_chat(RequestPurpose::ViewMessages, ChatId(1))
+        );
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"error","code":400,"message":"CANARY_VIEW_FAIL","@extra":"{}"}}"#,
+                extra.0
+            ),
+        );
+        assert!(!session.requests.has_purpose(RequestPurpose::ViewMessages));
+        assert_eq!(session.message_ids_to_view(ChatId(1)), vec![MessageId(5)]);
+        assert!(session.histories.get(&1).unwrap().viewing.is_empty());
+        assert!(!session.histories.get(&1).unwrap().viewed.contains(&5));
+        assert!(!sink.rendered().contains("CANARY_VIEW_FAIL"));
+
+        let extra = session.request(RequestPurpose::ViewMessages, Some(ChatId(1)));
+        session.begin_viewing(ChatId(1), &[MessageId(5)]);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
+        );
+        assert!(session.message_ids_to_view(ChatId(1)).is_empty());
+        assert!(session.histories.get(&1).unwrap().viewed.contains(&5));
+        assert!(session.histories.get(&1).unwrap().viewing.is_empty());
     }
 }

@@ -54,7 +54,12 @@ pub enum EnvelopePayload {
     },
     UpdateChatReadInbox {
         chat_id: ChatId,
+        last_read_inbox_message_id: MessageId,
         unread_count: i32,
+    },
+    UpdateChatReadOutbox {
+        chat_id: ChatId,
+        last_read_outbox_message_id: MessageId,
     },
     UpdateConnectionState(ConnectionState),
     UpdateNewChat {
@@ -62,6 +67,8 @@ pub enum EnvelopePayload {
         title: String,
         kind: ChatKind,
         unread_count: i32,
+        last_read_inbox_message_id: MessageId,
+        last_read_outbox_message_id: MessageId,
     },
     Ok,
     Error(TdError),
@@ -316,10 +323,19 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
         }),
         "updateChatReadInbox" => Ok(EnvelopePayload::UpdateChatReadInbox {
             chat_id: ChatId(int53(value.get("chat_id"))?),
+            last_read_inbox_message_id: MessageId(int53_or_zero(
+                value.get("last_read_inbox_message_id"),
+            )),
             unread_count: value
                 .get("unread_count")
                 .and_then(Value::as_i64)
                 .unwrap_or(0) as i32,
+        }),
+        "updateChatReadOutbox" => Ok(EnvelopePayload::UpdateChatReadOutbox {
+            chat_id: ChatId(int53(value.get("chat_id"))?),
+            last_read_outbox_message_id: MessageId(int53_or_zero(
+                value.get("last_read_outbox_message_id"),
+            )),
         }),
         "updateConnectionState" => Ok(EnvelopePayload::UpdateConnectionState(parse_connection(
             value.get("state"),
@@ -338,6 +354,12 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
                     .get("unread_count")
                     .and_then(Value::as_i64)
                     .unwrap_or(0) as i32,
+                last_read_inbox_message_id: MessageId(int53_or_zero(
+                    chat.get("last_read_inbox_message_id"),
+                )),
+                last_read_outbox_message_id: MessageId(int53_or_zero(
+                    chat.get("last_read_outbox_message_id"),
+                )),
             })
         }
         "ok" => Ok(EnvelopePayload::Ok),
@@ -530,6 +552,10 @@ fn int53(value: Option<&Value>) -> Result<i64, ParseError> {
     }
 }
 
+fn int53_or_zero(value: Option<&Value>) -> i64 {
+    int53(value).unwrap_or(0)
+}
+
 fn int64(value: Option<&Value>) -> Option<i64> {
     match value {
         Some(Value::String(s)) => s.parse().ok(),
@@ -597,6 +623,83 @@ mod tests {
             .expect("sendMessage");
         assert!(send.contains("topic_id:MessageTopic"));
         assert!(!send.contains("message_thread_id"));
+    }
+
+    #[test]
+    fn read_inbox_and_outbox_are_typed() {
+        let inbox = parse_envelope(
+            r#"{"@type":"updateChatReadInbox","chat_id":4,"last_read_inbox_message_id":88,"unread_count":3}"#,
+        )
+        .unwrap();
+        match inbox.payload {
+            EnvelopePayload::UpdateChatReadInbox {
+                chat_id,
+                last_read_inbox_message_id,
+                unread_count,
+            } => {
+                assert_eq!(chat_id.0, 4);
+                assert_eq!(last_read_inbox_message_id.0, 88);
+                assert_eq!(unread_count, 3);
+            }
+            other => panic!("{other:?}"),
+        }
+        let outbox = parse_envelope(
+            r#"{"@type":"updateChatReadOutbox","chat_id":4,"last_read_outbox_message_id":91}"#,
+        )
+        .unwrap();
+        match outbox.payload {
+            EnvelopePayload::UpdateChatReadOutbox {
+                chat_id,
+                last_read_outbox_message_id,
+            } => {
+                assert_eq!(chat_id.0, 4);
+                assert_eq!(last_read_outbox_message_id.0, 91);
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn new_chat_carries_read_cursors() {
+        let json = r#"{"@type":"updateNewChat","chat":{"id":9,"title":"n","type":{"@type":"chatTypePrivate","user_id":9},"unread_count":2,"last_read_inbox_message_id":10,"last_read_outbox_message_id":11}}"#;
+        let env = parse_envelope(json).unwrap();
+        match env.payload {
+            EnvelopePayload::UpdateNewChat {
+                unread_count,
+                last_read_inbox_message_id,
+                last_read_outbox_message_id,
+                ..
+            } => {
+                assert_eq!(unread_count, 2);
+                assert_eq!(last_read_inbox_message_id.0, 10);
+                assert_eq!(last_read_outbox_message_id.0, 11);
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn view_messages_schema_matches_1_8_67() {
+        let schema = include_str!("../../schema/td_api.tl");
+        let view = schema
+            .lines()
+            .find(|l| l.starts_with("viewMessages "))
+            .expect("viewMessages");
+        assert!(view.contains("message_ids:vector<int53>"));
+        assert!(view.contains("source:MessageSource"));
+        assert!(view.contains("force_read:Bool"));
+        assert!(
+            schema
+                .lines()
+                .any(|l| l.starts_with("updateChatReadOutbox "))
+        );
+        assert!(schema.lines().any(|l| l.starts_with("openChat ")));
+        assert!(schema.lines().any(|l| l.starts_with("closeChat ")));
+        assert!(
+            schema
+                .lines()
+                .any(|l| l.starts_with("messageSourceChatHistory"))
+        );
     }
 
     #[test]

@@ -12,7 +12,9 @@ use quill::credentials::TelegramCredentials;
 use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::{AccountKey, ChatId};
 use quill::platform::live_secret_store;
-use quill::state::{ChatSummary, HistoryMessage, Session};
+use quill::state::{
+    ChatSummary, HistoryMessage, OutboxReceipt, Session, outgoing_status_label, unread_badge_text,
+};
 use quill::telegram::client::copy_and_parse;
 use quill::telegram::envelope::{AuthorizationState, MessageContent};
 use std::sync::Arc;
@@ -92,6 +94,8 @@ pub enum ScreenshotDemo {
     WaitPassword,
     ReadyChats,
     ReadyChatsComposer,
+    ReadyUnread,
+    ReadyUnreadRead,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -242,6 +246,24 @@ impl QuillApp {
                     ConnectUiStatus::DemoReadyChats,
                     None,
                     "screenshot demo — Ready chat list (injected updates, no live Telegram)".into(),
+                    AuthorizationState::Ready,
+                )
+            }
+            Some(ScreenshotDemo::ReadyUnread) => {
+                demo_session = Some(seed_ready_unread_session(demo_sink.clone()));
+                (
+                    ConnectUiStatus::DemoReadyChats,
+                    None,
+                    "screenshot demo — unread badge (injected updates, no live Telegram)".into(),
+                    AuthorizationState::Ready,
+                )
+            }
+            Some(ScreenshotDemo::ReadyUnreadRead) => {
+                demo_session = Some(seed_ready_unread_read_session(demo_sink.clone()));
+                (
+                    ConnectUiStatus::DemoReadyChats,
+                    None,
+                    "screenshot demo — after mark-read (injected updates, no live Telegram)".into(),
                     AuthorizationState::Ready,
                 )
             }
@@ -820,6 +842,7 @@ impl QuillApp {
             .into_iter()
             .flatten()
             .collect();
+        let chat = open.and_then(|id| session.and_then(|s| s.chats.get(&id.0)));
         let sender_name = title.clone();
         div()
             .id("conversation-history")
@@ -878,11 +901,10 @@ impl QuillApp {
                         }
                     };
                     let label = if message.is_outgoing {
-                        if message.pending {
-                            "You (sending)".to_string()
-                        } else {
-                            "You".into()
-                        }
+                        let receipt = chat
+                            .map(|summary| summary.outbox_receipt(&message))
+                            .unwrap_or(OutboxReceipt::Sent);
+                        outgoing_status_label(message.pending, receipt).to_string()
                     } else {
                         sender_name.clone()
                     };
@@ -1037,27 +1059,88 @@ impl QuillApp {
 }
 
 fn seed_ready_chats_session(sink: Arc<MemorySink>) -> Session {
+    seed_demo_session(sink, DemoSeed::ReadyChats)
+}
+
+fn seed_ready_unread_session(sink: Arc<MemorySink>) -> Session {
+    seed_demo_session(sink, DemoSeed::UnreadBadge)
+}
+
+fn seed_ready_unread_read_session(sink: Arc<MemorySink>) -> Session {
+    seed_demo_session(sink, DemoSeed::AfterMarkRead)
+}
+
+#[derive(Clone, Copy)]
+enum DemoSeed {
+    ReadyChats,
+    UnreadBadge,
+    AfterMarkRead,
+}
+
+fn seed_demo_session(sink: Arc<MemorySink>, kind: DemoSeed) -> Session {
     let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
     let mut session = Session::new(AccountKey::primary(), dyn_sink.clone());
     let seq = AtomicU64::new(0);
+    let a_unread = match kind {
+        DemoSeed::ReadyChats => 1,
+        DemoSeed::UnreadBadge => 3,
+        DemoSeed::AfterMarkRead => 3,
+    };
     let jsons = [
-        r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
-        r#"{"@type":"updateNewChat","chat":{"id":11,"title":"Demo chat A","type":{"@type":"chatTypePrivate","user_id":11},"unread_count":1}}"#,
-        r#"{"@type":"updateNewChat","chat":{"id":12,"title":"Demo chat B","type":{"@type":"chatTypePrivate","user_id":12},"unread_count":0}}"#,
-        r#"{"@type":"updateNewChat","chat":{"id":13,"title":"Demo channel","type":{"@type":"chatTypeSupergroup","supergroup_id":13,"is_channel":true},"unread_count":0}}"#,
-        r#"{"@type":"updateChatPosition","chat_id":11,"position":{"@type":"chatPosition","list":{"@type":"chatListMain"},"order":"30","is_pinned":true}}"#,
-        r#"{"@type":"updateChatPosition","chat_id":12,"position":{"@type":"chatPosition","list":{"@type":"chatListMain"},"order":"20","is_pinned":false}}"#,
-        r#"{"@type":"updateChatPosition","chat_id":13,"position":{"@type":"chatPosition","list":{"@type":"chatListMain"},"order":"10","is_pinned":false}}"#,
-        r#"{"@type":"updateChatLastMessage","chat_id":11,"last_message":{"id":101,"chat_id":11,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"Hello from injected JSON.","entities":[]}}},"positions":[{"@type":"chatPosition","list":{"@type":"chatListMain"},"order":"30","is_pinned":true}]}"#,
-        r#"{"@type":"updateNewMessage","message":{"id":101,"chat_id":11,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"Hello from injected JSON.","entities":[]}}}}"#,
-        r#"{"@type":"updateNewMessage","message":{"id":102,"chat_id":11,"is_outgoing":true,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"Reply from the session reducer.","entities":[]}}}}"#,
+        r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#
+            .to_string(),
+        format!(
+            r#"{{"@type":"updateNewChat","chat":{{"id":11,"title":"Demo chat A","type":{{"@type":"chatTypePrivate","user_id":11}},"unread_count":{a_unread},"last_read_inbox_message_id":100,"last_read_outbox_message_id":0}}}}"#
+        ),
+        r#"{"@type":"updateNewChat","chat":{"id":12,"title":"Demo chat B","type":{"@type":"chatTypePrivate","user_id":12},"unread_count":0,"last_read_inbox_message_id":40,"last_read_outbox_message_id":0}}"#
+            .to_string(),
+        r#"{"@type":"updateNewChat","chat":{"id":13,"title":"Demo channel","type":{"@type":"chatTypeSupergroup","supergroup_id":13,"is_channel":true},"unread_count":0}}"#
+            .to_string(),
+        r#"{"@type":"updateChatPosition","chat_id":11,"position":{"@type":"chatPosition","list":{"@type":"chatListMain"},"order":"30","is_pinned":true}}"#
+            .to_string(),
+        r#"{"@type":"updateChatPosition","chat_id":12,"position":{"@type":"chatPosition","list":{"@type":"chatListMain"},"order":"20","is_pinned":false}}"#
+            .to_string(),
+        r#"{"@type":"updateChatPosition","chat_id":13,"position":{"@type":"chatPosition","list":{"@type":"chatListMain"},"order":"10","is_pinned":false}}"#
+            .to_string(),
+        r#"{"@type":"updateChatLastMessage","chat_id":11,"last_message":{"id":101,"chat_id":11,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"Hello from injected JSON.","entities":[]}}},"positions":[{"@type":"chatPosition","list":{"@type":"chatListMain"},"order":"30","is_pinned":true}]}"#
+            .to_string(),
+        r#"{"@type":"updateChatLastMessage","chat_id":12,"last_message":{"id":40,"chat_id":12,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"Later.","entities":[]}}},"positions":[{"@type":"chatPosition","list":{"@type":"chatListMain"},"order":"20","is_pinned":false}]}"#
+            .to_string(),
+        r#"{"@type":"updateNewMessage","message":{"id":101,"chat_id":11,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"Hello from injected JSON.","entities":[]}}}}"#
+            .to_string(),
+        r#"{"@type":"updateNewMessage","message":{"id":102,"chat_id":11,"is_outgoing":true,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"Reply from the session reducer.","entities":[]}}}}"#
+            .to_string(),
+        r#"{"@type":"updateNewMessage","message":{"id":103,"chat_id":11,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"Two more waiting.","entities":[]}}}}"#
+            .to_string(),
+        r#"{"@type":"updateNewMessage","message":{"id":40,"chat_id":12,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"Later.","entities":[]}}}}"#
+            .to_string(),
     ];
     for json in jsons {
-        if let Some(owned) = copy_and_parse(json, &seq, &dyn_sink) {
+        if let Some(owned) = copy_and_parse(&json, &seq, &dyn_sink) {
             session.apply(owned);
         }
     }
-    session.open_chat(ChatId(11));
+    match kind {
+        DemoSeed::ReadyChats => {
+            session.open_chat(ChatId(11));
+        }
+        DemoSeed::UnreadBadge => {
+            session.open_chat(ChatId(12));
+        }
+        DemoSeed::AfterMarkRead => {
+            let follow = [
+                r#"{"@type":"updateNewMessage","message":{"id":104,"chat_id":11,"is_outgoing":true,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"Still waiting on a receipt.","entities":[]}}}}"#,
+                r#"{"@type":"updateChatReadInbox","chat_id":11,"last_read_inbox_message_id":103,"unread_count":0}"#,
+                r#"{"@type":"updateChatReadOutbox","chat_id":11,"last_read_outbox_message_id":102}"#,
+            ];
+            for json in follow {
+                if let Some(owned) = copy_and_parse(json, &seq, &dyn_sink) {
+                    session.apply(owned);
+                }
+            }
+            session.open_chat(ChatId(11));
+        }
+    }
     session
 }
 
@@ -1170,6 +1253,7 @@ fn session_chat_row(
     let id = chat.id;
     let title = chat.title.clone();
     let preview = chat.sidebar_preview();
+    let badge = unread_badge_text(chat.unread_count);
     div()
         .id(("chat-row", id.0 as u64))
         .px_2()
@@ -1184,13 +1268,38 @@ fn session_chat_row(
         .on_click(cx.listener(move |this, _, _, cx| {
             this.select_listed_chat(id, cx);
         }))
-        .child(div().font_medium().child(title))
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .justify_between()
+                .gap_2()
+                .child(div().font_medium().min_w_0().child(title))
+                .when_some(badge, |this, label| this.child(unread_badge(label, id))),
+        )
         .child(
             div()
                 .text_xs()
                 .text_color(cx.theme().muted_foreground)
                 .child(preview),
         )
+}
+
+fn unread_badge(label: String, chat_id: ChatId) -> impl IntoElement {
+    div()
+        .id(("unread-badge", chat_id.0 as u64))
+        .h(px(20.))
+        .min_w(px(20.))
+        .px_1()
+        .rounded_md()
+        .flex()
+        .items_center()
+        .justify_center()
+        .bg(rgb(0x1f6feb))
+        .text_color(rgb(0xffffff))
+        .text_xs()
+        .font_semibold()
+        .child(label)
 }
 
 fn auth_action_note(auth: &AuthView, connect_status: &ConnectUiStatus) -> impl IntoElement {

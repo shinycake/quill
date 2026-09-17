@@ -133,6 +133,45 @@ pub fn get_chat_history(
     .to_string()
 }
 
+/// `openChat` — required before `viewMessages` can mark history as read.
+pub fn open_chat(extra: RequestId, chat_id: ChatId) -> String {
+    json!({
+        "@type": "openChat",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0,
+    })
+    .to_string()
+}
+
+/// `closeChat` when leaving a conversation. Distinct from client `close`.
+pub fn close_chat(extra: RequestId, chat_id: ChatId) -> String {
+    json!({
+        "@type": "closeChat",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0,
+    })
+    .to_string()
+}
+
+/// `viewMessages` (TDLib 1.8.67). `source` is `messageSourceChatHistory`.
+/// `force_read` marks the ids read even if `openChat` has not completed.
+pub fn view_messages(
+    extra: RequestId,
+    chat_id: ChatId,
+    message_ids: &[MessageId],
+    force_read: bool,
+) -> String {
+    json!({
+        "@type": "viewMessages",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0,
+        "message_ids": message_ids.iter().map(|id| id.0).collect::<Vec<_>>(),
+        "source": { "@type": "messageSourceChatHistory" },
+        "force_read": force_read,
+    })
+    .to_string()
+}
+
 /// `sendMessage` for the pinned 1.8.67 schema: typed `topic_id`, not `message_thread_id`.
 pub fn send_text(extra: RequestId, chat_id: ChatId, text: &str) -> String {
     json!({
@@ -214,5 +253,35 @@ mod tests {
         assert_eq!(v["@type"], "checkAuthenticationPassword");
         assert_eq!(v["@extra"], "5");
         assert_eq!(v["password"], "unit-test-password");
+    }
+
+    #[test]
+    fn view_messages_uses_chat_history_source() {
+        let json = view_messages(
+            RequestId(6),
+            ChatId(7),
+            &[MessageId(11), MessageId(12)],
+            true,
+        );
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "viewMessages");
+        assert_eq!(v["@extra"], "6");
+        assert_eq!(v["chat_id"], 7);
+        assert_eq!(v["message_ids"], serde_json::json!([11, 12]));
+        assert_eq!(v["source"]["@type"], "messageSourceChatHistory");
+        assert_eq!(v["force_read"], true);
+        assert!(!json.contains("CANARY"));
+    }
+
+    #[test]
+    fn open_and_close_chat_are_distinct_from_client_close() {
+        let open = open_chat(RequestId(8), ChatId(3));
+        let close = close_chat(RequestId(9), ChatId(3));
+        let client_close = close_request(RequestId(10));
+        assert!(open.contains("\"@type\":\"openChat\""));
+        assert!(close.contains("\"@type\":\"closeChat\""));
+        assert!(client_close.contains("\"@type\":\"close\""));
+        assert!(!client_close.contains("closeChat"));
+        assert_eq!(serde_json::from_str::<Value>(&close).unwrap()["chat_id"], 3);
     }
 }
