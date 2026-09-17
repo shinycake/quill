@@ -264,7 +264,9 @@ fn auth_action_note(auth: &AuthView, credentials_present: bool) -> impl IntoElem
         AuthAction::Ready => "Ready (synthetic)".into(),
         AuthAction::EnterPhone => format!("Phone entry ({cred}) · TDLib connect not wired yet"),
         AuthAction::EnterCode => format!("Code entry ({cred}) · TDLib connect not wired yet"),
-        AuthAction::EnterPassword => format!("Password entry ({cred}) · TDLib connect not wired yet"),
+        AuthAction::EnterPassword => {
+            format!("Password entry ({cred}) · TDLib connect not wired yet")
+        }
         other => format!("{other:?}"),
     };
     div().text_xs().child(label)
