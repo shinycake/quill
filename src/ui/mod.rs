@@ -946,6 +946,7 @@ impl QuillApp {
             .gap_2()
             .child(
                 div()
+                    .id("sidebar-search-field")
                     .flex_1()
                     .on_click(cx.listener(|this, _, window, cx| {
                         if !this.search_is_open() {
@@ -2297,7 +2298,7 @@ fn status_bar(
         .text_xs()
         .text_color(cx.theme().muted_foreground)
         .child(format!(
-            "Auth: {} · {} · {} · Keyboard: ⌘K search, Esc cancel, ⌘1 sidebar, ⌘L composer, ⌘↑ older · VoiceOver: macOS follow-up",
+            "Auth: {} · {} · {} · Keyboard: ⌘F/⌘K search, Esc cancel, ⌘1 sidebar, ⌘L composer, ⌘↑ older · VoiceOver: macOS follow-up",
             auth.title,
             connect_status_label(connect_status),
             status_note
