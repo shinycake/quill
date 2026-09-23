@@ -74,7 +74,7 @@ pub enum EnvelopePayload {
     Error(TdError),
     Messages(Vec<ParsedMessage>),
     Message(ParsedMessage),
-    /// `chats` — `searchChats` / `searchChatsOnServer` / similar.
+    /// `chats` — `searchChats` / `searchRecentlyFoundChats` / similar.
     Chats {
         total_count: i32,
         chat_ids: Vec<ChatId>,
@@ -1038,6 +1038,16 @@ mod tests {
         let schema = include_str!("../../schema/td_api.tl");
         assert!(schema.lines().any(|l| l.starts_with("searchChats ")));
         assert!(schema.lines().any(|l| l.starts_with("searchMessages ")));
+        assert!(
+            schema
+                .lines()
+                .any(|l| l.starts_with("searchRecentlyFoundChats "))
+        );
+        assert!(
+            schema
+                .lines()
+                .any(|l| l.starts_with("addRecentlyFoundChat "))
+        );
         assert!(schema.lines().any(|l| l.starts_with("chats ")));
         assert!(schema.lines().any(|l| l.starts_with("foundMessages ")));
     }

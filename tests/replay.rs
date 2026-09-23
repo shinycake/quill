@@ -404,7 +404,22 @@ fn replay_global_search_happy_empty_and_error() {
             r#"{"@type":"updateChatPosition","chat_id":7,"position":{"@type":"chatPosition","list":{"@type":"chatListMain"},"order":"9","is_pinned":false}}"#,
         ],
     );
-    session.open_search();
+    let recents_gen = session.search.begin_recents();
+    let recents_extra =
+        session.request_search(RequestPurpose::SearchRecentlyFoundChats, recents_gen);
+    apply_all_seq(
+        &mut session,
+        &sink,
+        &seq,
+        &[&format!(
+            r#"{{"@type":"chats","@extra":"{}","total_count":1,"chat_ids":[7]}}"#,
+            recents_extra.0
+        )],
+    );
+    assert_eq!(session.search.status, quill::state::SearchStatus::Ready);
+    assert!(session.search.recents);
+    assert_eq!(session.search.chat_ids[0].0, 7);
+
     let search_gen = session.search.begin_query("hello");
     let chats_extra = session.request_search(RequestPurpose::SearchChats, search_gen);
     let messages_extra = session.request_search(RequestPurpose::SearchMessages, search_gen);

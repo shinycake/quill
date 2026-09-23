@@ -55,6 +55,8 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("ctrl-l", FocusComposer, None),
         KeyBinding::new("cmd-up", LoadOlder, None),
         KeyBinding::new("ctrl-up", LoadOlder, None),
+        KeyBinding::new("cmd-f", OpenSearch, None),
+        KeyBinding::new("ctrl-f", OpenSearch, None),
         KeyBinding::new("cmd-k", OpenSearch, None),
         KeyBinding::new("ctrl-k", OpenSearch, None),
         KeyBinding::new("escape", CancelSearch, None),
@@ -114,7 +116,7 @@ pub enum ScreenshotDemo {
     ReadyMedia,
     /// Composer attachment chip + outgoing photo/document (injected, no live Telegram).
     ReadySendMedia,
-    /// Global search palette over injected `searchChats` / `searchMessages`.
+    /// Sidebar search over injected recents / `searchChats` / `searchMessages`.
     ReadySearch,
 }
 
@@ -167,7 +169,7 @@ impl QuillApp {
         });
         let search_input = cx.new(|cx| {
             TextareaState::new(window, cx)
-                .placeholder("Search chats and messages")
+                .placeholder("Search")
                 .auto_grow(1, 1)
                 .submit_on_enter(true)
         });
@@ -334,7 +336,7 @@ impl QuillApp {
                 (
                     ConnectUiStatus::DemoReadyChats,
                     None,
-                    "screenshot demo — global search (injected searchChats / searchMessages)"
+                    "screenshot demo — sidebar search (injected searchChats / searchMessages)"
                         .into(),
                     AuthorizationState::Ready,
                 )
@@ -812,13 +814,17 @@ impl QuillApp {
             return;
         }
         if let Some(live) = self.live.as_mut() {
-            live.driver.open_search();
+            match live.driver.open_search() {
+                Ok(Some(_)) => self.status_note = "searching…".into(),
+                Ok(None) => self.status_note = "search chats and messages".into(),
+                Err(_) => self.status_note = "could not search".into(),
+            }
         } else if let Some(session) = self.demo_session.as_mut() {
             session.open_search();
+            self.status_note = "search chats and messages".into();
         }
         self.search_input
             .update(cx, |input, cx| input.focus(window, cx));
-        self.status_note = "search chats and messages".into();
         cx.notify();
     }
 
@@ -870,12 +876,7 @@ impl QuillApp {
                 cx.notify();
                 return;
             }
-            if trimmed.is_empty() {
-                session.search.clear_query();
-                session.search.open = true;
-            } else {
-                session.apply_local_search_filter(query);
-            }
+            session.apply_local_search_filter(query);
         }
         cx.notify();
     }
@@ -891,13 +892,7 @@ impl QuillApp {
                 .first()
                 .map(|hit| (hit.chat_id, hit.message_id))
         });
-        let local = self.session().and_then(|session| {
-            session
-                .local_search_chats(&session.search.query)
-                .first()
-                .map(|chat| chat.id)
-        });
-        if let Some(chat_id) = chat.or(local) {
+        if let Some(chat_id) = chat {
             self.select_search_chat(chat_id, window, cx);
         } else if let Some((chat_id, message_id)) = message {
             self.select_search_message(chat_id, message_id, window, cx);
@@ -943,20 +938,41 @@ impl QuillApp {
         cx.notify();
     }
 
-    fn search_palette(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    fn sidebar_search_field(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .id("sidebar-search")
+            .flex()
+            .items_center()
+            .gap_2()
+            .child(
+                div()
+                    .flex_1()
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        if !this.search_is_open() {
+                            this.open_search_ui(window, cx);
+                        }
+                    }))
+                    .child(Textarea::new(&self.search_input).h(px(40.))),
+            )
+            .when(self.search_is_open(), |this| {
+                this.child(Button::new("search-clear").label("Clear").ghost().on_click(
+                    cx.listener(|this, _, window, cx| {
+                        this.cancel_search(window, cx);
+                    }),
+                ))
+            })
+    }
+
+    fn search_results(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let session = self.session();
         let status = session
             .map(|s| s.search.status)
             .unwrap_or(SearchStatus::Closed);
+        let recents = session.is_some_and(|s| s.search.recents);
         let query = session.map(|s| s.search.query.clone()).unwrap_or_default();
-        let chat_ids: Vec<ChatId> = match status {
-            SearchStatus::Idle | SearchStatus::Closed => session
-                .map(|s| s.local_search_chats("").into_iter().map(|c| c.id).collect())
-                .unwrap_or_default(),
-            _ => session
-                .map(|s| s.search.chat_ids.clone())
-                .unwrap_or_default(),
-        };
+        let chat_ids: Vec<ChatId> = session
+            .map(|s| s.search.chat_ids.clone())
+            .unwrap_or_default();
         let messages: Vec<(ChatId, MessageId, String, String)> = session
             .map(|s| {
                 s.search
@@ -987,51 +1003,35 @@ impl QuillApp {
             .unwrap_or_default();
         let hint = match status {
             SearchStatus::Idle => "Type to search chats and messages.".to_string(),
+            SearchStatus::Searching if recents => "Loading recent chats…".to_string(),
             SearchStatus::Searching => format!("Searching “{query}”…"),
+            SearchStatus::Ready if recents => String::new(),
             SearchStatus::Ready => format!("Results for “{query}”"),
             SearchStatus::Empty => format!("No chats or messages match “{query}”."),
             SearchStatus::Failed => "Search failed.".to_string(),
             SearchStatus::Closed => String::new(),
         };
+        let chat_heading = if recents { "Recent" } else { "Chats" };
         div()
-            .id("search-palette")
-            .px_4()
-            .py_3()
-            .border_b_1()
-            .border_color(cx.theme().border)
-            .bg(cx.theme().sidebar)
+            .id("search-results")
             .flex()
             .flex_col()
             .gap_2()
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap_2()
-                    .child(
-                        div()
-                            .flex_1()
-                            .child(Textarea::new(&self.search_input).h(px(40.))),
-                    )
-                    .child(Button::new("search-clear").label("Clear").ghost().on_click(
-                        cx.listener(|this, _, window, cx| {
-                            this.cancel_search(window, cx);
-                        }),
-                    )),
-            )
-            .child(
-                div()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(hint),
-            )
+            .when(!hint.is_empty(), |this| {
+                this.child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(hint),
+                )
+            })
             .when(!chats.is_empty(), |this| {
                 let mut block = div()
                     .id("search-chats")
                     .flex()
                     .flex_col()
                     .gap_1()
-                    .child(div().text_xs().font_semibold().child("Chats"));
+                    .child(div().text_xs().font_semibold().child(chat_heading));
                 for (id, title, preview) in chats {
                     block = block.child(search_result_row(
                         ("search-chat", id.0 as u64),
@@ -1223,9 +1223,6 @@ impl Render for QuillApp {
                 self.search_is_open(),
                 cx,
             ))
-            .when(self.search_is_open(), |this| {
-                this.child(self.search_palette(cx))
-            })
             .child(
                 div()
                     .id("quill-shell")
@@ -1524,27 +1521,32 @@ impl QuillApp {
                 );
             }
             PaneMode::Ready => {
-                let open = self.session().and_then(|s| s.open_chat);
-                let chats: Vec<ChatSummary> = self
-                    .session()
-                    .map(|s| s.ordered_chats().into_iter().cloned().collect())
-                    .unwrap_or_default();
-                if chats.is_empty() {
-                    let loading = self.session().is_some_and(|s| !s.chats_exhausted);
-                    list = list.child(
-                        div()
-                            .text_xs()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(if loading {
-                                "Loading chats…"
-                            } else {
-                                "No chats in the main list."
-                            }),
-                    );
-                }
-                for chat in chats {
-                    let selected = open == Some(chat.id);
-                    list = list.child(session_chat_row(&chat, selected, cx));
+                list = list.child(self.sidebar_search_field(cx));
+                if self.search_is_open() {
+                    list = list.child(self.search_results(cx));
+                } else {
+                    let open = self.session().and_then(|s| s.open_chat);
+                    let chats: Vec<ChatSummary> = self
+                        .session()
+                        .map(|s| s.ordered_chats().into_iter().cloned().collect())
+                        .unwrap_or_default();
+                    if chats.is_empty() {
+                        let loading = self.session().is_some_and(|s| !s.chats_exhausted);
+                        list = list.child(
+                            div()
+                                .text_xs()
+                                .text_color(cx.theme().muted_foreground)
+                                .child(if loading {
+                                    "Loading chats…"
+                                } else {
+                                    "No chats in the main list."
+                                }),
+                        );
+                    }
+                    for chat in chats {
+                        let selected = open == Some(chat.id);
+                        list = list.child(session_chat_row(&chat, selected, cx));
+                    }
                 }
             }
         }
@@ -1839,8 +1841,16 @@ fn chat_list_caption(mode: PaneMode, session: Option<&Session>) -> SharedString 
         PaneMode::Synthetic => "Synthetic".into(),
         PaneMode::Connecting => "Waiting for Ready".into(),
         PaneMode::Ready => {
-            let n = session.map(|s| s.ordered_chats().len()).unwrap_or(0);
-            format!("Main list · {n}").into()
+            if session.is_some_and(|s| s.search.open) {
+                if session.is_some_and(|s| s.search.recents) {
+                    "Recent".into()
+                } else {
+                    "Search".into()
+                }
+            } else {
+                let n = session.map(|s| s.ordered_chats().len()).unwrap_or(0);
+                format!("Main list · {n}").into()
+            }
         }
     }
 }

@@ -11,8 +11,9 @@ pub use envelope::{
 };
 pub use ffi::{LibraryOrigin, TdJson, loaded_library_origin, resolve_tdjson_path};
 pub use requests::{
-    SetTdlibParameters, check_authentication_code, check_authentication_password, close_chat,
-    close_request, download_file, get_authorization_state, get_chat_history, load_chats, log_out,
-    open_chat, search_chats, search_messages, send_document, send_photo, send_text,
+    SetTdlibParameters, add_recently_found_chat, check_authentication_code,
+    check_authentication_password, close_chat, close_request, download_file,
+    get_authorization_state, get_chat_history, load_chats, log_out, open_chat, search_chats,
+    search_messages, search_recently_found_chats, send_document, send_photo, send_text,
     set_authentication_phone_number, view_messages,
 };
