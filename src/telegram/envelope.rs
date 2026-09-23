@@ -74,6 +74,17 @@ pub enum EnvelopePayload {
     Error(TdError),
     Messages(Vec<ParsedMessage>),
     Message(ParsedMessage),
+    /// `chats` — `searchChats` / `searchRecentlyFoundChats` / similar.
+    Chats {
+        total_count: i32,
+        chat_ids: Vec<ChatId>,
+    },
+    /// `foundMessages` — `searchMessages` (and secret-chat search).
+    FoundMessages {
+        total_count: i32,
+        messages: Vec<ParsedMessage>,
+        next_offset: String,
+    },
     UpdateFile(ParsedFile),
     File(ParsedFile),
     Unknown(UnknownKind),
@@ -528,6 +539,43 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
                 .collect();
             Ok(EnvelopePayload::Messages(parsed))
         }
+        "chats" => Ok(EnvelopePayload::Chats {
+            total_count: value
+                .get("total_count")
+                .and_then(Value::as_i64)
+                .unwrap_or(0) as i32,
+            chat_ids: value
+                .get("chat_ids")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(|v| int53(Some(v)).ok())
+                .map(ChatId)
+                .collect(),
+        }),
+        "foundMessages" => {
+            let messages = value
+                .get("messages")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default();
+            let parsed = messages
+                .iter()
+                .filter_map(|m| parse_message(m).ok())
+                .collect();
+            Ok(EnvelopePayload::FoundMessages {
+                total_count: value
+                    .get("total_count")
+                    .and_then(Value::as_i64)
+                    .unwrap_or(0) as i32,
+                messages: parsed,
+                next_offset: value
+                    .get("next_offset")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string(),
+            })
+        }
         "message" => Ok(EnvelopePayload::Message(parse_message(&value)?)),
         "updateFile" => Ok(EnvelopePayload::UpdateFile(parse_file(value.get("file"))?)),
         "file" => Ok(EnvelopePayload::File(parse_file(Some(&value))?)),
@@ -950,6 +998,58 @@ mod tests {
             }
             other => panic!("{other:?}"),
         }
+    }
+
+    #[test]
+    fn chats_and_found_messages_are_typed() {
+        let chats = parse_envelope(
+            r#"{"@type":"chats","@extra":"4","total_count":2,"chat_ids":[11,"12"]}"#,
+        )
+        .unwrap();
+        match chats.payload {
+            EnvelopePayload::Chats {
+                total_count,
+                chat_ids,
+            } => {
+                assert_eq!(total_count, 2);
+                assert_eq!(chat_ids, vec![ChatId(11), ChatId(12)]);
+            }
+            other => panic!("{other:?}"),
+        }
+        let found = parse_envelope(
+            r#"{"@type":"foundMessages","@extra":"5","total_count":1,"next_offset":"n1","messages":[{"id":101,"chat_id":11,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"CANARY_FOUND_hi","entities":[]}}}]}"#,
+        )
+        .unwrap();
+        match found.payload {
+            EnvelopePayload::FoundMessages {
+                total_count,
+                messages,
+                next_offset,
+            } => {
+                assert_eq!(total_count, 1);
+                assert_eq!(next_offset, "n1");
+                assert_eq!(messages.len(), 1);
+                assert_eq!(messages[0].id.0, 101);
+                assert_eq!(messages[0].chat_id.0, 11);
+                assert_eq!(messages[0].content.preview(), "CANARY_FOUND_hi");
+            }
+            other => panic!("{other:?}"),
+        }
+        let schema = include_str!("../../schema/td_api.tl");
+        assert!(schema.lines().any(|l| l.starts_with("searchChats ")));
+        assert!(schema.lines().any(|l| l.starts_with("searchMessages ")));
+        assert!(
+            schema
+                .lines()
+                .any(|l| l.starts_with("searchRecentlyFoundChats "))
+        );
+        assert!(
+            schema
+                .lines()
+                .any(|l| l.starts_with("addRecentlyFoundChat "))
+        );
+        assert!(schema.lines().any(|l| l.starts_with("chats ")));
+        assert!(schema.lines().any(|l| l.starts_with("foundMessages ")));
     }
 
     #[test]

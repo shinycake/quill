@@ -8,23 +8,24 @@ use gpui_kit::*;
 use quill::auth::{AuthAction, AuthView, view_for};
 use quill::composer::{AttachmentKind, ComposerAttachment, ComposerSnapshot, should_send_on_enter};
 use quill::connect::{
-    ConnectBlocker, ConnectGate, LiveConnect, USER_DOWNLOAD_PRIORITY, evaluate_gate,
-    start_live_connect,
+    ConnectBlocker, ConnectGate, LiveConnect, SEARCH_DEBOUNCE, SearchQueryOutcome,
+    USER_DOWNLOAD_PRIORITY, evaluate_gate, start_live_connect,
 };
 use quill::credentials::TelegramCredentials;
 use quill::diagnostics::{DiagnosticSink, MemorySink};
-use quill::ids::{AccountKey, ChatId, FileId};
+use quill::ids::{AccountKey, ChatId, FileId, MessageId};
 use quill::local_path::sandboxed_display_path;
 use quill::platform::live_secret_store;
 use quill::state::{
-    ChatSummary, HistoryMessage, OutboxReceipt, Session, outgoing_status_label, unread_badge_text,
+    ChatSummary, HistoryMessage, OutboxReceipt, RequestPurpose, SearchStatus, Session,
+    outgoing_status_label, unread_badge_text,
 };
 use quill::telegram::client::copy_and_parse;
 use quill::telegram::envelope::{AuthorizationState, MessageContent, ParsedFile};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::atomic::AtomicU64;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 use synthetic::{SyntheticChat, session_bubble, session_text_bubble};
 use zeroize::Zeroize;
@@ -35,6 +36,8 @@ actions!(
         FocusSidebar,
         FocusComposer,
         LoadOlder,
+        OpenSearch,
+        CancelSearch,
         QuitApp,
         SubmitPhone,
         SubmitCode,
@@ -52,6 +55,9 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("ctrl-l", FocusComposer, None),
         KeyBinding::new("cmd-up", LoadOlder, None),
         KeyBinding::new("ctrl-up", LoadOlder, None),
+        KeyBinding::new("cmd-k", OpenSearch, None),
+        KeyBinding::new("ctrl-k", OpenSearch, None),
+        KeyBinding::new("escape", CancelSearch, None),
     ]);
 }
 
@@ -78,6 +84,7 @@ pub struct QuillApp {
     phone_input: Entity<TextareaState>,
     code_input: Entity<TextareaState>,
     password_input: Entity<TextareaState>,
+    search_input: Entity<TextareaState>,
     auth_demo: AuthorizationState,
     focus_sidebar: FocusHandle,
     connect_status: ConnectUiStatus,
@@ -107,6 +114,8 @@ pub enum ScreenshotDemo {
     ReadyMedia,
     /// Composer attachment chip + outgoing photo/document (injected, no live Telegram).
     ReadySendMedia,
+    /// Sidebar search over injected recents / `searchChats` / `searchMessages`.
+    ReadySearch,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -153,6 +162,12 @@ impl QuillApp {
         let password_input = cx.new(|cx| {
             TextareaState::new(window, cx)
                 .placeholder("Two-step password")
+                .auto_grow(1, 1)
+                .submit_on_enter(true)
+        });
+        let search_input = cx.new(|cx| {
+            TextareaState::new(window, cx)
+                .placeholder("Search")
                 .auto_grow(1, 1)
                 .submit_on_enter(true)
         });
@@ -214,6 +229,23 @@ impl QuillApp {
                         *shift, *secondary, marked,
                     )) {
                         this.submit_password(window, cx);
+                    }
+                }
+            },
+        )
+        .detach();
+        cx.subscribe_in(
+            &search_input,
+            window,
+            |this, state, event: &InputEvent, window, cx| {
+                let text = state.read(cx).value().to_string();
+                this.sync_search_query(&text, cx);
+                if let InputEvent::PressEnter { secondary, shift } = event {
+                    let marked = state.update(cx, |input, cx| input.marked_text_range(window, cx));
+                    if should_send_on_enter(quill::composer::enter_event_from_kit(
+                        *shift, *secondary, marked,
+                    )) {
+                        this.activate_first_search_result(window, cx);
                     }
                 }
             },
@@ -297,6 +329,16 @@ impl QuillApp {
                     AuthorizationState::Ready,
                 )
             }
+            Some(ScreenshotDemo::ReadySearch) => {
+                demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
+                (
+                    ConnectUiStatus::DemoReadyChats,
+                    None,
+                    "screenshot demo — sidebar search (injected searchChats / searchMessages)"
+                        .into(),
+                    AuthorizationState::Ready,
+                )
+            }
             None => bootstrap_connect(credentials),
         };
 
@@ -314,6 +356,7 @@ impl QuillApp {
             phone_input,
             code_input,
             password_input,
+            search_input,
             auth_demo,
             focus_sidebar: cx.focus_handle(),
             connect_status,
@@ -341,6 +384,16 @@ impl QuillApp {
             app.composer.update(cx, |input, cx| {
                 input.set_value("sending a photo too", window, cx);
             });
+        }
+        if matches!(demo, Some(ScreenshotDemo::ReadySearch)) {
+            app.search_input.update(cx, |input, cx| {
+                input.set_value("hello", window, cx);
+                input.focus(window, cx);
+            });
+            if let Some(session) = app.demo_session.as_mut() {
+                app.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_search(session, &app.demo_sink, &app.demo_seq);
+            }
         }
         if app.live.is_some() {
             app.spawn_poll_loop(cx);
@@ -749,6 +802,313 @@ impl QuillApp {
         }
         cx.notify();
     }
+
+    fn search_is_open(&self) -> bool {
+        self.session().is_some_and(|session| session.search.open)
+    }
+
+    fn open_search_ui(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.pane_mode() != PaneMode::Ready {
+            return;
+        }
+        if let Some(live) = self.live.as_mut() {
+            match live.driver.open_search() {
+                Ok(Some(_)) => self.status_note = "searching…".into(),
+                Ok(None) => self.status_note = "search chats and messages".into(),
+                Err(_) => self.status_note = "could not search".into(),
+            }
+        } else if let Some(session) = self.demo_session.as_mut() {
+            session.open_search();
+            self.status_note = "search chats and messages".into();
+        }
+        self.search_input
+            .update(cx, |input, cx| input.focus(window, cx));
+        cx.notify();
+    }
+
+    fn close_search_ui(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            live.driver.close_search();
+        } else if let Some(session) = self.demo_session.as_mut() {
+            session.close_search();
+        }
+        self.search_input
+            .update(cx, |input, cx| input.set_value("", window, cx));
+        self.status_note = "search closed".into();
+        cx.notify();
+    }
+
+    fn cancel_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.search_is_open() {
+            return;
+        }
+        let query = self.search_input.read(cx).value().to_string();
+        if query.trim().is_empty() {
+            self.close_search_ui(window, cx);
+        } else {
+            self.search_input
+                .update(cx, |input, cx| input.set_value("", window, cx));
+            self.sync_search_query("", cx);
+        }
+    }
+
+    fn sync_search_query(&mut self, query: &str, cx: &mut Context<Self>) {
+        if self.pane_mode() != PaneMode::Ready {
+            return;
+        }
+        if let Some(live) = self.live.as_mut() {
+            match live.driver.set_search_query(query) {
+                Ok(SearchQueryOutcome::Sent(_)) => self.status_note = "searching…".into(),
+                Ok(SearchQueryOutcome::Debounced { token }) => {
+                    self.schedule_search_commit(token, cx);
+                }
+                Ok(SearchQueryOutcome::Unchanged) if query.trim().is_empty() => {
+                    self.status_note = "search chats and messages".into();
+                }
+                Ok(SearchQueryOutcome::Unchanged) => {}
+                Err(_) => self.status_note = "could not search".into(),
+            }
+        } else if let Some(session) = self.demo_session.as_mut() {
+            let trimmed = query.trim();
+            if session.search.open
+                && session.search.query == trimmed
+                && !matches!(session.search.status, SearchStatus::Closed)
+            {
+                cx.notify();
+                return;
+            }
+            session.apply_local_search_filter(query);
+        }
+        cx.notify();
+    }
+
+    fn schedule_search_commit(&mut self, token: u64, cx: &mut Context<Self>) {
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(SEARCH_DEBOUNCE).await;
+            this.update(cx, |this, cx| {
+                if let Some(live) = this.live.as_mut() {
+                    match live.driver.commit_debounced_search(token) {
+                        Ok(Some(_)) => this.status_note = "searching…".into(),
+                        Ok(None) => {}
+                        Err(_) => this.status_note = "could not search".into(),
+                    }
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    fn activate_first_search_result(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let chat = self
+            .session()
+            .and_then(|session| session.search.chat_ids.first().copied());
+        let message = self.session().and_then(|session| {
+            session
+                .search
+                .messages
+                .first()
+                .map(|hit| (hit.chat_id, hit.message_id))
+        });
+        if let Some(chat_id) = chat {
+            self.select_search_chat(chat_id, window, cx);
+        } else if let Some((chat_id, message_id)) = message {
+            self.select_search_message(chat_id, message_id, window, cx);
+        }
+    }
+
+    fn select_search_chat(&mut self, chat_id: ChatId, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            self.status_note = match live.driver.select_search_chat(chat_id) {
+                Ok(_) => "chat selected".into(),
+                Err(_) => "could not open chat".into(),
+            };
+        } else if let Some(session) = self.demo_session.as_mut() {
+            session.close_search();
+            session.open_chat(chat_id);
+            self.status_note = "chat selected".into();
+        }
+        self.search_input
+            .update(cx, |input, cx| input.set_value("", window, cx));
+        cx.notify();
+    }
+
+    fn select_search_message(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(live) = self.live.as_mut() {
+            self.status_note = match live.driver.select_search_message(chat_id, message_id) {
+                Ok(_) => "opened chat".into(),
+                Err(_) => "could not open chat".into(),
+            };
+        } else if let Some(session) = self.demo_session.as_mut() {
+            session.promote_search_message(chat_id, message_id);
+            session.close_search();
+            session.open_chat(chat_id);
+            self.status_note = "opened chat".into();
+        }
+        self.search_input
+            .update(cx, |input, cx| input.set_value("", window, cx));
+        cx.notify();
+    }
+
+    fn sidebar_search_field(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .id("sidebar-search")
+            .flex()
+            .items_center()
+            .gap_2()
+            .child(
+                div()
+                    .id("sidebar-search-field")
+                    .flex_1()
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        if !this.search_is_open() {
+                            this.open_search_ui(window, cx);
+                        }
+                    }))
+                    .child(Textarea::new(&self.search_input).h(px(40.))),
+            )
+            .when(self.search_is_open(), |this| {
+                this.child(Button::new("search-clear").label("Clear").ghost().on_click(
+                    cx.listener(|this, _, window, cx| {
+                        this.cancel_search(window, cx);
+                    }),
+                ))
+            })
+    }
+
+    fn search_results(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let session = self.session();
+        let status = session
+            .map(|s| s.search.status)
+            .unwrap_or(SearchStatus::Closed);
+        let recents = session.is_some_and(|s| s.search.recents);
+        let query = session.map(|s| s.search.query.clone()).unwrap_or_default();
+        let chat_ids: Vec<ChatId> = session
+            .map(|s| s.search.chat_ids.clone())
+            .unwrap_or_default();
+        let messages: Vec<(ChatId, MessageId, String, String)> = session
+            .map(|s| {
+                s.search
+                    .messages
+                    .iter()
+                    .map(|hit| {
+                        let title = s
+                            .chats
+                            .get(&hit.chat_id.0)
+                            .map(|c| c.title.clone())
+                            .unwrap_or_else(|| format!("chat {}", hit.chat_id.0));
+                        (hit.chat_id, hit.message_id, title, hit.preview.clone())
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        let chats: Vec<(ChatId, String, String)> = session
+            .map(|s| {
+                chat_ids
+                    .into_iter()
+                    .map(|id| {
+                        s.chats
+                            .get(&id.0)
+                            .map(|chat| (chat.id, chat.title.clone(), chat.sidebar_preview()))
+                            .unwrap_or_else(|| (id, format!("chat {}", id.0), String::new()))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        let hint = match status {
+            SearchStatus::Idle => "Type to search chats and messages.".to_string(),
+            SearchStatus::Searching if recents => "Loading recent chats…".to_string(),
+            SearchStatus::Searching => format!("Searching “{query}”…"),
+            SearchStatus::Ready if recents => String::new(),
+            SearchStatus::Ready => format!("Results for “{query}”"),
+            SearchStatus::Empty => format!("No chats or messages match “{query}”."),
+            SearchStatus::Failed => "Search failed.".to_string(),
+            SearchStatus::Closed => String::new(),
+        };
+        let chat_heading = if recents { "Recent" } else { "Chats" };
+        div()
+            .id("search-results")
+            .flex()
+            .flex_col()
+            .gap_2()
+            .when(!hint.is_empty(), |this| {
+                this.child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(hint),
+                )
+            })
+            .when(!chats.is_empty(), |this| {
+                let mut block = div()
+                    .id("search-chats")
+                    .flex()
+                    .flex_col()
+                    .gap_1()
+                    .child(div().text_xs().font_semibold().child(chat_heading));
+                for (id, title, preview) in chats {
+                    block = block.child(search_result_row(
+                        ("search-chat", id.0 as u64),
+                        title,
+                        preview,
+                        cx,
+                        move |this, window, cx| this.select_search_chat(id, window, cx),
+                    ));
+                }
+                this.child(block)
+            })
+            .when(!messages.is_empty(), |this| {
+                let mut block = div()
+                    .id("search-messages")
+                    .flex()
+                    .flex_col()
+                    .gap_1()
+                    .child(div().text_xs().font_semibold().child("Messages"));
+                for (chat_id, message_id, title, preview) in messages {
+                    block = block.child(search_result_row(
+                        ("search-msg", message_id.0 as u64),
+                        title,
+                        preview,
+                        cx,
+                        move |this, window, cx| {
+                            this.select_search_message(chat_id, message_id, window, cx);
+                        },
+                    ));
+                }
+                this.child(block)
+            })
+    }
+}
+
+fn search_result_row(
+    id: (&'static str, u64),
+    title: String,
+    preview: String,
+    cx: &mut Context<QuillApp>,
+    on_pick: impl Fn(&mut QuillApp, &mut Window, &mut Context<QuillApp>) + 'static,
+) -> impl IntoElement {
+    div()
+        .id(id)
+        .px_2()
+        .py_2()
+        .rounded_md()
+        .cursor_pointer()
+        .hover(|style| style.bg(cx.theme().accent.opacity(0.12)))
+        .on_click(cx.listener(move |this, _, window, cx| on_pick(this, window, cx)))
+        .child(div().font_medium().child(title))
+        .child(
+            div()
+                .text_xs()
+                .text_color(cx.theme().muted_foreground)
+                .child(preview),
+        )
 }
 
 fn bootstrap_connect(
@@ -863,6 +1223,12 @@ impl Render for QuillApp {
             .on_action(cx.listener(|this, _: &LoadOlder, _, cx| {
                 this.load_older_action(cx);
             }))
+            .on_action(cx.listener(|this, _: &OpenSearch, window, cx| {
+                this.open_search_ui(window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &CancelSearch, window, cx| {
+                this.cancel_search(window, cx);
+            }))
             .on_action(cx.listener(|this, _: &SubmitPhone, window, cx| {
                 this.submit_phone(window, cx);
             }))
@@ -872,7 +1238,12 @@ impl Render for QuillApp {
             .on_action(cx.listener(|this, _: &SubmitPassword, window, cx| {
                 this.submit_password(window, cx);
             }))
-            .child(title_bar(self.pane_mode(), self.live.is_some(), cx))
+            .child(title_bar(
+                self.pane_mode(),
+                self.live.is_some(),
+                self.search_is_open(),
+                cx,
+            ))
             .child(
                 div()
                     .id("quill-shell")
@@ -1171,27 +1542,32 @@ impl QuillApp {
                 );
             }
             PaneMode::Ready => {
-                let open = self.session().and_then(|s| s.open_chat);
-                let chats: Vec<ChatSummary> = self
-                    .session()
-                    .map(|s| s.ordered_chats().into_iter().cloned().collect())
-                    .unwrap_or_default();
-                if chats.is_empty() {
-                    let loading = self.session().is_some_and(|s| !s.chats_exhausted);
-                    list = list.child(
-                        div()
-                            .text_xs()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(if loading {
-                                "Loading chats…"
-                            } else {
-                                "No chats in the main list."
-                            }),
-                    );
-                }
-                for chat in chats {
-                    let selected = open == Some(chat.id);
-                    list = list.child(session_chat_row(&chat, selected, cx));
+                list = list.child(self.sidebar_search_field(cx));
+                if self.search_is_open() {
+                    list = list.child(self.search_results(cx));
+                } else {
+                    let open = self.session().and_then(|s| s.open_chat);
+                    let chats: Vec<ChatSummary> = self
+                        .session()
+                        .map(|s| s.ordered_chats().into_iter().cloned().collect())
+                        .unwrap_or_default();
+                    if chats.is_empty() {
+                        let loading = self.session().is_some_and(|s| !s.chats_exhausted);
+                        list = list.child(
+                            div()
+                                .text_xs()
+                                .text_color(cx.theme().muted_foreground)
+                                .child(if loading {
+                                    "Loading chats…"
+                                } else {
+                                    "No chats in the main list."
+                                }),
+                        );
+                    }
+                    for chat in chats {
+                        let selected = open == Some(chat.id);
+                        list = list.child(session_chat_row(&chat, selected, cx));
+                    }
                 }
             }
         }
@@ -1280,6 +1656,29 @@ fn seed_ready_media_session(sink: Arc<MemorySink>) -> Session {
 
 fn seed_ready_send_media_session(sink: Arc<MemorySink>) -> Session {
     seed_demo_session(sink, DemoSeed::SendMedia)
+}
+
+fn apply_ready_search(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    session.open_search();
+    let search_gen = session.search.begin_query("hello");
+    let chats_extra = session.request_search(RequestPurpose::SearchChats, search_gen);
+    let messages_extra = session.request_search(RequestPurpose::SearchMessages, search_gen);
+    let jsons = [
+        format!(
+            r#"{{"@type":"chats","@extra":"{}","total_count":1,"chat_ids":[11]}}"#,
+            chats_extra.0
+        ),
+        format!(
+            r#"{{"@type":"foundMessages","@extra":"{}","total_count":1,"next_offset":"","messages":[{{"id":101,"chat_id":11,"is_outgoing":false,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"Hello from injected JSON.","entities":[]}}}}}}]}}"#,
+            messages_extra.0
+        ),
+    ];
+    for json in jsons {
+        if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
+            session.apply(owned);
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -1463,13 +1862,26 @@ fn chat_list_caption(mode: PaneMode, session: Option<&Session>) -> SharedString 
         PaneMode::Synthetic => "Synthetic".into(),
         PaneMode::Connecting => "Waiting for Ready".into(),
         PaneMode::Ready => {
-            let n = session.map(|s| s.ordered_chats().len()).unwrap_or(0);
-            format!("Main list · {n}").into()
+            if session.is_some_and(|s| s.search.open) {
+                if session.is_some_and(|s| s.search.recents) {
+                    "Recent".into()
+                } else {
+                    "Search".into()
+                }
+            } else {
+                let n = session.map(|s| s.ordered_chats().len()).unwrap_or(0);
+                format!("Main list · {n}").into()
+            }
         }
     }
 }
 
-fn title_bar(mode: PaneMode, live: bool, cx: &mut Context<QuillApp>) -> impl IntoElement {
+fn title_bar(
+    mode: PaneMode,
+    live: bool,
+    search_open: bool,
+    cx: &mut Context<QuillApp>,
+) -> impl IntoElement {
     let title = match mode {
         PaneMode::Synthetic => "Quill — synthetic chat",
         PaneMode::Connecting if live => "Quill — live TDLib",
@@ -1502,6 +1914,24 @@ fn title_bar(mode: PaneMode, live: bool, cx: &mut Context<QuillApp>) -> impl Int
                             this.load_older_action(cx);
                         })),
                 )
+                .when(mode == PaneMode::Ready, |this| {
+                    this.child(
+                        Button::new("search")
+                            .label(if search_open {
+                                "Close search"
+                            } else {
+                                "Search"
+                            })
+                            .ghost()
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                if this.search_is_open() {
+                                    this.close_search_ui(window, cx);
+                                } else {
+                                    this.open_search_ui(window, cx);
+                                }
+                            })),
+                    )
+                })
                 .when(show_cycle, |this| {
                     this.child(
                         Button::new("cycle-auth")
@@ -1888,7 +2318,7 @@ fn status_bar(
         .text_xs()
         .text_color(cx.theme().muted_foreground)
         .child(format!(
-            "Auth: {} · {} · {} · Keyboard: ⌘1 sidebar, ⌘L composer, ⌘↑ older · VoiceOver: macOS follow-up",
+            "Auth: {} · {} · {} · Keyboard: ⌘K search, Esc cancel, ⌘1 sidebar, ⌘L composer, ⌘↑ older · VoiceOver: macOS follow-up",
             auth.title,
             connect_status_label(connect_status),
             status_note

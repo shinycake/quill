@@ -113,6 +113,61 @@ pub fn load_chats(extra: RequestId, limit: i32) -> String {
     .to_string()
 }
 
+/// `searchChats` (TDLib 1.8.67). Offline title/username search of known chats.
+/// `type_filter` is null = all chat types (`SearchChatTypeFilter`).
+pub fn search_chats(extra: RequestId, query: &str, limit: i32) -> String {
+    json!({
+        "@type": "searchChats",
+        "@extra": extra.as_extra(),
+        "query": query,
+        "type_filter": Value::Null,
+        "limit": limit,
+    })
+    .to_string()
+}
+
+/// `searchMessages` (TDLib 1.8.67). `chat_list` null = all lists (official
+/// clients / Unigram); schema: only Main and Archive are searchable.
+/// `filter` / `chat_type_filter` null = all messages / all chat types.
+pub fn search_messages(extra: RequestId, query: &str, limit: i32) -> String {
+    json!({
+        "@type": "searchMessages",
+        "@extra": extra.as_extra(),
+        "chat_list": Value::Null,
+        "query": query,
+        "offset": "",
+        "limit": limit,
+        "filter": Value::Null,
+        "chat_type_filter": Value::Null,
+        "min_date": 0,
+        "max_date": 0,
+    })
+    .to_string()
+}
+
+/// `searchRecentlyFoundChats` (TDLib 1.8.67). Offline; empty `query` is the
+/// recently-found list (official empty-search surface). Up to 50 chats.
+pub fn search_recently_found_chats(extra: RequestId, query: &str, limit: i32) -> String {
+    json!({
+        "@type": "searchRecentlyFoundChats",
+        "@extra": extra.as_extra(),
+        "query": query,
+        "type_filter": Value::Null,
+        "limit": limit,
+    })
+    .to_string()
+}
+
+/// `addRecentlyFoundChat` (TDLib 1.8.67). Official clients send this on select.
+pub fn add_recently_found_chat(extra: RequestId, chat_id: ChatId) -> String {
+    json!({
+        "@type": "addRecentlyFoundChat",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0,
+    })
+    .to_string()
+}
+
 pub fn get_chat_history(
     extra: RequestId,
     chat_id: ChatId,
@@ -429,6 +484,54 @@ mod tests {
         assert_eq!(v["limit"], 0);
         assert_eq!(v["synchronous"], false);
         assert!(!json.contains("CANARY"));
+    }
+
+    #[test]
+    fn search_chats_shape_matches_1_8_67() {
+        let json = search_chats(RequestId(21), "alice", 20);
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "searchChats");
+        assert_eq!(v["@extra"], "21");
+        assert_eq!(v["query"], "alice");
+        assert_eq!(v["type_filter"], Value::Null);
+        assert_eq!(v["limit"], 20);
+        assert!(!json.contains("CANARY"));
+    }
+
+    #[test]
+    fn search_messages_shape_matches_1_8_67() {
+        let json = search_messages(RequestId(22), "hello", 20);
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "searchMessages");
+        assert_eq!(v["@extra"], "22");
+        assert_eq!(v["chat_list"], Value::Null);
+        assert_eq!(v["query"], "hello");
+        assert_eq!(v["offset"], "");
+        assert_eq!(v["limit"], 20);
+        assert_eq!(v["filter"], Value::Null);
+        assert_eq!(v["chat_type_filter"], Value::Null);
+        assert_eq!(v["min_date"], 0);
+        assert_eq!(v["max_date"], 0);
+        assert!(!json.contains("chatListMain"));
+        assert!(!json.contains("CANARY"));
+    }
+
+    #[test]
+    fn search_recently_found_and_add_shapes_match_1_8_67() {
+        let recents = search_recently_found_chats(RequestId(23), "", 50);
+        let v: serde_json::Value = serde_json::from_str(&recents).unwrap();
+        assert_eq!(v["@type"], "searchRecentlyFoundChats");
+        assert_eq!(v["@extra"], "23");
+        assert_eq!(v["query"], "");
+        assert_eq!(v["type_filter"], Value::Null);
+        assert_eq!(v["limit"], 50);
+        let add = add_recently_found_chat(RequestId(24), ChatId(11));
+        let v: serde_json::Value = serde_json::from_str(&add).unwrap();
+        assert_eq!(v["@type"], "addRecentlyFoundChat");
+        assert_eq!(v["@extra"], "24");
+        assert_eq!(v["chat_id"], 11);
+        assert!(!recents.contains("CANARY"));
+        assert!(!add.contains("CANARY"));
     }
 
     #[test]
