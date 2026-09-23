@@ -16,7 +16,9 @@ Captured from a real GPUI window on 2026-09-17 (Linux Xvfb + lavapipe). **Not** 
 | `ready-unread.png` | Unread **badge** on Demo chat A (`unread_count: 3`) while B is selected. Injected updates, no live Telegram. Driven by `quill --screenshot-demo ready-unread`. |
 | `ready-unread-read.png` | Same list **after** `updateChatReadInbox` (badge gone) + outbox receipts (`You · read` / `You · sent`). Driven by `quill --screenshot-demo ready-unread-read`. |
 | `ready-media.png` | Photo thumb (local path complete), honest **not downloaded** photo placeholder, and a **notes.txt** document chip. Injected `messagePhoto` / `messageDocument` / `file`, no live Telegram. Driven by `quill --screenshot-demo ready-media`. |
+| `ready-send-media.png` | Composer **Attach** chip (`demo-notes.txt`) plus outgoing photo thumb and document chip in history. Injected send path; no live Telegram. Driven by `quill --screenshot-demo ready-send-media`. |
 | `fixtures/demo-thumb.png` | Tiny checkerboard PNG used as the completed photo `local.path` in the media demo (not a screenshot). |
+| `fixtures/demo-notes.txt` | Tiny text file used for outgoing document attach / send demos (not a screenshot). |
 
 Optional recapture of code / 2FA fields (same script now also snaps `wait-code` / `wait-password`):
 
@@ -33,6 +35,7 @@ bash scripts/capture-connect-screenshots.sh
 #   cargo run --features ui -- --screenshot-demo ready-unread docs/screenshots
 #   cargo run --features ui -- --screenshot-demo ready-unread-read docs/screenshots
 #   cargo run --features ui -- --screenshot-demo ready-media docs/screenshots
+#   cargo run --features ui -- --screenshot-demo ready-send-media docs/screenshots
 ```
 
 Environment used by the script: `DISPLAY`, `LIBGL_ALWAYS_SOFTWARE=1`, `WGPU_BACKEND=vulkan`, `VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json`.

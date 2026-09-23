@@ -6,7 +6,7 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::auth::{AuthAction, AuthView, view_for};
-use quill::composer::{ComposerSnapshot, should_send_on_enter};
+use quill::composer::{AttachmentKind, ComposerAttachment, ComposerSnapshot, should_send_on_enter};
 use quill::connect::{
     ConnectBlocker, ConnectGate, LiveConnect, USER_DOWNLOAD_PRIORITY, evaluate_gate,
     start_live_connect,
@@ -89,6 +89,8 @@ pub struct QuillApp {
     demo_session: Option<Session>,
     demo_seq: AtomicU64,
     demo_sink: Arc<MemorySink>,
+    /// Local file the user explicitly attached (canonical path via `pick`).
+    pending_attachment: Option<ComposerAttachment>,
 }
 
 /// Forced UI surfaces for screenshot proof (no live Telegram / no real credentials).
@@ -103,6 +105,8 @@ pub enum ScreenshotDemo {
     ReadyUnread,
     ReadyUnreadRead,
     ReadyMedia,
+    /// Composer attachment chip + outgoing photo/document (injected, no live Telegram).
+    ReadySendMedia,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -283,8 +287,26 @@ impl QuillApp {
                     AuthorizationState::Ready,
                 )
             }
+            Some(ScreenshotDemo::ReadySendMedia) => {
+                demo_session = Some(seed_ready_send_media_session(demo_sink.clone()));
+                (
+                    ConnectUiStatus::DemoReadyChats,
+                    None,
+                    "screenshot demo — outgoing photo/document send (injected, no live Telegram)"
+                        .into(),
+                    AuthorizationState::Ready,
+                )
+            }
             None => bootstrap_connect(credentials),
         };
+
+        let mut pending_attachment = None;
+        if matches!(demo, Some(ScreenshotDemo::ReadySendMedia)) {
+            pending_attachment = ComposerAttachment::pick(
+                &demo_media_allowlist().join("demo-notes.txt"),
+                AttachmentKind::Document,
+            );
+        }
 
         let mut app = Self {
             chat,
@@ -308,10 +330,16 @@ impl QuillApp {
             demo_session,
             demo_seq: AtomicU64::new(0),
             demo_sink,
+            pending_attachment,
         };
         if matches!(demo, Some(ScreenshotDemo::ReadyChatsComposer)) {
             app.composer.update(cx, |input, cx| {
                 input.set_value("hello from composer", window, cx);
+            });
+        }
+        if matches!(demo, Some(ScreenshotDemo::ReadySendMedia)) {
+            app.composer.update(cx, |input, cx| {
+                input.set_value("sending a photo too", window, cx);
             });
         }
         if app.live.is_some() {
@@ -448,15 +476,27 @@ impl QuillApp {
                         cx.notify();
                         return;
                     }
-                    let snap = ComposerSnapshot::capture(chat_id, view_generation, text);
+                    let attachment = self.pending_attachment.clone();
+                    let snap = ComposerSnapshot::capture_with_attachment(
+                        chat_id,
+                        view_generation,
+                        text,
+                        attachment,
+                    );
+                    if snap.is_empty() {
+                        self.status_note = "type a message or attach a file".into();
+                        cx.notify();
+                        return;
+                    }
                     let result = self
                         .live
                         .as_mut()
                         .expect("live")
                         .driver
-                        .send_text_snapshot(&snap);
+                        .send_snapshot(&snap);
                     match result {
                         Ok(_) => {
+                            self.pending_attachment = None;
                             self.composer
                                 .update(cx, |input, cx| input.set_value("", window, cx));
                             self.status_note = "sending…".into();
@@ -469,7 +509,9 @@ impl QuillApp {
                     return;
                 }
                 if self.demo_session.is_some() {
-                    self.apply_demo_outgoing(&text);
+                    let attachment = self.pending_attachment.clone();
+                    self.apply_demo_outgoing(&text, attachment.as_ref());
+                    self.pending_attachment = None;
                     self.composer
                         .update(cx, |input, cx| input.set_value("", window, cx));
                     self.status_note = "demo send applied locally (no live Telegram)".into();
@@ -485,7 +527,39 @@ impl QuillApp {
         }
     }
 
-    fn apply_demo_outgoing(&mut self, text: &str) {
+    fn attach_local(&mut self, kind: AttachmentKind, cx: &mut Context<Self>) {
+        // Explicit user action → pick. Prefer QUILL_ATTACH_PHOTO / QUILL_ATTACH_FILE
+        // when set (live testing); otherwise the demo fixtures under docs/screenshots.
+        // Never read paths from TDLib JSON for send.
+        let env_key = match kind {
+            AttachmentKind::Photo => "QUILL_ATTACH_PHOTO",
+            AttachmentKind::Document => "QUILL_ATTACH_FILE",
+        };
+        let path = std::env::var_os(env_key)
+            .map(PathBuf::from)
+            .unwrap_or_else(|| match kind {
+                AttachmentKind::Photo => demo_media_allowlist().join("demo-thumb.png"),
+                AttachmentKind::Document => demo_media_allowlist().join("demo-notes.txt"),
+            });
+        match ComposerAttachment::pick(&path, kind) {
+            Some(att) => {
+                self.status_note = format!("attached {}", att.file_name);
+                self.pending_attachment = Some(att);
+            }
+            None => {
+                self.status_note = "could not attach file".into();
+            }
+        }
+        cx.notify();
+    }
+
+    fn clear_attachment(&mut self, cx: &mut Context<Self>) {
+        self.pending_attachment = None;
+        self.status_note = "attachment cleared".into();
+        cx.notify();
+    }
+
+    fn apply_demo_outgoing(&mut self, text: &str, attachment: Option<&ComposerAttachment>) {
         let Some(session) = self.demo_session.as_mut() else {
             return;
         };
@@ -493,12 +567,34 @@ impl QuillApp {
             return;
         };
         let dyn_sink: Arc<dyn DiagnosticSink> = self.demo_sink.clone();
-        let json = format!(
-            r#"{{"@type":"updateNewMessage","message":{{"id":{},"chat_id":{},"is_outgoing":true,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":{},"entities":[]}}}}}}}}"#,
-            -(session.view_generation.0 as i64),
-            chat_id.0,
-            serde_json::to_string(text).unwrap_or_else(|_| "\"\"".into()),
-        );
+        let id = -(session.view_generation.0 as i64);
+        let caption = text.trim();
+        let json = match attachment {
+            Some(att) if att.kind == AttachmentKind::Photo => {
+                let path = att.path.to_string_lossy();
+                let file = demo_file_json(900, &path, true);
+                format!(
+                    r#"{{"@type":"updateNewMessage","message":{{"id":{id},"chat_id":{},"is_outgoing":true,"content":{{"@type":"messagePhoto","photo":{{"@type":"photo","has_stickers":false,"sizes":[{{"@type":"photoSize","type":"m","photo":{file},"width":240,"height":160,"progressive_sizes":[]}}]}},"caption":{{"@type":"formattedText","text":{},"entities":[]}},"has_spoiler":false,"is_secret":false}}}}}}"#,
+                    chat_id.0,
+                    serde_json::to_string(caption).unwrap_or_else(|_| "\"\"".into()),
+                )
+            }
+            Some(att) => {
+                let path = att.path.to_string_lossy();
+                let file = demo_file_json(901, &path, true);
+                format!(
+                    r#"{{"@type":"updateNewMessage","message":{{"id":{id},"chat_id":{},"is_outgoing":true,"content":{{"@type":"messageDocument","document":{{"@type":"document","file_name":{},"mime_type":"text/plain","document":{file}}},"caption":{{"@type":"formattedText","text":{},"entities":[]}}}}}}}}"#,
+                    chat_id.0,
+                    serde_json::to_string(&att.file_name).unwrap_or_else(|_| "\"file\"".into()),
+                    serde_json::to_string(caption).unwrap_or_else(|_| "\"\"".into()),
+                )
+            }
+            None => format!(
+                r#"{{"@type":"updateNewMessage","message":{{"id":{id},"chat_id":{},"is_outgoing":true,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":{},"entities":[]}}}}}}}}"#,
+                chat_id.0,
+                serde_json::to_string(text).unwrap_or_else(|_| "\"\"".into()),
+            ),
+        };
         if let Some(owned) = copy_and_parse(&json, &self.demo_seq, &dyn_sink) {
             session.apply(owned);
         }
@@ -846,11 +942,76 @@ impl QuillApp {
             .min_h_0()
             .child(history)
             .when(composer.is_some(), |this| {
+                let show_attach = matches!(mode, PaneMode::Ready);
+                let chip = if show_attach {
+                    self.pending_attachment.as_ref().map(|att| {
+                        let label = match att.kind {
+                            AttachmentKind::Photo => format!("Photo · {}", att.file_name),
+                            AttachmentKind::Document => format!("Document · {}", att.file_name),
+                        };
+                        label
+                    })
+                } else {
+                    None
+                };
                 this.child(
                     div()
                         .p_3()
                         .border_t_1()
                         .border_color(cx.theme().border)
+                        .flex()
+                        .flex_col()
+                        .gap_2()
+                        .when(show_attach, |box_| {
+                            box_.child(
+                                div()
+                                    .flex()
+                                    .gap_2()
+                                    .items_center()
+                                    .child(
+                                        Button::new("attach-photo").label("Attach photo").on_click(
+                                            cx.listener(|this, _, _, cx| {
+                                                this.attach_local(AttachmentKind::Photo, cx);
+                                            }),
+                                        ),
+                                    )
+                                    .child(
+                                        Button::new("attach-file").label("Attach file").on_click(
+                                            cx.listener(|this, _, _, cx| {
+                                                this.attach_local(AttachmentKind::Document, cx);
+                                            }),
+                                        ),
+                                    )
+                                    .when(self.pending_attachment.is_some(), |row| {
+                                        row.child(
+                                            Button::new("clear-attach").label("Clear").on_click(
+                                                cx.listener(|this, _, _, cx| {
+                                                    this.clear_attachment(cx);
+                                                }),
+                                            ),
+                                        )
+                                    }),
+                            )
+                        })
+                        .when_some(chip, |this, label| {
+                            this.child(
+                                div()
+                                    .id("composer-attach-chip")
+                                    .px_3()
+                                    .py_2()
+                                    .rounded_md()
+                                    .border_1()
+                                    .border_color(rgb(0x8b949e))
+                                    .bg(rgb(0x21262d))
+                                    .child(div().text_sm().font_medium().child(label))
+                                    .child(
+                                        div()
+                                            .text_xs()
+                                            .text_color(rgb(0xc9d1d9))
+                                            .child("ready to send · picked locally"),
+                                    ),
+                            )
+                        })
                         .child(Textarea::new(&self.composer).h(px(88.))),
                 )
             })
@@ -1117,12 +1278,17 @@ fn seed_ready_media_session(sink: Arc<MemorySink>) -> Session {
     seed_demo_session(sink, DemoSeed::Media)
 }
 
+fn seed_ready_send_media_session(sink: Arc<MemorySink>) -> Session {
+    seed_demo_session(sink, DemoSeed::SendMedia)
+}
+
 #[derive(Clone, Copy)]
 enum DemoSeed {
     ReadyChats,
     UnreadBadge,
     AfterMarkRead,
     Media,
+    SendMedia,
 }
 
 fn seed_demo_session(sink: Arc<MemorySink>, kind: DemoSeed) -> Session {
@@ -1130,7 +1296,7 @@ fn seed_demo_session(sink: Arc<MemorySink>, kind: DemoSeed) -> Session {
     let mut session = Session::new(AccountKey::primary(), dyn_sink.clone());
     let seq = AtomicU64::new(0);
     let a_unread = match kind {
-        DemoSeed::ReadyChats | DemoSeed::Media => 1,
+        DemoSeed::ReadyChats | DemoSeed::Media | DemoSeed::SendMedia => 1,
         DemoSeed::UnreadBadge => 3,
         DemoSeed::AfterMarkRead => 3,
     };
@@ -1164,7 +1330,7 @@ fn seed_demo_session(sink: Arc<MemorySink>, kind: DemoSeed) -> Session {
             .to_string(),
     ];
     for json in jsons {
-        if matches!(kind, DemoSeed::Media)
+        if matches!(kind, DemoSeed::Media | DemoSeed::SendMedia)
             && (json.contains(r#""id":101"#)
                 || json.contains(r#""id":102"#)
                 || json.contains(r#""id":103"#))
@@ -1212,6 +1378,33 @@ fn seed_demo_session(sink: Arc<MemorySink>, kind: DemoSeed) -> Session {
                     r#"{{"@type":"updateNewMessage","message":{{"id":203,"chat_id":11,"is_outgoing":false,"content":{{"@type":"messageDocument","document":{{"@type":"document","file_name":"notes.txt","mime_type":"text/plain","document":{doc}}},"caption":{{"@type":"formattedText","text":"","entities":[]}}}}}}}}"#
                 ),
                 r#"{"@type":"updateChatLastMessage","chat_id":11,"last_message":{"id":203,"chat_id":11,"is_outgoing":false,"content":{"@type":"messageDocument","document":{"@type":"document","file_name":"notes.txt","mime_type":"text/plain","document":{"@type":"file","id":24,"size":24,"expected_size":24,"local":{"@type":"localFile","path":"","can_be_downloaded":true,"can_be_deleted":false,"is_downloading_active":false,"is_downloading_completed":false,"download_offset":0,"downloaded_prefix_size":0,"downloaded_size":0},"remote":{"@type":"remoteFile","id":"x","unique_id":"u","is_uploading_active":false,"is_uploading_completed":true,"uploaded_size":24}}}},"caption":{"@type":"formattedText","text":"","entities":[]}}},"positions":[{"@type":"chatPosition","list":{"@type":"chatListMain"},"order":"30","is_pinned":true}]}"#
+                    .to_string(),
+            ];
+            for json in follow {
+                if let Some(owned) = copy_and_parse(&json, &seq, &dyn_sink) {
+                    session.apply(owned);
+                }
+            }
+            session.open_chat(ChatId(11));
+        }
+        DemoSeed::SendMedia => {
+            let thumb_path = demo_thumb_png_path();
+            let photo_file = demo_file_json(31, &thumb_path, true);
+            let doc_path = demo_media_allowlist()
+                .join("demo-notes.txt")
+                .to_string_lossy()
+                .into_owned();
+            let doc_file = demo_file_json(32, &doc_path, true);
+            let follow = [
+                r#"{"@type":"updateNewMessage","message":{"id":301,"chat_id":11,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"Send me a photo?","entities":[]}}}}"#
+                    .to_string(),
+                format!(
+                    r#"{{"@type":"updateNewMessage","message":{{"id":302,"chat_id":11,"is_outgoing":true,"content":{{"@type":"messagePhoto","photo":{{"@type":"photo","has_stickers":false,"sizes":[{{"@type":"photoSize","type":"m","photo":{photo_file},"width":240,"height":160,"progressive_sizes":[]}}]}},"caption":{{"@type":"formattedText","text":"Outgoing photo","entities":[]}},"has_spoiler":false,"is_secret":false}}}}}}"#
+                ),
+                format!(
+                    r#"{{"@type":"updateNewMessage","message":{{"id":303,"chat_id":11,"is_outgoing":true,"content":{{"@type":"messageDocument","document":{{"@type":"document","file_name":"demo-notes.txt","mime_type":"text/plain","document":{doc_file}}},"caption":{{"@type":"formattedText","text":"","entities":[]}}}}}}}}"#
+                ),
+                r#"{"@type":"updateChatLastMessage","chat_id":11,"last_message":{"id":303,"chat_id":11,"is_outgoing":true,"content":{"@type":"messageDocument","document":{"@type":"document","file_name":"demo-notes.txt","mime_type":"text/plain","document":{"@type":"file","id":32,"size":24,"expected_size":24,"local":{"@type":"localFile","path":"","can_be_downloaded":true,"can_be_deleted":false,"is_downloading_active":false,"is_downloading_completed":true,"download_offset":0,"downloaded_prefix_size":24,"downloaded_size":24},"remote":{"@type":"remoteFile","id":"x","unique_id":"u","is_uploading_active":false,"is_uploading_completed":true,"uploaded_size":24}}}},"caption":{"@type":"formattedText","text":"","entities":[]}}},"positions":[{"@type":"chatPosition","list":{"@type":"chatListMain"},"order":"30","is_pinned":true}]}"#
                     .to_string(),
             ];
             for json in follow {
