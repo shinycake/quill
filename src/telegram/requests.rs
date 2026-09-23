@@ -113,6 +113,37 @@ pub fn load_chats(extra: RequestId, limit: i32) -> String {
     .to_string()
 }
 
+/// `searchChats` (TDLib 1.8.67). Offline title/username search of known chats.
+/// `type_filter` is null = all chat types (`SearchChatTypeFilter`).
+pub fn search_chats(extra: RequestId, query: &str, limit: i32) -> String {
+    json!({
+        "@type": "searchChats",
+        "@extra": extra.as_extra(),
+        "query": query,
+        "type_filter": Value::Null,
+        "limit": limit,
+    })
+    .to_string()
+}
+
+/// `searchMessages` (TDLib 1.8.67) over `chatListMain`.
+/// `filter` / `chat_type_filter` null = all messages / all chat types.
+pub fn search_messages(extra: RequestId, query: &str, limit: i32) -> String {
+    json!({
+        "@type": "searchMessages",
+        "@extra": extra.as_extra(),
+        "chat_list": { "@type": "chatListMain" },
+        "query": query,
+        "offset": "",
+        "limit": limit,
+        "filter": Value::Null,
+        "chat_type_filter": Value::Null,
+        "min_date": 0,
+        "max_date": 0,
+    })
+    .to_string()
+}
+
 pub fn get_chat_history(
     extra: RequestId,
     chat_id: ChatId,
@@ -428,6 +459,35 @@ mod tests {
         assert_eq!(v["offset"], 0);
         assert_eq!(v["limit"], 0);
         assert_eq!(v["synchronous"], false);
+        assert!(!json.contains("CANARY"));
+    }
+
+    #[test]
+    fn search_chats_shape_matches_1_8_67() {
+        let json = search_chats(RequestId(21), "alice", 20);
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "searchChats");
+        assert_eq!(v["@extra"], "21");
+        assert_eq!(v["query"], "alice");
+        assert_eq!(v["type_filter"], Value::Null);
+        assert_eq!(v["limit"], 20);
+        assert!(!json.contains("CANARY"));
+    }
+
+    #[test]
+    fn search_messages_shape_matches_1_8_67() {
+        let json = search_messages(RequestId(22), "hello", 20);
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "searchMessages");
+        assert_eq!(v["@extra"], "22");
+        assert_eq!(v["chat_list"]["@type"], "chatListMain");
+        assert_eq!(v["query"], "hello");
+        assert_eq!(v["offset"], "");
+        assert_eq!(v["limit"], 20);
+        assert_eq!(v["filter"], Value::Null);
+        assert_eq!(v["chat_type_filter"], Value::Null);
+        assert_eq!(v["min_date"], 0);
+        assert_eq!(v["max_date"], 0);
         assert!(!json.contains("CANARY"));
     }
 

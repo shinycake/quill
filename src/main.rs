@@ -83,9 +83,10 @@ fn parse_screenshot_demo(args: &[String]) -> Option<(ui::ScreenshotDemo, std::pa
                 "ready-unread-read" => ScreenshotDemo::ReadyUnreadRead,
                 "ready-media" => ScreenshotDemo::ReadyMedia,
                 "ready-send-media" => ScreenshotDemo::ReadySendMedia,
+                "ready-search" => ScreenshotDemo::ReadySearch,
                 _ => {
                     eprintln!(
-                        "unknown screenshot demo '{kind}' (expected need-tdjson|wait-phone|wait-code|wait-password|ready-chats|ready-chats-composer|ready-unread|ready-unread-read|ready-media|ready-send-media)"
+                        "unknown screenshot demo '{kind}' (expected need-tdjson|wait-phone|wait-code|wait-password|ready-chats|ready-chats-composer|ready-unread|ready-unread-read|ready-media|ready-send-media|ready-search)"
                     );
                     std::process::exit(2);
                 }
@@ -117,6 +118,7 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
         ScreenshotDemo::ReadyUnreadRead => ".quill-ready-ready-unread-read",
         ScreenshotDemo::ReadyMedia => ".quill-ready-ready-media",
         ScreenshotDemo::ReadySendMedia => ".quill-ready-ready-send-media",
+        ScreenshotDemo::ReadySearch => ".quill-ready-ready-search",
     });
     let _ = std::fs::remove_file(&marker);
     let marker_for_spawn = marker.clone();

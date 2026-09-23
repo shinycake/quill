@@ -21,7 +21,7 @@ Research snapshot 2026-09-16, pin recheck **2026-09-17**.
 - Composer send policy is tested without GPU: IME composition and Shift/secondary Enter do not send.
 - Kit `InputEvent::PressEnter` (**gpui-base 0.6.1**) has `{ secondary, shift }` only — no composing flag. `InputBaseState::enter` always emits `PressEnter` and does **not** consult `ime_marked_range` (Escape does). Quill reads `EntityInputHandler::marked_text_range` at PressEnter time via `enter_event_from_kit`. Do not hardcode `composing: false`.
 - **VoiceOver** is a manual macOS follow-up. This agent has no GUI/VoiceOver runner on Linux. Do not claim the Phase 0 a11y gate until a Mac session records it.
-- **Screenshots:** real GPUI window on Linux xvfb + lavapipe, `docs/screenshots/synthetic-chat.png` (plus composer and unsupported-auth shots), connect surfaces via `quill --screenshot-demo`, Phase 1 `ready-chats` / `ready-chats-composer`, unread proof `ready-unread` / `ready-unread-read`, media receive `ready-media`, and outgoing attach/send `ready-send-media` (injected Ready + inbox/outbox/media updates, no live Telegram). The stray “X” in an early capture was the X11 cursor, not a jump button. VoiceOver remains a macOS follow-up.
+- **Screenshots:** real GPUI window on Linux xvfb + lavapipe, `docs/screenshots/synthetic-chat.png` (plus composer and unsupported-auth shots), connect surfaces via `quill --screenshot-demo`, Phase 1 `ready-chats` / `ready-chats-composer`, unread proof `ready-unread` / `ready-unread-read`, media receive `ready-media`, outgoing attach/send `ready-send-media`, and global search `ready-search` (injected Ready + inbox/outbox/media/search updates, no live Telegram). The stray “X” in an early capture was the X11 cursor, not a jump button. VoiceOver remains a macOS follow-up.
 
 ## TDLib
 
@@ -72,6 +72,12 @@ Research snapshot 2026-09-16, pin recheck **2026-09-17**.
 3. Native tdjson build + rpath verification on Apple Silicon (`docs/native-bundle.md`). This Linux agent has no tdjson; UI shows the MissingTdjson halt when credentials are loaded.
 4. **No App Store / notarization / distribution pipeline.** Ad-hoc Apple Developer signing only if needed for Idan's personal Mac. Public repo; brand polish is still a follow-up.
 5. **GitHub Actions did not run** on 2026-09-17: billing/spending limit. Re-run after billing is fixed. Local gates: `cargo fmt`, `clippy -D warnings`, `cargo test --no-default-features --locked`.
+
+## Global search (Phase 1)
+
+- **Schema (1.8.67, not invented):** `searchChats` (`query`, `type_filter: SearchChatTypeFilter` null = all types, `limit`) returns `chats` (`total_count`, `chat_ids`). Offline title/username of already-known chats. `searchMessages` (`chat_list: chatListMain`, `query`, `offset` empty string for the first page, `limit` ≤ 100, `filter` / `chat_type_filter` null, `min_date`/`max_date` 0) returns `foundMessages` (`total_count`, `messages`, `next_offset`). Not used this slice: `searchPublicChat`, `searchChatMessages`, `searchChatsOnServer`, message-result pagination.
+- **UX:** Ready shell Cmd/Ctrl+K (and a Search button) opens a palette. Empty query lists the main chat list. Typing sends both TDLib methods for a new search generation; stale `@extra` is ignored. Esc/Clear empties the query, then closes. Selecting a chat uses the existing `openChat` path. Selecting a message upserts that hit into history and opens the chat — no new history pager.
+- **Out of this slice:** public username lookup, in-chat-only search, archive/secret lists, sponsored results, VoiceOver.
 
 ## Photo / document receive (2026-09-17)
 

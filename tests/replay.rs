@@ -389,6 +389,98 @@ fn replay_send_photo_then_document_succeed() {
 }
 
 #[test]
+fn replay_global_search_happy_empty_and_error() {
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn quill::diagnostics::DiagnosticSink> = sink.clone();
+    let mut session = Session::new(AccountKey::primary(), dyn_sink);
+    let seq = AtomicU64::new(0);
+    apply_all_seq(
+        &mut session,
+        &sink,
+        &seq,
+        &[
+            r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+            r#"{"@type":"updateNewChat","chat":{"id":7,"title":"Alice","type":{"@type":"chatTypePrivate","user_id":7},"unread_count":0}}"#,
+            r#"{"@type":"updateChatPosition","chat_id":7,"position":{"@type":"chatPosition","list":{"@type":"chatListMain"},"order":"9","is_pinned":false}}"#,
+        ],
+    );
+    session.open_search();
+    let search_gen = session.search.begin_query("hello");
+    let chats_extra = session.request_search(RequestPurpose::SearchChats, search_gen);
+    let messages_extra = session.request_search(RequestPurpose::SearchMessages, search_gen);
+    apply_all_seq(
+        &mut session,
+        &sink,
+        &seq,
+        &[
+            &format!(
+                r#"{{"@type":"chats","@extra":"{}","total_count":1,"chat_ids":[7]}}"#,
+                chats_extra.0
+            ),
+            &format!(
+                r#"{{"@type":"foundMessages","@extra":"{}","total_count":1,"next_offset":"","messages":[{{"id":50,"chat_id":7,"is_outgoing":false,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"CANARY_REPLAY_search","entities":[]}}}}}}]}}"#,
+                messages_extra.0
+            ),
+        ],
+    );
+    assert_eq!(session.search.status, quill::state::SearchStatus::Ready);
+    assert_eq!(session.search.chat_ids[0].0, 7);
+    session.promote_search_message(quill::ids::ChatId(7), quill::ids::MessageId(50));
+    session.open_chat(quill::ids::ChatId(7));
+    assert!(
+        session
+            .histories
+            .get(&7)
+            .unwrap()
+            .messages
+            .contains_key(&50)
+    );
+
+    let search_gen = session.search.begin_query("zzz");
+    let chats_extra = session.request_search(RequestPurpose::SearchChats, search_gen);
+    let messages_extra = session.request_search(RequestPurpose::SearchMessages, search_gen);
+    apply_all_seq(
+        &mut session,
+        &sink,
+        &seq,
+        &[
+            &format!(
+                r#"{{"@type":"chats","@extra":"{}","total_count":0,"chat_ids":[]}}"#,
+                chats_extra.0
+            ),
+            &format!(
+                r#"{{"@type":"foundMessages","@extra":"{}","total_count":0,"next_offset":"","messages":[]}}"#,
+                messages_extra.0
+            ),
+        ],
+    );
+    assert_eq!(session.search.status, quill::state::SearchStatus::Empty);
+
+    let search_gen = session.search.begin_query("nope");
+    let chats_extra = session.request_search(RequestPurpose::SearchChats, search_gen);
+    let messages_extra = session.request_search(RequestPurpose::SearchMessages, search_gen);
+    apply_all_seq(
+        &mut session,
+        &sink,
+        &seq,
+        &[
+            &format!(
+                r#"{{"@type":"error","code":400,"message":"CANARY_REPLAY_search_err","@extra":"{}"}}"#,
+                chats_extra.0
+            ),
+            &format!(
+                r#"{{"@type":"error","code":400,"message":"CANARY_REPLAY_search_err2","@extra":"{}"}}"#,
+                messages_extra.0
+            ),
+        ],
+    );
+    assert_eq!(session.search.status, quill::state::SearchStatus::Failed);
+    session.close_search();
+    assert_eq!(session.search.status, quill::state::SearchStatus::Closed);
+    assert!(!sink.rendered().contains("CANARY_REPLAY"));
+}
+
+#[test]
 fn logout_invalidates_pending_requests() {
     let sink = Arc::new(MemorySink::new());
     let dyn_sink: Arc<dyn quill::diagnostics::DiagnosticSink> = sink.clone();

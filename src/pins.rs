@@ -93,4 +93,8 @@ pub const REQUIRED_SCHEMA_CONSTRUCTORS: &[&str] = &[
     "inputDocument",
     "inputFileLocal",
     "formattedText",
+    "searchChats",
+    "searchMessages",
+    "chats",
+    "foundMessages",
 ];

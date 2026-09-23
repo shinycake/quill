@@ -8,15 +8,15 @@ use crate::ids::{AccountKey, ChatId, FileId, MessageId, RequestId};
 use crate::lifecycle::{RestoreBlocker, plan_restore};
 use crate::platform::{DatabaseKey, KeyDecision, SecretStore, load_or_create_key};
 use crate::settings::{AccountPaths, default_app_root};
-use crate::state::{RequestPurpose, Session, ShutdownPhase};
+use crate::state::{RequestPurpose, SearchStatus, Session, ShutdownPhase};
 use crate::telegram::client::{LiveTdJson, OwnedEnvelope, ReceiveBridge};
 use crate::telegram::envelope::{AuthorizationState, EnvelopePayload};
 use crate::telegram::ffi::{LibraryOrigin, TdJsonError, resolve_tdjson_path};
 use crate::telegram::requests::{
     SetTdlibParameters, check_authentication_code, check_authentication_password, close_chat,
     close_request, download_file as download_file_request, get_authorization_state,
-    get_chat_history, load_chats, open_chat, send_document, send_photo, send_text,
-    set_authentication_phone_number, view_messages,
+    get_chat_history, load_chats, open_chat, search_chats, search_messages, send_document,
+    send_photo, send_text, set_authentication_phone_number, view_messages,
 };
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -30,6 +30,8 @@ pub const HISTORY_PAGE_SIZE: i32 = 50;
 pub const THUMB_DOWNLOAD_PRIORITY: i32 = 1;
 /// `downloadFile.priority` when the user opens media.
 pub const USER_DOWNLOAD_PRIORITY: i32 = 32;
+/// `searchChats.limit` / `searchMessages.limit` for the Phase 1 palette.
+pub const SEARCH_LIMIT: i32 = 20;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConnectBlocker {
     MissingCredentials,
@@ -660,6 +662,95 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.sender
             .send_json(&check_authentication_password(extra, password))?;
         Ok(extra)
+    }
+
+    pub fn open_search(&mut self) {
+        self.session.open_search();
+    }
+
+    pub fn close_search(&mut self) {
+        self.session.close_search();
+    }
+
+    /// Update the palette query. Empty query cancels in-flight search (local list).
+    /// Non-empty sends `searchChats` + `searchMessages` for a new generation.
+    pub fn set_search_query(
+        &mut self,
+        query: &str,
+    ) -> Result<Option<(RequestId, RequestId)>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let trimmed = query.trim();
+        if !self.session.search.open {
+            self.session.open_search();
+        }
+        if trimmed.is_empty() {
+            self.session.search.clear_query();
+            return Ok(None);
+        }
+        if self.session.search.query == trimmed
+            && matches!(
+                self.session.search.status,
+                SearchStatus::Searching
+                    | SearchStatus::Ready
+                    | SearchStatus::Empty
+                    | SearchStatus::Failed
+            )
+        {
+            return Ok(None);
+        }
+        let search_gen = self.session.search.begin_query(trimmed);
+        let chats_extra = self
+            .session
+            .request_search(RequestPurpose::SearchChats, search_gen);
+        let messages_extra = self
+            .session
+            .request_search(RequestPurpose::SearchMessages, search_gen);
+        match self
+            .sender
+            .send_json(&search_chats(chats_extra, trimmed, SEARCH_LIMIT))
+        {
+            Ok(()) => {}
+            Err(err) => {
+                self.session.requests.take(chats_extra);
+                self.session.requests.take(messages_extra);
+                self.session.search.accept_chats(Vec::new(), true);
+                self.session.search.accept_messages(Vec::new(), true);
+                return Err(err);
+            }
+        }
+        match self
+            .sender
+            .send_json(&search_messages(messages_extra, trimmed, SEARCH_LIMIT))
+        {
+            Ok(()) => Ok(Some((chats_extra, messages_extra))),
+            Err(err) => {
+                self.session.requests.take(messages_extra);
+                self.session.search.accept_messages(Vec::new(), true);
+                Err(err)
+            }
+        }
+    }
+
+    /// Open a chat from the palette via the existing `openChat` path.
+    pub fn select_search_chat(
+        &mut self,
+        chat_id: ChatId,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        self.session.close_search();
+        self.select_chat(chat_id)
+    }
+
+    /// Jump to a found message: upsert it into history, then `select_chat`.
+    pub fn select_search_message(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        self.session.promote_search_message(chat_id, message_id);
+        self.session.close_search();
+        self.select_chat(chat_id)
     }
 
     /// Send `close` (not `logOut`). Callers must keep receiving until Closed.
@@ -1797,6 +1888,176 @@ mod tests {
         );
         assert!(!sink.rendered().contains("CANARY_PHOTO"));
         let _ = std::fs::remove_dir_all(&pick_dir);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn driver_search_happy_empty_error_and_select() {
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = Arc::new(RecordingSender::new());
+        let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+        let mut driver =
+            ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+        assert_eq!(
+            driver.set_search_query("alice"),
+            Err(ConnectSendError::InvalidRequest)
+        );
+        let seq = AtomicU64::new(0);
+        driver
+            .ingest(
+                copy_and_parse(
+                    r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        driver
+            .ingest(
+                copy_and_parse(
+                    r#"{"@type":"updateNewChat","chat":{"id":7,"title":"Alice","type":{"@type":"chatTypePrivate","user_id":7},"unread_count":0}}"#,
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        driver
+            .ingest(
+                copy_and_parse(
+                    r#"{"@type":"updateChatPosition","chat_id":7,"position":{"@type":"chatPosition","list":{"@type":"chatListMain"},"order":"9","is_pinned":false}}"#,
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+
+        let extras = driver.set_search_query("alice").unwrap().expect("search");
+        let sent = recorder.snapshot();
+        assert!(
+            sent.iter()
+                .any(|j| j.contains("\"@type\":\"searchChats\"") && j.contains("alice"))
+        );
+        assert!(
+            sent.iter().any(|j| {
+                j.contains("\"@type\":\"searchMessages\"") && j.contains("chatListMain")
+            })
+        );
+        driver
+            .ingest(
+                copy_and_parse(
+                    &format!(
+                        r#"{{"@type":"chats","@extra":"{}","total_count":1,"chat_ids":[7]}}"#,
+                        extras.0.0
+                    ),
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        driver
+            .ingest(
+                copy_and_parse(
+                    &format!(
+                        r#"{{"@type":"foundMessages","@extra":"{}","total_count":1,"next_offset":"","messages":[{{"id":50,"chat_id":7,"is_outgoing":false,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"CANARY_DRV_search","entities":[]}}}}}}]}}"#,
+                        extras.1 .0
+                    ),
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        assert_eq!(driver.session.search.status, SearchStatus::Ready);
+        assert_eq!(driver.session.search.chat_ids, vec![ChatId(7)]);
+        driver
+            .select_search_message(ChatId(7), MessageId(50))
+            .unwrap();
+        assert_eq!(driver.session.search.status, SearchStatus::Closed);
+        assert_eq!(driver.session.open_chat, Some(ChatId(7)));
+        assert!(
+            driver
+                .session
+                .histories
+                .get(&7)
+                .unwrap()
+                .messages
+                .contains_key(&50)
+        );
+        assert!(
+            recorder
+                .snapshot()
+                .iter()
+                .any(|j| j.contains("\"@type\":\"openChat\"") && j.contains("\"chat_id\":7"))
+        );
+
+        driver.open_search();
+        let empty = driver.set_search_query("zzz").unwrap().expect("empty");
+        driver
+            .ingest(
+                copy_and_parse(
+                    &format!(
+                        r#"{{"@type":"chats","@extra":"{}","total_count":0,"chat_ids":[]}}"#,
+                        empty.0.0
+                    ),
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        driver
+            .ingest(
+                copy_and_parse(
+                    &format!(
+                        r#"{{"@type":"foundMessages","@extra":"{}","total_count":0,"next_offset":"","messages":[]}}"#,
+                        empty.1 .0
+                    ),
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        assert_eq!(driver.session.search.status, SearchStatus::Empty);
+
+        let fail = driver.set_search_query("nope").unwrap().expect("fail");
+        driver
+            .ingest(
+                copy_and_parse(
+                    &format!(
+                        r#"{{"@type":"error","code":400,"message":"CANARY_DRV_ERR","@extra":"{}"}}"#,
+                        fail.0 .0
+                    ),
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        driver
+            .ingest(
+                copy_and_parse(
+                    &format!(
+                        r#"{{"@type":"error","code":400,"message":"CANARY_DRV_ERR2","@extra":"{}"}}"#,
+                        fail.1 .0
+                    ),
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        assert_eq!(driver.session.search.status, SearchStatus::Failed);
+        driver.close_search();
+        assert_eq!(driver.session.search.status, SearchStatus::Closed);
+        assert!(!sink.rendered().contains("CANARY_DRV"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
