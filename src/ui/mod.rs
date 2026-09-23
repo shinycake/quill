@@ -8,8 +8,8 @@ use gpui_kit::*;
 use quill::auth::{AuthAction, AuthView, view_for};
 use quill::composer::{AttachmentKind, ComposerAttachment, ComposerSnapshot, should_send_on_enter};
 use quill::connect::{
-    ConnectBlocker, ConnectGate, LiveConnect, USER_DOWNLOAD_PRIORITY, evaluate_gate,
-    start_live_connect,
+    ConnectBlocker, ConnectGate, LiveConnect, SEARCH_DEBOUNCE, SearchQueryOutcome,
+    USER_DOWNLOAD_PRIORITY, evaluate_gate, start_live_connect,
 };
 use quill::credentials::TelegramCredentials;
 use quill::diagnostics::{DiagnosticSink, MemorySink};
@@ -55,8 +55,6 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("ctrl-l", FocusComposer, None),
         KeyBinding::new("cmd-up", LoadOlder, None),
         KeyBinding::new("ctrl-up", LoadOlder, None),
-        KeyBinding::new("cmd-f", OpenSearch, None),
-        KeyBinding::new("ctrl-f", OpenSearch, None),
         KeyBinding::new("cmd-k", OpenSearch, None),
         KeyBinding::new("ctrl-k", OpenSearch, None),
         KeyBinding::new("escape", CancelSearch, None),
@@ -860,11 +858,14 @@ impl QuillApp {
         }
         if let Some(live) = self.live.as_mut() {
             match live.driver.set_search_query(query) {
-                Ok(Some(_)) => self.status_note = "searching…".into(),
-                Ok(None) if query.trim().is_empty() => {
+                Ok(SearchQueryOutcome::Sent(_)) => self.status_note = "searching…".into(),
+                Ok(SearchQueryOutcome::Debounced { token }) => {
+                    self.schedule_search_commit(token, cx);
+                }
+                Ok(SearchQueryOutcome::Unchanged) if query.trim().is_empty() => {
                     self.status_note = "search chats and messages".into();
                 }
-                Ok(None) => {}
+                Ok(SearchQueryOutcome::Unchanged) => {}
                 Err(_) => self.status_note = "could not search".into(),
             }
         } else if let Some(session) = self.demo_session.as_mut() {
@@ -879,6 +880,24 @@ impl QuillApp {
             session.apply_local_search_filter(query);
         }
         cx.notify();
+    }
+
+    fn schedule_search_commit(&mut self, token: u64, cx: &mut Context<Self>) {
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(SEARCH_DEBOUNCE).await;
+            this.update(cx, |this, cx| {
+                if let Some(live) = this.live.as_mut() {
+                    match live.driver.commit_debounced_search(token) {
+                        Ok(Some(_)) => this.status_note = "searching…".into(),
+                        Ok(None) => {}
+                        Err(_) => this.status_note = "could not search".into(),
+                    }
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
     }
 
     fn activate_first_search_result(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -924,14 +943,14 @@ impl QuillApp {
     ) {
         if let Some(live) = self.live.as_mut() {
             self.status_note = match live.driver.select_search_message(chat_id, message_id) {
-                Ok(_) => "jumped to message".into(),
+                Ok(_) => "opened chat".into(),
                 Err(_) => "could not open chat".into(),
             };
         } else if let Some(session) = self.demo_session.as_mut() {
             session.promote_search_message(chat_id, message_id);
             session.close_search();
             session.open_chat(chat_id);
-            self.status_note = "jumped to message".into();
+            self.status_note = "opened chat".into();
         }
         self.search_input
             .update(cx, |input, cx| input.set_value("", window, cx));
@@ -994,10 +1013,11 @@ impl QuillApp {
             .map(|s| {
                 chat_ids
                     .into_iter()
-                    .filter_map(|id| {
+                    .map(|id| {
                         s.chats
                             .get(&id.0)
                             .map(|chat| (chat.id, chat.title.clone(), chat.sidebar_preview()))
+                            .unwrap_or_else(|| (id, format!("chat {}", id.0), String::new()))
                     })
                     .collect()
             })
@@ -2298,7 +2318,7 @@ fn status_bar(
         .text_xs()
         .text_color(cx.theme().muted_foreground)
         .child(format!(
-            "Auth: {} · {} · {} · Keyboard: ⌘F/⌘K search, Esc cancel, ⌘1 sidebar, ⌘L composer, ⌘↑ older · VoiceOver: macOS follow-up",
+            "Auth: {} · {} · {} · Keyboard: ⌘K search, Esc cancel, ⌘1 sidebar, ⌘L composer, ⌘↑ older · VoiceOver: macOS follow-up",
             auth.title,
             connect_status_label(connect_status),
             status_note

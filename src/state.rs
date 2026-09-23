@@ -426,7 +426,7 @@ impl Default for SearchState {
 }
 
 impl SearchState {
-    pub fn open_palette(&mut self) {
+    pub fn open_field(&mut self) {
         if self.open {
             return;
         }
@@ -1124,7 +1124,7 @@ impl Session {
     }
 
     pub fn open_search(&mut self) {
-        self.search.open_palette();
+        self.search.open_field();
     }
 
     pub fn close_search(&mut self) {
