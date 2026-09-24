@@ -918,6 +918,63 @@ fn replay_pin_and_unpin_message_is_pinned() {
 }
 
 #[test]
+fn replay_mute_and_archive_move_sidebar_lists() {
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn quill::diagnostics::DiagnosticSink> = sink.clone();
+    let mut session = Session::new(AccountKey::primary(), dyn_sink);
+    let seq = AtomicU64::new(0);
+    apply_all_seq(
+        &mut session,
+        &sink,
+        &seq,
+        &[
+            r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+            r#"{"@type":"updateNewChat","chat":{"id":7,"title":"Alice","type":{"@type":"chatTypePrivate","user_id":7},"unread_count":0}}"#,
+            r#"{"@type":"updateChatPosition","chat_id":7,"position":{"@type":"chatPosition","list":{"@type":"chatListMain"},"order":"9","is_pinned":false}}"#,
+        ],
+    );
+    assert_eq!(session.ordered_chats().len(), 1);
+    let mute = session.request(
+        RequestPurpose::SetChatNotificationSettings,
+        Some(quill::ids::ChatId(7)),
+    );
+    apply_all_seq(
+        &mut session,
+        &sink,
+        &seq,
+        &[
+            &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, mute.0),
+            r#"{"@type":"updateChatNotificationSettings","chat_id":7,"notification_settings":{"@type":"chatNotificationSettings","use_default_mute_for":false,"mute_for":3600,"use_default_sound":true,"sound_id":"0","use_default_show_preview":true,"show_preview":false,"use_default_mute_stories":true,"mute_stories":false,"use_default_story_sound":true,"story_sound_id":"0","use_default_show_story_poster":true,"show_story_poster":false,"use_default_disable_pinned_message_notifications":true,"disable_pinned_message_notifications":false,"use_default_disable_mention_notifications":true,"disable_mention_notifications":false}}"#,
+        ],
+    );
+    assert!(session.chats.get(&7).unwrap().is_muted());
+    assert_eq!(
+        session
+            .chats
+            .get(&7)
+            .unwrap()
+            .notification_settings
+            .mute_for,
+        3600
+    );
+    let archive = session.request(RequestPurpose::AddChatToList, Some(quill::ids::ChatId(7)));
+    apply_all_seq(
+        &mut session,
+        &sink,
+        &seq,
+        &[
+            &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, archive.0),
+            r#"{"@type":"updateChatRemovedFromList","chat_id":7,"chat_list":{"@type":"chatListMain"}}"#,
+            r#"{"@type":"updateChatAddedToList","chat_id":7,"chat_list":{"@type":"chatListArchive"}}"#,
+            r#"{"@type":"updateChatPosition","chat_id":7,"position":{"@type":"chatPosition","list":{"@type":"chatListArchive"},"order":"4","is_pinned":false}}"#,
+        ],
+    );
+    assert!(session.ordered_chats().is_empty());
+    assert!(session.ordered_archived_chats()[0].is_muted());
+    assert!(!sink.rendered().contains("CANARY"));
+}
+
+#[test]
 fn logout_invalidates_pending_requests() {
     let sink = Arc::new(MemorySink::new());
     let dyn_sink: Arc<dyn quill::diagnostics::DiagnosticSink> = sink.clone();

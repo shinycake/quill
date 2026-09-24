@@ -14,16 +14,19 @@ use crate::state::{
     ChatSearchJumpNeed, ForwardFlight, RequestPurpose, SearchStatus, Session, ShutdownPhase,
 };
 use crate::telegram::client::{LiveTdJson, OwnedEnvelope, ReceiveBridge};
-use crate::telegram::envelope::{AuthorizationState, EnvelopePayload};
+use crate::telegram::envelope::{
+    AuthorizationState, ChatNotificationSettings, EnvelopePayload, MUTE_FOREVER,
+};
 use crate::telegram::ffi::{LibraryOrigin, TdJsonError, resolve_tdjson_path};
 use crate::telegram::requests::{
-    SetTdlibParameters, add_message_reaction, add_recently_found_chat, check_authentication_code,
-    check_authentication_password, close_chat, close_request, delete_messages,
-    download_file as download_file_request, edit_message_caption, edit_message_text,
-    forward_messages, get_authorization_state, get_chat_history, load_chats, open_chat,
-    pin_chat_message, remove_message_reaction, search_chat_messages, search_chats, search_messages,
-    search_recently_found_chats, send_document, send_photo, send_text,
-    set_authentication_phone_number, unpin_chat_message, view_messages,
+    SetTdlibParameters, add_chat_to_list, add_message_reaction, add_recently_found_chat,
+    check_authentication_code, check_authentication_password, close_chat, close_request,
+    delete_messages, download_file as download_file_request, edit_message_caption,
+    edit_message_text, forward_messages, get_authorization_state, get_chat_history, load_chats,
+    open_chat, pin_chat_message, remove_message_reaction, search_chat_messages, search_chats,
+    search_messages, search_recently_found_chats, send_document, send_photo, send_text,
+    set_authentication_phone_number, set_chat_notification_settings, unpin_chat_message,
+    view_messages,
 };
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -1003,6 +1006,93 @@ impl<S: JsonSender> ConnectDriver<S> {
         } else {
             pin_chat_message(extra, chat_id, message_id, false, false)
         };
+        match self.sender.send_json(&json) {
+            Ok(()) => Ok(extra),
+            Err(err) => {
+                self.session.requests.take(extra);
+                Err(err)
+            }
+        }
+    }
+
+    /// Mute for `mute_for` seconds (0 = unmute). Copies the chat's other
+    /// notification settings and clears `use_default_mute_for` (Unigram).
+    pub fn set_chat_mute_for(
+        &mut self,
+        chat_id: ChatId,
+        mute_for: i32,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let Some(chat) = self.session.chats.get(&chat_id.0) else {
+            return Err(ConnectSendError::InvalidRequest);
+        };
+        if !chat.supported() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let settings = chat.notification_settings.clone().with_mute_for(mute_for);
+        self.send_notification_settings(chat_id, &settings)
+    }
+
+    /// Unmute (`mute_for` 0, not "use default").
+    pub fn unmute_chat(&mut self, chat_id: ChatId) -> Result<RequestId, ConnectSendError> {
+        self.set_chat_mute_for(chat_id, 0)
+    }
+
+    /// Mute forever (`i32::MAX`, tdesktop `kMuteForeverValue`).
+    pub fn mute_chat_forever(&mut self, chat_id: ChatId) -> Result<RequestId, ConnectSendError> {
+        self.set_chat_mute_for(chat_id, MUTE_FOREVER)
+    }
+
+    fn send_notification_settings(
+        &mut self,
+        chat_id: ChatId,
+        settings: &ChatNotificationSettings,
+    ) -> Result<RequestId, ConnectSendError> {
+        let extra = self
+            .session
+            .request(RequestPurpose::SetChatNotificationSettings, Some(chat_id));
+        let json = set_chat_notification_settings(extra, chat_id, settings);
+        match self.sender.send_json(&json) {
+            Ok(()) => Ok(extra),
+            Err(err) => {
+                self.session.requests.take(extra);
+                Err(err)
+            }
+        }
+    }
+
+    /// Move the chat to `chatListArchive` (`addChatToList`).
+    pub fn archive_chat(&mut self, chat_id: ChatId) -> Result<RequestId, ConnectSendError> {
+        self.send_add_chat_to_list(chat_id, true)
+    }
+
+    /// Move the chat back to `chatListMain` (`addChatToList`).
+    pub fn unarchive_chat(&mut self, chat_id: ChatId) -> Result<RequestId, ConnectSendError> {
+        self.send_add_chat_to_list(chat_id, false)
+    }
+
+    fn send_add_chat_to_list(
+        &mut self,
+        chat_id: ChatId,
+        archive: bool,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let supported = self
+            .session
+            .chats
+            .get(&chat_id.0)
+            .is_some_and(|chat| chat.supported());
+        if !supported {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::AddChatToList, Some(chat_id));
+        let json = add_chat_to_list(extra, chat_id, archive);
         match self.sender.send_json(&json) {
             Ok(()) => Ok(extra),
             Err(err) => {
@@ -3649,6 +3739,103 @@ mod tests {
             .get(&50)
             .unwrap();
         assert!(!cleared.is_pinned);
+        assert!(!sink.rendered().contains("CANARY"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn driver_mute_forever_then_unmute_and_archive() {
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = Arc::new(RecordingSender::new());
+        let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+        let mut driver =
+            ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+        let seq = AtomicU64::new(0);
+        seed_ready_alice(&mut driver, &seq, &dyn_sink);
+
+        let extra = driver.mute_chat_forever(ChatId(7)).unwrap();
+        let json = recorder
+            .snapshot()
+            .last()
+            .cloned()
+            .expect("setChatNotificationSettings");
+        let v: Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "setChatNotificationSettings");
+        assert_eq!(v["@extra"], extra.0.to_string());
+        assert_eq!(v["chat_id"], 7);
+        assert_eq!(
+            v["notification_settings"]["@type"],
+            "chatNotificationSettings"
+        );
+        assert_eq!(v["notification_settings"]["use_default_mute_for"], false);
+        assert_eq!(v["notification_settings"]["mute_for"], i32::MAX);
+        driver
+            .ingest(
+                copy_and_parse(
+                    &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        driver
+            .ingest(
+                copy_and_parse(
+                    r#"{"@type":"updateChatNotificationSettings","chat_id":7,"notification_settings":{"@type":"chatNotificationSettings","use_default_mute_for":false,"mute_for":2147483647,"use_default_sound":true,"sound_id":"0","use_default_show_preview":true,"show_preview":false,"use_default_mute_stories":true,"mute_stories":false,"use_default_story_sound":true,"story_sound_id":"0","use_default_show_story_poster":true,"show_story_poster":false,"use_default_disable_pinned_message_notifications":true,"disable_pinned_message_notifications":false,"use_default_disable_mention_notifications":true,"disable_mention_notifications":false}}"#,
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        assert!(driver.session.chats.get(&7).unwrap().is_muted());
+
+        let unmute = driver.unmute_chat(ChatId(7)).unwrap();
+        let unmute_json = recorder.snapshot().last().cloned().unwrap();
+        let v: Value = serde_json::from_str(&unmute_json).unwrap();
+        assert_eq!(v["@type"], "setChatNotificationSettings");
+        assert_eq!(v["@extra"], unmute.0.to_string());
+        assert_eq!(v["notification_settings"]["mute_for"], 0);
+
+        let archive = driver.archive_chat(ChatId(7)).unwrap();
+        let archive_json = recorder.snapshot().last().cloned().unwrap();
+        let v: Value = serde_json::from_str(&archive_json).unwrap();
+        assert_eq!(v["@type"], "addChatToList");
+        assert_eq!(v["@extra"], archive.0.to_string());
+        assert_eq!(v["chat_list"]["@type"], "chatListArchive");
+        driver
+            .ingest(
+                copy_and_parse(
+                    r#"{"@type":"updateChatPosition","chat_id":7,"position":{"@type":"chatPosition","list":{"@type":"chatListMain"},"order":"0","is_pinned":false}}"#,
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        driver
+            .ingest(
+                copy_and_parse(
+                    r#"{"@type":"updateChatPosition","chat_id":7,"position":{"@type":"chatPosition","list":{"@type":"chatListArchive"},"order":"4","is_pinned":false}}"#,
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        assert!(driver.session.ordered_chats().is_empty());
+        assert_eq!(driver.session.ordered_archived_chats()[0].id.0, 7);
+
+        let unarchive = driver.unarchive_chat(ChatId(7)).unwrap();
+        let unarchive_json = recorder.snapshot().last().cloned().unwrap();
+        let v: Value = serde_json::from_str(&unarchive_json).unwrap();
+        assert_eq!(v["@type"], "addChatToList");
+        assert_eq!(v["@extra"], unarchive.0.to_string());
+        assert_eq!(v["chat_list"]["@type"], "chatListMain");
         assert!(!sink.rendered().contains("CANARY"));
         let _ = std::fs::remove_dir_all(&dir);
     }

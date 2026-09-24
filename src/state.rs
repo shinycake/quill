@@ -5,9 +5,10 @@ use crate::ids::{
 };
 use crate::telegram::client::OwnedEnvelope;
 use crate::telegram::envelope::{
-    AuthorizationState, ChatKind, ChatList, ChatPositionUpdate, ConnectionState, EnvelopePayload,
-    ErrorClass, MessageContent, MessageForwardInfo, MessageInteractionInfo, MessageOrigin,
-    MessageReaction, MessageReplyTo, ParsedFile, ParsedMessage,
+    AuthorizationState, ChatKind, ChatList, ChatNotificationSettings, ChatPositionUpdate,
+    ConnectionState, EnvelopePayload, ErrorClass, MessageContent, MessageForwardInfo,
+    MessageInteractionInfo, MessageOrigin, MessageReaction, MessageReplyTo, ParsedFile,
+    ParsedMessage,
 };
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
@@ -48,6 +49,12 @@ pub enum RequestPurpose {
     PinChatMessage,
     /// `unpinChatMessage`. Response is `ok`; pin via `updateMessageIsPinned`.
     UnpinChatMessage,
+    /// `setChatNotificationSettings`. Response is `ok`; mute via
+    /// `updateChatNotificationSettings`.
+    SetChatNotificationSettings,
+    /// `addChatToList` (`chatListArchive` or `chatListMain`). Response is `ok`;
+    /// list membership via position / added-to-list updates.
+    AddChatToList,
     Close,
     LogOut,
     Other,
@@ -349,6 +356,12 @@ pub struct ChatSummary {
     pub order: i64,
     pub is_pinned: bool,
     pub in_main_list: bool,
+    /// `chatListArchive` membership (`updateChatPosition` / add-remove-from-list).
+    pub in_archive: bool,
+    pub archive_order: i64,
+    pub archive_is_pinned: bool,
+    /// `chat.notification_settings` / `updateChatNotificationSettings`.
+    pub notification_settings: ChatNotificationSettings,
     /// Sidebar preview from `updateChatLastMessage`. Not logged.
     pub last_preview: String,
 }
@@ -356,6 +369,10 @@ pub struct ChatSummary {
 impl ChatSummary {
     pub fn supported(&self) -> bool {
         self.kind.is_supported_cloud_chat()
+    }
+
+    pub fn is_muted(&self) -> bool {
+        self.notification_settings.is_muted()
     }
 
     pub fn sidebar_preview(&self) -> String {
@@ -396,6 +413,10 @@ fn placeholder_chat(chat_id: ChatId) -> ChatSummary {
         order: 0,
         is_pinned: false,
         in_main_list: false,
+        in_archive: false,
+        archive_order: 0,
+        archive_is_pinned: false,
+        notification_settings: ChatNotificationSettings::default(),
         last_preview: String::new(),
     }
 }
@@ -931,6 +952,7 @@ pub struct Session {
     pub connection: ConnectionState,
     pub chats: HashMap<i64, ChatSummary>,
     pub main_order: Vec<ChatId>,
+    pub archive_order: Vec<ChatId>,
     pub histories: HashMap<i64, HistoryState>,
     pub open_chat: Option<ChatId>,
     pub view_generation: ViewGeneration,
@@ -966,6 +988,7 @@ impl Session {
             connection: ConnectionState::WaitingForNetwork,
             chats: HashMap::new(),
             main_order: Vec::new(),
+            archive_order: Vec::new(),
             histories: HashMap::new(),
             open_chat: None,
             view_generation: ViewGeneration(1),
@@ -1031,6 +1054,7 @@ impl Session {
                 unread_count,
                 last_read_inbox_message_id,
                 last_read_outbox_message_id,
+                notification_settings,
             } => {
                 let chat = self
                     .chats
@@ -1041,6 +1065,16 @@ impl Session {
                 chat.unread_count = unread_count;
                 chat.last_read_inbox_message_id = last_read_inbox_message_id;
                 chat.last_read_outbox_message_id = last_read_outbox_message_id;
+                chat.notification_settings = notification_settings;
+            }
+            EnvelopePayload::UpdateChatNotificationSettings {
+                chat_id,
+                notification_settings,
+            } => {
+                self.chats
+                    .entry(chat_id.0)
+                    .or_insert_with(|| placeholder_chat(chat_id))
+                    .notification_settings = notification_settings;
             }
             EnvelopePayload::UpdateChatTitle { chat_id, title } => {
                 self.chats
@@ -1070,19 +1104,24 @@ impl Session {
                     .last_read_outbox_message_id = last_read_outbox_message_id;
             }
             EnvelopePayload::UpdateChatAddedToList { chat_id, list } => {
-                if list == ChatList::Main {
-                    self.chats
-                        .entry(chat_id.0)
-                        .or_insert_with(|| placeholder_chat(chat_id))
-                        .in_main_list = true;
-                    self.rebuild_main_order();
+                let chat = self
+                    .chats
+                    .entry(chat_id.0)
+                    .or_insert_with(|| placeholder_chat(chat_id));
+                match list {
+                    ChatList::Main => chat.in_main_list = true,
+                    ChatList::Archive => chat.in_archive = true,
+                    _ => {}
                 }
+                self.rebuild_main_order();
             }
             EnvelopePayload::UpdateChatRemovedFromList { chat_id, list } => {
-                if list == ChatList::Main
-                    && let Some(chat) = self.chats.get_mut(&chat_id.0)
-                {
-                    chat.in_main_list = false;
+                if let Some(chat) = self.chats.get_mut(&chat_id.0) {
+                    match list {
+                        ChatList::Main => chat.in_main_list = false,
+                        ChatList::Archive => chat.in_archive = false,
+                        _ => {}
+                    }
                     self.rebuild_main_order();
                 }
             }
@@ -1404,22 +1443,33 @@ impl Session {
     }
 
     fn apply_position_fields(&mut self, pos: ChatPositionUpdate) {
-        // A position on Archive / a folder is not a Main-list eviction.
-        // Main membership changes only via a Main `updateChatPosition`, a full
-        // `updateChatLastMessage` positions set, or add/remove-from-list.
-        if pos.list != ChatList::Main {
-            return;
-        }
+        // A position on one list is not an eviction from the other.
+        // A single `updateChatPosition` updates only that list. A full
+        // `updateChatLastMessage` positions set replaces both memberships.
         let chat = self
             .chats
             .entry(pos.chat_id.0)
             .or_insert_with(|| placeholder_chat(pos.chat_id));
-        if pos.order == 0 {
-            chat.in_main_list = false;
-        } else {
-            chat.order = pos.order;
-            chat.is_pinned = pos.is_pinned;
-            chat.in_main_list = true;
+        match pos.list {
+            ChatList::Main => {
+                if pos.order == 0 {
+                    chat.in_main_list = false;
+                } else {
+                    chat.order = pos.order;
+                    chat.is_pinned = pos.is_pinned;
+                    chat.in_main_list = true;
+                }
+            }
+            ChatList::Archive => {
+                if pos.order == 0 {
+                    chat.in_archive = false;
+                } else {
+                    chat.archive_order = pos.order;
+                    chat.archive_is_pinned = pos.is_pinned;
+                    chat.in_archive = true;
+                }
+            }
+            ChatList::Folder(_) | ChatList::Unknown => {}
         }
     }
 
@@ -1437,6 +1487,18 @@ impl Session {
             None => {
                 if let Some(chat) = self.chats.get_mut(&chat_id.0) {
                     chat.in_main_list = false;
+                }
+            }
+        }
+        match positions
+            .iter()
+            .find(|pos| pos.list == ChatList::Archive)
+            .cloned()
+        {
+            Some(pos) => self.apply_position_fields(pos),
+            None => {
+                if let Some(chat) = self.chats.get_mut(&chat_id.0) {
+                    chat.in_archive = false;
                 }
             }
         }
@@ -1542,6 +1604,18 @@ impl Session {
             .collect();
         rows.sort_by(|a, b| b.order.cmp(&a.order).then(b.id.0.cmp(&a.id.0)));
         self.main_order = rows.into_iter().map(|c| c.id).collect();
+        let mut archived: Vec<ChatSummary> = self
+            .chats
+            .values()
+            .filter(|c| c.in_archive)
+            .cloned()
+            .collect();
+        archived.sort_by(|a, b| {
+            b.archive_order
+                .cmp(&a.archive_order)
+                .then(b.id.0.cmp(&a.id.0))
+        });
+        self.archive_order = archived.into_iter().map(|c| c.id).collect();
     }
 
     pub fn open_chat(&mut self, chat_id: ChatId) {
@@ -1604,6 +1678,16 @@ impl Session {
         self.main_order
             .iter()
             .filter_map(|id| self.chats.get(&id.0))
+            .filter(|chat| chat.in_main_list)
+            .collect()
+    }
+
+    /// Chats in `chatListArchive`, highest TDLib order first (same as main).
+    pub fn ordered_archived_chats(&self) -> Vec<&ChatSummary> {
+        self.archive_order
+            .iter()
+            .filter_map(|id| self.chats.get(&id.0))
+            .filter(|chat| chat.in_archive)
             .collect()
     }
 
@@ -2308,8 +2392,11 @@ mod tests {
         );
         let chat = session.chats.get(&5).unwrap();
         assert!(chat.in_main_list);
+        assert!(chat.in_archive);
+        assert_eq!(chat.archive_order, 3);
         assert_eq!(chat.order, 6);
         assert_eq!(session.ordered_chats().len(), 1);
+        assert_eq!(session.ordered_archived_chats().len(), 1);
     }
 
     #[test]
@@ -2340,8 +2427,33 @@ mod tests {
             &sink,
             r#"{"@type":"updateChatLastMessage","chat_id":6,"last_message":null,"positions":[{"@type":"chatPosition","list":{"@type":"chatListArchive"},"order":"1","is_pinned":false}]}"#,
         );
-        assert!(!session.chats.get(&6).unwrap().in_main_list);
+        let chat = session.chats.get(&6).unwrap();
+        assert!(!chat.in_main_list);
+        assert!(chat.in_archive);
         assert!(session.ordered_chats().is_empty());
+        assert_eq!(session.ordered_archived_chats()[0].id.0, 6);
+    }
+
+    #[test]
+    fn notification_settings_mute_and_unmute() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateNewChat","chat":{"id":7,"title":"m","type":{"@type":"chatTypePrivate","user_id":7},"unread_count":0,"notification_settings":{"@type":"chatNotificationSettings","use_default_mute_for":false,"mute_for":2147483647,"use_default_sound":true,"sound_id":"0","use_default_show_preview":true,"show_preview":false,"use_default_mute_stories":true,"mute_stories":false,"use_default_story_sound":true,"story_sound_id":"0","use_default_show_story_poster":true,"show_story_poster":false,"use_default_disable_pinned_message_notifications":true,"disable_pinned_message_notifications":false,"use_default_disable_mention_notifications":true,"disable_mention_notifications":false}}}"#,
+        );
+        let chat = session.chats.get(&7).unwrap();
+        assert!(chat.is_muted());
+        assert!(chat.notification_settings.is_muted_forever());
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateChatNotificationSettings","chat_id":7,"notification_settings":{"@type":"chatNotificationSettings","use_default_mute_for":false,"mute_for":0,"use_default_sound":true,"sound_id":"0","use_default_show_preview":true,"show_preview":false,"use_default_mute_stories":true,"mute_stories":false,"use_default_story_sound":true,"story_sound_id":"0","use_default_show_story_poster":true,"show_story_poster":false,"use_default_disable_pinned_message_notifications":true,"disable_pinned_message_notifications":false,"use_default_disable_mention_notifications":true,"disable_mention_notifications":false}}"#,
+        );
+        assert!(!session.chats.get(&7).unwrap().is_muted());
     }
 
     #[test]
