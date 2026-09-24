@@ -3763,7 +3763,7 @@ fn session_history_row(
             let chosen = chip.is_chosen;
             row = row.child(
                 div()
-                    .id(("reaction-chip", message_id.0 as u64, index as u64))
+                    .id(("reaction-chip", message_id.0 as u64 * 64 + index as u64))
                     .px_2()
                     .py_1()
                     .rounded_md()
