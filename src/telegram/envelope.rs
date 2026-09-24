@@ -215,6 +215,22 @@ pub enum ChatList {
     Unknown,
 }
 
+/// Same-chat / known-chat reply metadata from `message.reply_to`.
+/// Stories and unknown `MessageReplyTo` variants are dropped (out of scope).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MessageReplyTo {
+    pub chat_id: ChatId,
+    pub message_id: MessageId,
+    pub quote_text: Option<String>,
+    pub content_preview: Option<String>,
+}
+
+impl MessageReplyTo {
+    pub fn is_same_chat(&self, open_chat: ChatId) -> bool {
+        self.chat_id.0 == 0 || self.chat_id == open_chat
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParsedMessage {
     pub id: MessageId,
@@ -222,6 +238,7 @@ pub struct ParsedMessage {
     pub is_outgoing: bool,
     pub content: MessageContent,
     pub files: Vec<ParsedFile>,
+    pub reply_to: Option<MessageReplyTo>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -736,7 +753,48 @@ fn parse_message(value: &Value) -> Result<ParsedMessage, ParseError> {
             .unwrap_or(false),
         content,
         files,
+        reply_to: parse_reply_to(value.get("reply_to")),
     })
+}
+
+fn parse_reply_to(value: Option<&Value>) -> Option<MessageReplyTo> {
+    let value = value?;
+    if value.is_null() {
+        return None;
+    }
+    match value.get("@type").and_then(Value::as_str) {
+        Some("messageReplyToMessage") => {
+            let message_id = int53_or_zero(value.get("message_id"));
+            if message_id == 0 {
+                return None;
+            }
+            let quote_text = value.get("quote").and_then(|quote| {
+                if quote.is_null() {
+                    return None;
+                }
+                let text = parse_formatted_text(quote.get("text"));
+                if text.is_empty() { None } else { Some(text) }
+            });
+            let content_preview = value.get("content").and_then(|content| {
+                if content.is_null() {
+                    return None;
+                }
+                let preview = parse_content(Some(content)).0.preview();
+                if preview.is_empty() {
+                    None
+                } else {
+                    Some(preview)
+                }
+            });
+            Some(MessageReplyTo {
+                chat_id: ChatId(int53_or_zero(value.get("chat_id"))),
+                message_id: MessageId(message_id),
+                quote_text,
+                content_preview,
+            })
+        }
+        _ => None,
+    }
 }
 
 fn parse_content(value: Option<&Value>) -> (MessageContent, Vec<ParsedFile>) {
@@ -1323,5 +1381,47 @@ mod tests {
             }
             other => panic!("{other:?}"),
         }
+    }
+
+    #[test]
+    fn message_reply_to_message_is_typed() {
+        let env = parse_envelope(
+            r#"{"@type":"updateNewMessage","message":{"id":104,"chat_id":11,"is_outgoing":true,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"sounds good","entities":[]}},"reply_to":{"@type":"messageReplyToMessage","chat_id":11,"message_id":101,"quote":{"@type":"textQuote","text":{"@type":"formattedText","text":"Hello from injected JSON.","entities":[]},"position":0,"is_manual":false},"checklist_task_id":0,"poll_option_id":""}}}"#,
+        )
+        .unwrap();
+        match env.payload {
+            EnvelopePayload::UpdateNewMessage(message) => {
+                let reply = message.reply_to.expect("reply_to");
+                assert_eq!(reply.chat_id.0, 11);
+                assert_eq!(reply.message_id.0, 101);
+                assert_eq!(
+                    reply.quote_text.as_deref(),
+                    Some("Hello from injected JSON.")
+                );
+                assert!(reply.is_same_chat(ChatId(11)));
+            }
+            other => panic!("{other:?}"),
+        }
+        let story = parse_envelope(
+            r#"{"@type":"updateNewMessage","message":{"id":2,"chat_id":11,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"story","entities":[]}},"reply_to":{"@type":"messageReplyToStory","story_poster_chat_id":11,"story_id":3}}}"#,
+        )
+        .unwrap();
+        match story.payload {
+            EnvelopePayload::UpdateNewMessage(message) => assert_eq!(message.reply_to, None),
+            other => panic!("{other:?}"),
+        }
+        let schema = include_str!("../../schema/td_api.tl");
+        assert!(
+            schema
+                .lines()
+                .any(|l| l.starts_with("messageReplyToMessage "))
+        );
+        assert!(
+            schema
+                .lines()
+                .any(|l| l.starts_with("inputMessageReplyToMessage "))
+        );
+        assert!(schema.lines().any(|l| l.starts_with("textQuote ")));
+        assert!(schema.lines().any(|l| l.starts_with("inputTextQuote ")));
     }
 }

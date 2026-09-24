@@ -269,14 +269,33 @@ pub fn download_file(extra: RequestId, file_id: FileId, priority: i32) -> String
     .to_string()
 }
 
+/// Same-chat reply: schema `inputMessageReplyToMessage` (quote null = whole message).
+pub fn input_message_reply_to(message_id: Option<MessageId>) -> Value {
+    match message_id {
+        None => Value::Null,
+        Some(id) => json!({
+            "@type": "inputMessageReplyToMessage",
+            "message_id": id.0,
+            "quote": Value::Null,
+            "checklist_task_id": 0,
+            "poll_option_id": ""
+        }),
+    }
+}
+
 /// `sendMessage` for the pinned 1.8.67 schema: typed `topic_id`, not `message_thread_id`.
-pub fn send_text(extra: RequestId, chat_id: ChatId, text: &str) -> String {
+pub fn send_text(
+    extra: RequestId,
+    chat_id: ChatId,
+    text: &str,
+    reply_to: Option<MessageId>,
+) -> String {
     json!({
         "@type": "sendMessage",
         "@extra": extra.as_extra(),
         "chat_id": chat_id.0,
         "topic_id": Value::Null,
-        "reply_to": Value::Null,
+        "reply_to": input_message_reply_to(reply_to),
         "options": Value::Null,
         "reply_markup": Value::Null,
         "input_message_content": {
@@ -295,13 +314,19 @@ pub fn send_text(extra: RequestId, chat_id: ChatId, text: &str) -> String {
 
 /// `sendMessage` + `inputMessagePhoto` / `inputPhoto` / `inputFileLocal` (1.8.67).
 /// `path` must already be an explicitly picked local file — never a JSON `local.path`.
-pub fn send_photo(extra: RequestId, chat_id: ChatId, path: &str, caption: &str) -> String {
+pub fn send_photo(
+    extra: RequestId,
+    chat_id: ChatId,
+    path: &str,
+    caption: &str,
+    reply_to: Option<MessageId>,
+) -> String {
     json!({
         "@type": "sendMessage",
         "@extra": extra.as_extra(),
         "chat_id": chat_id.0,
         "topic_id": Value::Null,
-        "reply_to": Value::Null,
+        "reply_to": input_message_reply_to(reply_to),
         "options": Value::Null,
         "reply_markup": Value::Null,
         "input_message_content": {
@@ -333,13 +358,19 @@ pub fn send_photo(extra: RequestId, chat_id: ChatId, path: &str, caption: &str) 
 
 /// `sendMessage` + `inputMessageDocument` / `inputDocument` / `inputFileLocal` (1.8.67).
 /// `path` must already be an explicitly picked local file — never a JSON `local.path`.
-pub fn send_document(extra: RequestId, chat_id: ChatId, path: &str, caption: &str) -> String {
+pub fn send_document(
+    extra: RequestId,
+    chat_id: ChatId,
+    path: &str,
+    caption: &str,
+    reply_to: Option<MessageId>,
+) -> String {
     json!({
         "@type": "sendMessage",
         "@extra": extra.as_extra(),
         "chat_id": chat_id.0,
         "topic_id": Value::Null,
-        "reply_to": Value::Null,
+        "reply_to": input_message_reply_to(reply_to),
         "options": Value::Null,
         "reply_markup": Value::Null,
         "input_message_content": {
@@ -382,15 +413,41 @@ mod tests {
 
     #[test]
     fn send_text_includes_topic_id_null() {
-        let json = send_text(RequestId(9), ChatId(1), "hi");
+        let json = send_text(RequestId(9), ChatId(1), "hi", None);
         assert!(json.contains("\"topic_id\":null"));
         assert!(!json.contains("message_thread_id"));
         assert!(json.contains("\"@extra\":\"9\""));
+        assert!(json.contains("\"reply_to\":null"));
+    }
+
+    #[test]
+    fn send_text_reply_uses_input_message_reply_to_message() {
+        let json = send_text(
+            RequestId(10),
+            ChatId(11),
+            "sounds good",
+            Some(MessageId(101)),
+        );
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "sendMessage");
+        assert_eq!(v["reply_to"]["@type"], "inputMessageReplyToMessage");
+        assert_eq!(v["reply_to"]["message_id"], 101);
+        assert_eq!(v["reply_to"]["quote"], Value::Null);
+        assert_eq!(v["reply_to"]["checklist_task_id"], 0);
+        assert_eq!(v["reply_to"]["poll_option_id"], "");
+        assert!(!json.contains("inputMessageReplyToExternalMessage"));
+        assert!(!json.contains("CANARY"));
     }
 
     #[test]
     fn send_photo_shape_matches_1_8_67() {
-        let json = send_photo(RequestId(11), ChatId(7), "/tmp/picked.png", "CANARY_CAP");
+        let json = send_photo(
+            RequestId(11),
+            ChatId(7),
+            "/tmp/picked.png",
+            "CANARY_CAP",
+            None,
+        );
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(v["@type"], "sendMessage");
         assert_eq!(v["@extra"], "11");
@@ -427,7 +484,7 @@ mod tests {
 
     #[test]
     fn send_document_shape_matches_1_8_67() {
-        let json = send_document(RequestId(12), ChatId(7), "/tmp/picked.txt", "");
+        let json = send_document(RequestId(12), ChatId(7), "/tmp/picked.txt", "", None);
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(v["@type"], "sendMessage");
         assert_eq!(v["input_message_content"]["@type"], "inputMessageDocument");
