@@ -25,7 +25,10 @@ use quill::state::{
     SearchStatus, Session, outgoing_status_label, unread_badge_text,
 };
 use quill::telegram::client::copy_and_parse;
-use quill::telegram::envelope::{AuthorizationState, MessageContent, ParsedFile};
+use quill::telegram::envelope::{
+    AuthorizationState, DEFAULT_EMOJI_REACTIONS, MessageContent, MessageInteractionInfo,
+    ParsedFile, toggle_chosen_emoji_reaction,
+};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -127,6 +130,8 @@ pub struct QuillApp {
     forward_picker_open: bool,
     /// Last successful (or failed) `forwardMessages` result.
     forward_result: Option<ForwardResult>,
+    /// tdesktop hover React / Unigram ReactionButton picker (emoji only).
+    pending_react: Option<(ChatId, MessageId)>,
 }
 
 /// Forced UI surfaces for screenshot proof (no live Telegram / no real credentials).
@@ -153,6 +158,8 @@ pub enum ScreenshotDemo {
     ReadyEditDelete,
     /// Forward select + dest picker + success (injected, no live Telegram).
     ReadyForward,
+    /// Emoji react / unreact + chips (injected, no live Telegram).
+    ReadyReactions,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -456,6 +463,15 @@ impl QuillApp {
                     AuthorizationState::Ready,
                 )
             }
+            Some(ScreenshotDemo::ReadyReactions) => {
+                demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
+                (
+                    ConnectUiStatus::DemoReadyChats,
+                    None,
+                    "screenshot demo — emoji reactions (injected interaction_info)".into(),
+                    AuthorizationState::Ready,
+                )
+            }
             None => bootstrap_connect(credentials),
         };
 
@@ -500,6 +516,7 @@ impl QuillApp {
             pending_forward: None,
             forward_picker_open: false,
             forward_result: None,
+            pending_react: None,
         };
         if matches!(demo, Some(ScreenshotDemo::ReadyChatsComposer)) {
             app.composer.update(cx, |input, cx| {
@@ -580,6 +597,14 @@ impl QuillApp {
                 input.focus(window, cx);
             });
             app.status_note = "screenshot demo — select → pick dest → forwarded".into();
+        }
+        if matches!(demo, Some(ScreenshotDemo::ReadyReactions)) {
+            if let Some(session) = app.demo_session.as_mut() {
+                app.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_reactions(session, &app.demo_sink, &app.demo_seq);
+            }
+            app.pending_react = Some((ChatId(11), MessageId(101)));
+            app.status_note = "screenshot demo — react · unreact · chips".into();
         }
         if app.live.is_some() {
             app.spawn_poll_loop(cx);
@@ -947,6 +972,12 @@ impl QuillApp {
             self.pending_forward = None;
             self.forward_picker_open = false;
         }
+        if self
+            .pending_react
+            .is_some_and(|(react_chat, _)| react_chat != chat_id)
+        {
+            self.pending_react = None;
+        }
         if self.live.is_some() {
             let result = self
                 .live
@@ -1137,6 +1168,10 @@ impl QuillApp {
     }
 
     fn cancel_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.pending_react.is_some() {
+            self.close_reaction_picker(cx);
+            return;
+        }
         if self.forward_picker_open {
             self.close_forward_picker(window, cx);
             return;
@@ -1476,6 +1511,148 @@ impl QuillApp {
         if let Some(owned) = copy_and_parse(&json, &self.demo_seq, &dyn_sink) {
             session.apply(owned);
         }
+    }
+
+    fn open_reaction_picker(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        cx: &mut Context<Self>,
+    ) {
+        let can_react = self.session().is_some_and(|session| {
+            session
+                .histories
+                .get(&chat_id.0)
+                .and_then(|history| history.messages.get(&message_id.0))
+                .is_some_and(quill::state::HistoryMessage::can_react)
+        });
+        if !can_react {
+            return;
+        }
+        self.pending_react = Some((chat_id, message_id));
+        self.status_note = "react".into();
+        cx.notify();
+    }
+
+    fn close_reaction_picker(&mut self, cx: &mut Context<Self>) {
+        self.pending_react = None;
+        self.status_note = "reaction picker closed".into();
+        cx.notify();
+    }
+
+    fn toggle_emoji_reaction(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        emoji: String,
+        cx: &mut Context<Self>,
+    ) {
+        if self.live.is_some() {
+            let result = self
+                .live
+                .as_mut()
+                .expect("live")
+                .driver
+                .toggle_message_reaction(chat_id, message_id, &emoji);
+            self.status_note = match result {
+                Ok(_) => "updating reaction…".into(),
+                Err(_) => "could not update reaction".into(),
+            };
+            cx.notify();
+            return;
+        }
+        if self.demo_session.is_some() {
+            self.apply_demo_reaction_toggle(chat_id, message_id, &emoji);
+            self.status_note = "reaction updated".into();
+            cx.notify();
+        }
+    }
+
+    fn apply_demo_reaction_toggle(&mut self, chat_id: ChatId, message_id: MessageId, emoji: &str) {
+        let Some(session) = self.demo_session.as_mut() else {
+            return;
+        };
+        let current = session
+            .histories
+            .get(&chat_id.0)
+            .and_then(|history| history.messages.get(&message_id.0))
+            .and_then(|message| message.interaction_info.clone());
+        let next = toggle_chosen_emoji_reaction(current.as_ref(), emoji);
+        let json = interaction_info_update_json(chat_id, message_id, &next);
+        let dyn_sink: Arc<dyn DiagnosticSink> = self.demo_sink.clone();
+        if let Some(owned) = copy_and_parse(&json, &self.demo_seq, &dyn_sink) {
+            session.apply(owned);
+        }
+    }
+
+    fn reaction_picker_panel(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let target = self.pending_react;
+        let (chat_id, message_id) = target.unwrap_or((ChatId(0), MessageId(0)));
+        let chosen: Vec<String> = self
+            .session()
+            .and_then(|session| {
+                session
+                    .histories
+                    .get(&chat_id.0)
+                    .and_then(|history| history.messages.get(&message_id.0))
+                    .map(|message| {
+                        DEFAULT_EMOJI_REACTIONS
+                            .iter()
+                            .filter(|emoji| message.chosen_emoji(emoji))
+                            .map(|emoji| (*emoji).to_string())
+                            .collect()
+                    })
+            })
+            .unwrap_or_default();
+        let mut row = div().id("reaction-emoji-row").flex().flex_wrap().gap_1();
+        for emoji in DEFAULT_EMOJI_REACTIONS {
+            let own = chosen.iter().any(|picked| picked == *emoji);
+            let picked = (*emoji).to_string();
+            row = row.child(
+                Button::new(format!("react-pick-{picked}"))
+                    .label(if own {
+                        format!("{picked} · yours")
+                    } else {
+                        picked.clone()
+                    })
+                    .ghost()
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.toggle_emoji_reaction(chat_id, message_id, picked.clone(), cx);
+                    })),
+            );
+        }
+        div()
+            .id("reaction-picker")
+            .flex()
+            .flex_col()
+            .gap_2()
+            .px_3()
+            .py_2()
+            .border_b_1()
+            .border_color(cx.theme().border)
+            .bg(cx.theme().sidebar)
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .child(div().font_semibold().child("React"))
+                    .child(
+                        Button::new("close-reaction-picker")
+                            .label("Close")
+                            .ghost()
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.close_reaction_picker(cx);
+                            })),
+                    ),
+            )
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("Tap an emoji to react. Tap yours again to remove."),
+            )
+            .child(row)
     }
 
     fn composer_edit_banner(
@@ -2721,6 +2898,9 @@ impl QuillApp {
             .when(self.forward_picker_open, |this| {
                 this.child(self.forward_picker_panel(cx))
             })
+            .when(self.pending_react.is_some(), |this| {
+                this.child(self.reaction_picker_panel(cx))
+            })
             .when(chat_search_open, |this| {
                 this.child(self.chat_search_bar(cx))
             })
@@ -2776,6 +2956,9 @@ impl QuillApp {
                         .forward_info
                         .as_ref()
                         .and_then(|info| session.map(|s| s.forward_from_label(info)));
+                    let reaction_open = self
+                        .pending_react
+                        .is_some_and(|(chat, id)| chat == message.chat_id && id == message.id);
                     let row = session_history_row(
                         &message,
                         &files,
@@ -2785,6 +2968,7 @@ impl QuillApp {
                         quote_preview,
                         forward_from,
                         selected_forward,
+                        reaction_open,
                         cx,
                     );
                     list = list.child(
@@ -3046,6 +3230,54 @@ fn apply_ready_forward(session: &mut Session, sink: &Arc<MemorySink>, seq: &Atom
     if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
         session.apply(owned);
     }
+}
+
+fn apply_ready_reactions(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let extra = session.request(RequestPurpose::AddMessageReaction, Some(ChatId(11)));
+    let jsons = [
+        format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
+        r#"{"@type":"updateMessageInteractionInfo","chat_id":11,"message_id":101,"interaction_info":{"@type":"messageInteractionInfo","view_count":0,"forward_count":0,"reply_info":null,"reactions":{"@type":"messageReactions","reactions":[{"@type":"messageReaction","type":{"@type":"reactionTypeEmoji","emoji":"❤"},"total_count":3,"is_chosen":true,"used_sender_id":null,"recent_sender_ids":[]},{"@type":"messageReaction","type":{"@type":"reactionTypeEmoji","emoji":"👍"},"total_count":2,"is_chosen":false,"used_sender_id":null,"recent_sender_ids":[]}],"are_tags":false,"paid_reactors":[],"can_get_added_reactions":false}}}"#
+            .to_string(),
+    ];
+    for json in jsons {
+        if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
+            session.apply(owned);
+        }
+    }
+}
+
+fn interaction_info_update_json(
+    chat_id: ChatId,
+    message_id: MessageId,
+    info: &MessageInteractionInfo,
+) -> String {
+    let reactions = match &info.reactions {
+        Some(list) if !list.reactions.is_empty() => {
+            let items: Vec<String> = list
+                .reactions
+                .iter()
+                .filter_map(|reaction| {
+                    let emoji = reaction.reaction_type.emoji_text()?;
+                    Some(format!(
+                        r#"{{"@type":"messageReaction","type":{{"@type":"reactionTypeEmoji","emoji":{}}},"total_count":{},"is_chosen":{},"used_sender_id":null,"recent_sender_ids":[]}}"#,
+                        serde_json::to_string(emoji).unwrap_or_else(|_| "\"\"".into()),
+                        reaction.total_count,
+                        reaction.is_chosen
+                    ))
+                })
+                .collect();
+            format!(
+                r#"{{"@type":"messageReactions","reactions":[{}],"are_tags":false,"paid_reactors":[],"can_get_added_reactions":false}}"#,
+                items.join(",")
+            )
+        }
+        _ => "null".into(),
+    };
+    format!(
+        r#"{{"@type":"updateMessageInteractionInfo","chat_id":{},"message_id":{},"interaction_info":{{"@type":"messageInteractionInfo","view_count":{},"forward_count":{},"reply_info":null,"reactions":{reactions}}}}}"#,
+        chat_id.0, message_id.0, info.view_count, info.forward_count
+    )
 }
 
 #[derive(Clone, Copy)]
@@ -3418,6 +3650,7 @@ fn session_history_row(
     quote_preview: Option<String>,
     forward_from: Option<String>,
     selected_forward: bool,
+    reaction_open: bool,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
     let quote = message.reply_to.as_ref().and_then(|reply| {
@@ -3499,6 +3732,63 @@ fn session_history_row(
                 this.begin_delete(confirm.clone(), cx);
             }))
     });
+    let react_btn = message.can_react().then(|| {
+        Button::new(format!("react-{}", message_id.0))
+            .label(if reaction_open { "Reacting" } else { "React" })
+            .ghost()
+            .on_click(cx.listener(move |this, _, _, cx| {
+                if this
+                    .pending_react
+                    .is_some_and(|(chat, id)| chat == chat_id && id == message_id)
+                {
+                    this.close_reaction_picker(cx);
+                } else {
+                    this.open_reaction_picker(chat_id, message_id, cx);
+                }
+            }))
+    });
+    let chips = message.emoji_reaction_chips();
+    let chip_row = (!chips.is_empty()).then(|| {
+        let mut row = div()
+            .id(("reaction-chips", message_id.0 as u64))
+            .flex()
+            .flex_wrap()
+            .gap_1()
+            .mt_1();
+        for (index, chip) in chips.into_iter().enumerate() {
+            let Some(label) = chip.chip_label() else {
+                continue;
+            };
+            let emoji = chip.reaction_type.emoji_text().unwrap_or("").to_string();
+            let chosen = chip.is_chosen;
+            row = row.child(
+                div()
+                    .id(("reaction-chip", message_id.0 as u64 * 64 + index as u64))
+                    .px_2()
+                    .py_1()
+                    .rounded_md()
+                    .text_xs()
+                    .cursor_pointer()
+                    .when(chosen, |this| {
+                        this.bg(rgb(0x1f6feb))
+                            .text_color(rgb(0xffffff))
+                            .border_1()
+                            .border_color(rgb(0x58a6ff))
+                    })
+                    .when(!chosen, |this| {
+                        this.bg(rgb(0x21262d))
+                            .text_color(rgb(0xc9d1d9))
+                            .border_1()
+                            .border_color(rgb(0x8b949e))
+                    })
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.toggle_emoji_reaction(chat_id, message_id, emoji.clone(), cx);
+                    }))
+                    .child(label),
+            );
+        }
+        row
+    });
     let extra_media = match &message.content {
         MessageContent::Photo(photo) => Some(photo_attachment(
             message.id.0 as u64,
@@ -3521,11 +3811,13 @@ fn session_history_row(
         div()
             .id(("bubble-extra", message.id.0 as u64))
             .when_some(extra_media, |this, media| this.child(media))
+            .when_some(chip_row, |this, chips| this.child(chips))
             .child(
                 div()
                     .flex()
                     .gap_2()
                     .child(reply_btn)
+                    .when_some(react_btn, |this, btn| this.child(btn))
                     .when_some(forward_btn, |this, btn| this.child(btn))
                     .when_some(select_btn, |this, btn| this.child(btn))
                     .when_some(edit_btn, |this, btn| this.child(btn))

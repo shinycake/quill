@@ -116,4 +116,11 @@ pub const REQUIRED_SCHEMA_CONSTRUCTORS: &[&str] = &[
     "messageOriginHiddenUser",
     "messageOriginChat",
     "messageOriginChannel",
+    "addMessageReaction",
+    "removeMessageReaction",
+    "updateMessageInteractionInfo",
+    "messageInteractionInfo",
+    "messageReactions",
+    "messageReaction",
+    "reactionTypeEmoji",
 ];

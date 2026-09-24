@@ -790,6 +790,72 @@ fn replay_forward_messages_result_and_attribution() {
 }
 
 #[test]
+fn replay_add_remove_reaction_and_interaction_info() {
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn quill::diagnostics::DiagnosticSink> = sink.clone();
+    let mut session = Session::new(AccountKey::primary(), dyn_sink);
+    let seq = AtomicU64::new(0);
+    apply_all_seq(
+        &mut session,
+        &sink,
+        &seq,
+        &[
+            r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+            r#"{"@type":"updateNewChat","chat":{"id":7,"title":"Alice","type":{"@type":"chatTypePrivate","user_id":7},"unread_count":0}}"#,
+            r#"{"@type":"updateNewMessage","message":{"id":50,"chat_id":7,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"hello already here","entities":[]}}}}"#,
+        ],
+    );
+    let extra = session.request(
+        RequestPurpose::AddMessageReaction,
+        Some(quill::ids::ChatId(7)),
+    );
+    apply_all_seq(
+        &mut session,
+        &sink,
+        &seq,
+        &[
+            &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
+            r#"{"@type":"updateMessageInteractionInfo","chat_id":7,"message_id":50,"interaction_info":{"@type":"messageInteractionInfo","view_count":0,"forward_count":0,"reply_info":null,"reactions":{"@type":"messageReactions","reactions":[{"@type":"messageReaction","type":{"@type":"reactionTypeEmoji","emoji":"❤"},"total_count":1,"is_chosen":true,"used_sender_id":null,"recent_sender_ids":[]},{"@type":"messageReaction","type":{"@type":"reactionTypeEmoji","emoji":"👍"},"total_count":2,"is_chosen":false,"used_sender_id":null,"recent_sender_ids":[]}],"are_tags":false,"paid_reactors":[],"can_get_added_reactions":false}}}"#,
+        ],
+    );
+    let message = session
+        .histories
+        .get(&7)
+        .unwrap()
+        .messages
+        .get(&50)
+        .unwrap();
+    let chips = message.emoji_reaction_chips();
+    assert_eq!(chips[0].chip_label().as_deref(), Some("❤ 1"));
+    assert!(chips[0].is_chosen);
+    assert_eq!(chips[1].chip_label().as_deref(), Some("👍 2"));
+    assert!(!chips[1].is_chosen);
+    let remove = session.request(
+        RequestPurpose::RemoveMessageReaction,
+        Some(quill::ids::ChatId(7)),
+    );
+    apply_all_seq(
+        &mut session,
+        &sink,
+        &seq,
+        &[
+            &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, remove.0),
+            r#"{"@type":"updateMessageInteractionInfo","chat_id":7,"message_id":50,"interaction_info":{"@type":"messageInteractionInfo","view_count":0,"forward_count":0,"reply_info":null,"reactions":{"@type":"messageReactions","reactions":[{"@type":"messageReaction","type":{"@type":"reactionTypeEmoji","emoji":"👍"},"total_count":2,"is_chosen":false,"used_sender_id":null,"recent_sender_ids":[]}],"are_tags":false,"paid_reactors":[],"can_get_added_reactions":false}}}"#,
+        ],
+    );
+    let after = session
+        .histories
+        .get(&7)
+        .unwrap()
+        .messages
+        .get(&50)
+        .unwrap();
+    assert!(!after.chosen_emoji("❤"));
+    assert_eq!(after.emoji_reaction_chips().len(), 1);
+    assert!(!sink.rendered().contains("CANARY"));
+}
+
+#[test]
 fn logout_invalidates_pending_requests() {
     let sink = Arc::new(MemorySink::new());
     let dyn_sink: Arc<dyn quill::diagnostics::DiagnosticSink> = sink.clone();
