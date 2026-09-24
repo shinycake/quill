@@ -737,6 +737,69 @@ fn replay_edit_content_and_delete_tombstone() {
 }
 
 #[test]
+fn replay_forward_messages_pending_and_origin_header() {
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn quill::diagnostics::DiagnosticSink> = sink.clone();
+    let mut session = Session::new(AccountKey::primary(), dyn_sink);
+    let seq = AtomicU64::new(0);
+    apply_all_seq(
+        &mut session,
+        &sink,
+        &seq,
+        &[
+            r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+            r#"{"@type":"updateNewChat","chat":{"id":7,"title":"Alice","type":{"@type":"chatTypePrivate","user_id":7},"unread_count":0}}"#,
+            r#"{"@type":"updateNewChat","chat":{"id":8,"title":"Bob","type":{"@type":"chatTypePrivate","user_id":8},"unread_count":0}}"#,
+            r#"{"@type":"updateChatPosition","chat_id":7,"position":{"@type":"chatPosition","list":{"@type":"chatListMain"},"order":"9","is_pinned":false}}"#,
+            r#"{"@type":"updateChatPosition","chat_id":8,"position":{"@type":"chatPosition","list":{"@type":"chatListMain"},"order":"8","is_pinned":false}}"#,
+            r#"{"@type":"updateNewMessage","message":{"id":50,"chat_id":7,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"hello already loaded","entities":[]}}}}"#,
+            r#"{"@type":"updateNewMessage","message":{"id":51,"chat_id":7,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"CANARY_REPLAY_fwd","entities":[]}},"forward_info":{"@type":"messageForwardInfo","origin":{"@type":"messageOriginHiddenUser","sender_name":"Ada Lovelace"},"date":1710000000,"source":null,"public_service_announcement_type":""}}}"#,
+        ],
+    );
+    session.open_chat(quill::ids::ChatId(7));
+    let incoming = session
+        .histories
+        .get(&7)
+        .unwrap()
+        .messages
+        .get(&51)
+        .unwrap();
+    assert_eq!(
+        session.forward_origin_header(incoming.forward_info.as_ref().unwrap()),
+        "Forwarded from Ada Lovelace"
+    );
+    let dests: Vec<_> = session
+        .forward_destinations("bob")
+        .into_iter()
+        .map(|chat| chat.id)
+        .collect();
+    assert_eq!(dests, vec![quill::ids::ChatId(8)]);
+    let extra = session.request(RequestPurpose::ForwardMessages, Some(quill::ids::ChatId(8)));
+    apply_all_seq(
+        &mut session,
+        &sink,
+        &seq,
+        &[&format!(
+            r#"{{"@type":"messages","@extra":"{}","total_count":1,"messages":[{{"id":-9,"chat_id":8,"is_outgoing":true,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"hello already loaded","entities":[]}}}},"forward_info":{{"@type":"messageForwardInfo","origin":{{"@type":"messageOriginHiddenUser","sender_name":"Alice"}},"date":1710000000,"source":null,"public_service_announcement_type":""}}}}]}}"#,
+            extra.0
+        )],
+    );
+    let pending = session
+        .histories
+        .get(&8)
+        .unwrap()
+        .messages
+        .get(&-9)
+        .unwrap();
+    assert!(pending.pending);
+    assert_eq!(
+        session.forward_origin_header(pending.forward_info.as_ref().unwrap()),
+        "Forwarded from Alice"
+    );
+    assert!(!sink.rendered().contains("CANARY_REPLAY"));
+}
+
+#[test]
 fn logout_invalidates_pending_requests() {
     let sink = Arc::new(MemorySink::new());
     let dyn_sink: Arc<dyn quill::diagnostics::DiagnosticSink> = sink.clone();

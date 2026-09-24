@@ -447,6 +447,33 @@ pub fn edit_message_caption(
     .to_string()
 }
 
+/// `forwardMessages` (TDLib 1.8.67). `options` null = default `messageSendOptions`.
+/// `topic_id` null (message threads unsupported). `message_ids` must be strictly
+/// increasing; at most 100. Default is a real forward (`send_copy: false`) when
+/// `messageProperties.can_be_forwarded`; copy-only uses `send_copy: true`
+/// (Unigram `ChooseChatsViewModel` / schema `can_be_copied`).
+pub fn forward_messages(
+    extra: RequestId,
+    chat_id: ChatId,
+    from_chat_id: ChatId,
+    message_ids: &[MessageId],
+    send_copy: bool,
+    remove_caption: bool,
+) -> String {
+    json!({
+        "@type": "forwardMessages",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0,
+        "topic_id": Value::Null,
+        "from_chat_id": from_chat_id.0,
+        "message_ids": message_ids.iter().map(|id| id.0).collect::<Vec<_>>(),
+        "options": Value::Null,
+        "send_copy": send_copy,
+        "remove_caption": remove_caption
+    })
+    .to_string()
+}
+
 /// `deleteMessages` (TDLib 1.8.67). `revoke` true = delete for all members
 /// (tdesktop `DeleteMessagesBox` / Unigram `DeleteMessagesPopup` default for
 /// own outgoing that `can_be_deleted_for_all_users`). Always true in
@@ -742,6 +769,42 @@ mod tests {
         assert_eq!(v["message_ids"], serde_json::json!([102]));
         assert_eq!(v["revoke"], true);
         assert!(!json.contains("CANARY"));
+    }
+
+    #[test]
+    fn forward_messages_shape_matches_1_8_67() {
+        let json = forward_messages(
+            RequestId(34),
+            ChatId(12),
+            ChatId(11),
+            &[MessageId(101)],
+            false,
+            false,
+        );
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "forwardMessages");
+        assert_eq!(v["@extra"], "34");
+        assert_eq!(v["chat_id"], 12);
+        assert_eq!(v["topic_id"], Value::Null);
+        assert_eq!(v["from_chat_id"], 11);
+        assert_eq!(v["message_ids"], serde_json::json!([101]));
+        assert_eq!(v["options"], Value::Null);
+        assert_eq!(v["send_copy"], false);
+        assert_eq!(v["remove_caption"], false);
+        assert!(!json.contains("CANARY"));
+        assert!(!json.contains("message_thread_id"));
+        assert!(!json.contains("inputMessageForwarded"));
+        let copy = forward_messages(
+            RequestId(35),
+            ChatId(12),
+            ChatId(11),
+            &[MessageId(101)],
+            true,
+            false,
+        );
+        let v: serde_json::Value = serde_json::from_str(&copy).unwrap();
+        assert_eq!(v["send_copy"], true);
+        assert_eq!(v["remove_caption"], false);
     }
 
     #[test]

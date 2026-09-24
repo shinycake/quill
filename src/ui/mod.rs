@@ -16,6 +16,7 @@ use quill::connect::{
 };
 use quill::credentials::TelegramCredentials;
 use quill::diagnostics::{DiagnosticSink, MemorySink};
+use quill::forward::{ForwardCapabilities, ForwardDraft, cancel_forward_draft};
 use quill::ids::{AccountKey, ChatId, FileId, MessageId};
 use quill::local_path::sandboxed_display_path;
 use quill::platform::live_secret_store;
@@ -119,6 +120,8 @@ pub struct QuillApp {
     saved_edit_draft: String,
     /// Delete confirm (tdesktop `DeleteMessagesBox` / Unigram popup).
     pending_delete: Option<DeleteConfirm>,
+    /// Forward picker (tdesktop ShareBox / Unigram `ChooseChatsViewModel`).
+    pending_forward: Option<ForwardDraft>,
 }
 
 /// Forced UI surfaces for screenshot proof (no live Telegram / no real credentials).
@@ -143,6 +146,8 @@ pub enum ScreenshotDemo {
     ReadyReply,
     /// Own-message edit mode + delete confirm (injected, no live Telegram).
     ReadyEditDelete,
+    /// Forward picker + forwarded-from header (injected, no live Telegram).
+    ReadyForward,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -416,6 +421,15 @@ impl QuillApp {
                     AuthorizationState::Ready,
                 )
             }
+            Some(ScreenshotDemo::ReadyForward) => {
+                demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
+                (
+                    ConnectUiStatus::DemoReadyChats,
+                    None,
+                    "screenshot demo — forward picker + origin header (injected)".into(),
+                    AuthorizationState::Ready,
+                )
+            }
             None => bootstrap_connect(credentials),
         };
 
@@ -456,6 +470,7 @@ impl QuillApp {
             pending_edit: None,
             saved_edit_draft: String::new(),
             pending_delete: None,
+            pending_forward: None,
         };
         if matches!(demo, Some(ScreenshotDemo::ReadyChatsComposer)) {
             app.composer.update(cx, |input, cx| {
@@ -519,6 +534,20 @@ impl QuillApp {
             app.pending_edit = edit;
             app.saved_edit_draft = "unrelated draft stays".into();
             app.pending_delete = DeleteConfirm::own(ChatId(11), MessageId(102), true, false);
+        }
+        if matches!(demo, Some(ScreenshotDemo::ReadyForward)) {
+            if let Some(session) = app.demo_session.as_mut() {
+                app.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_forward(session, &app.demo_sink, &app.demo_seq);
+                if let Some(src) = session
+                    .histories
+                    .get(&11)
+                    .and_then(|history| history.messages.get(&101))
+                {
+                    app.pending_forward =
+                        ForwardDraft::from_history(ChatId(11), src, ForwardCapabilities::ASSUMED);
+                }
+            }
         }
         if app.live.is_some() {
             app.spawn_poll_loop(cx);
@@ -847,7 +876,60 @@ impl QuillApp {
         }
     }
 
+    fn apply_demo_forward(&mut self, draft: &ForwardDraft, dest: ChatId) {
+        let Some(session) = self.demo_session.as_mut() else {
+            return;
+        };
+        let Some(source) = session
+            .histories
+            .get(&draft.from_chat_id.0)
+            .and_then(|history| history.messages.get(&draft.message_id.0))
+        else {
+            return;
+        };
+        let body = match &source.content {
+            MessageContent::Text(text) => text.clone(),
+            other => other.preview(),
+        };
+        let origin_name = session
+            .chats
+            .get(&draft.from_chat_id.0)
+            .map(|chat| chat.title.clone())
+            .unwrap_or_else(|| "Hidden user".into());
+        let new_id = session
+            .histories
+            .get(&dest.0)
+            .and_then(|history| history.messages.keys().next_back().copied())
+            .unwrap_or(0)
+            + 1;
+        let body_json = serde_json::to_string(&body).unwrap_or_else(|_| "\"\"".into());
+        let origin_json = serde_json::to_string(&origin_name).unwrap_or_else(|_| "\"\"".into());
+        let forward_info = if draft.send_copy {
+            String::new()
+        } else {
+            format!(
+                r#","forward_info":{{"@type":"messageForwardInfo","origin":{{"@type":"messageOriginHiddenUser","sender_name":{origin_json}}},"date":1710000000,"source":null,"public_service_announcement_type":""}}"#
+            )
+        };
+        let json = format!(
+            r#"{{"@type":"updateNewMessage","message":{{"id":{new_id},"chat_id":{},"is_outgoing":true,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":{body_json},"entities":[]}}}}{forward_info}}}}}"#,
+            dest.0
+        );
+        let dyn_sink: Arc<dyn DiagnosticSink> = self.demo_sink.clone();
+        if let Some(owned) = copy_and_parse(&json, &self.demo_seq, &dyn_sink) {
+            session.apply(owned);
+        }
+    }
+
     fn select_listed_chat(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
+        if self.pending_forward.is_some() {
+            if self.try_pick_forward_dest(chat_id, cx) {
+                return;
+            }
+            self.status_note = "cannot forward to this chat".into();
+            cx.notify();
+            return;
+        }
         if self
             .pending_reply
             .as_ref()
@@ -1060,6 +1142,10 @@ impl QuillApp {
     }
 
     fn cancel_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.pending_forward.is_some() {
+            self.cancel_forward(cx);
+            return;
+        }
         if self.pending_delete.is_some() {
             self.cancel_delete(cx);
             return;
@@ -1167,6 +1253,80 @@ impl QuillApp {
         }
     }
 
+    fn begin_forward(&mut self, draft: ForwardDraft, cx: &mut Context<Self>) {
+        self.pending_forward = Some(draft);
+        self.status_note = "forward to…".into();
+        cx.notify();
+    }
+
+    fn cancel_forward(&mut self, cx: &mut Context<Self>) {
+        self.pending_forward = cancel_forward_draft(self.pending_forward.take());
+        self.status_note = "forward cancelled".into();
+        cx.notify();
+    }
+
+    fn confirm_forward(&mut self, dest: ChatId, cx: &mut Context<Self>) {
+        let Some(draft) = self.pending_forward.clone() else {
+            return;
+        };
+        let supported = self.session().is_some_and(|session| {
+            session
+                .chats
+                .get(&dest.0)
+                .is_some_and(|chat| chat.supported())
+        });
+        if !supported {
+            self.status_note = "cannot forward to this chat".into();
+            cx.notify();
+            return;
+        }
+        if self.live.is_some() {
+            let result = self
+                .live
+                .as_mut()
+                .expect("live")
+                .driver
+                .forward_draft(&draft, dest);
+            match result {
+                Ok(_) => {
+                    self.pending_forward = None;
+                    self.status_note = "forwarding…".into();
+                    self.select_listed_chat(dest, cx);
+                }
+                Err(_) => {
+                    self.status_note = "could not forward message".into();
+                    cx.notify();
+                }
+            }
+            return;
+        }
+        if self.demo_session.is_some() {
+            self.apply_demo_forward(&draft, dest);
+            self.pending_forward = None;
+            self.status_note = "demo forward applied locally (no live Telegram)".into();
+            self.select_listed_chat(dest, cx);
+            return;
+        }
+        cx.notify();
+    }
+
+    fn try_pick_forward_dest(&mut self, dest: ChatId, cx: &mut Context<Self>) -> bool {
+        if self.pending_forward.is_none() {
+            return false;
+        }
+        let supported = self.session().is_some_and(|session| {
+            session
+                .chats
+                .get(&dest.0)
+                .is_some_and(|chat| chat.supported())
+        });
+        if !supported {
+            return false;
+        }
+        self.confirm_forward(dest, cx);
+        true
+    }
+
     fn begin_delete(&mut self, confirm: DeleteConfirm, cx: &mut Context<Self>) {
         self.pending_delete = Some(confirm);
         self.status_note = "confirm delete".into();
@@ -1251,6 +1411,90 @@ impl QuillApp {
                         this.clear_edit(window, cx);
                     })),
             )
+    }
+
+    fn forward_picker(&self, draft: &ForwardDraft, cx: &mut Context<Self>) -> impl IntoElement {
+        let dests: Vec<ChatSummary> = self
+            .session()
+            .map(|session| {
+                session
+                    .forward_destinations("")
+                    .into_iter()
+                    .cloned()
+                    .collect()
+            })
+            .unwrap_or_default();
+        let kind = if draft.send_copy {
+            "Copy to…"
+        } else {
+            "Forward to…"
+        };
+        let preview = draft.preview.clone();
+        let mut list = div()
+            .id("forward-dest-list")
+            .flex()
+            .flex_col()
+            .gap_1()
+            .max_h(px(160.));
+        if dests.is_empty() {
+            list = list.child(
+                div()
+                    .text_xs()
+                    .text_color(rgb(0x8b949e))
+                    .child("No loaded cloud chats to forward to."),
+            );
+        }
+        for chat in dests {
+            let id = chat.id;
+            let title = chat.title.clone();
+            list = list.child(
+                Button::new(format!("forward-dest-{}", id.0))
+                    .label(title)
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.confirm_forward(id, cx);
+                    })),
+            );
+        }
+        div()
+            .id("forward-picker")
+            .flex()
+            .flex_col()
+            .gap_2()
+            .px_3()
+            .py_2()
+            .rounded_md()
+            .border_1()
+            .border_color(rgb(0x58a6ff))
+            .bg(rgb(0x21262d))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .gap_2()
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .min_w_0()
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .font_medium()
+                                    .text_color(rgb(0x58a6ff))
+                                    .child(kind),
+                            )
+                            .child(div().text_sm().text_color(rgb(0xc9d1d9)).child(preview)),
+                    )
+                    .child(
+                        Button::new("cancel-forward")
+                            .label("Cancel")
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.cancel_forward(cx);
+                            })),
+                    ),
+            )
+            .child(list)
     }
 
     fn delete_confirm_banner(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -1712,6 +1956,11 @@ impl QuillApp {
     }
 
     fn select_search_chat(&mut self, chat_id: ChatId, window: &mut Window, cx: &mut Context<Self>) {
+        if self.try_pick_forward_dest(chat_id, cx) {
+            self.search_input
+                .update(cx, |input, cx| input.set_value("", window, cx));
+            return;
+        }
         if let Some(live) = self.live.as_mut() {
             self.status_note = match live.driver.select_search_chat(chat_id) {
                 Ok(_) => "chat selected".into(),
@@ -2186,6 +2435,9 @@ impl QuillApp {
                                     ),
                             )
                         })
+                        .when_some(self.pending_forward.clone(), |this, draft| {
+                            this.child(self.forward_picker(&draft, cx))
+                        })
                         .when_some(self.pending_delete.clone(), |this, _| {
                             this.child(self.delete_confirm_banner(cx))
                         })
@@ -2305,6 +2557,12 @@ impl QuillApp {
                     };
                     let highlighted = highlight_id == Some(message.id);
                     let quote_preview = session.and_then(|s| s.reply_quote_preview(&message));
+                    let forward_header = session.and_then(|s| {
+                        message
+                            .forward_info
+                            .as_ref()
+                            .map(|info| s.forward_origin_header(info))
+                    });
                     let row = session_history_row(
                         &message,
                         &files,
@@ -2312,6 +2570,7 @@ impl QuillApp {
                         &media_roots,
                         label,
                         quote_preview,
+                        forward_header,
                         cx,
                     );
                     list = list.child(
@@ -2544,6 +2803,14 @@ fn apply_ready_search_in_chat(session: &mut Session, sink: &Arc<MemorySink>, seq
 fn apply_ready_reply(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
     let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
     let json = r#"{"@type":"updateNewMessage","message":{"id":104,"chat_id":11,"is_outgoing":true,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"Got it — quoting you.","entities":[]}},"reply_to":{"@type":"messageReplyToMessage","chat_id":11,"message_id":101,"quote":{"@type":"textQuote","text":{"@type":"formattedText","text":"Hello from injected JSON.","entities":[]},"position":0,"is_manual":false},"checklist_task_id":0,"poll_option_id":""}}}"#;
+    if let Some(owned) = copy_and_parse(json, seq, &dyn_sink) {
+        session.apply(owned);
+    }
+}
+
+fn apply_ready_forward(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let json = r#"{"@type":"updateNewMessage","message":{"id":105,"chat_id":11,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"Forwarded hello from Ada.","entities":[]}},"forward_info":{"@type":"messageForwardInfo","origin":{"@type":"messageOriginHiddenUser","sender_name":"Ada Lovelace"},"date":1710000000,"source":null,"public_service_announcement_type":""}}}"#;
     if let Some(owned) = copy_and_parse(json, seq, &dyn_sink) {
         session.apply(owned);
     }
@@ -2917,12 +3184,28 @@ fn session_history_row(
     media_roots: &[PathBuf],
     label: String,
     quote_preview: Option<String>,
+    forward_header: Option<String>,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
     let quote = message.reply_to.as_ref().and_then(|reply| {
         let preview = quote_preview.clone()?;
         Some(reply_quote_strip(message.id, reply.message_id, preview, cx))
     });
+    let forwarded = forward_header.map(|header| forward_origin_strip(message.id, header));
+    let header = match (forwarded, quote) {
+        (Some(fwd), Some(reply)) => Some(
+            div()
+                .id(("bubble-headers", message.id.0 as u64))
+                .flex()
+                .flex_col()
+                .child(fwd)
+                .child(reply)
+                .into_any_element(),
+        ),
+        (Some(fwd), None) => Some(fwd),
+        (None, Some(reply)) => Some(reply),
+        (None, None) => None,
+    };
     let reply_id = format!("reply-{}", message.id.0);
     let reply_target = ComposerReplyTo::new(message.chat_id, message.id, message.content.preview());
     let reply_btn = Button::new(reply_id)
@@ -2960,6 +3243,17 @@ fn session_history_row(
                 this.begin_delete(confirm.clone(), cx);
             }))
     });
+    let forward_btn =
+        ForwardDraft::from_history(message.chat_id, message, ForwardCapabilities::ASSUMED).map(
+            |draft| {
+                Button::new(format!("forward-{}", message.id.0))
+                    .label("Forward")
+                    .ghost()
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.begin_forward(draft.clone(), cx);
+                    }))
+            },
+        );
     let extra_media = match &message.content {
         MessageContent::Photo(photo) => Some(photo_attachment(
             message.id.0 as u64,
@@ -2987,6 +3281,7 @@ fn session_history_row(
                     .flex()
                     .gap_2()
                     .child(reply_btn)
+                    .when_some(forward_btn, |this, btn| this.child(btn))
                     .when_some(edit_btn, |this, btn| this.child(btn))
                     .when_some(delete_btn, |this, btn| this.child(btn)),
             )
@@ -3004,8 +3299,20 @@ fn session_history_row(
         body,
         message.is_outgoing,
         extra,
-        quote,
+        header,
     )
+}
+
+fn forward_origin_strip(row_id: MessageId, header: String) -> AnyElement {
+    div()
+        .id(("forward-origin", row_id.0 as u64))
+        .mt_1()
+        .mb_1()
+        .text_xs()
+        .font_medium()
+        .text_color(rgb(0x79c0ff))
+        .child(header)
+        .into_any_element()
 }
 
 fn reply_quote_strip(
@@ -3281,7 +3588,7 @@ fn status_bar(
         .text_xs()
         .text_color(cx.theme().muted_foreground)
         .child(format!(
-            "Auth: {} · {} · {} · Keyboard: ⌘K search, ⌘F in chat, Esc cancel delete/edit/reply/search, ⌘1 sidebar, ⌘L composer, ⌘↑ older · VoiceOver: macOS follow-up",
+            "Auth: {} · {} · {} · Keyboard: ⌘K search, ⌘F in chat, Esc cancel forward/delete/edit/reply/search, ⌘1 sidebar, ⌘L composer, ⌘↑ older · VoiceOver: macOS follow-up",
             auth.title,
             connect_status_label(connect_status),
             status_note

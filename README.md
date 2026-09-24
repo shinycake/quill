@@ -30,6 +30,7 @@ Toolchain: Rust **1.98.1**. UI pin: **gpui-kit 0.6.1**. TDLib schema: **1.8.67**
 - [x] In-chat search (`searchChatMessages`; Cmd/Ctrl+F; next/prev + jump-to-message; injected/replay; live needs tdjson)
 - [x] Reply to message (composer quote + `inputMessageReplyToMessage`; quote-strip jump; injected/replay; live needs tdjson)
 - [x] Edit / delete own messages (`editMessageText` / `editMessageCaption` / `deleteMessages`; confirm; injected/replay; live needs tdjson)
+- [x] Forward messages (`forwardMessages` + destination picker over loaded chats; `forward_info` origin header; injected/replay; live needs tdjson)
 - [ ] VoiceOver pass on macOS
 - [ ] Channels / bots (blocked on sponsored-content implementation)
 

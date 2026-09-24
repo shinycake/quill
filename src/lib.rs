@@ -7,6 +7,7 @@ pub mod connect;
 pub mod connect_smoke;
 pub mod credentials;
 pub mod diagnostics;
+pub mod forward;
 pub mod ids;
 pub mod layout;
 pub mod lifecycle;

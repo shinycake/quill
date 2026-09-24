@@ -6,7 +6,7 @@ use crate::ids::{
 use crate::telegram::client::OwnedEnvelope;
 use crate::telegram::envelope::{
     AuthorizationState, ChatKind, ChatList, ChatPositionUpdate, ConnectionState, EnvelopePayload,
-    ErrorClass, MessageContent, MessageReplyTo, ParsedFile, ParsedMessage,
+    ErrorClass, MessageContent, MessageForwardInfo, MessageReplyTo, ParsedFile, ParsedMessage,
 };
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
@@ -37,6 +37,8 @@ pub enum RequestPurpose {
     EditMessage,
     /// `deleteMessages`. Response is `ok`; rows leave via `updateDeleteMessages`.
     DeleteMessages,
+    /// `forwardMessages`. Response is `messages`; dest rows arrive via updates too.
+    ForwardMessages,
     Close,
     LogOut,
     Other,
@@ -368,6 +370,7 @@ pub struct HistoryMessage {
     pub content: MessageContent,
     pub pending: bool,
     pub reply_to: Option<MessageReplyTo>,
+    pub forward_info: Option<MessageForwardInfo>,
 }
 
 #[derive(Debug, Default)]
@@ -447,6 +450,7 @@ pub struct SearchMessageHit {
     pub is_outgoing: bool,
     pub content: MessageContent,
     pub reply_to: Option<MessageReplyTo>,
+    pub forward_info: Option<MessageForwardInfo>,
 }
 
 impl SearchMessageHit {
@@ -458,6 +462,7 @@ impl SearchMessageHit {
             is_outgoing: message.is_outgoing,
             content: message.content.clone(),
             reply_to: message.reply_to.clone(),
+            forward_info: message.forward_info.clone(),
         }
     }
 
@@ -469,6 +474,7 @@ impl SearchMessageHit {
             content: self.content,
             pending: false,
             reply_to: self.reply_to,
+            forward_info: self.forward_info,
         }
     }
 }
@@ -1112,6 +1118,14 @@ impl Session {
                     return;
                 }
                 if let Some(pending) = pending
+                    && pending.purpose == RequestPurpose::ForwardMessages
+                {
+                    for message in messages {
+                        self.upsert_message(message, true);
+                    }
+                    return;
+                }
+                if let Some(pending) = pending
                     && pending.purpose == RequestPurpose::GetHistory
                 {
                     if pending.view_generation != Some(self.view_generation) {
@@ -1641,6 +1655,7 @@ impl Session {
                         is_outgoing: message.is_outgoing,
                         content: message.content.clone(),
                         reply_to: message.reply_to.clone(),
+                        forward_info: message.forward_info.clone(),
                     })
                     .collect()
             })
@@ -1719,6 +1734,7 @@ fn history_message(message: ParsedMessage, pending: bool) -> HistoryMessage {
         content: message.content,
         pending,
         reply_to: message.reply_to,
+        forward_info: message.forward_info,
     }
 }
 
@@ -1755,6 +1771,39 @@ impl Session {
             .content_preview
             .clone()
             .unwrap_or_else(|| "Message".into())
+    }
+
+    /// tdesktop `paintForwardedInfo` / Unigram compact "Forwarded from {origin}".
+    pub fn forward_origin_header(&self, info: &MessageForwardInfo) -> String {
+        let name = info.origin.display_name(
+            |chat_id| self.chats.get(&chat_id.0).map(|chat| chat.title.clone()),
+            |user_id| {
+                self.chats.values().find_map(|chat| match chat.kind {
+                    crate::telegram::envelope::ChatKind::Private { user_id: id }
+                        if id == user_id =>
+                    {
+                        Some(chat.title.clone())
+                    }
+                    _ => None,
+                })
+            },
+        );
+        let name = if name == "Hidden user" {
+            info.source_name
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .unwrap_or(&name)
+                .to_string()
+        } else {
+            name
+        };
+        crate::forward::forwarded_from_header(&name)
+    }
+
+    /// Destination list for the forward picker — loaded supported chats only.
+    pub fn forward_destinations(&self, query: &str) -> Vec<&ChatSummary> {
+        crate::forward::forward_destinations(self.ordered_chats(), query)
     }
 }
 
@@ -2854,6 +2903,7 @@ mod tests {
             is_outgoing: false,
             content: crate::telegram::envelope::MessageContent::Text("gone".into()),
             reply_to: None,
+            forward_info: None,
         });
         assert_eq!(
             session.begin_chat_search_jump(MessageId(70)),
@@ -2873,6 +2923,7 @@ mod tests {
             is_outgoing: false,
             content: crate::telegram::envelope::MessageContent::Text("ghost".into()),
             reply_to: None,
+            forward_info: None,
         });
         assert_eq!(
             session.begin_chat_search_jump(MessageId(80)),
@@ -3063,5 +3114,104 @@ mod tests {
                 .is_tombstone(MessageId(102))
         );
         assert!(!sink.rendered().contains("CANARY_EDITED"));
+    }
+
+    #[test]
+    fn forward_info_header_and_destination_pick() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+        );
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateNewChat","chat":{"id":11,"title":"Demo chat A","type":{"@type":"chatTypePrivate","user_id":11},"unread_count":0}}"#,
+        );
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateNewChat","chat":{"id":12,"title":"Demo chat B","type":{"@type":"chatTypePrivate","user_id":12},"unread_count":0}}"#,
+        );
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateNewChat","chat":{"id":13,"title":"Demo channel","type":{"@type":"chatTypeSupergroup","supergroup_id":13,"is_channel":true},"unread_count":0}}"#,
+        );
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateChatPosition","chat_id":11,"position":{"@type":"chatPosition","list":{"@type":"chatListMain"},"order":"30","is_pinned":true}}"#,
+        );
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateChatPosition","chat_id":12,"position":{"@type":"chatPosition","list":{"@type":"chatListMain"},"order":"20","is_pinned":false}}"#,
+        );
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateChatPosition","chat_id":13,"position":{"@type":"chatPosition","list":{"@type":"chatListMain"},"order":"10","is_pinned":false}}"#,
+        );
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateNewMessage","message":{"id":105,"chat_id":11,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"CANARY_FWD_body","entities":[]}},"forward_info":{"@type":"messageForwardInfo","origin":{"@type":"messageOriginHiddenUser","sender_name":"Ada Lovelace"},"date":1710000000,"source":null,"public_service_announcement_type":""}}}"#,
+        );
+        let row = session
+            .histories
+            .get(&11)
+            .unwrap()
+            .messages
+            .get(&105)
+            .unwrap();
+        let info = row.forward_info.as_ref().expect("forward_info");
+        assert_eq!(
+            session.forward_origin_header(info),
+            "Forwarded from Ada Lovelace"
+        );
+        let dests: Vec<_> = session
+            .forward_destinations("")
+            .into_iter()
+            .map(|c| c.id)
+            .collect();
+        assert_eq!(dests, vec![ChatId(11), ChatId(12)]);
+        let filtered: Vec<_> = session
+            .forward_destinations("chat b")
+            .into_iter()
+            .map(|c| c.id)
+            .collect();
+        assert_eq!(filtered, vec![ChatId(12)]);
+
+        let extra = session.request(RequestPurpose::ForwardMessages, Some(ChatId(12)));
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"messages","@extra":"{}","total_count":1,"messages":[{{"id":-8,"chat_id":12,"is_outgoing":true,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"CANARY_FWD_body","entities":[]}}}},"forward_info":{{"@type":"messageForwardInfo","origin":{{"@type":"messageOriginHiddenUser","sender_name":"Ada Lovelace"}},"date":1710000000,"source":null,"public_service_announcement_type":""}}}}]}}"#,
+                extra.0
+            ),
+        );
+        let pending = session
+            .histories
+            .get(&12)
+            .unwrap()
+            .messages
+            .get(&-8)
+            .unwrap();
+        assert!(pending.pending);
+        assert!(pending.forward_info.is_some());
+        assert!(!sink.rendered().contains("CANARY_FWD"));
     }
 }

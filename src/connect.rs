@@ -6,6 +6,7 @@ use crate::composer::{
 };
 use crate::credentials::TelegramCredentials;
 use crate::diagnostics::DiagnosticSink;
+use crate::forward::{ForwardCapabilities, ForwardDraft};
 use crate::ids::{AccountKey, ChatId, FileId, MessageId, RequestId};
 use crate::lifecycle::{RestoreBlocker, plan_restore};
 use crate::platform::{DatabaseKey, KeyDecision, SecretStore, load_or_create_key};
@@ -18,9 +19,9 @@ use crate::telegram::requests::{
     SetTdlibParameters, add_recently_found_chat, check_authentication_code,
     check_authentication_password, close_chat, close_request, delete_messages,
     download_file as download_file_request, edit_message_caption, edit_message_text,
-    get_authorization_state, get_chat_history, load_chats, open_chat, search_chat_messages,
-    search_chats, search_messages, search_recently_found_chats, send_document, send_photo,
-    send_text, set_authentication_phone_number, view_messages,
+    forward_messages, get_authorization_state, get_chat_history, load_chats, open_chat,
+    search_chat_messages, search_chats, search_messages, search_recently_found_chats,
+    send_document, send_photo, send_text, set_authentication_phone_number, view_messages,
 };
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -770,6 +771,65 @@ impl<S: JsonSender> ConnectDriver<S> {
             .session
             .request(RequestPurpose::DeleteMessages, Some(confirm.chat_id));
         let json = delete_messages(extra, confirm.chat_id, &[confirm.message_id], true);
+        match self.sender.send_json(&json) {
+            Ok(()) => Ok(extra),
+            Err(err) => {
+                self.session.requests.take(extra);
+                Err(err)
+            }
+        }
+    }
+
+    /// Unigram `ChooseChatsViewModel` / tdesktop ShareBox confirm: `forwardMessages`.
+    /// Default `send_copy` comes from the draft (false when `can_be_forwarded`).
+    pub fn forward_draft(
+        &mut self,
+        draft: &ForwardDraft,
+        dest: ChatId,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let dest_ok = self
+            .session
+            .chats
+            .get(&dest.0)
+            .is_some_and(|chat| chat.supported());
+        if !dest_ok {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let src_ok = self
+            .session
+            .chats
+            .get(&draft.from_chat_id.0)
+            .is_some_and(|chat| chat.supported());
+        if !src_ok {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let Some(message) = self
+            .session
+            .histories
+            .get(&draft.from_chat_id.0)
+            .and_then(|history| history.messages.get(&draft.message_id.0))
+        else {
+            return Err(ConnectSendError::InvalidRequest);
+        };
+        if ForwardDraft::from_history(draft.from_chat_id, message, ForwardCapabilities::ASSUMED)
+            .is_none()
+        {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::ForwardMessages, Some(dest));
+        let json = forward_messages(
+            extra,
+            dest,
+            draft.from_chat_id,
+            &[draft.message_id],
+            draft.send_copy,
+            false,
+        );
         match self.sender.send_json(&json) {
             Ok(()) => Ok(extra),
             Err(err) => {
@@ -3102,6 +3162,120 @@ mod tests {
         let history = driver.session.histories.get(&7).unwrap();
         assert!(!history.contains(MessageId(60)));
         assert!(history.is_tombstone(MessageId(60)));
+        assert!(!sink.rendered().contains("CANARY"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn driver_forward_shape_destination_and_forward_info() {
+        use crate::forward::{ForwardCapabilities, ForwardDraft};
+
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = Arc::new(RecordingSender::new());
+        let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+        let mut driver =
+            ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+        let seq = AtomicU64::new(0);
+        seed_ready_alice(&mut driver, &seq, &dyn_sink);
+        driver
+            .ingest(
+                copy_and_parse(
+                    r#"{"@type":"updateNewChat","chat":{"id":8,"title":"Bob","type":{"@type":"chatTypePrivate","user_id":8},"unread_count":0}}"#,
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        driver
+            .ingest(
+                copy_and_parse(
+                    r#"{"@type":"updateChatPosition","chat_id":8,"position":{"@type":"chatPosition","list":{"@type":"chatListMain"},"order":"8","is_pinned":false}}"#,
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        driver
+            .ingest(
+                copy_and_parse(
+                    r#"{"@type":"updateNewChat","chat":{"id":9,"title":"News","type":{"@type":"chatTypeSupergroup","supergroup_id":9,"is_channel":true},"unread_count":0}}"#,
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+
+        let dests: Vec<_> = driver
+            .session
+            .forward_destinations("")
+            .into_iter()
+            .map(|c| c.id)
+            .collect();
+        assert_eq!(dests, vec![ChatId(7), ChatId(8)]);
+
+        let src = driver
+            .session
+            .histories
+            .get(&7)
+            .unwrap()
+            .messages
+            .get(&50)
+            .unwrap()
+            .clone();
+        let draft =
+            ForwardDraft::from_history(ChatId(7), &src, ForwardCapabilities::ASSUMED).unwrap();
+        assert!(!draft.send_copy);
+        assert_eq!(
+            driver.forward_draft(&draft, ChatId(9)),
+            Err(ConnectSendError::InvalidRequest)
+        );
+        let extra = driver.forward_draft(&draft, ChatId(8)).unwrap();
+        let json = recorder
+            .snapshot()
+            .last()
+            .cloned()
+            .expect("forwardMessages");
+        let v: Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "forwardMessages");
+        assert_eq!(v["@extra"], extra.0.to_string());
+        assert_eq!(v["chat_id"], 8);
+        assert_eq!(v["topic_id"], Value::Null);
+        assert_eq!(v["from_chat_id"], 7);
+        assert_eq!(v["message_ids"], serde_json::json!([50]));
+        assert_eq!(v["options"], Value::Null);
+        assert_eq!(v["send_copy"], false);
+        assert_eq!(v["remove_caption"], false);
+
+        driver
+            .ingest(
+                copy_and_parse(
+                    r#"{"@type":"updateNewMessage","message":{"id":80,"chat_id":8,"is_outgoing":true,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"hello already here","entities":[]}},"forward_info":{"@type":"messageForwardInfo","origin":{"@type":"messageOriginHiddenUser","sender_name":"Alice"},"date":1710000000,"source":null,"public_service_announcement_type":""}}}"#,
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        let forwarded = driver
+            .session
+            .histories
+            .get(&8)
+            .unwrap()
+            .messages
+            .get(&80)
+            .unwrap();
+        assert_eq!(
+            driver
+                .session
+                .forward_origin_header(forwarded.forward_info.as_ref().unwrap()),
+            "Forwarded from Alice"
+        );
         assert!(!sink.rendered().contains("CANARY"));
         let _ = std::fs::remove_dir_all(&dir);
     }

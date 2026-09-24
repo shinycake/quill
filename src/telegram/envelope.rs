@@ -237,6 +237,87 @@ impl MessageReplyTo {
     }
 }
 
+/// Schema `MessageOrigin` (TDLib 1.8.67). Click-through is out of this slice.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MessageOrigin {
+    User {
+        sender_user_id: UserId,
+    },
+    HiddenUser {
+        sender_name: String,
+    },
+    Chat {
+        sender_chat_id: ChatId,
+        author_signature: String,
+    },
+    Channel {
+        chat_id: ChatId,
+        message_id: MessageId,
+        author_signature: String,
+    },
+    Unknown {
+        type_name: String,
+    },
+}
+
+impl MessageOrigin {
+    /// Compact origin name for tdesktop `paintForwardedInfo` / Unigram header.
+    pub fn display_name(
+        &self,
+        chat_title: impl Fn(ChatId) -> Option<String>,
+        user_title: impl Fn(UserId) -> Option<String>,
+    ) -> String {
+        match self {
+            MessageOrigin::HiddenUser { sender_name } => {
+                let name = sender_name.trim();
+                if name.is_empty() {
+                    "Hidden user".into()
+                } else {
+                    name.to_string()
+                }
+            }
+            MessageOrigin::User { sender_user_id } => {
+                user_title(*sender_user_id).unwrap_or_else(|| format!("user {}", sender_user_id.0))
+            }
+            MessageOrigin::Chat {
+                sender_chat_id,
+                author_signature,
+            } => {
+                let title = chat_title(*sender_chat_id)
+                    .unwrap_or_else(|| format!("chat {}", sender_chat_id.0));
+                signed_origin(&title, author_signature)
+            }
+            MessageOrigin::Channel {
+                chat_id,
+                author_signature,
+                ..
+            } => {
+                let title =
+                    chat_title(*chat_id).unwrap_or_else(|| format!("channel {}", chat_id.0));
+                signed_origin(&title, author_signature)
+            }
+            MessageOrigin::Unknown { .. } => "Forwarded message".into(),
+        }
+    }
+}
+
+fn signed_origin(title: &str, author_signature: &str) -> String {
+    let sig = author_signature.trim();
+    if sig.is_empty() {
+        title.to_string()
+    } else {
+        format!("{title} ({sig})")
+    }
+}
+
+/// Schema `messageForwardInfo` (origin + date; `source` is optional Saved/Replies).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MessageForwardInfo {
+    pub origin: MessageOrigin,
+    pub date: i32,
+    pub source_name: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParsedMessage {
     pub id: MessageId,
@@ -245,6 +326,7 @@ pub struct ParsedMessage {
     pub content: MessageContent,
     pub files: Vec<ParsedFile>,
     pub reply_to: Option<MessageReplyTo>,
+    pub forward_info: Option<MessageForwardInfo>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -769,7 +851,77 @@ fn parse_message(value: &Value) -> Result<ParsedMessage, ParseError> {
         content,
         files,
         reply_to: parse_reply_to(value.get("reply_to")),
+        forward_info: parse_forward_info(value.get("forward_info")),
     })
+}
+
+fn parse_forward_info(value: Option<&Value>) -> Option<MessageForwardInfo> {
+    let value = value?;
+    if value.is_null() {
+        return None;
+    }
+    match value.get("@type").and_then(Value::as_str) {
+        Some("messageForwardInfo") | None => {}
+        Some(_) => return None,
+    }
+    let origin = parse_message_origin(value.get("origin"))?;
+    let source_name = value.get("source").and_then(|source| {
+        if source.is_null() {
+            return None;
+        }
+        let name = source.get("sender_name").and_then(Value::as_str)?;
+        let name = name.trim();
+        if name.is_empty() {
+            None
+        } else {
+            Some(name.to_string())
+        }
+    });
+    Some(MessageForwardInfo {
+        origin,
+        date: value.get("date").and_then(Value::as_i64).unwrap_or(0) as i32,
+        source_name,
+    })
+}
+
+fn parse_message_origin(value: Option<&Value>) -> Option<MessageOrigin> {
+    let value = value?;
+    if value.is_null() {
+        return None;
+    }
+    match value.get("@type").and_then(Value::as_str) {
+        Some("messageOriginUser") => Some(MessageOrigin::User {
+            sender_user_id: UserId(int53_or_zero(value.get("sender_user_id"))),
+        }),
+        Some("messageOriginHiddenUser") => Some(MessageOrigin::HiddenUser {
+            sender_name: value
+                .get("sender_name")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string(),
+        }),
+        Some("messageOriginChat") => Some(MessageOrigin::Chat {
+            sender_chat_id: ChatId(int53_or_zero(value.get("sender_chat_id"))),
+            author_signature: value
+                .get("author_signature")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string(),
+        }),
+        Some("messageOriginChannel") => Some(MessageOrigin::Channel {
+            chat_id: ChatId(int53_or_zero(value.get("chat_id"))),
+            message_id: MessageId(int53_or_zero(value.get("message_id"))),
+            author_signature: value
+                .get("author_signature")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string(),
+        }),
+        Some(other) => Some(MessageOrigin::Unknown {
+            type_name: other.to_string(),
+        }),
+        None => None,
+    }
 }
 
 fn parse_reply_to(value: Option<&Value>) -> Option<MessageReplyTo> {
@@ -1469,5 +1621,59 @@ mod tests {
         assert!(schema.lines().any(|l| l.starts_with("editMessageText ")));
         assert!(schema.lines().any(|l| l.starts_with("editMessageCaption ")));
         assert!(schema.lines().any(|l| l.starts_with("deleteMessages ")));
+    }
+
+    #[test]
+    fn message_forward_info_is_typed() {
+        let env = parse_envelope(
+            r#"{"@type":"updateNewMessage","message":{"id":105,"chat_id":11,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"Forwarded hello.","entities":[]}},"forward_info":{"@type":"messageForwardInfo","origin":{"@type":"messageOriginHiddenUser","sender_name":"Ada Lovelace"},"date":1710000000,"source":null,"public_service_announcement_type":""}}}"#,
+        )
+        .unwrap();
+        match env.payload {
+            EnvelopePayload::UpdateNewMessage(message) => {
+                let info = message.forward_info.expect("forward_info");
+                assert_eq!(info.date, 1_710_000_000);
+                assert_eq!(
+                    info.origin,
+                    MessageOrigin::HiddenUser {
+                        sender_name: "Ada Lovelace".into()
+                    }
+                );
+                assert_eq!(info.origin.display_name(|_| None, |_| None), "Ada Lovelace");
+            }
+            other => panic!("{other:?}"),
+        }
+        let user = parse_envelope(
+            r#"{"@type":"updateNewMessage","message":{"id":2,"chat_id":11,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"from user","entities":[]}},"forward_info":{"@type":"messageForwardInfo","origin":{"@type":"messageOriginUser","sender_user_id":42},"date":1,"source":{"@type":"forwardSource","chat_id":9,"message_id":3,"sender_id":null,"sender_name":"Hidden Ada","date":1,"is_outgoing":false},"public_service_announcement_type":""}}}"#,
+        )
+        .unwrap();
+        match user.payload {
+            EnvelopePayload::UpdateNewMessage(message) => {
+                let info = message.forward_info.expect("forward_info");
+                assert_eq!(
+                    info.origin,
+                    MessageOrigin::User {
+                        sender_user_id: UserId(42)
+                    }
+                );
+                assert_eq!(info.source_name.as_deref(), Some("Hidden Ada"));
+            }
+            other => panic!("{other:?}"),
+        }
+        let schema = include_str!("../../schema/td_api.tl");
+        assert!(schema.lines().any(|l| l.starts_with("messageForwardInfo ")));
+        assert!(schema.lines().any(|l| l.starts_with("messageOriginUser ")));
+        assert!(
+            schema
+                .lines()
+                .any(|l| l.starts_with("messageOriginHiddenUser "))
+        );
+        assert!(schema.lines().any(|l| l.starts_with("messageOriginChat ")));
+        assert!(
+            schema
+                .lines()
+                .any(|l| l.starts_with("messageOriginChannel "))
+        );
+        assert!(schema.lines().any(|l| l.starts_with("forwardMessages ")));
     }
 }
