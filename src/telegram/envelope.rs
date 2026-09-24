@@ -105,6 +105,12 @@ pub enum EnvelopePayload {
         message_id: MessageId,
         interaction_info: Option<MessageInteractionInfo>,
     },
+    /// `updateMessageIsPinned` — message pin state changed (TDLib 1.8.67).
+    UpdateMessageIsPinned {
+        chat_id: ChatId,
+        message_id: MessageId,
+        is_pinned: bool,
+    },
     Unknown(UnknownKind),
 }
 
@@ -419,6 +425,8 @@ pub struct ParsedMessage {
     pub id: MessageId,
     pub chat_id: ChatId,
     pub is_outgoing: bool,
+    /// Schema `message.is_pinned` (TDLib 1.8.67).
+    pub is_pinned: bool,
     pub content: MessageContent,
     pub files: Vec<ParsedFile>,
     pub reply_to: Option<MessageReplyTo>,
@@ -820,6 +828,14 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
             message_id: MessageId(int53(value.get("message_id"))?),
             interaction_info: parse_interaction_info(value.get("interaction_info")),
         }),
+        "updateMessageIsPinned" => Ok(EnvelopePayload::UpdateMessageIsPinned {
+            chat_id: ChatId(int53(value.get("chat_id"))?),
+            message_id: MessageId(int53(value.get("message_id"))?),
+            is_pinned: value
+                .get("is_pinned")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+        }),
         other => Ok(EnvelopePayload::Unknown(UnknownKind {
             type_name: other.to_string(),
         })),
@@ -948,6 +964,10 @@ fn parse_message(value: &Value) -> Result<ParsedMessage, ParseError> {
         chat_id: ChatId(int53(value.get("chat_id"))?),
         is_outgoing: value
             .get("is_outgoing")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        is_pinned: value
+            .get("is_pinned")
             .and_then(Value::as_bool)
             .unwrap_or(false),
         content,
@@ -1925,5 +1945,44 @@ mod tests {
                 .lines()
                 .any(|l| l.starts_with("removeMessageReaction "))
         );
+    }
+
+    #[test]
+    fn message_is_pinned_and_update_are_typed() {
+        let env = parse_envelope(
+            r#"{"@type":"updateNewMessage","message":{"id":101,"chat_id":11,"is_outgoing":false,"is_pinned":true,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"pinned","entities":[]}}}}"#,
+        )
+        .unwrap();
+        match env.payload {
+            EnvelopePayload::UpdateNewMessage(message) => {
+                assert!(message.is_pinned);
+                assert_eq!(message.id.0, 101);
+            }
+            other => panic!("{other:?}"),
+        }
+        let update = parse_envelope(
+            r#"{"@type":"updateMessageIsPinned","chat_id":11,"message_id":101,"is_pinned":false}"#,
+        )
+        .unwrap();
+        match update.payload {
+            EnvelopePayload::UpdateMessageIsPinned {
+                chat_id,
+                message_id,
+                is_pinned,
+            } => {
+                assert_eq!(chat_id.0, 11);
+                assert_eq!(message_id.0, 101);
+                assert!(!is_pinned);
+            }
+            other => panic!("{other:?}"),
+        }
+        let schema = include_str!("../../schema/td_api.tl");
+        assert!(
+            schema
+                .lines()
+                .any(|l| l.starts_with("updateMessageIsPinned "))
+        );
+        assert!(schema.lines().any(|l| l.starts_with("pinChatMessage ")));
+        assert!(schema.lines().any(|l| l.starts_with("unpinChatMessage ")));
     }
 }

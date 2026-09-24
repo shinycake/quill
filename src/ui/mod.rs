@@ -160,6 +160,8 @@ pub enum ScreenshotDemo {
     ReadyForward,
     /// Emoji react / unreact + chips (injected, no live Telegram).
     ReadyReactions,
+    /// Pin / unpin + pinned banner (injected, no live Telegram).
+    ReadyPin,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -472,6 +474,15 @@ impl QuillApp {
                     AuthorizationState::Ready,
                 )
             }
+            Some(ScreenshotDemo::ReadyPin) => {
+                demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
+                (
+                    ConnectUiStatus::DemoReadyChats,
+                    None,
+                    "screenshot demo — pin / unpin (injected updateMessageIsPinned)".into(),
+                    AuthorizationState::Ready,
+                )
+            }
             None => bootstrap_connect(credentials),
         };
 
@@ -605,6 +616,14 @@ impl QuillApp {
             }
             app.pending_react = Some((ChatId(11), MessageId(101)));
             app.status_note = "screenshot demo — react · unreact · chips".into();
+        }
+        if matches!(demo, Some(ScreenshotDemo::ReadyPin)) {
+            if let Some(session) = app.demo_session.as_mut() {
+                app.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_pin(session, &app.demo_sink, &app.demo_seq);
+                let _ = session.begin_chat_search_jump(MessageId(101));
+            }
+            app.status_note = "screenshot demo — pin · unpin · pinned bar".into();
         }
         if app.live.is_some() {
             app.spawn_poll_loop(cx);
@@ -1583,6 +1602,150 @@ impl QuillApp {
         if let Some(owned) = copy_and_parse(&json, &self.demo_seq, &dyn_sink) {
             session.apply(owned);
         }
+    }
+
+    fn toggle_pin_message(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        cx: &mut Context<Self>,
+    ) {
+        if self.live.is_some() {
+            let result = self
+                .live
+                .as_mut()
+                .expect("live")
+                .driver
+                .toggle_pin_chat_message(chat_id, message_id);
+            self.status_note = match result {
+                Ok(_) => "updating pin…".into(),
+                Err(_) => "could not update pin".into(),
+            };
+            cx.notify();
+            return;
+        }
+        if self.demo_session.is_some() {
+            self.apply_demo_pin_toggle(chat_id, message_id);
+            self.status_note = "pin updated".into();
+            cx.notify();
+        }
+    }
+
+    fn apply_demo_pin_toggle(&mut self, chat_id: ChatId, message_id: MessageId) {
+        let Some(session) = self.demo_session.as_mut() else {
+            return;
+        };
+        let currently_pinned = session
+            .histories
+            .get(&chat_id.0)
+            .and_then(|history| history.messages.get(&message_id.0))
+            .is_some_and(|message| message.is_pinned);
+        let json = format!(
+            r#"{{"@type":"updateMessageIsPinned","chat_id":{},"message_id":{},"is_pinned":{}}}"#,
+            chat_id.0, message_id.0, !currently_pinned
+        );
+        let dyn_sink: Arc<dyn DiagnosticSink> = self.demo_sink.clone();
+        if let Some(owned) = copy_and_parse(&json, &self.demo_seq, &dyn_sink) {
+            session.apply(owned);
+        }
+    }
+
+    fn jump_to_pinned_message(&mut self, message_id: MessageId, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            self.status_note = match live.driver.jump_to_chat_search_message(message_id) {
+                Ok(_) => chat_search_jump_note(&live.driver.session),
+                Err(_) => "could not jump to pinned message".into(),
+            };
+        } else if let Some(session) = self.demo_session.as_mut() {
+            let _ = session.begin_chat_search_jump(message_id);
+            self.status_note = chat_search_jump_note(session);
+        }
+        cx.notify();
+    }
+
+    fn unpin_from_banner(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        cx: &mut Context<Self>,
+    ) {
+        if self.live.is_some() {
+            let result = self
+                .live
+                .as_mut()
+                .expect("live")
+                .driver
+                .unpin_chat_message(chat_id, message_id);
+            self.status_note = match result {
+                Ok(_) => "unpinning…".into(),
+                Err(_) => "could not unpin".into(),
+            };
+            cx.notify();
+            return;
+        }
+        if self.demo_session.is_some() {
+            let json = format!(
+                r#"{{"@type":"updateMessageIsPinned","chat_id":{},"message_id":{},"is_pinned":false}}"#,
+                chat_id.0, message_id.0
+            );
+            if let Some(session) = self.demo_session.as_mut() {
+                let dyn_sink: Arc<dyn DiagnosticSink> = self.demo_sink.clone();
+                if let Some(owned) = copy_and_parse(&json, &self.demo_seq, &dyn_sink) {
+                    session.apply(owned);
+                }
+            }
+            self.status_note = "unpinned".into();
+            cx.notify();
+        }
+    }
+
+    fn pinned_message_banner(
+        &self,
+        message: &HistoryMessage,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let chat_id = message.chat_id;
+        let message_id = message.id;
+        let preview = message.content.preview();
+        div()
+            .id("pinned-message-bar")
+            .flex()
+            .items_center()
+            .justify_between()
+            .gap_2()
+            .px_3()
+            .py_2()
+            .border_b_1()
+            .border_color(cx.theme().border)
+            .bg(rgb(0x161b22))
+            .child(
+                div()
+                    .id("pinned-message-jump")
+                    .flex()
+                    .flex_col()
+                    .min_w_0()
+                    .flex_1()
+                    .cursor_pointer()
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.jump_to_pinned_message(message_id, cx);
+                    }))
+                    .child(
+                        div()
+                            .text_xs()
+                            .font_medium()
+                            .text_color(rgb(0x58a6ff))
+                            .child("Pinned message"),
+                    )
+                    .child(div().text_sm().text_color(rgb(0xc9d1d9)).child(preview)),
+            )
+            .child(
+                Button::new("unpin-banner")
+                    .label("Unpin")
+                    .ghost()
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.unpin_from_banner(chat_id, message_id, cx);
+                    })),
+            )
     }
 
     fn reaction_picker_panel(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -2879,6 +3042,7 @@ impl QuillApp {
             }
             ChatSearchJump::None | ChatSearchJump::Missing { .. } => None,
         });
+        let pinned = session.and_then(|s| s.open_chat_pinned_message()).cloned();
         div()
             .id("conversation-history")
             .flex()
@@ -2895,6 +3059,9 @@ impl QuillApp {
                     .font_semibold()
                     .child(title),
             )
+            .when_some(pinned, |this, message| {
+                this.child(self.pinned_message_banner(&message, cx))
+            })
             .when(self.forward_picker_open, |this| {
                 this.child(self.forward_picker_panel(cx))
             })
@@ -3238,6 +3405,21 @@ fn apply_ready_reactions(session: &mut Session, sink: &Arc<MemorySink>, seq: &At
     let jsons = [
         format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
         r#"{"@type":"updateMessageInteractionInfo","chat_id":11,"message_id":101,"interaction_info":{"@type":"messageInteractionInfo","view_count":0,"forward_count":0,"reply_info":null,"reactions":{"@type":"messageReactions","reactions":[{"@type":"messageReaction","type":{"@type":"reactionTypeEmoji","emoji":"❤"},"total_count":3,"is_chosen":true,"used_sender_id":null,"recent_sender_ids":[]},{"@type":"messageReaction","type":{"@type":"reactionTypeEmoji","emoji":"👍"},"total_count":2,"is_chosen":false,"used_sender_id":null,"recent_sender_ids":[]}],"are_tags":false,"paid_reactors":[],"can_get_added_reactions":false}}}"#
+            .to_string(),
+    ];
+    for json in jsons {
+        if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
+            session.apply(owned);
+        }
+    }
+}
+
+fn apply_ready_pin(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let extra = session.request(RequestPurpose::PinChatMessage, Some(ChatId(11)));
+    let jsons = [
+        format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
+        r#"{"@type":"updateMessageIsPinned","chat_id":11,"message_id":101,"is_pinned":true}"#
             .to_string(),
     ];
     for json in jsons {
@@ -3747,6 +3929,15 @@ fn session_history_row(
                 }
             }))
     });
+    let pin_btn = message.can_pin().then(|| {
+        let pinned = message.is_pinned;
+        Button::new(format!("pin-{}", message_id.0))
+            .label(if pinned { "Unpin" } else { "Pin" })
+            .ghost()
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.toggle_pin_message(chat_id, message_id, cx);
+            }))
+    });
     let chips = message.emoji_reaction_chips();
     let chip_row = (!chips.is_empty()).then(|| {
         let mut row = div()
@@ -3818,6 +4009,7 @@ fn session_history_row(
                     .gap_2()
                     .child(reply_btn)
                     .when_some(react_btn, |this, btn| this.child(btn))
+                    .when_some(pin_btn, |this, btn| this.child(btn))
                     .when_some(forward_btn, |this, btn| this.child(btn))
                     .when_some(select_btn, |this, btn| this.child(btn))
                     .when_some(edit_btn, |this, btn| this.child(btn))

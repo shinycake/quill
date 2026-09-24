@@ -44,6 +44,10 @@ pub enum RequestPurpose {
     AddMessageReaction,
     /// `removeMessageReaction`. Response is `ok`; chips via `updateMessageInteractionInfo`.
     RemoveMessageReaction,
+    /// `pinChatMessage`. Response is `ok`; pin via `updateMessageIsPinned`.
+    PinChatMessage,
+    /// `unpinChatMessage`. Response is `ok`; pin via `updateMessageIsPinned`.
+    UnpinChatMessage,
     Close,
     LogOut,
     Other,
@@ -410,10 +414,18 @@ pub struct HistoryMessage {
     pub reply_to: Option<MessageReplyTo>,
     pub forward_info: Option<MessageForwardInfo>,
     pub interaction_info: Option<MessageInteractionInfo>,
+    /// Schema `message.is_pinned` / `updateMessageIsPinned`.
+    pub is_pinned: bool,
 }
 
 impl HistoryMessage {
     pub fn can_react(&self) -> bool {
+        !self.pending && self.id.0 > 0
+    }
+
+    /// Already-sent messages can be pinned/unpinned (live `messageProperties.can_be_pinned`
+    /// stays out — same default as edit/forward/react).
+    pub fn can_pin(&self) -> bool {
         !self.pending && self.id.0 > 0
     }
 
@@ -500,6 +512,23 @@ impl HistoryState {
             false
         }
     }
+
+    fn update_is_pinned(&mut self, id: MessageId, is_pinned: bool) -> bool {
+        if let Some(message) = self.messages.get_mut(&id.0) {
+            message.is_pinned = is_pinned;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Newest pinned message in loaded history (`getChatPinnedMessage` is newest).
+    pub fn newest_pinned(&self) -> Option<&HistoryMessage> {
+        self.messages
+            .values()
+            .rev()
+            .find(|message| message.is_pinned)
+    }
 }
 
 /// Global search (official sidebar field): recents, then `searchChats` + `searchMessages`.
@@ -523,6 +552,7 @@ pub struct SearchMessageHit {
     pub reply_to: Option<MessageReplyTo>,
     pub forward_info: Option<MessageForwardInfo>,
     pub interaction_info: Option<MessageInteractionInfo>,
+    pub is_pinned: bool,
 }
 
 impl SearchMessageHit {
@@ -536,6 +566,7 @@ impl SearchMessageHit {
             reply_to: message.reply_to.clone(),
             forward_info: message.forward_info.clone(),
             interaction_info: message.interaction_info.clone(),
+            is_pinned: message.is_pinned,
         }
     }
 
@@ -549,6 +580,7 @@ impl SearchMessageHit {
             reply_to: self.reply_to,
             forward_info: self.forward_info,
             interaction_info: self.interaction_info,
+            is_pinned: self.is_pinned,
         }
     }
 }
@@ -1108,6 +1140,15 @@ impl Session {
             } => {
                 if let Some(history) = self.histories.get_mut(&chat_id.0) {
                     history.update_interaction_info(message_id, interaction_info);
+                }
+            }
+            EnvelopePayload::UpdateMessageIsPinned {
+                chat_id,
+                message_id,
+                is_pinned,
+            } => {
+                if let Some(history) = self.histories.get_mut(&chat_id.0) {
+                    history.update_is_pinned(message_id, is_pinned);
                 }
             }
             EnvelopePayload::UpdateMessageContent {
@@ -1752,6 +1793,7 @@ impl Session {
                         reply_to: message.reply_to.clone(),
                         forward_info: message.forward_info.clone(),
                         interaction_info: message.interaction_info.clone(),
+                        is_pinned: message.is_pinned,
                     })
                     .collect()
             })
@@ -1762,6 +1804,12 @@ impl Session {
         if let Some(id) = self.chat_search.selected_hit().map(|hit| hit.message_id) {
             let _ = self.begin_chat_search_jump(id);
         }
+    }
+
+    /// Newest pinned message in the open chat's loaded history.
+    pub fn open_chat_pinned_message(&self) -> Option<&HistoryMessage> {
+        let chat_id = self.open_chat?;
+        self.histories.get(&chat_id.0)?.newest_pinned()
     }
 
     /// Insert a found message into that chat's history so open-chat can show it
@@ -1832,6 +1880,7 @@ fn history_message(message: ParsedMessage, pending: bool) -> HistoryMessage {
         reply_to: message.reply_to,
         forward_info: message.forward_info,
         interaction_info: message.interaction_info,
+        is_pinned: message.is_pinned,
     }
 }
 
@@ -3058,6 +3107,7 @@ mod tests {
             reply_to: None,
             forward_info: None,
             interaction_info: None,
+            is_pinned: false,
         });
         assert_eq!(
             session.begin_chat_search_jump(MessageId(70)),
@@ -3079,6 +3129,7 @@ mod tests {
             reply_to: None,
             forward_info: None,
             interaction_info: None,
+            is_pinned: false,
         });
         assert_eq!(
             session.begin_chat_search_jump(MessageId(80)),
@@ -3440,6 +3491,79 @@ mod tests {
             .get(&101)
             .unwrap();
         assert!(cleared.emoji_reaction_chips().is_empty());
+        assert!(!sink.rendered().contains("CANARY"));
+    }
+
+    #[test]
+    fn message_is_pinned_update_and_newest_pinned() {
+        let sink = Arc::new(MemorySink::new());
+        let mut session = Session::new(AccountKey::primary(), sink.clone());
+        let seq = AtomicU64::new(0);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+        );
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateNewChat","chat":{"id":11,"title":"Demo","type":{"@type":"chatTypePrivate","user_id":11},"unread_count":0}}"#,
+        );
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateNewMessage","message":{"id":100,"chat_id":11,"is_outgoing":false,"is_pinned":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"older","entities":[]}}}}"#,
+        );
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateNewMessage","message":{"id":101,"chat_id":11,"is_outgoing":false,"is_pinned":true,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"Hello from injected JSON.","entities":[]}}}}"#,
+        );
+        session.open_chat = Some(ChatId(11));
+        let pinned = session
+            .histories
+            .get(&11)
+            .unwrap()
+            .messages
+            .get(&101)
+            .unwrap();
+        assert!(pinned.is_pinned);
+        assert!(pinned.can_pin());
+        assert_eq!(
+            session.open_chat_pinned_message().map(|m| m.id),
+            Some(MessageId(101))
+        );
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateMessageIsPinned","chat_id":11,"message_id":101,"is_pinned":false}"#,
+        );
+        assert!(
+            !session
+                .histories
+                .get(&11)
+                .unwrap()
+                .messages
+                .get(&101)
+                .unwrap()
+                .is_pinned
+        );
+        assert!(session.open_chat_pinned_message().is_none());
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateMessageIsPinned","chat_id":11,"message_id":100,"is_pinned":true}"#,
+        );
+        assert_eq!(
+            session.open_chat_pinned_message().map(|m| m.id),
+            Some(MessageId(100))
+        );
         assert!(!sink.rendered().contains("CANARY"));
     }
 }

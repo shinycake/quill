@@ -540,6 +540,38 @@ pub fn remove_message_reaction(
     .to_string()
 }
 
+/// `pinChatMessage` (TDLib 1.8.67). Official Pin: notify when the chat allows
+/// it (`disable_notification` false); pin for everyone (`only_for_self` false).
+/// Schema: notifications are always disabled in channels and private chats.
+pub fn pin_chat_message(
+    extra: RequestId,
+    chat_id: ChatId,
+    message_id: MessageId,
+    disable_notification: bool,
+    only_for_self: bool,
+) -> String {
+    json!({
+        "@type": "pinChatMessage",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0,
+        "message_id": message_id.0,
+        "disable_notification": disable_notification,
+        "only_for_self": only_for_self
+    })
+    .to_string()
+}
+
+/// `unpinChatMessage` (TDLib 1.8.67). Removes one pinned message.
+pub fn unpin_chat_message(extra: RequestId, chat_id: ChatId, message_id: MessageId) -> String {
+    json!({
+        "@type": "unpinChatMessage",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0,
+        "message_id": message_id.0
+    })
+    .to_string()
+}
+
 pub fn runtime_version_request() -> String {
     json!({
         "@type": "getOption",
@@ -868,6 +900,30 @@ mod tests {
         assert!(!remove.contains("is_big"));
         assert!(!remove.contains("update_recent_reactions"));
         assert!(!remove.contains("CANARY"));
+    }
+
+    #[test]
+    fn pin_and_unpin_chat_message_shape_matches_1_8_67() {
+        let pin = pin_chat_message(RequestId(40), ChatId(11), MessageId(101), false, false);
+        let v: serde_json::Value = serde_json::from_str(&pin).unwrap();
+        assert_eq!(v["@type"], "pinChatMessage");
+        assert_eq!(v["@extra"], "40");
+        assert_eq!(v["chat_id"], 11);
+        assert_eq!(v["message_id"], 101);
+        assert_eq!(v["disable_notification"], false);
+        assert_eq!(v["only_for_self"], false);
+        assert!(!pin.contains("CANARY"));
+        assert!(!pin.contains("unpinAllChatMessages"));
+
+        let unpin = unpin_chat_message(RequestId(41), ChatId(11), MessageId(101));
+        let v: serde_json::Value = serde_json::from_str(&unpin).unwrap();
+        assert_eq!(v["@type"], "unpinChatMessage");
+        assert_eq!(v["@extra"], "41");
+        assert_eq!(v["chat_id"], 11);
+        assert_eq!(v["message_id"], 101);
+        assert!(!unpin.contains("disable_notification"));
+        assert!(!unpin.contains("only_for_self"));
+        assert!(!unpin.contains("CANARY"));
     }
 
     #[test]

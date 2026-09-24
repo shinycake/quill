@@ -89,9 +89,10 @@ fn parse_screenshot_demo(args: &[String]) -> Option<(ui::ScreenshotDemo, std::pa
                 "ready-edit-delete" => ScreenshotDemo::ReadyEditDelete,
                 "ready-forward" => ScreenshotDemo::ReadyForward,
                 "ready-reactions" => ScreenshotDemo::ReadyReactions,
+                "ready-pin" => ScreenshotDemo::ReadyPin,
                 _ => {
                     eprintln!(
-                        "unknown screenshot demo '{kind}' (expected need-tdjson|wait-phone|wait-code|wait-password|ready-chats|ready-chats-composer|ready-unread|ready-unread-read|ready-media|ready-send-media|ready-search|ready-search-in-chat|ready-reply|ready-edit-delete|ready-forward|ready-reactions)"
+                        "unknown screenshot demo '{kind}' (expected need-tdjson|wait-phone|wait-code|wait-password|ready-chats|ready-chats-composer|ready-unread|ready-unread-read|ready-media|ready-send-media|ready-search|ready-search-in-chat|ready-reply|ready-edit-delete|ready-forward|ready-reactions|ready-pin)"
                     );
                     std::process::exit(2);
                 }
@@ -129,6 +130,7 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
         ScreenshotDemo::ReadyEditDelete => ".quill-ready-ready-edit-delete",
         ScreenshotDemo::ReadyForward => ".quill-ready-ready-forward",
         ScreenshotDemo::ReadyReactions => ".quill-ready-ready-reactions",
+        ScreenshotDemo::ReadyPin => ".quill-ready-ready-pin",
     });
     let _ = std::fs::remove_file(&marker);
     let marker_for_spawn = marker.clone();
