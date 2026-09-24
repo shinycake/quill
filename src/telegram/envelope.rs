@@ -99,6 +99,12 @@ pub enum EnvelopePayload {
     },
     UpdateFile(ParsedFile),
     File(ParsedFile),
+    /// `updateMessageInteractionInfo` — views / forwards / `messageReactions`.
+    UpdateMessageInteractionInfo {
+        chat_id: ChatId,
+        message_id: MessageId,
+        interaction_info: Option<MessageInteractionInfo>,
+    },
     Unknown(UnknownKind),
 }
 
@@ -248,6 +254,150 @@ pub struct MessageForwardInfo {
     pub date: i32,
 }
 
+/// Official Telegram default emoji reactions (tdesktop active-emoji first
+/// row / Unigram default picker). Custom emoji and paid stay out of this slice.
+pub const DEFAULT_EMOJI_REACTIONS: &[&str] = &[
+    "👍", "👎", "❤", "🔥", "🥰", "👏", "😁", "🤔", "🤯", "😱", "🤬", "😢", "🎉", "🤩", "🤮", "💩",
+];
+
+/// `ReactionType` (TDLib 1.8.67). Phase 1 chips use emoji only.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ReactionType {
+    Emoji { emoji: String },
+    CustomEmoji { custom_emoji_id: i64 },
+    Paid,
+    Unknown,
+}
+
+impl ReactionType {
+    pub fn emoji(emoji: impl Into<String>) -> Self {
+        Self::Emoji {
+            emoji: emoji.into(),
+        }
+    }
+
+    pub fn emoji_text(&self) -> Option<&str> {
+        match self {
+            Self::Emoji { emoji } => Some(emoji.as_str()),
+            _ => None,
+        }
+    }
+
+    /// JSON object for `addMessageReaction` / `removeMessageReaction`.
+    pub fn to_tdlib_json(&self) -> serde_json::Value {
+        match self {
+            Self::Emoji { emoji } => serde_json::json!({
+                "@type": "reactionTypeEmoji",
+                "emoji": emoji
+            }),
+            Self::CustomEmoji { custom_emoji_id } => serde_json::json!({
+                "@type": "reactionTypeCustomEmoji",
+                "custom_emoji_id": custom_emoji_id.to_string()
+            }),
+            Self::Paid => serde_json::json!({ "@type": "reactionTypePaid" }),
+            Self::Unknown => serde_json::json!({ "@type": "reactionTypeEmoji", "emoji": "" }),
+        }
+    }
+}
+
+/// `messageReaction` (TDLib 1.8.67). `used_sender_id` / recent senders stay out.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MessageReaction {
+    pub reaction_type: ReactionType,
+    pub total_count: i32,
+    pub is_chosen: bool,
+}
+
+impl MessageReaction {
+    /// Chip label: emoji + count (tdesktop InlineList / Unigram ReactionButton).
+    pub fn chip_label(&self) -> Option<String> {
+        let emoji = self.reaction_type.emoji_text()?;
+        Some(format!("{emoji} {}", self.total_count))
+    }
+}
+
+/// `messageReactions` (TDLib 1.8.67). Tags / paid reactors stay out of display.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct MessageReactions {
+    pub reactions: Vec<MessageReaction>,
+    pub are_tags: bool,
+}
+
+impl MessageReactions {
+    pub fn emoji_chips(&self) -> impl Iterator<Item = &MessageReaction> {
+        self.reactions
+            .iter()
+            .filter(|reaction| reaction.reaction_type.emoji_text().is_some())
+    }
+
+    pub fn chosen_emoji(&self, emoji: &str) -> bool {
+        self.reactions.iter().any(|reaction| {
+            reaction.is_chosen && reaction.reaction_type.emoji_text() == Some(emoji)
+        })
+    }
+}
+
+/// `messageInteractionInfo` (TDLib 1.8.67). `reply_info` stays out of this slice.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct MessageInteractionInfo {
+    pub view_count: i32,
+    pub forward_count: i32,
+    pub reactions: Option<MessageReactions>,
+}
+
+impl MessageInteractionInfo {
+    pub fn emoji_chips(&self) -> Vec<&MessageReaction> {
+        self.reactions
+            .as_ref()
+            .map(|reactions| reactions.emoji_chips().collect())
+            .unwrap_or_default()
+    }
+
+    pub fn chosen_emoji(&self, emoji: &str) -> bool {
+        self.reactions
+            .as_ref()
+            .is_some_and(|reactions| reactions.chosen_emoji(emoji))
+    }
+}
+
+/// Toggle the current user's chosen emoji (tdesktop chip click / Unigram
+/// ReactionButton). Used to build the next `updateMessageInteractionInfo`.
+pub fn toggle_chosen_emoji_reaction(
+    current: Option<&MessageInteractionInfo>,
+    emoji: &str,
+) -> MessageInteractionInfo {
+    let mut info = current.cloned().unwrap_or_default();
+    let mut reactions = info.reactions.take().unwrap_or_default();
+    if let Some(existing) = reactions
+        .reactions
+        .iter_mut()
+        .find(|reaction| reaction.reaction_type.emoji_text() == Some(emoji))
+    {
+        if existing.is_chosen {
+            existing.is_chosen = false;
+            existing.total_count = (existing.total_count - 1).max(0);
+        } else {
+            existing.is_chosen = true;
+            existing.total_count += 1;
+        }
+    } else {
+        reactions.reactions.push(MessageReaction {
+            reaction_type: ReactionType::emoji(emoji),
+            total_count: 1,
+            is_chosen: true,
+        });
+    }
+    reactions
+        .reactions
+        .retain(|reaction| reaction.total_count > 0);
+    info.reactions = if reactions.reactions.is_empty() {
+        None
+    } else {
+        Some(reactions)
+    };
+    info
+}
+
 /// Same-chat / known-chat reply metadata from `message.reply_to`.
 /// Stories and unknown `MessageReplyTo` variants are dropped (out of scope).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -273,6 +423,7 @@ pub struct ParsedMessage {
     pub files: Vec<ParsedFile>,
     pub reply_to: Option<MessageReplyTo>,
     pub forward_info: Option<MessageForwardInfo>,
+    pub interaction_info: Option<MessageInteractionInfo>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -664,6 +815,11 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
         "message" => Ok(EnvelopePayload::Message(parse_message(&value)?)),
         "updateFile" => Ok(EnvelopePayload::UpdateFile(parse_file(value.get("file"))?)),
         "file" => Ok(EnvelopePayload::File(parse_file(Some(&value))?)),
+        "updateMessageInteractionInfo" => Ok(EnvelopePayload::UpdateMessageInteractionInfo {
+            chat_id: ChatId(int53(value.get("chat_id"))?),
+            message_id: MessageId(int53(value.get("message_id"))?),
+            interaction_info: parse_interaction_info(value.get("interaction_info")),
+        }),
         other => Ok(EnvelopePayload::Unknown(UnknownKind {
             type_name: other.to_string(),
         })),
@@ -798,7 +954,89 @@ fn parse_message(value: &Value) -> Result<ParsedMessage, ParseError> {
         files,
         reply_to: parse_reply_to(value.get("reply_to")),
         forward_info: parse_forward_info(value.get("forward_info")),
+        interaction_info: parse_interaction_info(value.get("interaction_info")),
     })
+}
+
+fn parse_interaction_info(value: Option<&Value>) -> Option<MessageInteractionInfo> {
+    let value = value?;
+    if value.is_null() {
+        return None;
+    }
+    match value.get("@type").and_then(Value::as_str) {
+        None | Some("messageInteractionInfo") => Some(MessageInteractionInfo {
+            view_count: value.get("view_count").and_then(Value::as_i64).unwrap_or(0) as i32,
+            forward_count: value
+                .get("forward_count")
+                .and_then(Value::as_i64)
+                .unwrap_or(0) as i32,
+            reactions: parse_message_reactions(value.get("reactions")),
+        }),
+        _ => None,
+    }
+}
+
+fn parse_message_reactions(value: Option<&Value>) -> Option<MessageReactions> {
+    let value = value?;
+    if value.is_null() {
+        return None;
+    }
+    match value.get("@type").and_then(Value::as_str) {
+        None | Some("messageReactions") => {
+            let reactions = value
+                .get("reactions")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(parse_message_reaction)
+                .collect();
+            Some(MessageReactions {
+                reactions,
+                are_tags: value
+                    .get("are_tags")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
+            })
+        }
+        _ => None,
+    }
+}
+
+fn parse_message_reaction(value: &Value) -> Option<MessageReaction> {
+    let reaction_type = parse_reaction_type(value.get("type"))?;
+    Some(MessageReaction {
+        reaction_type,
+        total_count: value
+            .get("total_count")
+            .and_then(Value::as_i64)
+            .unwrap_or(0) as i32,
+        is_chosen: value
+            .get("is_chosen")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+    })
+}
+
+fn parse_reaction_type(value: Option<&Value>) -> Option<ReactionType> {
+    let value = value?;
+    if value.is_null() {
+        return None;
+    }
+    match value.get("@type").and_then(Value::as_str) {
+        Some("reactionTypeEmoji") => Some(ReactionType::Emoji {
+            emoji: value
+                .get("emoji")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string(),
+        }),
+        Some("reactionTypeCustomEmoji") => Some(ReactionType::CustomEmoji {
+            custom_emoji_id: int64(value.get("custom_emoji_id")).unwrap_or(0),
+        }),
+        Some("reactionTypePaid") => Some(ReactionType::Paid),
+        Some(_) => Some(ReactionType::Unknown),
+        None => None,
+    }
 }
 
 fn parse_forward_info(value: Option<&Value>) -> Option<MessageForwardInfo> {
@@ -1595,6 +1833,97 @@ mod tests {
             schema
                 .lines()
                 .any(|l| l.starts_with("messageOriginHiddenUser "))
+        );
+    }
+
+    #[test]
+    fn message_interaction_info_and_update_are_typed() {
+        let env = parse_envelope(
+            r#"{"@type":"updateNewMessage","message":{"id":101,"chat_id":11,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"react me","entities":[]}},"interaction_info":{"@type":"messageInteractionInfo","view_count":4,"forward_count":1,"reply_info":null,"reactions":{"@type":"messageReactions","reactions":[{"@type":"messageReaction","type":{"@type":"reactionTypeEmoji","emoji":"❤"},"total_count":3,"is_chosen":true,"used_sender_id":null,"recent_sender_ids":[]},{"@type":"messageReaction","type":{"@type":"reactionTypeEmoji","emoji":"👍"},"total_count":2,"is_chosen":false,"used_sender_id":null,"recent_sender_ids":[]}],"are_tags":false,"paid_reactors":[],"can_get_added_reactions":true}}}}"#,
+        )
+        .unwrap();
+        match env.payload {
+            EnvelopePayload::UpdateNewMessage(message) => {
+                let info = message.interaction_info.expect("interaction_info");
+                assert_eq!(info.view_count, 4);
+                assert_eq!(info.forward_count, 1);
+                let chips = info.emoji_chips();
+                assert_eq!(chips.len(), 2);
+                assert_eq!(chips[0].chip_label().as_deref(), Some("❤ 3"));
+                assert!(chips[0].is_chosen);
+                assert_eq!(chips[1].chip_label().as_deref(), Some("👍 2"));
+                assert!(!chips[1].is_chosen);
+                assert!(info.chosen_emoji("❤"));
+                assert!(!info.chosen_emoji("👍"));
+            }
+            other => panic!("{other:?}"),
+        }
+        let update = parse_envelope(
+            r#"{"@type":"updateMessageInteractionInfo","chat_id":11,"message_id":101,"interaction_info":{"@type":"messageInteractionInfo","view_count":0,"forward_count":0,"reply_info":null,"reactions":{"@type":"messageReactions","reactions":[{"@type":"messageReaction","type":{"@type":"reactionTypeEmoji","emoji":"👍"},"total_count":1,"is_chosen":true,"used_sender_id":null,"recent_sender_ids":[]}],"are_tags":false,"paid_reactors":[],"can_get_added_reactions":false}}}"#,
+        )
+        .unwrap();
+        match update.payload {
+            EnvelopePayload::UpdateMessageInteractionInfo {
+                chat_id,
+                message_id,
+                interaction_info,
+            } => {
+                assert_eq!(chat_id.0, 11);
+                assert_eq!(message_id.0, 101);
+                let info = interaction_info.expect("interaction_info");
+                assert_eq!(info.emoji_chips()[0].chip_label().as_deref(), Some("👍 1"));
+                assert!(info.chosen_emoji("👍"));
+            }
+            other => panic!("{other:?}"),
+        }
+        let cleared = parse_envelope(
+            r#"{"@type":"updateMessageInteractionInfo","chat_id":11,"message_id":101,"interaction_info":null}"#,
+        )
+        .unwrap();
+        match cleared.payload {
+            EnvelopePayload::UpdateMessageInteractionInfo {
+                interaction_info, ..
+            } => assert_eq!(interaction_info, None),
+            other => panic!("{other:?}"),
+        }
+        let after_unreact = toggle_chosen_emoji_reaction(
+            Some(&MessageInteractionInfo {
+                reactions: Some(MessageReactions {
+                    reactions: vec![MessageReaction {
+                        reaction_type: ReactionType::emoji("❤"),
+                        total_count: 3,
+                        is_chosen: true,
+                    }],
+                    are_tags: false,
+                }),
+                ..MessageInteractionInfo::default()
+            }),
+            "❤",
+        );
+        assert!(!after_unreact.chosen_emoji("❤"));
+        assert_eq!(
+            after_unreact.emoji_chips()[0].chip_label().as_deref(),
+            Some("❤ 2")
+        );
+        let schema = include_str!("../../schema/td_api.tl");
+        assert!(
+            schema
+                .lines()
+                .any(|l| l.starts_with("updateMessageInteractionInfo "))
+        );
+        assert!(
+            schema
+                .lines()
+                .any(|l| l.starts_with("messageInteractionInfo "))
+        );
+        assert!(schema.lines().any(|l| l.starts_with("messageReactions ")));
+        assert!(schema.lines().any(|l| l.starts_with("messageReaction ")));
+        assert!(schema.lines().any(|l| l.starts_with("reactionTypeEmoji ")));
+        assert!(schema.lines().any(|l| l.starts_with("addMessageReaction ")));
+        assert!(
+            schema
+                .lines()
+                .any(|l| l.starts_with("removeMessageReaction "))
         );
     }
 }

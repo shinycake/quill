@@ -6,8 +6,8 @@ use crate::ids::{
 use crate::telegram::client::OwnedEnvelope;
 use crate::telegram::envelope::{
     AuthorizationState, ChatKind, ChatList, ChatPositionUpdate, ConnectionState, EnvelopePayload,
-    ErrorClass, MessageContent, MessageForwardInfo, MessageOrigin, MessageReplyTo, ParsedFile,
-    ParsedMessage,
+    ErrorClass, MessageContent, MessageForwardInfo, MessageInteractionInfo, MessageOrigin,
+    MessageReaction, MessageReplyTo, ParsedFile, ParsedMessage,
 };
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
@@ -40,6 +40,10 @@ pub enum RequestPurpose {
     DeleteMessages,
     /// `forwardMessages`. Response is `messages`.
     ForwardMessages,
+    /// `addMessageReaction`. Response is `ok`; chips via `updateMessageInteractionInfo`.
+    AddMessageReaction,
+    /// `removeMessageReaction`. Response is `ok`; chips via `updateMessageInteractionInfo`.
+    RemoveMessageReaction,
     Close,
     LogOut,
     Other,
@@ -405,6 +409,26 @@ pub struct HistoryMessage {
     pub pending: bool,
     pub reply_to: Option<MessageReplyTo>,
     pub forward_info: Option<MessageForwardInfo>,
+    pub interaction_info: Option<MessageInteractionInfo>,
+}
+
+impl HistoryMessage {
+    pub fn can_react(&self) -> bool {
+        !self.pending && self.id.0 > 0
+    }
+
+    pub fn emoji_reaction_chips(&self) -> Vec<&MessageReaction> {
+        self.interaction_info
+            .as_ref()
+            .map(MessageInteractionInfo::emoji_chips)
+            .unwrap_or_default()
+    }
+
+    pub fn chosen_emoji(&self, emoji: &str) -> bool {
+        self.interaction_info
+            .as_ref()
+            .is_some_and(|info| info.chosen_emoji(emoji))
+    }
 }
 
 #[derive(Debug, Default)]
@@ -463,6 +487,19 @@ impl HistoryState {
             false
         }
     }
+
+    fn update_interaction_info(
+        &mut self,
+        id: MessageId,
+        interaction_info: Option<MessageInteractionInfo>,
+    ) -> bool {
+        if let Some(message) = self.messages.get_mut(&id.0) {
+            message.interaction_info = interaction_info;
+            true
+        } else {
+            false
+        }
+    }
 }
 
 /// Global search (official sidebar field): recents, then `searchChats` + `searchMessages`.
@@ -485,6 +522,7 @@ pub struct SearchMessageHit {
     pub content: MessageContent,
     pub reply_to: Option<MessageReplyTo>,
     pub forward_info: Option<MessageForwardInfo>,
+    pub interaction_info: Option<MessageInteractionInfo>,
 }
 
 impl SearchMessageHit {
@@ -497,6 +535,7 @@ impl SearchMessageHit {
             content: message.content.clone(),
             reply_to: message.reply_to.clone(),
             forward_info: message.forward_info.clone(),
+            interaction_info: message.interaction_info.clone(),
         }
     }
 
@@ -509,6 +548,7 @@ impl SearchMessageHit {
             pending: false,
             reply_to: self.reply_to,
             forward_info: self.forward_info,
+            interaction_info: self.interaction_info,
         }
     }
 }
@@ -1060,6 +1100,15 @@ impl Session {
             }
             EnvelopePayload::UpdateMessageSendAcknowledged { .. } => {
                 // Not success. Keep the pending row until Succeeded/Failed.
+            }
+            EnvelopePayload::UpdateMessageInteractionInfo {
+                chat_id,
+                message_id,
+                interaction_info,
+            } => {
+                if let Some(history) = self.histories.get_mut(&chat_id.0) {
+                    history.update_interaction_info(message_id, interaction_info);
+                }
             }
             EnvelopePayload::UpdateMessageContent {
                 chat_id,
@@ -1702,6 +1751,7 @@ impl Session {
                         content: message.content.clone(),
                         reply_to: message.reply_to.clone(),
                         forward_info: message.forward_info.clone(),
+                        interaction_info: message.interaction_info.clone(),
                     })
                     .collect()
             })
@@ -1781,6 +1831,7 @@ fn history_message(message: ParsedMessage, pending: bool) -> HistoryMessage {
         pending,
         reply_to: message.reply_to,
         forward_info: message.forward_info,
+        interaction_info: message.interaction_info,
     }
 }
 
@@ -3006,6 +3057,7 @@ mod tests {
             content: crate::telegram::envelope::MessageContent::Text("gone".into()),
             reply_to: None,
             forward_info: None,
+            interaction_info: None,
         });
         assert_eq!(
             session.begin_chat_search_jump(MessageId(70)),
@@ -3026,6 +3078,7 @@ mod tests {
             content: crate::telegram::envelope::MessageContent::Text("ghost".into()),
             reply_to: None,
             forward_info: None,
+            interaction_info: None,
         });
         assert_eq!(
             session.begin_chat_search_jump(MessageId(80)),
@@ -3319,6 +3372,74 @@ mod tests {
             session.forward_from_label(incoming.forward_info.as_ref().unwrap()),
             "Forwarded from Ada Lovelace"
         );
+        assert!(!sink.rendered().contains("CANARY"));
+    }
+
+    #[test]
+    fn interaction_info_update_sets_chips_and_own_highlight() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+        );
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateNewChat","chat":{"id":11,"title":"Demo","type":{"@type":"chatTypePrivate","user_id":11},"unread_count":0}}"#,
+        );
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateNewMessage","message":{"id":101,"chat_id":11,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"Hello from injected JSON.","entities":[]}},"interaction_info":{"@type":"messageInteractionInfo","view_count":0,"forward_count":0,"reply_info":null,"reactions":{"@type":"messageReactions","reactions":[{"@type":"messageReaction","type":{"@type":"reactionTypeEmoji","emoji":"👍"},"total_count":2,"is_chosen":false,"used_sender_id":null,"recent_sender_ids":[]}],"are_tags":false,"paid_reactors":[],"can_get_added_reactions":false}}}}"#,
+        );
+        let incoming = session
+            .histories
+            .get(&11)
+            .unwrap()
+            .messages
+            .get(&101)
+            .unwrap();
+        assert!(incoming.can_react());
+        assert_eq!(incoming.emoji_reaction_chips().len(), 1);
+        assert!(!incoming.chosen_emoji("❤"));
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateMessageInteractionInfo","chat_id":11,"message_id":101,"interaction_info":{"@type":"messageInteractionInfo","view_count":0,"forward_count":0,"reply_info":null,"reactions":{"@type":"messageReactions","reactions":[{"@type":"messageReaction","type":{"@type":"reactionTypeEmoji","emoji":"❤"},"total_count":3,"is_chosen":true,"used_sender_id":null,"recent_sender_ids":[]},{"@type":"messageReaction","type":{"@type":"reactionTypeEmoji","emoji":"👍"},"total_count":2,"is_chosen":false,"used_sender_id":null,"recent_sender_ids":[]}],"are_tags":false,"paid_reactors":[],"can_get_added_reactions":false}}}"#,
+        );
+        let updated = session
+            .histories
+            .get(&11)
+            .unwrap()
+            .messages
+            .get(&101)
+            .unwrap();
+        let chips = updated.emoji_reaction_chips();
+        assert_eq!(chips[0].chip_label().as_deref(), Some("❤ 3"));
+        assert!(chips[0].is_chosen);
+        assert_eq!(chips[1].chip_label().as_deref(), Some("👍 2"));
+        assert!(!chips[1].is_chosen);
+        assert!(updated.chosen_emoji("❤"));
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateMessageInteractionInfo","chat_id":11,"message_id":101,"interaction_info":null}"#,
+        );
+        let cleared = session
+            .histories
+            .get(&11)
+            .unwrap()
+            .messages
+            .get(&101)
+            .unwrap();
+        assert!(cleared.emoji_reaction_chips().is_empty());
         assert!(!sink.rendered().contains("CANARY"));
     }
 }
