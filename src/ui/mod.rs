@@ -8,8 +8,8 @@ use gpui_kit::*;
 use quill::auth::{AuthAction, AuthView, view_for};
 use quill::composer::{AttachmentKind, ComposerAttachment, ComposerSnapshot, should_send_on_enter};
 use quill::connect::{
-    ConnectBlocker, ConnectGate, LiveConnect, SEARCH_DEBOUNCE, SearchQueryOutcome,
-    USER_DOWNLOAD_PRIORITY, evaluate_gate, start_live_connect,
+    ChatSearchQueryOutcome, ConnectBlocker, ConnectGate, LiveConnect, SEARCH_DEBOUNCE,
+    SearchQueryOutcome, USER_DOWNLOAD_PRIORITY, evaluate_gate, start_live_connect,
 };
 use quill::credentials::TelegramCredentials;
 use quill::diagnostics::{DiagnosticSink, MemorySink};
@@ -17,8 +17,8 @@ use quill::ids::{AccountKey, ChatId, FileId, MessageId};
 use quill::local_path::sandboxed_display_path;
 use quill::platform::live_secret_store;
 use quill::state::{
-    ChatSummary, HistoryMessage, OutboxReceipt, RequestPurpose, SearchStatus, Session,
-    outgoing_status_label, unread_badge_text,
+    ChatSearchJump, ChatSummary, HistoryMessage, OutboxReceipt, RequestPurpose, SearchStatus,
+    Session, outgoing_status_label, unread_badge_text,
 };
 use quill::telegram::client::copy_and_parse;
 use quill::telegram::envelope::{AuthorizationState, MessageContent, ParsedFile};
@@ -37,6 +37,9 @@ actions!(
         FocusComposer,
         LoadOlder,
         OpenSearch,
+        OpenChatSearch,
+        ChatSearchNewer,
+        ChatSearchOlder,
         CancelSearch,
         QuitApp,
         SubmitPhone,
@@ -57,6 +60,12 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("ctrl-up", LoadOlder, None),
         KeyBinding::new("cmd-k", OpenSearch, None),
         KeyBinding::new("ctrl-k", OpenSearch, None),
+        KeyBinding::new("cmd-f", OpenChatSearch, None),
+        KeyBinding::new("ctrl-f", OpenChatSearch, None),
+        KeyBinding::new("cmd-g", ChatSearchNewer, None),
+        KeyBinding::new("ctrl-g", ChatSearchNewer, None),
+        KeyBinding::new("cmd-shift-g", ChatSearchOlder, None),
+        KeyBinding::new("ctrl-shift-g", ChatSearchOlder, None),
         KeyBinding::new("escape", CancelSearch, None),
     ]);
 }
@@ -85,6 +94,7 @@ pub struct QuillApp {
     code_input: Entity<TextareaState>,
     password_input: Entity<TextareaState>,
     search_input: Entity<TextareaState>,
+    chat_search_input: Entity<TextareaState>,
     auth_demo: AuthorizationState,
     focus_sidebar: FocusHandle,
     connect_status: ConnectUiStatus,
@@ -116,6 +126,8 @@ pub enum ScreenshotDemo {
     ReadySendMedia,
     /// Sidebar search over injected recents / `searchChats` / `searchMessages`.
     ReadySearch,
+    /// In-chat search (`searchChatMessages`) + jump-to-message.
+    ReadySearchInChat,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -168,6 +180,12 @@ impl QuillApp {
         let search_input = cx.new(|cx| {
             TextareaState::new(window, cx)
                 .placeholder("Search")
+                .auto_grow(1, 1)
+                .submit_on_enter(true)
+        });
+        let chat_search_input = cx.new(|cx| {
+            TextareaState::new(window, cx)
+                .placeholder("Search in chat")
                 .auto_grow(1, 1)
                 .submit_on_enter(true)
         });
@@ -246,6 +264,23 @@ impl QuillApp {
                         *shift, *secondary, marked,
                     )) {
                         this.activate_first_search_result(window, cx);
+                    }
+                }
+            },
+        )
+        .detach();
+        cx.subscribe_in(
+            &chat_search_input,
+            window,
+            |this, state, event: &InputEvent, window, cx| {
+                let text = state.read(cx).value().to_string();
+                this.sync_chat_search_query(&text, cx);
+                if let InputEvent::PressEnter { secondary, shift } = event {
+                    let marked = state.update(cx, |input, cx| input.marked_text_range(window, cx));
+                    if should_send_on_enter(quill::composer::enter_event_from_kit(
+                        *shift, *secondary, marked,
+                    )) {
+                        this.jump_selected_chat_search_hit(cx);
                     }
                 }
             },
@@ -339,6 +374,15 @@ impl QuillApp {
                     AuthorizationState::Ready,
                 )
             }
+            Some(ScreenshotDemo::ReadySearchInChat) => {
+                demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
+                (
+                    ConnectUiStatus::DemoReadyChats,
+                    None,
+                    "screenshot demo — in-chat search (injected searchChatMessages)".into(),
+                    AuthorizationState::Ready,
+                )
+            }
             None => bootstrap_connect(credentials),
         };
 
@@ -357,6 +401,7 @@ impl QuillApp {
             code_input,
             password_input,
             search_input,
+            chat_search_input,
             auth_demo,
             focus_sidebar: cx.focus_handle(),
             connect_status,
@@ -393,6 +438,16 @@ impl QuillApp {
             if let Some(session) = app.demo_session.as_mut() {
                 app.demo_seq.store(session.last_seq, Ordering::SeqCst);
                 apply_ready_search(session, &app.demo_sink, &app.demo_seq);
+            }
+        }
+        if matches!(demo, Some(ScreenshotDemo::ReadySearchInChat)) {
+            app.chat_search_input.update(cx, |input, cx| {
+                input.set_value("hello", window, cx);
+                input.focus(window, cx);
+            });
+            if let Some(session) = app.demo_session.as_mut() {
+                app.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_search_in_chat(session, &app.demo_sink, &app.demo_seq);
             }
         }
         if app.live.is_some() {
@@ -807,6 +862,11 @@ impl QuillApp {
         self.session().is_some_and(|session| session.search.open)
     }
 
+    fn chat_search_is_open(&self) -> bool {
+        self.session()
+            .is_some_and(|session| session.chat_search.open)
+    }
+
     fn open_search_ui(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.pane_mode() != PaneMode::Ready {
             return;
@@ -839,6 +899,10 @@ impl QuillApp {
     }
 
     fn cancel_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.chat_search_is_open() {
+            self.close_chat_search_ui(window, cx);
+            return;
+        }
         if !self.search_is_open() {
             return;
         }
@@ -850,6 +914,291 @@ impl QuillApp {
                 .update(cx, |input, cx| input.set_value("", window, cx));
             self.sync_search_query("", cx);
         }
+    }
+
+    fn open_chat_search_ui(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.pane_mode() != PaneMode::Ready {
+            return;
+        }
+        let opened = if let Some(live) = self.live.as_mut() {
+            match live.driver.open_chat_search() {
+                Ok(true) => {
+                    self.status_note = "search in chat".into();
+                    true
+                }
+                Ok(false) => {
+                    self.status_note = "select a chat to search in conversation".into();
+                    false
+                }
+                Err(_) => {
+                    self.status_note = "could not search in chat".into();
+                    false
+                }
+            }
+        } else if let Some(session) = self.demo_session.as_mut() {
+            if session.open_chat_search() {
+                self.status_note = "search in chat".into();
+                true
+            } else {
+                self.status_note = "select a chat to search in conversation".into();
+                false
+            }
+        } else {
+            false
+        };
+        if opened {
+            self.chat_search_input
+                .update(cx, |input, cx| input.focus(window, cx));
+        }
+        cx.notify();
+    }
+
+    fn close_chat_search_ui(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            live.driver.close_chat_search();
+        } else if let Some(session) = self.demo_session.as_mut() {
+            session.close_chat_search();
+        }
+        self.chat_search_input
+            .update(cx, |input, cx| input.set_value("", window, cx));
+        self.status_note = "in-chat search closed".into();
+        cx.notify();
+    }
+
+    fn sync_chat_search_query(&mut self, query: &str, cx: &mut Context<Self>) {
+        if self.pane_mode() != PaneMode::Ready || !self.chat_search_is_open() {
+            return;
+        }
+        if let Some(live) = self.live.as_mut() {
+            match live.driver.set_chat_search_query(query) {
+                Ok(ChatSearchQueryOutcome::Sent(_)) => {
+                    self.status_note = "searching in chat…".into()
+                }
+                Ok(ChatSearchQueryOutcome::Debounced { token }) => {
+                    self.schedule_chat_search_commit(token, cx);
+                }
+                Ok(ChatSearchQueryOutcome::Unchanged) if query.trim().is_empty() => {
+                    self.status_note = "search in chat".into();
+                }
+                Ok(ChatSearchQueryOutcome::Unchanged) => {}
+                Err(_) => self.status_note = "could not search in chat".into(),
+            }
+        } else if let Some(session) = self.demo_session.as_mut() {
+            let trimmed = query.trim();
+            if session.chat_search.open
+                && session.chat_search.query == trimmed
+                && !matches!(session.chat_search.status, SearchStatus::Closed)
+            {
+                cx.notify();
+                return;
+            }
+            session.apply_local_chat_search_filter(query);
+        }
+        cx.notify();
+    }
+
+    fn schedule_chat_search_commit(&mut self, token: u64, cx: &mut Context<Self>) {
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(SEARCH_DEBOUNCE).await;
+            this.update(cx, |this, cx| {
+                if let Some(live) = this.live.as_mut() {
+                    match live.driver.commit_debounced_chat_search(token) {
+                        Ok(Some(_)) => this.status_note = "searching in chat…".into(),
+                        Ok(None) => {}
+                        Err(_) => this.status_note = "could not search in chat".into(),
+                    }
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    fn jump_selected_chat_search_hit(&mut self, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            self.status_note = match live.driver.jump_selected_chat_search_hit() {
+                Ok(_) => chat_search_jump_note(&live.driver.session),
+                Err(_) => "could not jump to message".into(),
+            };
+        } else if let Some(session) = self.demo_session.as_mut() {
+            if let Some(id) = session.chat_search.selected_hit().map(|hit| hit.message_id) {
+                let _ = session.begin_chat_search_jump(id);
+            }
+            self.status_note = chat_search_jump_note(session);
+        }
+        cx.notify();
+    }
+
+    fn jump_chat_search_message(&mut self, message_id: MessageId, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            self.status_note = match live.driver.jump_to_chat_search_message(message_id) {
+                Ok(_) => chat_search_jump_note(&live.driver.session),
+                Err(_) => "could not jump to message".into(),
+            };
+        } else if let Some(session) = self.demo_session.as_mut() {
+            let _ = session.begin_chat_search_jump(message_id);
+            self.status_note = chat_search_jump_note(session);
+        }
+        cx.notify();
+    }
+
+    fn chat_search_newer(&mut self, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            self.status_note = match live.driver.chat_search_newer() {
+                Ok(_) => chat_search_jump_note(&live.driver.session),
+                Err(_) => "could not jump to message".into(),
+            };
+        } else if let Some(session) = self.demo_session.as_mut() {
+            if let Some(id) = session.chat_search.select_newer() {
+                let _ = session.begin_chat_search_jump(id);
+            }
+            self.status_note = chat_search_jump_note(session);
+        }
+        cx.notify();
+    }
+
+    fn chat_search_older(&mut self, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            self.status_note = match live.driver.chat_search_older() {
+                Ok(_) => chat_search_jump_note(&live.driver.session),
+                Err(_) => "could not jump to message".into(),
+            };
+        } else if let Some(session) = self.demo_session.as_mut() {
+            if let Some(id) = session.chat_search.select_older() {
+                let _ = session.begin_chat_search_jump(id);
+            }
+            self.status_note = chat_search_jump_note(session);
+        }
+        cx.notify();
+    }
+
+    fn chat_search_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let session = self.session();
+        let status = session
+            .map(|s| s.chat_search.status)
+            .unwrap_or(SearchStatus::Closed);
+        let query = session
+            .map(|s| s.chat_search.query.clone())
+            .unwrap_or_default();
+        let position = session
+            .map(|s| s.chat_search.position_label())
+            .unwrap_or_default();
+        let jump_note = session.map(chat_search_jump_note).unwrap_or_default();
+        let hits: Vec<(MessageId, String, bool)> = session
+            .map(|s| {
+                s.chat_search
+                    .hits
+                    .iter()
+                    .enumerate()
+                    .map(|(i, hit)| {
+                        (
+                            hit.message_id,
+                            hit.preview.clone(),
+                            s.chat_search.selected == Some(i),
+                        )
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        let caption = match status {
+            SearchStatus::Idle => "Type to search this chat.".to_string(),
+            SearchStatus::Searching => format!("Searching “{query}”…"),
+            SearchStatus::Ready => {
+                if jump_note.is_empty() {
+                    format!("Results for “{query}”")
+                } else {
+                    format!("Results for “{query}” · {jump_note}")
+                }
+            }
+            SearchStatus::Empty => format!("No messages match “{query}”."),
+            SearchStatus::Failed => "Search in chat failed.".to_string(),
+            SearchStatus::Closed => String::new(),
+        };
+        div()
+            .id("chat-search")
+            .px_3()
+            .py_2()
+            .border_b_1()
+            .border_color(cx.theme().border)
+            .flex()
+            .flex_col()
+            .gap_2()
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .child(
+                        div()
+                            .id("chat-search-field")
+                            .flex_1()
+                            .child(Textarea::new(&self.chat_search_input).h(px(36.))),
+                    )
+                    .child(
+                        Button::new("chat-search-close")
+                            .label("Close")
+                            .ghost()
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.close_chat_search_ui(window, cx);
+                            })),
+                    ),
+            )
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .child(
+                        Button::new("chat-search-older")
+                            .label("Older")
+                            .ghost()
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.chat_search_older(cx);
+                            })),
+                    )
+                    .child(
+                        Button::new("chat-search-newer")
+                            .label("Newer")
+                            .ghost()
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.chat_search_newer(cx);
+                            })),
+                    )
+                    .when(!position.is_empty(), |this| {
+                        this.child(
+                            div()
+                                .text_xs()
+                                .text_color(cx.theme().muted_foreground)
+                                .child(position),
+                        )
+                    }),
+            )
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(caption),
+            )
+            .when(!hits.is_empty(), |this| {
+                let mut list = div().id("chat-search-hits").flex().flex_col().gap_1();
+                for (message_id, preview, selected) in hits {
+                    list = list.child(search_result_row(
+                        ("chat-search-hit", message_id.0 as u64),
+                        preview,
+                        if selected {
+                            "Jump · selected".into()
+                        } else {
+                            "Jump".into()
+                        },
+                        cx,
+                        move |this, _window, cx| {
+                            this.jump_chat_search_message(message_id, cx);
+                        },
+                    ));
+                }
+                this.child(list)
+            })
     }
 
     fn sync_search_query(&mut self, query: &str, cx: &mut Context<Self>) {
@@ -1226,6 +1575,15 @@ impl Render for QuillApp {
             .on_action(cx.listener(|this, _: &OpenSearch, window, cx| {
                 this.open_search_ui(window, cx);
             }))
+            .on_action(cx.listener(|this, _: &OpenChatSearch, window, cx| {
+                this.open_chat_search_ui(window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &ChatSearchNewer, _, cx| {
+                this.chat_search_newer(cx);
+            }))
+            .on_action(cx.listener(|this, _: &ChatSearchOlder, _, cx| {
+                this.chat_search_older(cx);
+            }))
             .on_action(cx.listener(|this, _: &CancelSearch, window, cx| {
                 this.cancel_search(window, cx);
             }))
@@ -1242,6 +1600,7 @@ impl Render for QuillApp {
                 self.pane_mode(),
                 self.live.is_some(),
                 self.search_is_open(),
+                self.chat_search_is_open(),
                 cx,
             ))
             .child(
@@ -1423,6 +1782,13 @@ impl QuillApp {
             session.map(|s| s.downloading.clone()).unwrap_or_default();
         let media_roots = self.media_display_roots();
         let sender_name = title.clone();
+        let chat_search_open = session.is_some_and(|s| s.chat_search.open);
+        let highlight_id = session.and_then(|s| match s.chat_search.jump {
+            ChatSearchJump::Ready { message_id } | ChatSearchJump::Loading { message_id } => {
+                Some(message_id)
+            }
+            ChatSearchJump::None | ChatSearchJump::Missing { .. } => None,
+        });
         div()
             .id("conversation-history")
             .flex()
@@ -1439,6 +1805,9 @@ impl QuillApp {
                     .font_semibold()
                     .child(title),
             )
+            .when(chat_search_open, |this| {
+                this.child(self.chat_search_bar(cx))
+            })
             .child(if let Some(reason) = gate {
                 pane_placeholder("Unsupported chat", reason, cx).into_any_element()
             } else if open.is_none() {
@@ -1481,14 +1850,25 @@ impl QuillApp {
                     } else {
                         sender_name.clone()
                     };
-                    list = list.child(session_history_row(
+                    let highlighted = highlight_id == Some(message.id);
+                    let row = session_history_row(
                         &message,
                         &files,
                         &downloading,
                         &media_roots,
                         label,
                         cx,
-                    ));
+                    );
+                    list = list.child(
+                        div()
+                            .when(highlighted, |this| {
+                                this.rounded_lg()
+                                    .border_2()
+                                    .border_color(rgb(0x58a6ff))
+                                    .px_1()
+                            })
+                            .child(row),
+                    );
                 }
                 list.into_any_element()
             })
@@ -1658,6 +2038,15 @@ fn seed_ready_send_media_session(sink: Arc<MemorySink>) -> Session {
     seed_demo_session(sink, DemoSeed::SendMedia)
 }
 
+fn chat_search_jump_note(session: &Session) -> String {
+    match session.chat_search.jump {
+        ChatSearchJump::None => String::new(),
+        ChatSearchJump::Loading { .. } => "loading around message…".into(),
+        ChatSearchJump::Ready { message_id } => format!("jumped to {}", message_id.0),
+        ChatSearchJump::Missing { .. } => "message deleted or inaccessible".into(),
+    }
+}
+
 fn apply_ready_search(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
     let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
     session.open_search();
@@ -1679,6 +2068,22 @@ fn apply_ready_search(session: &mut Session, sink: &Arc<MemorySink>, seq: &Atomi
             session.apply(owned);
         }
     }
+}
+
+fn apply_ready_search_in_chat(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    assert!(session.open_chat_search());
+    let search_gen = session.chat_search.begin_query("hello");
+    let extra =
+        session.request_chat_search(RequestPurpose::SearchChatMessages, ChatId(11), search_gen);
+    let json = format!(
+        r#"{{"@type":"foundChatMessages","@extra":"{}","total_count":2,"next_from_message_id":90,"messages":[{{"id":101,"chat_id":11,"is_outgoing":false,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"Hello from injected JSON.","entities":[]}}}}}},{{"id":103,"chat_id":11,"is_outgoing":false,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"Two more waiting.","entities":[]}}}}}}]}}"#,
+        extra.0
+    );
+    if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
+        session.apply(owned);
+    }
+    let _ = session.begin_chat_search_jump(MessageId(101));
 }
 
 #[derive(Clone, Copy)]
@@ -1880,6 +2285,7 @@ fn title_bar(
     mode: PaneMode,
     live: bool,
     search_open: bool,
+    chat_search_open: bool,
     cx: &mut Context<QuillApp>,
 ) -> impl IntoElement {
     let title = match mode {
@@ -1928,6 +2334,22 @@ fn title_bar(
                                     this.close_search_ui(window, cx);
                                 } else {
                                     this.open_search_ui(window, cx);
+                                }
+                            })),
+                    )
+                    .child(
+                        Button::new("find-in-chat")
+                            .label(if chat_search_open {
+                                "Close find"
+                            } else {
+                                "Find in chat"
+                            })
+                            .ghost()
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                if this.chat_search_is_open() {
+                                    this.close_chat_search_ui(window, cx);
+                                } else {
+                                    this.open_chat_search_ui(window, cx);
                                 }
                             })),
                     )
@@ -2318,7 +2740,7 @@ fn status_bar(
         .text_xs()
         .text_color(cx.theme().muted_foreground)
         .child(format!(
-            "Auth: {} · {} · {} · Keyboard: ⌘K search, Esc cancel, ⌘1 sidebar, ⌘L composer, ⌘↑ older · VoiceOver: macOS follow-up",
+            "Auth: {} · {} · {} · Keyboard: ⌘K search, ⌘F in chat, Esc cancel, ⌘1 sidebar, ⌘L composer, ⌘↑ older · VoiceOver: macOS follow-up",
             auth.title,
             connect_status_label(connect_status),
             status_note
