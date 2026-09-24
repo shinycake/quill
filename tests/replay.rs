@@ -873,10 +873,7 @@ fn replay_pin_and_unpin_message_is_pinned() {
     );
     session.open_chat = Some(quill::ids::ChatId(7));
     assert!(session.open_chat_pinned_message().is_none());
-    let extra = session.request(
-        RequestPurpose::PinChatMessage,
-        Some(quill::ids::ChatId(7)),
-    );
+    let extra = session.request(RequestPurpose::PinChatMessage, Some(quill::ids::ChatId(7)));
     apply_all_seq(
         &mut session,
         &sink,
@@ -894,10 +891,7 @@ fn replay_pin_and_unpin_message_is_pinned() {
         .get(&50)
         .unwrap();
     assert!(message.is_pinned);
-    assert_eq!(
-        session.open_chat_pinned_message().map(|m| m.id.0),
-        Some(50)
-    );
+    assert_eq!(session.open_chat_pinned_message().map(|m| m.id.0), Some(50));
     let unpin = session.request(
         RequestPurpose::UnpinChatMessage,
         Some(quill::ids::ChatId(7)),
