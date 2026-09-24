@@ -2810,7 +2810,9 @@ fn apply_ready_reply(session: &mut Session, sink: &Arc<MemorySink>, seq: &Atomic
 
 fn apply_ready_forward(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
     let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
-    let json = r#"{"@type":"updateNewMessage","message":{"id":105,"chat_id":11,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"Forwarded hello from Ada.","entities":[]}},"forward_info":{"@type":"messageForwardInfo","origin":{"@type":"messageOriginHiddenUser","sender_name":"Ada Lovelace"},"date":1710000000,"source":null,"public_service_announcement_type":""}}}"#;
+    // Upsert the first visible incoming row so the origin header and picker
+    // share one screenshot (a 4th history row sits under the composer).
+    let json = r#"{"@type":"updateNewMessage","message":{"id":101,"chat_id":11,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"Hello from injected JSON.","entities":[]}},"forward_info":{"@type":"messageForwardInfo","origin":{"@type":"messageOriginHiddenUser","sender_name":"Ada Lovelace"},"date":1710000000,"source":null,"public_service_announcement_type":""}}}"#;
     if let Some(owned) = copy_and_parse(json, seq, &dyn_sink) {
         session.apply(owned);
     }
