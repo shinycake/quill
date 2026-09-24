@@ -394,6 +394,65 @@ pub fn send_document(
     .to_string()
 }
 
+/// `editMessageText` (TDLib 1.8.67). `reply_markup` null (bots only).
+/// Schema: `input_message_content` must be `inputMessageText`.
+pub fn edit_message_text(
+    extra: RequestId,
+    chat_id: ChatId,
+    message_id: MessageId,
+    text: &str,
+) -> String {
+    json!({
+        "@type": "editMessageText",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0,
+        "message_id": message_id.0,
+        "reply_markup": Value::Null,
+        "input_message_content": {
+            "@type": "inputMessageText",
+            "text": {
+                "@type": "formattedText",
+                "text": text,
+                "entities": []
+            },
+            "link_preview_options": Value::Null,
+            "clear_draft": true
+        }
+    })
+    .to_string()
+}
+
+/// `deleteMessages` (TDLib 1.8.67). `revoke` true = delete for all users
+/// (`messageProperties.can_be_deleted_for_all_users`). Schema: always true
+/// for supergroups, channels, and secret chats.
+pub fn delete_messages(
+    extra: RequestId,
+    chat_id: ChatId,
+    message_ids: &[MessageId],
+    revoke: bool,
+) -> String {
+    json!({
+        "@type": "deleteMessages",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0,
+        "message_ids": message_ids.iter().map(|id| id.0).collect::<Vec<_>>(),
+        "revoke": revoke,
+    })
+    .to_string()
+}
+
+/// `getMessageProperties` (TDLib 1.8.67). Capabilities live here, not on
+/// `message` (`can_be_edited`, delete-for-self / delete-for-all).
+pub fn get_message_properties(extra: RequestId, chat_id: ChatId, message_id: MessageId) -> String {
+    json!({
+        "@type": "getMessageProperties",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0,
+        "message_id": message_id.0,
+    })
+    .to_string()
+}
+
 pub fn runtime_version_request() -> String {
     json!({
         "@type": "getOption",
@@ -634,6 +693,60 @@ mod tests {
         assert_eq!(v["filter"], Value::Null);
         assert!(!json.contains("CANARY"));
         assert!(!json.contains("message_thread_id"));
+    }
+
+    #[test]
+    fn edit_message_text_shape_matches_1_8_67() {
+        let json = edit_message_text(RequestId(31), ChatId(11), MessageId(102), "edited body");
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "editMessageText");
+        assert_eq!(v["@extra"], "31");
+        assert_eq!(v["chat_id"], 11);
+        assert_eq!(v["message_id"], 102);
+        assert_eq!(v["reply_markup"], Value::Null);
+        assert_eq!(v["input_message_content"]["@type"], "inputMessageText");
+        assert_eq!(v["input_message_content"]["text"]["text"], "edited body");
+        assert_eq!(v["input_message_content"]["text"]["entities"], json!([]));
+        assert_eq!(
+            v["input_message_content"]["link_preview_options"],
+            Value::Null
+        );
+        assert_eq!(v["input_message_content"]["clear_draft"], true);
+        assert!(!json.contains("CANARY"));
+        assert!(!json.contains("message_thread_id"));
+    }
+
+    #[test]
+    fn delete_messages_shape_matches_1_8_67() {
+        let json = delete_messages(
+            RequestId(32),
+            ChatId(11),
+            &[MessageId(102), MessageId(103)],
+            true,
+        );
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "deleteMessages");
+        assert_eq!(v["@extra"], "32");
+        assert_eq!(v["chat_id"], 11);
+        assert_eq!(v["message_ids"], json!([102, 103]));
+        assert_eq!(v["revoke"], true);
+        let for_me = delete_messages(RequestId(33), ChatId(11), &[MessageId(102)], false);
+        assert_eq!(
+            serde_json::from_str::<Value>(&for_me).unwrap()["revoke"],
+            false
+        );
+        assert!(!json.contains("CANARY"));
+    }
+
+    #[test]
+    fn get_message_properties_shape_matches_1_8_67() {
+        let json = get_message_properties(RequestId(34), ChatId(11), MessageId(102));
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "getMessageProperties");
+        assert_eq!(v["@extra"], "34");
+        assert_eq!(v["chat_id"], 11);
+        assert_eq!(v["message_id"], 102);
+        assert!(!json.contains("CANARY"));
     }
 
     #[test]

@@ -107,6 +107,36 @@ pub fn cancel_reply_draft(
     (None, text)
 }
 
+/// Message the composer is editing (tdesktop `FieldHeader::editMessage`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ComposerEdit {
+    pub chat_id: ChatId,
+    pub message_id: MessageId,
+    pub preview: String,
+}
+
+impl ComposerEdit {
+    pub fn new(chat_id: ChatId, message_id: MessageId, preview: impl Into<String>) -> Self {
+        Self {
+            chat_id,
+            message_id,
+            preview: preview.into(),
+        }
+    }
+}
+
+/// tdesktop `ComposeControls::cancelEditMessage` / `FieldHeader::editCancelled`:
+/// drop the edit header and restore the pre-edit compose draft. The field is
+/// filled with the message text while editing; cancel does not keep that.
+pub fn cancel_edit_draft(
+    edit: Option<ComposerEdit>,
+    _current: String,
+    restore: String,
+) -> (Option<ComposerEdit>, String) {
+    let _ = edit;
+    (None, restore)
+}
+
 /// Snapshot of a send attempt: destination is frozen at submit time.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ComposerSnapshot {
@@ -115,6 +145,7 @@ pub struct ComposerSnapshot {
     pub text: String,
     pub attachment: Option<ComposerAttachment>,
     pub reply_to: Option<ComposerReplyTo>,
+    pub edit: Option<ComposerEdit>,
 }
 
 impl ComposerSnapshot {
@@ -139,11 +170,17 @@ impl ComposerSnapshot {
             text: text.into(),
             attachment,
             reply_to: None,
+            edit: None,
         }
     }
 
     pub fn with_reply(mut self, reply_to: Option<ComposerReplyTo>) -> Self {
         self.reply_to = reply_to;
+        self
+    }
+
+    pub fn with_edit(mut self, edit: Option<ComposerEdit>) -> Self {
+        self.edit = edit;
         self
     }
 
@@ -153,6 +190,17 @@ impl ComposerSnapshot {
         self.reply_to.as_ref().and_then(|reply| {
             if reply.chat_id.0 == self.chat_id {
                 Some(reply.message_id)
+            } else {
+                None
+            }
+        })
+    }
+
+    /// Same-chat `editMessageText.message_id` only.
+    pub fn send_edit(&self) -> Option<MessageId> {
+        self.edit.as_ref().and_then(|edit| {
+            if edit.chat_id.0 == self.chat_id {
+                Some(edit.message_id)
             } else {
                 None
             }
@@ -292,5 +340,27 @@ mod tests {
             "other chat",
         )));
         assert_eq!(other.send_reply_to(), None);
+    }
+
+    #[test]
+    fn cancel_edit_restores_stashed_draft() {
+        let edit = ComposerEdit::new(ChatId(11), MessageId(102), "original");
+        let (cleared, text) =
+            cancel_edit_draft(Some(edit), "in-progress edit".into(), "stash".into());
+        assert_eq!(cleared, None);
+        assert_eq!(text, "stash");
+    }
+
+    #[test]
+    fn snapshot_edit_is_same_chat_only() {
+        let same = ComposerSnapshot::capture(ChatId(11), ViewGeneration(1), "hi")
+            .with_edit(Some(ComposerEdit::new(ChatId(11), MessageId(102), "orig")));
+        assert_eq!(same.send_edit(), Some(MessageId(102)));
+        let other = same.with_edit(Some(ComposerEdit::new(
+            ChatId(12),
+            MessageId(40),
+            "other chat",
+        )));
+        assert_eq!(other.send_edit(), None);
     }
 }

@@ -105,4 +105,10 @@ pub const REQUIRED_SCHEMA_CONSTRUCTORS: &[&str] = &[
     "inputMessageReplyToMessage",
     "textQuote",
     "inputTextQuote",
+    "editMessageText",
+    "deleteMessages",
+    "getMessageProperties",
+    "messageProperties",
+    "updateMessageContent",
+    "updateMessageEdited",
 ];

@@ -14,10 +14,11 @@ use crate::telegram::envelope::{AuthorizationState, EnvelopePayload};
 use crate::telegram::ffi::{LibraryOrigin, TdJsonError, resolve_tdjson_path};
 use crate::telegram::requests::{
     SetTdlibParameters, add_recently_found_chat, check_authentication_code,
-    check_authentication_password, close_chat, close_request,
-    download_file as download_file_request, get_authorization_state, get_chat_history, load_chats,
-    open_chat, search_chat_messages, search_chats, search_messages, search_recently_found_chats,
-    send_document, send_photo, send_text, set_authentication_phone_number, view_messages,
+    check_authentication_password, close_chat, close_request, delete_messages,
+    download_file as download_file_request, edit_message_text, get_authorization_state,
+    get_chat_history, get_message_properties, load_chats, open_chat, search_chat_messages,
+    search_chats, search_messages, search_recently_found_chats, send_document, send_photo,
+    send_text, set_authentication_phone_number, view_messages,
 };
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -357,6 +358,13 @@ impl<S: JsonSender> ConnectDriver<S> {
                 | EnvelopePayload::UpdateFile(_)
                 | EnvelopePayload::File(_)
         );
+        let properties_after = matches!(
+            owned.envelope.payload,
+            EnvelopePayload::Messages(_)
+                | EnvelopePayload::UpdateNewMessage(_)
+                | EnvelopePayload::Message(_)
+                | EnvelopePayload::UpdateMessageSendSucceeded { .. }
+        );
         let chat_search_hits = matches!(
             owned.envelope.payload,
             EnvelopePayload::FoundChatMessages { .. }
@@ -372,6 +380,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         if thumbs_after {
             self.maybe_download_open_thumbs()?;
+        }
+        if properties_after {
+            self.maybe_fetch_message_properties()?;
         }
         if chat_search_hits {
             // Unigram ChatSearchViewModel: first hit → LoadMessageSliceAsync.
@@ -442,6 +453,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.send_open_chat(chat_id)?;
         self.maybe_view_open_messages()?;
         self.maybe_download_open_thumbs()?;
+        self.maybe_fetch_message_properties()?;
         self.fetch_history()
     }
 
@@ -665,6 +677,137 @@ impl<S: JsonSender> ConnectDriver<S> {
                 Err(err)
             }
         }
+    }
+
+    /// `editMessageText` for an own text message. Same-chat only; no attachments.
+    pub fn edit_snapshot(
+        &mut self,
+        snapshot: &ComposerSnapshot,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let Some(message_id) = snapshot.send_edit() else {
+            return Err(ConnectSendError::InvalidRequest);
+        };
+        if snapshot.attachment.is_some() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let text = snapshot.caption();
+        if text.is_empty() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let chat_id = snapshot.chat_id();
+        let supported = self
+            .session
+            .chats
+            .get(&chat_id.0)
+            .is_some_and(|chat| chat.supported());
+        if !supported {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if let Some(row) = self
+            .session
+            .histories
+            .get(&chat_id.0)
+            .and_then(|history| history.messages.get(&message_id.0))
+        {
+            if !row.can_edit_own_text() {
+                return Err(ConnectSendError::InvalidRequest);
+            }
+        } else {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra =
+            self.session
+                .request_for_message(RequestPurpose::EditMessageText, chat_id, message_id);
+        let json = edit_message_text(extra, chat_id, message_id, text);
+        match self.sender.send_json(&json) {
+            Ok(()) => Ok(extra),
+            Err(err) => {
+                self.session.requests.take(extra);
+                Err(err)
+            }
+        }
+    }
+
+    /// `deleteMessages`. `revoke` is `messageProperties.can_be_deleted_for_all_users`.
+    pub fn delete_own_message(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        revoke: bool,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let supported = self
+            .session
+            .chats
+            .get(&chat_id.0)
+            .is_some_and(|chat| chat.supported());
+        if !supported {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let Some(row) = self
+            .session
+            .histories
+            .get(&chat_id.0)
+            .and_then(|history| history.messages.get(&message_id.0))
+        else {
+            return Err(ConnectSendError::InvalidRequest);
+        };
+        if revoke && !row.can_delete_for_all_users() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if !revoke && !row.can_delete_only_for_self() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra =
+            self.session
+                .request_for_message(RequestPurpose::DeleteMessages, chat_id, message_id);
+        let json = delete_messages(extra, chat_id, &[message_id], revoke);
+        match self.sender.send_json(&json) {
+            Ok(()) => Ok(extra),
+            Err(err) => {
+                self.session.requests.take(extra);
+                Err(err)
+            }
+        }
+    }
+
+    /// `getMessageProperties` for outgoing rows in the open chat that lack flags.
+    pub fn maybe_fetch_message_properties(&mut self) -> Result<Vec<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Ok(Vec::new());
+        }
+        let needed = self.session.outgoing_needing_properties();
+        let mut extras = Vec::new();
+        for (chat_id, message_id) in needed {
+            if self.session.requests.has_purpose_for_message(
+                RequestPurpose::GetMessageProperties,
+                chat_id,
+                message_id,
+            ) {
+                continue;
+            }
+            let extra = self.session.request_for_message(
+                RequestPurpose::GetMessageProperties,
+                chat_id,
+                message_id,
+            );
+            match self
+                .sender
+                .send_json(&get_message_properties(extra, chat_id, message_id))
+            {
+                Ok(()) => extras.push(extra),
+                Err(err) => {
+                    self.session.requests.take(extra);
+                    return Err(err);
+                }
+            }
+        }
+        Ok(extras)
     }
 
     /// Send `setAuthenticationPhoneNumber` when auth is WaitPhoneNumber.
@@ -1221,7 +1364,7 @@ mod tests {
     use crate::diagnostics::MemorySink;
     use crate::platform::MemorySecretStore;
     use crate::telegram::client::copy_and_parse;
-    use serde_json::Value;
+    use serde_json::{Value, json};
     use std::sync::Mutex as StdMutex;
     use std::sync::atomic::AtomicU64;
 
@@ -2838,6 +2981,152 @@ mod tests {
                 .is_some()
         );
         assert!(!sink.rendered().contains("CANARY_REPLY"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn driver_edit_and_delete_shapes() {
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = Arc::new(RecordingSender::new());
+        let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+        let mut driver =
+            ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+        let seq = AtomicU64::new(0);
+        seed_ready_alice(&mut driver, &seq, &dyn_sink);
+        driver
+            .ingest(
+                copy_and_parse(
+                    r#"{"@type":"updateNewMessage","message":{"id":60,"chat_id":7,"is_outgoing":true,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"CANARY_EDIT_orig","entities":[]}}}}"#,
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        let props_json = recorder
+            .snapshot()
+            .into_iter()
+            .rev()
+            .find(|j| j.contains("getMessageProperties"))
+            .expect("getMessageProperties");
+        let props_v: Value = serde_json::from_str(&props_json).unwrap();
+        assert_eq!(props_v["@type"], "getMessageProperties");
+        assert_eq!(props_v["chat_id"], 7);
+        assert_eq!(props_v["message_id"], 60);
+        let extra: u64 = props_v["@extra"].as_str().unwrap().parse().unwrap();
+        driver
+            .ingest(
+                copy_and_parse(
+                    &format!(
+                        r#"{{"@type":"messageProperties","@extra":"{extra}","can_be_edited":true,"can_be_deleted_only_for_self":true,"can_be_deleted_for_all_users":true}}"#,
+                    ),
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        let row = driver
+            .session
+            .histories
+            .get(&7)
+            .unwrap()
+            .messages
+            .get(&60)
+            .unwrap();
+        assert!(row.can_edit_own_text());
+
+        let snap = crate::composer::ComposerSnapshot::capture(
+            ChatId(7),
+            driver.session.view_generation,
+            "CANARY_EDIT_new",
+        )
+        .with_edit(Some(crate::composer::ComposerEdit::new(
+            ChatId(7),
+            MessageId(60),
+            "CANARY_EDIT_orig",
+        )));
+        let edit_extra = driver.edit_snapshot(&snap).unwrap();
+        let edit_json = recorder
+            .snapshot()
+            .last()
+            .cloned()
+            .expect("editMessageText");
+        let v: Value = serde_json::from_str(&edit_json).unwrap();
+        assert_eq!(v["@type"], "editMessageText");
+        assert_eq!(v["@extra"], edit_extra.0.to_string());
+        assert_eq!(v["chat_id"], 7);
+        assert_eq!(v["message_id"], 60);
+        assert_eq!(v["reply_markup"], Value::Null);
+        assert_eq!(v["input_message_content"]["@type"], "inputMessageText");
+        assert_eq!(
+            v["input_message_content"]["text"]["text"],
+            "CANARY_EDIT_new"
+        );
+
+        driver
+            .ingest(
+                copy_and_parse(
+                    r#"{"@type":"updateMessageContent","chat_id":7,"message_id":60,"new_content":{"@type":"messageText","text":{"@type":"formattedText","text":"CANARY_EDIT_new","entities":[]}}}"#,
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        driver
+            .ingest(
+                copy_and_parse(
+                    r#"{"@type":"updateMessageEdited","chat_id":7,"message_id":60,"edit_date":1700000000}"#,
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        let edited = driver
+            .session
+            .histories
+            .get(&7)
+            .unwrap()
+            .messages
+            .get(&60)
+            .unwrap();
+        assert!(edited.is_edited());
+
+        let del_extra = driver
+            .delete_own_message(ChatId(7), MessageId(60), true)
+            .unwrap();
+        let del_json = recorder.snapshot().last().cloned().expect("deleteMessages");
+        let d: Value = serde_json::from_str(&del_json).unwrap();
+        assert_eq!(d["@type"], "deleteMessages");
+        assert_eq!(d["@extra"], del_extra.0.to_string());
+        assert_eq!(d["chat_id"], 7);
+        assert_eq!(d["message_ids"], json!([60]));
+        assert_eq!(d["revoke"], true);
+
+        driver
+            .ingest(
+                copy_and_parse(
+                    r#"{"@type":"updateDeleteMessages","chat_id":7,"message_ids":[60],"is_permanent":true,"from_cache":false}"#,
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        assert!(
+            !driver
+                .session
+                .histories
+                .get(&7)
+                .unwrap()
+                .contains(MessageId(60))
+        );
+        assert!(!sink.rendered().contains("CANARY_EDIT"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

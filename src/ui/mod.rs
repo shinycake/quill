@@ -7,8 +7,8 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::auth::{AuthAction, AuthView, view_for};
 use quill::composer::{
-    AttachmentKind, ComposerAttachment, ComposerReplyTo, ComposerSnapshot, cancel_reply_draft,
-    should_send_on_enter,
+    AttachmentKind, ComposerAttachment, ComposerEdit, ComposerReplyTo, ComposerSnapshot,
+    cancel_edit_draft, cancel_reply_draft, should_send_on_enter,
 };
 use quill::connect::{
     ChatSearchQueryOutcome, ConnectBlocker, ConnectGate, LiveConnect, SEARCH_DEBOUNCE,
@@ -113,6 +113,22 @@ pub struct QuillApp {
     pending_attachment: Option<ComposerAttachment>,
     /// Same-chat reply draft (tdesktop `FieldHeader::replyToMessage`).
     pending_reply: Option<ComposerReplyTo>,
+    /// Own-text edit draft (tdesktop `FieldHeader::editMessage`).
+    pending_edit: Option<ComposerEdit>,
+    /// Composer text stashed while editing (restored on cancel / successful edit).
+    composer_stash: String,
+    /// Confirm delete of an own message (tdesktop `DeleteMessagesBox`).
+    pending_delete: Option<PendingDelete>,
+}
+
+/// tdesktop delete box: for-me vs revoke (`deleteMessages.revoke`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct PendingDelete {
+    chat_id: ChatId,
+    message_id: MessageId,
+    preview: String,
+    can_delete_only_for_self: bool,
+    can_delete_for_all_users: bool,
 }
 
 /// Forced UI surfaces for screenshot proof (no live Telegram / no real credentials).
@@ -135,6 +151,10 @@ pub enum ScreenshotDemo {
     ReadySearchInChat,
     /// Reply-to-message: composer quote + history quote strip.
     ReadyReply,
+    /// Edit own text: composer edit header + history edited indicator.
+    ReadyEdit,
+    /// Delete own message: confirm box + history after a revoke delete.
+    ReadyDelete,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -399,6 +419,24 @@ impl QuillApp {
                     AuthorizationState::Ready,
                 )
             }
+            Some(ScreenshotDemo::ReadyEdit) => {
+                demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
+                (
+                    ConnectUiStatus::DemoReadyChats,
+                    None,
+                    "screenshot demo — edit own message (injected editMessageText)".into(),
+                    AuthorizationState::Ready,
+                )
+            }
+            Some(ScreenshotDemo::ReadyDelete) => {
+                demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
+                (
+                    ConnectUiStatus::DemoReadyChats,
+                    None,
+                    "screenshot demo — delete own message (injected deleteMessages)".into(),
+                    AuthorizationState::Ready,
+                )
+            }
             None => bootstrap_connect(credentials),
         };
 
@@ -436,6 +474,9 @@ impl QuillApp {
             demo_sink,
             pending_attachment,
             pending_reply: None,
+            pending_edit: None,
+            composer_stash: String::new(),
+            pending_delete: None,
         };
         if matches!(demo, Some(ScreenshotDemo::ReadyChatsComposer)) {
             app.composer.update(cx, |input, cx| {
@@ -480,6 +521,34 @@ impl QuillApp {
                     MessageId(101),
                     "Hello from injected JSON.",
                 ));
+            }
+        }
+        if matches!(demo, Some(ScreenshotDemo::ReadyEdit)) {
+            app.composer.update(cx, |input, cx| {
+                input.set_value("Reply from the session reducer — now edited.", window, cx);
+                input.focus(window, cx);
+            });
+            if let Some(session) = app.demo_session.as_mut() {
+                app.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_edit(session, &app.demo_sink, &app.demo_seq);
+                app.pending_edit = Some(ComposerEdit::new(
+                    ChatId(11),
+                    MessageId(102),
+                    "Reply from the session reducer.",
+                ));
+            }
+        }
+        if matches!(demo, Some(ScreenshotDemo::ReadyDelete)) {
+            if let Some(session) = app.demo_session.as_mut() {
+                app.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_delete(session, &app.demo_sink, &app.demo_seq);
+                app.pending_delete = Some(PendingDelete {
+                    chat_id: ChatId(11),
+                    message_id: MessageId(102),
+                    preview: "Reply from the session reducer.".into(),
+                    can_delete_only_for_self: true,
+                    can_delete_for_all_users: true,
+                });
             }
         }
         if app.live.is_some() {
@@ -616,6 +685,32 @@ impl QuillApp {
                         cx.notify();
                         return;
                     }
+                    if let Some(edit) = self.pending_edit.clone() {
+                        let snap = ComposerSnapshot::capture(chat_id, view_generation, text)
+                            .with_edit(Some(edit));
+                        if snap.caption().is_empty() {
+                            self.status_note = "edited text cannot be empty".into();
+                            cx.notify();
+                            return;
+                        }
+                        let result = self
+                            .live
+                            .as_mut()
+                            .expect("live")
+                            .driver
+                            .edit_snapshot(&snap);
+                        match result {
+                            Ok(_) => {
+                                self.finish_edit(window, cx);
+                                self.status_note = "editing…".into();
+                            }
+                            Err(_) => {
+                                self.status_note = "could not edit message".into();
+                            }
+                        }
+                        cx.notify();
+                        return;
+                    }
                     let attachment = self.pending_attachment.clone();
                     let snap = ComposerSnapshot::capture_with_attachment(
                         chat_id,
@@ -651,6 +746,13 @@ impl QuillApp {
                     return;
                 }
                 if self.demo_session.is_some() {
+                    if let Some(edit) = self.pending_edit.clone() {
+                        self.apply_demo_edit(&text, &edit);
+                        self.finish_edit(window, cx);
+                        self.status_note = "demo edit applied locally (no live Telegram)".into();
+                        cx.notify();
+                        return;
+                    }
                     let attachment = self.pending_attachment.clone();
                     let reply = self.pending_reply.clone();
                     self.apply_demo_outgoing(&text, attachment.as_ref(), reply.as_ref());
@@ -672,6 +774,11 @@ impl QuillApp {
     }
 
     fn attach_local(&mut self, kind: AttachmentKind, cx: &mut Context<Self>) {
+        if self.pending_edit.is_some() {
+            self.status_note = "finish or cancel edit before attaching".into();
+            cx.notify();
+            return;
+        }
         // Explicit user action → pick. Prefer QUILL_ATTACH_PHOTO / QUILL_ATTACH_FILE
         // when set (live testing); otherwise the demo fixtures under docs/screenshots.
         // Never read paths from TDLib JSON for send.
@@ -758,6 +865,42 @@ impl QuillApp {
         }
     }
 
+    fn apply_demo_edit(&mut self, text: &str, edit: &ComposerEdit) {
+        let Some(session) = self.demo_session.as_mut() else {
+            return;
+        };
+        let dyn_sink: Arc<dyn DiagnosticSink> = self.demo_sink.clone();
+        let body = serde_json::to_string(text.trim()).unwrap_or_else(|_| "\"\"".into());
+        let content = format!(
+            r#"{{"@type":"updateMessageContent","chat_id":{},"message_id":{},"new_content":{{"@type":"messageText","text":{{"@type":"formattedText","text":{body},"entities":[]}}}}}}"#,
+            edit.chat_id.0, edit.message_id.0
+        );
+        if let Some(owned) = copy_and_parse(&content, &self.demo_seq, &dyn_sink) {
+            session.apply(owned);
+        }
+        let edited = format!(
+            r#"{{"@type":"updateMessageEdited","chat_id":{},"message_id":{},"edit_date":1700000000,"reply_markup":null}}"#,
+            edit.chat_id.0, edit.message_id.0
+        );
+        if let Some(owned) = copy_and_parse(&edited, &self.demo_seq, &dyn_sink) {
+            session.apply(owned);
+        }
+    }
+
+    fn apply_demo_delete(&mut self, chat_id: ChatId, message_id: MessageId) {
+        let Some(session) = self.demo_session.as_mut() else {
+            return;
+        };
+        let dyn_sink: Arc<dyn DiagnosticSink> = self.demo_sink.clone();
+        let json = format!(
+            r#"{{"@type":"updateDeleteMessages","chat_id":{},"message_ids":[{}],"is_permanent":true,"from_cache":false}}"#,
+            chat_id.0, message_id.0
+        );
+        if let Some(owned) = copy_and_parse(&json, &self.demo_seq, &dyn_sink) {
+            session.apply(owned);
+        }
+    }
+
     fn select_listed_chat(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
         if self
             .pending_reply
@@ -765,6 +908,21 @@ impl QuillApp {
             .is_some_and(|reply| reply.chat_id != chat_id)
         {
             self.pending_reply = None;
+        }
+        if self
+            .pending_edit
+            .as_ref()
+            .is_some_and(|edit| edit.chat_id != chat_id)
+        {
+            self.pending_edit = None;
+            self.composer_stash.clear();
+        }
+        if self
+            .pending_delete
+            .as_ref()
+            .is_some_and(|delete| delete.chat_id != chat_id)
+        {
+            self.pending_delete = None;
         }
         if self.live.is_some() {
             let result = self
@@ -973,6 +1131,14 @@ impl QuillApp {
         }
         if self.pending_reply.is_some() {
             self.clear_reply(cx);
+            return;
+        }
+        if self.pending_delete.is_some() {
+            self.clear_delete(cx);
+            return;
+        }
+        if self.pending_edit.is_some() {
+            self.clear_edit(window, cx);
         }
     }
 
@@ -982,6 +1148,10 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.pending_edit.is_some() {
+            self.clear_edit(window, cx);
+        }
+        self.pending_delete = None;
         self.pending_reply = Some(reply);
         self.composer
             .update(cx, |input, cx| input.focus(window, cx));
@@ -993,6 +1163,96 @@ impl QuillApp {
         // tdesktop FieldHeader Escape / replyCancelled: header only — keep typed text.
         self.pending_reply = cancel_reply_draft(self.pending_reply.take(), String::new()).0;
         self.status_note = "reply cancelled".into();
+        cx.notify();
+    }
+
+    fn begin_edit_own(
+        &mut self,
+        edit: ComposerEdit,
+        original: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.pending_reply = None;
+        self.pending_delete = None;
+        self.pending_attachment = None;
+        if self.pending_edit.is_none() {
+            self.composer_stash = self.composer.read(cx).value().to_string();
+        }
+        self.pending_edit = Some(edit);
+        self.composer.update(cx, |input, cx| {
+            input.set_value(&original, window, cx);
+            input.focus(window, cx);
+        });
+        self.status_note = "editing".into();
+        cx.notify();
+    }
+
+    fn clear_edit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let restore = std::mem::take(&mut self.composer_stash);
+        let (_, text) = cancel_edit_draft(self.pending_edit.take(), String::new(), restore);
+        self.composer
+            .update(cx, |input, cx| input.set_value(&text, window, cx));
+        self.status_note = "edit cancelled".into();
+        cx.notify();
+    }
+
+    fn finish_edit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let restore = std::mem::take(&mut self.composer_stash);
+        self.pending_edit = None;
+        self.composer
+            .update(cx, |input, cx| input.set_value(&restore, window, cx));
+    }
+
+    fn begin_delete_own(&mut self, delete: PendingDelete, cx: &mut Context<Self>) {
+        self.pending_delete = Some(delete);
+        self.status_note = "confirm delete".into();
+        cx.notify();
+    }
+
+    fn clear_delete(&mut self, cx: &mut Context<Self>) {
+        self.pending_delete = None;
+        self.status_note = "delete cancelled".into();
+        cx.notify();
+    }
+
+    fn confirm_delete(&mut self, revoke: bool, cx: &mut Context<Self>) {
+        let Some(pending) = self.pending_delete.clone() else {
+            return;
+        };
+        if revoke && !pending.can_delete_for_all_users {
+            self.status_note = "cannot delete for everyone".into();
+            cx.notify();
+            return;
+        }
+        if !revoke && !pending.can_delete_only_for_self {
+            self.status_note = "cannot delete for me".into();
+            cx.notify();
+            return;
+        }
+        if self.live.is_some() {
+            let result = self.live.as_mut().expect("live").driver.delete_own_message(
+                pending.chat_id,
+                pending.message_id,
+                revoke,
+            );
+            self.status_note = match result {
+                Ok(_) => "deleting…".into(),
+                Err(_) => "could not delete message".into(),
+            };
+        } else if self.demo_session.is_some() {
+            self.apply_demo_delete(pending.chat_id, pending.message_id);
+            self.status_note = "demo delete applied locally (no live Telegram)".into();
+        }
+        self.pending_delete = None;
+        if self
+            .pending_edit
+            .as_ref()
+            .is_some_and(|edit| edit.message_id == pending.message_id)
+        {
+            self.pending_edit = None;
+            self.composer_stash.clear();
+        }
         cx.notify();
     }
 
@@ -1034,6 +1294,108 @@ impl QuillApp {
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.clear_reply(cx);
                     })),
+            )
+    }
+
+    fn composer_edit_banner(
+        &self,
+        edit: &ComposerEdit,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let preview = edit.preview.clone();
+        div()
+            .id("composer-edit-header")
+            .flex()
+            .items_center()
+            .justify_between()
+            .gap_2()
+            .px_3()
+            .py_2()
+            .rounded_md()
+            .border_1()
+            .border_color(rgb(0xd29922))
+            .bg(rgb(0x21262d))
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .min_w_0()
+                    .child(
+                        div()
+                            .text_xs()
+                            .font_medium()
+                            .text_color(rgb(0xd29922))
+                            .child("Editing message"),
+                    )
+                    .child(div().text_sm().text_color(rgb(0xc9d1d9)).child(preview)),
+            )
+            .child(
+                Button::new("cancel-edit")
+                    .label("Cancel")
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.clear_edit(window, cx);
+                    })),
+            )
+    }
+
+    fn delete_confirm_box(
+        &self,
+        pending: &PendingDelete,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let preview = pending.preview.clone();
+        let for_me = pending.can_delete_only_for_self;
+        let for_all = pending.can_delete_for_all_users;
+        div()
+            .id("delete-confirm-box")
+            .mx_3()
+            .mt_2()
+            .px_3()
+            .py_2()
+            .rounded_md()
+            .border_1()
+            .border_color(rgb(0xf85149))
+            .bg(rgb(0x21262d))
+            .child(
+                div()
+                    .text_sm()
+                    .font_medium()
+                    .text_color(rgb(0xf85149))
+                    .child("Delete this message?"),
+            )
+            .child(div().text_xs().text_color(rgb(0xc9d1d9)).child(preview))
+            .child(
+                div()
+                    .mt_2()
+                    .flex()
+                    .gap_2()
+                    .flex_wrap()
+                    .when(for_me, |row| {
+                        row.child(
+                            Button::new("delete-for-me")
+                                .label("Delete for me")
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.confirm_delete(false, cx);
+                                })),
+                        )
+                    })
+                    .when(for_all, |row| {
+                        row.child(
+                            Button::new("delete-for-everyone")
+                                .label("Delete for everyone")
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.confirm_delete(true, cx);
+                                })),
+                        )
+                    })
+                    .child(
+                        Button::new("cancel-delete")
+                            .label("Cancel")
+                            .ghost()
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.clear_delete(cx);
+                            })),
+                    ),
             )
     }
 
@@ -1806,7 +2168,7 @@ impl QuillApp {
             .min_h_0()
             .child(history)
             .when(composer.is_some(), |this| {
-                let show_attach = matches!(mode, PaneMode::Ready);
+                let show_attach = matches!(mode, PaneMode::Ready) && self.pending_edit.is_none();
                 let chip = if show_attach {
                     self.pending_attachment.as_ref().map(|att| {
                         let label = match att.kind {
@@ -1879,6 +2241,9 @@ impl QuillApp {
                         .when_some(self.pending_reply.clone(), |this, reply| {
                             this.child(self.composer_reply_banner(&reply, cx))
                         })
+                        .when_some(self.pending_edit.clone(), |this, edit| {
+                            this.child(self.composer_edit_banner(&edit, cx))
+                        })
                         .child(Textarea::new(&self.composer).h(px(88.))),
                 )
             })
@@ -1945,6 +2310,9 @@ impl QuillApp {
             .when(chat_search_open, |this| {
                 this.child(self.chat_search_bar(cx))
             })
+            .when_some(self.pending_delete.clone(), |this, pending| {
+                this.child(self.delete_confirm_box(&pending, cx))
+            })
             .child(if let Some(reason) = gate {
                 pane_placeholder("Unsupported chat", reason, cx).into_any_element()
             } else if open.is_none() {
@@ -1979,7 +2347,7 @@ impl QuillApp {
                     .pt_2()
                     .gap_1();
                 for message in messages {
-                    let label = if message.is_outgoing {
+                    let mut label = if message.is_outgoing {
                         let receipt = chat
                             .map(|summary| summary.outbox_receipt(&message))
                             .unwrap_or(OutboxReceipt::Sent);
@@ -1987,6 +2355,9 @@ impl QuillApp {
                     } else {
                         sender_name.clone()
                     };
+                    if message.is_edited() {
+                        label.push_str(" · edited");
+                    }
                     let highlighted = highlight_id == Some(message.id);
                     let quote_preview = session.and_then(|s| s.reply_quote_preview(&message));
                     let row = session_history_row(
@@ -2229,6 +2600,51 @@ fn apply_ready_reply(session: &mut Session, sink: &Arc<MemorySink>, seq: &Atomic
     let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
     let json = r#"{"@type":"updateNewMessage","message":{"id":104,"chat_id":11,"is_outgoing":true,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"Got it — quoting you.","entities":[]}},"reply_to":{"@type":"messageReplyToMessage","chat_id":11,"message_id":101,"quote":{"@type":"textQuote","text":{"@type":"formattedText","text":"Hello from injected JSON.","entities":[]},"position":0,"is_manual":false},"checklist_task_id":0,"poll_option_id":""}}}"#;
     if let Some(owned) = copy_and_parse(json, seq, &dyn_sink) {
+        session.apply(owned);
+    }
+}
+
+fn inject_message_properties(
+    session: &mut Session,
+    sink: &Arc<MemorySink>,
+    seq: &AtomicU64,
+    message_id: MessageId,
+    can_be_edited: bool,
+    can_delete_self: bool,
+    can_delete_all: bool,
+) {
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let extra =
+        session.request_for_message(RequestPurpose::GetMessageProperties, ChatId(11), message_id);
+    let json = format!(
+        r#"{{"@type":"messageProperties","@extra":"{}","can_be_edited":{can_be_edited},"can_be_deleted_only_for_self":{can_delete_self},"can_be_deleted_for_all_users":{can_delete_all}}}"#,
+        extra.0
+    );
+    if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
+        session.apply(owned);
+    }
+}
+
+fn apply_ready_edit(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    inject_message_properties(session, sink, seq, MessageId(102), true, true, true);
+    let already = r#"{"@type":"updateNewMessage","message":{"id":105,"chat_id":11,"is_outgoing":true,"edit_date":1700000000,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"Already changed this one.","entities":[]}}}}"#;
+    if let Some(owned) = copy_and_parse(already, seq, &dyn_sink) {
+        session.apply(owned);
+    }
+    inject_message_properties(session, sink, seq, MessageId(105), true, true, true);
+}
+
+fn apply_ready_delete(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    inject_message_properties(session, sink, seq, MessageId(102), true, true, true);
+    let extra = r#"{"@type":"updateNewMessage","message":{"id":106,"chat_id":11,"is_outgoing":true,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"This one is gone.","entities":[]}}}}"#;
+    if let Some(owned) = copy_and_parse(extra, seq, &dyn_sink) {
+        session.apply(owned);
+    }
+    inject_message_properties(session, sink, seq, MessageId(106), false, true, true);
+    let gone = r#"{"@type":"updateDeleteMessages","chat_id":11,"message_ids":[106],"is_permanent":true,"from_cache":false}"#;
+    if let Some(owned) = copy_and_parse(gone, seq, &dyn_sink) {
         session.apply(owned);
     }
 }
@@ -2615,6 +3031,36 @@ fn session_history_row(
         .on_click(cx.listener(move |this, _, window, cx| {
             this.begin_reply_to(reply_target.clone(), window, cx);
         }));
+    let can_edit = message.can_edit_own_text();
+    let can_delete = message.can_delete_only_for_self() || message.can_delete_for_all_users();
+    let edit_target = ComposerEdit::new(message.chat_id, message.id, message.content.preview());
+    let edit_original = match &message.content {
+        MessageContent::Text(text) => text.clone(),
+        _ => String::new(),
+    };
+    let edit_btn = can_edit.then(|| {
+        Button::new(format!("edit-{}", message.id.0))
+            .label("Edit")
+            .ghost()
+            .on_click(cx.listener(move |this, _, window, cx| {
+                this.begin_edit_own(edit_target.clone(), edit_original.clone(), window, cx);
+            }))
+    });
+    let delete_target = PendingDelete {
+        chat_id: message.chat_id,
+        message_id: message.id,
+        preview: message.content.preview(),
+        can_delete_only_for_self: message.can_delete_only_for_self(),
+        can_delete_for_all_users: message.can_delete_for_all_users(),
+    };
+    let delete_btn = can_delete.then(|| {
+        Button::new(format!("delete-{}", message.id.0))
+            .label("Delete")
+            .ghost()
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.begin_delete_own(delete_target.clone(), cx);
+            }))
+    });
     let extra_media = match &message.content {
         MessageContent::Photo(photo) => Some(photo_attachment(
             message.id.0 as u64,
@@ -2636,8 +3082,19 @@ fn session_history_row(
     let extra = Some(
         div()
             .id(("bubble-extra", message.id.0 as u64))
+            .flex()
+            .flex_col()
+            .gap_1()
             .when_some(extra_media, |this, media| this.child(media))
-            .child(reply_btn)
+            .child(
+                div()
+                    .flex()
+                    .gap_1()
+                    .flex_wrap()
+                    .child(reply_btn)
+                    .when_some(edit_btn, |this, btn| this.child(btn))
+                    .when_some(delete_btn, |this, btn| this.child(btn)),
+            )
             .into_any_element(),
     );
     let body = match &message.content {
@@ -2929,7 +3386,7 @@ fn status_bar(
         .text_xs()
         .text_color(cx.theme().muted_foreground)
         .child(format!(
-            "Auth: {} · {} · {} · Keyboard: ⌘K search, ⌘F in chat, Esc cancel reply/search, ⌘1 sidebar, ⌘L composer, ⌘↑ older · VoiceOver: macOS follow-up",
+            "Auth: {} · {} · {} · Keyboard: ⌘K search, ⌘F in chat, Esc cancel edit/delete/reply/search, ⌘1 sidebar, ⌘L composer, ⌘↑ older · VoiceOver: macOS follow-up",
             auth.title,
             connect_status_label(connect_status),
             status_note

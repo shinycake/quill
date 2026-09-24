@@ -20,6 +20,8 @@ Captured from a real GPUI window on 2026-09-17 (Linux Xvfb + lavapipe). **Not** 
 | `ready-search.png` | Ready sidebar **Search** (`hello`) with **Chats** + **Messages** hits. Injected `chats` / `foundMessages`, no live Telegram. Driven by `quill --screenshot-demo ready-search`. |
 | `ready-search-in-chat.png` | Ready chat open, **Find in chat** (`hello`) with hits + jumped message. Injected `foundChatMessages`, no live Telegram. Driven by `quill --screenshot-demo ready-search-in-chat`. |
 | `ready-reply.png` | Ready chat open, history **quote strip** on a reply plus composer **Replying to** preview and typed text. Injected `messageReplyToMessage`, no live Telegram. Driven by `quill --screenshot-demo ready-reply`. |
+| `ready-edit.png` | Ready chat open, composer **Editing message** header, outgoing **Edit** / **Delete** actions, and an **edited** indicator on a prior own text. Injected `messageProperties` / `edit_date`, no live Telegram. Driven by `quill --screenshot-demo ready-edit`. |
+| `ready-delete.png` | Ready chat open, tdesktop-style **Delete this message?** confirm (**Delete for me** / **Delete for everyone**) after another own message was removed from history. Injected `deleteMessages` / `updateDeleteMessages`, no live Telegram. Driven by `quill --screenshot-demo ready-delete`. |
 | `fixtures/demo-thumb.png` | Tiny checkerboard PNG used as the completed photo `local.path` in the media demo (not a screenshot). |
 | `fixtures/demo-notes.txt` | Tiny text file used for outgoing document attach / send demos (not a screenshot). |
 
@@ -42,6 +44,8 @@ bash scripts/capture-connect-screenshots.sh
 #   cargo run --features ui -- --screenshot-demo ready-search docs/screenshots
 #   cargo run --features ui -- --screenshot-demo ready-search-in-chat docs/screenshots
 #   cargo run --features ui -- --screenshot-demo ready-reply docs/screenshots
+#   cargo run --features ui -- --screenshot-demo ready-edit docs/screenshots
+#   cargo run --features ui -- --screenshot-demo ready-delete docs/screenshots
 ```
 
 Environment used by the script: `DISPLAY`, `LIBGL_ALWAYS_SOFTWARE=1`, `WGPU_BACKEND=vulkan`, `VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json`.

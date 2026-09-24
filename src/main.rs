@@ -86,9 +86,11 @@ fn parse_screenshot_demo(args: &[String]) -> Option<(ui::ScreenshotDemo, std::pa
                 "ready-search" => ScreenshotDemo::ReadySearch,
                 "ready-search-in-chat" => ScreenshotDemo::ReadySearchInChat,
                 "ready-reply" => ScreenshotDemo::ReadyReply,
+                "ready-edit" => ScreenshotDemo::ReadyEdit,
+                "ready-delete" => ScreenshotDemo::ReadyDelete,
                 _ => {
                     eprintln!(
-                        "unknown screenshot demo '{kind}' (expected need-tdjson|wait-phone|wait-code|wait-password|ready-chats|ready-chats-composer|ready-unread|ready-unread-read|ready-media|ready-send-media|ready-search|ready-search-in-chat|ready-reply)"
+                        "unknown screenshot demo '{kind}' (expected need-tdjson|wait-phone|wait-code|wait-password|ready-chats|ready-chats-composer|ready-unread|ready-unread-read|ready-media|ready-send-media|ready-search|ready-search-in-chat|ready-reply|ready-edit|ready-delete)"
                     );
                     std::process::exit(2);
                 }
@@ -123,6 +125,8 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
         ScreenshotDemo::ReadySearch => ".quill-ready-ready-search",
         ScreenshotDemo::ReadySearchInChat => ".quill-ready-ready-search-in-chat",
         ScreenshotDemo::ReadyReply => ".quill-ready-ready-reply",
+        ScreenshotDemo::ReadyEdit => ".quill-ready-ready-edit",
+        ScreenshotDemo::ReadyDelete => ".quill-ready-ready-delete",
     });
     let _ = std::fs::remove_file(&marker);
     let marker_for_spawn = marker.clone();

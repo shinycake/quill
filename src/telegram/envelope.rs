@@ -93,6 +93,21 @@ pub enum EnvelopePayload {
     },
     UpdateFile(ParsedFile),
     File(ParsedFile),
+    /// `updateMessageContent` — body changed; `edit_date` arrives separately.
+    UpdateMessageContent {
+        chat_id: ChatId,
+        message_id: MessageId,
+        content: MessageContent,
+        files: Vec<ParsedFile>,
+    },
+    /// `updateMessageEdited` — `edit_date` (0 = never). Content is a separate update.
+    UpdateMessageEdited {
+        chat_id: ChatId,
+        message_id: MessageId,
+        edit_date: i32,
+    },
+    /// `messageProperties` — response to `getMessageProperties`.
+    MessageProperties(MessageActionFlags),
     Unknown(UnknownKind),
 }
 
@@ -231,6 +246,20 @@ impl MessageReplyTo {
     }
 }
 
+/// `messageProperties` flags this slice needs (TDLib 1.8.67).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct MessageActionFlags {
+    pub can_be_edited: bool,
+    pub can_be_deleted_only_for_self: bool,
+    pub can_be_deleted_for_all_users: bool,
+}
+
+impl MessageActionFlags {
+    pub fn can_delete(self) -> bool {
+        self.can_be_deleted_only_for_self || self.can_be_deleted_for_all_users
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParsedMessage {
     pub id: MessageId,
@@ -239,6 +268,8 @@ pub struct ParsedMessage {
     pub content: MessageContent,
     pub files: Vec<ParsedFile>,
     pub reply_to: Option<MessageReplyTo>,
+    /// Unix timestamp; 0 if never edited (`message.edit_date`).
+    pub edit_date: i32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -621,6 +652,23 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
         "message" => Ok(EnvelopePayload::Message(parse_message(&value)?)),
         "updateFile" => Ok(EnvelopePayload::UpdateFile(parse_file(value.get("file"))?)),
         "file" => Ok(EnvelopePayload::File(parse_file(Some(&value))?)),
+        "updateMessageContent" => {
+            let (content, files) = parse_content(value.get("new_content"));
+            Ok(EnvelopePayload::UpdateMessageContent {
+                chat_id: ChatId(int53(value.get("chat_id"))?),
+                message_id: MessageId(int53(value.get("message_id"))?),
+                content,
+                files,
+            })
+        }
+        "updateMessageEdited" => Ok(EnvelopePayload::UpdateMessageEdited {
+            chat_id: ChatId(int53(value.get("chat_id"))?),
+            message_id: MessageId(int53(value.get("message_id"))?),
+            edit_date: value.get("edit_date").and_then(Value::as_i64).unwrap_or(0) as i32,
+        }),
+        "messageProperties" => Ok(EnvelopePayload::MessageProperties(
+            parse_message_properties(&value),
+        )),
         other => Ok(EnvelopePayload::Unknown(UnknownKind {
             type_name: other.to_string(),
         })),
@@ -754,7 +802,25 @@ fn parse_message(value: &Value) -> Result<ParsedMessage, ParseError> {
         content,
         files,
         reply_to: parse_reply_to(value.get("reply_to")),
+        edit_date: value.get("edit_date").and_then(Value::as_i64).unwrap_or(0) as i32,
     })
+}
+
+fn parse_message_properties(value: &Value) -> MessageActionFlags {
+    MessageActionFlags {
+        can_be_edited: value
+            .get("can_be_edited")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        can_be_deleted_only_for_self: value
+            .get("can_be_deleted_only_for_self")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        can_be_deleted_for_all_users: value
+            .get("can_be_deleted_for_all_users")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+    }
 }
 
 fn parse_reply_to(value: Option<&Value>) -> Option<MessageReplyTo> {
@@ -1423,5 +1489,81 @@ mod tests {
         );
         assert!(schema.lines().any(|l| l.starts_with("textQuote ")));
         assert!(schema.lines().any(|l| l.starts_with("inputTextQuote ")));
+    }
+
+    #[test]
+    fn edit_and_delete_updates_are_typed() {
+        let content = parse_envelope(
+            r#"{"@type":"updateMessageContent","chat_id":11,"message_id":102,"new_content":{"@type":"messageText","text":{"@type":"formattedText","text":"CANARY_EDIT_text","entities":[]}}}"#,
+        )
+        .unwrap();
+        match content.payload {
+            EnvelopePayload::UpdateMessageContent {
+                chat_id,
+                message_id,
+                content,
+                ..
+            } => {
+                assert_eq!(chat_id.0, 11);
+                assert_eq!(message_id.0, 102);
+                assert_eq!(content, MessageContent::Text("CANARY_EDIT_text".into()));
+            }
+            other => panic!("{other:?}"),
+        }
+        let edited = parse_envelope(
+            r#"{"@type":"updateMessageEdited","chat_id":11,"message_id":102,"edit_date":1700000000,"reply_markup":null}"#,
+        )
+        .unwrap();
+        match edited.payload {
+            EnvelopePayload::UpdateMessageEdited {
+                chat_id,
+                message_id,
+                edit_date,
+            } => {
+                assert_eq!(chat_id.0, 11);
+                assert_eq!(message_id.0, 102);
+                assert_eq!(edit_date, 1_700_000_000);
+            }
+            other => panic!("{other:?}"),
+        }
+        let props = parse_envelope(
+            r#"{"@type":"messageProperties","@extra":"9","can_be_edited":true,"can_be_deleted_only_for_self":true,"can_be_deleted_for_all_users":false}"#,
+        )
+        .unwrap();
+        match props.payload {
+            EnvelopePayload::MessageProperties(flags) => {
+                assert!(flags.can_be_edited);
+                assert!(flags.can_be_deleted_only_for_self);
+                assert!(!flags.can_be_deleted_for_all_users);
+            }
+            other => panic!("{other:?}"),
+        }
+        let with_date = parse_envelope(
+            r#"{"@type":"updateNewMessage","message":{"id":5,"chat_id":11,"is_outgoing":true,"edit_date":99,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"hi","entities":[]}}}}"#,
+        )
+        .unwrap();
+        match with_date.payload {
+            EnvelopePayload::UpdateNewMessage(message) => assert_eq!(message.edit_date, 99),
+            other => panic!("{other:?}"),
+        }
+        let schema = include_str!("../../schema/td_api.tl");
+        assert!(schema.lines().any(|l| l.starts_with("editMessageText ")));
+        assert!(schema.lines().any(|l| l.starts_with("deleteMessages ")));
+        assert!(
+            schema
+                .lines()
+                .any(|l| l.starts_with("getMessageProperties "))
+        );
+        assert!(schema.lines().any(|l| l.starts_with("messageProperties ")));
+        assert!(
+            schema
+                .lines()
+                .any(|l| l.starts_with("updateMessageContent "))
+        );
+        assert!(
+            schema
+                .lines()
+                .any(|l| l.starts_with("updateMessageEdited "))
+        );
     }
 }

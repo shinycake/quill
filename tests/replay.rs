@@ -694,6 +694,82 @@ fn replay_reply_to_message_quote_and_jump() {
 }
 
 #[test]
+fn replay_edit_and_delete_own_messages() {
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn quill::diagnostics::DiagnosticSink> = sink.clone();
+    let mut session = Session::new(AccountKey::primary(), dyn_sink);
+    let seq = AtomicU64::new(0);
+    apply_all_seq(
+        &mut session,
+        &sink,
+        &seq,
+        &[
+            r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+            r#"{"@type":"updateNewChat","chat":{"id":7,"title":"Alice","type":{"@type":"chatTypePrivate","user_id":7},"unread_count":0}}"#,
+            r#"{"@type":"updateNewMessage","message":{"id":60,"chat_id":7,"is_outgoing":true,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"CANARY_REPLAY_edit","entities":[]}}}}"#,
+            r#"{"@type":"updateNewMessage","message":{"id":61,"chat_id":7,"is_outgoing":true,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"CANARY_REPLAY_del","entities":[]}}}}"#,
+        ],
+    );
+    session.open_chat(quill::ids::ChatId(7));
+    let extra = session.request_for_message(
+        RequestPurpose::GetMessageProperties,
+        quill::ids::ChatId(7),
+        quill::ids::MessageId(60),
+    );
+    apply_all_seq(
+        &mut session,
+        &sink,
+        &seq,
+        &[&format!(
+            r#"{{"@type":"messageProperties","@extra":"{}","can_be_edited":true,"can_be_deleted_only_for_self":true,"can_be_deleted_for_all_users":true}}"#,
+            extra.0
+        )],
+    );
+    let row = session
+        .histories
+        .get(&7)
+        .unwrap()
+        .messages
+        .get(&60)
+        .unwrap();
+    assert!(row.can_edit_own_text());
+    apply_all_seq(
+        &mut session,
+        &sink,
+        &seq,
+        &[
+            r#"{"@type":"updateMessageContent","chat_id":7,"message_id":60,"new_content":{"@type":"messageText","text":{"@type":"formattedText","text":"CANARY_REPLAY_edited","entities":[]}}}"#,
+            r#"{"@type":"updateMessageEdited","chat_id":7,"message_id":60,"edit_date":1700000000,"reply_markup":null}"#,
+            r#"{"@type":"updateDeleteMessages","chat_id":7,"message_ids":[61],"is_permanent":true,"from_cache":false}"#,
+        ],
+    );
+    let edited = session
+        .histories
+        .get(&7)
+        .unwrap()
+        .messages
+        .get(&60)
+        .unwrap();
+    assert!(edited.is_edited());
+    assert_eq!(
+        edited.content,
+        quill::telegram::envelope::MessageContent::Text("CANARY_REPLAY_edited".into())
+    );
+    assert!(
+        !session
+            .histories
+            .get(&7)
+            .unwrap()
+            .contains(quill::ids::MessageId(61))
+    );
+    assert_eq!(
+        session.chats.get(&7).unwrap().last_preview,
+        "CANARY_REPLAY_edited"
+    );
+    assert!(!sink.rendered().contains("CANARY_REPLAY"));
+}
+
+#[test]
 fn logout_invalidates_pending_requests() {
     let sink = Arc::new(MemorySink::new());
     let dyn_sink: Arc<dyn quill::diagnostics::DiagnosticSink> = sink.clone();

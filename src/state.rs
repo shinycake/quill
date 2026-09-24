@@ -6,7 +6,7 @@ use crate::ids::{
 use crate::telegram::client::OwnedEnvelope;
 use crate::telegram::envelope::{
     AuthorizationState, ChatKind, ChatList, ChatPositionUpdate, ConnectionState, EnvelopePayload,
-    ErrorClass, MessageContent, MessageReplyTo, ParsedFile, ParsedMessage,
+    ErrorClass, MessageActionFlags, MessageContent, MessageReplyTo, ParsedFile, ParsedMessage,
 };
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
@@ -33,6 +33,12 @@ pub enum RequestPurpose {
     SearchChatMessages,
     /// `getChatHistory` around a jump target (Unigram `LoadMessageSliceImpl`).
     GetHistoryAround,
+    /// `editMessageText`. Response `message` replaces the row (not pending).
+    EditMessageText,
+    /// `deleteMessages`. History changes on `updateDeleteMessages`.
+    DeleteMessages,
+    /// `getMessageProperties` for edit/delete affordances.
+    GetMessageProperties,
     Close,
     LogOut,
     Other,
@@ -196,6 +202,31 @@ impl RequestRegistry {
         id
     }
 
+    pub fn register_message(
+        &mut self,
+        account_generation: AccountGeneration,
+        purpose: RequestPurpose,
+        chat_id: ChatId,
+        message_id: MessageId,
+    ) -> RequestId {
+        self.next += 1;
+        let id = RequestId(self.next);
+        self.pending.insert(
+            id.0,
+            PendingRequest {
+                id,
+                account_generation,
+                purpose,
+                chat_id: Some(chat_id),
+                view_generation: None,
+                file_id: None,
+                search_generation: None,
+                around_message_id: Some(message_id),
+            },
+        );
+        id
+    }
+
     pub fn register_download(
         &mut self,
         account_generation: AccountGeneration,
@@ -253,6 +284,19 @@ impl RequestRegistry {
         self.pending
             .values()
             .any(|p| p.purpose == RequestPurpose::DownloadFile && p.file_id == Some(file_id.0))
+    }
+
+    pub fn has_purpose_for_message(
+        &self,
+        purpose: RequestPurpose,
+        chat_id: ChatId,
+        message_id: MessageId,
+    ) -> bool {
+        self.pending.values().any(|p| {
+            p.purpose == purpose
+                && p.chat_id == Some(chat_id)
+                && p.around_message_id == Some(message_id)
+        })
     }
 }
 
@@ -364,6 +408,38 @@ pub struct HistoryMessage {
     pub content: MessageContent,
     pub pending: bool,
     pub reply_to: Option<MessageReplyTo>,
+    /// `message.edit_date`; 0 if never edited.
+    pub edit_date: i32,
+    /// From `getMessageProperties`. `None` until TDLib answers.
+    pub properties: Option<MessageActionFlags>,
+}
+
+impl HistoryMessage {
+    pub fn is_edited(&self) -> bool {
+        self.edit_date > 0
+    }
+
+    /// Own text only; requires `messageProperties.can_be_edited`.
+    pub fn can_edit_own_text(&self) -> bool {
+        self.is_outgoing
+            && !self.pending
+            && matches!(self.content, MessageContent::Text(_))
+            && self.properties.is_some_and(|p| p.can_be_edited)
+    }
+
+    pub fn can_delete_only_for_self(&self) -> bool {
+        self.is_outgoing
+            && self
+                .properties
+                .is_some_and(|p| p.can_be_deleted_only_for_self)
+    }
+
+    pub fn can_delete_for_all_users(&self) -> bool {
+        self.is_outgoing
+            && self
+                .properties
+                .is_some_and(|p| p.can_be_deleted_for_all_users)
+    }
 }
 
 #[derive(Debug, Default)]
@@ -434,6 +510,7 @@ pub struct SearchMessageHit {
     pub is_outgoing: bool,
     pub content: MessageContent,
     pub reply_to: Option<MessageReplyTo>,
+    pub edit_date: i32,
 }
 
 impl SearchMessageHit {
@@ -445,6 +522,7 @@ impl SearchMessageHit {
             is_outgoing: message.is_outgoing,
             content: message.content.clone(),
             reply_to: message.reply_to.clone(),
+            edit_date: message.edit_date,
         }
     }
 
@@ -456,6 +534,8 @@ impl SearchMessageHit {
             content: self.content,
             pending: false,
             reply_to: self.reply_to,
+            edit_date: self.edit_date,
+            properties: None,
         }
     }
 }
@@ -982,13 +1062,39 @@ impl Session {
             EnvelopePayload::UpdateNewMessage(message) => {
                 self.upsert_message(message, false);
             }
+            EnvelopePayload::UpdateMessageContent {
+                chat_id,
+                message_id,
+                content,
+                files,
+            } => {
+                self.remember_files(&files);
+                self.apply_message_content(chat_id, message_id, content);
+            }
+            EnvelopePayload::UpdateMessageEdited {
+                chat_id,
+                message_id,
+                edit_date,
+            } => {
+                self.apply_message_edited(chat_id, message_id, edit_date);
+            }
+            EnvelopePayload::MessageProperties(flags) => {
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetMessageProperties)
+                    && let (Some(chat_id), Some(message_id)) = (
+                        pending.and_then(|p| p.chat_id),
+                        pending.and_then(|p| p.around_message_id),
+                    )
+                {
+                    self.apply_message_properties(chat_id, message_id, flags);
+                }
+            }
             EnvelopePayload::UpdateMessageSendSucceeded {
                 message,
                 old_message_id,
             } => {
                 self.remember_files(&message.files);
                 let history = self.histories.entry(message.chat_id.0).or_default();
-                history.replace_id(old_message_id, history_message(message, false));
+                history.replace_id(old_message_id, history_message(message, false, None));
             }
             EnvelopePayload::UpdateMessageSendFailed {
                 message,
@@ -997,7 +1103,7 @@ impl Session {
             } => {
                 self.remember_files(&message.files);
                 let history = self.histories.entry(message.chat_id.0).or_default();
-                history.replace_id(old_message_id, history_message(message, true));
+                history.replace_id(old_message_id, history_message(message, true, None));
             }
             EnvelopePayload::UpdateMessageSendAcknowledged { .. } => {
                 // Not success. Keep the pending row until Succeeded/Failed.
@@ -1028,6 +1134,7 @@ impl Session {
                         self.chat_search.jump = ChatSearchJump::Missing { message_id: id };
                     }
                 }
+                self.refresh_last_preview(chat_id);
             }
             EnvelopePayload::Chats { chat_ids, .. } => {
                 if self.search.matches_generation(pending)
@@ -1259,7 +1366,73 @@ impl Session {
     fn upsert_message(&mut self, message: ParsedMessage, pending: bool) {
         self.remember_files(&message.files);
         let history = self.histories.entry(message.chat_id.0).or_default();
-        history.upsert(history_message(message, pending));
+        let previous = history.messages.get(&message.id.0);
+        let properties = previous.and_then(|row| row.properties);
+        history.upsert(history_message(message, pending, properties));
+    }
+
+    fn apply_message_content(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        content: MessageContent,
+    ) {
+        let updated = if let Some(row) = self
+            .histories
+            .entry(chat_id.0)
+            .or_default()
+            .messages
+            .get_mut(&message_id.0)
+        {
+            row.content = content;
+            true
+        } else {
+            false
+        };
+        if updated {
+            self.refresh_last_preview(chat_id);
+        }
+    }
+
+    fn apply_message_edited(&mut self, chat_id: ChatId, message_id: MessageId, edit_date: i32) {
+        if let Some(row) = self
+            .histories
+            .entry(chat_id.0)
+            .or_default()
+            .messages
+            .get_mut(&message_id.0)
+        {
+            row.edit_date = edit_date;
+        }
+    }
+
+    fn apply_message_properties(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        flags: MessageActionFlags,
+    ) {
+        if let Some(row) = self
+            .histories
+            .entry(chat_id.0)
+            .or_default()
+            .messages
+            .get_mut(&message_id.0)
+        {
+            row.properties = Some(flags);
+        }
+    }
+
+    fn refresh_last_preview(&mut self, chat_id: ChatId) {
+        let preview = self
+            .histories
+            .get(&chat_id.0)
+            .and_then(|history| history.messages.values().next_back())
+            .map(|message| preview_from_content(&message.content))
+            .unwrap_or_default();
+        if let Some(chat) = self.chats.get_mut(&chat_id.0) {
+            chat.last_preview = preview;
+        }
     }
 
     fn remember_files(&mut self, files: &[ParsedFile]) {
@@ -1419,6 +1592,35 @@ impl Session {
             .iter()
             .filter_map(|id| self.chats.get(&id.0))
             .collect()
+    }
+
+    pub fn request_for_message(
+        &mut self,
+        purpose: RequestPurpose,
+        chat_id: ChatId,
+        message_id: MessageId,
+    ) -> RequestId {
+        self.requests
+            .register_message(self.account_generation, purpose, chat_id, message_id)
+    }
+
+    pub fn outgoing_needing_properties(&self) -> Vec<(ChatId, MessageId)> {
+        let Some(chat_id) = self.open_chat else {
+            return Vec::new();
+        };
+        self.histories
+            .get(&chat_id.0)
+            .map(|history| {
+                history
+                    .ordered()
+                    .into_iter()
+                    .filter(|message| {
+                        message.is_outgoing && !message.pending && message.properties.is_none()
+                    })
+                    .map(|message| (message.chat_id, message.id))
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 
     pub fn request(&mut self, purpose: RequestPurpose, chat_id: Option<ChatId>) -> RequestId {
@@ -1605,6 +1807,7 @@ impl Session {
                         is_outgoing: message.is_outgoing,
                         content: message.content.clone(),
                         reply_to: message.reply_to.clone(),
+                        edit_date: message.edit_date,
                     })
                     .collect()
             })
@@ -1675,7 +1878,11 @@ impl Session {
     }
 }
 
-fn history_message(message: ParsedMessage, pending: bool) -> HistoryMessage {
+fn history_message(
+    message: ParsedMessage,
+    pending: bool,
+    properties: Option<MessageActionFlags>,
+) -> HistoryMessage {
     HistoryMessage {
         id: message.id,
         chat_id: message.chat_id,
@@ -1683,6 +1890,8 @@ fn history_message(message: ParsedMessage, pending: bool) -> HistoryMessage {
         content: message.content,
         pending,
         reply_to: message.reply_to,
+        edit_date: message.edit_date,
+        properties,
     }
 }
 
@@ -2818,6 +3027,7 @@ mod tests {
             is_outgoing: false,
             content: crate::telegram::envelope::MessageContent::Text("gone".into()),
             reply_to: None,
+            edit_date: 0,
         });
         assert_eq!(
             session.begin_chat_search_jump(MessageId(70)),
@@ -2837,6 +3047,7 @@ mod tests {
             is_outgoing: false,
             content: crate::telegram::envelope::MessageContent::Text("ghost".into()),
             reply_to: None,
+            edit_date: 0,
         });
         assert_eq!(
             session.begin_chat_search_jump(MessageId(80)),
@@ -2977,5 +3188,105 @@ mod tests {
             }
         );
         assert!(session.histories.get(&11).unwrap().contains(MessageId(90)));
+    }
+
+    #[test]
+    fn edit_and_delete_own_message_updates() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+        );
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateNewChat","chat":{"id":11,"title":"Alice","type":{"@type":"chatTypePrivate","user_id":11},"unread_count":0}}"#,
+        );
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateNewMessage","message":{"id":102,"chat_id":11,"is_outgoing":true,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"CANARY_EDIT_orig","entities":[]}}}}"#,
+        );
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateNewMessage","message":{"id":106,"chat_id":11,"is_outgoing":true,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"to delete","entities":[]}}}}"#,
+        );
+        session.open_chat(ChatId(11));
+        assert_eq!(
+            session.outgoing_needing_properties(),
+            vec![(ChatId(11), MessageId(102)), (ChatId(11), MessageId(106))]
+        );
+        let extra = session.request_for_message(
+            RequestPurpose::GetMessageProperties,
+            ChatId(11),
+            MessageId(102),
+        );
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"messageProperties","@extra":"{}","can_be_edited":true,"can_be_deleted_only_for_self":true,"can_be_deleted_for_all_users":true}}"#,
+                extra.0
+            ),
+        );
+        let row = session
+            .histories
+            .get(&11)
+            .unwrap()
+            .messages
+            .get(&102)
+            .unwrap();
+        assert!(row.can_edit_own_text());
+        assert!(row.can_delete_only_for_self());
+        assert!(row.can_delete_for_all_users());
+        assert!(!row.is_edited());
+
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateMessageContent","chat_id":11,"message_id":102,"new_content":{"@type":"messageText","text":{"@type":"formattedText","text":"CANARY_EDIT_new","entities":[]}}}"#,
+        );
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateMessageEdited","chat_id":11,"message_id":102,"edit_date":1700000000,"reply_markup":null}"#,
+        );
+        let edited = session
+            .histories
+            .get(&11)
+            .unwrap()
+            .messages
+            .get(&102)
+            .unwrap();
+        assert_eq!(
+            edited.content,
+            crate::telegram::envelope::MessageContent::Text("CANARY_EDIT_new".into())
+        );
+        assert!(edited.is_edited());
+        assert!(edited.can_edit_own_text());
+        assert_eq!(session.chats.get(&11).unwrap().last_preview, "to delete");
+
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateDeleteMessages","chat_id":11,"message_ids":[106],"is_permanent":true,"from_cache":false}"#,
+        );
+        assert!(!session.histories.get(&11).unwrap().contains(MessageId(106)));
+        assert_eq!(
+            session.chats.get(&11).unwrap().last_preview,
+            "CANARY_EDIT_new"
+        );
+        assert!(!sink.rendered().contains("CANARY_EDIT"));
     }
 }
