@@ -221,6 +221,33 @@ pub enum ChatList {
     Unknown,
 }
 
+/// `message.forward_info.origin` (TDLib 1.8.67 `MessageOrigin`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MessageOrigin {
+    User {
+        user_id: UserId,
+    },
+    HiddenUser {
+        sender_name: String,
+    },
+    Chat {
+        chat_id: ChatId,
+        author_signature: String,
+    },
+    Channel {
+        chat_id: ChatId,
+        message_id: MessageId,
+        author_signature: String,
+    },
+}
+
+/// Typed `messageForwardInfo`. `source` (Saved Messages / Replies) stays out.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MessageForwardInfo {
+    pub origin: MessageOrigin,
+    pub date: i32,
+}
+
 /// Same-chat / known-chat reply metadata from `message.reply_to`.
 /// Stories and unknown `MessageReplyTo` variants are dropped (out of scope).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -245,6 +272,7 @@ pub struct ParsedMessage {
     pub content: MessageContent,
     pub files: Vec<ParsedFile>,
     pub reply_to: Option<MessageReplyTo>,
+    pub forward_info: Option<MessageForwardInfo>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -769,7 +797,59 @@ fn parse_message(value: &Value) -> Result<ParsedMessage, ParseError> {
         content,
         files,
         reply_to: parse_reply_to(value.get("reply_to")),
+        forward_info: parse_forward_info(value.get("forward_info")),
     })
+}
+
+fn parse_forward_info(value: Option<&Value>) -> Option<MessageForwardInfo> {
+    let value = value?;
+    if value.is_null() {
+        return None;
+    }
+    match value.get("@type").and_then(Value::as_str) {
+        Some("messageForwardInfo") => {
+            let origin = parse_message_origin(value.get("origin"))?;
+            Some(MessageForwardInfo {
+                origin,
+                date: value.get("date").and_then(Value::as_i64).unwrap_or(0) as i32,
+            })
+        }
+        _ => None,
+    }
+}
+
+fn parse_message_origin(value: Option<&Value>) -> Option<MessageOrigin> {
+    let value = value?;
+    match value.get("@type").and_then(Value::as_str) {
+        Some("messageOriginUser") => Some(MessageOrigin::User {
+            user_id: UserId(int53_or_zero(value.get("sender_user_id"))),
+        }),
+        Some("messageOriginHiddenUser") => Some(MessageOrigin::HiddenUser {
+            sender_name: value
+                .get("sender_name")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string(),
+        }),
+        Some("messageOriginChat") => Some(MessageOrigin::Chat {
+            chat_id: ChatId(int53_or_zero(value.get("sender_chat_id"))),
+            author_signature: value
+                .get("author_signature")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string(),
+        }),
+        Some("messageOriginChannel") => Some(MessageOrigin::Channel {
+            chat_id: ChatId(int53_or_zero(value.get("chat_id"))),
+            message_id: MessageId(int53_or_zero(value.get("message_id"))),
+            author_signature: value
+                .get("author_signature")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string(),
+        }),
+        _ => None,
+    }
 }
 
 fn parse_reply_to(value: Option<&Value>) -> Option<MessageReplyTo> {
@@ -1469,5 +1549,52 @@ mod tests {
         assert!(schema.lines().any(|l| l.starts_with("editMessageText ")));
         assert!(schema.lines().any(|l| l.starts_with("editMessageCaption ")));
         assert!(schema.lines().any(|l| l.starts_with("deleteMessages ")));
+    }
+
+    #[test]
+    fn message_forward_info_and_messages_are_typed() {
+        let env = parse_envelope(
+            r#"{"@type":"updateNewMessage","message":{"id":105,"chat_id":11,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"fwd body","entities":[]}},"forward_info":{"@type":"messageForwardInfo","origin":{"@type":"messageOriginHiddenUser","sender_name":"Ada Lovelace"},"date":1700000000,"source":null,"public_service_announcement_type":""}}}"#,
+        )
+        .unwrap();
+        match env.payload {
+            EnvelopePayload::UpdateNewMessage(message) => {
+                let info = message.forward_info.expect("forward_info");
+                assert_eq!(
+                    info.origin,
+                    MessageOrigin::HiddenUser {
+                        sender_name: "Ada Lovelace".into()
+                    }
+                );
+                assert_eq!(info.date, 1_700_000_000);
+            }
+            other => panic!("{other:?}"),
+        }
+        let messages = parse_envelope(
+            r#"{"@type":"messages","@extra":"34","total_count":2,"messages":[{"id":80,"chat_id":12,"is_outgoing":true,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"Hello from injected JSON.","entities":[]}},"forward_info":{"@type":"messageForwardInfo","origin":{"@type":"messageOriginUser","sender_user_id":11},"date":1}},null]}"#,
+        )
+        .unwrap();
+        match messages.payload {
+            EnvelopePayload::Messages(parsed) => {
+                assert_eq!(parsed.len(), 1);
+                assert_eq!(parsed[0].id.0, 80);
+                assert_eq!(parsed[0].chat_id.0, 12);
+                assert!(matches!(
+                    parsed[0].forward_info.as_ref().map(|i| &i.origin),
+                    Some(MessageOrigin::User { user_id }) if user_id.0 == 11
+                ));
+            }
+            other => panic!("{other:?}"),
+        }
+        let schema = include_str!("../../schema/td_api.tl");
+        assert!(schema.lines().any(|l| l.starts_with("forwardMessages ")));
+        assert!(schema.lines().any(|l| l.starts_with("messages ")));
+        assert!(schema.lines().any(|l| l.starts_with("messageForwardInfo ")));
+        assert!(schema.lines().any(|l| l.starts_with("messageOriginUser ")));
+        assert!(
+            schema
+                .lines()
+                .any(|l| l.starts_with("messageOriginHiddenUser "))
+        );
     }
 }

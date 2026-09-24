@@ -109,4 +109,11 @@ pub const REQUIRED_SCHEMA_CONSTRUCTORS: &[&str] = &[
     "editMessageCaption",
     "deleteMessages",
     "updateMessageContent",
+    "forwardMessages",
+    "messages",
+    "messageForwardInfo",
+    "messageOriginUser",
+    "messageOriginHiddenUser",
+    "messageOriginChat",
+    "messageOriginChannel",
 ];

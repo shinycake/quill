@@ -6,7 +6,8 @@ use crate::ids::{
 use crate::telegram::client::OwnedEnvelope;
 use crate::telegram::envelope::{
     AuthorizationState, ChatKind, ChatList, ChatPositionUpdate, ConnectionState, EnvelopePayload,
-    ErrorClass, MessageContent, MessageReplyTo, ParsedFile, ParsedMessage,
+    ErrorClass, MessageContent, MessageForwardInfo, MessageOrigin, MessageReplyTo, ParsedFile,
+    ParsedMessage,
 };
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
@@ -37,6 +38,8 @@ pub enum RequestPurpose {
     EditMessage,
     /// `deleteMessages`. Response is `ok`; rows leave via `updateDeleteMessages`.
     DeleteMessages,
+    /// `forwardMessages`. Response is `messages`.
+    ForwardMessages,
     Close,
     LogOut,
     Other,
@@ -78,6 +81,39 @@ impl AuthRequestError {
             }
             (_, ErrorClass::Unauthorized) => "session is no longer authorized",
             _ => "Telegram rejected the request",
+        }
+    }
+}
+
+/// Source + dest frozen when `forwardMessages` is sent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ForwardFlight {
+    pub extra: RequestId,
+    pub dest_chat_id: ChatId,
+    pub from_chat_id: ChatId,
+    pub requested: usize,
+}
+
+/// Result of `forwardMessages` (`messages` or `error`). Dest title is resolved
+/// from the loaded chat list (tdesktop ShareBox success names the peer).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ForwardResult {
+    pub dest_chat_id: ChatId,
+    pub dest_title: String,
+    pub from_chat_id: ChatId,
+    pub requested: usize,
+    pub forwarded_ids: Vec<MessageId>,
+}
+
+impl ForwardResult {
+    pub fn success_label(&self) -> String {
+        let n = self.forwarded_ids.len();
+        if n == 0 {
+            format!("Could not forward to {}", self.dest_title)
+        } else if n == 1 {
+            format!("Forwarded to {}", self.dest_title)
+        } else {
+            format!("Forwarded {n} messages to {}", self.dest_title)
         }
     }
 }
@@ -368,6 +404,7 @@ pub struct HistoryMessage {
     pub content: MessageContent,
     pub pending: bool,
     pub reply_to: Option<MessageReplyTo>,
+    pub forward_info: Option<MessageForwardInfo>,
 }
 
 #[derive(Debug, Default)]
@@ -447,6 +484,7 @@ pub struct SearchMessageHit {
     pub is_outgoing: bool,
     pub content: MessageContent,
     pub reply_to: Option<MessageReplyTo>,
+    pub forward_info: Option<MessageForwardInfo>,
 }
 
 impl SearchMessageHit {
@@ -458,6 +496,7 @@ impl SearchMessageHit {
             is_outgoing: message.is_outgoing,
             content: message.content.clone(),
             reply_to: message.reply_to.clone(),
+            forward_info: message.forward_info.clone(),
         }
     }
 
@@ -469,6 +508,7 @@ impl SearchMessageHit {
             content: self.content,
             pending: false,
             reply_to: self.reply_to,
+            forward_info: self.forward_info,
         }
     }
 }
@@ -828,6 +868,10 @@ pub struct Session {
     pub last_seq: u64,
     /// Last classified error for phone / code / password submit. Never a secret.
     pub last_auth_error: Option<AuthRequestError>,
+    /// In-flight `forwardMessages` (dest / source / requested count).
+    pub in_flight_forward: Option<ForwardFlight>,
+    /// Last `forwardMessages` outcome for the dest picker success surface.
+    pub last_forward: Option<ForwardResult>,
     /// TDLib `file.id` → latest `file` / `localFile` snapshot.
     pub files: HashMap<i32, ParsedFile>,
     /// `downloadFile` in flight (until completed, undownloadable, idle, or error).
@@ -858,6 +902,8 @@ impl Session {
             shutdown: ShutdownPhase::Running,
             last_seq: 0,
             last_auth_error: None,
+            in_flight_forward: None,
+            last_forward: None,
             files: HashMap::new(),
             downloading: HashSet::new(),
             download_extras: HashMap::new(),
@@ -1106,6 +1152,12 @@ impl Session {
             }
             EnvelopePayload::Messages(messages) => {
                 if let Some(pending) = pending
+                    && pending.purpose == RequestPurpose::ForwardMessages
+                {
+                    self.finish_forward(pending, &messages, false);
+                    return;
+                }
+                if let Some(pending) = pending
                     && pending.purpose == RequestPurpose::GetHistoryAround
                 {
                     self.apply_history_around(pending, &messages, seq);
@@ -1201,6 +1253,11 @@ impl Session {
                 {
                     self.finish_history_around(pending, message_id, true, seq);
                 }
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::ForwardMessages)
+                    && let Some(pending) = pending
+                {
+                    self.finish_forward(pending, &[], true);
+                }
                 let download_id = pending
                     .filter(|p| p.purpose == RequestPurpose::DownloadFile)
                     .and_then(|p| p.file_id)
@@ -1239,11 +1296,14 @@ impl Session {
             self.download_extras.clear();
             self.search.close();
             self.chat_search.close();
+            self.in_flight_forward = None;
+            self.last_forward = None;
         }
         if matches!(state, AuthorizationState::LoggingOut) {
             self.requests.invalidate_account();
             self.search.close();
             self.chat_search.close();
+            self.in_flight_forward = None;
         }
         if matches!(state, AuthorizationState::Closing) {
             self.shutdown = ShutdownPhase::WaitingClosed;
@@ -1641,6 +1701,7 @@ impl Session {
                         is_outgoing: message.is_outgoing,
                         content: message.content.clone(),
                         reply_to: message.reply_to.clone(),
+                        forward_info: message.forward_info.clone(),
                     })
                     .collect()
             })
@@ -1719,6 +1780,7 @@ fn history_message(message: ParsedMessage, pending: bool) -> HistoryMessage {
         content: message.content,
         pending,
         reply_to: message.reply_to,
+        forward_info: message.forward_info,
     }
 }
 
@@ -1755,6 +1817,95 @@ impl Session {
             .content_preview
             .clone()
             .unwrap_or_else(|| "Message".into())
+    }
+
+    /// Loaded Main-list destinations for the forward picker. Local title filter
+    /// (tdesktop ShareBox search field). Unsupported kinds stay out.
+    pub fn forward_destinations(&self, query: &str) -> Vec<&ChatSummary> {
+        self.local_search_chats(query)
+            .into_iter()
+            .filter(|chat| chat.supported())
+            .collect()
+    }
+
+    /// Official "Forwarded from" label from `messageForwardInfo.origin`.
+    pub fn forward_from_label(&self, info: &MessageForwardInfo) -> String {
+        match &info.origin {
+            MessageOrigin::HiddenUser { sender_name } if !sender_name.trim().is_empty() => {
+                format!("Forwarded from {sender_name}")
+            }
+            MessageOrigin::User { user_id } => self
+                .chats
+                .values()
+                .find(
+                    |chat| matches!(chat.kind, ChatKind::Private { user_id: id } if id == *user_id),
+                )
+                .map(|chat| format!("Forwarded from {}", chat.title))
+                .unwrap_or_else(|| "Forwarded message".into()),
+            MessageOrigin::Chat {
+                chat_id,
+                author_signature,
+            }
+            | MessageOrigin::Channel {
+                chat_id,
+                author_signature,
+                ..
+            } => {
+                if let Some(chat) = self.chats.get(&chat_id.0) {
+                    if author_signature.is_empty() {
+                        format!("Forwarded from {}", chat.title)
+                    } else {
+                        format!("Forwarded from {} ({author_signature})", chat.title)
+                    }
+                } else if !author_signature.is_empty() {
+                    format!("Forwarded from {author_signature}")
+                } else {
+                    "Forwarded message".into()
+                }
+            }
+            _ => "Forwarded message".into(),
+        }
+    }
+
+    fn finish_forward(
+        &mut self,
+        pending: &PendingRequest,
+        messages: &[ParsedMessage],
+        failed: bool,
+    ) {
+        let forwarded: Vec<ParsedMessage> = if failed {
+            Vec::new()
+        } else {
+            messages.to_vec()
+        };
+        for message in &forwarded {
+            self.remember_files(&message.files);
+            self.upsert_message(message.clone(), message.id.0 < 0);
+        }
+        let flight = self
+            .in_flight_forward
+            .take()
+            .filter(|flight| flight.extra == pending.id);
+        let dest_chat_id = flight
+            .as_ref()
+            .map(|f| f.dest_chat_id)
+            .or(pending.chat_id)
+            .unwrap_or(ChatId(0));
+        let dest_title = self
+            .chats
+            .get(&dest_chat_id.0)
+            .map(|chat| chat.title.clone())
+            .unwrap_or_else(|| format!("chat {}", dest_chat_id.0));
+        self.last_forward = Some(ForwardResult {
+            dest_chat_id,
+            dest_title,
+            from_chat_id: flight.as_ref().map(|f| f.from_chat_id).unwrap_or(ChatId(0)),
+            requested: flight
+                .as_ref()
+                .map(|f| f.requested)
+                .unwrap_or(forwarded.len()),
+            forwarded_ids: forwarded.iter().map(|m| m.id).collect(),
+        });
     }
 }
 
@@ -2854,6 +3005,7 @@ mod tests {
             is_outgoing: false,
             content: crate::telegram::envelope::MessageContent::Text("gone".into()),
             reply_to: None,
+            forward_info: None,
         });
         assert_eq!(
             session.begin_chat_search_jump(MessageId(70)),
@@ -2873,6 +3025,7 @@ mod tests {
             is_outgoing: false,
             content: crate::telegram::envelope::MessageContent::Text("ghost".into()),
             reply_to: None,
+            forward_info: None,
         });
         assert_eq!(
             session.begin_chat_search_jump(MessageId(80)),
@@ -3063,5 +3216,109 @@ mod tests {
                 .is_tombstone(MessageId(102))
         );
         assert!(!sink.rendered().contains("CANARY_EDITED"));
+    }
+
+    #[test]
+    fn forward_messages_result_upserts_dest_and_labels_origin() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+        );
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateNewChat","chat":{"id":11,"title":"Alice","type":{"@type":"chatTypePrivate","user_id":11},"unread_count":0}}"#,
+        );
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateChatPosition","chat_id":11,"position":{"@type":"chatPosition","list":{"@type":"chatListMain"},"order":"2","is_pinned":false}}"#,
+        );
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateNewChat","chat":{"id":12,"title":"Bob","type":{"@type":"chatTypePrivate","user_id":12},"unread_count":0}}"#,
+        );
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateChatPosition","chat_id":12,"position":{"@type":"chatPosition","list":{"@type":"chatListMain"},"order":"1","is_pinned":false}}"#,
+        );
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateNewMessage","message":{"id":101,"chat_id":11,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"Hello from injected JSON.","entities":[]}}}}"#,
+        );
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateNewMessage","message":{"id":105,"chat_id":11,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"already forwarded","entities":[]}},"forward_info":{"@type":"messageForwardInfo","origin":{"@type":"messageOriginHiddenUser","sender_name":"Ada Lovelace"},"date":1}}}"#,
+        );
+        let dests: Vec<_> = session
+            .forward_destinations("bo")
+            .into_iter()
+            .map(|c| c.id)
+            .collect();
+        assert_eq!(dests, vec![ChatId(12)]);
+        assert!(
+            session
+                .forward_destinations("")
+                .iter()
+                .all(|c| c.supported())
+        );
+        let extra = session.request(RequestPurpose::ForwardMessages, Some(ChatId(12)));
+        session.in_flight_forward = Some(ForwardFlight {
+            extra,
+            dest_chat_id: ChatId(12),
+            from_chat_id: ChatId(11),
+            requested: 1,
+        });
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"messages","@extra":"{}","total_count":1,"messages":[{{"id":80,"chat_id":12,"is_outgoing":true,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"Hello from injected JSON.","entities":[]}}}},"forward_info":{{"@type":"messageForwardInfo","origin":{{"@type":"messageOriginUser","sender_user_id":11}},"date":1}}}}]}}"#,
+                extra.0
+            ),
+        );
+        let result = session.last_forward.as_ref().expect("forward result");
+        assert_eq!(result.dest_chat_id, ChatId(12));
+        assert_eq!(result.dest_title, "Bob");
+        assert_eq!(result.forwarded_ids, vec![MessageId(80)]);
+        assert_eq!(result.success_label(), "Forwarded to Bob");
+        let dest = session
+            .histories
+            .get(&12)
+            .unwrap()
+            .messages
+            .get(&80)
+            .unwrap();
+        assert_eq!(
+            session.forward_from_label(dest.forward_info.as_ref().unwrap()),
+            "Forwarded from Alice"
+        );
+        let incoming = session
+            .histories
+            .get(&11)
+            .unwrap()
+            .messages
+            .get(&105)
+            .unwrap();
+        assert_eq!(
+            session.forward_from_label(incoming.forward_info.as_ref().unwrap()),
+            "Forwarded from Ada Lovelace"
+        );
+        assert!(!sink.rendered().contains("CANARY"));
     }
 }

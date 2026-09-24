@@ -2,7 +2,7 @@
 //! Never logs api_hash, phone numbers, or codes.
 
 use crate::composer::{
-    AttachmentKind, ComposerEdit, ComposerEditKind, ComposerSnapshot, DeleteConfirm,
+    AttachmentKind, ComposerEdit, ComposerEditKind, ComposerSnapshot, DeleteConfirm, ForwardDraft,
 };
 use crate::credentials::TelegramCredentials;
 use crate::diagnostics::DiagnosticSink;
@@ -10,7 +10,9 @@ use crate::ids::{AccountKey, ChatId, FileId, MessageId, RequestId};
 use crate::lifecycle::{RestoreBlocker, plan_restore};
 use crate::platform::{DatabaseKey, KeyDecision, SecretStore, load_or_create_key};
 use crate::settings::{AccountPaths, default_app_root};
-use crate::state::{ChatSearchJumpNeed, RequestPurpose, SearchStatus, Session, ShutdownPhase};
+use crate::state::{
+    ChatSearchJumpNeed, ForwardFlight, RequestPurpose, SearchStatus, Session, ShutdownPhase,
+};
 use crate::telegram::client::{LiveTdJson, OwnedEnvelope, ReceiveBridge};
 use crate::telegram::envelope::{AuthorizationState, EnvelopePayload};
 use crate::telegram::ffi::{LibraryOrigin, TdJsonError, resolve_tdjson_path};
@@ -18,9 +20,9 @@ use crate::telegram::requests::{
     SetTdlibParameters, add_recently_found_chat, check_authentication_code,
     check_authentication_password, close_chat, close_request, delete_messages,
     download_file as download_file_request, edit_message_caption, edit_message_text,
-    get_authorization_state, get_chat_history, load_chats, open_chat, search_chat_messages,
-    search_chats, search_messages, search_recently_found_chats, send_document, send_photo,
-    send_text, set_authentication_phone_number, view_messages,
+    forward_messages, get_authorization_state, get_chat_history, load_chats, open_chat,
+    search_chat_messages, search_chats, search_messages, search_recently_found_chats,
+    send_document, send_photo, send_text, set_authentication_phone_number, view_messages,
 };
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -774,6 +776,65 @@ impl<S: JsonSender> ConnectDriver<S> {
             Ok(()) => Ok(extra),
             Err(err) => {
                 self.session.requests.take(extra);
+                Err(err)
+            }
+        }
+    }
+
+    /// Send `forwardMessages` after the dest picker chooses a supported chat.
+    /// `send_copy: false` preserves official "Forwarded from" attribution.
+    pub fn forward_messages(
+        &mut self,
+        dest: ChatId,
+        draft: &ForwardDraft,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if draft.is_empty() || draft.message_ids.len() > 100 {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let dest_ok = self
+            .session
+            .chats
+            .get(&dest.0)
+            .is_some_and(|chat| chat.supported());
+        let from_ok = self
+            .session
+            .chats
+            .get(&draft.from_chat_id.0)
+            .is_some_and(|chat| chat.supported());
+        if !dest_ok || !from_ok {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        for id in &draft.message_ids {
+            let Some(message) = self
+                .session
+                .histories
+                .get(&draft.from_chat_id.0)
+                .and_then(|history| history.messages.get(&id.0))
+            else {
+                return Err(ConnectSendError::InvalidRequest);
+            };
+            if message.pending || id.0 <= 0 {
+                return Err(ConnectSendError::InvalidRequest);
+            }
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::ForwardMessages, Some(dest));
+        self.session.in_flight_forward = Some(ForwardFlight {
+            extra,
+            dest_chat_id: dest,
+            from_chat_id: draft.from_chat_id,
+            requested: draft.message_ids.len(),
+        });
+        let json = forward_messages(extra, dest, draft.from_chat_id, &draft.message_ids);
+        match self.sender.send_json(&json) {
+            Ok(()) => Ok(extra),
+            Err(err) => {
+                self.session.requests.take(extra);
+                self.session.in_flight_forward = None;
                 Err(err)
             }
         }
@@ -3102,6 +3163,119 @@ mod tests {
         let history = driver.session.histories.get(&7).unwrap();
         assert!(!history.contains(MessageId(60)));
         assert!(history.is_tombstone(MessageId(60)));
+        assert!(!sink.rendered().contains("CANARY"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn driver_forward_messages_shape_and_dest_result() {
+        use crate::composer::ForwardDraft;
+
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = Arc::new(RecordingSender::new());
+        let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+        let mut driver =
+            ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+        let seq = AtomicU64::new(0);
+        seed_ready_alice(&mut driver, &seq, &dyn_sink);
+        driver
+            .ingest(
+                copy_and_parse(
+                    r#"{"@type":"updateNewChat","chat":{"id":8,"title":"Bob","type":{"@type":"chatTypePrivate","user_id":8},"unread_count":0}}"#,
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        driver
+            .ingest(
+                copy_and_parse(
+                    r#"{"@type":"updateChatPosition","chat_id":8,"position":{"@type":"chatPosition","list":{"@type":"chatListMain"},"order":"8","is_pinned":false}}"#,
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        driver
+            .ingest(
+                copy_and_parse(
+                    r#"{"@type":"updateNewMessage","message":{"id":60,"chat_id":7,"is_outgoing":true,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"own outgoing","entities":[]}}}}"#,
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+
+        let mut draft = ForwardDraft::from_message(ChatId(7), MessageId(50), false).unwrap();
+        draft.toggle(ChatId(7), MessageId(60), false);
+        let extra = driver.forward_messages(ChatId(8), &draft).unwrap();
+        let json = recorder
+            .snapshot()
+            .last()
+            .cloned()
+            .expect("forwardMessages");
+        let v: Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "forwardMessages");
+        assert_eq!(v["@extra"], extra.0.to_string());
+        assert_eq!(v["chat_id"], 8);
+        assert_eq!(v["from_chat_id"], 7);
+        assert_eq!(v["topic_id"], Value::Null);
+        assert_eq!(v["message_ids"], serde_json::json!([50, 60]));
+        assert_eq!(v["send_copy"], false);
+        assert_eq!(v["remove_caption"], false);
+        assert_eq!(v["options"], Value::Null);
+
+        driver
+            .ingest(
+                copy_and_parse(
+                    &format!(
+                        r#"{{"@type":"messages","@extra":"{}","total_count":2,"messages":[{{"id":80,"chat_id":8,"is_outgoing":true,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"hello already here","entities":[]}}}},"forward_info":{{"@type":"messageForwardInfo","origin":{{"@type":"messageOriginUser","sender_user_id":7}},"date":1}}}},{{"id":81,"chat_id":8,"is_outgoing":true,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"own outgoing","entities":[]}}}},"forward_info":{{"@type":"messageForwardInfo","origin":{{"@type":"messageOriginUser","sender_user_id":7}},"date":1}}}}]}}"#,
+                        extra.0
+                    ),
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        let result = driver
+            .session
+            .last_forward
+            .as_ref()
+            .expect("forward result");
+        assert_eq!(result.dest_title, "Bob");
+        assert_eq!(result.forwarded_ids, vec![MessageId(80), MessageId(81)]);
+        assert_eq!(result.success_label(), "Forwarded 2 messages to Bob");
+        assert!(
+            driver
+                .session
+                .histories
+                .get(&8)
+                .unwrap()
+                .contains(MessageId(80))
+        );
+        assert_eq!(
+            driver.session.forward_from_label(
+                driver
+                    .session
+                    .histories
+                    .get(&8)
+                    .unwrap()
+                    .messages
+                    .get(&80)
+                    .unwrap()
+                    .forward_info
+                    .as_ref()
+                    .unwrap()
+            ),
+            "Forwarded from Alice"
+        );
         assert!(!sink.rendered().contains("CANARY"));
         let _ = std::fs::remove_dir_all(&dir);
     }

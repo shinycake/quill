@@ -737,6 +737,59 @@ fn replay_edit_content_and_delete_tombstone() {
 }
 
 #[test]
+fn replay_forward_messages_result_and_attribution() {
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn quill::diagnostics::DiagnosticSink> = sink.clone();
+    let mut session = Session::new(AccountKey::primary(), dyn_sink);
+    let seq = AtomicU64::new(0);
+    apply_all_seq(
+        &mut session,
+        &sink,
+        &seq,
+        &[
+            r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+            r#"{"@type":"updateNewChat","chat":{"id":7,"title":"Alice","type":{"@type":"chatTypePrivate","user_id":7},"unread_count":0}}"#,
+            r#"{"@type":"updateChatPosition","chat_id":7,"position":{"@type":"chatPosition","list":{"@type":"chatListMain"},"order":"2","is_pinned":false}}"#,
+            r#"{"@type":"updateNewChat","chat":{"id":8,"title":"Bob","type":{"@type":"chatTypePrivate","user_id":8},"unread_count":0}}"#,
+            r#"{"@type":"updateChatPosition","chat_id":8,"position":{"@type":"chatPosition","list":{"@type":"chatListMain"},"order":"1","is_pinned":false}}"#,
+            r#"{"@type":"updateNewMessage","message":{"id":50,"chat_id":7,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"hello already here","entities":[]}}}}"#,
+        ],
+    );
+    let extra = session.request(RequestPurpose::ForwardMessages, Some(quill::ids::ChatId(8)));
+    session.in_flight_forward = Some(quill::state::ForwardFlight {
+        extra,
+        dest_chat_id: quill::ids::ChatId(8),
+        from_chat_id: quill::ids::ChatId(7),
+        requested: 1,
+    });
+    apply_all_seq(
+        &mut session,
+        &sink,
+        &seq,
+        &[&format!(
+            r#"{{"@type":"messages","@extra":"{}","total_count":1,"messages":[{{"id":80,"chat_id":8,"is_outgoing":true,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"hello already here","entities":[]}}}},"forward_info":{{"@type":"messageForwardInfo","origin":{{"@type":"messageOriginUser","sender_user_id":7}},"date":1}}}}]}}"#,
+            extra.0
+        )],
+    );
+    let result = session.last_forward.as_ref().expect("forward result");
+    assert_eq!(result.dest_title, "Bob");
+    assert_eq!(result.forwarded_ids, vec![quill::ids::MessageId(80)]);
+    assert_eq!(result.success_label(), "Forwarded to Bob");
+    let dest = session
+        .histories
+        .get(&8)
+        .unwrap()
+        .messages
+        .get(&80)
+        .unwrap();
+    assert_eq!(
+        session.forward_from_label(dest.forward_info.as_ref().unwrap()),
+        "Forwarded from Alice"
+    );
+    assert!(!sink.rendered().contains("CANARY"));
+}
+
+#[test]
 fn logout_invalidates_pending_requests() {
     let sink = Arc::new(MemorySink::new());
     let dyn_sink: Arc<dyn quill::diagnostics::DiagnosticSink> = sink.clone();

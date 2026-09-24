@@ -201,6 +201,65 @@ impl DeleteConfirm {
     }
 }
 
+/// Messages queued for `forwardMessages` (tdesktop `Data::ForwardDraft` /
+/// `ShowForwardMessagesBox`). Ids stay strictly increasing (schema).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ForwardDraft {
+    pub from_chat_id: ChatId,
+    pub message_ids: Vec<MessageId>,
+}
+
+impl ForwardDraft {
+    /// Already-sent history only. Pending / local ids cannot be forwarded.
+    pub fn from_message(chat_id: ChatId, message_id: MessageId, pending: bool) -> Option<Self> {
+        if pending || message_id.0 <= 0 {
+            return None;
+        }
+        Some(Self {
+            from_chat_id: chat_id,
+            message_ids: vec![message_id],
+        })
+    }
+
+    pub fn contains(&self, message_id: MessageId) -> bool {
+        self.message_ids.contains(&message_id)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.message_ids.is_empty()
+    }
+
+    /// Toggle a same-chat id. Cross-chat selection is not official history
+    /// multi-select — start a new draft instead.
+    pub fn toggle(&mut self, chat_id: ChatId, message_id: MessageId, pending: bool) {
+        if pending || message_id.0 <= 0 {
+            return;
+        }
+        if chat_id != self.from_chat_id {
+            self.from_chat_id = chat_id;
+            self.message_ids = vec![message_id];
+            return;
+        }
+        if let Some(index) = self.message_ids.iter().position(|id| *id == message_id) {
+            self.message_ids.remove(index);
+        } else {
+            self.message_ids.push(message_id);
+            self.message_ids.sort_by_key(|id| id.0);
+        }
+    }
+
+    pub fn count(&self) -> usize {
+        self.message_ids.len()
+    }
+}
+
+/// tdesktop ShareBox / `ShowForwardMessagesBox` Escape: leave the picker
+/// (and optional selection) without sending.
+pub fn cancel_forward_draft(draft: Option<ForwardDraft>) -> (Option<ForwardDraft>, bool) {
+    let _ = draft;
+    (None, false)
+}
+
 /// Snapshot of a send attempt: destination is frozen at submit time.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ComposerSnapshot {
@@ -445,5 +504,22 @@ mod tests {
         assert!(DeleteConfirm::own(ChatId(11), MessageId(102), true, false).is_some());
         assert!(DeleteConfirm::own(ChatId(11), MessageId(101), false, false).is_none());
         assert!(DeleteConfirm::own(ChatId(11), MessageId(-5), true, true).is_none());
+    }
+
+    #[test]
+    fn forward_draft_sorts_and_rejects_pending() {
+        assert!(ForwardDraft::from_message(ChatId(11), MessageId(-1), true).is_none());
+        assert!(ForwardDraft::from_message(ChatId(11), MessageId(0), false).is_none());
+        let mut draft = ForwardDraft::from_message(ChatId(11), MessageId(102), false).unwrap();
+        draft.toggle(ChatId(11), MessageId(101), false);
+        assert_eq!(draft.message_ids, vec![MessageId(101), MessageId(102)]);
+        draft.toggle(ChatId(11), MessageId(102), false);
+        assert_eq!(draft.message_ids, vec![MessageId(101)]);
+        draft.toggle(ChatId(12), MessageId(40), false);
+        assert_eq!(draft.from_chat_id, ChatId(12));
+        assert_eq!(draft.message_ids, vec![MessageId(40)]);
+        let (cleared, picker) = cancel_forward_draft(Some(draft));
+        assert_eq!(cleared, None);
+        assert!(!picker);
     }
 }
