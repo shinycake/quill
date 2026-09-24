@@ -467,6 +467,30 @@ pub fn delete_messages(
     .to_string()
 }
 
+/// `forwardMessages` (TDLib 1.8.67). `send_copy` false keeps attribution
+/// (`message.forward_info`) — official default, not hide-sender copy.
+/// `remove_caption` is ignored unless `send_copy` is true. `topic_id` /
+/// `options` null. Ids must already be strictly increasing (≤ 100).
+pub fn forward_messages(
+    extra: RequestId,
+    chat_id: ChatId,
+    from_chat_id: ChatId,
+    message_ids: &[MessageId],
+) -> String {
+    json!({
+        "@type": "forwardMessages",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0,
+        "topic_id": Value::Null,
+        "from_chat_id": from_chat_id.0,
+        "message_ids": message_ids.iter().map(|id| id.0).collect::<Vec<_>>(),
+        "options": Value::Null,
+        "send_copy": false,
+        "remove_caption": false
+    })
+    .to_string()
+}
+
 pub fn runtime_version_request() -> String {
     json!({
         "@type": "getOption",
@@ -742,6 +766,29 @@ mod tests {
         assert_eq!(v["message_ids"], serde_json::json!([102]));
         assert_eq!(v["revoke"], true);
         assert!(!json.contains("CANARY"));
+    }
+
+    #[test]
+    fn forward_messages_shape_matches_1_8_67() {
+        let json = forward_messages(
+            RequestId(34),
+            ChatId(12),
+            ChatId(11),
+            &[MessageId(101), MessageId(102)],
+        );
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "forwardMessages");
+        assert_eq!(v["@extra"], "34");
+        assert_eq!(v["chat_id"], 12);
+        assert_eq!(v["topic_id"], Value::Null);
+        assert_eq!(v["from_chat_id"], 11);
+        assert_eq!(v["message_ids"], serde_json::json!([101, 102]));
+        assert_eq!(v["options"], Value::Null);
+        assert_eq!(v["send_copy"], false);
+        assert_eq!(v["remove_caption"], false);
+        assert!(!json.contains("CANARY"));
+        assert!(!json.contains("message_thread_id"));
+        assert!(!json.contains("inputMessageForwarded"));
     }
 
     #[test]
