@@ -3,6 +3,7 @@
 
 use crate::composer::{
     AttachmentKind, ComposerEdit, ComposerEditKind, ComposerSnapshot, DeleteConfirm, ForwardDraft,
+    ReactionToggle, can_react_to, reaction_toggle_for,
 };
 use crate::credentials::TelegramCredentials;
 use crate::diagnostics::DiagnosticSink;
@@ -17,12 +18,13 @@ use crate::telegram::client::{LiveTdJson, OwnedEnvelope, ReceiveBridge};
 use crate::telegram::envelope::{AuthorizationState, EnvelopePayload};
 use crate::telegram::ffi::{LibraryOrigin, TdJsonError, resolve_tdjson_path};
 use crate::telegram::requests::{
-    SetTdlibParameters, add_recently_found_chat, check_authentication_code,
+    SetTdlibParameters, add_message_reaction, add_recently_found_chat, check_authentication_code,
     check_authentication_password, close_chat, close_request, delete_messages,
     download_file as download_file_request, edit_message_caption, edit_message_text,
     forward_messages, get_authorization_state, get_chat_history, load_chats, open_chat,
-    search_chat_messages, search_chats, search_messages, search_recently_found_chats,
-    send_document, send_photo, send_text, set_authentication_phone_number, view_messages,
+    remove_message_reaction, search_chat_messages, search_chats, search_messages,
+    search_recently_found_chats, send_document, send_photo, send_text,
+    set_authentication_phone_number, view_messages,
 };
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -835,6 +837,62 @@ impl<S: JsonSender> ConnectDriver<S> {
             Err(err) => {
                 self.session.requests.take(extra);
                 self.session.in_flight_forward = None;
+                Err(err)
+            }
+        }
+    }
+
+    /// Unigram `ReactionButton.OnClick`: chosen → `removeMessageReaction`, else
+    /// `addMessageReaction` (`is_big` false, `update_recent_reactions` false).
+    /// UI applies chips only from `updateMessageInteractionInfo`.
+    pub fn toggle_message_reaction(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        emoji: &str,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let supported = self
+            .session
+            .chats
+            .get(&chat_id.0)
+            .is_some_and(|chat| chat.supported());
+        if !supported {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let Some(message) = self
+            .session
+            .histories
+            .get(&chat_id.0)
+            .and_then(|history| history.messages.get(&message_id.0))
+        else {
+            return Err(ConnectSendError::InvalidRequest);
+        };
+        if !can_react_to(message.pending, message.id) {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let emoji = emoji.trim();
+        if emoji.is_empty() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let action = reaction_toggle_for(&message.reactions, emoji);
+        let purpose = match action {
+            ReactionToggle::Add => RequestPurpose::AddMessageReaction,
+            ReactionToggle::Remove => RequestPurpose::RemoveMessageReaction,
+        };
+        let extra = self.session.request(purpose, Some(chat_id));
+        let json = match action {
+            ReactionToggle::Add => {
+                add_message_reaction(extra, chat_id, message_id, emoji, false, false)
+            }
+            ReactionToggle::Remove => remove_message_reaction(extra, chat_id, message_id, emoji),
+        };
+        match self.sender.send_json(&json) {
+            Ok(()) => Ok(extra),
+            Err(err) => {
+                self.session.requests.take(extra);
                 Err(err)
             }
         }
@@ -3275,6 +3333,97 @@ mod tests {
                     .unwrap()
             ),
             "Forwarded from Alice"
+        );
+        assert!(!sink.rendered().contains("CANARY"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn driver_toggle_message_reaction_add_then_remove() {
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = Arc::new(RecordingSender::new());
+        let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+        let mut driver =
+            ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+        let seq = AtomicU64::new(0);
+        seed_ready_alice(&mut driver, &seq, &dyn_sink);
+
+        let extra = driver
+            .toggle_message_reaction(ChatId(7), MessageId(50), "👍")
+            .expect("add reaction");
+        let json = recorder
+            .snapshot()
+            .last()
+            .cloned()
+            .expect("addMessageReaction");
+        let v: Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "addMessageReaction");
+        assert_eq!(v["@extra"], extra.0.to_string());
+        assert_eq!(v["chat_id"], 7);
+        assert_eq!(v["message_id"], 50);
+        assert_eq!(v["reaction_type"]["@type"], "reactionTypeEmoji");
+        assert_eq!(v["reaction_type"]["emoji"], "👍");
+        assert_eq!(v["is_big"], false);
+        assert_eq!(v["update_recent_reactions"], false);
+
+        driver
+            .ingest(
+                copy_and_parse(
+                    r#"{"@type":"updateMessageInteractionInfo","chat_id":7,"message_id":50,"interaction_info":{"@type":"messageInteractionInfo","view_count":0,"forward_count":0,"reply_info":null,"reactions":{"@type":"messageReactions","reactions":[{"@type":"messageReaction","type":{"@type":"reactionTypeEmoji","emoji":"👍"},"total_count":1,"is_chosen":true,"used_sender_id":null,"recent_sender_ids":[]}],"are_tags":false,"paid_reactors":[],"can_get_added_reactions":false}}}"#,
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        let chosen = driver
+            .session
+            .histories
+            .get(&7)
+            .unwrap()
+            .messages
+            .get(&50)
+            .unwrap();
+        assert_eq!(chosen.reactions.len(), 1);
+        assert!(chosen.reactions[0].is_chosen);
+
+        let extra = driver
+            .toggle_message_reaction(ChatId(7), MessageId(50), "👍")
+            .expect("remove reaction");
+        let json = recorder
+            .snapshot()
+            .last()
+            .cloned()
+            .expect("removeMessageReaction");
+        let v: Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "removeMessageReaction");
+        assert_eq!(v["@extra"], extra.0.to_string());
+        assert_eq!(v["reaction_type"]["emoji"], "👍");
+
+        driver
+            .ingest(
+                copy_and_parse(
+                    r#"{"@type":"updateMessageInteractionInfo","chat_id":7,"message_id":50,"interaction_info":null}"#,
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        assert!(
+            driver
+                .session
+                .histories
+                .get(&7)
+                .unwrap()
+                .messages
+                .get(&50)
+                .unwrap()
+                .reactions
+                .is_empty()
         );
         assert!(!sink.rendered().contains("CANARY"));
         let _ = std::fs::remove_dir_all(&dir);

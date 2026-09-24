@@ -2,7 +2,7 @@
 
 use crate::ids::{ChatId, MessageId, ViewGeneration};
 use crate::local_path::{is_explicit_send_path, pick_send_path};
-use crate::telegram::envelope::MessageContent;
+use crate::telegram::envelope::{MessageContent, MessageReaction};
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -258,6 +258,87 @@ impl ForwardDraft {
 pub fn cancel_forward_draft(draft: Option<ForwardDraft>) -> (Option<ForwardDraft>, bool) {
     let _ = draft;
     (None, false)
+}
+
+/// Official default emoji reactions (Telegram launch set / tdesktop strip
+/// fallback before recents exist). Heart is U+2764 `❤` as TDLib stores it,
+/// not `❤️` with VS16. Unigram compact flyout shows up to 7 of
+/// Top+Recent+Popular; this slice keeps the classic eight.
+pub const DEFAULT_QUICK_REACTIONS: &[&str] = &["👍", "👎", "❤", "🔥", "🥰", "👏", "😁", "🤔"];
+
+/// Per-message react picker (tdesktop hover `HistoryView::Reactions::Button`
+/// / Unigram `ReactionsMenuFlyout`). Already-sent history only.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReactionPicker {
+    pub chat_id: ChatId,
+    pub message_id: MessageId,
+}
+
+impl ReactionPicker {
+    pub fn from_message(chat_id: ChatId, message_id: MessageId, pending: bool) -> Option<Self> {
+        if !can_react_to(pending, message_id) {
+            return None;
+        }
+        Some(Self {
+            chat_id,
+            message_id,
+        })
+    }
+}
+
+/// Pending / local ids cannot be reacted (same gate as forward).
+pub fn can_react_to(pending: bool, message_id: MessageId) -> bool {
+    !pending && message_id.0 > 0
+}
+
+/// Unigram `ReactionButton.OnClick`: chosen → `removeMessageReaction`, else
+/// `addMessageReaction`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReactionToggle {
+    Add,
+    Remove,
+}
+
+pub fn reaction_toggle_for(reactions: &[MessageReaction], emoji: &str) -> ReactionToggle {
+    if reactions
+        .iter()
+        .any(|reaction| reaction.emoji == emoji && reaction.is_chosen)
+    {
+        ReactionToggle::Remove
+    } else {
+        ReactionToggle::Add
+    }
+}
+
+/// Local list after the current user toggles an emoji. Matches the
+/// `updateMessageInteractionInfo` TDLib would emit (demo / tests only).
+pub fn toggle_emoji_reaction(list: &[MessageReaction], emoji: &str) -> Vec<MessageReaction> {
+    let mut out = list.to_vec();
+    if let Some(existing) = out.iter_mut().find(|reaction| reaction.emoji == emoji) {
+        if existing.is_chosen {
+            existing.total_count -= 1;
+            existing.is_chosen = false;
+            if existing.total_count <= 0 {
+                out.retain(|reaction| reaction.emoji != emoji);
+            }
+        } else {
+            existing.total_count += 1;
+            existing.is_chosen = true;
+        }
+    } else {
+        out.push(MessageReaction {
+            emoji: emoji.to_string(),
+            total_count: 1,
+            is_chosen: true,
+        });
+    }
+    out
+}
+
+/// tdesktop / Unigram Esc: close the reaction strip first, leave history.
+pub fn cancel_reaction_picker(picker: Option<ReactionPicker>) -> Option<ReactionPicker> {
+    let _ = picker;
+    None
 }
 
 /// Snapshot of a send attempt: destination is frozen at submit time.
@@ -521,5 +602,43 @@ mod tests {
         let (cleared, picker) = cancel_forward_draft(Some(draft));
         assert_eq!(cleared, None);
         assert!(!picker);
+    }
+
+    #[test]
+    fn reaction_toggle_adds_then_removes_chosen() {
+        assert!(ReactionPicker::from_message(ChatId(11), MessageId(-1), true).is_none());
+        assert!(ReactionPicker::from_message(ChatId(11), MessageId(0), false).is_none());
+        let picker = ReactionPicker::from_message(ChatId(11), MessageId(101), false).unwrap();
+        assert_eq!(picker.message_id, MessageId(101));
+        assert_eq!(reaction_toggle_for(&[], "👍"), ReactionToggle::Add);
+        let added = toggle_emoji_reaction(&[], "👍");
+        assert_eq!(added.len(), 1);
+        assert_eq!(added[0].emoji, "👍");
+        assert_eq!(added[0].total_count, 1);
+        assert!(added[0].is_chosen);
+        assert_eq!(reaction_toggle_for(&added, "👍"), ReactionToggle::Remove);
+        let others = vec![MessageReaction {
+            emoji: "🔥".into(),
+            total_count: 2,
+            is_chosen: false,
+        }];
+        let with_own = toggle_emoji_reaction(&others, "👍");
+        assert_eq!(with_own.len(), 2);
+        assert!(with_own.iter().any(|r| r.emoji == "👍" && r.is_chosen));
+        let after_remove = toggle_emoji_reaction(&added, "👍");
+        assert!(after_remove.is_empty());
+        let shared = vec![MessageReaction {
+            emoji: "❤".into(),
+            total_count: 3,
+            is_chosen: true,
+        }];
+        let decremented = toggle_emoji_reaction(&shared, "❤");
+        assert_eq!(decremented.len(), 1);
+        assert_eq!(decremented[0].total_count, 2);
+        assert!(!decremented[0].is_chosen);
+        assert_eq!(cancel_reaction_picker(Some(picker)), None);
+        assert_eq!(DEFAULT_QUICK_REACTIONS.len(), 8);
+        assert!(DEFAULT_QUICK_REACTIONS.contains(&"❤"));
+        assert!(!DEFAULT_QUICK_REACTIONS.contains(&"❤️"));
     }
 }

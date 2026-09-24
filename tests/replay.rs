@@ -790,6 +790,55 @@ fn replay_forward_messages_result_and_attribution() {
 }
 
 #[test]
+fn replay_message_reactions_add_chosen_and_clear() {
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn quill::diagnostics::DiagnosticSink> = sink.clone();
+    let mut session = Session::new(AccountKey::primary(), dyn_sink);
+    let seq = AtomicU64::new(0);
+    apply_all_seq(
+        &mut session,
+        &sink,
+        &seq,
+        &[
+            r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+            r#"{"@type":"updateNewMessage","message":{"id":50,"chat_id":7,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"hello already here","entities":[]}}}}"#,
+            r#"{"@type":"updateMessageInteractionInfo","chat_id":7,"message_id":50,"interaction_info":{"@type":"messageInteractionInfo","view_count":0,"forward_count":0,"reply_info":null,"reactions":{"@type":"messageReactions","reactions":[{"@type":"messageReaction","type":{"@type":"reactionTypeEmoji","emoji":"👍"},"total_count":1,"is_chosen":true,"used_sender_id":null,"recent_sender_ids":[]},{"@type":"messageReaction","type":{"@type":"reactionTypeEmoji","emoji":"🔥"},"total_count":2,"is_chosen":false,"used_sender_id":null,"recent_sender_ids":[]}],"are_tags":false,"paid_reactors":[],"can_get_added_reactions":false}}}"#,
+        ],
+    );
+    let message = session
+        .histories
+        .get(&7)
+        .unwrap()
+        .messages
+        .get(&50)
+        .unwrap();
+    assert_eq!(message.reactions.len(), 2);
+    assert_eq!(message.reactions[0].emoji, "👍");
+    assert!(message.reactions[0].is_chosen);
+    assert_eq!(message.reactions[1].total_count, 2);
+    apply_all_seq(
+        &mut session,
+        &sink,
+        &seq,
+        &[
+            r#"{"@type":"updateMessageInteractionInfo","chat_id":7,"message_id":50,"interaction_info":null}"#,
+        ],
+    );
+    assert!(
+        session
+            .histories
+            .get(&7)
+            .unwrap()
+            .messages
+            .get(&50)
+            .unwrap()
+            .reactions
+            .is_empty()
+    );
+    assert!(!sink.rendered().contains("CANARY"));
+}
+
+#[test]
 fn logout_invalidates_pending_requests() {
     let sink = Arc::new(MemorySink::new());
     let dyn_sink: Arc<dyn quill::diagnostics::DiagnosticSink> = sink.clone();

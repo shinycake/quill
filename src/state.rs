@@ -6,8 +6,8 @@ use crate::ids::{
 use crate::telegram::client::OwnedEnvelope;
 use crate::telegram::envelope::{
     AuthorizationState, ChatKind, ChatList, ChatPositionUpdate, ConnectionState, EnvelopePayload,
-    ErrorClass, MessageContent, MessageForwardInfo, MessageOrigin, MessageReplyTo, ParsedFile,
-    ParsedMessage,
+    ErrorClass, MessageContent, MessageForwardInfo, MessageOrigin, MessageReaction, MessageReplyTo,
+    ParsedFile, ParsedMessage,
 };
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
@@ -40,6 +40,10 @@ pub enum RequestPurpose {
     DeleteMessages,
     /// `forwardMessages`. Response is `messages`.
     ForwardMessages,
+    /// `addMessageReaction`. Response is `ok`; chips via `updateMessageInteractionInfo`.
+    AddMessageReaction,
+    /// `removeMessageReaction`. Response is `ok`; chips via `updateMessageInteractionInfo`.
+    RemoveMessageReaction,
     Close,
     LogOut,
     Other,
@@ -405,6 +409,8 @@ pub struct HistoryMessage {
     pub pending: bool,
     pub reply_to: Option<MessageReplyTo>,
     pub forward_info: Option<MessageForwardInfo>,
+    /// Emoji reactions from `messageInteractionInfo` (`is_chosen` = current user).
+    pub reactions: Vec<MessageReaction>,
 }
 
 #[derive(Debug, Default)]
@@ -463,6 +469,15 @@ impl HistoryState {
             false
         }
     }
+
+    fn update_reactions(&mut self, id: MessageId, reactions: Vec<MessageReaction>) -> bool {
+        if let Some(message) = self.messages.get_mut(&id.0) {
+            message.reactions = reactions;
+            true
+        } else {
+            false
+        }
+    }
 }
 
 /// Global search (official sidebar field): recents, then `searchChats` + `searchMessages`.
@@ -485,6 +500,7 @@ pub struct SearchMessageHit {
     pub content: MessageContent,
     pub reply_to: Option<MessageReplyTo>,
     pub forward_info: Option<MessageForwardInfo>,
+    pub reactions: Vec<MessageReaction>,
 }
 
 impl SearchMessageHit {
@@ -497,6 +513,7 @@ impl SearchMessageHit {
             content: message.content.clone(),
             reply_to: message.reply_to.clone(),
             forward_info: message.forward_info.clone(),
+            reactions: message.reactions.clone(),
         }
     }
 
@@ -509,6 +526,7 @@ impl SearchMessageHit {
             pending: false,
             reply_to: self.reply_to,
             forward_info: self.forward_info,
+            reactions: self.reactions,
         }
     }
 }
@@ -1060,6 +1078,15 @@ impl Session {
             }
             EnvelopePayload::UpdateMessageSendAcknowledged { .. } => {
                 // Not success. Keep the pending row until Succeeded/Failed.
+            }
+            EnvelopePayload::UpdateMessageInteractionInfo {
+                chat_id,
+                message_id,
+                reactions,
+            } => {
+                if let Some(history) = self.histories.get_mut(&chat_id.0) {
+                    history.update_reactions(message_id, reactions);
+                }
             }
             EnvelopePayload::UpdateMessageContent {
                 chat_id,
@@ -1702,6 +1729,7 @@ impl Session {
                         content: message.content.clone(),
                         reply_to: message.reply_to.clone(),
                         forward_info: message.forward_info.clone(),
+                        reactions: message.reactions.clone(),
                     })
                     .collect()
             })
@@ -1781,6 +1809,7 @@ fn history_message(message: ParsedMessage, pending: bool) -> HistoryMessage {
         pending,
         reply_to: message.reply_to,
         forward_info: message.forward_info,
+        reactions: message.reactions,
     }
 }
 
@@ -3006,6 +3035,7 @@ mod tests {
             content: crate::telegram::envelope::MessageContent::Text("gone".into()),
             reply_to: None,
             forward_info: None,
+            reactions: Vec::new(),
         });
         assert_eq!(
             session.begin_chat_search_jump(MessageId(70)),
@@ -3026,6 +3056,7 @@ mod tests {
             content: crate::telegram::envelope::MessageContent::Text("ghost".into()),
             reply_to: None,
             forward_info: None,
+            reactions: Vec::new(),
         });
         assert_eq!(
             session.begin_chat_search_jump(MessageId(80)),
@@ -3318,6 +3349,81 @@ mod tests {
         assert_eq!(
             session.forward_from_label(incoming.forward_info.as_ref().unwrap()),
             "Forwarded from Ada Lovelace"
+        );
+        assert!(!sink.rendered().contains("CANARY"));
+    }
+
+    #[test]
+    fn update_message_interaction_info_sets_counts_and_chosen() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+        );
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateNewMessage","message":{"id":101,"chat_id":11,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"Hello from injected JSON.","entities":[]}},"interaction_info":{"@type":"messageInteractionInfo","view_count":0,"forward_count":0,"reply_info":null,"reactions":{"@type":"messageReactions","reactions":[{"@type":"messageReaction","type":{"@type":"reactionTypeEmoji","emoji":"🔥"},"total_count":2,"is_chosen":false,"used_sender_id":null,"recent_sender_ids":[]}],"are_tags":false,"paid_reactors":[],"can_get_added_reactions":false}}}}"#,
+        );
+        let first = session
+            .histories
+            .get(&11)
+            .unwrap()
+            .messages
+            .get(&101)
+            .unwrap();
+        assert_eq!(first.reactions.len(), 1);
+        assert_eq!(first.reactions[0].emoji, "🔥");
+        assert_eq!(first.reactions[0].total_count, 2);
+        assert!(!first.reactions[0].is_chosen);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateMessageInteractionInfo","chat_id":11,"message_id":101,"interaction_info":{"@type":"messageInteractionInfo","view_count":0,"forward_count":0,"reply_info":null,"reactions":{"@type":"messageReactions","reactions":[{"@type":"messageReaction","type":{"@type":"reactionTypeEmoji","emoji":"👍"},"total_count":1,"is_chosen":true,"used_sender_id":null,"recent_sender_ids":[]},{"@type":"messageReaction","type":{"@type":"reactionTypeEmoji","emoji":"🔥"},"total_count":2,"is_chosen":false,"used_sender_id":null,"recent_sender_ids":[]}],"are_tags":false,"paid_reactors":[],"can_get_added_reactions":false}}}"#,
+        );
+        let after = session
+            .histories
+            .get(&11)
+            .unwrap()
+            .messages
+            .get(&101)
+            .unwrap();
+        assert_eq!(after.reactions.len(), 2);
+        assert_eq!(after.reactions[0].emoji, "👍");
+        assert!(after.reactions[0].is_chosen);
+        assert_eq!(after.reactions[1].emoji, "🔥");
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateMessageInteractionInfo","chat_id":11,"message_id":101,"interaction_info":null}"#,
+        );
+        let cleared = session
+            .histories
+            .get(&11)
+            .unwrap()
+            .messages
+            .get(&101)
+            .unwrap();
+        assert!(cleared.reactions.is_empty());
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateMessageInteractionInfo","chat_id":11,"message_id":999,"interaction_info":{"@type":"messageInteractionInfo","view_count":0,"forward_count":0,"reply_info":null,"reactions":{"@type":"messageReactions","reactions":[{"@type":"messageReaction","type":{"@type":"reactionTypeEmoji","emoji":"👍"},"total_count":1,"is_chosen":true,"used_sender_id":null,"recent_sender_ids":[]}],"are_tags":false,"paid_reactors":[],"can_get_added_reactions":false}}}"#,
+        );
+        assert!(
+            !session
+                .histories
+                .get(&11)
+                .unwrap()
+                .messages
+                .contains_key(&999)
         );
         assert!(!sink.rendered().contains("CANARY"));
     }

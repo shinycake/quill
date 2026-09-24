@@ -491,6 +491,53 @@ pub fn forward_messages(
     .to_string()
 }
 
+/// `addMessageReaction` (TDLib 1.8.67). Unigram `ReactionButton.OnClick`
+/// uses `is_big` false and `update_recent_reactions` false for the compact
+/// strip / chip. `reaction_type` is `reactionTypeEmoji` only in this slice.
+pub fn add_message_reaction(
+    extra: RequestId,
+    chat_id: ChatId,
+    message_id: MessageId,
+    emoji: &str,
+    is_big: bool,
+    update_recent_reactions: bool,
+) -> String {
+    json!({
+        "@type": "addMessageReaction",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0,
+        "message_id": message_id.0,
+        "reaction_type": {
+            "@type": "reactionTypeEmoji",
+            "emoji": emoji
+        },
+        "is_big": is_big,
+        "update_recent_reactions": update_recent_reactions
+    })
+    .to_string()
+}
+
+/// `removeMessageReaction` (TDLib 1.8.67). Schema: a chosen reaction can
+/// always be removed. Unigram chip click on `IsChosen` sends this.
+pub fn remove_message_reaction(
+    extra: RequestId,
+    chat_id: ChatId,
+    message_id: MessageId,
+    emoji: &str,
+) -> String {
+    json!({
+        "@type": "removeMessageReaction",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0,
+        "message_id": message_id.0,
+        "reaction_type": {
+            "@type": "reactionTypeEmoji",
+            "emoji": emoji
+        }
+    })
+    .to_string()
+}
+
 pub fn runtime_version_request() -> String {
     json!({
         "@type": "getOption",
@@ -789,6 +836,40 @@ mod tests {
         assert!(!json.contains("CANARY"));
         assert!(!json.contains("message_thread_id"));
         assert!(!json.contains("inputMessageForwarded"));
+    }
+
+    #[test]
+    fn add_and_remove_message_reaction_shapes_match_1_8_67() {
+        let add = add_message_reaction(
+            RequestId(41),
+            ChatId(11),
+            MessageId(101),
+            "👍",
+            false,
+            false,
+        );
+        let v: serde_json::Value = serde_json::from_str(&add).unwrap();
+        assert_eq!(v["@type"], "addMessageReaction");
+        assert_eq!(v["@extra"], "41");
+        assert_eq!(v["chat_id"], 11);
+        assert_eq!(v["message_id"], 101);
+        assert_eq!(v["reaction_type"]["@type"], "reactionTypeEmoji");
+        assert_eq!(v["reaction_type"]["emoji"], "👍");
+        assert_eq!(v["is_big"], false);
+        assert_eq!(v["update_recent_reactions"], false);
+        assert!(!add.contains("reactionTypeCustomEmoji"));
+        assert!(!add.contains("reactionTypePaid"));
+        assert!(!add.contains("CANARY"));
+        let remove = remove_message_reaction(RequestId(42), ChatId(11), MessageId(101), "❤");
+        let v: serde_json::Value = serde_json::from_str(&remove).unwrap();
+        assert_eq!(v["@type"], "removeMessageReaction");
+        assert_eq!(v["@extra"], "42");
+        assert_eq!(v["chat_id"], 11);
+        assert_eq!(v["message_id"], 101);
+        assert_eq!(v["reaction_type"]["@type"], "reactionTypeEmoji");
+        assert_eq!(v["reaction_type"]["emoji"], "❤");
+        assert!(!remove.contains("is_big"));
+        assert!(!remove.contains("CANARY"));
     }
 
     #[test]
