@@ -85,6 +85,12 @@ pub enum EnvelopePayload {
         messages: Vec<ParsedMessage>,
         next_offset: String,
     },
+    /// `foundChatMessages` — `searchChatMessages` (in-chat find).
+    FoundChatMessages {
+        total_count: i32,
+        messages: Vec<ParsedMessage>,
+        next_from_message_id: i64,
+    },
     UpdateFile(ParsedFile),
     File(ParsedFile),
     Unknown(UnknownKind),
@@ -576,6 +582,25 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
                     .to_string(),
             })
         }
+        "foundChatMessages" => {
+            let messages = value
+                .get("messages")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default();
+            let parsed = messages
+                .iter()
+                .filter_map(|m| parse_message(m).ok())
+                .collect();
+            Ok(EnvelopePayload::FoundChatMessages {
+                total_count: value
+                    .get("total_count")
+                    .and_then(Value::as_i64)
+                    .unwrap_or(0) as i32,
+                messages: parsed,
+                next_from_message_id: int53_or_zero(value.get("next_from_message_id")),
+            })
+        }
         "message" => Ok(EnvelopePayload::Message(parse_message(&value)?)),
         "updateFile" => Ok(EnvelopePayload::UpdateFile(parse_file(value.get("file"))?)),
         "file" => Ok(EnvelopePayload::File(parse_file(Some(&value))?)),
@@ -1050,6 +1075,27 @@ mod tests {
         );
         assert!(schema.lines().any(|l| l.starts_with("chats ")));
         assert!(schema.lines().any(|l| l.starts_with("foundMessages ")));
+        let in_chat = parse_envelope(
+            r#"{"@type":"foundChatMessages","@extra":"6","total_count":2,"next_from_message_id":"90","messages":[{"id":101,"chat_id":11,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"CANARY_INCHAT_hi","entities":[]}}}]}"#,
+        )
+        .unwrap();
+        match in_chat.payload {
+            EnvelopePayload::FoundChatMessages {
+                total_count,
+                messages,
+                next_from_message_id,
+            } => {
+                assert_eq!(total_count, 2);
+                assert_eq!(next_from_message_id, 90);
+                assert_eq!(messages.len(), 1);
+                assert_eq!(messages[0].id.0, 101);
+                assert_eq!(messages[0].chat_id.0, 11);
+                assert_eq!(messages[0].content.preview(), "CANARY_INCHAT_hi");
+            }
+            other => panic!("{other:?}"),
+        }
+        assert!(schema.lines().any(|l| l.starts_with("searchChatMessages ")));
+        assert!(schema.lines().any(|l| l.starts_with("foundChatMessages ")));
     }
 
     #[test]

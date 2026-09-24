@@ -18,6 +18,7 @@ Captured from a real GPUI window on 2026-09-17 (Linux Xvfb + lavapipe). **Not** 
 | `ready-media.png` | Photo thumb (local path complete), honest **not downloaded** photo placeholder, and a **notes.txt** document chip. Injected `messagePhoto` / `messageDocument` / `file`, no live Telegram. Driven by `quill --screenshot-demo ready-media`. |
 | `ready-send-media.png` | Composer **Attach** chip (`demo-notes.txt`) plus outgoing photo thumb and document chip in history. Injected send path; no live Telegram. Driven by `quill --screenshot-demo ready-send-media`. |
 | `ready-search.png` | Ready sidebar **Search** (`hello`) with **Chats** + **Messages** hits. Injected `chats` / `foundMessages`, no live Telegram. Driven by `quill --screenshot-demo ready-search`. |
+| `ready-search-in-chat.png` | Ready **in-chat find** bar (`hello`, `1 of 2`) with a chat open and the selected hit highlighted. Injected `foundChatMessages`, no live Telegram. Driven by `quill --screenshot-demo ready-search-in-chat`. |
 | `fixtures/demo-thumb.png` | Tiny checkerboard PNG used as the completed photo `local.path` in the media demo (not a screenshot). |
 | `fixtures/demo-notes.txt` | Tiny text file used for outgoing document attach / send demos (not a screenshot). |
 
@@ -38,6 +39,7 @@ bash scripts/capture-connect-screenshots.sh
 #   cargo run --features ui -- --screenshot-demo ready-media docs/screenshots
 #   cargo run --features ui -- --screenshot-demo ready-send-media docs/screenshots
 #   cargo run --features ui -- --screenshot-demo ready-search docs/screenshots
+#   cargo run --features ui -- --screenshot-demo ready-search-in-chat docs/screenshots
 ```
 
 Environment used by the script: `DISPLAY`, `LIBGL_ALWAYS_SOFTWARE=1`, `WGPU_BACKEND=vulkan`, `VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json`.

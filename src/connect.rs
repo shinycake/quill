@@ -16,8 +16,8 @@ use crate::telegram::requests::{
     SetTdlibParameters, add_recently_found_chat, check_authentication_code,
     check_authentication_password, close_chat, close_request,
     download_file as download_file_request, get_authorization_state, get_chat_history, load_chats,
-    open_chat, search_chats, search_messages, search_recently_found_chats, send_document,
-    send_photo, send_text, set_authentication_phone_number, view_messages,
+    open_chat, search_chat_messages, search_chats, search_messages, search_recently_found_chats,
+    send_document, send_photo, send_text, set_authentication_phone_number, view_messages,
 };
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -35,6 +35,8 @@ pub const USER_DOWNLOAD_PRIORITY: i32 = 32;
 pub const SEARCH_LIMIT: i32 = 20;
 /// `searchRecentlyFoundChats.limit` — schema/Unigram cap is 50.
 pub const RECENT_SEARCH_LIMIT: i32 = 50;
+/// `searchChatMessages.limit` — tdesktop `SearchPerPage` / Unigram first page.
+pub const IN_CHAT_SEARCH_LIMIT: i32 = 50;
 /// tdesktop `kSearchRequestDelay` / `AutoSearchTimeout` (config.h): 900 ms.
 pub const SEARCH_DEBOUNCE: Duration = Duration::from_millis(900);
 
@@ -266,6 +268,8 @@ pub struct ConnectDriver<S: JsonSender> {
     parameters_sent: bool,
     search_debounce_token: u64,
     pending_typed_search: Option<(u64, String)>,
+    in_chat_debounce_token: u64,
+    pending_in_chat_search: Option<(u64, String)>,
 }
 
 impl<S: JsonSender> ConnectDriver<S> {
@@ -284,6 +288,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             parameters_sent: false,
             search_debounce_token: 0,
             pending_typed_search: None,
+            in_chat_debounce_token: 0,
+            pending_in_chat_search: None,
         }
     }
 
@@ -396,6 +402,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.maybe_download_open_thumbs()?;
             return self.fetch_history();
         }
+        self.clear_in_chat_debounce();
         self.close_open_chat()?;
         self.session.open_chat(chat_id);
         if !self
@@ -876,6 +883,153 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.session.promote_search_message(chat_id, message_id);
         self.session.close_search();
         self.select_chat(chat_id)
+    }
+
+    /// tdesktop `searchInChat` when history is focused (Ctrl/Cmd+F). No-op
+    /// when no chat is open — does not steal sidebar `open_search`.
+    pub fn open_in_chat_search(&mut self) -> Result<bool, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let Some(chat_id) = self.session.open_chat else {
+            return Ok(false);
+        };
+        self.clear_in_chat_debounce();
+        self.session.open_in_chat_search(chat_id);
+        Ok(true)
+    }
+
+    pub fn close_in_chat_search(&mut self) {
+        self.clear_in_chat_debounce();
+        self.session.close_in_chat_search();
+    }
+
+    /// Empty query: idle find bar, no request (tdesktop ComposeSearch).
+    /// Non-empty: debounce 900 ms, then `searchChatMessages`.
+    pub fn set_in_chat_search_query(
+        &mut self,
+        query: &str,
+    ) -> Result<SearchQueryOutcome, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if !self.session.in_chat_search.open {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let trimmed = query.trim();
+        if trimmed.is_empty() {
+            self.clear_in_chat_debounce();
+            if self.session.in_chat_search.query.is_empty()
+                && matches!(
+                    self.session.in_chat_search.status,
+                    SearchStatus::Idle | SearchStatus::Closed
+                )
+            {
+                return Ok(SearchQueryOutcome::Unchanged);
+            }
+            self.session.in_chat_search.clear_query();
+            return Ok(SearchQueryOutcome::Unchanged);
+        }
+        if self
+            .pending_in_chat_search
+            .as_ref()
+            .is_some_and(|(_, q)| q == trimmed)
+            && self.session.in_chat_search.query == trimmed
+        {
+            return Ok(SearchQueryOutcome::Unchanged);
+        }
+        if self.pending_in_chat_search.is_none()
+            && self.session.in_chat_search.query == trimmed
+            && matches!(
+                self.session.in_chat_search.status,
+                SearchStatus::Searching
+                    | SearchStatus::Ready
+                    | SearchStatus::Empty
+                    | SearchStatus::Failed
+            )
+        {
+            return Ok(SearchQueryOutcome::Unchanged);
+        }
+        let _gen = self.session.in_chat_search.begin_query(trimmed);
+        self.in_chat_debounce_token = self.in_chat_debounce_token.saturating_add(1);
+        let token = self.in_chat_debounce_token;
+        self.pending_in_chat_search = Some((token, trimmed.to_string()));
+        Ok(SearchQueryOutcome::Debounced { token })
+    }
+
+    pub fn pending_in_chat_debounce_token(&self) -> Option<u64> {
+        self.pending_in_chat_search
+            .as_ref()
+            .map(|(token, _)| *token)
+    }
+
+    pub fn commit_debounced_in_chat_search(
+        &mut self,
+        token: u64,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        let Some((pending_token, query)) = self.pending_in_chat_search.clone() else {
+            return Ok(None);
+        };
+        if pending_token != token {
+            return Ok(None);
+        }
+        self.pending_in_chat_search = None;
+        self.send_in_chat_search(&query)
+    }
+
+    fn clear_in_chat_debounce(&mut self) {
+        self.pending_in_chat_search = None;
+        self.in_chat_debounce_token = self.in_chat_debounce_token.saturating_add(1);
+    }
+
+    fn send_in_chat_search(
+        &mut self,
+        trimmed: &str,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        let Some(chat_id) = self
+            .session
+            .in_chat_search
+            .chat_id
+            .or(self.session.open_chat)
+        else {
+            return Ok(None);
+        };
+        let search_gen = self.session.in_chat_search.generation;
+        let extra = self
+            .session
+            .request_search(RequestPurpose::SearchChatMessages, search_gen);
+        match self.sender.send_json(&search_chat_messages(
+            extra,
+            chat_id,
+            trimmed,
+            IN_CHAT_SEARCH_LIMIT,
+        )) {
+            Ok(()) => Ok(Some(extra)),
+            Err(err) => {
+                self.session.requests.take(extra);
+                self.session.in_chat_search.accept(Vec::new(), 0, true);
+                Err(err)
+            }
+        }
+    }
+
+    pub fn jump_in_chat_hit(&mut self, index: usize) -> Option<MessageId> {
+        self.session.select_in_chat_hit(index)
+    }
+
+    /// tdesktop BottomBar next = older (higher index in reverse-chrono hits).
+    pub fn in_chat_search_next(&mut self) -> Option<MessageId> {
+        let next = self.session.in_chat_search.selected.saturating_add(1);
+        self.jump_in_chat_hit(next)
+    }
+
+    /// tdesktop BottomBar previous = newer (lower index).
+    pub fn in_chat_search_prev(&mut self) -> Option<MessageId> {
+        let selected = self.session.in_chat_search.selected;
+        if selected == 0 {
+            return None;
+        }
+        self.jump_in_chat_hit(selected - 1)
     }
 
     /// Send `close` (not `logOut`). Callers must keep receiving until Closed.
@@ -2307,6 +2461,193 @@ mod tests {
                 .any(|j| j.contains("\"query\":\"a\"") || j.contains("\"query\":\"al\""))
         );
         assert_eq!(SEARCH_DEBOUNCE, Duration::from_millis(900));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn commit_in_chat_search<S: JsonSender>(
+        driver: &mut ConnectDriver<S>,
+        query: &str,
+    ) -> RequestId {
+        match driver.set_in_chat_search_query(query).unwrap() {
+            SearchQueryOutcome::Debounced { token } => driver
+                .commit_debounced_in_chat_search(token)
+                .unwrap()
+                .expect("debounced in-chat search"),
+            other => panic!("expected Debounced, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn driver_in_chat_search_open_type_settle_jump_does_not_fire_sidebar() {
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = Arc::new(RecordingSender::new());
+        let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+        let mut driver =
+            ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+        assert_eq!(
+            driver.open_in_chat_search(),
+            Err(ConnectSendError::InvalidRequest)
+        );
+        let seq = AtomicU64::new(0);
+        driver
+            .ingest(
+                copy_and_parse(
+                    r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        driver
+            .ingest(
+                copy_and_parse(
+                    r#"{"@type":"updateNewChat","chat":{"id":7,"title":"Alice","type":{"@type":"chatTypePrivate","user_id":7},"unread_count":0}}"#,
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        driver
+            .ingest(
+                copy_and_parse(
+                    r#"{"@type":"updateChatPosition","chat_id":7,"position":{"@type":"chatPosition","list":{"@type":"chatListMain"},"order":"9","is_pinned":false}}"#,
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+
+        assert!(!driver.open_in_chat_search().unwrap());
+        assert!(!driver.session.in_chat_search.open);
+        assert!(!driver.session.search.open);
+        let before_open = recorder.snapshot().len();
+        assert!(
+            !recorder
+                .snapshot()
+                .iter()
+                .any(|j| j.contains("searchChatMessages")
+                    || j.contains("searchChats")
+                    || j.contains("searchMessages")
+                    || j.contains("searchRecentlyFoundChats"))
+        );
+
+        driver.select_chat(ChatId(7)).unwrap();
+        assert!(driver.open_in_chat_search().unwrap());
+        assert!(driver.session.in_chat_search.open);
+        assert!(!driver.session.search.open);
+        assert_eq!(driver.session.in_chat_search.status, SearchStatus::Idle);
+        let after_open = recorder.snapshot();
+        assert!(!after_open[before_open..].iter().any(|j| {
+            j.contains("searchChatMessages")
+                || j.contains("\"@type\":\"searchChats\"")
+                || j.contains("\"@type\":\"searchMessages\"")
+                || j.contains("searchRecentlyFoundChats")
+        }));
+
+        let t1 = match driver.set_in_chat_search_query("h").unwrap() {
+            SearchQueryOutcome::Debounced { token } => token,
+            other => panic!("{other:?}"),
+        };
+        let t2 = match driver.set_in_chat_search_query("he").unwrap() {
+            SearchQueryOutcome::Debounced { token } => token,
+            other => panic!("{other:?}"),
+        };
+        let t3 = match driver.set_in_chat_search_query("hello").unwrap() {
+            SearchQueryOutcome::Debounced { token } => token,
+            other => panic!("{other:?}"),
+        };
+        assert!(
+            driver
+                .commit_debounced_in_chat_search(t1)
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            driver
+                .commit_debounced_in_chat_search(t2)
+                .unwrap()
+                .is_none()
+        );
+        let extra = driver
+            .commit_debounced_in_chat_search(t3)
+            .unwrap()
+            .expect("settled in-chat");
+        let sent = recorder.snapshot();
+        let in_chat: Vec<String> = sent
+            .iter()
+            .filter(|j| j.contains("\"@type\":\"searchChatMessages\""))
+            .cloned()
+            .collect();
+        assert_eq!(in_chat.len(), 1);
+        assert!(in_chat[0].contains("\"chat_id\":7"));
+        assert!(in_chat[0].contains("\"query\":\"hello\""));
+        assert!(in_chat[0].contains("\"from_message_id\":0"));
+        assert!(in_chat[0].contains("\"topic_id\":null"));
+        assert!(!sent.iter().any(|j| j.contains("\"@type\":\"searchChats\"")
+            || j.contains("\"@type\":\"searchMessages\"")
+            || j.contains("searchRecentlyFoundChats")));
+
+        driver
+            .ingest(
+                copy_and_parse(
+                    &format!(
+                        r#"{{"@type":"foundChatMessages","@extra":"{}","total_count":2,"next_from_message_id":0,"messages":[{{"id":50,"chat_id":7,"is_outgoing":false,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"CANARY_DRV_inchat_new","entities":[]}}}}}},{{"id":40,"chat_id":7,"is_outgoing":false,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"CANARY_DRV_inchat_old","entities":[]}}}}}}]}}"#,
+                        extra.0
+                    ),
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        assert_eq!(driver.session.in_chat_search.status, SearchStatus::Ready);
+        assert_eq!(driver.session.in_chat_search.hits.len(), 2);
+        assert_eq!(
+            driver.session.in_chat_search.highlighted,
+            Some(MessageId(50))
+        );
+        assert!(
+            driver
+                .session
+                .histories
+                .get(&7)
+                .unwrap()
+                .messages
+                .contains_key(&50)
+        );
+        assert_eq!(driver.in_chat_search_next(), Some(MessageId(40)));
+        assert_eq!(
+            driver.session.in_chat_search.highlighted,
+            Some(MessageId(40))
+        );
+        assert_eq!(driver.in_chat_search_prev(), Some(MessageId(50)));
+        assert!(!driver.session.search.open);
+
+        let empty = commit_in_chat_search(&mut driver, "zzz");
+        driver
+            .ingest(
+                copy_and_parse(
+                    &format!(
+                        r#"{{"@type":"foundChatMessages","@extra":"{}","total_count":0,"next_from_message_id":0,"messages":[]}}"#,
+                        empty.0
+                    ),
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        assert_eq!(driver.session.in_chat_search.status, SearchStatus::Empty);
+
+        driver.close_in_chat_search();
+        assert_eq!(driver.session.in_chat_search.status, SearchStatus::Closed);
+        assert!(!sink.rendered().contains("CANARY_DRV_inchat"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

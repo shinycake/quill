@@ -29,6 +29,7 @@ pub enum RequestPurpose {
     SearchChats,
     SearchMessages,
     SearchRecentlyFoundChats,
+    SearchChatMessages,
     AddRecentlyFoundChat,
     Close,
     LogOut,
@@ -527,6 +528,139 @@ impl SearchState {
     }
 }
 
+/// In-chat find (tdesktop ComposeSearch / Unigram `ChatSearchViewModel`).
+#[derive(Debug, Clone)]
+pub struct InChatSearchState {
+    pub open: bool,
+    pub chat_id: Option<ChatId>,
+    pub query: String,
+    pub generation: u64,
+    pub status: SearchStatus,
+    pub hits: Vec<SearchMessageHit>,
+    pub total_count: i32,
+    /// 0-based index into `hits` (TDLib reverse-chrono: 0 is newest).
+    pub selected: usize,
+    pub highlighted: Option<MessageId>,
+}
+
+impl Default for InChatSearchState {
+    fn default() -> Self {
+        Self {
+            open: false,
+            chat_id: None,
+            query: String::new(),
+            generation: 0,
+            status: SearchStatus::Closed,
+            hits: Vec::new(),
+            total_count: 0,
+            selected: 0,
+            highlighted: None,
+        }
+    }
+}
+
+impl InChatSearchState {
+    pub fn open_for(&mut self, chat_id: ChatId) {
+        if self.open && self.chat_id == Some(chat_id) {
+            return;
+        }
+        self.open = true;
+        self.chat_id = Some(chat_id);
+        self.query.clear();
+        self.generation = self.generation.saturating_add(1);
+        self.status = SearchStatus::Idle;
+        self.clear_results();
+    }
+
+    pub fn close(&mut self) {
+        self.open = false;
+        self.chat_id = None;
+        self.query.clear();
+        self.status = SearchStatus::Closed;
+        self.generation = self.generation.saturating_add(1);
+        self.clear_results();
+    }
+
+    pub fn clear_query(&mut self) {
+        self.query.clear();
+        self.generation = self.generation.saturating_add(1);
+        self.clear_results();
+        self.status = if self.open {
+            SearchStatus::Idle
+        } else {
+            SearchStatus::Closed
+        };
+    }
+
+    pub fn begin_query(&mut self, query: &str) -> u64 {
+        self.open = true;
+        self.query = query.to_string();
+        self.generation = self.generation.saturating_add(1);
+        self.status = SearchStatus::Searching;
+        self.clear_results();
+        self.generation
+    }
+
+    fn clear_results(&mut self) {
+        self.hits.clear();
+        self.total_count = 0;
+        self.selected = 0;
+        self.highlighted = None;
+    }
+
+    fn matches_generation(&self, pending: Option<&PendingRequest>) -> bool {
+        pending
+            .and_then(|p| p.search_generation)
+            .is_some_and(|search_gen| search_gen == self.generation)
+            && self.open
+    }
+
+    pub(crate) fn accept(&mut self, hits: Vec<SearchMessageHit>, total_count: i32, error: bool) {
+        self.hits = hits;
+        self.total_count = total_count;
+        self.selected = 0;
+        self.highlighted = None;
+        self.status = if !self.hits.is_empty() {
+            SearchStatus::Ready
+        } else if error {
+            SearchStatus::Failed
+        } else if self.query.is_empty() {
+            SearchStatus::Idle
+        } else {
+            SearchStatus::Empty
+        };
+    }
+
+    pub fn display_total(&self) -> usize {
+        if self.total_count > 0 {
+            self.total_count as usize
+        } else {
+            self.hits.len()
+        }
+    }
+
+    pub fn counter_label(&self) -> String {
+        match self.status {
+            SearchStatus::Searching => "Searching…".into(),
+            SearchStatus::Empty => "No messages found".into(),
+            SearchStatus::Failed => "Search failed".into(),
+            SearchStatus::Ready if !self.hits.is_empty() => {
+                format!("{} of {}", self.selected + 1, self.display_total())
+            }
+            SearchStatus::Idle | SearchStatus::Closed | SearchStatus::Ready => String::new(),
+        }
+    }
+
+    pub fn select(&mut self, index: usize) -> bool {
+        if index >= self.hits.len() {
+            return false;
+        }
+        self.selected = index;
+        self.highlighted = Some(self.hits[index].message_id);
+        true
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ShutdownPhase {
     Running,
@@ -559,6 +693,7 @@ pub struct Session {
     /// `@extra` → `file.id` until the download unsticks (survives `file@extra` consuming pending).
     download_extras: HashMap<u64, i32>,
     pub search: SearchState,
+    pub in_chat_search: InChatSearchState,
     diagnostics: Arc<dyn DiagnosticSink>,
 }
 
@@ -585,6 +720,7 @@ impl Session {
             downloading: HashSet::new(),
             download_extras: HashMap::new(),
             search: SearchState::default(),
+            in_chat_search: InChatSearchState::default(),
             diagnostics,
         }
     }
@@ -777,6 +913,24 @@ impl Session {
                     self.search.accept_messages(hits, false);
                 }
             }
+            EnvelopePayload::FoundChatMessages {
+                messages,
+                total_count,
+                ..
+            } => {
+                if self.in_chat_search.matches_generation(pending)
+                    && pending.map(|p| p.purpose) == Some(RequestPurpose::SearchChatMessages)
+                {
+                    for message in &messages {
+                        self.remember_files(&message.files);
+                    }
+                    let hits = messages.iter().map(SearchMessageHit::from_parsed).collect();
+                    self.in_chat_search.accept(hits, total_count, false);
+                    if self.in_chat_search.status == SearchStatus::Ready {
+                        self.promote_in_chat_hit();
+                    }
+                }
+            }
             EnvelopePayload::Messages(messages) => {
                 if let Some(pending) = pending
                     && pending.purpose == RequestPurpose::GetHistory
@@ -857,6 +1011,11 @@ impl Session {
                         _ => {}
                     }
                 }
+                if self.in_chat_search.matches_generation(pending)
+                    && pending.map(|p| p.purpose) == Some(RequestPurpose::SearchChatMessages)
+                {
+                    self.in_chat_search.accept(Vec::new(), 0, true);
+                }
                 let download_id = pending
                     .filter(|p| p.purpose == RequestPurpose::DownloadFile)
                     .and_then(|p| p.file_id)
@@ -894,10 +1053,12 @@ impl Session {
             self.downloading.clear();
             self.download_extras.clear();
             self.search.close();
+            self.in_chat_search.close();
         }
         if matches!(state, AuthorizationState::LoggingOut) {
             self.requests.invalidate_account();
             self.search.close();
+            self.in_chat_search.close();
         }
         if matches!(state, AuthorizationState::Closing) {
             self.shutdown = ShutdownPhase::WaitingClosed;
@@ -1049,6 +1210,9 @@ impl Session {
     }
 
     pub fn open_chat(&mut self, chat_id: ChatId) {
+        if self.in_chat_search.open && self.in_chat_search.chat_id != Some(chat_id) {
+            self.in_chat_search.close();
+        }
         self.open_chat = Some(chat_id);
         self.view_generation.bump();
         let history = self.histories.entry(chat_id.0).or_default();
@@ -1131,6 +1295,39 @@ impl Session {
         self.search.close();
     }
 
+    pub fn open_in_chat_search(&mut self, chat_id: ChatId) {
+        self.in_chat_search.open_for(chat_id);
+    }
+
+    pub fn close_in_chat_search(&mut self) {
+        self.in_chat_search.close();
+    }
+
+    /// Insert the selected in-chat hit into history (same upsert as sidebar
+    /// message hits — no second pager).
+    pub fn promote_in_chat_hit(&mut self) -> Option<MessageId> {
+        let hit = self.in_chat_search.hits.get(self.in_chat_search.selected)?;
+        if self
+            .in_chat_search
+            .chat_id
+            .is_some_and(|id| id != hit.chat_id)
+        {
+            return None;
+        }
+        let hit = hit.clone();
+        let history = self.histories.entry(hit.chat_id.0).or_default();
+        history.upsert(hit.clone().into_history());
+        self.in_chat_search.highlighted = Some(hit.message_id);
+        Some(hit.message_id)
+    }
+
+    pub fn select_in_chat_hit(&mut self, index: usize) -> Option<MessageId> {
+        if !self.in_chat_search.select(index) {
+            return None;
+        }
+        self.promote_in_chat_hit()
+    }
+
     /// Insert a found message into that chat's history so open-chat can show it
     /// without a separate history pagination scheme.
     pub fn promote_search_message(&mut self, chat_id: ChatId, message_id: MessageId) {
@@ -1175,6 +1372,47 @@ impl Session {
             self.search.status = SearchStatus::Idle;
         } else {
             self.search.finish_if_complete();
+        }
+    }
+
+    /// Demo-only: filter the open chat's already-loaded history (no live TDLib).
+    pub fn apply_local_in_chat_filter(&mut self, query: &str) {
+        let Some(chat_id) = self.open_chat else {
+            return;
+        };
+        if !self.in_chat_search.open {
+            self.in_chat_search.open_for(chat_id);
+        }
+        let trimmed = query.trim();
+        if trimmed.is_empty() {
+            self.in_chat_search.clear_query();
+            return;
+        }
+        let _ = self.in_chat_search.begin_query(trimmed);
+        let needle = trimmed.to_lowercase();
+        let hits: Vec<SearchMessageHit> = self
+            .histories
+            .get(&chat_id.0)
+            .map(|history| {
+                history
+                    .ordered()
+                    .into_iter()
+                    .rev()
+                    .filter(|message| message.content.preview().to_lowercase().contains(&needle))
+                    .map(|message| SearchMessageHit {
+                        chat_id: message.chat_id,
+                        message_id: message.id,
+                        preview: message.content.preview(),
+                        is_outgoing: message.is_outgoing,
+                        content: message.content.clone(),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        let total = hits.len() as i32;
+        self.in_chat_search.accept(hits, total, false);
+        if self.in_chat_search.status == SearchStatus::Ready {
+            self.promote_in_chat_hit();
         }
     }
 
@@ -2147,5 +2385,130 @@ mod tests {
         );
         assert_eq!(session.search.status, SearchStatus::Idle);
         assert!(session.search.recents);
+    }
+
+    #[test]
+    fn in_chat_search_happy_path_jump_and_next() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateNewChat","chat":{"id":11,"title":"Alice","type":{"@type":"chatTypePrivate","user_id":11},"unread_count":0}}"#,
+        );
+        session.open_chat(ChatId(11));
+        session.open_in_chat_search(ChatId(11));
+        assert_eq!(session.in_chat_search.status, SearchStatus::Idle);
+        assert!(session.in_chat_search.open);
+        assert!(!session.search.open);
+
+        let search_gen = session.in_chat_search.begin_query("hello");
+        let extra = session.request_search(RequestPurpose::SearchChatMessages, search_gen);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"foundChatMessages","@extra":"{}","total_count":2,"next_from_message_id":0,"messages":[{{"id":104,"chat_id":11,"is_outgoing":false,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"CANARY_INCHAT_newer","entities":[]}}}}}},{{"id":101,"chat_id":11,"is_outgoing":false,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"CANARY_INCHAT_older","entities":[]}}}}}}]}}"#,
+                extra.0
+            ),
+        );
+        assert_eq!(session.in_chat_search.status, SearchStatus::Ready);
+        assert_eq!(session.in_chat_search.hits.len(), 2);
+        assert_eq!(session.in_chat_search.selected, 0);
+        assert_eq!(session.in_chat_search.highlighted, Some(MessageId(104)));
+        assert_eq!(session.in_chat_search.counter_label(), "1 of 2");
+        assert!(
+            session
+                .histories
+                .get(&11)
+                .unwrap()
+                .messages
+                .contains_key(&104)
+        );
+        assert_eq!(session.select_in_chat_hit(1), Some(MessageId(101)));
+        assert_eq!(session.in_chat_search.highlighted, Some(MessageId(101)));
+        assert_eq!(session.in_chat_search.counter_label(), "2 of 2");
+        assert!(
+            session
+                .histories
+                .get(&11)
+                .unwrap()
+                .messages
+                .contains_key(&101)
+        );
+        session.close_in_chat_search();
+        assert_eq!(session.in_chat_search.status, SearchStatus::Closed);
+        assert!(!session.in_chat_search.open);
+        assert!(!sink.rendered().contains("CANARY_INCHAT"));
+    }
+
+    #[test]
+    fn in_chat_search_empty_error_stale_and_chat_switch() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateNewChat","chat":{"id":11,"title":"Alice","type":{"@type":"chatTypePrivate","user_id":11},"unread_count":0}}"#,
+        );
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateNewChat","chat":{"id":12,"title":"Bob","type":{"@type":"chatTypePrivate","user_id":12},"unread_count":0}}"#,
+        );
+        session.open_chat(ChatId(11));
+        session.open_in_chat_search(ChatId(11));
+
+        let empty_gen = session.in_chat_search.begin_query("zzz");
+        let empty_extra = session.request_search(RequestPurpose::SearchChatMessages, empty_gen);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"foundChatMessages","@extra":"{}","total_count":0,"next_from_message_id":0,"messages":[]}}"#,
+                empty_extra.0
+            ),
+        );
+        assert_eq!(session.in_chat_search.status, SearchStatus::Empty);
+        assert_eq!(session.in_chat_search.counter_label(), "No messages found");
+
+        let stale = session.in_chat_search.begin_query("old");
+        let stale_extra = session.request_search(RequestPurpose::SearchChatMessages, stale);
+        let fresh = session.in_chat_search.begin_query("new");
+        let fresh_extra = session.request_search(RequestPurpose::SearchChatMessages, fresh);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"foundChatMessages","@extra":"{}","total_count":1,"next_from_message_id":0,"messages":[{{"id":1,"chat_id":11,"is_outgoing":false,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"stale","entities":[]}}}}}}]}}"#,
+                stale_extra.0
+            ),
+        );
+        assert_eq!(session.in_chat_search.status, SearchStatus::Searching);
+        assert!(session.in_chat_search.hits.is_empty());
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"error","code":400,"message":"CANARY_INCHAT_ERR","@extra":"{}"}}"#,
+                fresh_extra.0
+            ),
+        );
+        assert_eq!(session.in_chat_search.status, SearchStatus::Failed);
+        assert!(!sink.rendered().contains("CANARY_INCHAT_ERR"));
+
+        let again = session.in_chat_search.begin_query("hello");
+        let _again_extra = session.request_search(RequestPurpose::SearchChatMessages, again);
+        session.open_chat(ChatId(12));
+        assert!(!session.in_chat_search.open);
+        assert_eq!(session.in_chat_search.status, SearchStatus::Closed);
+        assert!(!session.search.open);
     }
 }

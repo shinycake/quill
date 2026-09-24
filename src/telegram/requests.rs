@@ -158,6 +158,26 @@ pub fn search_recently_found_chats(extra: RequestId, query: &str, limit: i32) ->
     .to_string()
 }
 
+/// `searchChatMessages` (TDLib 1.8.67). In-chat find: Unigram
+/// `SearchChatMessages` / tdesktop ComposeSearch. `topic_id` / `sender_id` /
+/// `filter` null = all topics / any sender / all messages. First page from the
+/// last message: `from_message_id` 0, `offset` 0 (schema).
+pub fn search_chat_messages(extra: RequestId, chat_id: ChatId, query: &str, limit: i32) -> String {
+    json!({
+        "@type": "searchChatMessages",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0,
+        "topic_id": Value::Null,
+        "query": query,
+        "sender_id": Value::Null,
+        "from_message_id": 0,
+        "offset": 0,
+        "limit": limit,
+        "filter": Value::Null,
+    })
+    .to_string()
+}
+
 /// `addRecentlyFoundChat` (TDLib 1.8.67). Official clients send this on select.
 pub fn add_recently_found_chat(extra: RequestId, chat_id: ChatId) -> String {
     json!({
@@ -514,6 +534,25 @@ mod tests {
         assert_eq!(v["max_date"], 0);
         assert!(!json.contains("chatListMain"));
         assert!(!json.contains("CANARY"));
+    }
+
+    #[test]
+    fn search_chat_messages_shape_matches_1_8_67() {
+        let json = search_chat_messages(RequestId(25), ChatId(11), "hello", 50);
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "searchChatMessages");
+        assert_eq!(v["@extra"], "25");
+        assert_eq!(v["chat_id"], 11);
+        assert_eq!(v["topic_id"], Value::Null);
+        assert_eq!(v["query"], "hello");
+        assert_eq!(v["sender_id"], Value::Null);
+        assert_eq!(v["from_message_id"], 0);
+        assert_eq!(v["offset"], 0);
+        assert_eq!(v["limit"], 50);
+        assert_eq!(v["filter"], Value::Null);
+        assert!(!json.contains("CANARY"));
+        assert!(!json.contains("searchMessages"));
+        assert!(!json.contains("searchChats"));
     }
 
     #[test]

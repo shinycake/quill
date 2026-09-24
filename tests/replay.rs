@@ -496,6 +496,61 @@ fn replay_global_search_happy_empty_and_error() {
 }
 
 #[test]
+fn replay_in_chat_search_found_chat_messages() {
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn quill::diagnostics::DiagnosticSink> = sink.clone();
+    let mut session = Session::new(AccountKey::primary(), dyn_sink);
+    let seq = AtomicU64::new(0);
+    apply_all_seq(
+        &mut session,
+        &sink,
+        &seq,
+        &[
+            r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+            r#"{"@type":"updateNewChat","chat":{"id":7,"title":"Alice","type":{"@type":"chatTypePrivate","user_id":7},"unread_count":0}}"#,
+            r#"{"@type":"updateChatPosition","chat_id":7,"position":{"@type":"chatPosition","list":{"@type":"chatListMain"},"order":"9","is_pinned":false}}"#,
+        ],
+    );
+    session.open_chat(quill::ids::ChatId(7));
+    session.open_in_chat_search(quill::ids::ChatId(7));
+    assert!(!session.search.open);
+    let search_gen = session.in_chat_search.begin_query("hello");
+    let extra = session.request_search(RequestPurpose::SearchChatMessages, search_gen);
+    apply_all_seq(
+        &mut session,
+        &sink,
+        &seq,
+        &[&format!(
+            r#"{{"@type":"foundChatMessages","@extra":"{}","total_count":1,"next_from_message_id":0,"messages":[{{"id":50,"chat_id":7,"is_outgoing":false,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"CANARY_REPLAY_inchat","entities":[]}}}}}}]}}"#,
+            extra.0
+        )],
+    );
+    assert_eq!(
+        session.in_chat_search.status,
+        quill::state::SearchStatus::Ready
+    );
+    assert_eq!(
+        session.in_chat_search.highlighted,
+        Some(quill::ids::MessageId(50))
+    );
+    assert!(
+        session
+            .histories
+            .get(&7)
+            .unwrap()
+            .messages
+            .contains_key(&50)
+    );
+    assert!(!session.search.open);
+    session.close_in_chat_search();
+    assert_eq!(
+        session.in_chat_search.status,
+        quill::state::SearchStatus::Closed
+    );
+    assert!(!sink.rendered().contains("CANARY_REPLAY"));
+}
+
+#[test]
 fn logout_invalidates_pending_requests() {
     let sink = Arc::new(MemorySink::new());
     let dyn_sink: Arc<dyn quill::diagnostics::DiagnosticSink> = sink.clone();

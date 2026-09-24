@@ -97,6 +97,8 @@ pub const REQUIRED_SCHEMA_CONSTRUCTORS: &[&str] = &[
     "searchMessages",
     "searchRecentlyFoundChats",
     "addRecentlyFoundChat",
+    "searchChatMessages",
     "chats",
     "foundMessages",
+    "foundChatMessages",
 ];
