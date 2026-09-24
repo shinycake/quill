@@ -75,6 +75,12 @@ pub enum EnvelopePayload {
         unread_count: i32,
         last_read_inbox_message_id: MessageId,
         last_read_outbox_message_id: MessageId,
+        notification_settings: ChatNotificationSettings,
+    },
+    /// `updateChatNotificationSettings` — chat mute / sound exception changed.
+    UpdateChatNotificationSettings {
+        chat_id: ChatId,
+        notification_settings: ChatNotificationSettings,
     },
     Ok,
     Error(TdError),
@@ -231,6 +237,81 @@ pub enum ChatList {
     Archive,
     Folder(i32),
     Unknown,
+}
+
+/// tdesktop default mute submenu (`SessionSettings::mutePeriods` when unset /
+/// `DefaultTimePickerValues`): 1 hour, 8 hours, 2 days. Seconds, matching
+/// `chatNotificationSettings.mute_for`.
+pub const MUTE_FOR_1_HOUR: i32 = 3600;
+pub const MUTE_FOR_8_HOURS: i32 = 8 * 3600;
+pub const MUTE_FOR_2_DAYS: i32 = 2 * 86400;
+/// tdesktop `MuteMenu::kMuteForeverValue` (`numeric_limits<int>::max()`).
+/// TDLib: mute_for longer than 366 days is muted forever.
+pub const MUTE_FOREVER: i32 = i32::MAX;
+pub const MUTE_FOREVER_AFTER_SECONDS: i32 = 366 * 86400;
+
+/// `chatNotificationSettings` (TDLib 1.8.67). Other fields are copied through
+/// so a mute change does not reset sound / preview exceptions.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChatNotificationSettings {
+    pub use_default_mute_for: bool,
+    pub mute_for: i32,
+    pub use_default_sound: bool,
+    pub sound_id: i64,
+    pub use_default_show_preview: bool,
+    pub show_preview: bool,
+    pub use_default_mute_stories: bool,
+    pub mute_stories: bool,
+    pub use_default_story_sound: bool,
+    pub story_sound_id: i64,
+    pub use_default_show_story_poster: bool,
+    pub show_story_poster: bool,
+    pub use_default_disable_pinned_message_notifications: bool,
+    pub disable_pinned_message_notifications: bool,
+    pub use_default_disable_mention_notifications: bool,
+    pub disable_mention_notifications: bool,
+}
+
+impl Default for ChatNotificationSettings {
+    fn default() -> Self {
+        Self {
+            use_default_mute_for: true,
+            mute_for: 0,
+            use_default_sound: true,
+            sound_id: 0,
+            use_default_show_preview: true,
+            show_preview: false,
+            use_default_mute_stories: true,
+            mute_stories: false,
+            use_default_story_sound: true,
+            story_sound_id: 0,
+            use_default_show_story_poster: true,
+            show_story_poster: false,
+            use_default_disable_pinned_message_notifications: true,
+            disable_pinned_message_notifications: false,
+            use_default_disable_mention_notifications: true,
+            disable_mention_notifications: false,
+        }
+    }
+}
+
+impl ChatNotificationSettings {
+    /// Exception mute. `use_default_mute_for` stays true until the user sets one
+    /// (Unigram clones settings and clears the default flag).
+    pub fn with_mute_for(mut self, mute_for: i32) -> Self {
+        self.use_default_mute_for = false;
+        self.mute_for = mute_for;
+        self
+    }
+
+    /// Effective chat mute. Scope defaults are not applied here.
+    pub fn is_muted(&self) -> bool {
+        !self.use_default_mute_for && self.mute_for > 0
+    }
+
+    pub fn is_muted_forever(&self) -> bool {
+        self.is_muted() && self.mute_for > MUTE_FOREVER_AFTER_SECONDS
+    }
 }
 
 /// `message.forward_info.origin` (TDLib 1.8.67 `MessageOrigin`).
@@ -725,6 +806,12 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
                 value.get("last_read_outbox_message_id"),
             )),
         }),
+        "updateChatNotificationSettings" => Ok(EnvelopePayload::UpdateChatNotificationSettings {
+            chat_id: ChatId(int53(value.get("chat_id"))?),
+            notification_settings: parse_chat_notification_settings(
+                value.get("notification_settings"),
+            ),
+        }),
         "updateConnectionState" => Ok(EnvelopePayload::UpdateConnectionState(parse_connection(
             value.get("state"),
         ))),
@@ -748,6 +835,9 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
                 last_read_outbox_message_id: MessageId(int53_or_zero(
                     chat.get("last_read_outbox_message_id"),
                 )),
+                notification_settings: parse_chat_notification_settings(
+                    chat.get("notification_settings"),
+                ),
             })
         }
         "ok" => Ok(EnvelopePayload::Ok),
@@ -941,6 +1031,80 @@ fn parse_position_list(chat_id: ChatId, value: Option<&Value>) -> Vec<ChatPositi
         .flatten()
         .map(|position| parse_position_entry(chat_id, position))
         .collect()
+}
+
+fn json_bool(value: Option<&Value>, default: bool) -> bool {
+    value.and_then(Value::as_bool).unwrap_or(default)
+}
+
+fn json_i32(value: Option<&Value>, default: i32) -> i32 {
+    value
+        .and_then(|v| {
+            v.as_i64()
+                .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
+        })
+        .unwrap_or(default as i64) as i32
+}
+
+fn json_i64_field(value: Option<&Value>, default: i64) -> i64 {
+    value
+        .and_then(|v| {
+            v.as_i64()
+                .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
+        })
+        .unwrap_or(default)
+}
+
+fn parse_chat_notification_settings(value: Option<&Value>) -> ChatNotificationSettings {
+    let Some(value) = value.filter(|v| !v.is_null()) else {
+        return ChatNotificationSettings::default();
+    };
+    let defaults = ChatNotificationSettings::default();
+    ChatNotificationSettings {
+        use_default_mute_for: json_bool(
+            value.get("use_default_mute_for"),
+            defaults.use_default_mute_for,
+        ),
+        mute_for: json_i32(value.get("mute_for"), defaults.mute_for),
+        use_default_sound: json_bool(value.get("use_default_sound"), defaults.use_default_sound),
+        sound_id: json_i64_field(value.get("sound_id"), defaults.sound_id),
+        use_default_show_preview: json_bool(
+            value.get("use_default_show_preview"),
+            defaults.use_default_show_preview,
+        ),
+        show_preview: json_bool(value.get("show_preview"), defaults.show_preview),
+        use_default_mute_stories: json_bool(
+            value.get("use_default_mute_stories"),
+            defaults.use_default_mute_stories,
+        ),
+        mute_stories: json_bool(value.get("mute_stories"), defaults.mute_stories),
+        use_default_story_sound: json_bool(
+            value.get("use_default_story_sound"),
+            defaults.use_default_story_sound,
+        ),
+        story_sound_id: json_i64_field(value.get("story_sound_id"), defaults.story_sound_id),
+        use_default_show_story_poster: json_bool(
+            value.get("use_default_show_story_poster"),
+            defaults.use_default_show_story_poster,
+        ),
+        show_story_poster: json_bool(value.get("show_story_poster"), defaults.show_story_poster),
+        use_default_disable_pinned_message_notifications: json_bool(
+            value.get("use_default_disable_pinned_message_notifications"),
+            defaults.use_default_disable_pinned_message_notifications,
+        ),
+        disable_pinned_message_notifications: json_bool(
+            value.get("disable_pinned_message_notifications"),
+            defaults.disable_pinned_message_notifications,
+        ),
+        use_default_disable_mention_notifications: json_bool(
+            value.get("use_default_disable_mention_notifications"),
+            defaults.use_default_disable_mention_notifications,
+        ),
+        disable_mention_notifications: json_bool(
+            value.get("disable_mention_notifications"),
+            defaults.disable_mention_notifications,
+        ),
+    }
 }
 
 fn parse_chat_list(value: Option<&Value>) -> ChatList {

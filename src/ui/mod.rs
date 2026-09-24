@@ -26,7 +26,8 @@ use quill::state::{
 };
 use quill::telegram::client::copy_and_parse;
 use quill::telegram::envelope::{
-    AuthorizationState, DEFAULT_EMOJI_REACTIONS, MessageContent, MessageInteractionInfo,
+    AuthorizationState, ChatNotificationSettings, DEFAULT_EMOJI_REACTIONS, MUTE_FOR_1_HOUR,
+    MUTE_FOR_2_DAYS, MUTE_FOR_8_HOURS, MUTE_FOREVER, MessageContent, MessageInteractionInfo,
     ParsedFile, toggle_chosen_emoji_reaction,
 };
 use std::collections::HashMap;
@@ -132,6 +133,8 @@ pub struct QuillApp {
     forward_result: Option<ForwardResult>,
     /// tdesktop hover React / Unigram ReactionButton picker (emoji only).
     pending_react: Option<(ChatId, MessageId)>,
+    /// tdesktop Mute submenu (1 hour / 8 hours / 2 days / Forever).
+    mute_menu_open: bool,
 }
 
 /// Forced UI surfaces for screenshot proof (no live Telegram / no real credentials).
@@ -162,6 +165,8 @@ pub enum ScreenshotDemo {
     ReadyReactions,
     /// Pin / unpin + pinned banner (injected, no live Telegram).
     ReadyPin,
+    /// Mute presets + muted icon + archive section (injected, no live Telegram).
+    ReadyMuteArchive,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -483,6 +488,16 @@ impl QuillApp {
                     AuthorizationState::Ready,
                 )
             }
+            Some(ScreenshotDemo::ReadyMuteArchive) => {
+                demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
+                (
+                    ConnectUiStatus::DemoReadyChats,
+                    None,
+                    "screenshot demo — mute / archive (injected notification + chat list updates)"
+                        .into(),
+                    AuthorizationState::Ready,
+                )
+            }
             None => bootstrap_connect(credentials),
         };
 
@@ -528,6 +543,7 @@ impl QuillApp {
             forward_picker_open: false,
             forward_result: None,
             pending_react: None,
+            mute_menu_open: false,
         };
         if matches!(demo, Some(ScreenshotDemo::ReadyChatsComposer)) {
             app.composer.update(cx, |input, cx| {
@@ -624,6 +640,14 @@ impl QuillApp {
                 let _ = session.begin_chat_search_jump(MessageId(101));
             }
             app.status_note = "screenshot demo — pin · unpin · pinned bar".into();
+        }
+        if matches!(demo, Some(ScreenshotDemo::ReadyMuteArchive)) {
+            if let Some(session) = app.demo_session.as_mut() {
+                app.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_mute_archive(session, &app.demo_sink, &app.demo_seq);
+            }
+            app.mute_menu_open = true;
+            app.status_note = "screenshot demo — mute presets · muted icon · archive".into();
         }
         if app.live.is_some() {
             app.spawn_poll_loop(cx);
@@ -1187,6 +1211,10 @@ impl QuillApp {
     }
 
     fn cancel_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.mute_menu_open {
+            self.close_mute_menu(cx);
+            return;
+        }
         if self.pending_react.is_some() {
             self.close_reaction_picker(cx);
             return;
@@ -1697,6 +1725,287 @@ impl QuillApp {
             self.status_note = "unpinned".into();
             cx.notify();
         }
+    }
+
+    fn close_mute_menu(&mut self, cx: &mut Context<Self>) {
+        self.mute_menu_open = false;
+        cx.notify();
+    }
+
+    fn open_mute_menu(&mut self, cx: &mut Context<Self>) {
+        self.mute_menu_open = true;
+        self.status_note = "mute for…".into();
+        cx.notify();
+    }
+
+    fn apply_chat_mute(&mut self, chat_id: ChatId, mute_for: i32, cx: &mut Context<Self>) {
+        self.mute_menu_open = false;
+        if self.live.is_some() {
+            let result = self
+                .live
+                .as_mut()
+                .expect("live")
+                .driver
+                .set_chat_mute_for(chat_id, mute_for);
+            self.status_note = match result {
+                Ok(_) if mute_for == 0 => "unmuting…".into(),
+                Ok(_) => "muting…".into(),
+                Err(_) => "could not change mute".into(),
+            };
+            cx.notify();
+            return;
+        }
+        if self.demo_session.is_some() {
+            self.apply_demo_notification(chat_id, mute_for);
+            self.status_note = if mute_for == 0 {
+                "unmuted".into()
+            } else {
+                "muted".into()
+            };
+            cx.notify();
+        }
+    }
+
+    fn apply_demo_notification(&mut self, chat_id: ChatId, mute_for: i32) {
+        let Some(session) = self.demo_session.as_mut() else {
+            return;
+        };
+        let current = session
+            .chats
+            .get(&chat_id.0)
+            .map(|chat| chat.notification_settings.clone())
+            .unwrap_or_default();
+        let settings = current.with_mute_for(mute_for);
+        let json = format!(
+            r#"{{"@type":"updateChatNotificationSettings","chat_id":{},"notification_settings":{}}}"#,
+            chat_id.0,
+            notification_settings_json(&settings)
+        );
+        let dyn_sink: Arc<dyn DiagnosticSink> = self.demo_sink.clone();
+        if let Some(owned) = copy_and_parse(&json, &self.demo_seq, &dyn_sink) {
+            session.apply(owned);
+        }
+    }
+
+    fn toggle_archive(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
+        let archived = self
+            .session()
+            .and_then(|session| session.chats.get(&chat_id.0))
+            .is_some_and(|chat| chat.in_archive);
+        if self.live.is_some() {
+            let result = if archived {
+                self.live
+                    .as_mut()
+                    .expect("live")
+                    .driver
+                    .unarchive_chat(chat_id)
+            } else {
+                self.live
+                    .as_mut()
+                    .expect("live")
+                    .driver
+                    .archive_chat(chat_id)
+            };
+            self.status_note = match result {
+                Ok(_) if archived => "unarchiving…".into(),
+                Ok(_) => "archiving…".into(),
+                Err(_) => "could not change archive".into(),
+            };
+            cx.notify();
+            return;
+        }
+        if self.demo_session.is_some() {
+            self.apply_demo_archive(chat_id, !archived);
+            self.status_note = if archived {
+                "unarchived".into()
+            } else {
+                "archived".into()
+            };
+            cx.notify();
+        }
+    }
+
+    fn apply_demo_archive(&mut self, chat_id: ChatId, archive: bool) {
+        let Some(session) = self.demo_session.as_mut() else {
+            return;
+        };
+        let order = session
+            .chats
+            .get(&chat_id.0)
+            .map(|chat| {
+                if archive {
+                    chat.order.max(1)
+                } else {
+                    chat.archive_order.max(1)
+                }
+            })
+            .unwrap_or(1);
+        let jsons = if archive {
+            vec![
+                format!(
+                    r#"{{"@type":"updateChatPosition","chat_id":{},"position":{{"@type":"chatPosition","list":{{"@type":"chatListMain"}},"order":"0","is_pinned":false}}}}"#,
+                    chat_id.0
+                ),
+                format!(
+                    r#"{{"@type":"updateChatRemovedFromList","chat_id":{},"chat_list":{{"@type":"chatListMain"}}}}"#,
+                    chat_id.0
+                ),
+                format!(
+                    r#"{{"@type":"updateChatPosition","chat_id":{},"position":{{"@type":"chatPosition","list":{{"@type":"chatListArchive"}},"order":"{order}","is_pinned":false}}}}"#,
+                    chat_id.0
+                ),
+                format!(
+                    r#"{{"@type":"updateChatAddedToList","chat_id":{},"chat_list":{{"@type":"chatListArchive"}}}}"#,
+                    chat_id.0
+                ),
+            ]
+        } else {
+            vec![
+                format!(
+                    r#"{{"@type":"updateChatPosition","chat_id":{},"position":{{"@type":"chatPosition","list":{{"@type":"chatListArchive"}},"order":"0","is_pinned":false}}}}"#,
+                    chat_id.0
+                ),
+                format!(
+                    r#"{{"@type":"updateChatRemovedFromList","chat_id":{},"chat_list":{{"@type":"chatListArchive"}}}}"#,
+                    chat_id.0
+                ),
+                format!(
+                    r#"{{"@type":"updateChatPosition","chat_id":{},"position":{{"@type":"chatPosition","list":{{"@type":"chatListMain"}},"order":"{order}","is_pinned":false}}}}"#,
+                    chat_id.0
+                ),
+                format!(
+                    r#"{{"@type":"updateChatAddedToList","chat_id":{},"chat_list":{{"@type":"chatListMain"}}}}"#,
+                    chat_id.0
+                ),
+            ]
+        };
+        let dyn_sink: Arc<dyn DiagnosticSink> = self.demo_sink.clone();
+        if let Some(session) = self.demo_session.as_mut() {
+            for json in jsons {
+                if let Some(owned) = copy_and_parse(&json, &self.demo_seq, &dyn_sink) {
+                    session.apply(owned);
+                }
+            }
+        }
+    }
+
+    fn conversation_header(
+        &self,
+        title: &str,
+        actions: Option<(ChatId, bool, bool, bool)>,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let (chat_id, muted, forever, archived) =
+            actions.unwrap_or((ChatId(0), false, false, false));
+        div()
+            .id("conversation-header")
+            .px_4()
+            .py_2()
+            .border_b_1()
+            .border_color(cx.theme().border)
+            .flex()
+            .items_center()
+            .justify_between()
+            .gap_2()
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .min_w_0()
+                    .child(div().font_semibold().child(title.to_string()))
+                    .when(muted, |this| {
+                        this.child(
+                            div()
+                                .text_xs()
+                                .text_color(cx.theme().muted_foreground)
+                                .child(if forever { "Muted forever" } else { "Muted" }),
+                        )
+                    }),
+            )
+            .when(actions.is_some(), |this| {
+                this.child(
+                    div()
+                        .flex()
+                        .gap_1()
+                        .child(
+                            Button::new("chat-mute")
+                                .label(if muted { "Unmute" } else { "Mute" })
+                                .ghost()
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    if muted {
+                                        this.apply_chat_mute(chat_id, 0, cx);
+                                    } else if this.mute_menu_open {
+                                        this.close_mute_menu(cx);
+                                    } else {
+                                        this.open_mute_menu(cx);
+                                    }
+                                })),
+                        )
+                        .child(
+                            Button::new("chat-archive")
+                                .label(if archived { "Unarchive" } else { "Archive" })
+                                .ghost()
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.toggle_archive(chat_id, cx);
+                                })),
+                        ),
+                )
+            })
+    }
+
+    fn mute_menu_panel(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let chat_id = self.session().and_then(|session| session.open_chat);
+        let presets = [
+            ("1 hour", MUTE_FOR_1_HOUR),
+            ("8 hours", MUTE_FOR_8_HOURS),
+            ("2 days", MUTE_FOR_2_DAYS),
+            ("Forever", MUTE_FOREVER),
+        ];
+        let mut row = div().id("mute-presets").flex().flex_wrap().gap_1();
+        for (label, seconds) in presets {
+            row = row.child(
+                Button::new(format!("mute-for-{seconds}"))
+                    .label(label)
+                    .ghost()
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        if let Some(chat_id) = chat_id {
+                            this.apply_chat_mute(chat_id, seconds, cx);
+                        }
+                    })),
+            );
+        }
+        div()
+            .id("mute-menu")
+            .flex()
+            .flex_col()
+            .gap_2()
+            .px_3()
+            .py_2()
+            .border_b_1()
+            .border_color(cx.theme().border)
+            .bg(cx.theme().sidebar)
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .child(div().font_semibold().child("Mute for"))
+                    .child(
+                        Button::new("close-mute-menu")
+                            .label("Close")
+                            .ghost()
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.close_mute_menu(cx);
+                            })),
+                    ),
+            )
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("1 hour, 8 hours, 2 days, or forever."),
+            )
+            .child(row)
     }
 
     fn pinned_message_banner(
@@ -3043,6 +3352,16 @@ impl QuillApp {
             ChatSearchJump::None | ChatSearchJump::Missing { .. } => None,
         });
         let pinned = session.and_then(|s| s.open_chat_pinned_message()).cloned();
+        let chat_actions = open.and_then(|id| {
+            session.and_then(|s| s.chats.get(&id.0)).and_then(|chat| {
+                chat.supported().then_some((
+                    chat.id,
+                    chat.is_muted(),
+                    chat.notification_settings.is_muted_forever(),
+                    chat.in_archive,
+                ))
+            })
+        });
         div()
             .id("conversation-history")
             .flex()
@@ -3050,15 +3369,10 @@ impl QuillApp {
             .flex_1()
             .min_h_0()
             .min_w_0()
-            .child(
-                div()
-                    .px_4()
-                    .py_2()
-                    .border_b_1()
-                    .border_color(cx.theme().border)
-                    .font_semibold()
-                    .child(title),
-            )
+            .child(self.conversation_header(&title, chat_actions, cx))
+            .when(self.mute_menu_open, |this| {
+                this.child(self.mute_menu_panel(cx))
+            })
             .when_some(pinned, |this, message| {
                 this.child(self.pinned_message_banner(&message, cx))
             })
@@ -3230,6 +3544,25 @@ impl QuillApp {
                     for chat in chats {
                         let selected = open == Some(chat.id);
                         list = list.child(session_chat_row(&chat, selected, cx));
+                    }
+                    let archived: Vec<ChatSummary> = self
+                        .session()
+                        .map(|s| s.ordered_archived_chats().into_iter().cloned().collect())
+                        .unwrap_or_default();
+                    if !archived.is_empty() {
+                        list = list.child(
+                            div()
+                                .id("archive-section")
+                                .mt_2()
+                                .text_xs()
+                                .font_semibold()
+                                .text_color(cx.theme().muted_foreground)
+                                .child("Archived"),
+                        );
+                        for chat in archived {
+                            let selected = open == Some(chat.id);
+                            list = list.child(session_chat_row(&chat, selected, cx));
+                        }
                     }
                 }
             }
@@ -3405,6 +3738,52 @@ fn apply_ready_reactions(session: &mut Session, sink: &Arc<MemorySink>, seq: &At
     let jsons = [
         format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
         r#"{"@type":"updateMessageInteractionInfo","chat_id":11,"message_id":101,"interaction_info":{"@type":"messageInteractionInfo","view_count":0,"forward_count":0,"reply_info":null,"reactions":{"@type":"messageReactions","reactions":[{"@type":"messageReaction","type":{"@type":"reactionTypeEmoji","emoji":"❤"},"total_count":3,"is_chosen":true,"used_sender_id":null,"recent_sender_ids":[]},{"@type":"messageReaction","type":{"@type":"reactionTypeEmoji","emoji":"👍"},"total_count":2,"is_chosen":false,"used_sender_id":null,"recent_sender_ids":[]}],"are_tags":false,"paid_reactors":[],"can_get_added_reactions":false}}}"#
+            .to_string(),
+    ];
+    for json in jsons {
+        if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
+            session.apply(owned);
+        }
+    }
+}
+
+fn notification_settings_json(settings: &ChatNotificationSettings) -> String {
+    format!(
+        r#"{{"@type":"chatNotificationSettings","use_default_mute_for":{},"mute_for":{},"use_default_sound":{},"sound_id":"{}","use_default_show_preview":{},"show_preview":{},"use_default_mute_stories":{},"mute_stories":{},"use_default_story_sound":{},"story_sound_id":"{}","use_default_show_story_poster":{},"show_story_poster":{},"use_default_disable_pinned_message_notifications":{},"disable_pinned_message_notifications":{},"use_default_disable_mention_notifications":{},"disable_mention_notifications":{}}}"#,
+        settings.use_default_mute_for,
+        settings.mute_for,
+        settings.use_default_sound,
+        settings.sound_id,
+        settings.use_default_show_preview,
+        settings.show_preview,
+        settings.use_default_mute_stories,
+        settings.mute_stories,
+        settings.use_default_story_sound,
+        settings.story_sound_id,
+        settings.use_default_show_story_poster,
+        settings.show_story_poster,
+        settings.use_default_disable_pinned_message_notifications,
+        settings.disable_pinned_message_notifications,
+        settings.use_default_disable_mention_notifications,
+        settings.disable_mention_notifications
+    )
+}
+
+fn apply_ready_mute_archive(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let muted = ChatNotificationSettings::default().with_mute_for(MUTE_FOREVER);
+    let jsons = [
+        format!(
+            r#"{{"@type":"updateChatNotificationSettings","chat_id":11,"notification_settings":{}}}"#,
+            notification_settings_json(&muted)
+        ),
+        r#"{"@type":"updateChatPosition","chat_id":12,"position":{"@type":"chatPosition","list":{"@type":"chatListMain"},"order":"0","is_pinned":false}}"#
+            .to_string(),
+        r#"{"@type":"updateChatRemovedFromList","chat_id":12,"chat_list":{"@type":"chatListMain"}}"#
+            .to_string(),
+        r#"{"@type":"updateChatPosition","chat_id":12,"position":{"@type":"chatPosition","list":{"@type":"chatListArchive"},"order":"20","is_pinned":false}}"#
+            .to_string(),
+        r#"{"@type":"updateChatAddedToList","chat_id":12,"chat_list":{"@type":"chatListArchive"}}"#
             .to_string(),
     ];
     for json in jsons {
@@ -3795,7 +4174,15 @@ fn session_chat_row(
                 .items_center()
                 .justify_between()
                 .gap_2()
-                .child(div().font_medium().min_w_0().child(title))
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap_1()
+                        .min_w_0()
+                        .child(div().font_medium().min_w_0().child(title))
+                        .when(chat.is_muted(), |this| this.child(muted_badge(id))),
+                )
                 .when_some(badge, |this, label| this.child(unread_badge(label, id))),
         )
         .child(
@@ -3804,6 +4191,22 @@ fn session_chat_row(
                 .text_color(cx.theme().muted_foreground)
                 .child(preview),
         )
+}
+
+fn muted_badge(chat_id: ChatId) -> impl IntoElement {
+    div()
+        .id(("muted-badge", chat_id.0 as u64))
+        .h(px(18.))
+        .px_1()
+        .rounded_md()
+        .flex()
+        .items_center()
+        .justify_center()
+        .bg(rgb(0x6e7681))
+        .text_color(rgb(0xffffff))
+        .text_xs()
+        .font_semibold()
+        .child("Muted")
 }
 
 fn unread_badge(label: String, chat_id: ChatId) -> impl IntoElement {

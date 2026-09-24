@@ -126,4 +126,9 @@ pub const REQUIRED_SCHEMA_CONSTRUCTORS: &[&str] = &[
     "pinChatMessage",
     "unpinChatMessage",
     "updateMessageIsPinned",
+    "setChatNotificationSettings",
+    "chatNotificationSettings",
+    "updateChatNotificationSettings",
+    "addChatToList",
+    "chatListArchive",
 ];

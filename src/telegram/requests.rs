@@ -561,6 +561,53 @@ pub fn pin_chat_message(
     .to_string()
 }
 
+/// `setChatNotificationSettings` (TDLib 1.8.67). Full settings object; callers
+/// copy the chat's current settings and change only `mute_for`.
+pub fn set_chat_notification_settings(
+    extra: RequestId,
+    chat_id: ChatId,
+    settings: &crate::telegram::envelope::ChatNotificationSettings,
+) -> String {
+    json!({
+        "@type": "setChatNotificationSettings",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0,
+        "notification_settings": {
+            "@type": "chatNotificationSettings",
+            "use_default_mute_for": settings.use_default_mute_for,
+            "mute_for": settings.mute_for,
+            "use_default_sound": settings.use_default_sound,
+            "sound_id": settings.sound_id,
+            "use_default_show_preview": settings.use_default_show_preview,
+            "show_preview": settings.show_preview,
+            "use_default_mute_stories": settings.use_default_mute_stories,
+            "mute_stories": settings.mute_stories,
+            "use_default_story_sound": settings.use_default_story_sound,
+            "story_sound_id": settings.story_sound_id,
+            "use_default_show_story_poster": settings.use_default_show_story_poster,
+            "show_story_poster": settings.show_story_poster,
+            "use_default_disable_pinned_message_notifications": settings.use_default_disable_pinned_message_notifications,
+            "disable_pinned_message_notifications": settings.disable_pinned_message_notifications,
+            "use_default_disable_mention_notifications": settings.use_default_disable_mention_notifications,
+            "disable_mention_notifications": settings.disable_mention_notifications
+        }
+    })
+    .to_string()
+}
+
+/// `addChatToList` (TDLib 1.8.67). Main and Archive are mutually exclusive.
+pub fn add_chat_to_list(extra: RequestId, chat_id: ChatId, archive: bool) -> String {
+    json!({
+        "@type": "addChatToList",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0,
+        "chat_list": {
+            "@type": if archive { "chatListArchive" } else { "chatListMain" }
+        }
+    })
+    .to_string()
+}
+
 /// `unpinChatMessage` (TDLib 1.8.67). Removes one pinned message.
 pub fn unpin_chat_message(extra: RequestId, chat_id: ChatId, message_id: MessageId) -> String {
     json!({
