@@ -7,8 +7,8 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::auth::{AuthAction, AuthView, view_for};
 use quill::composer::{
-    AttachmentKind, ComposerAttachment, ComposerReplyTo, ComposerSnapshot, cancel_reply_draft,
-    should_send_on_enter,
+    AttachmentKind, ComposerAttachment, ComposerEdit, ComposerReplyTo, ComposerSnapshot,
+    DeleteConfirm, begin_edit_draft, cancel_edit_draft, cancel_reply_draft, should_send_on_enter,
 };
 use quill::connect::{
     ChatSearchQueryOutcome, ConnectBlocker, ConnectGate, LiveConnect, SEARCH_DEBOUNCE,
@@ -113,6 +113,12 @@ pub struct QuillApp {
     pending_attachment: Option<ComposerAttachment>,
     /// Same-chat reply draft (tdesktop `FieldHeader::replyToMessage`).
     pending_reply: Option<ComposerReplyTo>,
+    /// Own-message edit (tdesktop `FieldHeader::editMessage`).
+    pending_edit: Option<ComposerEdit>,
+    /// Normal composer draft stashed while editing (`DraftType::Normal`).
+    saved_edit_draft: String,
+    /// Delete confirm (tdesktop `DeleteMessagesBox` / Unigram popup).
+    pending_delete: Option<DeleteConfirm>,
 }
 
 /// Forced UI surfaces for screenshot proof (no live Telegram / no real credentials).
@@ -135,6 +141,8 @@ pub enum ScreenshotDemo {
     ReadySearchInChat,
     /// Reply-to-message: composer quote + history quote strip.
     ReadyReply,
+    /// Own-message edit mode + delete confirm (injected, no live Telegram).
+    ReadyEditDelete,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -399,6 +407,15 @@ impl QuillApp {
                     AuthorizationState::Ready,
                 )
             }
+            Some(ScreenshotDemo::ReadyEditDelete) => {
+                demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
+                (
+                    ConnectUiStatus::DemoReadyChats,
+                    None,
+                    "screenshot demo — edit + delete own messages (injected)".into(),
+                    AuthorizationState::Ready,
+                )
+            }
             None => bootstrap_connect(credentials),
         };
 
@@ -436,6 +453,9 @@ impl QuillApp {
             demo_sink,
             pending_attachment,
             pending_reply: None,
+            pending_edit: None,
+            saved_edit_draft: String::new(),
+            pending_delete: None,
         };
         if matches!(demo, Some(ScreenshotDemo::ReadyChatsComposer)) {
             app.composer.update(cx, |input, cx| {
@@ -481,6 +501,24 @@ impl QuillApp {
                     "Hello from injected JSON.",
                 ));
             }
+        }
+        if matches!(demo, Some(ScreenshotDemo::ReadyEditDelete)) {
+            let edit = ComposerEdit::from_own_content(
+                ChatId(11),
+                MessageId(102),
+                true,
+                false,
+                &quill::telegram::envelope::MessageContent::Text(
+                    "Reply from the session reducer.".into(),
+                ),
+            );
+            app.composer.update(cx, |input, cx| {
+                input.set_value("Reply from the session reducer.", window, cx);
+                input.focus(window, cx);
+            });
+            app.pending_edit = edit;
+            app.saved_edit_draft = "unrelated draft stays".into();
+            app.pending_delete = DeleteConfirm::own(ChatId(11), MessageId(102), true, false);
         }
         if app.live.is_some() {
             app.spawn_poll_loop(cx);
@@ -594,6 +632,10 @@ impl QuillApp {
                 cx.notify();
             }
             PaneMode::Ready => {
+                if self.pending_edit.is_some() {
+                    self.submit_edit(text, window, cx);
+                    return;
+                }
                 if self.live.is_some() {
                     let plan = {
                         let session = &self.live.as_ref().expect("live").driver.session;
@@ -758,6 +800,53 @@ impl QuillApp {
         }
     }
 
+    fn apply_demo_edit(&mut self, edit: &ComposerEdit, text: &str) {
+        let Some(session) = self.demo_session.as_mut() else {
+            return;
+        };
+        match edit.kind {
+            quill::composer::ComposerEditKind::Text => {
+                let dyn_sink: Arc<dyn DiagnosticSink> = self.demo_sink.clone();
+                let body = serde_json::to_string(text).unwrap_or_else(|_| "\"\"".into());
+                let json = format!(
+                    r#"{{"@type":"updateMessageContent","chat_id":{},"message_id":{},"new_content":{{"@type":"messageText","text":{{"@type":"formattedText","text":{body},"entities":[]}}}}}}"#,
+                    edit.chat_id.0, edit.message_id.0
+                );
+                if let Some(owned) = copy_and_parse(&json, &self.demo_seq, &dyn_sink) {
+                    session.apply(owned);
+                }
+            }
+            quill::composer::ComposerEditKind::Caption => {
+                if let Some(message) = session
+                    .histories
+                    .get_mut(&edit.chat_id.0)
+                    .and_then(|history| history.messages.get_mut(&edit.message_id.0))
+                {
+                    match &mut message.content {
+                        MessageContent::Photo(photo) => photo.caption = text.to_string(),
+                        MessageContent::Document(doc) => doc.caption = text.to_string(),
+                        MessageContent::Text(body) => *body = text.to_string(),
+                        MessageContent::Unsupported { .. } => {}
+                    }
+                }
+            }
+        }
+    }
+
+    fn apply_demo_delete(&mut self, chat_id: ChatId, message_id: MessageId) {
+        let Some(session) = self.demo_session.as_mut() else {
+            return;
+        };
+        let dyn_sink: Arc<dyn DiagnosticSink> = self.demo_sink.clone();
+        let json = format!(
+            r#"{{"@type":"updateDeleteMessages","chat_id":{},"message_ids":[{}],"is_permanent":true,"from_cache":false}}"#,
+            chat_id.0, message_id.0
+        );
+        if let Some(owned) = copy_and_parse(&json, &self.demo_seq, &dyn_sink) {
+            session.apply(owned);
+        }
+    }
+
     fn select_listed_chat(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
         if self
             .pending_reply
@@ -765,6 +854,21 @@ impl QuillApp {
             .is_some_and(|reply| reply.chat_id != chat_id)
         {
             self.pending_reply = None;
+        }
+        if self
+            .pending_edit
+            .as_ref()
+            .is_some_and(|edit| edit.chat_id != chat_id)
+        {
+            self.pending_edit = None;
+            self.saved_edit_draft.clear();
+        }
+        if self
+            .pending_delete
+            .as_ref()
+            .is_some_and(|confirm| confirm.chat_id != chat_id)
+        {
+            self.pending_delete = None;
         }
         if self.live.is_some() {
             let result = self
@@ -956,6 +1060,10 @@ impl QuillApp {
     }
 
     fn cancel_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.pending_delete.is_some() {
+            self.cancel_delete(cx);
+            return;
+        }
         if self.chat_search_is_open() {
             self.close_chat_search_ui(window, cx);
             return;
@@ -973,6 +1081,10 @@ impl QuillApp {
         }
         if self.pending_reply.is_some() {
             self.clear_reply(cx);
+            return;
+        }
+        if self.pending_edit.is_some() {
+            self.clear_edit(window, cx);
         }
     }
 
@@ -982,10 +1094,110 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.pending_edit.is_some() {
+            self.clear_edit(window, cx);
+        }
         self.pending_reply = Some(reply);
         self.composer
             .update(cx, |input, cx| input.focus(window, cx));
         self.status_note = "replying".into();
+        cx.notify();
+    }
+
+    fn begin_edit(&mut self, edit: ComposerEdit, window: &mut Window, cx: &mut Context<Self>) {
+        self.pending_reply = None;
+        self.pending_attachment = None;
+        let current = self.composer.read(cx).value().to_string();
+        let (edit, field, saved) = begin_edit_draft(current, edit);
+        self.pending_edit = Some(edit);
+        self.saved_edit_draft = saved;
+        self.composer.update(cx, |input, cx| {
+            input.set_value(&field, window, cx);
+            input.focus(window, cx);
+        });
+        self.status_note = "editing".into();
+        cx.notify();
+    }
+
+    fn clear_edit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // tdesktop cancelEditMessage → applyDraft(): restore normal draft.
+        let saved = std::mem::take(&mut self.saved_edit_draft);
+        let (_, restored) = cancel_edit_draft(self.pending_edit.take(), saved);
+        self.composer
+            .update(cx, |input, cx| input.set_value(&restored, window, cx));
+        self.status_note = "edit cancelled".into();
+        cx.notify();
+    }
+
+    fn finish_edit_restore_draft(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let saved = std::mem::take(&mut self.saved_edit_draft);
+        self.pending_edit = None;
+        self.composer
+            .update(cx, |input, cx| input.set_value(&saved, window, cx));
+    }
+
+    fn submit_edit(&mut self, text: String, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(edit) = self.pending_edit.clone() else {
+            return;
+        };
+        if self.live.is_some() {
+            let result = self
+                .live
+                .as_mut()
+                .expect("live")
+                .driver
+                .edit_snapshot(&edit, &text);
+            match result {
+                Ok(_) => {
+                    self.finish_edit_restore_draft(window, cx);
+                    self.status_note = "saving edit…".into();
+                }
+                Err(_) => {
+                    self.status_note = "could not edit message".into();
+                }
+            }
+            cx.notify();
+            return;
+        }
+        if self.demo_session.is_some() {
+            self.apply_demo_edit(&edit, text.trim());
+            self.finish_edit_restore_draft(window, cx);
+            self.status_note = "demo edit applied locally (no live Telegram)".into();
+            cx.notify();
+        }
+    }
+
+    fn begin_delete(&mut self, confirm: DeleteConfirm, cx: &mut Context<Self>) {
+        self.pending_delete = Some(confirm);
+        self.status_note = "confirm delete".into();
+        cx.notify();
+    }
+
+    fn cancel_delete(&mut self, cx: &mut Context<Self>) {
+        self.pending_delete = None;
+        self.status_note = "delete cancelled".into();
+        cx.notify();
+    }
+
+    fn confirm_delete(&mut self, cx: &mut Context<Self>) {
+        let Some(confirm) = self.pending_delete.take() else {
+            return;
+        };
+        if self.live.is_some() {
+            let result = self
+                .live
+                .as_mut()
+                .expect("live")
+                .driver
+                .delete_confirmed(&confirm);
+            self.status_note = match result {
+                Ok(_) => "deleting…".into(),
+                Err(_) => "could not delete message".into(),
+            };
+        } else if self.demo_session.is_some() {
+            self.apply_demo_delete(confirm.chat_id, confirm.message_id);
+            self.status_note = "demo delete applied locally (no live Telegram)".into();
+        }
         cx.notify();
     }
 
@@ -994,6 +1206,104 @@ impl QuillApp {
         self.pending_reply = cancel_reply_draft(self.pending_reply.take(), String::new()).0;
         self.status_note = "reply cancelled".into();
         cx.notify();
+    }
+
+    fn composer_edit_banner(
+        &self,
+        edit: &ComposerEdit,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let preview = edit.original_text.clone();
+        let kind = match edit.kind {
+            quill::composer::ComposerEditKind::Text => "Editing message",
+            quill::composer::ComposerEditKind::Caption => "Editing caption",
+        };
+        div()
+            .id("composer-edit-header")
+            .flex()
+            .items_center()
+            .justify_between()
+            .gap_2()
+            .px_3()
+            .py_2()
+            .rounded_md()
+            .border_1()
+            .border_color(rgb(0xd29922))
+            .bg(rgb(0x21262d))
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .min_w_0()
+                    .child(
+                        div()
+                            .text_xs()
+                            .font_medium()
+                            .text_color(rgb(0xd29922))
+                            .child(kind),
+                    )
+                    .child(div().text_sm().text_color(rgb(0xc9d1d9)).child(preview)),
+            )
+            .child(
+                Button::new("cancel-edit")
+                    .label("Cancel")
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.clear_edit(window, cx);
+                    })),
+            )
+    }
+
+    fn delete_confirm_banner(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .id("delete-confirm")
+            .flex()
+            .items_center()
+            .justify_between()
+            .gap_2()
+            .px_3()
+            .py_2()
+            .rounded_md()
+            .border_1()
+            .border_color(rgb(0xf85149))
+            .bg(rgb(0x3d1f1f))
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .min_w_0()
+                    .child(
+                        div()
+                            .text_xs()
+                            .font_medium()
+                            .text_color(rgb(0xf85149))
+                            .child("Delete this message?"),
+                    )
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_color(rgb(0xc9d1d9))
+                            .child("Deletes for everyone (official desktop default)."),
+                    ),
+            )
+            .child(
+                div()
+                    .flex()
+                    .gap_2()
+                    .child(
+                        Button::new("cancel-delete")
+                            .label("Cancel")
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.cancel_delete(cx);
+                            })),
+                    )
+                    .child(
+                        Button::new("confirm-delete")
+                            .label("Delete")
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.confirm_delete(cx);
+                            })),
+                    ),
+            )
     }
 
     fn composer_reply_banner(
@@ -1806,7 +2116,7 @@ impl QuillApp {
             .min_h_0()
             .child(history)
             .when(composer.is_some(), |this| {
-                let show_attach = matches!(mode, PaneMode::Ready);
+                let show_attach = matches!(mode, PaneMode::Ready) && self.pending_edit.is_none();
                 let chip = if show_attach {
                     self.pending_attachment.as_ref().map(|att| {
                         let label = match att.kind {
@@ -1875,6 +2185,12 @@ impl QuillApp {
                                             .child("ready to send · picked locally"),
                                     ),
                             )
+                        })
+                        .when_some(self.pending_delete.clone(), |this, _| {
+                            this.child(self.delete_confirm_banner(cx))
+                        })
+                        .when_some(self.pending_edit.clone(), |this, edit| {
+                            this.child(self.composer_edit_banner(&edit, cx))
                         })
                         .when_some(self.pending_reply.clone(), |this, reply| {
                             this.child(self.composer_reply_banner(&reply, cx))
@@ -2615,6 +2931,35 @@ fn session_history_row(
         .on_click(cx.listener(move |this, _, window, cx| {
             this.begin_reply_to(reply_target.clone(), window, cx);
         }));
+    let edit_btn = ComposerEdit::from_own_content(
+        message.chat_id,
+        message.id,
+        message.is_outgoing,
+        message.pending,
+        &message.content,
+    )
+    .map(|edit| {
+        Button::new(format!("edit-{}", message.id.0))
+            .label("Edit")
+            .ghost()
+            .on_click(cx.listener(move |this, _, window, cx| {
+                this.begin_edit(edit.clone(), window, cx);
+            }))
+    });
+    let delete_btn = DeleteConfirm::own(
+        message.chat_id,
+        message.id,
+        message.is_outgoing,
+        message.pending,
+    )
+    .map(|confirm| {
+        Button::new(format!("delete-{}", message.id.0))
+            .label("Delete")
+            .ghost()
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.begin_delete(confirm.clone(), cx);
+            }))
+    });
     let extra_media = match &message.content {
         MessageContent::Photo(photo) => Some(photo_attachment(
             message.id.0 as u64,
@@ -2637,7 +2982,14 @@ fn session_history_row(
         div()
             .id(("bubble-extra", message.id.0 as u64))
             .when_some(extra_media, |this, media| this.child(media))
-            .child(reply_btn)
+            .child(
+                div()
+                    .flex()
+                    .gap_2()
+                    .child(reply_btn)
+                    .when_some(edit_btn, |this, btn| this.child(btn))
+                    .when_some(delete_btn, |this, btn| this.child(btn)),
+            )
             .into_any_element(),
     );
     let body = match &message.content {
@@ -2929,7 +3281,7 @@ fn status_bar(
         .text_xs()
         .text_color(cx.theme().muted_foreground)
         .child(format!(
-            "Auth: {} · {} · {} · Keyboard: ⌘K search, ⌘F in chat, Esc cancel reply/search, ⌘1 sidebar, ⌘L composer, ⌘↑ older · VoiceOver: macOS follow-up",
+            "Auth: {} · {} · {} · Keyboard: ⌘K search, ⌘F in chat, Esc cancel delete/edit/reply/search, ⌘1 sidebar, ⌘L composer, ⌘↑ older · VoiceOver: macOS follow-up",
             auth.title,
             connect_status_label(connect_status),
             status_note

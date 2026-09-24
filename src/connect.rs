@@ -1,7 +1,9 @@
 //! Live TDLib connect gate: credentials + tdjson → setTdlibParameters → auth updates.
 //! Never logs api_hash, phone numbers, or codes.
 
-use crate::composer::{AttachmentKind, ComposerSnapshot};
+use crate::composer::{
+    AttachmentKind, ComposerEdit, ComposerEditKind, ComposerSnapshot, DeleteConfirm,
+};
 use crate::credentials::TelegramCredentials;
 use crate::diagnostics::DiagnosticSink;
 use crate::ids::{AccountKey, ChatId, FileId, MessageId, RequestId};
@@ -14,10 +16,11 @@ use crate::telegram::envelope::{AuthorizationState, EnvelopePayload};
 use crate::telegram::ffi::{LibraryOrigin, TdJsonError, resolve_tdjson_path};
 use crate::telegram::requests::{
     SetTdlibParameters, add_recently_found_chat, check_authentication_code,
-    check_authentication_password, close_chat, close_request,
-    download_file as download_file_request, get_authorization_state, get_chat_history, load_chats,
-    open_chat, search_chat_messages, search_chats, search_messages, search_recently_found_chats,
-    send_document, send_photo, send_text, set_authentication_phone_number, view_messages,
+    check_authentication_password, close_chat, close_request, delete_messages,
+    download_file as download_file_request, edit_message_caption, edit_message_text,
+    get_authorization_state, get_chat_history, load_chats, open_chat, search_chat_messages,
+    search_chats, search_messages, search_recently_found_chats, send_document, send_photo,
+    send_text, set_authentication_phone_number, view_messages,
 };
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -354,6 +357,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             owned.envelope.payload,
             EnvelopePayload::Messages(_)
                 | EnvelopePayload::UpdateNewMessage(_)
+                | EnvelopePayload::UpdateMessageContent { .. }
                 | EnvelopePayload::UpdateFile(_)
                 | EnvelopePayload::File(_)
         );
@@ -658,6 +662,114 @@ impl<S: JsonSender> ConnectDriver<S> {
                 return Err(ConnectSendError::InvalidRequest);
             }
         };
+        match self.sender.send_json(&json) {
+            Ok(()) => Ok(extra),
+            Err(err) => {
+                self.session.requests.take(extra);
+                Err(err)
+            }
+        }
+    }
+
+    /// Save an own-message edit via `editMessageText` or `editMessageCaption`.
+    pub fn edit_snapshot(
+        &mut self,
+        edit: &ComposerEdit,
+        text: &str,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let supported = self
+            .session
+            .chats
+            .get(&edit.chat_id.0)
+            .is_some_and(|chat| chat.supported());
+        if !supported {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let Some(message) = self
+            .session
+            .histories
+            .get(&edit.chat_id.0)
+            .and_then(|history| history.messages.get(&edit.message_id.0))
+        else {
+            return Err(ConnectSendError::InvalidRequest);
+        };
+        if ComposerEdit::from_own_content(
+            message.chat_id,
+            message.id,
+            message.is_outgoing,
+            message.pending,
+            &message.content,
+        )
+        .is_none()
+        {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let caption = text.trim();
+        if matches!(edit.kind, ComposerEditKind::Text) && caption.is_empty() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::EditMessage, Some(edit.chat_id));
+        let json = match edit.kind {
+            ComposerEditKind::Text => {
+                edit_message_text(extra, edit.chat_id, edit.message_id, caption)
+            }
+            ComposerEditKind::Caption => {
+                edit_message_caption(extra, edit.chat_id, edit.message_id, caption, false)
+            }
+        };
+        match self.sender.send_json(&json) {
+            Ok(()) => Ok(extra),
+            Err(err) => {
+                self.session.requests.take(extra);
+                Err(err)
+            }
+        }
+    }
+
+    /// After UI confirm (tdesktop `DeleteMessagesBox`), send `deleteMessages`.
+    /// `revoke: true` matches official desktop default for own outgoing.
+    pub fn delete_confirmed(
+        &mut self,
+        confirm: &DeleteConfirm,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let supported = self
+            .session
+            .chats
+            .get(&confirm.chat_id.0)
+            .is_some_and(|chat| chat.supported());
+        if !supported {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let Some(message) = self
+            .session
+            .histories
+            .get(&confirm.chat_id.0)
+            .and_then(|history| history.messages.get(&confirm.message_id.0))
+        else {
+            return Err(ConnectSendError::InvalidRequest);
+        };
+        if DeleteConfirm::own(
+            message.chat_id,
+            message.id,
+            message.is_outgoing,
+            message.pending,
+        )
+        .is_none()
+        {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::DeleteMessages, Some(confirm.chat_id));
+        let json = delete_messages(extra, confirm.chat_id, &[confirm.message_id], true);
         match self.sender.send_json(&json) {
             Ok(()) => Ok(extra),
             Err(err) => {
@@ -2838,6 +2950,159 @@ mod tests {
                 .is_some()
         );
         assert!(!sink.rendered().contains("CANARY_REPLY"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn driver_edit_text_shape_and_incoming_rejected() {
+        use crate::composer::{ComposerEdit, ComposerEditKind};
+
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = Arc::new(RecordingSender::new());
+        let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+        let mut driver =
+            ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+        let seq = AtomicU64::new(0);
+        seed_ready_alice(&mut driver, &seq, &dyn_sink);
+        driver
+            .ingest(
+                copy_and_parse(
+                    r#"{"@type":"updateNewMessage","message":{"id":60,"chat_id":7,"is_outgoing":true,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"own outgoing","entities":[]}}}}"#,
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+
+        let incoming = ComposerEdit {
+            chat_id: ChatId(7),
+            message_id: MessageId(50),
+            original_text: "hello already here".into(),
+            kind: ComposerEditKind::Text,
+        };
+        assert_eq!(
+            driver.edit_snapshot(&incoming, "nope"),
+            Err(ConnectSendError::InvalidRequest)
+        );
+
+        let edit = ComposerEdit {
+            chat_id: ChatId(7),
+            message_id: MessageId(60),
+            original_text: "own outgoing".into(),
+            kind: ComposerEditKind::Text,
+        };
+        assert_eq!(
+            driver.edit_snapshot(&edit, "   "),
+            Err(ConnectSendError::InvalidRequest)
+        );
+        let extra = driver.edit_snapshot(&edit, "CANARY_EDIT_text").unwrap();
+        let json = recorder
+            .snapshot()
+            .last()
+            .cloned()
+            .expect("editMessageText");
+        let v: Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "editMessageText");
+        assert_eq!(v["@extra"], extra.0.to_string());
+        assert_eq!(v["chat_id"], 7);
+        assert_eq!(v["message_id"], 60);
+        assert_eq!(v["reply_markup"], Value::Null);
+        assert_eq!(v["input_message_content"]["@type"], "inputMessageText");
+        assert_eq!(
+            v["input_message_content"]["text"]["text"],
+            "CANARY_EDIT_text"
+        );
+        assert_eq!(v["input_message_content"]["clear_draft"], true);
+
+        driver
+            .ingest(
+                copy_and_parse(
+                    r#"{"@type":"updateMessageContent","chat_id":7,"message_id":60,"new_content":{"@type":"messageText","text":{"@type":"formattedText","text":"CANARY_EDIT_text","entities":[]}}}"#,
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        assert_eq!(
+            driver
+                .session
+                .histories
+                .get(&7)
+                .unwrap()
+                .messages
+                .get(&60)
+                .unwrap()
+                .content
+                .preview(),
+            "CANARY_EDIT_text"
+        );
+        assert!(!sink.rendered().contains("CANARY_EDIT"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn driver_delete_confirm_shape_and_tombstone() {
+        use crate::composer::DeleteConfirm;
+
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = Arc::new(RecordingSender::new());
+        let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+        let mut driver =
+            ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+        let seq = AtomicU64::new(0);
+        seed_ready_alice(&mut driver, &seq, &dyn_sink);
+        driver
+            .ingest(
+                copy_and_parse(
+                    r#"{"@type":"updateNewMessage","message":{"id":60,"chat_id":7,"is_outgoing":true,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"own outgoing","entities":[]}}}}"#,
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+
+        let incoming = DeleteConfirm {
+            chat_id: ChatId(7),
+            message_id: MessageId(50),
+        };
+        assert_eq!(
+            driver.delete_confirmed(&incoming),
+            Err(ConnectSendError::InvalidRequest)
+        );
+
+        let confirm = DeleteConfirm::own(ChatId(7), MessageId(60), true, false).unwrap();
+        let extra = driver.delete_confirmed(&confirm).unwrap();
+        let json = recorder.snapshot().last().cloned().expect("deleteMessages");
+        let v: Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "deleteMessages");
+        assert_eq!(v["@extra"], extra.0.to_string());
+        assert_eq!(v["chat_id"], 7);
+        assert_eq!(v["message_ids"], serde_json::json!([60]));
+        assert_eq!(v["revoke"], true);
+
+        driver
+            .ingest(
+                copy_and_parse(
+                    r#"{"@type":"updateDeleteMessages","chat_id":7,"message_ids":[60],"is_permanent":true,"from_cache":false}"#,
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        let history = driver.session.histories.get(&7).unwrap();
+        assert!(!history.contains(MessageId(60)));
+        assert!(history.is_tombstone(MessageId(60)));
+        assert!(!sink.rendered().contains("CANARY"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

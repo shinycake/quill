@@ -33,6 +33,10 @@ pub enum RequestPurpose {
     SearchChatMessages,
     /// `getChatHistory` around a jump target (Unigram `LoadMessageSliceImpl`).
     GetHistoryAround,
+    /// `editMessageText` / `editMessageCaption`. Response is `message`.
+    EditMessage,
+    /// `deleteMessages`. Response is `ok`; rows leave via `updateDeleteMessages`.
+    DeleteMessages,
     Close,
     LogOut,
     Other,
@@ -412,6 +416,15 @@ impl HistoryState {
 
     pub fn is_tombstone(&self, id: MessageId) -> bool {
         self.tombstones.contains(&id.0)
+    }
+
+    fn update_content(&mut self, id: MessageId, content: MessageContent) -> bool {
+        if let Some(message) = self.messages.get_mut(&id.0) {
+            message.content = content;
+            true
+        } else {
+            false
+        }
     }
 }
 
@@ -1001,6 +1014,29 @@ impl Session {
             }
             EnvelopePayload::UpdateMessageSendAcknowledged { .. } => {
                 // Not success. Keep the pending row until Succeeded/Failed.
+            }
+            EnvelopePayload::UpdateMessageContent {
+                chat_id,
+                message_id,
+                content,
+                files,
+            } => {
+                self.remember_files(&files);
+                let preview = content.preview();
+                let updated = self
+                    .histories
+                    .get_mut(&chat_id.0)
+                    .is_some_and(|history| history.update_content(message_id, content));
+                if updated {
+                    let is_last = self
+                        .histories
+                        .get(&chat_id.0)
+                        .and_then(|history| history.messages.keys().next_back().copied())
+                        == Some(message_id.0);
+                    if is_last && let Some(chat) = self.chats.get_mut(&chat_id.0) {
+                        chat.last_preview = preview;
+                    }
+                }
             }
             EnvelopePayload::UpdateDeleteMessages {
                 chat_id,
@@ -2977,5 +3013,55 @@ mod tests {
             }
         );
         assert!(session.histories.get(&11).unwrap().contains(MessageId(90)));
+    }
+
+    #[test]
+    fn update_message_content_rewrites_own_text() {
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let mut session = Session::new(AccountKey::primary(), dyn_sink);
+        let seq = AtomicU64::new(0);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+        );
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateNewChat","chat":{"id":11,"title":"Demo","type":{"@type":"chatTypePrivate","user_id":11},"unread_count":0}}"#,
+        );
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateNewMessage","message":{"id":102,"chat_id":11,"is_outgoing":true,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"Reply from the session reducer.","entities":[]}}}}"#,
+        );
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateMessageContent","chat_id":11,"message_id":102,"new_content":{"@type":"messageText","text":{"@type":"formattedText","text":"CANARY_EDITED_own","entities":[]}}}"#,
+        );
+        let text = session
+            .histories
+            .get(&11)
+            .unwrap()
+            .messages
+            .get(&102)
+            .unwrap()
+            .content
+            .preview();
+        assert_eq!(text, "CANARY_EDITED_own");
+        assert!(
+            !session
+                .histories
+                .get(&11)
+                .unwrap()
+                .is_tombstone(MessageId(102))
+        );
+        assert!(!sink.rendered().contains("CANARY_EDITED"));
     }
 }

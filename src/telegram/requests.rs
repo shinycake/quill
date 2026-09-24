@@ -394,6 +394,79 @@ pub fn send_document(
     .to_string()
 }
 
+/// `editMessageText` (TDLib 1.8.67). `reply_markup` null — bots only.
+/// `input_message_content` must be `inputMessageText` (or `inputMessageRichMessage`).
+pub fn edit_message_text(
+    extra: RequestId,
+    chat_id: ChatId,
+    message_id: MessageId,
+    text: &str,
+) -> String {
+    json!({
+        "@type": "editMessageText",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0,
+        "message_id": message_id.0,
+        "reply_markup": Value::Null,
+        "input_message_content": {
+            "@type": "inputMessageText",
+            "text": {
+                "@type": "formattedText",
+                "text": text,
+                "entities": []
+            },
+            "link_preview_options": Value::Null,
+            "clear_draft": true
+        }
+    })
+    .to_string()
+}
+
+/// `editMessageCaption` (TDLib 1.8.67). Caption-only media edit.
+/// `show_caption_above_media` is false unless the original already inverted it.
+pub fn edit_message_caption(
+    extra: RequestId,
+    chat_id: ChatId,
+    message_id: MessageId,
+    caption: &str,
+    show_caption_above_media: bool,
+) -> String {
+    json!({
+        "@type": "editMessageCaption",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0,
+        "message_id": message_id.0,
+        "reply_markup": Value::Null,
+        "caption": {
+            "@type": "formattedText",
+            "text": caption,
+            "entities": []
+        },
+        "show_caption_above_media": show_caption_above_media
+    })
+    .to_string()
+}
+
+/// `deleteMessages` (TDLib 1.8.67). `revoke` true = delete for all members
+/// (tdesktop `DeleteMessagesBox` / Unigram `DeleteMessagesPopup` default for
+/// own outgoing that `can_be_deleted_for_all_users`). Always true in
+/// supergroups, channels, and secret chats per schema.
+pub fn delete_messages(
+    extra: RequestId,
+    chat_id: ChatId,
+    message_ids: &[MessageId],
+    revoke: bool,
+) -> String {
+    json!({
+        "@type": "deleteMessages",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0,
+        "message_ids": message_ids.iter().map(|id| id.0).collect::<Vec<_>>(),
+        "revoke": revoke
+    })
+    .to_string()
+}
+
 pub fn runtime_version_request() -> String {
     json!({
         "@type": "getOption",
@@ -616,6 +689,59 @@ mod tests {
         assert_eq!(v["chat_id"], 11);
         assert!(!recents.contains("CANARY"));
         assert!(!add.contains("CANARY"));
+    }
+
+    #[test]
+    fn edit_message_text_shape_matches_1_8_67() {
+        let json = edit_message_text(RequestId(31), ChatId(11), MessageId(102), "edited body");
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "editMessageText");
+        assert_eq!(v["@extra"], "31");
+        assert_eq!(v["chat_id"], 11);
+        assert_eq!(v["message_id"], 102);
+        assert_eq!(v["reply_markup"], Value::Null);
+        assert_eq!(v["input_message_content"]["@type"], "inputMessageText");
+        assert_eq!(v["input_message_content"]["text"]["@type"], "formattedText");
+        assert_eq!(v["input_message_content"]["text"]["text"], "edited body");
+        assert_eq!(
+            v["input_message_content"]["text"]["entities"],
+            serde_json::json!([])
+        );
+        assert_eq!(
+            v["input_message_content"]["link_preview_options"],
+            Value::Null
+        );
+        assert_eq!(v["input_message_content"]["clear_draft"], true);
+        assert!(!json.contains("CANARY"));
+        assert!(!json.contains("message_thread_id"));
+    }
+
+    #[test]
+    fn edit_message_caption_shape_matches_1_8_67() {
+        let json = edit_message_caption(RequestId(32), ChatId(11), MessageId(60), "new cap", false);
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "editMessageCaption");
+        assert_eq!(v["@extra"], "32");
+        assert_eq!(v["chat_id"], 11);
+        assert_eq!(v["message_id"], 60);
+        assert_eq!(v["reply_markup"], Value::Null);
+        assert_eq!(v["caption"]["@type"], "formattedText");
+        assert_eq!(v["caption"]["text"], "new cap");
+        assert_eq!(v["caption"]["entities"], serde_json::json!([]));
+        assert_eq!(v["show_caption_above_media"], false);
+        assert!(!json.contains("CANARY"));
+    }
+
+    #[test]
+    fn delete_messages_shape_matches_1_8_67() {
+        let json = delete_messages(RequestId(33), ChatId(11), &[MessageId(102)], true);
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "deleteMessages");
+        assert_eq!(v["@extra"], "33");
+        assert_eq!(v["chat_id"], 11);
+        assert_eq!(v["message_ids"], serde_json::json!([102]));
+        assert_eq!(v["revoke"], true);
+        assert!(!json.contains("CANARY"));
     }
 
     #[test]
