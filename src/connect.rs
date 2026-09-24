@@ -21,9 +21,9 @@ use crate::telegram::requests::{
     check_authentication_password, close_chat, close_request, delete_messages,
     download_file as download_file_request, edit_message_caption, edit_message_text,
     forward_messages, get_authorization_state, get_chat_history, load_chats, open_chat,
-    remove_message_reaction, search_chat_messages, search_chats, search_messages,
+    pin_chat_message, remove_message_reaction, search_chat_messages, search_chats, search_messages,
     search_recently_found_chats, send_document, send_photo, send_text,
-    set_authentication_phone_number, view_messages,
+    set_authentication_phone_number, unpin_chat_message, view_messages,
 };
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -920,6 +920,88 @@ impl<S: JsonSender> ConnectDriver<S> {
             remove_message_reaction(extra, chat_id, message_id, emoji)
         } else {
             add_message_reaction(extra, chat_id, message_id, emoji, false, true)
+        };
+        match self.sender.send_json(&json) {
+            Ok(()) => Ok(extra),
+            Err(err) => {
+                self.session.requests.take(extra);
+                Err(err)
+            }
+        }
+    }
+
+    /// Pin a history message (tdesktop / Unigram Pin). Official defaults:
+    /// `disable_notification` false, `only_for_self` false.
+    pub fn pin_chat_message(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+    ) -> Result<RequestId, ConnectSendError> {
+        self.send_pin_chat_message(chat_id, message_id, false)
+    }
+
+    /// Unpin one pinned message (tdesktop PinnedBar cancel / Unpin).
+    pub fn unpin_chat_message(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+    ) -> Result<RequestId, ConnectSendError> {
+        self.send_pin_chat_message(chat_id, message_id, true)
+    }
+
+    /// Toggle pin for an already-sent message.
+    pub fn toggle_pin_chat_message(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+    ) -> Result<RequestId, ConnectSendError> {
+        let pinned = self
+            .session
+            .histories
+            .get(&chat_id.0)
+            .and_then(|history| history.messages.get(&message_id.0))
+            .is_some_and(|message| message.is_pinned);
+        self.send_pin_chat_message(chat_id, message_id, pinned)
+    }
+
+    fn send_pin_chat_message(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        unpin: bool,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let supported = self
+            .session
+            .chats
+            .get(&chat_id.0)
+            .is_some_and(|chat| chat.supported());
+        if !supported {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let Some(message) = self
+            .session
+            .histories
+            .get(&chat_id.0)
+            .and_then(|history| history.messages.get(&message_id.0))
+        else {
+            return Err(ConnectSendError::InvalidRequest);
+        };
+        if !message.can_pin() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let purpose = if unpin {
+            RequestPurpose::UnpinChatMessage
+        } else {
+            RequestPurpose::PinChatMessage
+        };
+        let extra = self.session.request(purpose, Some(chat_id));
+        let json = if unpin {
+            unpin_chat_message(extra, chat_id, message_id)
+        } else {
+            pin_chat_message(extra, chat_id, message_id, false, false)
         };
         match self.sender.send_json(&json) {
             Ok(()) => Ok(extra),
@@ -3468,6 +3550,105 @@ mod tests {
             .get(&50)
             .unwrap();
         assert!(cleared.emoji_reaction_chips().is_empty());
+        assert!(!sink.rendered().contains("CANARY"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn driver_pin_and_unpin_chat_message_then_is_pinned_update() {
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = Arc::new(RecordingSender::new());
+        let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+        let mut driver =
+            ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+        let seq = AtomicU64::new(0);
+        seed_ready_alice(&mut driver, &seq, &dyn_sink);
+
+        let extra = driver.pin_chat_message(ChatId(7), MessageId(50)).unwrap();
+        let json = recorder.snapshot().last().cloned().expect("pinChatMessage");
+        let v: Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "pinChatMessage");
+        assert_eq!(v["@extra"], extra.0.to_string());
+        assert_eq!(v["chat_id"], 7);
+        assert_eq!(v["message_id"], 50);
+        assert_eq!(v["disable_notification"], false);
+        assert_eq!(v["only_for_self"], false);
+        assert!(!json.contains("unpinAllChatMessages"));
+
+        driver
+            .ingest(
+                copy_and_parse(
+                    &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        driver
+            .ingest(
+                copy_and_parse(
+                    r#"{"@type":"updateMessageIsPinned","chat_id":7,"message_id":50,"is_pinned":true}"#,
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        let pinned = driver
+            .session
+            .histories
+            .get(&7)
+            .unwrap()
+            .messages
+            .get(&50)
+            .unwrap();
+        assert!(pinned.is_pinned);
+
+        let unpin_extra = driver.unpin_chat_message(ChatId(7), MessageId(50)).unwrap();
+        let unpin_json = recorder
+            .snapshot()
+            .last()
+            .cloned()
+            .expect("unpinChatMessage");
+        let v: Value = serde_json::from_str(&unpin_json).unwrap();
+        assert_eq!(v["@type"], "unpinChatMessage");
+        assert_eq!(v["@extra"], unpin_extra.0.to_string());
+        assert_eq!(v["chat_id"], 7);
+        assert_eq!(v["message_id"], 50);
+
+        driver
+            .ingest(
+                copy_and_parse(
+                    &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, unpin_extra.0),
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        driver
+            .ingest(
+                copy_and_parse(
+                    r#"{"@type":"updateMessageIsPinned","chat_id":7,"message_id":50,"is_pinned":false}"#,
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        let cleared = driver
+            .session
+            .histories
+            .get(&7)
+            .unwrap()
+            .messages
+            .get(&50)
+            .unwrap();
+        assert!(!cleared.is_pinned);
         assert!(!sink.rendered().contains("CANARY"));
         let _ = std::fs::remove_dir_all(&dir);
     }

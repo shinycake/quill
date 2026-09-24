@@ -23,6 +23,7 @@ Captured from a real GPUI window on 2026-09-17 (Linux Xvfb + lavapipe). **Not** 
 | `ready-edit-delete.png` | Ready chat open, composer **Editing message** plus **Delete this message?** confirm on an outgoing row. Injected Ready session, no live Telegram. Driven by `quill --screenshot-demo ready-edit-delete`. |
 | `ready-forward.png` | Ready chat open, two history rows selected, **Forward to…** dest picker (Demo chat B), and **Forwarded 2 messages to Demo chat B** success. Injected `forwardMessages` / `messageForwardInfo`, no live Telegram. Driven by `quill --screenshot-demo ready-forward`. |
 | `ready-reactions.png` | Ready chat open, **React** picker plus chips (`❤ 3` own highlight, `👍 2`). Injected `addMessageReaction` / `updateMessageInteractionInfo`, no live Telegram. Driven by `quill --screenshot-demo ready-reactions`. |
+| `ready-pin.png` | Ready chat open, **Pinned message** bar + history **Unpin** affordance on the pinned row. Injected `pinChatMessage` / `updateMessageIsPinned`, no live Telegram. Driven by `quill --screenshot-demo ready-pin`. |
 | `fixtures/demo-thumb.png` | Tiny checkerboard PNG used as the completed photo `local.path` in the media demo (not a screenshot). |
 | `fixtures/demo-notes.txt` | Tiny text file used for outgoing document attach / send demos (not a screenshot). |
 
@@ -48,6 +49,7 @@ bash scripts/capture-connect-screenshots.sh
 #   cargo run --features ui -- --screenshot-demo ready-edit-delete docs/screenshots
 #   cargo run --features ui -- --screenshot-demo ready-forward docs/screenshots
 #   cargo run --features ui -- --screenshot-demo ready-reactions docs/screenshots
+#   cargo run --features ui -- --screenshot-demo ready-pin docs/screenshots
 ```
 
 Environment used by the script: `DISPLAY`, `LIBGL_ALWAYS_SOFTWARE=1`, `WGPU_BACKEND=vulkan`, `VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json`.

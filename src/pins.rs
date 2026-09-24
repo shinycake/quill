@@ -123,4 +123,7 @@ pub const REQUIRED_SCHEMA_CONSTRUCTORS: &[&str] = &[
     "messageReactions",
     "messageReaction",
     "reactionTypeEmoji",
+    "pinChatMessage",
+    "unpinChatMessage",
+    "updateMessageIsPinned",
 ];

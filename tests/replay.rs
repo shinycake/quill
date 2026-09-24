@@ -856,6 +856,74 @@ fn replay_add_remove_reaction_and_interaction_info() {
 }
 
 #[test]
+fn replay_pin_and_unpin_message_is_pinned() {
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn quill::diagnostics::DiagnosticSink> = sink.clone();
+    let mut session = Session::new(AccountKey::primary(), dyn_sink);
+    let seq = AtomicU64::new(0);
+    apply_all_seq(
+        &mut session,
+        &sink,
+        &seq,
+        &[
+            r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+            r#"{"@type":"updateNewChat","chat":{"id":7,"title":"Alice","type":{"@type":"chatTypePrivate","user_id":7},"unread_count":0}}"#,
+            r#"{"@type":"updateNewMessage","message":{"id":50,"chat_id":7,"is_outgoing":false,"is_pinned":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"hello already here","entities":[]}}}}"#,
+        ],
+    );
+    session.open_chat = Some(quill::ids::ChatId(7));
+    assert!(session.open_chat_pinned_message().is_none());
+    let extra = session.request(
+        RequestPurpose::PinChatMessage,
+        Some(quill::ids::ChatId(7)),
+    );
+    apply_all_seq(
+        &mut session,
+        &sink,
+        &seq,
+        &[
+            &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
+            r#"{"@type":"updateMessageIsPinned","chat_id":7,"message_id":50,"is_pinned":true}"#,
+        ],
+    );
+    let message = session
+        .histories
+        .get(&7)
+        .unwrap()
+        .messages
+        .get(&50)
+        .unwrap();
+    assert!(message.is_pinned);
+    assert_eq!(
+        session.open_chat_pinned_message().map(|m| m.id.0),
+        Some(50)
+    );
+    let unpin = session.request(
+        RequestPurpose::UnpinChatMessage,
+        Some(quill::ids::ChatId(7)),
+    );
+    apply_all_seq(
+        &mut session,
+        &sink,
+        &seq,
+        &[
+            &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, unpin.0),
+            r#"{"@type":"updateMessageIsPinned","chat_id":7,"message_id":50,"is_pinned":false}"#,
+        ],
+    );
+    let after = session
+        .histories
+        .get(&7)
+        .unwrap()
+        .messages
+        .get(&50)
+        .unwrap();
+    assert!(!after.is_pinned);
+    assert!(session.open_chat_pinned_message().is_none());
+    assert!(!sink.rendered().contains("CANARY"));
+}
+
+#[test]
 fn logout_invalidates_pending_requests() {
     let sink = Arc::new(MemorySink::new());
     let dyn_sink: Arc<dyn quill::diagnostics::DiagnosticSink> = sink.clone();
