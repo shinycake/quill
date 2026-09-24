@@ -631,6 +631,69 @@ fn replay_chat_search_generation_jump_and_empty() {
 }
 
 #[test]
+fn replay_reply_to_message_quote_and_jump() {
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn quill::diagnostics::DiagnosticSink> = sink.clone();
+    let mut session = Session::new(AccountKey::primary(), dyn_sink);
+    let seq = AtomicU64::new(0);
+    apply_all_seq(
+        &mut session,
+        &sink,
+        &seq,
+        &[
+            r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+            r#"{"@type":"updateNewChat","chat":{"id":7,"title":"Alice","type":{"@type":"chatTypePrivate","user_id":7},"unread_count":0}}"#,
+            r#"{"@type":"updateNewMessage","message":{"id":50,"chat_id":7,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"hello already loaded","entities":[]}}}}"#,
+            r#"{"@type":"updateNewMessage","message":{"id":60,"chat_id":7,"is_outgoing":true,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"CANARY_REPLAY_reply","entities":[]}},"reply_to":{"@type":"messageReplyToMessage","chat_id":7,"message_id":50,"quote":null}}}"#,
+        ],
+    );
+    session.open_chat(quill::ids::ChatId(7));
+    let reply = session
+        .histories
+        .get(&7)
+        .unwrap()
+        .messages
+        .get(&60)
+        .unwrap();
+    assert_eq!(reply.reply_to.as_ref().map(|r| r.message_id.0), Some(50));
+    assert_eq!(
+        session.reply_quote_preview(reply).as_deref(),
+        Some("hello already loaded")
+    );
+    assert_eq!(
+        session.begin_chat_search_jump(quill::ids::MessageId(50)),
+        quill::state::ChatSearchJumpNeed::AlreadyReady
+    );
+    assert_eq!(
+        session.chat_search.jump,
+        quill::state::ChatSearchJump::Ready {
+            message_id: quill::ids::MessageId(50)
+        }
+    );
+    assert_eq!(
+        session.begin_chat_search_jump(quill::ids::MessageId(40)),
+        quill::state::ChatSearchJumpNeed::LoadAround
+    );
+    let around = session.request_history_around(quill::ids::ChatId(7), quill::ids::MessageId(40));
+    apply_all_seq(
+        &mut session,
+        &sink,
+        &seq,
+        &[&format!(
+            r#"{{"@type":"messages","@extra":"{}","total_count":1,"messages":[{{"id":40,"chat_id":7,"is_outgoing":false,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"older original","entities":[]}}}}}}]}}"#,
+            around.0
+        )],
+    );
+    assert_eq!(
+        session.chat_search.jump,
+        quill::state::ChatSearchJump::Ready {
+            message_id: quill::ids::MessageId(40)
+        }
+    );
+    assert!(!sink.rendered().contains("CANARY_REPLAY"));
+}
+
+#[test]
 fn logout_invalidates_pending_requests() {
     let sink = Arc::new(MemorySink::new());
     let dyn_sink: Arc<dyn quill::diagnostics::DiagnosticSink> = sink.clone();

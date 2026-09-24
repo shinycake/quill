@@ -6,7 +6,7 @@ use crate::ids::{
 use crate::telegram::client::OwnedEnvelope;
 use crate::telegram::envelope::{
     AuthorizationState, ChatKind, ChatList, ChatPositionUpdate, ConnectionState, EnvelopePayload,
-    ErrorClass, MessageContent, ParsedFile, ParsedMessage,
+    ErrorClass, MessageContent, MessageReplyTo, ParsedFile, ParsedMessage,
 };
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
@@ -363,6 +363,7 @@ pub struct HistoryMessage {
     pub is_outgoing: bool,
     pub content: MessageContent,
     pub pending: bool,
+    pub reply_to: Option<MessageReplyTo>,
 }
 
 #[derive(Debug, Default)]
@@ -432,6 +433,7 @@ pub struct SearchMessageHit {
     pub preview: String,
     pub is_outgoing: bool,
     pub content: MessageContent,
+    pub reply_to: Option<MessageReplyTo>,
 }
 
 impl SearchMessageHit {
@@ -442,6 +444,7 @@ impl SearchMessageHit {
             preview: message.content.preview(),
             is_outgoing: message.is_outgoing,
             content: message.content.clone(),
+            reply_to: message.reply_to.clone(),
         }
     }
 
@@ -452,6 +455,7 @@ impl SearchMessageHit {
             is_outgoing: self.is_outgoing,
             content: self.content,
             pending: false,
+            reply_to: self.reply_to,
         }
     }
 }
@@ -1600,6 +1604,7 @@ impl Session {
                         preview: message.content.preview(),
                         is_outgoing: message.is_outgoing,
                         content: message.content.clone(),
+                        reply_to: message.reply_to.clone(),
                     })
                     .collect()
             })
@@ -1677,6 +1682,43 @@ fn history_message(message: ParsedMessage, pending: bool) -> HistoryMessage {
         is_outgoing: message.is_outgoing,
         content: message.content,
         pending,
+        reply_to: message.reply_to,
+    }
+}
+
+impl Session {
+    /// Compact quote label: chosen `textQuote`, else the loaded original,
+    /// else `messageReplyToMessage.content` preview.
+    pub fn reply_quote_preview(&self, message: &HistoryMessage) -> Option<String> {
+        let reply = message.reply_to.as_ref()?;
+        Some(self.resolve_reply_preview(reply, message.chat_id))
+    }
+
+    pub fn resolve_reply_preview(&self, reply: &MessageReplyTo, fallback_chat: ChatId) -> String {
+        if let Some(quote) = reply
+            .quote_text
+            .as_ref()
+            .map(|text| text.trim())
+            .filter(|text| !text.is_empty())
+        {
+            return quote.to_string();
+        }
+        let chat_id = if reply.chat_id.0 != 0 {
+            reply.chat_id
+        } else {
+            fallback_chat
+        };
+        if let Some(original) = self
+            .histories
+            .get(&chat_id.0)
+            .and_then(|history| history.messages.get(&reply.message_id.0))
+        {
+            return original.content.preview();
+        }
+        reply
+            .content_preview
+            .clone()
+            .unwrap_or_else(|| "Message".into())
     }
 }
 
@@ -2775,6 +2817,7 @@ mod tests {
             preview: "gone".into(),
             is_outgoing: false,
             content: crate::telegram::envelope::MessageContent::Text("gone".into()),
+            reply_to: None,
         });
         assert_eq!(
             session.begin_chat_search_jump(MessageId(70)),
@@ -2793,6 +2836,7 @@ mod tests {
             preview: "ghost".into(),
             is_outgoing: false,
             content: crate::telegram::envelope::MessageContent::Text("ghost".into()),
+            reply_to: None,
         });
         assert_eq!(
             session.begin_chat_search_jump(MessageId(80)),
@@ -2838,5 +2882,100 @@ mod tests {
             }
         );
         assert!(!sink.rendered().contains("CANARY"));
+    }
+
+    #[test]
+    fn reply_to_message_preview_and_jump() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+        );
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateNewChat","chat":{"id":11,"title":"Alice","type":{"@type":"chatTypePrivate","user_id":11},"unread_count":0}}"#,
+        );
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateNewMessage","message":{"id":101,"chat_id":11,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"Hello from injected JSON.","entities":[]}}}}"#,
+        );
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateNewMessage","message":{"id":104,"chat_id":11,"is_outgoing":true,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"sounds good","entities":[]}},"reply_to":{"@type":"messageReplyToMessage","chat_id":11,"message_id":101,"quote":null,"checklist_task_id":0,"poll_option_id":""}}}"#,
+        );
+        session.open_chat(ChatId(11));
+        let reply = session
+            .histories
+            .get(&11)
+            .unwrap()
+            .messages
+            .get(&104)
+            .unwrap();
+        assert_eq!(
+            reply.reply_to.as_ref().map(|r| r.message_id),
+            Some(MessageId(101))
+        );
+        assert_eq!(
+            session.reply_quote_preview(reply).as_deref(),
+            Some("Hello from injected JSON.")
+        );
+        assert_eq!(
+            session.begin_chat_search_jump(reply.reply_to.as_ref().unwrap().message_id),
+            ChatSearchJumpNeed::AlreadyReady
+        );
+        assert_eq!(
+            session.chat_search.jump,
+            ChatSearchJump::Ready {
+                message_id: MessageId(101)
+            }
+        );
+
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateNewMessage","message":{"id":105,"chat_id":11,"is_outgoing":true,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"quoted","entities":[]}},"reply_to":{"@type":"messageReplyToMessage","chat_id":11,"message_id":90,"quote":{"@type":"textQuote","text":{"@type":"formattedText","text":"manual quote","entities":[]},"position":0,"is_manual":true},"checklist_task_id":0,"poll_option_id":""}}}"#,
+        );
+        let quoted = session
+            .histories
+            .get(&11)
+            .unwrap()
+            .messages
+            .get(&105)
+            .unwrap();
+        assert_eq!(
+            session.reply_quote_preview(quoted).as_deref(),
+            Some("manual quote")
+        );
+        assert_eq!(
+            session.begin_chat_search_jump(MessageId(90)),
+            ChatSearchJumpNeed::LoadAround
+        );
+        let around = session.request_history_around(ChatId(11), MessageId(90));
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"messages","@extra":"{}","total_count":1,"messages":[{{"id":90,"chat_id":11,"is_outgoing":false,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"older original","entities":[]}}}}}}]}}"#,
+                around.0
+            ),
+        );
+        assert_eq!(
+            session.chat_search.jump,
+            ChatSearchJump::Ready {
+                message_id: MessageId(90)
+            }
+        );
+        assert!(session.histories.get(&11).unwrap().contains(MessageId(90)));
     }
 }

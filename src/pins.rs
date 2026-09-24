@@ -101,4 +101,8 @@ pub const REQUIRED_SCHEMA_CONSTRUCTORS: &[&str] = &[
     "foundChatMessages",
     "chats",
     "foundMessages",
+    "messageReplyToMessage",
+    "inputMessageReplyToMessage",
+    "textQuote",
+    "inputTextQuote",
 ];

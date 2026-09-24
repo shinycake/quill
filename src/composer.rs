@@ -1,6 +1,6 @@
 //! Composer send policy. IME composition must never send.
 
-use crate::ids::{ChatId, ViewGeneration};
+use crate::ids::{ChatId, MessageId, ViewGeneration};
 use crate::local_path::{is_explicit_send_path, pick_send_path};
 use std::path::{Path, PathBuf};
 
@@ -78,6 +78,35 @@ impl ComposerAttachment {
     }
 }
 
+/// Message the composer is quoting (tdesktop `FieldHeader::replyToMessage`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ComposerReplyTo {
+    pub chat_id: ChatId,
+    pub message_id: MessageId,
+    pub preview: String,
+}
+
+impl ComposerReplyTo {
+    pub fn new(chat_id: ChatId, message_id: MessageId, preview: impl Into<String>) -> Self {
+        Self {
+            chat_id,
+            message_id,
+            preview: preview.into(),
+        }
+    }
+}
+
+/// tdesktop `FieldHeader` Escape / `replyCancelled`: drop the reply header
+/// and keep the typed field. `ComposeControls::clear` wipes text on send,
+/// not on cancel.
+pub fn cancel_reply_draft(
+    reply: Option<ComposerReplyTo>,
+    text: String,
+) -> (Option<ComposerReplyTo>, String) {
+    let _ = reply;
+    (None, text)
+}
+
 /// Snapshot of a send attempt: destination is frozen at submit time.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ComposerSnapshot {
@@ -85,6 +114,7 @@ pub struct ComposerSnapshot {
     pub view_generation: u64,
     pub text: String,
     pub attachment: Option<ComposerAttachment>,
+    pub reply_to: Option<ComposerReplyTo>,
 }
 
 impl ComposerSnapshot {
@@ -108,7 +138,25 @@ impl ComposerSnapshot {
             view_generation: view_generation.0,
             text: text.into(),
             attachment,
+            reply_to: None,
         }
+    }
+
+    pub fn with_reply(mut self, reply_to: Option<ComposerReplyTo>) -> Self {
+        self.reply_to = reply_to;
+        self
+    }
+
+    /// Same-chat `inputMessageReplyToMessage.message_id` only. Cross-chat
+    /// `inputMessageReplyToExternalMessage` is out of this slice.
+    pub fn send_reply_to(&self) -> Option<MessageId> {
+        self.reply_to.as_ref().and_then(|reply| {
+            if reply.chat_id.0 == self.chat_id {
+                Some(reply.message_id)
+            } else {
+                None
+            }
+        })
     }
 
     pub fn chat_id(&self) -> ChatId {
@@ -222,5 +270,27 @@ mod tests {
             ComposerAttachment::pick(&root.join("nope.png"), AttachmentKind::Document).is_none()
         );
         let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn cancel_reply_keeps_typed_text() {
+        let reply = ComposerReplyTo::new(ChatId(11), MessageId(101), "Hello from injected JSON.");
+        let (cleared, text) = cancel_reply_draft(Some(reply), "keep this draft".into());
+        assert_eq!(cleared, None);
+        assert_eq!(text, "keep this draft");
+    }
+
+    #[test]
+    fn snapshot_reply_is_same_chat_only() {
+        let same = ComposerSnapshot::capture(ChatId(11), ViewGeneration(1), "hi").with_reply(Some(
+            ComposerReplyTo::new(ChatId(11), MessageId(101), "orig"),
+        ));
+        assert_eq!(same.send_reply_to(), Some(MessageId(101)));
+        let other = same.with_reply(Some(ComposerReplyTo::new(
+            ChatId(12),
+            MessageId(40),
+            "other chat",
+        )));
+        assert_eq!(other.send_reply_to(), None);
     }
 }

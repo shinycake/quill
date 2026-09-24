@@ -634,6 +634,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if snapshot.attachment.is_none() && caption.is_empty() {
             return Err(ConnectSendError::InvalidRequest);
         }
+        let reply_to = snapshot.send_reply_to();
         // Validate the picked path before allocating `@extra`.
         let media_path = match snapshot.attachment.as_ref() {
             Some(att) => Some(
@@ -648,10 +649,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         // Contains caption / path — do not log `json`.
         let json = match (snapshot.attachment.as_ref(), media_path.as_deref()) {
             (Some(att), Some(path)) => match att.kind {
-                AttachmentKind::Photo => send_photo(extra, chat_id, path, caption),
-                AttachmentKind::Document => send_document(extra, chat_id, path, caption),
+                AttachmentKind::Photo => send_photo(extra, chat_id, path, caption, reply_to),
+                AttachmentKind::Document => send_document(extra, chat_id, path, caption, reply_to),
             },
-            (None, None) => send_text(extra, chat_id, caption),
+            (None, None) => send_text(extra, chat_id, caption, reply_to),
             _ => {
                 self.session.requests.take(extra);
                 return Err(ConnectSendError::InvalidRequest);
@@ -1039,6 +1040,15 @@ impl<S: JsonSender> ConnectDriver<S> {
             ChatSearchJumpNeed::AlreadyReady | ChatSearchJumpNeed::Missing => Ok(None),
             ChatSearchJumpNeed::LoadAround => self.fetch_history_around(message_id),
         }
+    }
+
+    /// Quote-strip activation: same Unigram `LoadMessageSliceImpl` around-load
+    /// + highlight pipeline as in-chat search jump (`getChatHistory` offset -25).
+    pub fn jump_to_replied_message(
+        &mut self,
+        message_id: MessageId,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        self.jump_to_chat_search_message(message_id)
     }
 
     pub fn jump_selected_chat_search_hit(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
@@ -2747,6 +2757,87 @@ mod tests {
         );
         assert_eq!(SEARCH_DEBOUNCE, Duration::from_millis(900));
         assert!(!sink.rendered().contains("CANARY_DRV_chat"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn driver_send_reply_shape_and_jump_to_replied() {
+        use crate::composer::ComposerReplyTo;
+
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = Arc::new(RecordingSender::new());
+        let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+        let mut driver =
+            ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+        let seq = AtomicU64::new(0);
+        seed_ready_alice(&mut driver, &seq, &dyn_sink);
+
+        let snap = crate::composer::ComposerSnapshot::capture(
+            ChatId(7),
+            driver.session.view_generation,
+            "CANARY_REPLY_text",
+        )
+        .with_reply(Some(ComposerReplyTo::new(
+            ChatId(7),
+            MessageId(50),
+            "hello already here",
+        )));
+        let extra = driver.send_snapshot(&snap).unwrap();
+        let send_json = recorder.snapshot().last().cloned().expect("sendMessage");
+        let v: Value = serde_json::from_str(&send_json).unwrap();
+        assert_eq!(v["@type"], "sendMessage");
+        assert_eq!(v["@extra"], extra.0.to_string());
+        assert_eq!(v["reply_to"]["@type"], "inputMessageReplyToMessage");
+        assert_eq!(v["reply_to"]["message_id"], 50);
+        assert_eq!(v["reply_to"]["quote"], Value::Null);
+        assert_eq!(v["reply_to"]["checklist_task_id"], 0);
+        assert_eq!(v["reply_to"]["poll_option_id"], "");
+        assert!(send_json.contains("CANARY_REPLY_text"));
+
+        driver
+            .ingest(
+                copy_and_parse(
+                    r#"{"@type":"updateNewMessage","message":{"id":60,"chat_id":7,"is_outgoing":true,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"CANARY_REPLY_text","entities":[]}},"reply_to":{"@type":"messageReplyToMessage","chat_id":7,"message_id":50}}}"#,
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        let reply = driver
+            .session
+            .histories
+            .get(&7)
+            .unwrap()
+            .messages
+            .get(&60)
+            .unwrap();
+        assert_eq!(
+            driver.session.reply_quote_preview(reply).as_deref(),
+            Some("hello already here")
+        );
+        assert_eq!(
+            driver
+                .jump_to_replied_message(reply.reply_to.as_ref().unwrap().message_id)
+                .unwrap(),
+            None
+        );
+        assert_eq!(
+            driver.session.chat_search.jump,
+            crate::state::ChatSearchJump::Ready {
+                message_id: MessageId(50)
+            }
+        );
+        assert!(
+            driver
+                .jump_to_replied_message(MessageId(40))
+                .unwrap()
+                .is_some()
+        );
+        assert!(!sink.rendered().contains("CANARY_REPLY"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

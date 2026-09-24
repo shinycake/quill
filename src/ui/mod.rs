@@ -6,7 +6,10 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::auth::{AuthAction, AuthView, view_for};
-use quill::composer::{AttachmentKind, ComposerAttachment, ComposerSnapshot, should_send_on_enter};
+use quill::composer::{
+    AttachmentKind, ComposerAttachment, ComposerReplyTo, ComposerSnapshot, cancel_reply_draft,
+    should_send_on_enter,
+};
 use quill::connect::{
     ChatSearchQueryOutcome, ConnectBlocker, ConnectGate, LiveConnect, SEARCH_DEBOUNCE,
     SearchQueryOutcome, USER_DOWNLOAD_PRIORITY, evaluate_gate, start_live_connect,
@@ -27,7 +30,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
-use synthetic::{SyntheticChat, session_bubble, session_text_bubble};
+use synthetic::{SyntheticChat, session_bubble_quoted};
 use zeroize::Zeroize;
 
 actions!(
@@ -108,6 +111,8 @@ pub struct QuillApp {
     demo_sink: Arc<MemorySink>,
     /// Local file the user explicitly attached (canonical path via `pick`).
     pending_attachment: Option<ComposerAttachment>,
+    /// Same-chat reply draft (tdesktop `FieldHeader::replyToMessage`).
+    pending_reply: Option<ComposerReplyTo>,
 }
 
 /// Forced UI surfaces for screenshot proof (no live Telegram / no real credentials).
@@ -128,6 +133,8 @@ pub enum ScreenshotDemo {
     ReadySearch,
     /// In-chat search (`searchChatMessages`) + jump-to-message.
     ReadySearchInChat,
+    /// Reply-to-message: composer quote + history quote strip.
+    ReadyReply,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -383,6 +390,15 @@ impl QuillApp {
                     AuthorizationState::Ready,
                 )
             }
+            Some(ScreenshotDemo::ReadyReply) => {
+                demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
+                (
+                    ConnectUiStatus::DemoReadyChats,
+                    None,
+                    "screenshot demo — reply to message (injected reply_to)".into(),
+                    AuthorizationState::Ready,
+                )
+            }
             None => bootstrap_connect(credentials),
         };
 
@@ -419,6 +435,7 @@ impl QuillApp {
             demo_seq: AtomicU64::new(0),
             demo_sink,
             pending_attachment,
+            pending_reply: None,
         };
         if matches!(demo, Some(ScreenshotDemo::ReadyChatsComposer)) {
             app.composer.update(cx, |input, cx| {
@@ -448,6 +465,21 @@ impl QuillApp {
             if let Some(session) = app.demo_session.as_mut() {
                 app.demo_seq.store(session.last_seq, Ordering::SeqCst);
                 apply_ready_search_in_chat(session, &app.demo_sink, &app.demo_seq);
+            }
+        }
+        if matches!(demo, Some(ScreenshotDemo::ReadyReply)) {
+            app.composer.update(cx, |input, cx| {
+                input.set_value("sounds good", window, cx);
+                input.focus(window, cx);
+            });
+            if let Some(session) = app.demo_session.as_mut() {
+                app.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_reply(session, &app.demo_sink, &app.demo_seq);
+                app.pending_reply = Some(ComposerReplyTo::new(
+                    ChatId(11),
+                    MessageId(101),
+                    "Hello from injected JSON.",
+                ));
             }
         }
         if app.live.is_some() {
@@ -590,7 +622,8 @@ impl QuillApp {
                         view_generation,
                         text,
                         attachment,
-                    );
+                    )
+                    .with_reply(self.pending_reply.clone());
                     if snap.is_empty() {
                         self.status_note = "type a message or attach a file".into();
                         cx.notify();
@@ -605,6 +638,7 @@ impl QuillApp {
                     match result {
                         Ok(_) => {
                             self.pending_attachment = None;
+                            self.pending_reply = None;
                             self.composer
                                 .update(cx, |input, cx| input.set_value("", window, cx));
                             self.status_note = "sending…".into();
@@ -618,8 +652,10 @@ impl QuillApp {
                 }
                 if self.demo_session.is_some() {
                     let attachment = self.pending_attachment.clone();
-                    self.apply_demo_outgoing(&text, attachment.as_ref());
+                    let reply = self.pending_reply.clone();
+                    self.apply_demo_outgoing(&text, attachment.as_ref(), reply.as_ref());
                     self.pending_attachment = None;
+                    self.pending_reply = None;
                     self.composer
                         .update(cx, |input, cx| input.set_value("", window, cx));
                     self.status_note = "demo send applied locally (no live Telegram)".into();
@@ -667,7 +703,12 @@ impl QuillApp {
         cx.notify();
     }
 
-    fn apply_demo_outgoing(&mut self, text: &str, attachment: Option<&ComposerAttachment>) {
+    fn apply_demo_outgoing(
+        &mut self,
+        text: &str,
+        attachment: Option<&ComposerAttachment>,
+        reply: Option<&ComposerReplyTo>,
+    ) {
         let Some(session) = self.demo_session.as_mut() else {
             return;
         };
@@ -677,12 +718,21 @@ impl QuillApp {
         let dyn_sink: Arc<dyn DiagnosticSink> = self.demo_sink.clone();
         let id = -(session.view_generation.0 as i64);
         let caption = text.trim();
+        let reply_json = reply
+            .filter(|r| r.chat_id == chat_id)
+            .map(|r| {
+                format!(
+                    r#","reply_to":{{"@type":"messageReplyToMessage","chat_id":{},"message_id":{},"quote":null,"checklist_task_id":0,"poll_option_id":""}}"#,
+                    r.chat_id.0, r.message_id.0
+                )
+            })
+            .unwrap_or_default();
         let json = match attachment {
             Some(att) if att.kind == AttachmentKind::Photo => {
                 let path = att.path.to_string_lossy();
                 let file = demo_file_json(900, &path, true);
                 format!(
-                    r#"{{"@type":"updateNewMessage","message":{{"id":{id},"chat_id":{},"is_outgoing":true,"content":{{"@type":"messagePhoto","photo":{{"@type":"photo","has_stickers":false,"sizes":[{{"@type":"photoSize","type":"m","photo":{file},"width":240,"height":160,"progressive_sizes":[]}}]}},"caption":{{"@type":"formattedText","text":{},"entities":[]}},"has_spoiler":false,"is_secret":false}}}}}}"#,
+                    r#"{{"@type":"updateNewMessage","message":{{"id":{id},"chat_id":{},"is_outgoing":true,"content":{{"@type":"messagePhoto","photo":{{"@type":"photo","has_stickers":false,"sizes":[{{"@type":"photoSize","type":"m","photo":{file},"width":240,"height":160,"progressive_sizes":[]}}]}},"caption":{{"@type":"formattedText","text":{},"entities":[]}},"has_spoiler":false,"is_secret":false}}{reply_json}}}}}"#,
                     chat_id.0,
                     serde_json::to_string(caption).unwrap_or_else(|_| "\"\"".into()),
                 )
@@ -691,14 +741,14 @@ impl QuillApp {
                 let path = att.path.to_string_lossy();
                 let file = demo_file_json(901, &path, true);
                 format!(
-                    r#"{{"@type":"updateNewMessage","message":{{"id":{id},"chat_id":{},"is_outgoing":true,"content":{{"@type":"messageDocument","document":{{"@type":"document","file_name":{},"mime_type":"text/plain","document":{file}}},"caption":{{"@type":"formattedText","text":{},"entities":[]}}}}}}}}"#,
+                    r#"{{"@type":"updateNewMessage","message":{{"id":{id},"chat_id":{},"is_outgoing":true,"content":{{"@type":"messageDocument","document":{{"@type":"document","file_name":{},"mime_type":"text/plain","document":{file}}},"caption":{{"@type":"formattedText","text":{},"entities":[]}}}}{reply_json}}}}}"#,
                     chat_id.0,
                     serde_json::to_string(&att.file_name).unwrap_or_else(|_| "\"file\"".into()),
                     serde_json::to_string(caption).unwrap_or_else(|_| "\"\"".into()),
                 )
             }
             None => format!(
-                r#"{{"@type":"updateNewMessage","message":{{"id":{id},"chat_id":{},"is_outgoing":true,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":{},"entities":[]}}}}}}}}"#,
+                r#"{{"@type":"updateNewMessage","message":{{"id":{id},"chat_id":{},"is_outgoing":true,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":{},"entities":[]}}}}{reply_json}}}}}"#,
                 chat_id.0,
                 serde_json::to_string(text).unwrap_or_else(|_| "\"\"".into()),
             ),
@@ -709,6 +759,13 @@ impl QuillApp {
     }
 
     fn select_listed_chat(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
+        if self
+            .pending_reply
+            .as_ref()
+            .is_some_and(|reply| reply.chat_id != chat_id)
+        {
+            self.pending_reply = None;
+        }
         if self.live.is_some() {
             let result = self
                 .live
@@ -903,17 +960,94 @@ impl QuillApp {
             self.close_chat_search_ui(window, cx);
             return;
         }
-        if !self.search_is_open() {
+        if self.search_is_open() {
+            let query = self.search_input.read(cx).value().to_string();
+            if query.trim().is_empty() {
+                self.close_search_ui(window, cx);
+            } else {
+                self.search_input
+                    .update(cx, |input, cx| input.set_value("", window, cx));
+                self.sync_search_query("", cx);
+            }
             return;
         }
-        let query = self.search_input.read(cx).value().to_string();
-        if query.trim().is_empty() {
-            self.close_search_ui(window, cx);
-        } else {
-            self.search_input
-                .update(cx, |input, cx| input.set_value("", window, cx));
-            self.sync_search_query("", cx);
+        if self.pending_reply.is_some() {
+            self.clear_reply(cx);
         }
+    }
+
+    fn begin_reply_to(
+        &mut self,
+        reply: ComposerReplyTo,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.pending_reply = Some(reply);
+        self.composer
+            .update(cx, |input, cx| input.focus(window, cx));
+        self.status_note = "replying".into();
+        cx.notify();
+    }
+
+    fn clear_reply(&mut self, cx: &mut Context<Self>) {
+        // tdesktop FieldHeader Escape / replyCancelled: header only — keep typed text.
+        self.pending_reply = cancel_reply_draft(self.pending_reply.take(), String::new()).0;
+        self.status_note = "reply cancelled".into();
+        cx.notify();
+    }
+
+    fn composer_reply_banner(
+        &self,
+        reply: &ComposerReplyTo,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let preview = reply.preview.clone();
+        div()
+            .id("composer-reply-quote")
+            .flex()
+            .items_center()
+            .justify_between()
+            .gap_2()
+            .px_3()
+            .py_2()
+            .rounded_md()
+            .border_1()
+            .border_color(rgb(0x58a6ff))
+            .bg(rgb(0x21262d))
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .min_w_0()
+                    .child(
+                        div()
+                            .text_xs()
+                            .font_medium()
+                            .text_color(rgb(0x58a6ff))
+                            .child("Replying to"),
+                    )
+                    .child(div().text_sm().text_color(rgb(0xc9d1d9)).child(preview)),
+            )
+            .child(
+                Button::new("cancel-reply")
+                    .label("Cancel")
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.clear_reply(cx);
+                    })),
+            )
+    }
+
+    fn jump_to_replied_message(&mut self, message_id: MessageId, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            self.status_note = match live.driver.jump_to_replied_message(message_id) {
+                Ok(_) => chat_search_jump_note(&live.driver.session),
+                Err(_) => "could not jump to message".into(),
+            };
+        } else if let Some(session) = self.demo_session.as_mut() {
+            let _ = session.begin_chat_search_jump(message_id);
+            self.status_note = chat_search_jump_note(session);
+        }
+        cx.notify();
     }
 
     fn open_chat_search_ui(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -1742,6 +1876,9 @@ impl QuillApp {
                                     ),
                             )
                         })
+                        .when_some(self.pending_reply.clone(), |this, reply| {
+                            this.child(self.composer_reply_banner(&reply, cx))
+                        })
                         .child(Textarea::new(&self.composer).h(px(88.))),
                 )
             })
@@ -1851,12 +1988,14 @@ impl QuillApp {
                         sender_name.clone()
                     };
                     let highlighted = highlight_id == Some(message.id);
+                    let quote_preview = session.and_then(|s| s.reply_quote_preview(&message));
                     let row = session_history_row(
                         &message,
                         &files,
                         &downloading,
                         &media_roots,
                         label,
+                        quote_preview,
                         cx,
                     );
                     list = list.child(
@@ -2084,6 +2223,14 @@ fn apply_ready_search_in_chat(session: &mut Session, sink: &Arc<MemorySink>, seq
         session.apply(owned);
     }
     let _ = session.begin_chat_search_jump(MessageId(101));
+}
+
+fn apply_ready_reply(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let json = r#"{"@type":"updateNewMessage","message":{"id":104,"chat_id":11,"is_outgoing":true,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"Got it — quoting you.","entities":[]}},"reply_to":{"@type":"messageReplyToMessage","chat_id":11,"message_id":101,"quote":{"@type":"textQuote","text":{"@type":"formattedText","text":"Hello from injected JSON.","entities":[]},"position":0,"is_manual":false},"checklist_task_id":0,"poll_option_id":""}}}"#;
+    if let Some(owned) = copy_and_parse(json, seq, &dyn_sink) {
+        session.apply(owned);
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -2453,49 +2600,91 @@ fn session_history_row(
     downloading: &std::collections::HashSet<i32>,
     media_roots: &[PathBuf],
     label: String,
+    quote_preview: Option<String>,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
-    match &message.content {
-        MessageContent::Text(text) => session_text_bubble(
+    let quote = message.reply_to.as_ref().and_then(|reply| {
+        let preview = quote_preview.clone()?;
+        Some(reply_quote_strip(message.id, reply.message_id, preview, cx))
+    });
+    let reply_id = format!("reply-{}", message.id.0);
+    let reply_target = ComposerReplyTo::new(message.chat_id, message.id, message.content.preview());
+    let reply_btn = Button::new(reply_id)
+        .label("Reply")
+        .ghost()
+        .on_click(cx.listener(move |this, _, window, cx| {
+            this.begin_reply_to(reply_target.clone(), window, cx);
+        }));
+    let extra_media = match &message.content {
+        MessageContent::Photo(photo) => Some(photo_attachment(
             message.id.0 as u64,
-            label,
-            text.clone(),
-            message.is_outgoing,
-        ),
-        MessageContent::Unsupported { type_name } => session_text_bubble(
+            photo,
+            files,
+            downloading,
+            media_roots,
+            cx,
+        )),
+        MessageContent::Document(doc) => Some(document_chip(
             message.id.0 as u64,
-            label,
-            format!("({type_name})"),
-            message.is_outgoing,
-        ),
-        MessageContent::Photo(photo) => {
-            let extra = photo_attachment(
-                message.id.0 as u64,
-                photo,
-                files,
-                downloading,
-                media_roots,
-                cx,
-            );
-            session_bubble(
-                message.id.0 as u64,
-                label,
-                photo.caption.clone(),
-                message.is_outgoing,
-                Some(extra),
-            )
-        }
-        MessageContent::Document(doc) => {
-            let extra = document_chip(message.id.0 as u64, doc, files, downloading, cx);
-            session_bubble(
-                message.id.0 as u64,
-                label,
-                doc.caption.clone(),
-                message.is_outgoing,
-                Some(extra),
-            )
-        }
-    }
+            doc,
+            files,
+            downloading,
+            cx,
+        )),
+        MessageContent::Text(_) | MessageContent::Unsupported { .. } => None,
+    };
+    let extra = Some(
+        div()
+            .id(("bubble-extra", message.id.0 as u64))
+            .when_some(extra_media, |this, media| this.child(media))
+            .child(reply_btn)
+            .into_any_element(),
+    );
+    let body = match &message.content {
+        MessageContent::Text(text) => text.clone(),
+        MessageContent::Unsupported { type_name } => format!("({type_name})"),
+        MessageContent::Photo(photo) => photo.caption.clone(),
+        MessageContent::Document(doc) => doc.caption.clone(),
+    };
+    session_bubble_quoted(
+        message.id.0 as u64,
+        label,
+        body,
+        message.is_outgoing,
+        extra,
+        quote,
+    )
+}
+
+fn reply_quote_strip(
+    row_id: MessageId,
+    target_id: MessageId,
+    preview: String,
+    cx: &mut Context<QuillApp>,
+) -> AnyElement {
+    div()
+        .id(("reply-quote", row_id.0 as u64))
+        .mt_1()
+        .mb_1()
+        .px_2()
+        .py_1()
+        .rounded_md()
+        .border_l_2()
+        .border_color(rgb(0x58a6ff))
+        .bg(rgb(0x161b22))
+        .cursor_pointer()
+        .on_click(cx.listener(move |this, _, _, cx| {
+            this.jump_to_replied_message(target_id, cx);
+        }))
+        .child(
+            div()
+                .text_xs()
+                .font_medium()
+                .text_color(rgb(0x58a6ff))
+                .child("Reply"),
+        )
+        .child(div().text_xs().text_color(rgb(0xc9d1d9)).child(preview))
+        .into_any_element()
 }
 
 fn photo_display_path(
@@ -2740,7 +2929,7 @@ fn status_bar(
         .text_xs()
         .text_color(cx.theme().muted_foreground)
         .child(format!(
-            "Auth: {} · {} · {} · Keyboard: ⌘K search, ⌘F in chat, Esc cancel, ⌘1 sidebar, ⌘L composer, ⌘↑ older · VoiceOver: macOS follow-up",
+            "Auth: {} · {} · {} · Keyboard: ⌘K search, ⌘F in chat, Esc cancel reply/search, ⌘1 sidebar, ⌘L composer, ⌘↑ older · VoiceOver: macOS follow-up",
             auth.title,
             connect_status_label(connect_status),
             status_note
