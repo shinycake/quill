@@ -34,6 +34,12 @@ pub enum EnvelopePayload {
         is_permanent: bool,
         from_cache: bool,
     },
+    UpdateMessageContent {
+        chat_id: ChatId,
+        message_id: MessageId,
+        content: MessageContent,
+        files: Vec<ParsedFile>,
+    },
     UpdateChatPosition(ChatPositionUpdate),
     UpdateChatTitle {
         chat_id: ChatId,
@@ -479,6 +485,15 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
                 .and_then(Value::as_bool)
                 .unwrap_or(false),
         }),
+        "updateMessageContent" => {
+            let (content, files) = parse_content(value.get("new_content"));
+            Ok(EnvelopePayload::UpdateMessageContent {
+                chat_id: ChatId(int53(value.get("chat_id"))?),
+                message_id: MessageId(int53(value.get("message_id"))?),
+                content,
+                files,
+            })
+        }
         "updateChatPosition" => Ok(EnvelopePayload::UpdateChatPosition(parse_position(&value)?)),
         "updateChatTitle" => Ok(EnvelopePayload::UpdateChatTitle {
             chat_id: ChatId(int53(value.get("chat_id"))?),
@@ -1423,5 +1438,36 @@ mod tests {
         );
         assert!(schema.lines().any(|l| l.starts_with("textQuote ")));
         assert!(schema.lines().any(|l| l.starts_with("inputTextQuote ")));
+    }
+
+    #[test]
+    fn update_message_content_is_typed() {
+        let env = parse_envelope(
+            r#"{"@type":"updateMessageContent","chat_id":11,"message_id":102,"new_content":{"@type":"messageText","text":{"@type":"formattedText","text":"CANARY_EDITED","entities":[]}}}"#,
+        )
+        .unwrap();
+        match env.payload {
+            EnvelopePayload::UpdateMessageContent {
+                chat_id,
+                message_id,
+                content,
+                files,
+            } => {
+                assert_eq!(chat_id.0, 11);
+                assert_eq!(message_id.0, 102);
+                assert_eq!(content, MessageContent::Text("CANARY_EDITED".into()));
+                assert!(files.is_empty());
+            }
+            other => panic!("{other:?}"),
+        }
+        let schema = include_str!("../../schema/td_api.tl");
+        assert!(
+            schema
+                .lines()
+                .any(|l| l.starts_with("updateMessageContent "))
+        );
+        assert!(schema.lines().any(|l| l.starts_with("editMessageText ")));
+        assert!(schema.lines().any(|l| l.starts_with("editMessageCaption ")));
+        assert!(schema.lines().any(|l| l.starts_with("deleteMessages ")));
     }
 }

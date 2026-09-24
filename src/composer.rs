@@ -2,6 +2,7 @@
 
 use crate::ids::{ChatId, MessageId, ViewGeneration};
 use crate::local_path::{is_explicit_send_path, pick_send_path};
+use crate::telegram::envelope::MessageContent;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -105,6 +106,99 @@ pub fn cancel_reply_draft(
 ) -> (Option<ComposerReplyTo>, String) {
     let _ = reply;
     (None, text)
+}
+
+/// Which TDLib edit constructor an own-message edit uses.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ComposerEditKind {
+    /// `editMessageText` + `inputMessageText`.
+    Text,
+    /// `editMessageCaption` for outgoing photo/document captions.
+    Caption,
+}
+
+/// Composer edit mode (tdesktop `FieldHeader::editMessage` / `_editMsgId`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ComposerEdit {
+    pub chat_id: ChatId,
+    pub message_id: MessageId,
+    pub original_text: String,
+    pub kind: ComposerEditKind,
+}
+
+impl ComposerEdit {
+    /// Own outgoing, already-sent messages only. Incoming / pending / unsupported
+    /// stay out of this slice (schema `messageProperties.can_be_edited` is the
+    /// live gate; official clients call `getMessageProperties`).
+    pub fn from_own_content(
+        chat_id: ChatId,
+        message_id: MessageId,
+        is_outgoing: bool,
+        pending: bool,
+        content: &MessageContent,
+    ) -> Option<Self> {
+        if !is_outgoing || pending {
+            return None;
+        }
+        let (kind, original_text) = match content {
+            MessageContent::Text(text) => (ComposerEditKind::Text, text.clone()),
+            MessageContent::Photo(photo) => (ComposerEditKind::Caption, photo.caption.clone()),
+            MessageContent::Document(doc) => (ComposerEditKind::Caption, doc.caption.clone()),
+            MessageContent::Unsupported { .. } => return None,
+        };
+        Some(Self {
+            chat_id,
+            message_id,
+            original_text,
+            kind,
+        })
+    }
+}
+
+/// Enter edit: stash the current field as the normal draft (tdesktop
+/// `DraftType::Normal`) and load the message text into the field.
+pub fn begin_edit_draft(
+    current_text: String,
+    edit: ComposerEdit,
+) -> (ComposerEdit, String, String) {
+    let field = edit.original_text.clone();
+    (edit, field, current_text)
+}
+
+/// tdesktop `ComposeControls::cancelEditMessage`: clear the edit header,
+/// then `applyDraft()` restores the **normal** draft — not the typed edit.
+pub fn cancel_edit_draft(
+    edit: Option<ComposerEdit>,
+    saved_draft: String,
+) -> (Option<ComposerEdit>, String) {
+    let _ = edit;
+    (None, saved_draft)
+}
+
+/// Pending delete confirm (tdesktop `DeleteMessagesBox` / Unigram
+/// `DeleteMessagesPopup`). Own outgoing only in this slice.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeleteConfirm {
+    pub chat_id: ChatId,
+    pub message_id: MessageId,
+}
+
+impl DeleteConfirm {
+    pub fn own(
+        chat_id: ChatId,
+        message_id: MessageId,
+        is_outgoing: bool,
+        pending: bool,
+    ) -> Option<Self> {
+        if is_outgoing && !pending {
+            Some(Self {
+                chat_id,
+                message_id,
+            })
+        } else {
+            None
+        }
+    }
 }
 
 /// Snapshot of a send attempt: destination is frozen at submit time.
@@ -292,5 +386,64 @@ mod tests {
             "other chat",
         )));
         assert_eq!(other.send_reply_to(), None);
+    }
+
+    #[test]
+    fn own_outgoing_text_can_enter_edit_incoming_cannot() {
+        let outgoing = ComposerEdit::from_own_content(
+            ChatId(11),
+            MessageId(102),
+            true,
+            false,
+            &MessageContent::Text("Reply from the session reducer.".into()),
+        )
+        .unwrap();
+        assert_eq!(outgoing.kind, ComposerEditKind::Text);
+        assert_eq!(outgoing.original_text, "Reply from the session reducer.");
+        assert!(
+            ComposerEdit::from_own_content(
+                ChatId(11),
+                MessageId(101),
+                false,
+                false,
+                &MessageContent::Text("incoming".into()),
+            )
+            .is_none()
+        );
+        assert!(
+            ComposerEdit::from_own_content(
+                ChatId(11),
+                MessageId(-1),
+                true,
+                true,
+                &MessageContent::Text("pending".into()),
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn cancel_edit_restores_unrelated_draft() {
+        let edit = ComposerEdit::from_own_content(
+            ChatId(11),
+            MessageId(102),
+            true,
+            false,
+            &MessageContent::Text("original outgoing".into()),
+        )
+        .unwrap();
+        let (edit, field, saved) = begin_edit_draft("keep this draft".into(), edit);
+        assert_eq!(field, "original outgoing");
+        assert_eq!(saved, "keep this draft");
+        let (cleared, restored) = cancel_edit_draft(Some(edit), saved);
+        assert_eq!(cleared, None);
+        assert_eq!(restored, "keep this draft");
+    }
+
+    #[test]
+    fn delete_confirm_is_own_outgoing_only() {
+        assert!(DeleteConfirm::own(ChatId(11), MessageId(102), true, false).is_some());
+        assert!(DeleteConfirm::own(ChatId(11), MessageId(101), false, false).is_none());
+        assert!(DeleteConfirm::own(ChatId(11), MessageId(-5), true, true).is_none());
     }
 }

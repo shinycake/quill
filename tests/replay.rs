@@ -694,6 +694,49 @@ fn replay_reply_to_message_quote_and_jump() {
 }
 
 #[test]
+fn replay_edit_content_and_delete_tombstone() {
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn quill::diagnostics::DiagnosticSink> = sink.clone();
+    let mut session = Session::new(AccountKey::primary(), dyn_sink);
+    let seq = AtomicU64::new(0);
+    apply_all_seq(
+        &mut session,
+        &sink,
+        &seq,
+        &[
+            r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+            r#"{"@type":"updateNewChat","chat":{"id":7,"title":"Alice","type":{"@type":"chatTypePrivate","user_id":7},"unread_count":0}}"#,
+            r#"{"@type":"updateNewMessage","message":{"id":60,"chat_id":7,"is_outgoing":true,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"own outgoing","entities":[]}}}}"#,
+            r#"{"@type":"updateMessageContent","chat_id":7,"message_id":60,"new_content":{"@type":"messageText","text":{"@type":"formattedText","text":"CANARY_REPLAY_edited","entities":[]}}}"#,
+        ],
+    );
+    assert_eq!(
+        session
+            .histories
+            .get(&7)
+            .unwrap()
+            .messages
+            .get(&60)
+            .unwrap()
+            .content
+            .preview(),
+        "CANARY_REPLAY_edited"
+    );
+    apply_all_seq(
+        &mut session,
+        &sink,
+        &seq,
+        &[
+            r#"{"@type":"updateDeleteMessages","chat_id":7,"message_ids":[60],"is_permanent":true,"from_cache":false}"#,
+        ],
+    );
+    let history = session.histories.get(&7).unwrap();
+    assert!(!history.contains(quill::ids::MessageId(60)));
+    assert!(history.is_tombstone(quill::ids::MessageId(60)));
+    assert!(!sink.rendered().contains("CANARY_REPLAY"));
+}
+
+#[test]
 fn logout_invalidates_pending_requests() {
     let sink = Arc::new(MemorySink::new());
     let dyn_sink: Arc<dyn quill::diagnostics::DiagnosticSink> = sink.clone();
