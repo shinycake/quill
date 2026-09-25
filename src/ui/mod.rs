@@ -167,6 +167,8 @@ pub enum ScreenshotDemo {
     ReadyPin,
     /// Mute presets + muted icon + archive section (injected, no live Telegram).
     ReadyMuteArchive,
+    /// Peer `chatActionTyping` in the open-chat header and sidebar row.
+    ReadyTyping,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -238,12 +240,13 @@ impl QuillApp {
             &composer,
             window,
             |this, state, event: &InputEvent, window, cx| {
+                let text = state.read(cx).value().to_string();
+                this.sync_composer_typing(&text);
                 if let InputEvent::PressEnter { secondary, shift } = event {
                     let marked = state.update(cx, |input, cx| input.marked_text_range(window, cx));
                     if should_send_on_enter(quill::composer::enter_event_from_kit(
                         *shift, *secondary, marked,
                     )) {
-                        let text = state.read(cx).value().to_string();
                         if !text.trim().is_empty() {
                             this.submit_composer(text, window, cx);
                         }
@@ -498,6 +501,15 @@ impl QuillApp {
                     AuthorizationState::Ready,
                 )
             }
+            Some(ScreenshotDemo::ReadyTyping) => {
+                demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
+                (
+                    ConnectUiStatus::DemoReadyChats,
+                    None,
+                    "screenshot demo — peer typing (injected updateChatAction)".into(),
+                    AuthorizationState::Ready,
+                )
+            }
             None => bootstrap_connect(credentials),
         };
 
@@ -648,6 +660,13 @@ impl QuillApp {
             }
             app.mute_menu_open = true;
             app.status_note = "screenshot demo — mute presets · muted icon · archive".into();
+        }
+        if matches!(demo, Some(ScreenshotDemo::ReadyTyping)) {
+            if let Some(session) = app.demo_session.as_mut() {
+                app.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_typing(session, &app.demo_sink, &app.demo_seq);
+            }
+            app.status_note = "screenshot demo — typing…".into();
         }
         if app.live.is_some() {
             app.spawn_poll_loop(cx);
@@ -1035,6 +1054,8 @@ impl QuillApp {
         } else if let Some(session) = self.demo_session.as_mut() {
             session.open_chat(chat_id);
         }
+        let text = self.composer.read(cx).value().to_string();
+        self.sync_composer_typing(&text);
         cx.notify();
     }
 
@@ -1288,6 +1309,7 @@ impl QuillApp {
             input.set_value(&field, window, cx);
             input.focus(window, cx);
         });
+        self.sync_composer_typing(&field);
         self.status_note = "editing".into();
         cx.notify();
     }
@@ -1298,6 +1320,7 @@ impl QuillApp {
         let (_, restored) = cancel_edit_draft(self.pending_edit.take(), saved);
         self.composer
             .update(cx, |input, cx| input.set_value(&restored, window, cx));
+        self.sync_composer_typing(&restored);
         self.status_note = "edit cancelled".into();
         cx.notify();
     }
@@ -1889,10 +1912,23 @@ impl QuillApp {
         }
     }
 
+    fn sync_composer_typing(&mut self, text: &str) {
+        let Some(live) = self.live.as_mut() else {
+            return;
+        };
+        let editing = self.pending_edit.is_some();
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0);
+        let _ = live.driver.sync_outgoing_typing(text, editing, now_ms);
+    }
+
     fn conversation_header(
         &self,
         title: &str,
         actions: Option<(ChatId, bool, bool, bool)>,
+        typing: bool,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let (chat_id, muted, forever, archived) =
@@ -1913,7 +1949,16 @@ impl QuillApp {
                     .flex_col()
                     .min_w_0()
                     .child(div().font_semibold().child(title.to_string()))
-                    .when(muted, |this| {
+                    .when(typing, |this| {
+                        this.child(
+                            div()
+                                .id("peer-typing")
+                                .text_sm()
+                                .text_color(cx.theme().accent)
+                                .child("typing…"),
+                        )
+                    })
+                    .when(muted && !typing, |this| {
                         this.child(
                             div()
                                 .text_xs()
@@ -3362,6 +3407,7 @@ impl QuillApp {
                 ))
             })
         });
+        let peer_typing = chat.is_some_and(|c| c.is_peer_typing());
         div()
             .id("conversation-history")
             .flex()
@@ -3369,7 +3415,7 @@ impl QuillApp {
             .flex_1()
             .min_h_0()
             .min_w_0()
-            .child(self.conversation_header(&title, chat_actions, cx))
+            .child(self.conversation_header(&title, chat_actions, peer_typing, cx))
             .when(self.mute_menu_open, |this| {
                 this.child(self.mute_menu_panel(cx))
             })
@@ -3767,6 +3813,14 @@ fn notification_settings_json(settings: &ChatNotificationSettings) -> String {
         settings.use_default_disable_mention_notifications,
         settings.disable_mention_notifications
     )
+}
+
+fn apply_ready_typing(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let json = r#"{"@type":"updateChatAction","chat_id":11,"topic_id":null,"sender_id":{"@type":"messageSenderUser","user_id":11},"action":{"@type":"chatActionTyping"}}"#;
+    if let Some(owned) = copy_and_parse(json, seq, &dyn_sink) {
+        session.apply(owned);
+    }
 }
 
 fn apply_ready_mute_archive(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {

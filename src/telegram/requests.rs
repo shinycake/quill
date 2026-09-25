@@ -596,6 +596,23 @@ pub fn set_chat_notification_settings(
 }
 
 /// `addChatToList` (TDLib 1.8.67). Main and Archive are mutually exclusive.
+/// `sendChatAction` (TDLib 1.8.67). `typing` sends `chatActionTyping`;
+/// otherwise `chatActionCancel` (Unigram `CancelTyping`). `topic_id` null,
+/// `business_connection_id` empty (not a bot business connection).
+pub fn send_chat_action(extra: RequestId, chat_id: ChatId, typing: bool) -> String {
+    json!({
+        "@type": "sendChatAction",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0,
+        "topic_id": Value::Null,
+        "business_connection_id": "",
+        "action": {
+            "@type": if typing { "chatActionTyping" } else { "chatActionCancel" }
+        }
+    })
+    .to_string()
+}
+
 pub fn add_chat_to_list(extra: RequestId, chat_id: ChatId, archive: bool) -> String {
     json!({
         "@type": "addChatToList",
@@ -1001,5 +1018,24 @@ mod tests {
         assert!(client_close.contains("\"@type\":\"close\""));
         assert!(!client_close.contains("closeChat"));
         assert_eq!(serde_json::from_str::<Value>(&close).unwrap()["chat_id"], 3);
+    }
+
+    #[test]
+    fn send_chat_action_typing_and_cancel_match_1_8_67() {
+        let typing = send_chat_action(RequestId(42), ChatId(11), true);
+        let v: serde_json::Value = serde_json::from_str(&typing).unwrap();
+        assert_eq!(v["@type"], "sendChatAction");
+        assert_eq!(v["@extra"], "42");
+        assert_eq!(v["chat_id"], 11);
+        assert_eq!(v["topic_id"], Value::Null);
+        assert_eq!(v["business_connection_id"], "");
+        assert_eq!(v["action"]["@type"], "chatActionTyping");
+        assert!(!typing.contains("CANARY"));
+        assert!(!typing.contains("message_thread_id"));
+
+        let cancel = send_chat_action(RequestId(43), ChatId(11), false);
+        let v: serde_json::Value = serde_json::from_str(&cancel).unwrap();
+        assert_eq!(v["action"]["@type"], "chatActionCancel");
+        assert!(!cancel.contains("chatActionTyping"));
     }
 }

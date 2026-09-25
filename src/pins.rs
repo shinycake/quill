@@ -131,4 +131,9 @@ pub const REQUIRED_SCHEMA_CONSTRUCTORS: &[&str] = &[
     "updateChatNotificationSettings",
     "addChatToList",
     "chatListArchive",
+    "sendChatAction",
+    "updateChatAction",
+    "chatActionTyping",
+    "chatActionCancel",
+    "messageSenderUser",
 ];

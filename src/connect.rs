@@ -24,13 +24,18 @@ use crate::telegram::requests::{
     delete_messages, download_file as download_file_request, edit_message_caption,
     edit_message_text, forward_messages, get_authorization_state, get_chat_history, load_chats,
     open_chat, pin_chat_message, remove_message_reaction, search_chat_messages, search_chats,
-    search_messages, search_recently_found_chats, send_document, send_photo, send_text,
-    set_authentication_phone_number, set_chat_notification_settings, unpin_chat_message,
+    search_messages, search_recently_found_chats, send_chat_action, send_document, send_photo,
+    send_text, set_authentication_phone_number, set_chat_notification_settings, unpin_chat_message,
     view_messages,
 };
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+
+/// Unigram `OutputChatActionManager` default delay and `ChatTextBox` keystroke
+/// gap before another `SendChatAction` (`chatActionTyping`). tdesktop resends
+/// every 5s (`kSendMyTypingInterval`); Quill follows the TDLib client's 4s.
+pub const OUTGOING_TYPING_INTERVAL_MS: u64 = 4_000;
 
 /// How many chats to ask TDLib to load per `loadChats` page.
 pub const MAIN_CHAT_LOAD_LIMIT: i32 = 100;
@@ -298,6 +303,13 @@ pub struct ConnectDriver<S: JsonSender> {
     pending_typed_search: Option<(u64, String)>,
     chat_search_debounce_token: u64,
     pending_typed_chat_search: Option<(u64, String)>,
+    /// Last `chatActionTyping` we sent (Unigram `_lastTypingTime`).
+    outgoing_typing: Option<OutgoingTyping>,
+}
+
+struct OutgoingTyping {
+    chat_id: ChatId,
+    last_sent_ms: u64,
 }
 
 impl<S: JsonSender> ConnectDriver<S> {
@@ -318,6 +330,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             pending_typed_search: None,
             chat_search_debounce_token: 0,
             pending_typed_chat_search: None,
+            outgoing_typing: None,
         }
     }
 
@@ -439,6 +452,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.maybe_download_open_thumbs()?;
             return self.fetch_history();
         }
+        self.cancel_outgoing_typing()?;
         self.close_open_chat()?;
         self.session.open_chat(chat_id);
         if !self
@@ -669,7 +683,86 @@ impl<S: JsonSender> ConnectDriver<S> {
             }
         };
         match self.sender.send_json(&json) {
-            Ok(()) => Ok(extra),
+            Ok(()) => {
+                let _ = self.cancel_outgoing_typing();
+                Ok(extra)
+            }
+            Err(err) => {
+                self.session.requests.take(extra);
+                Err(err)
+            }
+        }
+    }
+
+    /// Composer activity → `sendChatAction`.
+    ///
+    /// Unigram `ChatTextBox.OnTextChanged` calls `SetTyping(ChatActionTyping)`
+    /// while the field is non-empty, at most every 4s. tdesktop
+    /// `HistoryWidget::fieldChanged` does the same only when the field has
+    /// sendable text and the user is not editing. Empty text, edit mode, send,
+    /// and leaving the chat send `chatActionCancel` (Unigram `CancelTyping`;
+    /// tdesktop stops the action with progress `-1` on chat close and on send).
+    pub fn sync_outgoing_typing(
+        &mut self,
+        text: &str,
+        editing: bool,
+        now_ms: u64,
+    ) -> Result<(), ConnectSendError> {
+        let composing = !editing && !text.trim().is_empty();
+        let chat_id = self
+            .session
+            .open_chat
+            .filter(|id| self.typing_chat_allowed(*id));
+        let Some(chat_id) = chat_id.filter(|_| composing) else {
+            return self.cancel_outgoing_typing();
+        };
+        if let Some(prev) = &self.outgoing_typing {
+            if prev.chat_id != chat_id {
+                self.cancel_outgoing_typing()?;
+            } else if now_ms.saturating_sub(prev.last_sent_ms) < OUTGOING_TYPING_INTERVAL_MS {
+                return Ok(());
+            }
+        }
+        self.send_outgoing_action(chat_id, true, now_ms)
+    }
+
+    fn typing_chat_allowed(&self, chat_id: ChatId) -> bool {
+        self.chats_path_active()
+            && self
+                .session
+                .chats
+                .get(&chat_id.0)
+                .is_some_and(|chat| chat.supported())
+    }
+
+    fn cancel_outgoing_typing(&mut self) -> Result<(), ConnectSendError> {
+        let Some(prev) = self.outgoing_typing.take() else {
+            return Ok(());
+        };
+        if !self.typing_chat_allowed(prev.chat_id) {
+            return Ok(());
+        }
+        self.send_outgoing_action(prev.chat_id, false, 0)
+    }
+
+    fn send_outgoing_action(
+        &mut self,
+        chat_id: ChatId,
+        typing: bool,
+        now_ms: u64,
+    ) -> Result<(), ConnectSendError> {
+        let extra = self
+            .session
+            .request(RequestPurpose::SendChatAction, Some(chat_id));
+        let json = send_chat_action(extra, chat_id, typing);
+        match self.sender.send_json(&json) {
+            Ok(()) => {
+                self.outgoing_typing = typing.then_some(OutgoingTyping {
+                    chat_id,
+                    last_sent_ms: now_ms,
+                });
+                Ok(())
+            }
             Err(err) => {
                 self.session.requests.take(extra);
                 Err(err)
@@ -3836,6 +3929,74 @@ mod tests {
         assert_eq!(v["@type"], "addChatToList");
         assert_eq!(v["@extra"], unarchive.0.to_string());
         assert_eq!(v["chat_list"]["@type"], "chatListMain");
+        assert!(!sink.rendered().contains("CANARY"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn driver_sends_typing_then_cancel_on_empty_and_send() {
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = Arc::new(RecordingSender::new());
+        let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+        let mut driver =
+            ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+        let seq = AtomicU64::new(0);
+        seed_ready_alice(&mut driver, &seq, &dyn_sink);
+
+        driver.sync_outgoing_typing("hello", false, 1_000).unwrap();
+        let typing = recorder.snapshot().last().cloned().expect("sendChatAction");
+        let v: Value = serde_json::from_str(&typing).unwrap();
+        assert_eq!(v["@type"], "sendChatAction");
+        assert_eq!(v["chat_id"], 7);
+        assert_eq!(v["topic_id"], Value::Null);
+        assert_eq!(v["business_connection_id"], "");
+        assert_eq!(v["action"]["@type"], "chatActionTyping");
+
+        let before = recorder.snapshot().len();
+        driver.sync_outgoing_typing("hello!", false, 2_000).unwrap();
+        assert_eq!(recorder.snapshot().len(), before, "4s throttle");
+
+        driver
+            .sync_outgoing_typing("hello!!", false, 1_000 + OUTGOING_TYPING_INTERVAL_MS)
+            .unwrap();
+        assert_eq!(
+            serde_json::from_str::<Value>(recorder.snapshot().last().unwrap()).unwrap()["action"]["@type"],
+            "chatActionTyping"
+        );
+
+        driver.sync_outgoing_typing("   ", false, 9_000).unwrap();
+        assert_eq!(
+            serde_json::from_str::<Value>(recorder.snapshot().last().unwrap()).unwrap()["action"]["@type"],
+            "chatActionCancel"
+        );
+
+        driver.sync_outgoing_typing("again", false, 10_000).unwrap();
+        let snap = ComposerSnapshot::capture(ChatId(7), driver.session.view_generation, "again");
+        driver.send_text_snapshot(&snap).unwrap();
+        let sent = recorder.snapshot();
+        assert_eq!(
+            serde_json::from_str::<Value>(&sent[sent.len() - 2]).unwrap()["@type"],
+            "sendMessage"
+        );
+        assert_eq!(
+            serde_json::from_str::<Value>(sent.last().unwrap()).unwrap()["action"]["@type"],
+            "chatActionCancel"
+        );
+
+        driver
+            .ingest(
+                copy_and_parse(
+                    r#"{"@type":"updateChatAction","chat_id":7,"topic_id":null,"sender_id":{"@type":"messageSenderUser","user_id":7},"action":{"@type":"chatActionTyping"}}"#,
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        assert!(driver.session.chats.get(&7).unwrap().is_peer_typing());
         assert!(!sink.rendered().contains("CANARY"));
         let _ = std::fs::remove_dir_all(&dir);
     }
