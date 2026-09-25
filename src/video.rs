@@ -51,8 +51,9 @@ pub struct VideoProbe {
 }
 
 /// Read duration, width, and height from a user-picked local video.
-/// Prefers `ffprobe` (same ffmpeg family as playback). Falls back to the
-/// MPEG-4 `mvhd` / `tkhd` boxes when ffprobe is missing.
+/// Prefers `ffprobe` (same ffmpeg family as playback). Stream duration is used
+/// when it is a number; `N/A` or a missing stream duration falls back to
+/// `format.duration`. MPEG-4 `mvhd` / `tkhd` boxes are only a last resort.
 pub fn probe_local_video(path: &Path) -> Result<VideoProbe, String> {
     if !is_playable_video("", path) {
         return Err("unsupported video".into());
@@ -75,7 +76,7 @@ fn probe_with_ffprobe(path: &Path, supports_streaming: bool) -> Option<VideoProb
             "-select_streams",
             "v:0",
             "-show_entries",
-            "stream=width,height,duration",
+            "stream=width,height,duration:format=duration",
             "-of",
             "json",
         ])
@@ -86,14 +87,42 @@ fn probe_with_ffprobe(path: &Path, supports_streaming: bool) -> Option<VideoProb
         return None;
     }
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).ok()?;
+    probe_from_ffprobe_json(&value, supports_streaming)
+}
+
+/// Width and height come from the first video stream. Duration prefers that
+/// stream, then `format.duration` when the stream value is missing or `N/A`
+/// (common for some WebM and Matroska files).
+fn probe_from_ffprobe_json(
+    value: &serde_json::Value,
+    supports_streaming: bool,
+) -> Option<VideoProbe> {
     let stream = value.get("streams")?.get(0)?;
     let width = stream.get("width")?.as_i64()?;
     let height = stream.get("height")?.as_i64()?;
-    let duration = stream.get("duration").and_then(|v| {
-        v.as_f64()
-            .or_else(|| v.as_str().and_then(|s| s.parse::<f64>().ok()))
+    let duration = json_seconds(stream.get("duration")).or_else(|| {
+        json_seconds(
+            value
+                .get("format")
+                .and_then(|format| format.get("duration")),
+        )
     })?;
     finish_probe(duration, width, height, supports_streaming)
+}
+
+fn json_seconds(value: Option<&serde_json::Value>) -> Option<f64> {
+    let value = value?;
+    if value.is_null() {
+        return None;
+    }
+    if let Some(number) = value.as_f64() {
+        return number.is_finite().then_some(number);
+    }
+    let text = value.as_str()?.trim();
+    if text.is_empty() || text.eq_ignore_ascii_case("N/A") {
+        return None;
+    }
+    text.parse::<f64>().ok().filter(|number| number.is_finite())
 }
 
 fn probe_mp4_boxes(path: &Path, supports_streaming: bool) -> Option<VideoProbe> {
@@ -388,6 +417,31 @@ mod tests {
         let _ = std::fs::remove_dir_all(&account);
         let _ = std::fs::remove_file(&stray);
         let _ = std::fs::remove_dir_all(&gif_layout);
+    }
+
+    #[test]
+    fn format_duration_is_used_when_stream_duration_is_na() {
+        let missing = serde_json::json!({
+            "streams": [{ "width": 640, "height": 360 }],
+            "format": { "duration": "2.400000" }
+        });
+        let probe = probe_from_ffprobe_json(&missing, false).unwrap();
+        assert_eq!(probe.duration, 2);
+        assert_eq!(probe.width, 640);
+        assert_eq!(probe.height, 360);
+        assert!(!probe.supports_streaming);
+
+        let na = serde_json::json!({
+            "streams": [{ "width": 640, "height": 360, "duration": "N/A" }],
+            "format": { "duration": "3.2" }
+        });
+        assert_eq!(probe_from_ffprobe_json(&na, false).unwrap().duration, 3);
+
+        let neither = serde_json::json!({
+            "streams": [{ "width": 640, "height": 360, "duration": "N/A" }],
+            "format": { "duration": "N/A" }
+        });
+        assert!(probe_from_ffprobe_json(&neither, false).is_none());
     }
 
     #[test]

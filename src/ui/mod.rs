@@ -1089,7 +1089,15 @@ impl QuillApp {
                             self.status_note = "sending…".into();
                         }
                         Err(_) => {
-                            self.status_note = "could not send message".into();
+                            let video_unreadable = snap.attachment.as_ref().is_some_and(|att| {
+                                att.kind == AttachmentKind::Video
+                                    && quill::video::probe_local_video(&att.path).is_err()
+                            });
+                            self.status_note = if video_unreadable {
+                                "could not read video duration or size".into()
+                            } else {
+                                "could not send message".into()
+                            };
                         }
                     }
                     cx.notify();
@@ -1120,8 +1128,9 @@ impl QuillApp {
     }
 
     fn attach_local(&mut self, kind: AttachmentKind, cx: &mut Context<Self>) {
-        // Explicit user action → pick. Prefer QUILL_ATTACH_PHOTO / QUILL_ATTACH_FILE
-        // when set (live testing); otherwise the demo fixtures under docs/screenshots.
+        // Explicit user action → pick. Prefer QUILL_ATTACH_PHOTO / QUILL_ATTACH_FILE /
+        // QUILL_ATTACH_VIDEO when set (live testing); otherwise the demo fixtures
+        // under docs/screenshots.
         // Never read paths from TDLib JSON for send.
         let env_key = match kind {
             AttachmentKind::Photo => "QUILL_ATTACH_PHOTO",

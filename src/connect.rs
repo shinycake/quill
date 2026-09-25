@@ -1010,7 +1010,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.send_snapshot(snapshot)
     }
 
-    /// Send text, photo, or document via `sendMessage` (TDLib 1.8.67).
+    /// Send text, photo, document, or local video via `sendMessage` (TDLib 1.8.67).
     pub fn send_snapshot(
         &mut self,
         snapshot: &ComposerSnapshot,
