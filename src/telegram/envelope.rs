@@ -597,6 +597,7 @@ pub enum MessageContent {
     Document(DocumentContent),
     Sticker(StickerContent),
     Animation(AnimationContent),
+    Video(VideoContent),
     VoiceNote(VoiceNoteContent),
     Unsupported { type_name: String },
 }
@@ -674,6 +675,10 @@ impl MessageContent {
                 animation.caption.chars().take(80).collect()
             }
             MessageContent::Animation(_) => "GIF".into(),
+            MessageContent::Video(video) if !video.caption.is_empty() => {
+                video.caption.chars().take(80).collect()
+            }
+            MessageContent::Video(_) => "Video".into(),
             MessageContent::VoiceNote(note) if !note.caption.is_empty() => {
                 note.caption.chars().take(80).collect()
             }
@@ -872,6 +877,40 @@ impl AnimationContent {
     }
 
     /// The clip itself (`animation.animation`).
+    pub fn play_file_id(&self) -> Option<FileId> {
+        (self.file_id.0 != 0).then_some(self.file_id)
+    }
+}
+
+/// `video` inside `messageVideo` (TDLib 1.8.67).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VideoContent {
+    pub duration: i32,
+    pub width: i32,
+    pub height: i32,
+    pub file_name: String,
+    pub mime_type: String,
+    pub caption: String,
+    pub show_caption_above_media: bool,
+    pub has_spoiler: bool,
+    pub is_secret: bool,
+    /// `messageVideo.start_timestamp` — seconds to seek before playback.
+    pub start_timestamp: i32,
+    pub supports_streaming: bool,
+    pub has_stickers: bool,
+    pub file_id: FileId,
+    pub thumb_file_id: Option<FileId>,
+    pub thumb_width: i32,
+    pub thumb_height: i32,
+}
+
+impl VideoContent {
+    /// JPEG/MPEG4 thumbnail file, when the sender attached one.
+    pub fn thumb_file_id(&self) -> Option<FileId> {
+        self.thumb_file_id.filter(|id| id.0 != 0)
+    }
+
+    /// The clip itself (`video.video`).
     pub fn play_file_id(&self) -> Option<FileId> {
         (self.file_id.0 != 0).then_some(self.file_id)
     }
@@ -1694,6 +1733,7 @@ fn parse_content(value: Option<&Value>) -> (MessageContent, Vec<ParsedFile>) {
         Some("messageDocument") => parse_message_document(value),
         Some("messageSticker") => parse_message_sticker(value),
         Some("messageAnimation") => parse_message_animation(value),
+        Some("messageVideo") => parse_message_video(value),
         Some("messageVoiceNote") => parse_message_voice_note(value),
         Some(other) => (
             MessageContent::Unsupported {
@@ -1975,6 +2015,95 @@ fn parse_message_animation(value: &Value) -> (MessageContent, Vec<ParsedFile>) {
             thumb_file_id: item.thumb_file_id,
             thumb_width: item.thumb_width,
             thumb_height: item.thumb_height,
+        }),
+        files,
+    )
+}
+
+fn parse_message_video(value: &Value) -> (MessageContent, Vec<ParsedFile>) {
+    let video = value.get("video");
+    if video
+        .and_then(|video| video.get("@type"))
+        .and_then(Value::as_str)
+        != Some("video")
+    {
+        return (
+            MessageContent::Unsupported {
+                type_name: "messageVideo".into(),
+            },
+            Vec::new(),
+        );
+    }
+    let video = video.expect("video");
+    let mut files = Vec::new();
+    let file_id = match parse_file(video.get("video")) {
+        Ok(file) => {
+            let id = file.id;
+            files.push(file);
+            id
+        }
+        Err(_) => FileId(0),
+    };
+    let thumb = video.get("thumbnail").filter(|thumb| !thumb.is_null());
+    let (thumb_file_id, thumb_width, thumb_height) = if let Some(thumb) = thumb {
+        let id = match parse_file(thumb.get("file")) {
+            Ok(file) => {
+                let id = file.id;
+                files.push(file);
+                Some(id)
+            }
+            Err(_) => None,
+        };
+        (
+            id.filter(|id| id.0 != 0),
+            int53_or_zero(thumb.get("width")) as i32,
+            int53_or_zero(thumb.get("height")) as i32,
+        )
+    } else {
+        (None, 0, 0)
+    };
+    files.retain(|file| file.id.0 != 0);
+    (
+        MessageContent::Video(VideoContent {
+            duration: int53_or_zero(video.get("duration")) as i32,
+            width: int53_or_zero(video.get("width")) as i32,
+            height: int53_or_zero(video.get("height")) as i32,
+            file_name: video
+                .get("file_name")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string(),
+            mime_type: video
+                .get("mime_type")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string(),
+            caption: parse_formatted_text(value.get("caption")),
+            show_caption_above_media: value
+                .get("show_caption_above_media")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            has_spoiler: value
+                .get("has_spoiler")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            is_secret: value
+                .get("is_secret")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            start_timestamp: int53_or_zero(value.get("start_timestamp")) as i32,
+            supports_streaming: video
+                .get("supports_streaming")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            has_stickers: video
+                .get("has_stickers")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            file_id,
+            thumb_file_id,
+            thumb_width,
+            thumb_height,
         }),
         files,
     )
@@ -2820,6 +2949,39 @@ mod tests {
             }
             other => panic!("{other:?}"),
         }
+    }
+
+    #[test]
+    fn message_video_parses_1_8_67_fields() {
+        let clip = local_file_json(33, "", false, true);
+        let thumb = local_file_json(42, "/tmp/video-thumb.jpg", true, true);
+        let json = format!(
+            r#"{{"@type":"updateNewMessage","message":{{"id":9,"chat_id":11,"is_outgoing":false,"content":{{"@type":"messageVideo","video":{{"@type":"video","duration":42,"width":640,"height":360,"file_name":"clip.mp4","mime_type":"video/mp4","has_stickers":false,"supports_streaming":true,"minithumbnail":null,"thumbnail":{{"@type":"thumbnail","format":{{"@type":"thumbnailFormatJpeg"}},"width":120,"height":68,"file":{thumb}}},"video":{clip}}},"alternative_videos":[],"storyboards":[],"cover":null,"start_timestamp":3,"caption":{{"@type":"formattedText","text":"see this","entities":[]}},"show_caption_above_media":false,"has_spoiler":false,"is_secret":false}}}}}}"#
+        );
+        let env = parse_envelope(&json).unwrap();
+        let EnvelopePayload::UpdateNewMessage(message) = env.payload else {
+            panic!("expected message");
+        };
+        let MessageContent::Video(video) = &message.content else {
+            panic!("{:?}", message.content);
+        };
+        assert_eq!(video.duration, 42);
+        assert_eq!(video.width, 640);
+        assert_eq!(video.height, 360);
+        assert_eq!(video.file_name, "clip.mp4");
+        assert_eq!(video.mime_type, "video/mp4");
+        assert!(video.supports_streaming);
+        assert!(!video.has_stickers);
+        assert_eq!(video.start_timestamp, 3);
+        assert_eq!(video.file_id, FileId(33));
+        assert_eq!(video.play_file_id(), Some(FileId(33)));
+        assert_eq!(video.thumb_file_id(), Some(FileId(42)));
+        assert_eq!(video.thumb_width, 120);
+        assert_eq!(video.thumb_height, 68);
+        assert_eq!(video.caption, "see this");
+        assert_eq!(message.content.preview(), "see this");
+        assert!(message.files.iter().any(|file| file.id == FileId(33)));
+        assert!(message.files.iter().any(|file| file.id == FileId(42)));
     }
 
     #[test]

@@ -1833,6 +1833,16 @@ impl Session {
                         ids.push(file_id);
                     }
                 }
+                MessageContent::Video(video) => {
+                    if video.is_secret || video.has_spoiler {
+                        continue;
+                    }
+                    if let Some(file_id) = video.thumb_file_id()
+                        && self.should_download(file_id)
+                    {
+                        ids.push(file_id);
+                    }
+                }
                 _ => {}
             }
         }
@@ -3149,6 +3159,40 @@ mod tests {
         );
         assert!(session.thumb_file_ids_to_download().is_empty());
         assert!(session.should_download(FileId(3)));
+    }
+
+    #[test]
+    fn video_thumb_auto_downloads_secret_video_does_not() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        session.open_chat(ChatId(1));
+        let thumb = media_file_json(41, "", false);
+        let clip = media_file_json(42, "", false);
+        let secret_thumb = media_file_json(43, "", false);
+        let secret_clip = media_file_json(44, "", false);
+        let open = format!(
+            r#"{{"@type":"updateNewMessage","message":{{"id":20,"chat_id":1,"is_outgoing":false,"content":{{"@type":"messageVideo","video":{{"@type":"video","duration":8,"width":320,"height":180,"file_name":"a.mp4","mime_type":"video/mp4","has_stickers":false,"supports_streaming":true,"minithumbnail":null,"thumbnail":{{"@type":"thumbnail","format":{{"@type":"thumbnailFormatJpeg"}},"width":120,"height":68,"file":{thumb}}},"video":{clip}}},"alternative_videos":[],"storyboards":[],"cover":null,"start_timestamp":0,"caption":{{"@type":"formattedText","text":"clip","entities":[]}},"show_caption_above_media":false,"has_spoiler":false,"is_secret":false}}}}}}"#
+        );
+        let secret = format!(
+            r#"{{"@type":"updateNewMessage","message":{{"id":21,"chat_id":1,"is_outgoing":false,"content":{{"@type":"messageVideo","video":{{"@type":"video","duration":1,"width":100,"height":100,"file_name":"s.mp4","mime_type":"video/mp4","has_stickers":false,"supports_streaming":false,"minithumbnail":null,"thumbnail":{{"@type":"thumbnail","format":{{"@type":"thumbnailFormatJpeg"}},"width":40,"height":40,"file":{secret_thumb}}},"video":{secret_clip}}},"alternative_videos":[],"storyboards":[],"cover":null,"start_timestamp":0,"caption":{{"@type":"formattedText","text":"","entities":[]}},"show_caption_above_media":false,"has_spoiler":false,"is_secret":true}}}}}}"#
+        );
+        apply_json(&mut session, &seq, &sink, &open);
+        apply_json(&mut session, &seq, &sink, &secret);
+        assert_eq!(session.thumb_file_ids_to_download(), vec![FileId(41)]);
+        assert!(session.should_download(FileId(42)));
+        assert!(session.should_download(FileId(43)));
+        assert_eq!(
+            session
+                .histories
+                .get(&1)
+                .unwrap()
+                .messages
+                .get(&20)
+                .unwrap()
+                .content
+                .preview(),
+            "clip"
+        );
     }
 
     #[test]
