@@ -9,11 +9,11 @@ use quill::auth::{AuthAction, AuthView, view_for};
 use quill::composer::{
     AttachmentKind, ComposerAttachment, ComposerEdit, ComposerReplyTo, ComposerSnapshot,
     DeleteConfirm, ForwardDraft, begin_edit_draft, cancel_edit_draft, cancel_forward_draft,
-    cancel_reply_draft, should_send_on_enter,
+    cancel_reply_draft, draft_text_to_store, should_send_on_enter,
 };
 use quill::connect::{
-    ChatSearchQueryOutcome, ConnectBlocker, ConnectGate, LiveConnect, SEARCH_DEBOUNCE,
-    SearchQueryOutcome, USER_DOWNLOAD_PRIORITY, evaluate_gate, start_live_connect,
+    ChatSearchQueryOutcome, ConnectBlocker, ConnectGate, DraftSaveOutcome, LiveConnect,
+    SEARCH_DEBOUNCE, SearchQueryOutcome, USER_DOWNLOAD_PRIORITY, evaluate_gate, start_live_connect,
 };
 use quill::credentials::TelegramCredentials;
 use quill::diagnostics::{DiagnosticSink, MemorySink};
@@ -26,9 +26,9 @@ use quill::state::{
 };
 use quill::telegram::client::copy_and_parse;
 use quill::telegram::envelope::{
-    AuthorizationState, ChatNotificationSettings, DEFAULT_EMOJI_REACTIONS, MUTE_FOR_1_HOUR,
-    MUTE_FOR_2_DAYS, MUTE_FOR_8_HOURS, MUTE_FOREVER, MessageContent, MessageInteractionInfo,
-    ParsedFile, toggle_chosen_emoji_reaction,
+    AuthorizationState, ChatDraft, ChatNotificationSettings, DEFAULT_EMOJI_REACTIONS,
+    MUTE_FOR_1_HOUR, MUTE_FOR_2_DAYS, MUTE_FOR_8_HOURS, MUTE_FOREVER, MessageContent,
+    MessageInteractionInfo, ParsedFile, toggle_chosen_emoji_reaction,
 };
 use quill::voice::{self, VoiceCapture, format_voice_duration};
 use std::collections::HashMap;
@@ -121,6 +121,9 @@ pub struct QuillApp {
     pending_attachment: Option<ComposerAttachment>,
     /// Same-chat reply draft (tdesktop `FieldHeader::replyToMessage`).
     pending_reply: Option<ComposerReplyTo>,
+    /// Chat whose draft should be cleared after `updateMessageSendSucceeded`
+    /// if the composer is still empty.
+    clear_draft_on_success: Option<ChatId>,
     /// Own-message edit (tdesktop `FieldHeader::editMessage`).
     pending_edit: Option<ComposerEdit>,
     /// Normal composer draft stashed while editing (`DraftType::Normal`).
@@ -194,6 +197,8 @@ pub enum ScreenshotDemo {
     ReadyLinkPreview,
     /// Saved-GIF panel + a playing animation in history (injected, no live Telegram).
     ReadyGifs,
+    /// Restored private-chat composer draft (`draftMessage`).
+    ReadyDrafts,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -267,6 +272,7 @@ impl QuillApp {
             |this, state, event: &InputEvent, window, cx| {
                 let text = state.read(cx).value().to_string();
                 this.sync_composer_typing(&text);
+                this.note_open_draft(true, cx);
                 if let InputEvent::PressEnter { secondary, shift } = event {
                     let marked = state.update(cx, |input, cx| input.marked_text_range(window, cx));
                     if should_send_on_enter(quill::composer::enter_event_from_kit(
@@ -571,6 +577,15 @@ impl QuillApp {
                     AuthorizationState::Ready,
                 )
             }
+            Some(ScreenshotDemo::ReadyDrafts) => {
+                demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
+                (
+                    ConnectUiStatus::DemoReadyChats,
+                    None,
+                    "screenshot demo — restored private-chat draft".into(),
+                    AuthorizationState::Ready,
+                )
+            }
             None => bootstrap_connect(credentials),
         };
 
@@ -609,6 +624,7 @@ impl QuillApp {
             demo_sink,
             pending_attachment,
             pending_reply: None,
+            clear_draft_on_success: None,
             pending_edit: None,
             saved_edit_draft: String::new(),
             pending_delete: None,
@@ -773,6 +789,14 @@ impl QuillApp {
             app.spawn_animation_tick(cx);
             app.status_note = "screenshot demo — GIFs · tap to send · playing".into();
         }
+        if matches!(demo, Some(ScreenshotDemo::ReadyDrafts)) {
+            if let Some(session) = app.demo_session.as_mut() {
+                app.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_drafts(session, &app.demo_sink, &app.demo_seq);
+            }
+            app.restore_open_draft(window, cx);
+            app.status_note = "screenshot demo — draft restored".into();
+        }
         if matches!(demo, Some(ScreenshotDemo::ReadyLinkPreview)) {
             if let Some(session) = app.demo_session.as_mut() {
                 app.demo_seq.store(session.last_seq, Ordering::SeqCst);
@@ -846,10 +870,37 @@ impl QuillApp {
             self.present_forward_result(result, cx);
             progressed = true;
         }
+        self.finish_successful_sends(cx);
         if progressed || send_failed {
             cx.notify();
         }
         self.resume_pending_gif(cx);
+    }
+
+    fn finish_successful_sends(&mut self, cx: &mut Context<Self>) {
+        let clears = self
+            .live
+            .as_mut()
+            .map(|live| std::mem::take(&mut live.driver.session.draft_clears))
+            .unwrap_or_default();
+        if clears.is_empty() {
+            return;
+        }
+        let idle = self.pending_edit.is_none()
+            && self.pending_reply.is_none()
+            && self.composer.read(cx).value().trim().is_empty();
+        for chat_id in clears {
+            if self.clear_draft_on_success != Some(chat_id) {
+                continue;
+            }
+            self.clear_draft_on_success = None;
+            if !idle {
+                continue;
+            }
+            if let Some(live) = self.live.as_mut() {
+                let _ = live.driver.clear_draft_after_send(chat_id, true);
+            }
+        }
     }
 
     fn current_auth(&self) -> AuthorizationState {
@@ -955,8 +1006,10 @@ impl QuillApp {
                         Ok(_) => {
                             self.pending_attachment = None;
                             self.pending_reply = None;
+                            self.clear_draft_on_success = Some(chat_id);
                             self.composer
                                 .update(cx, |input, cx| input.set_value("", window, cx));
+                            self.forget_local_draft(chat_id);
                             self.status_note = "sending…".into();
                         }
                         Err(_) => {
@@ -972,6 +1025,9 @@ impl QuillApp {
                     self.apply_demo_outgoing(&text, attachment.as_ref(), reply.as_ref());
                     self.pending_attachment = None;
                     self.pending_reply = None;
+                    if let Some(chat_id) = self.demo_session.as_ref().and_then(|s| s.open_chat) {
+                        self.forget_local_draft(chat_id);
+                    }
                     self.composer
                         .update(cx, |input, cx| input.set_value("", window, cx));
                     self.status_note = "demo send applied locally (no live Telegram)".into();
@@ -1202,7 +1258,8 @@ impl QuillApp {
         }
     }
 
-    fn select_listed_chat(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
+    fn select_listed_chat(&mut self, chat_id: ChatId, window: &mut Window, cx: &mut Context<Self>) {
+        self.flush_leaving_draft(cx);
         if self
             .pending_reply
             .as_ref()
@@ -1272,6 +1329,7 @@ impl QuillApp {
         } else if let Some(session) = self.demo_session.as_mut() {
             session.open_chat(chat_id);
         }
+        self.restore_open_draft(window, cx);
         let text = self.composer.read(cx).value().to_string();
         self.sync_composer_typing(&text);
         cx.notify();
@@ -1531,6 +1589,7 @@ impl QuillApp {
             self.clear_edit(window, cx);
         }
         self.pending_reply = Some(reply);
+        self.note_open_draft(true, cx);
         self.composer
             .update(cx, |input, cx| input.focus(window, cx));
         self.status_note = "replying".into();
@@ -1541,6 +1600,7 @@ impl QuillApp {
         self.pending_reply = None;
         self.pending_attachment = None;
         let current = self.composer.read(cx).value().to_string();
+        self.note_open_draft(false, cx);
         let (edit, field, saved) = begin_edit_draft(current, edit);
         self.pending_edit = Some(edit);
         self.saved_edit_draft = saved;
@@ -1639,6 +1699,7 @@ impl QuillApp {
     fn clear_reply(&mut self, cx: &mut Context<Self>) {
         // tdesktop FieldHeader Escape / replyCancelled: header only — keep typed text.
         self.pending_reply = cancel_reply_draft(self.pending_reply.take(), String::new()).0;
+        self.note_open_draft(true, cx);
         self.status_note = "reply cancelled".into();
         cx.notify();
     }
@@ -2677,6 +2738,160 @@ impl QuillApp {
                 }
             }
         }
+    }
+
+    fn open_chat_id(&self) -> Option<ChatId> {
+        self.live
+            .as_ref()
+            .and_then(|live| live.driver.session.open_chat)
+            .or_else(|| {
+                self.demo_session
+                    .as_ref()
+                    .and_then(|session| session.open_chat)
+            })
+    }
+
+    fn composer_reply_id(&self, chat_id: ChatId) -> Option<MessageId> {
+        self.pending_reply.as_ref().and_then(|reply| {
+            if reply.chat_id == chat_id {
+                Some(reply.message_id)
+            } else {
+                None
+            }
+        })
+    }
+
+    fn note_open_draft(&mut self, delayed: bool, cx: &mut Context<Self>) {
+        if self.pending_edit.is_some() {
+            return;
+        }
+        let Some(chat_id) = self.open_chat_id() else {
+            return;
+        };
+        let text = self.composer.read(cx).value().to_string();
+        let reply = self.composer_reply_id(chat_id);
+        self.save_chat_draft(chat_id, &text, reply, delayed, cx);
+    }
+
+    fn flush_leaving_draft(&mut self, cx: &mut Context<Self>) {
+        let Some(chat_id) = self.open_chat_id() else {
+            return;
+        };
+        let (text, reply) = if self.pending_edit.is_some() {
+            (self.saved_edit_draft.clone(), None)
+        } else {
+            (
+                self.composer.read(cx).value().to_string(),
+                self.composer_reply_id(chat_id),
+            )
+        };
+        self.save_chat_draft(chat_id, &text, reply, false, cx);
+    }
+
+    fn save_chat_draft(
+        &mut self,
+        chat_id: ChatId,
+        text: &str,
+        reply_to: Option<MessageId>,
+        delayed: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0);
+        if self.live.is_some() {
+            let outcome = self.live.as_mut().and_then(|live| {
+                live.driver
+                    .note_composer_draft(chat_id, text, reply_to, now_ms, delayed)
+                    .ok()
+            });
+            if let Some(DraftSaveOutcome::Debounced { token, delay }) = outcome {
+                self.schedule_draft_commit(token, delay, cx);
+            }
+            return;
+        }
+        let Some(session) = self.demo_session.as_mut() else {
+            return;
+        };
+        if !session.accepts_composer_draft(chat_id) {
+            return;
+        }
+        let stored = draft_text_to_store(text, reply_to.is_some()).map(str::to_string);
+        let reply_to = stored.as_ref().and(reply_to);
+        let draft = stored.map(|text| ChatDraft {
+            text,
+            reply_to_message_id: reply_to,
+        });
+        session.store_composer_draft(chat_id, draft);
+    }
+
+    fn schedule_draft_commit(&mut self, token: u64, delay: Duration, cx: &mut Context<Self>) {
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(delay).await;
+            this.update(cx, |this, _cx| {
+                if let Some(live) = this.live.as_mut() {
+                    let _ = live.driver.commit_debounced_draft(token);
+                }
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    fn forget_local_draft(&mut self, chat_id: ChatId) {
+        if let Some(live) = self.live.as_mut() {
+            live.driver.cancel_pending_draft();
+            live.driver.session.store_composer_draft(chat_id, None);
+        } else if let Some(session) = self.demo_session.as_mut() {
+            session.store_composer_draft(chat_id, None);
+        }
+    }
+
+    fn restore_open_draft(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.pending_edit.is_some() {
+            return;
+        }
+        let Some(chat_id) = self.open_chat_id() else {
+            return;
+        };
+        let restored = self.session().and_then(|session| {
+            if session.draft_is_dirty(chat_id) {
+                return None;
+            }
+            if !session.accepts_composer_draft(chat_id) {
+                return Some((None, None));
+            }
+            let draft = session
+                .chats
+                .get(&chat_id.0)
+                .and_then(|chat| chat.draft.clone());
+            let preview = draft
+                .as_ref()
+                .and_then(|draft| draft.reply_to_message_id)
+                .map(|id| {
+                    let text = session
+                        .histories
+                        .get(&chat_id.0)
+                        .and_then(|history| history.messages.get(&id.0))
+                        .map(|message| message.content.preview())
+                        .filter(|text| !text.is_empty())
+                        .unwrap_or_else(|| "message".into());
+                    (id, text)
+                });
+            Some((draft, preview))
+        });
+        let Some((draft, preview)) = restored else {
+            return;
+        };
+        let text = draft
+            .as_ref()
+            .map(|draft| draft.text.clone())
+            .unwrap_or_default();
+        self.pending_reply =
+            preview.map(|(id, preview)| ComposerReplyTo::new(chat_id, id, preview));
+        self.composer
+            .update(cx, |input, cx| input.set_value(&text, window, cx));
     }
 
     fn sync_composer_typing(&mut self, text: &str) {
@@ -4842,6 +5057,14 @@ fn seed_ready_unread_read_session(sink: Arc<MemorySink>) -> Session {
     seed_demo_session(sink, DemoSeed::AfterMarkRead)
 }
 
+fn apply_ready_drafts(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let json = r#"{"@type":"updateChatDraftMessage","chat_id":11,"draft_message":{"@type":"draftMessage","reply_to":{"@type":"inputMessageReplyToMessage","message_id":101,"quote":null,"checklist_task_id":0,"poll_option_id":""},"date":1700000000,"content":{"@type":"draftMessageContentText","text":{"@type":"formattedText","text":"meet at 6","entities":[]},"link_preview_options":null},"effect_id":"0","suggested_post_info":null},"positions":[{"@type":"chatPosition","list":{"@type":"chatListMain"},"order":"30","is_pinned":true}]}"#;
+    if let Some(owned) = copy_and_parse(json, seq, &dyn_sink) {
+        session.apply(owned);
+    }
+}
+
 fn apply_ready_link_preview(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
     let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
     let thumb = demo_file_json(41, &demo_thumb_png_path(), true);
@@ -5478,8 +5701,8 @@ fn session_chat_row(
         } else {
             cx.theme().sidebar
         })
-        .on_click(cx.listener(move |this, _, _, cx| {
-            this.select_listed_chat(id, cx);
+        .on_click(cx.listener(move |this, _, window, cx| {
+            this.select_listed_chat(id, window, cx);
         }))
         .child(
             div()

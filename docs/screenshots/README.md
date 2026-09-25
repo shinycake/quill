@@ -30,6 +30,7 @@ Captured from a real GPUI window on 2026-09-17 (Linux Xvfb + lavapipe). **Not** 
 | `ready-voice.png` | Ready chat open, **Recording voice** bar (duration, waveform, Cancel, Send) plus history voice notes (incoming **New** / **Play**, outgoing **Pause** while playing). Injected `messageVoiceNote`, no live Telegram. Driven by `quill --screenshot-demo ready-voice`. |
 | `ready-link-preview.png` | Ready chat open, a message URL plus a **link preview** card (site name, title, description, photo). Injected `messageText` / `textEntityTypeUrl` / `linkPreview`, no live Telegram. Driven by `quill --screenshot-demo ready-link-preview`. |
 | `ready-gifs.png` | Ready chat open, **GIFs** panel (saved animations) and a history GIF (**GIF · playing** / **Pause**, plus a not-yet-downloaded clip). Injected `getSavedAnimations` / `messageAnimation`, no live Telegram. Driven by `quill --screenshot-demo ready-gifs`. |
+| `ready-drafts.png` | Ready private chat open with a restored composer draft (`meet at 6`) and **Replying to** the message the draft quotes. Sidebar row shows **Draft:**. Injected `draftMessage` / `updateChatDraftMessage`, no live Telegram. Driven by `quill --screenshot-demo ready-drafts`. |
 | `fixtures/demo-voice.ogg` | Tiny local file used as the completed voice `local.path` in the voice demo (not a screenshot). |
 | `fixtures/demo-thumb.png` | Tiny checkerboard PNG used as the completed photo `local.path` in the media demo (not a screenshot). |
 | `fixtures/demo-notes.txt` | Tiny text file used for outgoing document attach / send demos (not a screenshot). |
@@ -63,6 +64,7 @@ bash scripts/capture-connect-screenshots.sh
 #   cargo run --features ui -- --screenshot-demo ready-voice docs/screenshots
 #   cargo run --features ui -- --screenshot-demo ready-link-preview docs/screenshots
 #   cargo run --features ui -- --screenshot-demo ready-gifs docs/screenshots
+#   cargo run --features ui -- --screenshot-demo ready-drafts docs/screenshots
 ```
 
 Environment used by the script: `DISPLAY`, `LIBGL_ALWAYS_SOFTWARE=1`, `WGPU_BACKEND=vulkan`, `VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json`.

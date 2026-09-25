@@ -5,10 +5,11 @@ use crate::ids::{
 };
 use crate::telegram::client::OwnedEnvelope;
 use crate::telegram::envelope::{
-    AnimationItem, AuthorizationState, ChatAction, ChatKind, ChatList, ChatNotificationSettings,
-    ChatPositionUpdate, ConnectionState, EnvelopePayload, ErrorClass, MessageContent,
-    MessageForwardInfo, MessageInteractionInfo, MessageOrigin, MessageReaction, MessageReplyTo,
-    MessageSender, ParsedFile, ParsedMessage, StickerFormat, StickerItem, StickerSetInfo,
+    AnimationItem, AuthorizationState, ChatAction, ChatDraft, ChatKind, ChatList,
+    ChatNotificationSettings, ChatPositionUpdate, ConnectionState, EnvelopePayload, ErrorClass,
+    MessageContent, MessageForwardInfo, MessageInteractionInfo, MessageOrigin, MessageReaction,
+    MessageReplyTo, MessageSender, ParsedFile, ParsedMessage, StickerFormat, StickerItem,
+    StickerSetInfo,
 };
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
@@ -67,6 +68,9 @@ pub enum RequestPurpose {
     GetStickerSet,
     /// `getSavedAnimations`. Response is `animations`.
     GetSavedAnimations,
+    /// `setChatDraftMessage`. Response is `ok`; the draft also arrives as
+    /// `updateChatDraftMessage`.
+    SetChatDraftMessage,
     Close,
     LogOut,
     Other,
@@ -378,6 +382,8 @@ pub struct ChatSummary {
     pub last_preview: String,
     /// Senders with an active `chatActionTyping` (`updateChatAction`).
     pub typing_senders: Vec<MessageSender>,
+    /// `chat.draft_message` text draft. Voice/rich drafts are not stored.
+    pub draft: Option<ChatDraft>,
 }
 
 impl ChatSummary {
@@ -406,6 +412,16 @@ impl ChatSummary {
         }
         if self.is_peer_typing() {
             return "typing…".into();
+        }
+        if let Some(draft) = &self.draft {
+            let text = draft.text.replace('\n', " ");
+            let text = text.trim();
+            if !text.is_empty() {
+                return format!("Draft: {text}");
+            }
+            if draft.reply_to_message_id.is_some() {
+                return "Draft:".into();
+            }
         }
         if !self.last_preview.is_empty() {
             return self.last_preview.clone();
@@ -447,6 +463,7 @@ fn placeholder_chat(chat_id: ChatId) -> ChatSummary {
         notification_settings: ChatNotificationSettings::default(),
         last_preview: String::new(),
         typing_senders: Vec::new(),
+        draft: None,
     }
 }
 
@@ -1058,6 +1075,13 @@ pub struct Session {
     pub stickers: StickerPanel,
     /// Saved animations (`getSavedAnimations`) for the GIF picker.
     pub gifs: GifPanel,
+    /// `userTypeBot` ids from `updateUser`. Private chats with these users skip drafts.
+    bot_user_ids: HashSet<i64>,
+    /// Composer text changed since the last persisted draft. Remote
+    /// `updateChatDraftMessage` must not replace it (schema comment).
+    draft_dirty: HashSet<i64>,
+    /// Send succeeded; UI clears the server draft if the composer is still empty.
+    pub draft_clears: Vec<ChatId>,
     diagnostics: Arc<dyn DiagnosticSink>,
 }
 
@@ -1090,8 +1114,38 @@ impl Session {
             chat_search: ChatSearchState::default(),
             stickers: StickerPanel::default(),
             gifs: GifPanel::default(),
+            bot_user_ids: HashSet::new(),
+            draft_dirty: HashSet::new(),
+            draft_clears: Vec::new(),
             diagnostics,
         }
+    }
+
+    /// Private chats only, and not a known bot. Channels, groups, secret chats skip drafts.
+    pub fn accepts_composer_draft(&self, chat_id: ChatId) -> bool {
+        let Some(chat) = self.chats.get(&chat_id.0) else {
+            return false;
+        };
+        match chat.kind {
+            ChatKind::Private { user_id } => !self.bot_user_ids.contains(&user_id.0),
+            _ => false,
+        }
+    }
+
+    pub fn mark_draft_dirty(&mut self, chat_id: ChatId) {
+        self.draft_dirty.insert(chat_id.0);
+    }
+
+    pub fn draft_is_dirty(&self, chat_id: ChatId) -> bool {
+        self.draft_dirty.contains(&chat_id.0)
+    }
+
+    /// Local persist (after `setChatDraftMessage`, or the demo path). Clears the dirty bit.
+    pub fn store_composer_draft(&mut self, chat_id: ChatId, draft: Option<ChatDraft>) {
+        if let Some(chat) = self.chats.get_mut(&chat_id.0) {
+            chat.draft = draft;
+        }
+        self.draft_dirty.remove(&chat_id.0);
     }
 
     pub fn apply(&mut self, owned: OwnedEnvelope) {
@@ -1141,6 +1195,7 @@ impl Session {
                 last_read_inbox_message_id,
                 last_read_outbox_message_id,
                 notification_settings,
+                draft,
             } => {
                 let chat = self
                     .chats
@@ -1152,6 +1207,31 @@ impl Session {
                 chat.last_read_inbox_message_id = last_read_inbox_message_id;
                 chat.last_read_outbox_message_id = last_read_outbox_message_id;
                 chat.notification_settings = notification_settings;
+                if !self.draft_dirty.contains(&chat_id.0) {
+                    chat.draft = draft;
+                }
+            }
+            EnvelopePayload::UpdateChatDraftMessage {
+                chat_id,
+                draft,
+                positions,
+            } => {
+                let chat = self
+                    .chats
+                    .entry(chat_id.0)
+                    .or_insert_with(|| placeholder_chat(chat_id));
+                if !self.draft_dirty.contains(&chat_id.0) {
+                    chat.draft = draft;
+                }
+                self.replace_main_list_from_positions(chat_id, &positions);
+                self.rebuild_main_order();
+            }
+            EnvelopePayload::UpdateUser { user_id, is_bot } => {
+                if is_bot {
+                    self.bot_user_ids.insert(user_id.0);
+                } else {
+                    self.bot_user_ids.remove(&user_id.0);
+                }
             }
             EnvelopePayload::UpdateChatNotificationSettings {
                 chat_id,
@@ -1252,9 +1332,11 @@ impl Session {
                 message,
                 old_message_id,
             } => {
+                let chat_id = message.chat_id;
                 self.remember_files(&message.files);
                 let history = self.histories.entry(message.chat_id.0).or_default();
                 history.replace_id(old_message_id, history_message(message, false));
+                self.draft_clears.push(chat_id);
             }
             EnvelopePayload::UpdateMessageSendFailed {
                 message,
@@ -3960,5 +4042,55 @@ mod tests {
             Some(MessageId(100))
         );
         assert!(!sink.rendered().contains("CANARY"));
+    }
+
+    #[test]
+    fn private_draft_restores_and_dirty_update_is_ignored() {
+        let sink = Arc::new(MemorySink::new());
+        let seq = AtomicU64::new(0);
+        let mut session = Session::new(AccountKey::primary(), sink.clone());
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateNewChat","chat":{"id":11,"title":"Ada","type":{"@type":"chatTypePrivate","user_id":11},"unread_count":0,"draft_message":{"@type":"draftMessage","reply_to":{"@type":"inputMessageReplyToMessage","message_id":101,"quote":null,"checklist_task_id":0,"poll_option_id":""},"date":1,"content":{"@type":"draftMessageContentText","text":{"@type":"formattedText","text":"meet at 6","entities":[]},"link_preview_options":null},"effect_id":"0","suggested_post_info":null}}}"#,
+        );
+        assert!(session.accepts_composer_draft(ChatId(11)));
+        let draft = session.chats.get(&11).unwrap().draft.clone().unwrap();
+        assert_eq!(draft.text, "meet at 6");
+        assert_eq!(draft.reply_to_message_id, Some(MessageId(101)));
+        assert!(
+            session
+                .chats
+                .get(&11)
+                .unwrap()
+                .sidebar_preview()
+                .starts_with("Draft:")
+        );
+        session.mark_draft_dirty(ChatId(11));
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateChatDraftMessage","chat_id":11,"draft_message":{"@type":"draftMessage","reply_to":null,"date":2,"content":{"@type":"draftMessageContentText","text":{"@type":"formattedText","text":"stale","entities":[]},"link_preview_options":null},"effect_id":"0","suggested_post_info":null},"positions":[]}"#,
+        );
+        assert_eq!(
+            session.chats.get(&11).unwrap().draft.as_ref().unwrap().text,
+            "meet at 6"
+        );
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateUser","user":{"id":11,"first_name":"Bot","type":{"@type":"userTypeBot","can_be_edited":false,"can_join_groups":false,"can_read_all_group_messages":false,"has_main_web_app":false,"has_topics":false,"allows_users_to_create_topics":false,"can_manage_bots":false,"is_inline":false,"inline_query_placeholder":"","supports_guest_queries":false,"is_guard":false,"need_location":false,"can_connect_to_business":false,"can_be_added_to_attachment_menu":false,"active_user_count":0}}}"#,
+        );
+        assert!(!session.accepts_composer_draft(ChatId(11)));
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateNewChat","chat":{"id":13,"title":"News","type":{"@type":"chatTypeSupergroup","supergroup_id":13,"is_channel":true},"unread_count":0,"draft_message":{"@type":"draftMessage","reply_to":null,"date":1,"content":{"@type":"draftMessageContentText","text":{"@type":"formattedText","text":"nope","entities":[]},"link_preview_options":null},"effect_id":"0","suggested_post_info":null}}}"#,
+        );
+        assert!(!session.accepts_composer_draft(ChatId(13)));
     }
 }
