@@ -158,6 +158,14 @@ pub struct QuillApp {
     animation_cache_file: Option<i32>,
     /// Play was tapped before the clip was local. Resume when `downloadFile` finishes.
     pending_gif_play: Option<(MessageId, FileId, String)>,
+    /// History row whose video preview is looping.
+    playing_video: Option<MessageId>,
+    video_frames: Vec<PathBuf>,
+    video_frame: usize,
+    video_tick: bool,
+    video_cache_file: Option<i32>,
+    /// Play was tapped before the video was local. Resume when `downloadFile` finishes.
+    pending_video_play: Option<(MessageId, FileId, String, i32)>,
 }
 
 /// Forced UI surfaces for screenshot proof (no live Telegram / no real credentials).
@@ -200,6 +208,8 @@ pub enum ScreenshotDemo {
     ReadyLinkPreview,
     /// Saved-GIF panel + a playing animation in history (injected, no live Telegram).
     ReadyGifs,
+    /// Video bubble with Play/Pause in history (injected, no live Telegram).
+    ReadyVideo,
     /// Restored private-chat composer draft (`draftMessage`).
     ReadyDrafts,
 }
@@ -580,6 +590,15 @@ impl QuillApp {
                     AuthorizationState::Ready,
                 )
             }
+            Some(ScreenshotDemo::ReadyVideo) => {
+                demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
+                (
+                    ConnectUiStatus::DemoReadyChats,
+                    None,
+                    "screenshot demo — video bubble playback".into(),
+                    AuthorizationState::Ready,
+                )
+            }
             Some(ScreenshotDemo::ReadyDrafts) => {
                 demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
                 (
@@ -647,6 +666,12 @@ impl QuillApp {
             animation_tick: false,
             animation_cache_file: None,
             pending_gif_play: None,
+            playing_video: None,
+            video_frames: Vec::new(),
+            video_frame: 0,
+            video_tick: false,
+            video_cache_file: None,
+            pending_video_play: None,
         };
         if matches!(demo, Some(ScreenshotDemo::ReadyChatsComposer)) {
             app.composer.update(cx, |input, cx| {
@@ -793,6 +818,19 @@ impl QuillApp {
             app.spawn_animation_tick(cx);
             app.status_note = "screenshot demo — GIFs · tap to send · playing".into();
         }
+        if matches!(demo, Some(ScreenshotDemo::ReadyVideo)) {
+            if let Some(session) = app.demo_session.as_mut() {
+                app.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_video(session, &app.demo_sink, &app.demo_seq);
+            }
+            app.playing_video = Some(MessageId(601));
+            app.video_frames = vec![
+                demo_media_allowlist().join("demo-gif-1.png"),
+                demo_media_allowlist().join("demo-gif-2.png"),
+            ];
+            app.spawn_video_tick(cx);
+            app.status_note = "screenshot demo — video · playing".into();
+        }
         if matches!(demo, Some(ScreenshotDemo::ReadyDrafts)) {
             if let Some(session) = app.demo_session.as_mut() {
                 app.demo_seq.store(session.last_seq, Ordering::SeqCst);
@@ -879,6 +917,7 @@ impl QuillApp {
             cx.notify();
         }
         self.resume_pending_gif(cx);
+        self.resume_pending_video(cx);
     }
 
     fn finish_successful_sends(&mut self, cx: &mut Context<Self>) {
@@ -935,7 +974,7 @@ impl QuillApp {
         if primary.is_empty() {
             primary
         } else {
-            quill::animation::with_gif_frame_cache(primary)
+            quill::video::with_video_frame_cache(quill::animation::with_gif_frame_cache(primary))
         }
     }
 
@@ -1241,6 +1280,7 @@ impl QuillApp {
                         MessageContent::Animation(animation) => {
                             animation.caption = text.to_string()
                         }
+                        MessageContent::Video(video) => video.caption = text.to_string(),
                         MessageContent::Sticker(_) | MessageContent::Unsupported { .. } => {}
                     }
                 }
@@ -1306,6 +1346,7 @@ impl QuillApp {
         }
         self.stop_voice_playback();
         self.stop_animation_playback();
+        self.stop_video_playback();
         if self.gif_panel_open() {
             if let Some(live) = self.live.as_mut() {
                 live.driver.close_gif_panel();
@@ -2145,6 +2186,7 @@ impl QuillApp {
         match quill::animation::playback_frames(&safe, &mime, &cache) {
             Ok(frames) if !frames.is_empty() => {
                 self.stop_voice_playback();
+                self.stop_video_playback();
                 self.pending_gif_play = None;
                 if self.animation_cache_file.is_some_and(|id| id != file_id.0)
                     && let Some(old) = self.animation_cache_file.take()
@@ -2163,6 +2205,123 @@ impl QuillApp {
             }
         }
         cx.notify();
+    }
+
+    fn stop_video_playback(&mut self) {
+        if let Some(file_id) = self.video_cache_file.take() {
+            quill::video::discard_frame_cache(file_id);
+        }
+        self.playing_video = None;
+        self.video_frames.clear();
+        self.video_frame = 0;
+        self.pending_video_play = None;
+    }
+
+    fn spawn_video_tick(&mut self, cx: &mut Context<Self>) {
+        if self.video_tick {
+            return;
+        }
+        self.video_tick = true;
+        cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor()
+                    .timer(Duration::from_millis(400))
+                    .await;
+                let cont = this
+                    .update(cx, |this, cx| {
+                        let playing = this.playing_video.is_some() && this.video_frames.len() > 1;
+                        if playing {
+                            this.video_frame = (this.video_frame + 1) % this.video_frames.len();
+                            cx.notify();
+                        }
+                        this.playing_video.is_some()
+                    })
+                    .unwrap_or(false);
+                if !cont {
+                    break;
+                }
+            }
+            let _ = this.update(cx, |this, _| {
+                this.video_tick = false;
+            });
+        })
+        .detach();
+    }
+
+    fn toggle_video_playback(
+        &mut self,
+        message_id: MessageId,
+        file_id: FileId,
+        mime: String,
+        start_timestamp: i32,
+        cx: &mut Context<Self>,
+    ) {
+        if self.playing_video == Some(message_id) {
+            self.stop_video_playback();
+            self.status_note = "video paused".into();
+            cx.notify();
+            return;
+        }
+        let path = self.session().and_then(|session| {
+            session
+                .files
+                .get(&file_id.0)
+                .and_then(|file| file.usable_path())
+                .map(str::to_string)
+        });
+        let Some(path) = path else {
+            self.pending_video_play = Some((message_id, file_id, mime, start_timestamp));
+            self.request_media_download(file_id, cx);
+            self.status_note = "downloading video".into();
+            return;
+        };
+        self.pending_video_play = None;
+        let roots = self.media_display_roots();
+        let Some(safe) = sandboxed_display_path(&path, &roots) else {
+            self.status_note = "video file is outside the account files".into();
+            cx.notify();
+            return;
+        };
+        let cache = quill::video::video_frame_cache_dir(file_id.0);
+        match quill::video::playback_frames(&safe, &mime, &cache, start_timestamp) {
+            Ok(frames) if !frames.is_empty() => {
+                self.stop_voice_playback();
+                self.stop_animation_playback();
+                self.pending_video_play = None;
+                if self.video_cache_file.is_some_and(|id| id != file_id.0)
+                    && let Some(old) = self.video_cache_file.take()
+                {
+                    quill::video::discard_frame_cache(old);
+                }
+                self.video_cache_file = Some(file_id.0);
+                self.playing_video = Some(message_id);
+                self.video_frames = frames;
+                self.video_frame = 0;
+                self.spawn_video_tick(cx);
+                self.status_note = "playing video".into();
+            }
+            _ => {
+                self.status_note = "could not play video".into();
+            }
+        }
+        cx.notify();
+    }
+
+    fn resume_pending_video(&mut self, cx: &mut Context<Self>) {
+        let Some((message_id, file_id, mime, start_timestamp)) = self.pending_video_play.clone()
+        else {
+            return;
+        };
+        let ready = self.session().is_some_and(|session| {
+            session
+                .files
+                .get(&file_id.0)
+                .and_then(|file| file.usable_path())
+                .is_some()
+        });
+        if ready {
+            self.toggle_video_playback(message_id, file_id, mime, start_timestamp, cx);
+        }
     }
 
     fn resume_pending_gif(&mut self, cx: &mut Context<Self>) {
@@ -2253,6 +2412,7 @@ impl QuillApp {
             return;
         }
         self.stop_voice_playback();
+        self.stop_video_playback();
         self.playing_voice = Some(message_id);
         if !listened {
             self.mark_voice_opened(chat_id, message_id);
@@ -5003,6 +5163,15 @@ impl QuillApp {
                     } else {
                         None
                     };
+                    let video_playing = self.playing_video == Some(message.id);
+                    let video_frame = if video_playing {
+                        self.video_frames
+                            .get(self.video_frame)
+                            .cloned()
+                            .or_else(|| self.video_frames.first().cloned())
+                    } else {
+                        None
+                    };
                     let row = session_history_row(
                         &message,
                         &files,
@@ -5016,6 +5185,8 @@ impl QuillApp {
                         voice_playing,
                         animation_playing,
                         animation_frame,
+                        video_playing,
+                        video_frame,
                         cx,
                     );
                     list = list.child(
@@ -5391,6 +5562,30 @@ fn apply_ready_gifs(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU
     );
     if let Some(owned) = copy_and_parse(&saved, seq, &dyn_sink) {
         session.apply(owned);
+    }
+}
+
+fn apply_ready_video(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let thumb_path = demo_thumb_png_path();
+    let clip_path = demo_media_allowlist()
+        .join("demo-gif.gif")
+        .to_string_lossy()
+        .into_owned();
+    let thumb = demo_file_json(71, &thumb_path, true);
+    let clip = demo_file_json(72, &clip_path, true);
+    let pending = demo_file_json(73, "", false);
+    let playing = format!(
+        r#"{{"@type":"updateNewMessage","message":{{"id":601,"chat_id":11,"is_outgoing":false,"content":{{"@type":"messageVideo","video":{{"@type":"video","duration":12,"width":640,"height":360,"file_name":"clip.mp4","mime_type":"video/mp4","has_stickers":false,"supports_streaming":true,"minithumbnail":null,"thumbnail":{{"@type":"thumbnail","format":{{"@type":"thumbnailFormatJpeg"}},"width":240,"height":140,"file":{thumb}}},"video":{clip}}},"alternative_videos":[],"storyboards":[],"cover":null,"start_timestamp":0,"caption":{{"@type":"formattedText","text":"Beach clip","entities":[]}},"show_caption_above_media":false,"has_spoiler":false,"is_secret":false}}}}}}"#
+    );
+    let waiting = format!(
+        r#"{{"@type":"updateNewMessage","message":{{"id":602,"chat_id":11,"is_outgoing":true,"content":{{"@type":"messageVideo","video":{{"@type":"video","duration":3,"width":320,"height":180,"file_name":"pending.mp4","mime_type":"video/mp4","has_stickers":false,"supports_streaming":false,"minithumbnail":null,"thumbnail":null,"video":{pending}}},"alternative_videos":[],"storyboards":[],"cover":null,"start_timestamp":0,"caption":{{"@type":"formattedText","text":"","entities":[]}},"show_caption_above_media":false,"has_spoiler":false,"is_secret":false}}}}}}"#
+    );
+    let drop_seed = r#"{"@type":"updateDeleteMessages","chat_id":11,"message_ids":[101,102,103],"is_permanent":true,"from_cache":false}"#;
+    for json in [playing, waiting, drop_seed.to_string()] {
+        if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
+            session.apply(owned);
+        }
     }
 }
 
@@ -5930,6 +6125,8 @@ fn session_history_row(
     voice_playing: bool,
     animation_playing: bool,
     animation_frame: Option<PathBuf>,
+    video_playing: bool,
+    video_frame: Option<PathBuf>,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
     let quote = message.reply_to.as_ref().and_then(|reply| {
@@ -6132,6 +6329,16 @@ fn session_history_row(
             animation_frame.as_deref(),
             cx,
         )),
+        MessageContent::Video(video) => Some(video_attachment(
+            message.id,
+            video,
+            files,
+            downloading,
+            media_roots,
+            video_playing,
+            video_frame.as_deref(),
+            cx,
+        )),
         MessageContent::Text(_) | MessageContent::Unsupported { .. } => None,
     };
     let extra = Some(
@@ -6160,6 +6367,7 @@ fn session_history_row(
         MessageContent::Document(doc) => doc.caption.clone(),
         MessageContent::Sticker(_) => String::new(),
         MessageContent::Animation(animation) => animation.caption.clone(),
+        MessageContent::Video(video) => video.caption.clone(),
         MessageContent::VoiceNote(note) => note.caption.clone(),
     };
     if let Some(text_body) = text_body {
@@ -6673,6 +6881,134 @@ fn animation_attachment(
                         return;
                     }
                     this.toggle_animation_playback(message_id, play_id, mime.clone(), cx);
+                })),
+        )
+        .into_any_element()
+}
+
+fn video_attachment(
+    message_id: MessageId,
+    video: &quill::telegram::envelope::VideoContent,
+    files: &HashMap<i32, ParsedFile>,
+    downloading: &std::collections::HashSet<i32>,
+    media_roots: &[PathBuf],
+    playing: bool,
+    frame: Option<&std::path::Path>,
+    cx: &mut Context<QuillApp>,
+) -> AnyElement {
+    let row_id = message_id.0 as u64;
+    let play_id = video.play_file_id().unwrap_or(FileId(0));
+    let thumb_id = video.thumb_file_id().unwrap_or(FileId(0));
+    let mime = video.mime_type.clone();
+    let start_timestamp = video.start_timestamp;
+    let play_label = if playing { "Pause" } else { "Play" };
+    let duration = format_voice_duration(video.duration);
+    let visual = if playing {
+        frame.and_then(|path| sandboxed_display_path(&path.to_string_lossy(), media_roots))
+    } else {
+        None
+    };
+    let visual = visual.or_else(|| {
+        [thumb_id, play_id].into_iter().find_map(|id| {
+            if id.0 == 0 {
+                return None;
+            }
+            files
+                .get(&id.0)
+                .and_then(|file| file.usable_path())
+                .and_then(|path| sandboxed_display_path(path, media_roots))
+        })
+    });
+    let downloading_now = file_is_downloading(play_id, files, downloading)
+        || file_is_downloading(thumb_id, files, downloading);
+    let blocked = video.is_secret || video.has_spoiler;
+    let picture = if !blocked && let Some(path) = visual {
+        img(path)
+            .id(("video-img", row_id))
+            .w(px(240.))
+            .h(px(140.))
+            .rounded_md()
+            .object_fit(ObjectFit::Cover)
+            .with_fallback(|| {
+                div()
+                    .w(px(240.))
+                    .h(px(140.))
+                    .rounded_md()
+                    .bg(rgb(0x238636))
+                    .into_any_element()
+            })
+            .into_any_element()
+    } else {
+        let label = if blocked {
+            "Video".to_string()
+        } else if downloading_now {
+            "Video — downloading…".into()
+        } else if video.width > 0 && video.height > 0 {
+            format!("Video {}×{} — not downloaded", video.width, video.height)
+        } else {
+            "Video — not downloaded".into()
+        };
+        div()
+            .id(("video-ph", row_id))
+            .w(px(240.))
+            .h(px(140.))
+            .rounded_md()
+            .bg(rgb(0x238636))
+            .flex()
+            .items_center()
+            .justify_center()
+            .child(div().text_xs().text_color(rgb(0xffffff)).child(label))
+            .into_any_element()
+    };
+    div()
+        .id(("video-row", row_id))
+        .mt_2()
+        .flex()
+        .flex_col()
+        .gap_1()
+        .child(
+            div()
+                .relative()
+                .child(picture)
+                .child(
+                    div()
+                        .absolute()
+                        .top_1()
+                        .left_1()
+                        .px_1()
+                        .rounded_sm()
+                        .bg(rgb(0x0d1117))
+                        .text_xs()
+                        .text_color(rgb(0xffffff))
+                        .child(if playing { "Video · playing" } else { "Video" }),
+                )
+                .child(
+                    div()
+                        .absolute()
+                        .bottom_1()
+                        .left_1()
+                        .px_1()
+                        .rounded_sm()
+                        .bg(rgb(0x0d1117))
+                        .text_xs()
+                        .text_color(rgb(0xffffff))
+                        .child(duration),
+                ),
+        )
+        .child(
+            Button::new(format!("video-play-{row_id}"))
+                .label(play_label)
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    if blocked {
+                        return;
+                    }
+                    this.toggle_video_playback(
+                        message_id,
+                        play_id,
+                        mime.clone(),
+                        start_timestamp,
+                        cx,
+                    );
                 })),
         )
         .into_any_element()
