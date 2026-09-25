@@ -41,12 +41,14 @@ pub fn enter_event_from_kit(
 /// How the user chose to send a local file.
 /// Video is `inputMessageVideo`, not a document (tdesktop Photo/Video vs File).
 /// A video note is `inputMessageVideoNote` and is not mixed into an album.
+/// Audio is `inputMessageAudio` and is not mixed into a photo/video album.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AttachmentKind {
     Photo,
     Document,
     Video,
     VideoNote,
+    Audio,
 }
 
 /// A local file the user explicitly attached. Path is canonical at pick time.
@@ -78,7 +80,7 @@ impl ComposerAttachment {
     /// into a photo/video album). Photos and videos accumulate up to 10.
     pub fn push_attachment(list: &mut Vec<Self>, next: Self) {
         match next.kind {
-            AttachmentKind::Document | AttachmentKind::VideoNote => {
+            AttachmentKind::Document | AttachmentKind::VideoNote | AttachmentKind::Audio => {
                 list.clear();
                 list.push(next);
             }
@@ -569,6 +571,12 @@ mod tests {
         ComposerAttachment::push_attachment(&mut list, video_note);
         assert_eq!(list.len(), 1);
         assert_eq!(list[0].kind, AttachmentKind::VideoNote);
+        let track = root.join("night.mp3");
+        fs::write(&track, [1]).unwrap();
+        let audio = ComposerAttachment::pick(&track, AttachmentKind::Audio).unwrap();
+        ComposerAttachment::push_attachment(&mut list, audio);
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].kind, AttachmentKind::Audio);
         let _ = fs::remove_dir_all(&root);
     }
 

@@ -666,6 +666,75 @@ pub fn send_message_album(
     .to_string()
 }
 
+/// JPEG album cover for `inputAudio.album_cover_thumbnail`. `None` is JSON null
+/// (schema: pass null to skip thumbnail uploading).
+pub struct AudioCoverSend {
+    pub path: String,
+    pub width: i32,
+    pub height: i32,
+}
+
+/// Fields that exist on `inputAudio` (TDLib 1.8.67). `title` and `performer`
+/// are 0–64 characters. `file_name` and `mime_type` are not on this constructor.
+pub struct AudioSend {
+    pub duration: i32,
+    pub title: String,
+    pub performer: String,
+    pub album_cover: Option<AudioCoverSend>,
+}
+
+fn input_album_cover(cover: Option<&AudioCoverSend>) -> Value {
+    match cover {
+        Some(cover) => json!({
+            "@type": "inputThumbnail",
+            "thumbnail": {
+                "@type": "inputFileLocal",
+                "path": cover.path
+            },
+            "width": cover.width,
+            "height": cover.height
+        }),
+        None => Value::Null,
+    }
+}
+
+/// `sendMessage` + `inputMessageAudio` / `inputAudio` / `inputFileLocal` (1.8.67).
+/// `path` must already be an explicitly picked local file — never a JSON `local.path`.
+pub fn send_audio(
+    extra: RequestId,
+    chat_id: ChatId,
+    path: &str,
+    audio: &AudioSend,
+    caption: &str,
+    reply_to: Option<MessageId>,
+) -> String {
+    json!({
+        "@type": "sendMessage",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0,
+        "topic_id": Value::Null,
+        "reply_to": input_message_reply_to(reply_to),
+        "options": Value::Null,
+        "reply_markup": Value::Null,
+        "input_message_content": {
+            "@type": "inputMessageAudio",
+            "audio": {
+                "@type": "inputAudio",
+                "audio": {
+                    "@type": "inputFileLocal",
+                    "path": path
+                },
+                "album_cover_thumbnail": input_album_cover(audio.album_cover.as_ref()),
+                "duration": audio.duration,
+                "title": audio.title,
+                "performer": audio.performer
+            },
+            "caption": formatted_caption(caption)
+        }
+    })
+    .to_string()
+}
+
 /// `sendMessage` + `inputMessageDocument` / `inputDocument` / `inputFileLocal` (1.8.67).
 /// `path` must already be an explicitly picked local file — never a JSON `local.path`.
 pub fn send_document(
@@ -1324,6 +1393,78 @@ mod tests {
         );
         assert_eq!(v["input_message_content"]["caption"]["text"], "");
         assert!(!json.contains("CANARY"));
+    }
+
+    #[test]
+    fn send_audio_shape_matches_1_8_67() {
+        let json = send_audio(
+            RequestId(21),
+            ChatId(7),
+            "/tmp/picked.mp3",
+            &AudioSend {
+                duration: 214,
+                title: "Night Drive".into(),
+                performer: "Ada Lovelace".into(),
+                album_cover: Some(AudioCoverSend {
+                    path: "/tmp/cover.jpg".into(),
+                    width: 90,
+                    height: 90,
+                }),
+            },
+            "CANARY_AUDIO",
+            Some(MessageId(9)),
+        );
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "sendMessage");
+        assert_eq!(v["@extra"], "21");
+        assert_eq!(v["chat_id"], 7);
+        assert_eq!(v["topic_id"], Value::Null);
+        assert_eq!(v["input_message_content"]["@type"], "inputMessageAudio");
+        let audio = &v["input_message_content"]["audio"];
+        assert_eq!(audio["@type"], "inputAudio");
+        assert_eq!(audio["audio"]["@type"], "inputFileLocal");
+        assert_eq!(audio["audio"]["path"], "/tmp/picked.mp3");
+        assert_eq!(audio["album_cover_thumbnail"]["@type"], "inputThumbnail");
+        assert_eq!(
+            audio["album_cover_thumbnail"]["thumbnail"]["path"],
+            "/tmp/cover.jpg"
+        );
+        assert_eq!(audio["album_cover_thumbnail"]["width"], 90);
+        assert_eq!(audio["album_cover_thumbnail"]["height"], 90);
+        assert_eq!(audio["duration"], 214);
+        assert_eq!(audio["title"], "Night Drive");
+        assert_eq!(audio["performer"], "Ada Lovelace");
+        assert!(audio.get("file_name").is_none());
+        assert!(audio.get("mime_type").is_none());
+        assert_eq!(
+            v["input_message_content"]["caption"]["text"],
+            "CANARY_AUDIO"
+        );
+        assert_eq!(v["reply_to"]["@type"], "inputMessageReplyToMessage");
+        assert_eq!(v["reply_to"]["message_id"], 9);
+        assert!(!json.contains("inputMessageVoiceNote"));
+        assert!(!json.contains("api_hash"));
+
+        let bare = send_audio(
+            RequestId(22),
+            ChatId(7),
+            "/tmp/picked.flac",
+            &AudioSend {
+                duration: 0,
+                title: String::new(),
+                performer: String::new(),
+                album_cover: None,
+            },
+            "",
+            None,
+        );
+        let bare: serde_json::Value = serde_json::from_str(&bare).unwrap();
+        assert_eq!(
+            bare["input_message_content"]["audio"]["album_cover_thumbnail"],
+            Value::Null
+        );
+        assert_eq!(bare["input_message_content"]["caption"]["text"], "");
+        assert_eq!(bare["reply_to"], Value::Null);
     }
 
     #[test]

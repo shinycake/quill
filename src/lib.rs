@@ -3,6 +3,7 @@
 
 pub mod album;
 pub mod animation;
+pub mod audio;
 pub mod auth;
 pub mod composer;
 pub mod connect;
