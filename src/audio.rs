@@ -38,6 +38,16 @@ const TAG_LIMIT: usize = 64;
 /// `album_artist` / `performer`) and are truncated to 64 characters. Missing
 /// tags stay empty; the history row then shows the file name.
 pub fn probe_local_audio(path: &Path) -> Result<AudioProbe, String> {
+    if let Some(probe) = probe_with_ffprobe(path) {
+        return probe;
+    }
+    // Linux CI has no ffmpeg. MPEG-1 Layer III (the demo track, and the usual
+    // picked mp3) is read from the ID3 tag and frame headers, the same way
+    // video falls back to MPEG-4 boxes when `ffprobe` is missing.
+    probe_mp3(path)
+}
+
+fn probe_with_ffprobe(path: &Path) -> Option<Result<AudioProbe, String>> {
     let output = Command::new("ffprobe")
         .args([
             "-v",
@@ -51,13 +61,12 @@ pub fn probe_local_audio(path: &Path) -> Result<AudioProbe, String> {
         ])
         .arg(path)
         .output()
-        .map_err(|_| "ffprobe is not available".to_string())?;
+        .ok()?;
     if !output.status.success() {
-        return Err("could not read audio".into());
+        return None;
     }
-    let value: serde_json::Value =
-        serde_json::from_slice(&output.stdout).map_err(|_| "could not read audio".to_string())?;
-    probe_from_ffprobe_json(&value)
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).ok()?;
+    Some(probe_from_ffprobe_json(&value))
 }
 
 fn probe_from_ffprobe_json(value: &serde_json::Value) -> Result<AudioProbe, String> {
@@ -149,13 +158,14 @@ fn duration_seconds(seconds: f64) -> i32 {
 /// Embedded album picture as a JPEG, or `None` when the file has no cover
 /// (schema: pass null to skip thumbnail uploading).
 pub fn write_album_cover(src: &Path) -> Option<AudioCover> {
-    let dir = std::env::temp_dir().join("quill-audio-covers");
-    std::fs::create_dir_all(&dir).ok()?;
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .ok()?
-        .as_nanos();
-    let dest = dir.join(format!("{}-{nanos}.jpg", std::process::id()));
+    if let Some(cover) = write_album_cover_ffmpeg(src) {
+        return Some(cover);
+    }
+    write_album_cover_mp3(src)
+}
+
+fn write_album_cover_ffmpeg(src: &Path) -> Option<AudioCover> {
+    let dest = cover_dest()?;
     let status = Command::new("ffmpeg")
         .args(["-y", "-hide_banner", "-loglevel", "error", "-i"])
         .arg(src)
@@ -184,6 +194,16 @@ pub fn write_album_cover(src: &Path) -> Option<AudioCover> {
     })
 }
 
+fn cover_dest() -> Option<PathBuf> {
+    let dir = std::env::temp_dir().join("quill-audio-covers");
+    std::fs::create_dir_all(&dir).ok()?;
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()?
+        .as_nanos();
+    Some(dir.join(format!("{}-{nanos}.jpg", std::process::id())))
+}
+
 /// MIME type for a received `audio.mime_type` demo row. Not a field on
 /// `inputAudio`; TDLib detects it from the uploaded file.
 pub fn mime_type_for_path(path: &Path) -> &'static str {
@@ -204,7 +224,307 @@ pub fn mime_type_for_path(path: &Path) -> &'static str {
     }
 }
 
+/// MPEG-1 Layer III: ID3v2 `TIT2` / `TPE1` plus frame-header duration.
+/// Used when `ffprobe` is not installed (linux CI).
+fn probe_mp3(path: &Path) -> Result<AudioProbe, String> {
+    let bytes = std::fs::read(path).map_err(|_| "could not read audio".to_string())?;
+    if bytes.len() > 32 * 1024 * 1024 {
+        return Err("could not read audio".into());
+    }
+    let (title, performer, audio_at) = id3v2_tags(&bytes).unwrap_or_default();
+    let seconds =
+        mpeg1_layer3_seconds(&bytes[audio_at..]).ok_or("could not read audio duration")?;
+    Ok(AudioProbe {
+        duration: duration_seconds(seconds),
+        title,
+        performer,
+    })
+}
+
+fn id3v2_tags(bytes: &[u8]) -> Option<(String, String, usize)> {
+    if bytes.len() < 10 || &bytes[0..3] != b"ID3" {
+        return None;
+    }
+    let version = bytes[3];
+    if version != 3 && version != 4 {
+        return None;
+    }
+    let tag_size = synchsafe(&bytes[6..10])?;
+    let end = 10usize.checked_add(tag_size)?;
+    if end > bytes.len() {
+        return None;
+    }
+    let mut title = String::new();
+    let mut performer = String::new();
+    let mut offset = 10usize;
+    while offset + 10 <= end {
+        let id = &bytes[offset..offset + 4];
+        if id == b"\0\0\0\0" {
+            break;
+        }
+        let frame_size = if version == 4 {
+            synchsafe(&bytes[offset + 4..offset + 8])?
+        } else {
+            u32::from_be_bytes(bytes[offset + 4..offset + 8].try_into().ok()?) as usize
+        };
+        let body_at = offset + 10;
+        let body_end = body_at.checked_add(frame_size)?;
+        if body_end > end {
+            break;
+        }
+        let text = id3_text(&bytes[body_at..body_end]);
+        if id == b"TIT2" && title.is_empty() {
+            title = text;
+        } else if id == b"TPE1" && performer.is_empty() {
+            performer = text;
+        }
+        offset = body_end;
+    }
+    Some((title, performer, end))
+}
+
+fn synchsafe(bytes: &[u8]) -> Option<usize> {
+    if bytes.len() != 4 || bytes.iter().any(|b| b & 0x80 != 0) {
+        return None;
+    }
+    Some(
+        ((bytes[0] as usize) << 21)
+            | ((bytes[1] as usize) << 14)
+            | ((bytes[2] as usize) << 7)
+            | (bytes[3] as usize),
+    )
+}
+
+fn id3_text(body: &[u8]) -> String {
+    if body.is_empty() {
+        return String::new();
+    }
+    let encoding = body[0];
+    let raw = &body[1..];
+    let text = match encoding {
+        0 => latin1(raw),
+        1 => utf16_bom(raw),
+        2 => utf16_be(raw),
+        3 => String::from_utf8_lossy(raw).into_owned(),
+        _ => return String::new(),
+    };
+    text.trim_matches('\0')
+        .trim()
+        .chars()
+        .take(TAG_LIMIT)
+        .collect()
+}
+
+fn latin1(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| char::from(*b)).collect()
+}
+
+fn utf16_bom(bytes: &[u8]) -> String {
+    if bytes.len() < 2 {
+        return String::new();
+    }
+    let be = bytes[0] == 0xFE && bytes[1] == 0xFF;
+    let le = bytes[0] == 0xFF && bytes[1] == 0xFE;
+    if !be && !le {
+        return String::new();
+    }
+    decode_utf16(&bytes[2..], be)
+}
+
+fn utf16_be(bytes: &[u8]) -> String {
+    decode_utf16(bytes, true)
+}
+
+fn decode_utf16(bytes: &[u8], be: bool) -> String {
+    let (pairs, _) = bytes.as_chunks::<2>();
+    let units: Vec<u16> = pairs
+        .iter()
+        .map(|pair| {
+            if be {
+                u16::from_be_bytes(*pair)
+            } else {
+                u16::from_le_bytes(*pair)
+            }
+        })
+        .take_while(|unit| *unit != 0)
+        .collect();
+    String::from_utf16_lossy(&units)
+}
+
+fn mpeg1_layer3_seconds(bytes: &[u8]) -> Option<f64> {
+    const BITRATES: [i32; 16] = [
+        0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 0,
+    ];
+    const RATES: [i32; 3] = [44100, 48000, 32000];
+    let mut offset = 0usize;
+    let mut seconds = 0.0f64;
+    while offset + 4 <= bytes.len() {
+        if bytes[offset] != 0xFF || bytes[offset + 1] & 0xE0 != 0xE0 {
+            offset += 1;
+            continue;
+        }
+        let header = u32::from_be_bytes(bytes[offset..offset + 4].try_into().ok()?);
+        let version = (header >> 19) & 0b11;
+        let layer = (header >> 17) & 0b11;
+        let bitrate_i = ((header >> 12) & 0b1111) as usize;
+        let rate_i = ((header >> 10) & 0b11) as usize;
+        let pad = ((header >> 9) & 1) as i32;
+        if version != 0b11 || layer != 0b01 || bitrate_i == 0 || bitrate_i == 15 || rate_i == 3 {
+            offset += 1;
+            continue;
+        }
+        let bitrate = BITRATES[bitrate_i] * 1000;
+        let rate = RATES[rate_i];
+        let frame_len = (144 * bitrate) / rate + pad;
+        if frame_len < 4 {
+            offset += 1;
+            continue;
+        }
+        let next = offset + frame_len as usize;
+        if next > bytes.len() {
+            break;
+        }
+        seconds += 1152.0 / f64::from(rate);
+        offset = next;
+    }
+    (seconds > 0.0).then_some(seconds)
+}
+
+fn write_album_cover_mp3(src: &Path) -> Option<AudioCover> {
+    let bytes = std::fs::read(src).ok()?;
+    if bytes.len() > 32 * 1024 * 1024 {
+        return None;
+    }
+    let jpeg = id3_apic_jpeg(&bytes)?;
+    let (width, height) = jpeg_dimensions(&jpeg).unwrap_or((0, 0));
+    if width <= 0 || height <= 0 || width > 320 || height > 320 {
+        return None;
+    }
+    let dest = cover_dest()?;
+    std::fs::write(&dest, jpeg).ok()?;
+    Some(AudioCover {
+        path: dest,
+        width,
+        height,
+    })
+}
+
+fn id3_apic_jpeg(bytes: &[u8]) -> Option<Vec<u8>> {
+    if bytes.len() < 10 || &bytes[0..3] != b"ID3" {
+        return None;
+    }
+    let version = bytes[3];
+    if version != 3 && version != 4 {
+        return None;
+    }
+    let tag_size = synchsafe(&bytes[6..10])?;
+    let end = 10usize.checked_add(tag_size)?;
+    if end > bytes.len() {
+        return None;
+    }
+    let mut offset = 10usize;
+    while offset + 10 <= end {
+        let id = &bytes[offset..offset + 4];
+        if id == b"\0\0\0\0" {
+            break;
+        }
+        let frame_size = if version == 4 {
+            synchsafe(&bytes[offset + 4..offset + 8])?
+        } else {
+            u32::from_be_bytes(bytes[offset + 4..offset + 8].try_into().ok()?) as usize
+        };
+        let body_at = offset + 10;
+        let body_end = body_at.checked_add(frame_size)?;
+        if body_end > end {
+            break;
+        }
+        if id == b"APIC"
+            && let Some(jpeg) = apic_jpeg(&bytes[body_at..body_end])
+        {
+            return Some(jpeg);
+        }
+        offset = body_end;
+    }
+    None
+}
+
+fn apic_jpeg(body: &[u8]) -> Option<Vec<u8>> {
+    if body.is_empty() {
+        return None;
+    }
+    let encoding = body[0];
+    let mime_end = body[1..].iter().position(|b| *b == 0)? + 1;
+    let mime = &body[1..mime_end];
+    if mime != b"image/jpeg" && mime != b"image/jpg" {
+        return None;
+    }
+    let mut rest = mime_end + 1;
+    if rest >= body.len() {
+        return None;
+    }
+    rest += 1;
+    match encoding {
+        0 | 3 => {
+            let end = body[rest..].iter().position(|b| *b == 0)?;
+            rest += end + 1;
+        }
+        1 | 2 => {
+            while rest + 1 < body.len() {
+                let unit = if encoding == 2 || (body.len() > 2 && body[1] == 0xFE) {
+                    u16::from_be_bytes([body[rest], body[rest + 1]])
+                } else {
+                    u16::from_le_bytes([body[rest], body[rest + 1]])
+                };
+                rest += 2;
+                if unit == 0 {
+                    break;
+                }
+            }
+        }
+        _ => return None,
+    }
+    let jpeg = body.get(rest..)?;
+    jpeg.starts_with(&[0xFF, 0xD8]).then(|| jpeg.to_vec())
+}
+
+fn jpeg_dimensions(bytes: &[u8]) -> Option<(i32, i32)> {
+    if bytes.len() < 4 || bytes[0] != 0xFF || bytes[1] != 0xD8 {
+        return None;
+    }
+    let mut offset = 2usize;
+    while offset + 4 < bytes.len() {
+        if bytes[offset] != 0xFF {
+            return None;
+        }
+        let marker = bytes[offset + 1];
+        if marker == 0xD8 {
+            offset += 2;
+            continue;
+        }
+        if marker == 0xD9 || marker == 0xDA {
+            return None;
+        }
+        let len = u16::from_be_bytes([bytes[offset + 2], bytes[offset + 3]]) as usize;
+        if len < 2 || offset + 2 + len > bytes.len() {
+            return None;
+        }
+        if matches!(marker, 0xC0..=0xC2) && len >= 7 {
+            let height = u16::from_be_bytes([bytes[offset + 5], bytes[offset + 6]]);
+            let width = u16::from_be_bytes([bytes[offset + 7], bytes[offset + 8]]);
+            return Some((i32::from(width), i32::from(height)));
+        }
+        offset += 2 + len;
+    }
+    None
+}
+
 fn jpeg_size(path: &Path) -> Option<(i32, i32)> {
+    if let Some(size) = std::fs::read(path)
+        .ok()
+        .and_then(|bytes| jpeg_dimensions(&bytes))
+    {
+        return Some(size);
+    }
     let output = Command::new("ffprobe")
         .args([
             "-v",
