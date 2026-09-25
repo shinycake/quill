@@ -1934,25 +1934,53 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     /// Open a chat from search via `addRecentlyFoundChat` then `openChat`.
+    /// Flushes the leaving composer's draft before `select_chat` drops `pending_draft`.
     pub fn select_search_chat(
         &mut self,
         chat_id: ChatId,
+        leaving_text: &str,
+        leaving_reply: Option<MessageId>,
+        now_ms: u64,
     ) -> Result<Option<RequestId>, ConnectSendError> {
+        self.flush_leaving_composer(chat_id, leaving_text, leaving_reply, now_ms)?;
         self.remember_found_chat(chat_id);
         self.session.close_search();
         self.select_chat(chat_id)
     }
 
     /// Jump to a found message: upsert it into history, then `select_chat`.
+    /// Same flush-before-drop as [`Self::select_search_chat`].
     pub fn select_search_message(
         &mut self,
         chat_id: ChatId,
         message_id: MessageId,
+        leaving_text: &str,
+        leaving_reply: Option<MessageId>,
+        now_ms: u64,
     ) -> Result<Option<RequestId>, ConnectSendError> {
+        self.flush_leaving_composer(chat_id, leaving_text, leaving_reply, now_ms)?;
         self.remember_found_chat(chat_id);
         self.session.promote_search_message(chat_id, message_id);
         self.session.close_search();
         self.select_chat(chat_id)
+    }
+
+    /// Persist the open chat's composer before a search result switches chats.
+    fn flush_leaving_composer(
+        &mut self,
+        next_chat: ChatId,
+        leaving_text: &str,
+        leaving_reply: Option<MessageId>,
+        now_ms: u64,
+    ) -> Result<(), ConnectSendError> {
+        let Some(prev) = self.session.open_chat else {
+            return Ok(());
+        };
+        if prev == next_chat {
+            return Ok(());
+        }
+        self.note_composer_draft(prev, leaving_text, leaving_reply, now_ms, false)?;
+        Ok(())
     }
 
     /// tdesktop `searchInChat` when history is focused (`Command::Search` / Ctrl+F).
@@ -3716,7 +3744,7 @@ mod tests {
         assert_eq!(driver.session.search.status, SearchStatus::Ready);
         assert_eq!(driver.session.search.chat_ids, vec![ChatId(7)]);
         driver
-            .select_search_message(ChatId(7), MessageId(50))
+            .select_search_message(ChatId(7), MessageId(50), "", None, 0)
             .unwrap();
         assert_eq!(driver.session.search.status, SearchStatus::Closed);
         assert_eq!(driver.session.open_chat, Some(ChatId(7)));
@@ -4957,6 +4985,81 @@ mod tests {
             .unwrap();
         assert_eq!(driver.session.draft_clears, vec![ChatId(7)]);
         driver.clear_draft_after_send(ChatId(7), true).unwrap();
+        assert!(driver.session.chats.get(&7).unwrap().draft.is_none());
+        assert!(!sink.rendered().contains("CANARY"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn search_open_flushes_leaving_draft_and_media_send_drops_reply() {
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = Arc::new(RecordingSender::new());
+        let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+        let mut driver =
+            ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+        let seq = AtomicU64::new(0);
+        driver
+            .ingest(
+                copy_and_parse(
+                    r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        for (id, title) in [(7, "Ada"), (8, "Bob")] {
+            driver
+                .ingest(
+                    copy_and_parse(
+                        &format!(
+                            r#"{{"@type":"updateNewChat","chat":{{"id":{id},"title":"{title}","type":{{"@type":"chatTypePrivate","user_id":{id}}},"unread_count":0}}}}"#
+                        ),
+                        &seq,
+                        &dyn_sink,
+                    )
+                    .unwrap(),
+                )
+                .unwrap();
+        }
+        driver.select_chat(ChatId(7)).unwrap();
+        let outcome = driver
+            .note_composer_draft(ChatId(7), "hello", Some(MessageId(3)), 1_000, true)
+            .unwrap();
+        assert!(matches!(outcome, DraftSaveOutcome::Debounced { .. }));
+        driver
+            .select_search_chat(ChatId(8), "hello", Some(MessageId(3)), 1_500)
+            .unwrap();
+        assert_eq!(driver.session.open_chat, Some(ChatId(8)));
+        let saved = driver.session.chats.get(&7).unwrap().draft.clone().unwrap();
+        assert_eq!(saved.text, "hello");
+        assert_eq!(saved.reply_to_message_id, Some(MessageId(3)));
+        let sent = recorder.snapshot();
+        assert!(sent.iter().any(|json| {
+            json.contains("setChatDraftMessage")
+                && json.contains("\"chat_id\":7")
+                && json.contains("hello")
+                && json.contains("\"message_id\":3")
+        }));
+        driver.select_chat(ChatId(7)).unwrap();
+        driver
+            .note_composer_draft(ChatId(7), "caption", Some(MessageId(3)), 2_000, false)
+            .unwrap();
+        driver
+            .note_composer_draft(ChatId(7), "caption", None, 2_100, false)
+            .unwrap();
+        let after = driver.session.chats.get(&7).unwrap().draft.clone().unwrap();
+        assert_eq!(after.text, "caption");
+        assert_eq!(after.reply_to_message_id, None);
+        driver
+            .note_composer_draft(ChatId(7), "  ", Some(MessageId(9)), 3_000, false)
+            .unwrap();
+        driver
+            .select_search_message(ChatId(8), MessageId(1), "  ", None, 3_100)
+            .unwrap();
         assert!(driver.session.chats.get(&7).unwrap().draft.is_none());
         assert!(!sink.rendered().contains("CANARY"));
         let _ = std::fs::remove_dir_all(&dir);

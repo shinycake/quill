@@ -179,6 +179,25 @@ pub fn cancel_edit_draft(
     (None, saved_draft)
 }
 
+/// Enter edit without dropping the normal draft's reply. Flush `saved_reply`
+/// with the stashed text first; cancel/finish restores both.
+pub fn begin_edit_keeping_reply(
+    current_text: String,
+    edit: ComposerEdit,
+    reply: Option<ComposerReplyTo>,
+) -> (ComposerEdit, String, String, Option<ComposerReplyTo>) {
+    let (edit, field, saved) = begin_edit_draft(current_text, edit);
+    (edit, field, saved, reply)
+}
+
+/// Cancel edit: normal draft text and its reply come back together.
+pub fn cancel_edit_keeping_reply(
+    saved_draft: String,
+    saved_reply: Option<ComposerReplyTo>,
+) -> (String, Option<ComposerReplyTo>) {
+    (saved_draft, saved_reply)
+}
+
 /// Pending delete confirm (tdesktop `DeleteMessagesBox` / Unigram
 /// `DeleteMessagesPopup`). Own outgoing only in this slice.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -558,6 +577,28 @@ mod tests {
         let (cleared, restored) = cancel_edit_draft(Some(edit), saved);
         assert_eq!(cleared, None);
         assert_eq!(restored, "keep this draft");
+    }
+
+    #[test]
+    fn edit_keeps_reply_on_the_normal_draft() {
+        let edit = ComposerEdit::from_own_content(
+            ChatId(11),
+            MessageId(102),
+            true,
+            false,
+            &MessageContent::Text("original outgoing".into()),
+        )
+        .unwrap();
+        let reply = ComposerReplyTo::new(ChatId(11), MessageId(101), "quoted");
+        let (edit, field, saved, stashed) =
+            begin_edit_keeping_reply("keep this draft".into(), edit, Some(reply.clone()));
+        assert_eq!(field, "original outgoing");
+        assert_eq!(saved, "keep this draft");
+        assert_eq!(stashed, Some(reply.clone()));
+        let _ = edit;
+        let (restored, reply_back) = cancel_edit_keeping_reply(saved, stashed);
+        assert_eq!(restored, "keep this draft");
+        assert_eq!(reply_back, Some(reply));
     }
 
     #[test]

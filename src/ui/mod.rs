@@ -8,8 +8,9 @@ use gpui_kit::*;
 use quill::auth::{AuthAction, AuthView, view_for};
 use quill::composer::{
     AttachmentKind, ComposerAttachment, ComposerEdit, ComposerReplyTo, ComposerSnapshot,
-    DeleteConfirm, ForwardDraft, begin_edit_draft, cancel_edit_draft, cancel_forward_draft,
-    cancel_reply_draft, draft_text_to_store, should_send_on_enter,
+    DeleteConfirm, ForwardDraft, begin_edit_keeping_reply, cancel_edit_draft,
+    cancel_edit_keeping_reply, cancel_forward_draft, cancel_reply_draft, draft_text_to_store,
+    should_send_on_enter,
 };
 use quill::connect::{
     ChatSearchQueryOutcome, ConnectBlocker, ConnectGate, DraftSaveOutcome, LiveConnect,
@@ -128,6 +129,8 @@ pub struct QuillApp {
     pending_edit: Option<ComposerEdit>,
     /// Normal composer draft stashed while editing (`DraftType::Normal`).
     saved_edit_draft: String,
+    /// Reply that belonged to that normal draft. Restored with the text on cancel.
+    saved_edit_reply: Option<ComposerReplyTo>,
     /// Delete confirm (tdesktop `DeleteMessagesBox` / Unigram popup).
     pending_delete: Option<DeleteConfirm>,
     /// tdesktop `Data::ForwardDraft` / history multi-select.
@@ -627,6 +630,7 @@ impl QuillApp {
             clear_draft_on_success: None,
             pending_edit: None,
             saved_edit_draft: String::new(),
+            saved_edit_reply: None,
             pending_delete: None,
             pending_forward: None,
             forward_picker_open: false,
@@ -1274,6 +1278,7 @@ impl QuillApp {
         {
             self.pending_edit = None;
             self.saved_edit_draft.clear();
+            self.saved_edit_reply = None;
         }
         if self
             .pending_delete
@@ -1597,13 +1602,15 @@ impl QuillApp {
     }
 
     fn begin_edit(&mut self, edit: ComposerEdit, window: &mut Window, cx: &mut Context<Self>) {
-        self.pending_reply = None;
         self.pending_attachment = None;
         let current = self.composer.read(cx).value().to_string();
+        // Flush while the reply is still set so a reply-only draft is not wiped.
         self.note_open_draft(false, cx);
-        let (edit, field, saved) = begin_edit_draft(current, edit);
+        let reply = self.pending_reply.take();
+        let (edit, field, saved, stashed) = begin_edit_keeping_reply(current, edit, reply);
         self.pending_edit = Some(edit);
         self.saved_edit_draft = saved;
+        self.saved_edit_reply = stashed;
         self.composer.update(cx, |input, cx| {
             input.set_value(&field, window, cx);
             input.focus(window, cx);
@@ -1616,7 +1623,10 @@ impl QuillApp {
     fn clear_edit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         // tdesktop cancelEditMessage → applyDraft(): restore normal draft.
         let saved = std::mem::take(&mut self.saved_edit_draft);
+        let stashed = self.saved_edit_reply.take();
         let (_, restored) = cancel_edit_draft(self.pending_edit.take(), saved);
+        let (restored, reply) = cancel_edit_keeping_reply(restored, stashed);
+        self.pending_reply = reply;
         self.composer
             .update(cx, |input, cx| input.set_value(&restored, window, cx));
         self.sync_composer_typing(&restored);
@@ -1626,7 +1636,9 @@ impl QuillApp {
 
     fn finish_edit_restore_draft(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let saved = std::mem::take(&mut self.saved_edit_draft);
+        let reply = self.saved_edit_reply.take();
         self.pending_edit = None;
+        self.pending_reply = reply;
         self.composer
             .update(cx, |input, cx| input.set_value(&saved, window, cx));
     }
@@ -1978,14 +1990,26 @@ impl QuillApp {
             };
             if self.status_note == "sending voice note" {
                 self.pending_reply = None;
+                self.clear_draft_on_success = Some(
+                    self.live
+                        .as_ref()
+                        .and_then(|live| live.driver.session.open_chat)
+                        .unwrap_or(ChatId(0)),
+                );
                 self.composer
                     .update(cx, |input, cx| input.set_value("", window, cx));
+                if let Some(open) = self.open_chat_id() {
+                    self.forget_local_draft(open);
+                }
             }
         } else if self.demo_session.is_some() {
             self.apply_demo_voice(&draft, caption.trim(), reply.as_ref());
             self.pending_reply = None;
             self.composer
                 .update(cx, |input, cx| input.set_value("", window, cx));
+            if let Some(open) = self.demo_session.as_ref().and_then(|s| s.open_chat) {
+                self.forget_local_draft(open);
+            }
             self.status_note = "demo voice note applied locally (no live Telegram)".into();
         }
         self.sync_voice_action();
@@ -2323,7 +2347,7 @@ impl QuillApp {
             .as_ref()
             .filter(|reply| reply.chat_id == chat_id)
             .map(|reply| reply.message_id);
-        if let Some(live) = self.live.as_mut() {
+        let sent = if let Some(live) = self.live.as_mut() {
             self.status_note = match live.driver.send_animation(
                 chat_id,
                 quill::telegram::requests::AnimationSend {
@@ -2337,9 +2361,16 @@ impl QuillApp {
                 Ok(_) => "sending GIF".into(),
                 Err(_) => "could not send GIF".into(),
             };
+            self.status_note == "sending GIF"
         } else if self.demo_session.is_some() {
             self.apply_demo_gif(chat_id, file_id, duration, width, height, reply);
             self.status_note = "demo GIF applied locally (no live Telegram)".into();
+            true
+        } else {
+            false
+        };
+        if sent {
+            self.consume_sent_reply(chat_id, cx);
         }
         cx.notify();
     }
@@ -2412,7 +2443,7 @@ impl QuillApp {
             .as_ref()
             .filter(|reply| reply.chat_id == chat_id)
             .map(|reply| reply.message_id);
-        if let Some(live) = self.live.as_mut() {
+        let sent = if let Some(live) = self.live.as_mut() {
             self.status_note = match live.driver.send_sticker(
                 chat_id,
                 quill::telegram::requests::StickerSend {
@@ -2427,15 +2458,30 @@ impl QuillApp {
                 Ok(_) => "sticker sent".into(),
                 Err(_) => "could not send sticker".into(),
             };
-            if reply.is_some() {
-                self.pending_reply = None;
-            }
+            self.status_note == "sticker sent"
         } else if self.demo_session.is_some() {
             self.apply_demo_sticker(chat_id, &emoji, file_id, reply);
-            self.pending_reply = None;
             self.status_note = "sticker sent".into();
+            true
+        } else {
+            false
+        };
+        if sent {
+            self.consume_sent_reply(chat_id, cx);
         }
         cx.notify();
+    }
+
+    /// Sticker/GIF/voice sends consume the composer reply. Drop it from the UI
+    /// and from the stored draft, and keep any unsent text.
+    fn consume_sent_reply(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
+        self.pending_reply = None;
+        if self.pending_edit.is_some() {
+            self.saved_edit_reply = None;
+            return;
+        }
+        let text = self.composer.read(cx).value().to_string();
+        self.save_chat_draft(chat_id, &text, None, false, cx);
     }
 
     fn toggle_emoji_reaction(
@@ -2773,12 +2819,87 @@ impl QuillApp {
         self.save_chat_draft(chat_id, &text, reply, delayed, cx);
     }
 
+    fn leaving_draft_parts(&self, cx: &Context<Self>) -> (String, Option<MessageId>, u64) {
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0);
+        let Some(chat_id) = self.open_chat_id() else {
+            return (String::new(), None, now_ms);
+        };
+        if self.pending_edit.is_some() {
+            let reply = self.saved_edit_reply.as_ref().and_then(|saved| {
+                if saved.chat_id == chat_id {
+                    Some(saved.message_id)
+                } else {
+                    None
+                }
+            });
+            return (self.saved_edit_draft.clone(), reply, now_ms);
+        }
+        (
+            self.composer.read(cx).value().to_string(),
+            self.composer_reply_id(chat_id),
+            now_ms,
+        )
+    }
+
+    fn dismiss_cross_chat_state(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
+        if self
+            .pending_reply
+            .as_ref()
+            .is_some_and(|reply| reply.chat_id != chat_id)
+        {
+            self.pending_reply = None;
+        }
+        if self
+            .pending_edit
+            .as_ref()
+            .is_some_and(|edit| edit.chat_id != chat_id)
+        {
+            self.pending_edit = None;
+            self.saved_edit_draft.clear();
+            self.saved_edit_reply = None;
+        }
+        if self
+            .pending_delete
+            .as_ref()
+            .is_some_and(|confirm| confirm.chat_id != chat_id)
+        {
+            self.pending_delete = None;
+        }
+        if self
+            .pending_forward
+            .as_ref()
+            .is_some_and(|draft| draft.from_chat_id != chat_id)
+        {
+            self.pending_forward = None;
+            self.forward_picker_open = false;
+        }
+        if self
+            .pending_react
+            .is_some_and(|(react_chat, _)| react_chat != chat_id)
+        {
+            self.pending_react = None;
+        }
+        if self.voice_capture.is_some() {
+            self.cancel_voice_recording(cx);
+        }
+    }
+
     fn flush_leaving_draft(&mut self, cx: &mut Context<Self>) {
         let Some(chat_id) = self.open_chat_id() else {
             return;
         };
         let (text, reply) = if self.pending_edit.is_some() {
-            (self.saved_edit_draft.clone(), None)
+            let reply = self.saved_edit_reply.as_ref().and_then(|saved| {
+                if saved.chat_id == chat_id {
+                    Some(saved.message_id)
+                } else {
+                    None
+                }
+            });
+            (self.saved_edit_draft.clone(), reply)
         } else {
             (
                 self.composer.read(cx).value().to_string(),
@@ -4107,16 +4228,33 @@ impl QuillApp {
     }
 
     fn select_search_chat(&mut self, chat_id: ChatId, window: &mut Window, cx: &mut Context<Self>) {
+        let (text, reply, now_ms) = self.leaving_draft_parts(cx);
         if let Some(live) = self.live.as_mut() {
-            self.status_note = match live.driver.select_search_chat(chat_id) {
+            self.status_note = match live
+                .driver
+                .select_search_chat(chat_id, &text, reply, now_ms)
+            {
                 Ok(_) => "chat selected".into(),
                 Err(_) => "could not open chat".into(),
             };
         } else if let Some(session) = self.demo_session.as_mut() {
+            if let Some(prev) = session.open_chat {
+                if prev != chat_id {
+                    let stored = draft_text_to_store(&text, reply.is_some()).map(str::to_string);
+                    let reply_to = stored.as_ref().and(reply);
+                    let draft = stored.map(|body| ChatDraft {
+                        text: body,
+                        reply_to_message_id: reply_to,
+                    });
+                    session.store_composer_draft(prev, draft);
+                }
+            }
             session.close_search();
             session.open_chat(chat_id);
             self.status_note = "chat selected".into();
         }
+        self.dismiss_cross_chat_state(chat_id, cx);
+        self.restore_open_draft(window, cx);
         self.search_input
             .update(cx, |input, cx| input.set_value("", window, cx));
         cx.notify();
@@ -4129,17 +4267,34 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let (text, reply, now_ms) = self.leaving_draft_parts(cx);
         if let Some(live) = self.live.as_mut() {
-            self.status_note = match live.driver.select_search_message(chat_id, message_id) {
+            self.status_note = match live
+                .driver
+                .select_search_message(chat_id, message_id, &text, reply, now_ms)
+            {
                 Ok(_) => "opened chat".into(),
                 Err(_) => "could not open chat".into(),
             };
         } else if let Some(session) = self.demo_session.as_mut() {
+            if let Some(prev) = session.open_chat {
+                if prev != chat_id {
+                    let stored = draft_text_to_store(&text, reply.is_some()).map(str::to_string);
+                    let reply_to = stored.as_ref().and(reply);
+                    let draft = stored.map(|body| ChatDraft {
+                        text: body,
+                        reply_to_message_id: reply_to,
+                    });
+                    session.store_composer_draft(prev, draft);
+                }
+            }
             session.promote_search_message(chat_id, message_id);
             session.close_search();
             session.open_chat(chat_id);
             self.status_note = "opened chat".into();
         }
+        self.dismiss_cross_chat_state(chat_id, cx);
+        self.restore_open_draft(window, cx);
         self.search_input
             .update(cx, |input, cx| input.set_value("", window, cx));
         cx.notify();
