@@ -25,10 +25,11 @@ use crate::telegram::requests::{
     check_authentication_password, close_chat, close_request, delete_messages,
     download_file as download_file_request, edit_message_caption, edit_message_text,
     forward_messages, get_authorization_state, get_chat_history, get_installed_sticker_sets,
-    get_saved_animations, get_sticker_set, load_chats, open_chat, open_message_content,
-    pin_chat_message, remove_message_reaction, search_chat_messages, search_chats, search_messages,
-    search_recently_found_chats, send_animation, send_chat_action, send_chat_action_kind,
-    send_document, send_photo, send_sticker, send_text, send_video, send_voice_note,
+    get_saved_animations, get_sticker_set, input_message_photo, input_message_video, load_chats,
+    open_chat, open_message_content, pin_chat_message, remove_message_reaction,
+    search_chat_messages, search_chats, search_messages, search_recently_found_chats,
+    send_animation, send_chat_action, send_chat_action_kind, send_document, send_message_album,
+    send_photo, send_sticker, send_text, send_video, send_voice_note,
     set_authentication_phone_number, set_chat_draft_message, set_chat_notification_settings,
     unpin_chat_message, view_messages,
 };
@@ -1021,6 +1022,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         if snapshot.is_empty() {
             return Err(ConnectSendError::InvalidRequest);
         }
+        if snapshot.is_media_album() {
+            return self.send_album_snapshot(snapshot);
+        }
         let chat_id = snapshot.chat_id();
         let supported = self
             .session
@@ -1084,6 +1088,65 @@ impl<S: JsonSender> ConnectDriver<S> {
                 return Err(ConnectSendError::InvalidRequest);
             }
         };
+        match self.sender.send_json(&json) {
+            Ok(()) => {
+                let _ = self.cancel_outgoing_typing();
+                Ok(extra)
+            }
+            Err(err) => {
+                self.session.requests.take(extra);
+                Err(err)
+            }
+        }
+    }
+
+    /// `sendMessageAlbum` for 2–10 local photos and/or videos.
+    fn send_album_snapshot(
+        &mut self,
+        snapshot: &ComposerSnapshot,
+    ) -> Result<RequestId, ConnectSendError> {
+        let chat_id = snapshot.chat_id();
+        let supported = self
+            .session
+            .chats
+            .get(&chat_id.0)
+            .is_some_and(|chat| chat.supported());
+        if !supported || !snapshot.is_media_album() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let caption = snapshot.caption();
+        let last = snapshot.album.len() - 1;
+        let mut contents = Vec::with_capacity(snapshot.album.len());
+        for (index, att) in snapshot.album.iter().enumerate() {
+            let path = att
+                .send_path_str()
+                .ok_or(ConnectSendError::InvalidRequest)?;
+            let item_caption = if index == last { caption } else { "" };
+            let content = match att.kind {
+                AttachmentKind::Photo => input_message_photo(&path, item_caption),
+                AttachmentKind::Video => {
+                    let probe = crate::video::probe_local_video(&att.path)
+                        .map_err(|_| ConnectSendError::InvalidRequest)?;
+                    input_message_video(
+                        &path,
+                        &VideoSend {
+                            duration: probe.duration,
+                            width: probe.width,
+                            height: probe.height,
+                            supports_streaming: probe.supports_streaming,
+                        },
+                        item_caption,
+                    )
+                }
+                AttachmentKind::Document => return Err(ConnectSendError::InvalidRequest),
+            };
+            contents.push(content);
+        }
+        let reply_to = snapshot.send_reply_to();
+        let extra = self
+            .session
+            .request(RequestPurpose::SendMessageAlbum, Some(chat_id));
+        let json = send_message_album(extra, chat_id, reply_to, contents);
         match self.sender.send_json(&json) {
             Ok(()) => {
                 let _ = self.cancel_outgoing_typing();
@@ -3700,6 +3763,46 @@ mod tests {
             video_json["input_message_content"]["caption"]["text"],
             "CANARY_VIDEO_CAP"
         );
+
+        let album_photo = ComposerAttachment::pick(&photo, AttachmentKind::Photo).unwrap();
+        let album_video = ComposerAttachment::pick(&clip, AttachmentKind::Video).unwrap();
+        let album_snap = ComposerSnapshot::capture_album(
+            ChatId(7),
+            driver.session.view_generation,
+            "CANARY_ALBUM_CAP",
+            vec![album_photo, album_video],
+        )
+        .with_reply(None);
+        let album_extra = driver.send_snapshot(&album_snap).unwrap();
+        let album_json: Value = serde_json::from_str(recorder.snapshot().last().unwrap()).unwrap();
+        assert_eq!(album_json["@type"], "sendMessageAlbum");
+        assert_eq!(album_json["@extra"], album_extra.0.to_string());
+        assert!(album_json.get("reply_markup").is_none());
+        let contents = album_json["input_message_contents"].as_array().unwrap();
+        assert_eq!(contents.len(), 2);
+        assert_eq!(contents[0]["@type"], "inputMessagePhoto");
+        assert_eq!(contents[0]["caption"]["text"], "");
+        assert_eq!(contents[0]["show_caption_above_media"], false);
+        assert_eq!(contents[1]["@type"], "inputMessageVideo");
+        assert_eq!(contents[1]["caption"]["text"], "CANARY_ALBUM_CAP");
+        assert_eq!(contents[1]["show_caption_above_media"], false);
+        let album_reply = copy_and_parse(
+            &format!(
+                r#"{{"@type":"messages","@extra":"{}","total_count":2,"messages":[{{"id":-8,"chat_id":7,"is_outgoing":true,"media_album_id":"9001","content":{{"@type":"messagePhoto","photo":{{"@type":"photo","has_stickers":false,"sizes":[{{"@type":"photoSize","type":"m","photo":{{"@type":"file","id":51,"size":3,"expected_size":3,"local":{{"@type":"localFile","path":"","can_be_downloaded":false,"can_be_deleted":false,"is_downloading_active":false,"is_downloading_completed":false,"download_offset":0,"downloaded_prefix_size":0,"downloaded_size":0}},"remote":{{"@type":"remoteFile","id":"x","unique_id":"u","is_uploading_active":true,"is_uploading_completed":false,"uploaded_size":0}}}},"width":100,"height":80,"progressive_sizes":[]}}]}},"caption":{{"@type":"formattedText","text":"","entities":[]}},"has_spoiler":false,"is_secret":false}}}},{{"id":-7,"chat_id":7,"is_outgoing":true,"media_album_id":"9001","content":{{"@type":"messageVideo","video":{{"@type":"video","duration":1,"width":320,"height":180,"file_name":"clip.mp4","mime_type":"video/mp4","has_stickers":false,"supports_streaming":true,"minithumbnail":null,"thumbnail":null,"video":{{"@type":"file","id":52,"size":4,"expected_size":4,"local":{{"@type":"localFile","path":"","can_be_downloaded":false,"can_be_deleted":false,"is_downloading_active":false,"is_downloading_completed":false,"download_offset":0,"downloaded_prefix_size":0,"downloaded_size":0}},"remote":{{"@type":"remoteFile","id":"y","unique_id":"v","is_uploading_active":true,"is_uploading_completed":false,"uploaded_size":0}}}}}},"alternative_videos":[],"storyboards":[],"cover":null,"start_timestamp":0,"caption":{{"@type":"formattedText","text":"CANARY_ALBUM_CAP","entities":[]}},"show_caption_above_media":false,"has_spoiler":false,"is_secret":false}}}}]}}"#,
+                album_extra.0
+            ),
+            &seq,
+            &dyn_sink,
+        )
+        .unwrap();
+        driver.ingest(album_reply).unwrap();
+        let history = driver.session.histories.get(&7).unwrap();
+        let first = history.messages.get(&-8).unwrap();
+        let second = history.messages.get(&-7).unwrap();
+        assert!(first.pending && second.pending);
+        assert_eq!(first.media_album_id, 9001);
+        assert_eq!(second.media_album_id, 9001);
+        assert_eq!(history.messages.get(&-5).unwrap().media_album_id, 0);
 
         // Reject paths that were not picked through ComposerAttachment.
         let forged = ComposerSnapshot::capture_with_attachment(

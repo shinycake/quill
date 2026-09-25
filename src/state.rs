@@ -25,6 +25,8 @@ pub enum RequestPurpose {
     GetHistory,
     /// Any `sendMessage` (text / photo / document). Response `message` is pending.
     SendMessage,
+    /// `sendMessageAlbum`. Response `messages` are pending until send-succeeded.
+    SendMessageAlbum,
     OpenChat,
     CloseChat,
     ViewMessages,
@@ -483,6 +485,8 @@ pub struct HistoryMessage {
     pub interaction_info: Option<MessageInteractionInfo>,
     /// Schema `message.is_pinned` / `updateMessageIsPinned`.
     pub is_pinned: bool,
+    /// Schema `message.media_album_id`. `0` is not an album.
+    pub media_album_id: i64,
 }
 
 impl HistoryMessage {
@@ -626,6 +630,7 @@ pub struct SearchMessageHit {
     pub forward_info: Option<MessageForwardInfo>,
     pub interaction_info: Option<MessageInteractionInfo>,
     pub is_pinned: bool,
+    pub media_album_id: i64,
 }
 
 impl SearchMessageHit {
@@ -640,6 +645,7 @@ impl SearchMessageHit {
             forward_info: message.forward_info.clone(),
             interaction_info: message.interaction_info.clone(),
             is_pinned: message.is_pinned,
+            media_album_id: message.media_album_id,
         }
     }
 
@@ -654,6 +660,7 @@ impl SearchMessageHit {
             forward_info: self.forward_info,
             interaction_info: self.interaction_info,
             is_pinned: self.is_pinned,
+            media_album_id: self.media_album_id,
         }
     }
 }
@@ -1467,6 +1474,14 @@ impl Session {
             }
             EnvelopePayload::Messages(messages) => {
                 if let Some(pending) = pending
+                    && pending.purpose == RequestPurpose::SendMessageAlbum
+                {
+                    for message in messages {
+                        self.upsert_message(message, true);
+                    }
+                    return;
+                }
+                if let Some(pending) = pending
                     && pending.purpose == RequestPurpose::ForwardMessages
                 {
                     self.finish_forward(pending, &messages, false);
@@ -2217,6 +2232,7 @@ impl Session {
                         forward_info: message.forward_info.clone(),
                         interaction_info: message.interaction_info.clone(),
                         is_pinned: message.is_pinned,
+                        media_album_id: message.media_album_id,
                     })
                     .collect()
             })
@@ -2304,6 +2320,7 @@ fn history_message(message: ParsedMessage, pending: bool) -> HistoryMessage {
         forward_info: message.forward_info,
         interaction_info: message.interaction_info,
         is_pinned: message.is_pinned,
+        media_album_id: message.media_album_id,
     }
 }
 
@@ -3629,6 +3646,7 @@ mod tests {
             forward_info: None,
             interaction_info: None,
             is_pinned: false,
+            media_album_id: 0,
         });
         assert_eq!(
             session.begin_chat_search_jump(MessageId(70)),
@@ -3651,6 +3669,7 @@ mod tests {
             forward_info: None,
             interaction_info: None,
             is_pinned: false,
+            media_album_id: 0,
         });
         assert_eq!(
             session.begin_chat_search_jump(MessageId(80)),

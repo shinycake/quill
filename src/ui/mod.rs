@@ -118,8 +118,10 @@ pub struct QuillApp {
     demo_session: Option<Session>,
     demo_seq: AtomicU64,
     demo_sink: Arc<MemorySink>,
-    /// Local file the user explicitly attached (canonical path via `pick`).
-    pending_attachment: Option<ComposerAttachment>,
+    /// Local files the user explicitly attached (canonical paths via `pick`).
+    /// One item sends with `sendMessage`. Two or more photos/videos send with
+    /// `sendMessageAlbum`.
+    pending_attachments: Vec<ComposerAttachment>,
     /// Same-chat reply draft (tdesktop `FieldHeader::replyToMessage`).
     pending_reply: Option<ComposerReplyTo>,
     /// Chat whose draft should be cleared after `updateMessageSendSucceeded`
@@ -214,6 +216,8 @@ pub enum ScreenshotDemo {
     ReadyVideoSend,
     /// Restored private-chat composer draft (`draftMessage`).
     ReadyDrafts,
+    /// Received photo album plus an own-sent album and a multi-attach composer.
+    ReadyAlbums,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -619,21 +623,50 @@ impl QuillApp {
                     AuthorizationState::Ready,
                 )
             }
+            Some(ScreenshotDemo::ReadyAlbums) => {
+                demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
+                (
+                    ConnectUiStatus::DemoReadyChats,
+                    None,
+                    "screenshot demo — received album and own-sent album".into(),
+                    AuthorizationState::Ready,
+                )
+            }
             None => bootstrap_connect(credentials),
         };
 
-        let mut pending_attachment = None;
-        if matches!(demo, Some(ScreenshotDemo::ReadySendMedia)) {
-            pending_attachment = ComposerAttachment::pick(
+        let mut pending_attachments = Vec::new();
+        if matches!(demo, Some(ScreenshotDemo::ReadySendMedia))
+            && let Some(att) = ComposerAttachment::pick(
                 &demo_media_allowlist().join("demo-notes.txt"),
                 AttachmentKind::Document,
-            );
+            )
+        {
+            ComposerAttachment::push_attachment(&mut pending_attachments, att);
         }
-        if matches!(demo, Some(ScreenshotDemo::ReadyVideoSend)) {
-            pending_attachment = ComposerAttachment::pick(
+        if matches!(demo, Some(ScreenshotDemo::ReadyVideoSend))
+            && let Some(att) = ComposerAttachment::pick(
                 &demo_media_allowlist().join("demo-clip.mp4"),
                 AttachmentKind::Video,
-            );
+            )
+        {
+            ComposerAttachment::push_attachment(&mut pending_attachments, att);
+        }
+        if matches!(demo, Some(ScreenshotDemo::ReadyAlbums)) {
+            for (path, kind) in [
+                (
+                    demo_media_allowlist().join("demo-thumb.png"),
+                    AttachmentKind::Photo,
+                ),
+                (
+                    demo_media_allowlist().join("demo-clip.mp4"),
+                    AttachmentKind::Video,
+                ),
+            ] {
+                if let Some(att) = ComposerAttachment::pick(&path, kind) {
+                    ComposerAttachment::push_attachment(&mut pending_attachments, att);
+                }
+            }
         }
 
         let mut app = Self {
@@ -661,7 +694,7 @@ impl QuillApp {
             demo_session,
             demo_seq: AtomicU64::new(0),
             demo_sink,
-            pending_attachment,
+            pending_attachments,
             pending_reply: None,
             clear_draft_on_success: None,
             pending_edit: None,
@@ -864,6 +897,16 @@ impl QuillApp {
             app.spawn_video_tick(cx);
             app.status_note = "screenshot demo — attach video · own clip playing".into();
         }
+        if matches!(demo, Some(ScreenshotDemo::ReadyAlbums)) {
+            if let Some(session) = app.demo_session.as_mut() {
+                app.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_albums(session, &app.demo_sink, &app.demo_seq);
+            }
+            app.composer.update(cx, |input, cx| {
+                input.set_value("album caption", window, cx);
+            });
+            app.status_note = "screenshot demo — received album · own album".into();
+        }
         if matches!(demo, Some(ScreenshotDemo::ReadyDrafts)) {
             if let Some(session) = app.demo_session.as_mut() {
                 app.demo_seq.store(session.last_seq, Ordering::SeqCst);
@@ -1059,13 +1102,20 @@ impl QuillApp {
                         cx.notify();
                         return;
                     }
-                    let attachment = self.pending_attachment.clone();
-                    let snap = ComposerSnapshot::capture_with_attachment(
-                        chat_id,
-                        view_generation,
-                        text,
-                        attachment,
-                    )
+                    let attachments = self.pending_attachments.clone();
+                    let snap = if attachments.len() >= 2
+                        && attachments.iter().all(|att| {
+                            matches!(att.kind, AttachmentKind::Photo | AttachmentKind::Video)
+                        }) {
+                        ComposerSnapshot::capture_album(chat_id, view_generation, text, attachments)
+                    } else {
+                        ComposerSnapshot::capture_with_attachment(
+                            chat_id,
+                            view_generation,
+                            text,
+                            attachments.first().cloned(),
+                        )
+                    }
                     .with_reply(self.pending_reply.clone());
                     if snap.is_empty() {
                         self.status_note = "type a message or attach a file".into();
@@ -1080,7 +1130,7 @@ impl QuillApp {
                         .send_snapshot(&snap);
                     match result {
                         Ok(_) => {
-                            self.pending_attachment = None;
+                            self.pending_attachments.clear();
                             self.pending_reply = None;
                             self.clear_draft_on_success = Some(chat_id);
                             self.composer
@@ -1089,10 +1139,11 @@ impl QuillApp {
                             self.status_note = "sending…".into();
                         }
                         Err(_) => {
-                            let video_unreadable = snap.attachment.as_ref().is_some_and(|att| {
-                                att.kind == AttachmentKind::Video
-                                    && quill::video::probe_local_video(&att.path).is_err()
-                            });
+                            let video_unreadable =
+                                snap.attachment.iter().chain(snap.album.iter()).any(|att| {
+                                    att.kind == AttachmentKind::Video
+                                        && quill::video::probe_local_video(&att.path).is_err()
+                                });
                             self.status_note = if video_unreadable {
                                 "could not read video duration or size".into()
                             } else {
@@ -1104,10 +1155,18 @@ impl QuillApp {
                     return;
                 }
                 if self.demo_session.is_some() {
-                    let attachment = self.pending_attachment.clone();
+                    let attachments = self.pending_attachments.clone();
                     let reply = self.pending_reply.clone();
-                    self.apply_demo_outgoing(&text, attachment.as_ref(), reply.as_ref());
-                    self.pending_attachment = None;
+                    if attachments.len() >= 2
+                        && attachments.iter().all(|att| {
+                            matches!(att.kind, AttachmentKind::Photo | AttachmentKind::Video)
+                        })
+                    {
+                        self.apply_demo_album(&text, &attachments, reply.as_ref());
+                    } else {
+                        self.apply_demo_outgoing(&text, attachments.first(), reply.as_ref());
+                    }
+                    self.pending_attachments.clear();
                     self.pending_reply = None;
                     if let Some(chat_id) = self.demo_session.as_ref().and_then(|s| s.open_chat) {
                         self.forget_local_draft(chat_id);
@@ -1146,8 +1205,14 @@ impl QuillApp {
             });
         match ComposerAttachment::pick(&path, kind) {
             Some(att) => {
-                self.status_note = format!("attached {}", att.file_name);
-                self.pending_attachment = Some(att);
+                let name = att.file_name.clone();
+                let before = self.pending_attachments.len();
+                ComposerAttachment::push_attachment(&mut self.pending_attachments, att);
+                self.status_note = if self.pending_attachments.len() == before {
+                    format!("album is full ({before})")
+                } else {
+                    format!("attached {name}")
+                };
             }
             None => {
                 self.status_note = "could not attach file".into();
@@ -1157,9 +1222,77 @@ impl QuillApp {
     }
 
     fn clear_attachment(&mut self, cx: &mut Context<Self>) {
-        self.pending_attachment = None;
+        self.pending_attachments.clear();
         self.status_note = "attachment cleared".into();
         cx.notify();
+    }
+
+    fn apply_demo_album(
+        &mut self,
+        text: &str,
+        attachments: &[ComposerAttachment],
+        reply: Option<&ComposerReplyTo>,
+    ) {
+        let Some(session) = self.demo_session.as_mut() else {
+            return;
+        };
+        let Some(chat_id) = session.open_chat else {
+            return;
+        };
+        let dyn_sink: Arc<dyn DiagnosticSink> = self.demo_sink.clone();
+        let caption = text.trim();
+        let album_id = "88001";
+        let reply_json = reply
+            .filter(|r| r.chat_id == chat_id)
+            .map(|r| {
+                format!(
+                    r#","reply_to":{{"@type":"messageReplyToMessage","chat_id":{},"message_id":{},"quote":null,"checklist_task_id":0,"poll_option_id":""}}"#,
+                    r.chat_id.0, r.message_id.0
+                )
+            })
+            .unwrap_or_default();
+        for (index, att) in attachments.iter().enumerate() {
+            let id = -((index as i64) + 20);
+            let item_caption = if index + 1 == attachments.len() {
+                caption
+            } else {
+                ""
+            };
+            let path = att.path.to_string_lossy();
+            let file = demo_file_json(910 + index as i32, &path, true);
+            let json = match att.kind {
+                AttachmentKind::Photo => format!(
+                    r#"{{"@type":"updateNewMessage","message":{{"id":{id},"chat_id":{},"is_outgoing":true,"media_album_id":"{album_id}","content":{{"@type":"messagePhoto","photo":{{"@type":"photo","has_stickers":false,"sizes":[{{"@type":"photoSize","type":"m","photo":{file},"width":240,"height":160,"progressive_sizes":[]}}]}},"caption":{{"@type":"formattedText","text":{},"entities":[]}},"has_spoiler":false,"is_secret":false}}}}{reply_json}}}}}"#,
+                    chat_id.0,
+                    serde_json::to_string(item_caption).unwrap_or_else(|_| "\"\"".into()),
+                ),
+                AttachmentKind::Video => {
+                    let probe = quill::video::probe_local_video(&att.path).unwrap_or(
+                        quill::video::VideoProbe {
+                            duration: 0,
+                            width: 320,
+                            height: 180,
+                            supports_streaming: false,
+                        },
+                    );
+                    format!(
+                        r#"{{"@type":"updateNewMessage","message":{{"id":{id},"chat_id":{},"is_outgoing":true,"media_album_id":"{album_id}","content":{{"@type":"messageVideo","video":{{"@type":"video","duration":{},"width":{},"height":{},"file_name":{},"mime_type":"video/mp4","has_stickers":false,"supports_streaming":{},"minithumbnail":null,"thumbnail":null,"video":{file}}},"alternative_videos":[],"storyboards":[],"cover":null,"start_timestamp":0,"caption":{{"@type":"formattedText","text":{},"entities":[]}},"show_caption_above_media":false,"has_spoiler":false,"is_secret":false}}}}{reply_json}}}}}"#,
+                        chat_id.0,
+                        probe.duration,
+                        probe.width,
+                        probe.height,
+                        serde_json::to_string(&att.file_name)
+                            .unwrap_or_else(|_| "\"clip.mp4\"".into()),
+                        probe.supports_streaming,
+                        serde_json::to_string(item_caption).unwrap_or_else(|_| "\"\"".into()),
+                    )
+                }
+                AttachmentKind::Document => continue,
+            };
+            if let Some(owned) = copy_and_parse(&json, &self.demo_seq, &dyn_sink) {
+                session.apply(owned);
+            }
+        }
     }
 
     fn apply_demo_outgoing(
@@ -1709,7 +1842,7 @@ impl QuillApp {
     }
 
     fn begin_edit(&mut self, edit: ComposerEdit, window: &mut Window, cx: &mut Context<Self>) {
-        self.pending_attachment = None;
+        self.pending_attachments.clear();
         let current = self.composer.read(cx).value().to_string();
         // Flush while the reply is still set so a reply-only draft is not wiped.
         self.note_open_draft(false, cx);
@@ -4893,17 +5026,17 @@ impl QuillApp {
             .child(history)
             .when(composer.is_some(), |this| {
                 let show_attach = matches!(mode, PaneMode::Ready) && self.pending_edit.is_none();
-                let chip = if show_attach {
-                    self.pending_attachment.as_ref().map(|att| {
-                        let label = match att.kind {
+                let chips: Vec<String> = if show_attach {
+                    self.pending_attachments
+                        .iter()
+                        .map(|att| match att.kind {
                             AttachmentKind::Photo => format!("Photo · {}", att.file_name),
                             AttachmentKind::Document => format!("Document · {}", att.file_name),
                             AttachmentKind::Video => format!("Video · {}", att.file_name),
-                        };
-                        label
-                    })
+                        })
+                        .collect()
                 } else {
-                    None
+                    Vec::new()
                 };
                 this.child(
                     div()
@@ -4976,7 +5109,7 @@ impl QuillApp {
                                                 this.start_voice_recording(cx);
                                             })),
                                     )
-                                    .when(self.pending_attachment.is_some(), |row| {
+                                    .when(!self.pending_attachments.is_empty(), |row| {
                                         row.child(
                                             Button::new("clear-attach").label("Clear").on_click(
                                                 cx.listener(|this, _, _, cx| {
@@ -4987,24 +5120,31 @@ impl QuillApp {
                                     }),
                             )
                         })
-                        .when_some(chip, |this, label| {
-                            this.child(
-                                div()
-                                    .id("composer-attach-chip")
-                                    .px_3()
-                                    .py_2()
-                                    .rounded_md()
-                                    .border_1()
-                                    .border_color(rgb(0x8b949e))
-                                    .bg(rgb(0x21262d))
-                                    .child(div().text_sm().font_medium().child(label))
-                                    .child(
-                                        div()
-                                            .text_xs()
-                                            .text_color(rgb(0xc9d1d9))
-                                            .child("ready to send · picked locally"),
-                                    ),
-                            )
+                        .when(!chips.is_empty(), |this| {
+                            let album = chips.len() >= 2;
+                            let mut row =
+                                div().id("composer-attach-chip").flex().flex_wrap().gap_2();
+                            for (index, label) in chips.into_iter().enumerate() {
+                                row = row.child(
+                                    div()
+                                        .id(("composer-attach-item", index as u64))
+                                        .px_3()
+                                        .py_2()
+                                        .rounded_md()
+                                        .border_1()
+                                        .border_color(rgb(0x8b949e))
+                                        .bg(rgb(0x21262d))
+                                        .child(div().text_sm().font_medium().child(label))
+                                        .child(div().text_xs().text_color(rgb(0xc9d1d9)).child(
+                                            if album {
+                                                "album · picked locally"
+                                            } else {
+                                                "ready to send · picked locally"
+                                            },
+                                        )),
+                                );
+                            }
+                            this.child(row)
                         })
                         .when_some(self.forward_result.clone(), |this, result| {
                             this.child(self.forward_success_banner(&result, cx))
@@ -5205,7 +5345,28 @@ impl QuillApp {
                     .px_3()
                     .pt_2()
                     .gap_1();
-                for message in messages {
+                let groups = quill::album::group_media_albums(
+                    &messages,
+                    |message| message.media_album_id,
+                    |message| message.is_outgoing,
+                    |message| quill::album::is_album_media(&message.content),
+                );
+                for group in groups {
+                    let quill::album::HistoryGroup::Single(message) = group else {
+                        if let quill::album::HistoryGroup::Album { album_id, messages } = group {
+                            list = list.child(album_history_row(
+                                album_id,
+                                &messages,
+                                &files,
+                                &downloading,
+                                &media_roots,
+                                chat,
+                                &sender_name,
+                                cx,
+                            ));
+                        }
+                        continue;
+                    };
                     let label = if message.is_outgoing {
                         let receipt = chat
                             .map(|summary| summary.outbox_receipt(&message))
@@ -5677,6 +5838,62 @@ fn apply_ready_video_send(session: &mut Session, sink: &Arc<MemorySink>, seq: &A
     );
     let drop_seed = r#"{"@type":"updateDeleteMessages","chat_id":11,"message_ids":[101,102,103],"is_permanent":true,"from_cache":false}"#;
     for json in [sent, drop_seed.to_string()] {
+        if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
+            session.apply(owned);
+        }
+    }
+}
+
+fn apply_ready_albums(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let wide = demo_file_json(71, &demo_thumb_png_path(), true);
+    let left = demo_file_json(
+        72,
+        &demo_media_allowlist()
+            .join("demo-gif-1.png")
+            .to_string_lossy(),
+        true,
+    );
+    let right = demo_file_json(
+        73,
+        &demo_media_allowlist()
+            .join("demo-gif-2.png")
+            .to_string_lossy(),
+        true,
+    );
+    let own_photo = demo_file_json(74, &demo_thumb_png_path(), true);
+    let own_clip = demo_file_json(
+        75,
+        &demo_media_allowlist()
+            .join("demo-clip.mp4")
+            .to_string_lossy(),
+        true,
+    );
+    let own_thumb = demo_file_json(76, &demo_thumb_png_path(), true);
+    let received_a = format!(
+        r#"{{"@type":"updateNewMessage","message":{{"id":801,"chat_id":11,"is_outgoing":false,"media_album_id":"77001","content":{{"@type":"messagePhoto","photo":{{"@type":"photo","has_stickers":false,"sizes":[{{"@type":"photoSize","type":"m","photo":{wide},"width":640,"height":200,"progressive_sizes":[]}}]}},"caption":{{"@type":"formattedText","text":"","entities":[]}},"has_spoiler":false,"is_secret":false}}}}}}"#
+    );
+    let received_b = format!(
+        r#"{{"@type":"updateNewMessage","message":{{"id":802,"chat_id":11,"is_outgoing":false,"media_album_id":"77001","content":{{"@type":"messagePhoto","photo":{{"@type":"photo","has_stickers":false,"sizes":[{{"@type":"photoSize","type":"m","photo":{left},"width":200,"height":200,"progressive_sizes":[]}}]}},"caption":{{"@type":"formattedText","text":"","entities":[]}},"has_spoiler":false,"is_secret":false}}}}}}"#
+    );
+    let received_c = format!(
+        r#"{{"@type":"updateNewMessage","message":{{"id":803,"chat_id":11,"is_outgoing":false,"media_album_id":"77001","content":{{"@type":"messagePhoto","photo":{{"@type":"photo","has_stickers":false,"sizes":[{{"@type":"photoSize","type":"m","photo":{right},"width":200,"height":220,"progressive_sizes":[]}}]}},"caption":{{"@type":"formattedText","text":"From Ada","entities":[]}},"has_spoiler":false,"is_secret":false}}}}}}"#
+    );
+    let sent_photo = format!(
+        r#"{{"@type":"updateNewMessage","message":{{"id":811,"chat_id":11,"is_outgoing":true,"media_album_id":"77002","content":{{"@type":"messagePhoto","photo":{{"@type":"photo","has_stickers":false,"sizes":[{{"@type":"photoSize","type":"m","photo":{own_photo},"width":240,"height":200,"progressive_sizes":[]}}]}},"caption":{{"@type":"formattedText","text":"","entities":[]}},"has_spoiler":false,"is_secret":false}}}}}}"#
+    );
+    let sent_video = format!(
+        r#"{{"@type":"updateNewMessage","message":{{"id":812,"chat_id":11,"is_outgoing":true,"media_album_id":"77002","content":{{"@type":"messageVideo","video":{{"@type":"video","duration":1,"width":320,"height":180,"file_name":"demo-clip.mp4","mime_type":"video/mp4","has_stickers":false,"supports_streaming":true,"minithumbnail":null,"thumbnail":{{"@type":"thumbnail","format":{{"@type":"thumbnailFormatJpeg"}},"width":240,"height":140,"file":{own_thumb}}},"video":{own_clip}}},"alternative_videos":[],"storyboards":[],"cover":null,"start_timestamp":0,"caption":{{"@type":"formattedText","text":"Sent album","entities":[]}},"show_caption_above_media":false,"has_spoiler":false,"is_secret":false}}}}}}"#
+    );
+    let drop_seed = r#"{"@type":"updateDeleteMessages","chat_id":11,"message_ids":[101,102,103],"is_permanent":true,"from_cache":false}"#;
+    for json in [
+        received_a,
+        received_b,
+        received_c,
+        sent_photo,
+        sent_video,
+        drop_seed.to_string(),
+    ] {
         if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
             session.apply(owned);
         }
@@ -6204,6 +6421,220 @@ fn unread_badge(label: String, chat_id: ChatId) -> impl IntoElement {
         .text_xs()
         .font_semibold()
         .child(label)
+}
+
+fn album_history_row(
+    album_id: i64,
+    messages: &[&HistoryMessage],
+    files: &HashMap<i32, ParsedFile>,
+    downloading: &std::collections::HashSet<i32>,
+    media_roots: &[PathBuf],
+    chat: Option<&ChatSummary>,
+    sender_name: &str,
+    cx: &mut Context<QuillApp>,
+) -> AnyElement {
+    let Some(first) = messages.first() else {
+        return div().into_any_element();
+    };
+    let sizes: Vec<(i32, i32)> = messages
+        .iter()
+        .map(|message| quill::album::album_pixel_size(&message.content))
+        .collect();
+    let layout = quill::album::layout_media_group(
+        &sizes,
+        quill::album::ALBUM_MAX_WIDTH,
+        quill::album::ALBUM_MIN_WIDTH,
+        quill::album::ALBUM_SPACING,
+    );
+    let (box_w, box_h) = quill::album::layout_bounds(&layout);
+    let mut mosaic = div()
+        .id(("album", album_id as u64))
+        .relative()
+        .w(px(box_w as f32))
+        .h(px(box_h as f32))
+        .overflow_hidden()
+        .rounded_md();
+    for (index, message) in messages.iter().enumerate() {
+        let Some(part) = layout.get(index) else {
+            continue;
+        };
+        let tile = album_tile(message, part, files, downloading, media_roots, cx);
+        mosaic = mosaic.child(tile);
+    }
+    let caption = messages.iter().rev().find_map(|message| {
+        let text = match &message.content {
+            MessageContent::Photo(photo) => photo.caption.clone(),
+            MessageContent::Video(video) => video.caption.clone(),
+            _ => String::new(),
+        };
+        if text.is_empty() { None } else { Some(text) }
+    });
+    let label = if first.is_outgoing {
+        let receipt = chat
+            .map(|summary| summary.outbox_receipt(first))
+            .unwrap_or(OutboxReceipt::Sent);
+        outgoing_status_label(first.pending, receipt).to_string()
+    } else {
+        sender_name.to_string()
+    };
+    let reply_target = ComposerReplyTo::new(
+        first.chat_id,
+        first.id,
+        caption.clone().unwrap_or_else(|| "Album".into()),
+    );
+    let reply_btn = Button::new(format!("reply-album-{}", album_id))
+        .label("Reply")
+        .ghost()
+        .on_click(cx.listener(move |this, _, window, cx| {
+            this.begin_reply_to(reply_target.clone(), window, cx);
+        }));
+    let extra = div()
+        .id(("album-extra", album_id as u64))
+        .flex()
+        .flex_col()
+        .gap_1()
+        .child(mosaic)
+        .when_some(caption, |this, text| {
+            this.child(div().text_sm().child(text))
+        })
+        .child(reply_btn)
+        .into_any_element();
+    session_bubble_quoted(
+        album_id as u64,
+        label,
+        String::new(),
+        first.is_outgoing,
+        Some(extra),
+        None,
+    )
+}
+
+fn album_tile(
+    message: &HistoryMessage,
+    part: &quill::album::AlbumRect,
+    files: &HashMap<i32, ParsedFile>,
+    downloading: &std::collections::HashSet<i32>,
+    media_roots: &[PathBuf],
+    cx: &mut Context<QuillApp>,
+) -> AnyElement {
+    let row_id = message.id.0 as u64;
+    let frame = div()
+        .id(("album-tile", row_id))
+        .absolute()
+        .left(px(part.x as f32))
+        .top(px(part.y as f32))
+        .w(px(part.width as f32))
+        .h(px(part.height as f32))
+        .overflow_hidden();
+    match &message.content {
+        MessageContent::Photo(photo) => {
+            if let Some(path) = photo_display_path(photo, files, media_roots) {
+                frame
+                    .child(
+                        img(path)
+                            .id(("album-photo", row_id))
+                            .w(px(part.width as f32))
+                            .h(px(part.height as f32))
+                            .object_fit(ObjectFit::Cover)
+                            .with_fallback(|| {
+                                div()
+                                    .size_full()
+                                    .bg(rgb(0x444c56))
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .child("Photo")
+                                    .into_any_element()
+                            }),
+                    )
+                    .into_any_element()
+            } else {
+                let open_id = photo.open_file_id().unwrap_or(FileId(0));
+                let downloading_now = file_is_downloading(open_id, files, downloading);
+                frame
+                    .bg(rgb(0x444c56))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(rgb(0xffffff))
+                            .child(if downloading_now {
+                                "Photo — downloading…"
+                            } else {
+                                "Photo"
+                            }),
+                    )
+                    .into_any_element()
+            }
+        }
+        MessageContent::Video(video) => {
+            let play_id = video.play_file_id().unwrap_or(FileId(0));
+            let thumb_id = video.thumb_file_id().unwrap_or(FileId(0));
+            let mime = video.mime_type.clone();
+            let start_timestamp = video.start_timestamp;
+            let message_id = message.id;
+            let visual = [thumb_id, play_id].into_iter().find_map(|id| {
+                if id.0 == 0 {
+                    return None;
+                }
+                files
+                    .get(&id.0)
+                    .and_then(|file| file.usable_path())
+                    .and_then(|path| sandboxed_display_path(path, media_roots))
+            });
+            let duration = format_voice_duration(video.duration);
+            let picture = if let Some(path) = visual {
+                img(path)
+                    .id(("album-video", row_id))
+                    .w(px(part.width as f32))
+                    .h(px(part.height as f32))
+                    .object_fit(ObjectFit::Cover)
+                    .with_fallback(|| div().size_full().bg(rgb(0x238636)).into_any_element())
+                    .into_any_element()
+            } else {
+                div()
+                    .size_full()
+                    .bg(rgb(0x238636))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(div().text_xs().text_color(rgb(0xffffff)).child("Video"))
+                    .into_any_element()
+            };
+            frame
+                .child(picture)
+                .child(
+                    div()
+                        .absolute()
+                        .bottom(px(4.))
+                        .left(px(4.))
+                        .px_1()
+                        .rounded_sm()
+                        .bg(rgb(0x010409))
+                        .text_xs()
+                        .text_color(rgb(0xffffff))
+                        .child(format!("Video · {duration}")),
+                )
+                .child(
+                    Button::new(format!("album-play-{row_id}"))
+                        .label("Play")
+                        .ghost()
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.toggle_video_playback(
+                                message_id,
+                                play_id,
+                                mime.clone(),
+                                start_timestamp,
+                                cx,
+                            );
+                        })),
+                )
+                .into_any_element()
+        }
+        _ => frame.into_any_element(),
+    }
 }
 
 fn session_history_row(

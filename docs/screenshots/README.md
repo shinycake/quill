@@ -33,6 +33,7 @@ Captured from a real GPUI window on 2026-09-17 (Linux Xvfb + lavapipe). **Not** 
 | `ready-video.png` | Ready private chat open, a history video (**Video · playing** / **Pause**, duration, caption) plus a not-yet-downloaded video. Injected `messageVideo`, no live Telegram. Driven by `quill --screenshot-demo ready-video`. |
 | `ready-video-send.png` | Composer **Attach video** chip (`demo-clip.mp4`) plus an own-sent video (**Video · playing** / **Pause**, caption). Injected send path; no live Telegram. Driven by `quill --screenshot-demo ready-video-send`. |
 | `ready-drafts.png` | Ready private chat open with a restored composer draft (`meet at 6`) and **Replying to** the message the draft quotes. Sidebar row shows **Draft:**. Injected `draftMessage` / `updateChatDraftMessage`, no live Telegram. Driven by `quill --screenshot-demo ready-drafts`. |
+| `ready-albums.png` | Ready private chat with a **received** photo album (mosaic + caption) and an **own-sent** photo/video album. Composer shows a multi-attach album chip (photo + video). Injected `media_album_id`, no live Telegram. Driven by `quill --screenshot-demo ready-albums`. |
 | `fixtures/demo-voice.ogg` | Tiny local file used as the completed voice `local.path` in the voice demo (not a screenshot). |
 | `fixtures/demo-thumb.png` | Tiny checkerboard PNG used as the completed photo `local.path` in the media demo (not a screenshot). |
 | `fixtures/demo-notes.txt` | Tiny text file used for outgoing document attach / send demos (not a screenshot). |
@@ -69,6 +70,7 @@ bash scripts/capture-connect-screenshots.sh
 #   cargo run --features ui -- --screenshot-demo ready-video docs/screenshots
 #   cargo run --features ui -- --screenshot-demo ready-video-send docs/screenshots
 #   cargo run --features ui -- --screenshot-demo ready-drafts docs/screenshots
+#   cargo run --features ui -- --screenshot-demo ready-albums docs/screenshots
 ```
 
 Environment used by the script: `DISPLAY`, `LIBGL_ALWAYS_SOFTWARE=1`, `WGPU_BACKEND=vulkan`, `VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json`.

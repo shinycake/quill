@@ -62,6 +62,7 @@ pub const REQUIRED_SCHEMA_CONSTRUCTORS: &[&str] = &[
     "loadChats",
     "getChatHistory",
     "sendMessage",
+    "sendMessageAlbum",
     "openChat",
     "closeChat",
     "viewMessages",

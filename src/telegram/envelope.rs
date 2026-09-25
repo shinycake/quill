@@ -583,6 +583,8 @@ pub struct ParsedMessage {
     pub is_outgoing: bool,
     /// Schema `message.is_pinned` (TDLib 1.8.67).
     pub is_pinned: bool,
+    /// Schema `message.media_album_id` (int64). `0` means the message is not in an album.
+    pub media_album_id: i64,
     pub content: MessageContent,
     pub files: Vec<ParsedFile>,
     pub reply_to: Option<MessageReplyTo>,
@@ -1538,6 +1540,7 @@ fn parse_message(value: &Value) -> Result<ParsedMessage, ParseError> {
             .get("is_pinned")
             .and_then(Value::as_bool)
             .unwrap_or(false),
+        media_album_id: int64(value.get("media_album_id")).unwrap_or(0),
         content,
         files,
         reply_to: parse_reply_to(value.get("reply_to")),

@@ -99,9 +99,10 @@ fn parse_screenshot_demo(args: &[String]) -> Option<(ui::ScreenshotDemo, std::pa
                 "ready-video" => ScreenshotDemo::ReadyVideo,
                 "ready-video-send" => ScreenshotDemo::ReadyVideoSend,
                 "ready-drafts" => ScreenshotDemo::ReadyDrafts,
+                "ready-albums" => ScreenshotDemo::ReadyAlbums,
                 _ => {
                     eprintln!(
-                        "unknown screenshot demo '{kind}' (expected need-tdjson|wait-phone|wait-code|wait-password|ready-chats|ready-chats-composer|ready-unread|ready-unread-read|ready-media|ready-send-media|ready-search|ready-search-in-chat|ready-reply|ready-edit-delete|ready-forward|ready-reactions|ready-pin|ready-mute-archive|ready-typing|ready-stickers|ready-voice|ready-link-preview|ready-gifs|ready-video|ready-video-send|ready-drafts)"
+                        "unknown screenshot demo '{kind}' (expected need-tdjson|wait-phone|wait-code|wait-password|ready-chats|ready-chats-composer|ready-unread|ready-unread-read|ready-media|ready-send-media|ready-search|ready-search-in-chat|ready-reply|ready-edit-delete|ready-forward|ready-reactions|ready-pin|ready-mute-archive|ready-typing|ready-stickers|ready-voice|ready-link-preview|ready-gifs|ready-video|ready-video-send|ready-drafts|ready-albums)"
                     );
                     std::process::exit(2);
                 }
@@ -149,6 +150,7 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
         ScreenshotDemo::ReadyVideo => ".quill-ready-ready-video",
         ScreenshotDemo::ReadyVideoSend => ".quill-ready-ready-video-send",
         ScreenshotDemo::ReadyDrafts => ".quill-ready-ready-drafts",
+        ScreenshotDemo::ReadyAlbums => ".quill-ready-ready-albums",
     });
     let _ = std::fs::remove_file(&marker);
     let marker_for_spawn = marker.clone();

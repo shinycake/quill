@@ -72,6 +72,26 @@ impl ComposerAttachment {
         })
     }
 
+    /// Add a picked file. A document replaces the list (documents are not mixed
+    /// into a photo/video album). Photos and videos accumulate up to 10.
+    pub fn push_attachment(list: &mut Vec<Self>, next: Self) {
+        match next.kind {
+            AttachmentKind::Document => {
+                list.clear();
+                list.push(next);
+            }
+            AttachmentKind::Photo | AttachmentKind::Video => {
+                if list.iter().any(|att| att.kind == AttachmentKind::Document) {
+                    list.clear();
+                }
+                if list.len() >= crate::album::ALBUM_MAX_ITEMS {
+                    return;
+                }
+                list.push(next);
+            }
+        }
+    }
+
     /// Path string safe to embed in `inputFileLocal` (matches the pick).
     pub fn send_path_str(&self) -> Option<String> {
         if !is_explicit_send_path(&self.path, &self.path) {
@@ -350,6 +370,8 @@ pub struct ComposerSnapshot {
     pub view_generation: u64,
     pub text: String,
     pub attachment: Option<ComposerAttachment>,
+    /// 2–10 photos and/or videos. Empty when `attachment` is the single send.
+    pub album: Vec<ComposerAttachment>,
     pub reply_to: Option<ComposerReplyTo>,
 }
 
@@ -374,6 +396,24 @@ impl ComposerSnapshot {
             view_generation: view_generation.0,
             text: text.into(),
             attachment,
+            album: Vec::new(),
+            reply_to: None,
+        }
+    }
+
+    /// Freeze a 2–10 photo/video album. Caption is the composer text.
+    pub fn capture_album(
+        chat_id: ChatId,
+        view_generation: ViewGeneration,
+        text: impl Into<String>,
+        album: Vec<ComposerAttachment>,
+    ) -> Self {
+        Self {
+            chat_id: chat_id.0,
+            view_generation: view_generation.0,
+            text: text.into(),
+            attachment: None,
+            album,
             reply_to: None,
         }
     }
@@ -399,8 +439,17 @@ impl ComposerSnapshot {
         ChatId(self.chat_id)
     }
 
+    pub fn is_media_album(&self) -> bool {
+        let n = self.album.len();
+        (2..=crate::album::ALBUM_MAX_ITEMS).contains(&n)
+            && self
+                .album
+                .iter()
+                .all(|att| matches!(att.kind, AttachmentKind::Photo | AttachmentKind::Video))
+    }
+
     pub fn is_empty(&self) -> bool {
-        self.text.trim().is_empty() && self.attachment.is_none()
+        self.text.trim().is_empty() && self.attachment.is_none() && self.album.is_empty()
     }
 
     pub fn caption(&self) -> &str {

@@ -354,6 +354,37 @@ pub fn send_text(
     .to_string()
 }
 
+fn formatted_caption(caption: &str) -> Value {
+    json!({
+        "@type": "formattedText",
+        "text": caption,
+        "entities": []
+    })
+}
+
+/// `inputMessagePhoto` body (TDLib 1.8.67). Shared by `sendMessage` and `sendMessageAlbum`.
+pub fn input_message_photo(path: &str, caption: &str) -> Value {
+    json!({
+        "@type": "inputMessagePhoto",
+        "photo": {
+            "@type": "inputPhoto",
+            "photo": {
+                "@type": "inputFileLocal",
+                "path": path
+            },
+            "thumbnail": Value::Null,
+            "video": Value::Null,
+            "added_sticker_file_ids": [],
+            "width": 0,
+            "height": 0
+        },
+        "caption": formatted_caption(caption),
+        "show_caption_above_media": false,
+        "self_destruct_type": Value::Null,
+        "has_spoiler": false
+    })
+}
+
 /// `sendMessage` + `inputMessagePhoto` / `inputPhoto` / `inputFileLocal` (1.8.67).
 /// `path` must already be an explicitly picked local file — never a JSON `local.path`.
 pub fn send_photo(
@@ -371,29 +402,7 @@ pub fn send_photo(
         "reply_to": input_message_reply_to(reply_to),
         "options": Value::Null,
         "reply_markup": Value::Null,
-        "input_message_content": {
-            "@type": "inputMessagePhoto",
-            "photo": {
-                "@type": "inputPhoto",
-                "photo": {
-                    "@type": "inputFileLocal",
-                    "path": path
-                },
-                "thumbnail": Value::Null,
-                "video": Value::Null,
-                "added_sticker_file_ids": [],
-                "width": 0,
-                "height": 0
-            },
-            "caption": {
-                "@type": "formattedText",
-                "text": caption,
-                "entities": []
-            },
-            "show_caption_above_media": false,
-            "self_destruct_type": Value::Null,
-            "has_spoiler": false
-        }
+        "input_message_content": input_message_photo(path, caption)
     })
     .to_string()
 }
@@ -521,6 +530,32 @@ pub struct VideoSend {
     pub supports_streaming: bool,
 }
 
+/// `inputMessageVideo` body (TDLib 1.8.67). Shared by `sendMessage` and `sendMessageAlbum`.
+pub fn input_message_video(path: &str, video: &VideoSend, caption: &str) -> Value {
+    json!({
+        "@type": "inputMessageVideo",
+        "video": {
+            "@type": "inputVideo",
+            "video": {
+                "@type": "inputFileLocal",
+                "path": path
+            },
+            "thumbnail": Value::Null,
+            "cover": Value::Null,
+            "start_timestamp": 0,
+            "added_sticker_file_ids": [],
+            "duration": video.duration,
+            "width": video.width,
+            "height": video.height,
+            "supports_streaming": video.supports_streaming
+        },
+        "caption": formatted_caption(caption),
+        "show_caption_above_media": false,
+        "self_destruct_type": Value::Null,
+        "has_spoiler": false
+    })
+}
+
 /// `sendMessage` + `inputMessageVideo` / `inputVideo` / `inputFileLocal` (1.8.67).
 /// `path` must already be an explicitly picked local file — never a JSON `local.path`.
 pub fn send_video(
@@ -539,32 +574,27 @@ pub fn send_video(
         "reply_to": input_message_reply_to(reply_to),
         "options": Value::Null,
         "reply_markup": Value::Null,
-        "input_message_content": {
-            "@type": "inputMessageVideo",
-            "video": {
-                "@type": "inputVideo",
-                "video": {
-                    "@type": "inputFileLocal",
-                    "path": path
-                },
-                "thumbnail": Value::Null,
-                "cover": Value::Null,
-                "start_timestamp": 0,
-                "added_sticker_file_ids": [],
-                "duration": video.duration,
-                "width": video.width,
-                "height": video.height,
-                "supports_streaming": video.supports_streaming
-            },
-            "caption": {
-                "@type": "formattedText",
-                "text": caption,
-                "entities": []
-            },
-            "show_caption_above_media": false,
-            "self_destruct_type": Value::Null,
-            "has_spoiler": false
-        }
+        "input_message_content": input_message_video(path, video, caption)
+    })
+    .to_string()
+}
+
+/// `sendMessageAlbum` (TDLib 1.8.67). 2–10 contents, same `show_caption_above_media`.
+/// Caption sits on the last item (`show_caption_above_media` is false).
+pub fn send_message_album(
+    extra: RequestId,
+    chat_id: ChatId,
+    reply_to: Option<MessageId>,
+    input_message_contents: Vec<Value>,
+) -> String {
+    json!({
+        "@type": "sendMessageAlbum",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0,
+        "topic_id": Value::Null,
+        "reply_to": input_message_reply_to(reply_to),
+        "options": Value::Null,
+        "input_message_contents": input_message_contents
     })
     .to_string()
 }
