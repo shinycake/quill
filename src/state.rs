@@ -8,7 +8,7 @@ use crate::telegram::envelope::{
     AuthorizationState, ChatAction, ChatKind, ChatList, ChatNotificationSettings,
     ChatPositionUpdate, ConnectionState, EnvelopePayload, ErrorClass, MessageContent,
     MessageForwardInfo, MessageInteractionInfo, MessageOrigin, MessageReaction, MessageReplyTo,
-    MessageSender, ParsedFile, ParsedMessage,
+    MessageSender, ParsedFile, ParsedMessage, StickerFormat, StickerItem, StickerSetInfo,
 };
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
@@ -57,6 +57,10 @@ pub enum RequestPurpose {
     AddChatToList,
     /// `sendChatAction` (`chatActionTyping` / `chatActionCancel`). Response is `ok`.
     SendChatAction,
+    /// `getInstalledStickerSets` (`stickerTypeRegular`). Response is `stickerSets`.
+    GetInstalledStickerSets,
+    /// `getStickerSet`. Response is `stickerSet`.
+    GetStickerSet,
     Close,
     LogOut,
     Other,
@@ -963,6 +967,34 @@ pub enum ShutdownPhase {
     Closed,
 }
 
+/// Composer sticker panel (Unigram `StickerDrawerViewModel` installed regular sets).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct StickerPanel {
+    pub open: bool,
+    pub sets: Vec<StickerSetInfo>,
+    pub selected_set_id: Option<i64>,
+    pub stickers: Vec<StickerItem>,
+    pub loaded_set_id: Option<i64>,
+    pub loading_sets: bool,
+    pub loading_set: bool,
+    pub failed: bool,
+}
+
+impl StickerPanel {
+    pub fn close(&mut self) {
+        self.open = false;
+    }
+
+    pub fn selected_needs_load(&self) -> Option<i64> {
+        let id = self.selected_set_id?;
+        if self.loading_set || self.loaded_set_id == Some(id) {
+            None
+        } else {
+            Some(id)
+        }
+    }
+}
+
 pub struct Session {
     pub account: AccountKey,
     pub account_generation: AccountGeneration,
@@ -993,6 +1025,8 @@ pub struct Session {
     download_extras: HashMap<u64, i32>,
     pub search: SearchState,
     pub chat_search: ChatSearchState,
+    /// Installed regular sticker sets + the loaded `stickerSet` for the picker.
+    pub stickers: StickerPanel,
     diagnostics: Arc<dyn DiagnosticSink>,
 }
 
@@ -1023,6 +1057,7 @@ impl Session {
             download_extras: HashMap::new(),
             search: SearchState::default(),
             chat_search: ChatSearchState::default(),
+            stickers: StickerPanel::default(),
             diagnostics,
         }
     }
@@ -1364,6 +1399,22 @@ impl Session {
             EnvelopePayload::UpdateFile(file) | EnvelopePayload::File(file) => {
                 self.upsert_file(file, true);
             }
+            EnvelopePayload::StickerSets { sets, .. } => {
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetInstalledStickerSets) {
+                    self.accept_installed_sticker_sets(sets);
+                }
+            }
+            EnvelopePayload::StickerSet {
+                id,
+                stickers,
+                files,
+                ..
+            } => {
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetStickerSet) {
+                    self.remember_files(&files);
+                    self.accept_sticker_set(id, stickers);
+                }
+            }
             EnvelopePayload::Ok => {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::LoadChats) {
                     // A short OK is not exhaustion; 404 is.
@@ -1415,6 +1466,14 @@ impl Session {
                     && let Some(pending) = pending
                 {
                     self.finish_forward(pending, &[], true);
+                }
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetInstalledStickerSets) {
+                    self.stickers.loading_sets = false;
+                    self.stickers.failed = true;
+                }
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetStickerSet) {
+                    self.stickers.loading_set = false;
+                    self.stickers.failed = true;
                 }
                 let download_id = pending
                     .filter(|p| p.purpose == RequestPurpose::DownloadFile)
@@ -1599,21 +1658,88 @@ impl Session {
         };
         let mut ids = Vec::new();
         for message in history.messages.values() {
-            let MessageContent::Photo(photo) = &message.content else {
-                continue;
-            };
-            if photo.is_secret || photo.has_spoiler {
-                continue;
+            match &message.content {
+                MessageContent::Photo(photo) => {
+                    if photo.is_secret || photo.has_spoiler {
+                        continue;
+                    }
+                    if let Some(size) = photo.thumb_size()
+                        && self.should_download(size.file_id)
+                    {
+                        ids.push(size.file_id);
+                    }
+                }
+                MessageContent::Sticker(sticker) => {
+                    if let Some(file_id) = sticker.display_file_id()
+                        && self.should_download(file_id)
+                    {
+                        ids.push(file_id);
+                    }
+                }
+                _ => {}
             }
-            if let Some(size) = photo.thumb_size()
-                && self.should_download(size.file_id)
-            {
-                ids.push(size.file_id);
+        }
+        if self.stickers.open {
+            for sticker in &self.stickers.stickers {
+                let file_id = sticker.thumb_file_id.filter(|id| id.0 != 0).or_else(|| {
+                    (sticker.format == StickerFormat::Webp && sticker.file_id.0 != 0)
+                        .then_some(sticker.file_id)
+                });
+                if let Some(file_id) = file_id
+                    && self.should_download(file_id)
+                {
+                    ids.push(file_id);
+                }
             }
         }
         ids.sort_by_key(|id| id.0);
         ids.dedup();
         ids
+    }
+
+    pub fn accept_installed_sticker_sets(&mut self, sets: Vec<StickerSetInfo>) {
+        self.stickers.loading_sets = false;
+        self.stickers.failed = false;
+        self.stickers.sets = sets;
+        let still_selected = self
+            .stickers
+            .selected_set_id
+            .is_some_and(|id| self.stickers.sets.iter().any(|set| set.id == id));
+        if !still_selected {
+            self.stickers.selected_set_id = self.stickers.sets.first().map(|set| set.id);
+            self.stickers.loaded_set_id = None;
+            self.stickers.stickers.clear();
+        }
+    }
+
+    pub fn select_sticker_set(&mut self, set_id: i64) {
+        if self.stickers.selected_set_id == Some(set_id) {
+            return;
+        }
+        self.stickers.selected_set_id = Some(set_id);
+        self.stickers.loaded_set_id = None;
+        self.stickers.stickers.clear();
+        self.stickers.loading_set = false;
+        self.stickers.failed = false;
+    }
+
+    pub fn mark_sticker_set_loading(&mut self) {
+        self.stickers.loading_set = true;
+        self.stickers.failed = false;
+    }
+
+    pub fn accept_sticker_set(&mut self, id: i64, stickers: Vec<StickerItem>) {
+        self.stickers.loading_set = false;
+        if self
+            .stickers
+            .selected_set_id
+            .is_some_and(|selected| selected != id)
+        {
+            return;
+        }
+        self.stickers.failed = false;
+        self.stickers.loaded_set_id = Some(id);
+        self.stickers.stickers = stickers;
     }
 
     pub fn request_download(&mut self, file_id: FileId) -> RequestId {

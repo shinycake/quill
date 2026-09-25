@@ -111,6 +111,19 @@ pub enum EnvelopePayload {
     },
     UpdateFile(ParsedFile),
     File(ParsedFile),
+    /// `stickerSets` — `getInstalledStickerSets`.
+    StickerSets {
+        total_count: i32,
+        sets: Vec<StickerSetInfo>,
+    },
+    /// `stickerSet` — `getStickerSet`. Files on each sticker are in `files`.
+    StickerSet {
+        id: i64,
+        title: String,
+        name: String,
+        stickers: Vec<StickerItem>,
+        files: Vec<ParsedFile>,
+    },
     /// `updateMessageInteractionInfo` — views / forwards / `messageReactions`.
     UpdateMessageInteractionInfo {
         chat_id: ChatId,
@@ -544,6 +557,7 @@ pub enum MessageContent {
     Text(String),
     Photo(PhotoContent),
     Document(DocumentContent),
+    Sticker(StickerContent),
     Unsupported { type_name: String },
 }
 
@@ -560,6 +574,8 @@ impl MessageContent {
                 doc.file_name.chars().take(80).collect()
             }
             MessageContent::Document(_) => "Document".into(),
+            MessageContent::Sticker(sticker) if !sticker.emoji.is_empty() => sticker.emoji.clone(),
+            MessageContent::Sticker(_) => "Sticker".into(),
             MessageContent::Unsupported { type_name } => format!("({type_name})"),
         }
     }
@@ -646,6 +662,68 @@ pub struct DocumentContent {
     pub mime_type: String,
     pub caption: String,
     pub file_id: FileId,
+}
+
+/// Still image vs animation. TGS / WEBM are not played in this slice.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StickerFormat {
+    Webp,
+    Tgs,
+    Webm,
+    Unknown,
+}
+
+/// `messageSticker` (TDLib 1.8.67). Display uses `thumbnail` (WEBP/JPEG) or a WEBP `sticker` file.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StickerContent {
+    pub emoji: String,
+    pub width: i32,
+    pub height: i32,
+    pub format: StickerFormat,
+    pub file_id: FileId,
+    pub thumb_file_id: Option<FileId>,
+    pub thumb_width: i32,
+    pub thumb_height: i32,
+    pub is_premium: bool,
+}
+
+impl StickerContent {
+    /// File to show: thumbnail first, else the sticker itself when it is static WEBP.
+    pub fn display_file_id(&self) -> Option<FileId> {
+        if let Some(id) = self.thumb_file_id.filter(|id| id.0 != 0) {
+            return Some(id);
+        }
+        if self.format == StickerFormat::Webp && self.file_id.0 != 0 {
+            return Some(self.file_id);
+        }
+        None
+    }
+}
+
+/// One sticker inside `stickerSet.stickers` (picker). Same file ids as `sticker`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StickerItem {
+    pub id: i64,
+    pub set_id: i64,
+    pub emoji: String,
+    pub width: i32,
+    pub height: i32,
+    pub format: StickerFormat,
+    pub file_id: FileId,
+    pub thumb_file_id: Option<FileId>,
+    pub thumb_width: i32,
+    pub thumb_height: i32,
+}
+
+/// `stickerSetInfo` row from `getInstalledStickerSets` (regular sets only are requested).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StickerSetInfo {
+    pub id: i64,
+    pub title: String,
+    pub name: String,
+    pub size: i32,
+    pub is_installed: bool,
+    pub is_official: bool,
 }
 
 /// Typed `file` + `localFile` (no `remoteFile.id` — that can be an HTTP URL).
@@ -942,6 +1020,8 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
         "message" => Ok(EnvelopePayload::Message(parse_message(&value)?)),
         "updateFile" => Ok(EnvelopePayload::UpdateFile(parse_file(value.get("file"))?)),
         "file" => Ok(EnvelopePayload::File(parse_file(Some(&value))?)),
+        "stickerSets" => Ok(parse_sticker_sets(&value)),
+        "stickerSet" => Ok(parse_sticker_set(&value)),
         "updateMessageInteractionInfo" => Ok(EnvelopePayload::UpdateMessageInteractionInfo {
             chat_id: ChatId(int53(value.get("chat_id"))?),
             message_id: MessageId(int53(value.get("message_id"))?),
@@ -1380,6 +1460,7 @@ fn parse_content(value: Option<&Value>) -> (MessageContent, Vec<ParsedFile>) {
         ),
         Some("messagePhoto") => parse_message_photo(value),
         Some("messageDocument") => parse_message_document(value),
+        Some("messageSticker") => parse_message_sticker(value),
         Some(other) => (
             MessageContent::Unsupported {
                 type_name: other.to_string(),
@@ -1475,6 +1556,174 @@ fn parse_message_document(value: &Value) -> (MessageContent, Vec<ParsedFile>) {
         }),
         files,
     )
+}
+
+fn parse_message_sticker(value: &Value) -> (MessageContent, Vec<ParsedFile>) {
+    let sticker = value.get("sticker");
+    let (item, mut files) = parse_sticker_value(sticker);
+    let Some(item) = item else {
+        return (
+            MessageContent::Unsupported {
+                type_name: "messageSticker".into(),
+            },
+            files,
+        );
+    };
+    (
+        MessageContent::Sticker(StickerContent {
+            emoji: item.emoji,
+            width: item.width,
+            height: item.height,
+            format: item.format,
+            file_id: item.file_id,
+            thumb_file_id: item.thumb_file_id,
+            thumb_width: item.thumb_width,
+            thumb_height: item.thumb_height,
+            is_premium: value
+                .get("is_premium")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+        }),
+        {
+            files.retain(|file| file.id.0 != 0);
+            files
+        },
+    )
+}
+
+fn parse_sticker_format(value: Option<&Value>) -> StickerFormat {
+    match value.and_then(|v| v.get("@type")).and_then(Value::as_str) {
+        Some("stickerFormatWebp") => StickerFormat::Webp,
+        Some("stickerFormatTgs") => StickerFormat::Tgs,
+        Some("stickerFormatWebm") => StickerFormat::Webm,
+        _ => StickerFormat::Unknown,
+    }
+}
+
+fn parse_sticker_value(value: Option<&Value>) -> (Option<StickerItem>, Vec<ParsedFile>) {
+    let Some(value) = value else {
+        return (None, Vec::new());
+    };
+    if value.get("@type").and_then(Value::as_str) != Some("sticker") {
+        return (None, Vec::new());
+    }
+    let mut files = Vec::new();
+    let file_id = match parse_file(value.get("sticker")) {
+        Ok(file) => {
+            let id = file.id;
+            files.push(file);
+            id
+        }
+        Err(_) => FileId(0),
+    };
+    let thumb = value.get("thumbnail").filter(|thumb| !thumb.is_null());
+    let (thumb_file_id, thumb_width, thumb_height) = if let Some(thumb) = thumb {
+        let id = match parse_file(thumb.get("file")) {
+            Ok(file) => {
+                let id = file.id;
+                files.push(file);
+                Some(id)
+            }
+            Err(_) => None,
+        };
+        (
+            id,
+            int53_or_zero(thumb.get("width")) as i32,
+            int53_or_zero(thumb.get("height")) as i32,
+        )
+    } else {
+        (None, 0, 0)
+    };
+    (
+        Some(StickerItem {
+            id: int64(value.get("id")).unwrap_or(0),
+            set_id: int64(value.get("set_id")).unwrap_or(0),
+            emoji: value
+                .get("emoji")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string(),
+            width: int53_or_zero(value.get("width")) as i32,
+            height: int53_or_zero(value.get("height")) as i32,
+            format: parse_sticker_format(value.get("format")),
+            file_id,
+            thumb_file_id,
+            thumb_width,
+            thumb_height,
+        }),
+        files,
+    )
+}
+
+fn parse_sticker_set_info(value: &Value) -> Option<StickerSetInfo> {
+    if value.get("@type").and_then(Value::as_str) != Some("stickerSetInfo") {
+        return None;
+    }
+    Some(StickerSetInfo {
+        id: int64(value.get("id")).unwrap_or(0),
+        title: value
+            .get("title")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string(),
+        name: value
+            .get("name")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string(),
+        size: int53_or_zero(value.get("size")) as i32,
+        is_installed: value
+            .get("is_installed")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        is_official: value
+            .get("is_official")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+    })
+}
+
+fn parse_sticker_sets(value: &Value) -> EnvelopePayload {
+    let sets = value
+        .get("sets")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(parse_sticker_set_info)
+        .collect();
+    EnvelopePayload::StickerSets {
+        total_count: int53_or_zero(value.get("total_count")) as i32,
+        sets,
+    }
+}
+
+fn parse_sticker_set(value: &Value) -> EnvelopePayload {
+    let mut stickers = Vec::new();
+    let mut files = Vec::new();
+    if let Some(entries) = value.get("stickers").and_then(Value::as_array) {
+        for entry in entries {
+            let (item, item_files) = parse_sticker_value(Some(entry));
+            if let Some(item) = item {
+                stickers.push(item);
+            }
+            files.extend(item_files);
+        }
+    }
+    EnvelopePayload::StickerSet {
+        id: int64(value.get("id")).unwrap_or(0),
+        title: value
+            .get("title")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string(),
+        name: value
+            .get("name")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string(),
+        stickers,
+        files,
+    }
 }
 
 fn parse_file(value: Option<&Value>) -> Result<ParsedFile, ParseError> {
@@ -1889,6 +2138,63 @@ mod tests {
         assert!(schema.lines().any(|l| l.starts_with("updateFile ")));
         assert!(schema.lines().any(|l| l.starts_with("localFile ")));
         assert!(schema.lines().any(|l| l.starts_with("photoSize ")));
+    }
+
+    #[test]
+    fn message_sticker_keeps_webp_thumb_and_file() {
+        let sticker_file = local_file_json(41, "", false, true);
+        let thumb = local_file_json(42, "/tmp/sticker.webp", true, true);
+        let json = format!(
+            r#"{{"@type":"updateNewMessage","message":{{"id":8,"chat_id":11,"is_outgoing":false,"content":{{"@type":"messageSticker","is_premium":false,"sticker":{{"@type":"sticker","id":"9001","set_id":"77","width":512,"height":512,"emoji":"😀","format":{{"@type":"stickerFormatWebp"}},"full_type":{{"@type":"stickerFullTypeRegular","premium_animation":null}},"thumbnail":{{"@type":"thumbnail","format":{{"@type":"thumbnailFormatWebp"}},"width":128,"height":128,"file":{thumb}}},"sticker":{sticker_file}}}}}}}}}"#
+        );
+        let env = parse_envelope(&json).unwrap();
+        match env.payload {
+            EnvelopePayload::UpdateNewMessage(message) => {
+                let MessageContent::Sticker(sticker) = &message.content else {
+                    panic!("{:?}", message.content);
+                };
+                assert_eq!(sticker.emoji, "😀");
+                assert_eq!(sticker.file_id, FileId(41));
+                assert_eq!(sticker.thumb_file_id, Some(FileId(42)));
+                assert_eq!(sticker.display_file_id(), Some(FileId(42)));
+                assert_eq!(sticker.format, StickerFormat::Webp);
+                assert!(message.files.iter().any(|file| file.id == FileId(42)));
+                assert_eq!(message.content.preview(), "😀");
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn sticker_sets_and_sticker_set_parse_1_8_67() {
+        let sets = parse_envelope(
+            r#"{"@type":"stickerSets","total_count":1,"sets":[{"@type":"stickerSetInfo","id":"77","title":"Demo","name":"DemoStickers","thumbnail":null,"thumbnail_outline":null,"is_owned":false,"is_installed":true,"is_archived":false,"is_official":true,"sticker_type":{"@type":"stickerTypeRegular"},"needs_repainting":false,"is_allowed_as_chat_emoji_status":false,"is_viewed":true,"size":2,"covers":[]}]}"#,
+        )
+        .unwrap();
+        match sets.payload {
+            EnvelopePayload::StickerSets { total_count, sets } => {
+                assert_eq!(total_count, 1);
+                assert_eq!(sets[0].id, 77);
+                assert!(sets[0].is_installed);
+                assert!(sets[0].is_official);
+                assert_eq!(sets[0].title, "Demo");
+            }
+            other => panic!("{other:?}"),
+        }
+        let file = local_file_json(41, "/tmp/s.webp", true, true);
+        let set = parse_envelope(&format!(
+            r#"{{"@type":"stickerSet","id":"77","title":"Demo","name":"DemoStickers","thumbnail":null,"thumbnail_outline":null,"is_owned":false,"is_installed":true,"is_archived":false,"is_official":true,"sticker_type":{{"@type":"stickerTypeRegular"}},"needs_repainting":false,"is_allowed_as_chat_emoji_status":false,"is_viewed":true,"stickers":[{{"@type":"sticker","id":"9001","set_id":"77","width":512,"height":512,"emoji":"😀","format":{{"@type":"stickerFormatTgs"}},"full_type":{{"@type":"stickerFullTypeRegular","premium_animation":null}},"thumbnail":null,"sticker":{file}}}],"emojis":[]}}"#
+        ))
+        .unwrap();
+        match set.payload {
+            EnvelopePayload::StickerSet { id, stickers, .. } => {
+                assert_eq!(id, 77);
+                assert_eq!(stickers[0].format, StickerFormat::Tgs);
+                assert_eq!(stickers[0].file_id, FileId(41));
+                assert!(stickers[0].thumb_file_id.is_none());
+            }
+            other => panic!("{other:?}"),
+        }
     }
 
     #[test]

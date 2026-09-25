@@ -19,12 +19,13 @@ use crate::telegram::envelope::{
 };
 use crate::telegram::ffi::{LibraryOrigin, TdJsonError, resolve_tdjson_path};
 use crate::telegram::requests::{
-    SetTdlibParameters, add_chat_to_list, add_message_reaction, add_recently_found_chat,
-    check_authentication_code, check_authentication_password, close_chat, close_request,
-    delete_messages, download_file as download_file_request, edit_message_caption,
-    edit_message_text, forward_messages, get_authorization_state, get_chat_history, load_chats,
-    open_chat, pin_chat_message, remove_message_reaction, search_chat_messages, search_chats,
-    search_messages, search_recently_found_chats, send_chat_action, send_document, send_photo,
+    SetTdlibParameters, StickerSend, add_chat_to_list, add_message_reaction,
+    add_recently_found_chat, check_authentication_code, check_authentication_password, close_chat,
+    close_request, delete_messages, download_file as download_file_request, edit_message_caption,
+    edit_message_text, forward_messages, get_authorization_state, get_chat_history,
+    get_installed_sticker_sets, get_sticker_set, load_chats, open_chat, pin_chat_message,
+    remove_message_reaction, search_chat_messages, search_chats, search_messages,
+    search_recently_found_chats, send_chat_action, send_document, send_photo, send_sticker,
     send_text, set_authentication_phone_number, set_chat_notification_settings, unpin_chat_message,
     view_messages,
 };
@@ -393,9 +394,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         if view_after {
             self.maybe_view_open_messages()?;
         }
-        if thumbs_after {
+        if thumbs_after || self.session.stickers.open {
             self.maybe_download_open_thumbs()?;
         }
+        self.maybe_load_selected_sticker_set()?;
         if chat_search_hits {
             // Unigram ChatSearchViewModel: first hit → LoadMessageSliceAsync.
             self.jump_selected_chat_search_hit()?;
@@ -623,6 +625,112 @@ impl<S: JsonSender> ConnectDriver<S> {
             false,
         ))?;
         Ok(Some(extra))
+    }
+
+    /// Open the sticker panel and load installed regular sets
+    /// (`getInstalledStickerSets` + `stickerTypeRegular`).
+    pub fn open_sticker_panel(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        self.session.stickers.open = true;
+        self.session.stickers.failed = false;
+        if self
+            .session
+            .requests
+            .has_purpose(RequestPurpose::GetInstalledStickerSets)
+        {
+            return Ok(None);
+        }
+        if !self.session.stickers.sets.is_empty() {
+            return self.maybe_load_selected_sticker_set();
+        }
+        self.session.stickers.loading_sets = true;
+        let extra = self
+            .session
+            .request(RequestPurpose::GetInstalledStickerSets, None);
+        match self.sender.send_json(&get_installed_sticker_sets(extra)) {
+            Ok(()) => Ok(Some(extra)),
+            Err(err) => {
+                self.session.requests.take(extra);
+                self.session.stickers.loading_sets = false;
+                Err(err)
+            }
+        }
+    }
+
+    pub fn close_sticker_panel(&mut self) {
+        self.session.stickers.close();
+    }
+
+    pub fn select_sticker_set(
+        &mut self,
+        set_id: i64,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        self.session.select_sticker_set(set_id);
+        self.maybe_load_selected_sticker_set()
+    }
+
+    fn maybe_load_selected_sticker_set(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.session.stickers.open || !self.chats_path_active() {
+            return Ok(None);
+        }
+        if self
+            .session
+            .requests
+            .has_purpose(RequestPurpose::GetStickerSet)
+        {
+            return Ok(None);
+        }
+        let Some(set_id) = self.session.stickers.selected_needs_load() else {
+            return Ok(None);
+        };
+        self.session.mark_sticker_set_loading();
+        let extra = self.session.request(RequestPurpose::GetStickerSet, None);
+        match self.sender.send_json(&get_sticker_set(extra, set_id)) {
+            Ok(()) => Ok(Some(extra)),
+            Err(err) => {
+                self.session.requests.take(extra);
+                self.session.stickers.loading_set = false;
+                Err(err)
+            }
+        }
+    }
+
+    /// `sendMessage` + `inputMessageSticker` / `inputFileId` (Unigram compose).
+    pub fn send_sticker(
+        &mut self,
+        chat_id: ChatId,
+        sticker: StickerSend<'_>,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let supported = self
+            .session
+            .chats
+            .get(&chat_id.0)
+            .is_some_and(|chat| chat.supported());
+        if !supported || sticker.file_id.0 == 0 {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::SendMessage, Some(chat_id));
+        let json = send_sticker(extra, chat_id, sticker);
+        match self.sender.send_json(&json) {
+            Ok(()) => {
+                let _ = self.cancel_outgoing_typing();
+                Ok(extra)
+            }
+            Err(err) => {
+                self.session.requests.take(extra);
+                Err(err)
+            }
+        }
     }
 
     /// Send `sendMessage` for a snapshot frozen at composer submit.
@@ -2547,6 +2655,122 @@ mod tests {
                 .has_purpose_for_chat(RequestPurpose::ViewMessages, ChatId(7))
         );
         assert!(!sink.rendered().contains("CANARY_VIEW_TD"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn sticker_panel_loads_installed_set_and_send_uses_input_file_id() {
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = Arc::new(RecordingSender::new());
+        let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+        let mut driver =
+            ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+        let seq = AtomicU64::new(0);
+        driver
+            .ingest(
+                copy_and_parse(
+                    r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        driver
+            .ingest(
+                copy_and_parse(
+                    r#"{"@type":"updateNewChat","chat":{"id":7,"title":"Alice","type":{"@type":"chatTypePrivate","user_id":7},"unread_count":0}}"#,
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        driver.select_chat(ChatId(7)).unwrap();
+        driver.open_sticker_panel().unwrap();
+        let sets_extra = recorder
+            .snapshot()
+            .into_iter()
+            .rev()
+            .find(|json| json.contains("getInstalledStickerSets"))
+            .expect("installed sets");
+        let sets_extra: Value = serde_json::from_str(&sets_extra).unwrap();
+        assert_eq!(sets_extra["sticker_type"]["@type"], "stickerTypeRegular");
+        let extra = sets_extra["@extra"].as_str().unwrap();
+        driver
+            .ingest(
+                copy_and_parse(
+                    &format!(
+                        r#"{{"@type":"stickerSets","@extra":"{extra}","total_count":1,"sets":[{{"@type":"stickerSetInfo","id":"77","title":"Demo","name":"DemoStickers","thumbnail":null,"thumbnail_outline":null,"is_owned":false,"is_installed":true,"is_archived":false,"is_official":true,"sticker_type":{{"@type":"stickerTypeRegular"}},"needs_repainting":false,"is_allowed_as_chat_emoji_status":false,"is_viewed":true,"size":1,"covers":[]}}]}}"#
+                    ),
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        assert_eq!(driver.session.stickers.selected_set_id, Some(77));
+        let set_req = recorder
+            .snapshot()
+            .into_iter()
+            .rev()
+            .find(|json| json.contains("getStickerSet"))
+            .expect("getStickerSet");
+        let set_req: Value = serde_json::from_str(&set_req).unwrap();
+        assert_eq!(set_req["set_id"], "77");
+        let set_extra = set_req["@extra"].as_str().unwrap();
+        let file = r#"{"@type":"file","id":41,"size":8,"expected_size":8,"local":{"@type":"localFile","path":"","can_be_downloaded":true,"can_be_deleted":false,"is_downloading_active":false,"is_downloading_completed":false,"download_offset":0,"downloaded_prefix_size":0,"downloaded_size":0},"remote":{"@type":"remoteFile","id":"x","unique_id":"u","is_uploading_active":false,"is_uploading_completed":true,"uploaded_size":8}}"#;
+        driver
+            .ingest(
+                copy_and_parse(
+                    &format!(
+                        r#"{{"@type":"stickerSet","@extra":"{set_extra}","id":"77","title":"Demo","name":"DemoStickers","thumbnail":null,"thumbnail_outline":null,"is_owned":false,"is_installed":true,"is_archived":false,"is_official":true,"sticker_type":{{"@type":"stickerTypeRegular"}},"needs_repainting":false,"is_allowed_as_chat_emoji_status":false,"is_viewed":true,"stickers":[{{"@type":"sticker","id":"9001","set_id":"77","width":512,"height":512,"emoji":"😀","format":{{"@type":"stickerFormatWebp"}},"full_type":{{"@type":"stickerFullTypeRegular","premium_animation":null}},"thumbnail":{{"@type":"thumbnail","format":{{"@type":"thumbnailFormatWebp"}},"width":128,"height":128,"file":{file}}},"sticker":{file}}}],"emojis":[]}}"#
+                    ),
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        assert_eq!(driver.session.stickers.stickers.len(), 1);
+        assert!(
+            recorder
+                .snapshot()
+                .iter()
+                .any(|json| json.contains("downloadFile") && json.contains("\"file_id\":41"))
+        );
+        driver
+            .send_sticker(
+                ChatId(7),
+                StickerSend {
+                    file_id: FileId(41),
+                    emoji: "😀",
+                    width: 512,
+                    height: 512,
+                    thumb: Some((FileId(41), 128, 128)),
+                    reply_to: None,
+                },
+            )
+            .unwrap();
+        let sent = recorder
+            .snapshot()
+            .into_iter()
+            .rev()
+            .find(|json| json.contains("inputMessageSticker"))
+            .expect("send sticker");
+        let sent: Value = serde_json::from_str(&sent).unwrap();
+        assert_eq!(
+            sent["input_message_content"]["sticker"]["sticker"]["@type"],
+            "inputFileId"
+        );
+        assert_eq!(
+            sent["input_message_content"]["sticker"]["sticker"]["id"],
+            41
+        );
+        assert_eq!(sent["input_message_content"]["emoji"], "😀");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

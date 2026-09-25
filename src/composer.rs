@@ -144,7 +144,7 @@ impl ComposerEdit {
             MessageContent::Text(text) => (ComposerEditKind::Text, text.clone()),
             MessageContent::Photo(photo) => (ComposerEditKind::Caption, photo.caption.clone()),
             MessageContent::Document(doc) => (ComposerEditKind::Caption, doc.caption.clone()),
-            MessageContent::Unsupported { .. } => return None,
+            MessageContent::Sticker(_) | MessageContent::Unsupported { .. } => return None,
         };
         Some(Self {
             chat_id,
