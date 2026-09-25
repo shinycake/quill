@@ -132,6 +132,15 @@ pub enum EnvelopePayload {
         stickers: Vec<StickerItem>,
         files: Vec<ParsedFile>,
     },
+    /// `animations` — `getSavedAnimations`.
+    Animations {
+        animations: Vec<AnimationItem>,
+        files: Vec<ParsedFile>,
+    },
+    /// `updateSavedAnimations` — file ids of saved GIFs, newest first.
+    UpdateSavedAnimations {
+        animation_ids: Vec<i32>,
+    },
     /// `updateMessageInteractionInfo` — views / forwards / `messageReactions`.
     UpdateMessageInteractionInfo {
         chat_id: ChatId,
@@ -566,6 +575,7 @@ pub enum MessageContent {
     Photo(PhotoContent),
     Document(DocumentContent),
     Sticker(StickerContent),
+    Animation(AnimationContent),
     VoiceNote(VoiceNoteContent),
     Unsupported { type_name: String },
 }
@@ -639,6 +649,10 @@ impl MessageContent {
             MessageContent::Document(_) => "Document".into(),
             MessageContent::Sticker(sticker) if !sticker.emoji.is_empty() => sticker.emoji.clone(),
             MessageContent::Sticker(_) => "Sticker".into(),
+            MessageContent::Animation(animation) if !animation.caption.is_empty() => {
+                animation.caption.chars().take(80).collect()
+            }
+            MessageContent::Animation(_) => "GIF".into(),
             MessageContent::VoiceNote(note) if !note.caption.is_empty() => {
                 note.caption.chars().take(80).collect()
             }
@@ -810,6 +824,50 @@ pub struct StickerSetInfo {
     pub size: i32,
     pub is_installed: bool,
     pub is_official: bool,
+}
+
+/// `animation` inside `messageAnimation` or `getSavedAnimations` (TDLib 1.8.67).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AnimationContent {
+    pub duration: i32,
+    pub width: i32,
+    pub height: i32,
+    pub file_name: String,
+    pub mime_type: String,
+    pub caption: String,
+    pub show_caption_above_media: bool,
+    pub has_spoiler: bool,
+    pub is_secret: bool,
+    pub file_id: FileId,
+    pub thumb_file_id: Option<FileId>,
+    pub thumb_width: i32,
+    pub thumb_height: i32,
+}
+
+impl AnimationContent {
+    /// JPEG/MPEG4 thumbnail file, when the sender attached one.
+    pub fn thumb_file_id(&self) -> Option<FileId> {
+        self.thumb_file_id.filter(|id| id.0 != 0)
+    }
+
+    /// The clip itself (`animation.animation`).
+    pub fn play_file_id(&self) -> Option<FileId> {
+        (self.file_id.0 != 0).then_some(self.file_id)
+    }
+}
+
+/// One saved GIF from `animations.animations` (picker). Same file ids as `animation`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AnimationItem {
+    pub duration: i32,
+    pub width: i32,
+    pub height: i32,
+    pub file_name: String,
+    pub mime_type: String,
+    pub file_id: FileId,
+    pub thumb_file_id: Option<FileId>,
+    pub thumb_width: i32,
+    pub thumb_height: i32,
 }
 
 /// Typed `file` + `localFile` (no `remoteFile.id` — that can be an HTTP URL).
@@ -1112,6 +1170,20 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
         "file" => Ok(EnvelopePayload::File(parse_file(Some(&value))?)),
         "stickerSets" => Ok(parse_sticker_sets(&value)),
         "stickerSet" => Ok(parse_sticker_set(&value)),
+        "animations" => Ok(parse_animations(&value)),
+        "updateSavedAnimations" => Ok(EnvelopePayload::UpdateSavedAnimations {
+            animation_ids: value
+                .get("animation_ids")
+                .and_then(Value::as_array)
+                .map(|ids| {
+                    ids.iter()
+                        .filter_map(|id| id.as_i64())
+                        .map(|id| id as i32)
+                        .filter(|id| *id != 0)
+                        .collect()
+                })
+                .unwrap_or_default(),
+        }),
         "updateMessageInteractionInfo" => Ok(EnvelopePayload::UpdateMessageInteractionInfo {
             chat_id: ChatId(int53(value.get("chat_id"))?),
             message_id: MessageId(int53(value.get("message_id"))?),
@@ -1548,6 +1620,7 @@ fn parse_content(value: Option<&Value>) -> (MessageContent, Vec<ParsedFile>) {
         Some("messagePhoto") => parse_message_photo(value),
         Some("messageDocument") => parse_message_document(value),
         Some("messageSticker") => parse_message_sticker(value),
+        Some("messageAnimation") => parse_message_animation(value),
         Some("messageVoiceNote") => parse_message_voice_note(value),
         Some(other) => (
             MessageContent::Unsupported {
@@ -1791,6 +1864,121 @@ fn parse_message_sticker(value: &Value) -> (MessageContent, Vec<ParsedFile>) {
             files
         },
     )
+}
+
+fn parse_message_animation(value: &Value) -> (MessageContent, Vec<ParsedFile>) {
+    let animation = value.get("animation");
+    let (item, mut files) = parse_animation_value(animation);
+    let Some(item) = item else {
+        return (
+            MessageContent::Unsupported {
+                type_name: "messageAnimation".into(),
+            },
+            files,
+        );
+    };
+    files.retain(|file| file.id.0 != 0);
+    (
+        MessageContent::Animation(AnimationContent {
+            duration: item.duration,
+            width: item.width,
+            height: item.height,
+            file_name: item.file_name,
+            mime_type: item.mime_type,
+            caption: parse_formatted_text(value.get("caption")),
+            show_caption_above_media: value
+                .get("show_caption_above_media")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            has_spoiler: value
+                .get("has_spoiler")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            is_secret: value
+                .get("is_secret")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            file_id: item.file_id,
+            thumb_file_id: item.thumb_file_id,
+            thumb_width: item.thumb_width,
+            thumb_height: item.thumb_height,
+        }),
+        files,
+    )
+}
+
+fn parse_animation_value(value: Option<&Value>) -> (Option<AnimationItem>, Vec<ParsedFile>) {
+    let Some(value) = value else {
+        return (None, Vec::new());
+    };
+    if value.get("@type").and_then(Value::as_str) != Some("animation") {
+        return (None, Vec::new());
+    }
+    let mut files = Vec::new();
+    let file_id = match parse_file(value.get("animation")) {
+        Ok(file) => {
+            let id = file.id;
+            files.push(file);
+            id
+        }
+        Err(_) => FileId(0),
+    };
+    let thumb = value.get("thumbnail").filter(|thumb| !thumb.is_null());
+    let (thumb_file_id, thumb_width, thumb_height) = if let Some(thumb) = thumb {
+        let id = match parse_file(thumb.get("file")) {
+            Ok(file) => {
+                let id = file.id;
+                files.push(file);
+                Some(id)
+            }
+            Err(_) => None,
+        };
+        (
+            id.filter(|id| id.0 != 0),
+            int53_or_zero(thumb.get("width")) as i32,
+            int53_or_zero(thumb.get("height")) as i32,
+        )
+    } else {
+        (None, 0, 0)
+    };
+    (
+        Some(AnimationItem {
+            duration: int53_or_zero(value.get("duration")) as i32,
+            width: int53_or_zero(value.get("width")) as i32,
+            height: int53_or_zero(value.get("height")) as i32,
+            file_name: value
+                .get("file_name")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string(),
+            mime_type: value
+                .get("mime_type")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string(),
+            file_id,
+            thumb_file_id,
+            thumb_width,
+            thumb_height,
+        }),
+        files,
+    )
+}
+
+fn parse_animations(value: &Value) -> EnvelopePayload {
+    let mut animations = Vec::new();
+    let mut files = Vec::new();
+    if let Some(entries) = value.get("animations").and_then(Value::as_array) {
+        for entry in entries {
+            let (item, item_files) = parse_animation_value(Some(entry));
+            files.extend(item_files);
+            if let Some(item) = item {
+                animations.push(item);
+            }
+        }
+    }
+    files.retain(|file| file.id.0 != 0);
+    EnvelopePayload::Animations { animations, files }
 }
 
 fn parse_message_voice_note(value: &Value) -> (MessageContent, Vec<ParsedFile>) {
@@ -2505,6 +2693,39 @@ mod tests {
                 assert_eq!(stickers[0].format, StickerFormat::Tgs);
                 assert_eq!(stickers[0].file_id, FileId(41));
                 assert!(stickers[0].thumb_file_id.is_none());
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn message_animation_and_saved_list_parse_1_8_67() {
+        let clip = local_file_json(33, "", false, true);
+        let thumb = local_file_json(42, "/tmp/gif-thumb.jpg", true, true);
+        let json = format!(
+            r#"{{"@type":"updateNewMessage","message":{{"id":8,"chat_id":11,"is_outgoing":false,"content":{{"@type":"messageAnimation","animation":{{"@type":"animation","duration":2,"width":240,"height":140,"file_name":"wave.mp4","mime_type":"video/mp4","has_stickers":false,"minithumbnail":null,"thumbnail":{{"@type":"thumbnail","format":{{"@type":"thumbnailFormatJpeg"}},"width":120,"height":70,"file":{thumb}}},"animation":{clip}}},"caption":{{"@type":"formattedText","text":"loop","entities":[]}},"show_caption_above_media":false,"has_spoiler":false,"is_secret":false}}}}}}"#
+        );
+        let env = parse_envelope(&json).unwrap();
+        let EnvelopePayload::UpdateNewMessage(message) = env.payload else {
+            panic!("expected message");
+        };
+        let MessageContent::Animation(animation) = &message.content else {
+            panic!("{:?}", message.content);
+        };
+        assert_eq!(animation.mime_type, "video/mp4");
+        assert_eq!(animation.file_id, FileId(33));
+        assert_eq!(animation.thumb_file_id(), Some(FileId(42)));
+        assert_eq!(animation.caption, "loop");
+        assert_eq!(message.content.preview(), "loop");
+        let saved = parse_envelope(
+            r#"{"@type":"animations","animations":[{"@type":"animation","duration":1,"width":10,"height":10,"file_name":"a.mp4","mime_type":"video/mp4","has_stickers":false,"minithumbnail":null,"thumbnail":null,"animation":{"@type":"file","id":33,"size":1,"expected_size":1,"local":{"@type":"localFile","path":"","can_be_downloaded":true,"can_be_deleted":false,"is_downloading_active":false,"is_downloading_completed":false,"download_offset":0,"downloaded_prefix_size":0,"downloaded_size":0},"remote":{"@type":"remoteFile","id":"r","unique_id":"u","is_uploading_active":false,"is_uploading_completed":true,"uploaded_size":1}}}]}"#,
+        )
+        .unwrap();
+        match saved.payload {
+            EnvelopePayload::Animations { animations, .. } => {
+                assert_eq!(animations.len(), 1);
+                assert_eq!(animations[0].file_id, FileId(33));
+                assert!(animations[0].thumb_file_id.is_none());
             }
             other => panic!("{other:?}"),
         }

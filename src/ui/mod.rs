@@ -143,6 +143,11 @@ pub struct QuillApp {
     /// History row whose voice note is playing.
     playing_voice: Option<MessageId>,
     voice_player: Option<Child>,
+    /// History row whose GIF is looping (tdesktop clip / Unigram player).
+    playing_animation: Option<MessageId>,
+    animation_frames: Vec<PathBuf>,
+    animation_frame: usize,
+    animation_tick: bool,
 }
 
 /// Forced UI surfaces for screenshot proof (no live Telegram / no real credentials).
@@ -183,6 +188,8 @@ pub enum ScreenshotDemo {
     ReadyVoice,
     /// Link entities + web page (`linkPreview`) card (injected, no live Telegram).
     ReadyLinkPreview,
+    /// Saved-GIF panel + a playing animation in history (injected, no live Telegram).
+    ReadyGifs,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -551,6 +558,15 @@ impl QuillApp {
                     AuthorizationState::Ready,
                 )
             }
+            Some(ScreenshotDemo::ReadyGifs) => {
+                demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
+                (
+                    ConnectUiStatus::DemoReadyChats,
+                    None,
+                    "screenshot demo — saved GIFs + history playback".into(),
+                    AuthorizationState::Ready,
+                )
+            }
             None => bootstrap_connect(credentials),
         };
 
@@ -601,6 +617,10 @@ impl QuillApp {
             voice_tick: false,
             playing_voice: None,
             voice_player: None,
+            playing_animation: None,
+            animation_frames: Vec::new(),
+            animation_frame: 0,
+            animation_tick: false,
         };
         if matches!(demo, Some(ScreenshotDemo::ReadyChatsComposer)) {
             app.composer.update(cx, |input, cx| {
@@ -733,6 +753,19 @@ impl QuillApp {
             ));
             app.playing_voice = Some(MessageId(91));
             app.status_note = "screenshot demo — recording voice · playing voice note".into();
+        }
+        if matches!(demo, Some(ScreenshotDemo::ReadyGifs)) {
+            if let Some(session) = app.demo_session.as_mut() {
+                app.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_gifs(session, &app.demo_sink, &app.demo_seq);
+            }
+            app.playing_animation = Some(MessageId(501));
+            app.animation_frames = vec![
+                demo_media_allowlist().join("demo-gif-1.png"),
+                demo_media_allowlist().join("demo-gif-2.png"),
+            ];
+            app.spawn_animation_tick(cx);
+            app.status_note = "screenshot demo — GIFs · tap to send · playing".into();
         }
         if matches!(demo, Some(ScreenshotDemo::ReadyLinkPreview)) {
             if let Some(session) = app.demo_session.as_mut() {
@@ -1065,6 +1098,43 @@ impl QuillApp {
         }
     }
 
+    fn apply_demo_gif(
+        &mut self,
+        chat_id: ChatId,
+        file_id: FileId,
+        duration: i32,
+        width: i32,
+        height: i32,
+        reply: Option<MessageId>,
+    ) {
+        let Some(session) = self.demo_session.as_mut() else {
+            return;
+        };
+        let dyn_sink: Arc<dyn DiagnosticSink> = self.demo_sink.clone();
+        let id = -(session.view_generation.0 as i64);
+        let path = session
+            .files
+            .get(&file_id.0)
+            .and_then(|file| file.usable_path())
+            .unwrap_or("");
+        let file = demo_file_json(file_id.0, path, !path.is_empty());
+        let reply_json = reply
+            .map(|message_id| {
+                format!(
+                    r#","reply_to":{{"@type":"messageReplyToMessage","chat_id":{},"message_id":{},"quote":null,"checklist_task_id":0,"poll_option_id":""}}"#,
+                    chat_id.0, message_id.0
+                )
+            })
+            .unwrap_or_default();
+        let json = format!(
+            r#"{{"@type":"updateNewMessage","message":{{"id":{id},"chat_id":{},"is_outgoing":true,"content":{{"@type":"messageAnimation","animation":{{"@type":"animation","duration":{duration},"width":{width},"height":{height},"file_name":"gif.mp4","mime_type":"video/mp4","has_stickers":false,"minithumbnail":null,"thumbnail":{{"@type":"thumbnail","format":{{"@type":"thumbnailFormatJpeg"}},"width":{width},"height":{height},"file":{file}}},"animation":{file}}},"caption":{{"@type":"formattedText","text":"","entities":[]}},"show_caption_above_media":false,"has_spoiler":false,"is_secret":false}}}}{reply_json}}}}}"#,
+            chat_id.0
+        );
+        if let Some(owned) = copy_and_parse(&json, &self.demo_seq, &dyn_sink) {
+            session.apply(owned);
+        }
+    }
+
     fn apply_demo_edit(&mut self, edit: &ComposerEdit, text: &str) {
         let Some(session) = self.demo_session.as_mut() else {
             return;
@@ -1096,6 +1166,9 @@ impl QuillApp {
                             body.link_preview = None;
                         }
                         MessageContent::VoiceNote(note) => note.caption = text.to_string(),
+                        MessageContent::Animation(animation) => {
+                            animation.caption = text.to_string()
+                        }
                         MessageContent::Sticker(_) | MessageContent::Unsupported { .. } => {}
                     }
                 }
@@ -1158,6 +1231,14 @@ impl QuillApp {
             self.cancel_voice_recording(cx);
         }
         self.stop_voice_playback();
+        self.stop_animation_playback();
+        if self.gif_panel_open() {
+            if let Some(live) = self.live.as_mut() {
+                live.driver.close_gif_panel();
+            } else if let Some(session) = self.demo_session.as_mut() {
+                session.gifs.close();
+            }
+        }
         if self.sticker_panel_open() {
             if let Some(live) = self.live.as_mut() {
                 live.driver.close_sticker_panel();
@@ -1368,6 +1449,10 @@ impl QuillApp {
     fn cancel_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.voice_capture.is_some() {
             self.cancel_voice_recording(cx);
+            return;
+        }
+        if self.gif_panel_open() {
+            self.close_gif_panel(cx);
             return;
         }
         if self.sticker_panel_open() {
@@ -1756,6 +1841,9 @@ impl QuillApp {
         if self.pending_edit.is_some() || self.voice_capture.is_some() {
             return;
         }
+        if self.gif_panel_open() {
+            self.close_gif_panel(cx);
+        }
         if self.sticker_panel_open() {
             self.close_sticker_panel(cx);
         }
@@ -1880,6 +1968,93 @@ impl QuillApp {
         }
     }
 
+    fn stop_animation_playback(&mut self) {
+        self.playing_animation = None;
+        self.animation_frames.clear();
+        self.animation_frame = 0;
+    }
+
+    fn spawn_animation_tick(&mut self, cx: &mut Context<Self>) {
+        if self.animation_tick {
+            return;
+        }
+        self.animation_tick = true;
+        cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor()
+                    .timer(Duration::from_millis(400))
+                    .await;
+                let cont = this
+                    .update(cx, |this, cx| {
+                        let playing =
+                            this.playing_animation.is_some() && this.animation_frames.len() > 1;
+                        if playing {
+                            this.animation_frame =
+                                (this.animation_frame + 1) % this.animation_frames.len();
+                            cx.notify();
+                        }
+                        this.playing_animation.is_some()
+                    })
+                    .unwrap_or(false);
+                if !cont {
+                    break;
+                }
+            }
+            let _ = this.update(cx, |this, _| {
+                this.animation_tick = false;
+            });
+        })
+        .detach();
+    }
+
+    fn toggle_animation_playback(
+        &mut self,
+        message_id: MessageId,
+        file_id: FileId,
+        mime: String,
+        cx: &mut Context<Self>,
+    ) {
+        if self.playing_animation == Some(message_id) {
+            self.stop_animation_playback();
+            self.status_note = "GIF paused".into();
+            cx.notify();
+            return;
+        }
+        let path = self.session().and_then(|session| {
+            session
+                .files
+                .get(&file_id.0)
+                .and_then(|file| file.usable_path())
+                .map(str::to_string)
+        });
+        let Some(path) = path else {
+            self.request_media_download(file_id, cx);
+            self.status_note = "downloading GIF".into();
+            return;
+        };
+        let roots = self.media_display_roots();
+        let Some(safe) = sandboxed_display_path(&path, &roots) else {
+            self.status_note = "GIF file is outside the account files".into();
+            cx.notify();
+            return;
+        };
+        let cache = std::env::temp_dir().join(format!("quill-gif-{}", file_id.0));
+        match quill::animation::playback_frames(&safe, &mime, &cache) {
+            Ok(frames) if !frames.is_empty() => {
+                self.stop_voice_playback();
+                self.playing_animation = Some(message_id);
+                self.animation_frames = frames;
+                self.animation_frame = 0;
+                self.spawn_animation_tick(cx);
+                self.status_note = "playing GIF".into();
+            }
+            _ => {
+                self.status_note = "could not play GIF".into();
+            }
+        }
+        cx.notify();
+    }
+
     fn spawn_voice_tick(&mut self, cx: &mut Context<Self>) {
         if self.voice_tick {
             return;
@@ -1992,6 +2167,81 @@ impl QuillApp {
         }
     }
 
+    fn gif_panel_open(&self) -> bool {
+        self.session().is_some_and(|session| session.gifs.open)
+    }
+
+    fn toggle_gif_panel(&mut self, cx: &mut Context<Self>) {
+        if self.voice_capture.is_some() {
+            self.cancel_voice_recording(cx);
+        }
+        if self.gif_panel_open() {
+            self.close_gif_panel(cx);
+            return;
+        }
+        if self.sticker_panel_open() {
+            self.close_sticker_panel(cx);
+        }
+        if let Some(live) = self.live.as_mut() {
+            self.status_note = match live.driver.open_gif_panel() {
+                Ok(_) => "GIFs".into(),
+                Err(_) => "could not open GIFs".into(),
+            };
+        } else if let Some(session) = self.demo_session.as_mut() {
+            session.gifs.open = true;
+            self.status_note = "GIFs".into();
+        }
+        cx.notify();
+    }
+
+    fn close_gif_panel(&mut self, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            live.driver.close_gif_panel();
+        } else if let Some(session) = self.demo_session.as_mut() {
+            session.gifs.close();
+        }
+        self.status_note = "GIFs closed".into();
+        cx.notify();
+    }
+
+    fn send_gif_pick(
+        &mut self,
+        file_id: FileId,
+        duration: i32,
+        width: i32,
+        height: i32,
+        cx: &mut Context<Self>,
+    ) {
+        let chat_id = self.session().and_then(|session| session.open_chat);
+        let Some(chat_id) = chat_id else {
+            return;
+        };
+        let reply = self
+            .pending_reply
+            .as_ref()
+            .filter(|reply| reply.chat_id == chat_id)
+            .map(|reply| reply.message_id);
+        if let Some(live) = self.live.as_mut() {
+            self.status_note = match live.driver.send_animation(
+                chat_id,
+                quill::telegram::requests::AnimationSend {
+                    file_id,
+                    duration,
+                    width,
+                    height,
+                    reply_to: reply,
+                },
+            ) {
+                Ok(_) => "sending GIF".into(),
+                Err(_) => "could not send GIF".into(),
+            };
+        } else if self.demo_session.is_some() {
+            self.apply_demo_gif(chat_id, file_id, duration, width, height, reply);
+            self.status_note = "demo GIF applied locally (no live Telegram)".into();
+        }
+        cx.notify();
+    }
+
     fn sticker_panel_open(&self) -> bool {
         self.session().is_some_and(|session| session.stickers.open)
     }
@@ -2003,6 +2253,9 @@ impl QuillApp {
         if self.sticker_panel_open() {
             self.close_sticker_panel(cx);
             return;
+        }
+        if self.gif_panel_open() {
+            self.close_gif_panel(cx);
         }
         if let Some(live) = self.live.as_mut() {
             self.status_note = match live.driver.open_sticker_panel() {
@@ -2643,6 +2896,124 @@ impl QuillApp {
                     .child("Tap an emoji to react. Tap yours again to remove."),
             )
             .child(row)
+    }
+
+    fn gif_picker_panel(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let panel = self
+            .session()
+            .map(|session| session.gifs.clone())
+            .unwrap_or_default();
+        let files = self
+            .session()
+            .map(|session| session.files.clone())
+            .unwrap_or_default();
+        let roots = self.media_display_roots();
+        let mut grid = div().id("gif-grid").flex().flex_wrap().gap_2();
+        for (index, animation) in panel.animations.iter().enumerate() {
+            let file_id = animation.file_id;
+            let duration = animation.duration;
+            let width = animation.width;
+            let height = animation.height;
+            let display_id = animation.thumb_file_id.filter(|id| id.0 != 0);
+            let path = display_id.and_then(|id| {
+                files
+                    .get(&id.0)
+                    .and_then(|file| file.usable_path())
+                    .and_then(|path| sandboxed_display_path(path, &roots))
+            });
+            let label = if animation.file_name.is_empty() {
+                "GIF".to_string()
+            } else {
+                animation.file_name.clone()
+            };
+            let cell_id = format!("gif-pick-{index}-{file_id}", file_id = file_id.0);
+            let cell = if let Some(path) = path {
+                img(path)
+                    .id(SharedString::from(cell_id.clone()))
+                    .w(px(96.))
+                    .h(px(72.))
+                    .rounded_md()
+                    .object_fit(ObjectFit::Cover)
+                    .cursor_pointer()
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.send_gif_pick(file_id, duration, width, height, cx);
+                    }))
+                    .with_fallback({
+                        let label = label.clone();
+                        move || {
+                            div()
+                                .w(px(96.))
+                                .h(px(72.))
+                                .rounded_md()
+                                .bg(rgb(0x1f6feb))
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .child(label.clone())
+                                .into_any_element()
+                        }
+                    })
+                    .into_any_element()
+            } else {
+                div()
+                    .id(SharedString::from(cell_id))
+                    .w(px(96.))
+                    .h(px(72.))
+                    .rounded_md()
+                    .bg(rgb(0x1f6feb))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .cursor_pointer()
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.send_gif_pick(file_id, duration, width, height, cx);
+                    }))
+                    .child(label)
+                    .into_any_element()
+            };
+            grid = grid.child(cell);
+        }
+        let status = if panel.loading {
+            "Loading saved GIFs…"
+        } else if panel.failed {
+            "Could not load saved GIFs."
+        } else if panel.animations.is_empty() {
+            "No saved GIFs."
+        } else {
+            "Tap a GIF to send it."
+        };
+        div()
+            .id("gif-picker")
+            .flex()
+            .flex_col()
+            .gap_2()
+            .px_3()
+            .py_2()
+            .border_b_1()
+            .border_color(cx.theme().border)
+            .bg(cx.theme().sidebar)
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .child(div().font_semibold().child("GIFs"))
+                    .child(
+                        Button::new("close-gif-picker")
+                            .label("Close")
+                            .ghost()
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.close_gif_panel(cx);
+                            })),
+                    ),
+            )
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(status),
+            )
+            .child(grid)
     }
 
     fn sticker_picker_panel(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -3928,6 +4299,17 @@ impl QuillApp {
                                         ),
                                     )
                                     .child(
+                                        Button::new("open-gifs")
+                                            .label(if self.gif_panel_open() {
+                                                "GIFs open"
+                                            } else {
+                                                "GIFs"
+                                            })
+                                            .on_click(cx.listener(|this, _, _, cx| {
+                                                this.toggle_gif_panel(cx);
+                                            })),
+                                    )
+                                    .child(
                                         Button::new("open-stickers")
                                             .label(if self.sticker_panel_open() {
                                                 "Stickers open"
@@ -4136,6 +4518,9 @@ impl QuillApp {
             .when(self.pending_react.is_some(), |this| {
                 this.child(self.reaction_picker_panel(cx))
             })
+            .when(self.gif_panel_open(), |this| {
+                this.child(self.gif_picker_panel(cx))
+            })
             .when(self.sticker_panel_open(), |this| {
                 this.child(self.sticker_picker_panel(cx))
             })
@@ -4198,6 +4583,15 @@ impl QuillApp {
                         .pending_react
                         .is_some_and(|(chat, id)| chat == message.chat_id && id == message.id);
                     let voice_playing = self.playing_voice == Some(message.id);
+                    let animation_playing = self.playing_animation == Some(message.id);
+                    let animation_frame = if animation_playing {
+                        self.animation_frames
+                            .get(self.animation_frame)
+                            .cloned()
+                            .or_else(|| self.animation_frames.first().cloned())
+                    } else {
+                        None
+                    };
                     let row = session_history_row(
                         &message,
                         &files,
@@ -4209,6 +4603,8 @@ impl QuillApp {
                         selected_forward,
                         reaction_open,
                         voice_playing,
+                        animation_playing,
+                        animation_frame,
                         cx,
                     );
                     list = list.child(
@@ -4541,6 +4937,42 @@ fn notification_settings_json(settings: &ChatNotificationSettings) -> String {
         settings.use_default_disable_mention_notifications,
         settings.disable_mention_notifications
     )
+}
+
+fn apply_ready_gifs(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let frame = demo_media_allowlist()
+        .join("demo-gif-1.png")
+        .to_string_lossy()
+        .into_owned();
+    let clip = demo_media_allowlist()
+        .join("demo-gif.gif")
+        .to_string_lossy()
+        .into_owned();
+    let thumb = demo_file_json(61, &frame, true);
+    let pending = demo_file_json(62, "", false);
+    let local_clip = demo_file_json(63, &clip, true);
+    let history = format!(
+        r#"{{"@type":"updateNewMessage","message":{{"id":501,"chat_id":11,"is_outgoing":false,"content":{{"@type":"messageAnimation","animation":{{"@type":"animation","duration":1,"width":240,"height":140,"file_name":"demo-gif.gif","mime_type":"image/gif","has_stickers":false,"minithumbnail":null,"thumbnail":{{"@type":"thumbnail","format":{{"@type":"thumbnailFormatJpeg"}},"width":240,"height":140,"file":{thumb}}},"animation":{local_clip}}},"caption":{{"@type":"formattedText","text":"","entities":[]}},"show_caption_above_media":false,"has_spoiler":false,"is_secret":false}}}}}}"#
+    );
+    let waiting = format!(
+        r#"{{"@type":"updateNewMessage","message":{{"id":502,"chat_id":11,"is_outgoing":true,"content":{{"@type":"messageAnimation","animation":{{"@type":"animation","duration":2,"width":240,"height":140,"file_name":"saved.mp4","mime_type":"video/mp4","has_stickers":false,"minithumbnail":null,"thumbnail":null,"animation":{pending}}},"caption":{{"@type":"formattedText","text":"","entities":[]}},"show_caption_above_media":false,"has_spoiler":false,"is_secret":false}}}}}}"#
+    );
+    for json in [history, waiting] {
+        if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
+            session.apply(owned);
+        }
+    }
+    session.gifs.open = true;
+    session.gifs.loading = true;
+    let extra = session.request(RequestPurpose::GetSavedAnimations, None);
+    let saved = format!(
+        r#"{{"@type":"animations","@extra":"{}","animations":[{{"@type":"animation","duration":1,"width":240,"height":140,"file_name":"demo-gif.gif","mime_type":"image/gif","has_stickers":false,"minithumbnail":null,"thumbnail":{{"@type":"thumbnail","format":{{"@type":"thumbnailFormatJpeg"}},"width":240,"height":140,"file":{thumb}}},"animation":{local_clip}}},{{"@type":"animation","duration":2,"width":240,"height":140,"file_name":"saved.mp4","mime_type":"video/mp4","has_stickers":false,"minithumbnail":null,"thumbnail":null,"animation":{pending}}}]}}"#,
+        extra.0
+    );
+    if let Some(owned) = copy_and_parse(&saved, seq, &dyn_sink) {
+        session.apply(owned);
+    }
 }
 
 fn apply_ready_stickers(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
@@ -5077,6 +5509,8 @@ fn session_history_row(
     selected_forward: bool,
     reaction_open: bool,
     voice_playing: bool,
+    animation_playing: bool,
+    animation_frame: Option<PathBuf>,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
     let quote = message.reply_to.as_ref().and_then(|reply| {
@@ -5269,6 +5703,16 @@ fn session_history_row(
             voice_playing,
             cx,
         )),
+        MessageContent::Animation(animation) => Some(animation_attachment(
+            message.id,
+            animation,
+            files,
+            downloading,
+            media_roots,
+            animation_playing,
+            animation_frame.as_deref(),
+            cx,
+        )),
         MessageContent::Text(_) | MessageContent::Unsupported { .. } => None,
     };
     let extra = Some(
@@ -5296,6 +5740,7 @@ fn session_history_row(
         MessageContent::Photo(photo) => photo.caption.clone(),
         MessageContent::Document(doc) => doc.caption.clone(),
         MessageContent::Sticker(_) => String::new(),
+        MessageContent::Animation(animation) => animation.caption.clone(),
         MessageContent::VoiceNote(note) => note.caption.clone(),
     };
     if let Some(text_body) = text_body {
@@ -5703,6 +6148,114 @@ fn photo_attachment(
                 }))
         })
         .child(div().text_xs().text_color(rgb(0xffffff)).child(status))
+        .into_any_element()
+}
+
+fn animation_attachment(
+    message_id: MessageId,
+    animation: &quill::telegram::envelope::AnimationContent,
+    files: &HashMap<i32, ParsedFile>,
+    downloading: &std::collections::HashSet<i32>,
+    media_roots: &[PathBuf],
+    playing: bool,
+    frame: Option<&std::path::Path>,
+    cx: &mut Context<QuillApp>,
+) -> AnyElement {
+    let row_id = message_id.0 as u64;
+    let play_id = animation.play_file_id().unwrap_or(FileId(0));
+    let thumb_id = animation.thumb_file_id().unwrap_or(FileId(0));
+    let mime = animation.mime_type.clone();
+    let play_label = if playing { "Pause" } else { "Play" };
+    let visual = if playing {
+        frame.and_then(|path| sandboxed_display_path(&path.to_string_lossy(), media_roots))
+    } else {
+        None
+    };
+    let visual = visual.or_else(|| {
+        [thumb_id, play_id].into_iter().find_map(|id| {
+            if id.0 == 0 {
+                return None;
+            }
+            files
+                .get(&id.0)
+                .and_then(|file| file.usable_path())
+                .and_then(|path| sandboxed_display_path(path, media_roots))
+        })
+    });
+    let downloading_now = file_is_downloading(play_id, files, downloading)
+        || file_is_downloading(thumb_id, files, downloading);
+    let blocked = animation.is_secret || animation.has_spoiler;
+    let picture = if !blocked && let Some(path) = visual {
+        img(path)
+            .id(("gif-img", row_id))
+            .w(px(240.))
+            .h(px(140.))
+            .rounded_md()
+            .object_fit(ObjectFit::Cover)
+            .with_fallback(|| {
+                div()
+                    .w(px(240.))
+                    .h(px(140.))
+                    .rounded_md()
+                    .bg(rgb(0x1f6feb))
+                    .into_any_element()
+            })
+            .into_any_element()
+    } else {
+        let label = if blocked {
+            "GIF".to_string()
+        } else if downloading_now {
+            "GIF — downloading…".into()
+        } else if animation.width > 0 && animation.height > 0 {
+            format!(
+                "GIF {}×{} — not downloaded",
+                animation.width, animation.height
+            )
+        } else {
+            "GIF — not downloaded".into()
+        };
+        div()
+            .id(("gif-ph", row_id))
+            .w(px(240.))
+            .h(px(140.))
+            .rounded_md()
+            .bg(rgb(0x1f6feb))
+            .flex()
+            .items_center()
+            .justify_center()
+            .child(div().text_xs().text_color(rgb(0xffffff)).child(label))
+            .into_any_element()
+    };
+    div()
+        .id(("gif-row", row_id))
+        .mt_2()
+        .flex()
+        .flex_col()
+        .gap_1()
+        .child(
+            div().relative().child(picture).child(
+                div()
+                    .absolute()
+                    .top_1()
+                    .left_1()
+                    .px_1()
+                    .rounded_sm()
+                    .bg(rgb(0x0d1117))
+                    .text_xs()
+                    .text_color(rgb(0xffffff))
+                    .child(if playing { "GIF · playing" } else { "GIF" }),
+            ),
+        )
+        .child(
+            Button::new(format!("gif-play-{row_id}"))
+                .label(play_label)
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    if blocked {
+                        return;
+                    }
+                    this.toggle_animation_playback(message_id, play_id, mime.clone(), cx);
+                })),
+        )
         .into_any_element()
 }
 

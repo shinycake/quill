@@ -19,15 +19,16 @@ use crate::telegram::envelope::{
 };
 use crate::telegram::ffi::{LibraryOrigin, TdJsonError, resolve_tdjson_path};
 use crate::telegram::requests::{
-    SetTdlibParameters, StickerSend, add_chat_to_list, add_message_reaction,
+    AnimationSend, SetTdlibParameters, StickerSend, add_chat_to_list, add_message_reaction,
     add_recently_found_chat, check_authentication_code, check_authentication_password, close_chat,
     close_request, delete_messages, download_file as download_file_request, edit_message_caption,
     edit_message_text, forward_messages, get_authorization_state, get_chat_history,
-    get_installed_sticker_sets, get_sticker_set, load_chats, open_chat, open_message_content,
-    pin_chat_message, remove_message_reaction, search_chat_messages, search_chats, search_messages,
-    search_recently_found_chats, send_chat_action, send_chat_action_kind, send_document,
-    send_photo, send_sticker, send_text, send_voice_note, set_authentication_phone_number,
-    set_chat_notification_settings, unpin_chat_message, view_messages,
+    get_installed_sticker_sets, get_saved_animations, get_sticker_set, load_chats, open_chat,
+    open_message_content, pin_chat_message, remove_message_reaction, search_chat_messages,
+    search_chats, search_messages, search_recently_found_chats, send_animation, send_chat_action,
+    send_chat_action_kind, send_document, send_photo, send_sticker, send_text, send_voice_note,
+    set_authentication_phone_number, set_chat_notification_settings, unpin_chat_message,
+    view_messages,
 };
 use crate::voice::VoiceDraft;
 use std::path::Path;
@@ -398,10 +399,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         if view_after {
             self.maybe_view_open_messages()?;
         }
-        if thumbs_after || self.session.stickers.open {
+        if thumbs_after || self.session.stickers.open || self.session.gifs.open {
             self.maybe_download_open_thumbs()?;
         }
         self.maybe_load_selected_sticker_set()?;
+        self.maybe_refresh_saved_animations()?;
         if chat_search_hits {
             // Unigram ChatSearchViewModel: first hit → LoadMessageSliceAsync.
             self.jump_selected_chat_search_hit()?;
@@ -699,6 +701,83 @@ impl<S: JsonSender> ConnectDriver<S> {
             Err(err) => {
                 self.session.requests.take(extra);
                 self.session.stickers.loading_set = false;
+                Err(err)
+            }
+        }
+    }
+
+    /// Open the GIF panel and load `getSavedAnimations`.
+    pub fn open_gif_panel(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        self.session.gifs.open = true;
+        self.session.gifs.failed = false;
+        self.maybe_refresh_saved_animations()
+    }
+
+    pub fn close_gif_panel(&mut self) {
+        self.session.gifs.close();
+    }
+
+    fn maybe_refresh_saved_animations(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.session.gifs.open || !self.chats_path_active() {
+            return Ok(None);
+        }
+        if self
+            .session
+            .requests
+            .has_purpose(RequestPurpose::GetSavedAnimations)
+        {
+            return Ok(None);
+        }
+        let needs = self.session.gifs.animations.is_empty() || self.session.gifs.stale;
+        if !needs {
+            return Ok(None);
+        }
+        self.session.gifs.loading = true;
+        self.session.gifs.stale = false;
+        let extra = self
+            .session
+            .request(RequestPurpose::GetSavedAnimations, None);
+        match self.sender.send_json(&get_saved_animations(extra)) {
+            Ok(()) => Ok(Some(extra)),
+            Err(err) => {
+                self.session.requests.take(extra);
+                self.session.gifs.loading = false;
+                Err(err)
+            }
+        }
+    }
+
+    /// `sendMessage` + `inputMessageAnimation` / `inputAnimation` / `inputFileId`.
+    pub fn send_animation(
+        &mut self,
+        chat_id: ChatId,
+        animation: AnimationSend,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let supported = self
+            .session
+            .chats
+            .get(&chat_id.0)
+            .is_some_and(|chat| chat.supported());
+        if !supported || animation.file_id.0 == 0 {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::SendMessage, Some(chat_id));
+        let json = send_animation(extra, chat_id, animation);
+        match self.sender.send_json(&json) {
+            Ok(()) => {
+                let _ = self.cancel_outgoing_typing();
+                Ok(extra)
+            }
+            Err(err) => {
+                self.session.requests.take(extra);
                 Err(err)
             }
         }
@@ -2915,6 +2994,117 @@ mod tests {
             41
         );
         assert_eq!(sent["input_message_content"]["emoji"], "😀");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn gif_panel_loads_saved_animations_and_send_uses_input_animation() {
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = Arc::new(RecordingSender::new());
+        let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+        let mut driver =
+            ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+        let seq = AtomicU64::new(0);
+        driver
+            .ingest(
+                copy_and_parse(
+                    r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        driver
+            .ingest(
+                copy_and_parse(
+                    r#"{"@type":"updateNewChat","chat":{"id":7,"title":"Alice","type":{"@type":"chatTypePrivate","user_id":7},"unread_count":0}}"#,
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        driver.select_chat(ChatId(7)).unwrap();
+        driver.open_gif_panel().unwrap();
+        let saved = recorder
+            .snapshot()
+            .into_iter()
+            .rev()
+            .find(|json| json.contains("getSavedAnimations"))
+            .expect("saved animations");
+        let saved: Value = serde_json::from_str(&saved).unwrap();
+        let extra = saved["@extra"].as_str().unwrap();
+        let thumb = r#"{"@type":"file","id":42,"size":4,"expected_size":4,"local":{"@type":"localFile","path":"","can_be_downloaded":true,"can_be_deleted":false,"is_downloading_active":false,"is_downloading_completed":false,"download_offset":0,"downloaded_prefix_size":0,"downloaded_size":0},"remote":{"@type":"remoteFile","id":"t","unique_id":"tu","is_uploading_active":false,"is_uploading_completed":true,"uploaded_size":4}}"#;
+        let file = r#"{"@type":"file","id":33,"size":9,"expected_size":9,"local":{"@type":"localFile","path":"","can_be_downloaded":true,"can_be_deleted":false,"is_downloading_active":false,"is_downloading_completed":false,"download_offset":0,"downloaded_prefix_size":0,"downloaded_size":0},"remote":{"@type":"remoteFile","id":"a","unique_id":"au","is_uploading_active":false,"is_uploading_completed":true,"uploaded_size":9}}"#;
+        driver
+            .ingest(
+                copy_and_parse(
+                    &format!(
+                        r#"{{"@type":"animations","@extra":"{extra}","animations":[{{"@type":"animation","duration":2,"width":240,"height":140,"file_name":"wave.mp4","mime_type":"video/mp4","has_stickers":false,"minithumbnail":null,"thumbnail":{{"@type":"thumbnail","format":{{"@type":"thumbnailFormatJpeg"}},"width":120,"height":70,"file":{thumb}}},"animation":{file}}}]}}"#
+                    ),
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        assert_eq!(driver.session.gifs.animations.len(), 1);
+        assert_eq!(driver.session.gifs.animations[0].file_id, FileId(33));
+        assert!(
+            recorder
+                .snapshot()
+                .iter()
+                .any(|json| json.contains("downloadFile") && json.contains("\"file_id\":42"))
+        );
+        driver
+            .send_animation(
+                ChatId(7),
+                AnimationSend {
+                    file_id: FileId(33),
+                    duration: 2,
+                    width: 240,
+                    height: 140,
+                    reply_to: None,
+                },
+            )
+            .unwrap();
+        let sent = recorder
+            .snapshot()
+            .into_iter()
+            .rev()
+            .find(|json| json.contains("inputMessageAnimation"))
+            .expect("send animation");
+        let sent: Value = serde_json::from_str(&sent).unwrap();
+        assert_eq!(
+            sent["input_message_content"]["animation"]["@type"],
+            "inputAnimation"
+        );
+        assert_eq!(
+            sent["input_message_content"]["animation"]["animation"]["id"],
+            33
+        );
+        driver
+            .ingest(
+                copy_and_parse(
+                    r#"{"@type":"updateSavedAnimations","animation_ids":[33]}"#,
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        assert!(
+            recorder
+                .snapshot()
+                .iter()
+                .filter(|json| json.contains("getSavedAnimations"))
+                .count()
+                >= 2
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
