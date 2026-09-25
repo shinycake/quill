@@ -84,6 +84,19 @@ pub enum EnvelopePayload {
         last_read_inbox_message_id: MessageId,
         last_read_outbox_message_id: MessageId,
         notification_settings: ChatNotificationSettings,
+        /// `chat.draft_message`. Null when the chat has no draft.
+        draft: Option<ChatDraft>,
+    },
+    /// `updateChatDraftMessage`. Positions are the new chat-list orders.
+    UpdateChatDraftMessage {
+        chat_id: ChatId,
+        draft: Option<ChatDraft>,
+        positions: Vec<ChatPositionUpdate>,
+    },
+    /// `updateUser` — only the bot bit is kept (private-chat draft gate).
+    UpdateUser {
+        user_id: UserId,
+        is_bot: bool,
     },
     /// `updateChatNotificationSettings` — chat mute / sound exception changed.
     UpdateChatNotificationSettings {
@@ -291,6 +304,14 @@ pub const MUTE_FOREVER_AFTER_SECONDS: i32 = 366 * 86400;
 pub enum MessageSender {
     User { user_id: i64 },
     Chat { chat_id: i64 },
+}
+
+/// `draftMessage` text this slice restores. Voice/video/rich drafts are ignored.
+/// `reply_to` is same-chat `inputMessageReplyToMessage` only.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChatDraft {
+    pub text: String,
+    pub reply_to_message_id: Option<MessageId>,
 }
 
 /// `ChatAction` values this slice acts on. Other constructors stay `Other`
@@ -1067,6 +1088,25 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
             sender: parse_message_sender(value.get("sender_id"))?,
             action: parse_chat_action(value.get("action")),
         }),
+        "updateChatDraftMessage" => {
+            let chat_id = ChatId(int53(value.get("chat_id"))?);
+            Ok(EnvelopePayload::UpdateChatDraftMessage {
+                chat_id,
+                draft: parse_chat_draft(value.get("draft_message")),
+                positions: parse_position_list(chat_id, value.get("positions")),
+            })
+        }
+        "updateUser" => {
+            let user = value.get("user").ok_or(ParseError::MissingField)?;
+            Ok(EnvelopePayload::UpdateUser {
+                user_id: UserId(int53(user.get("id"))?),
+                is_bot: user
+                    .get("type")
+                    .and_then(|t| t.get("@type"))
+                    .and_then(Value::as_str)
+                    == Some("userTypeBot"),
+            })
+        }
         "updateConnectionState" => Ok(EnvelopePayload::UpdateConnectionState(parse_connection(
             value.get("state"),
         ))),
@@ -1093,6 +1133,7 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
                 notification_settings: parse_chat_notification_settings(
                     chat.get("notification_settings"),
                 ),
+                draft: parse_chat_draft(chat.get("draft_message")),
             })
         }
         "ok" => Ok(EnvelopePayload::Ok),
@@ -1337,6 +1378,38 @@ fn parse_message_sender(value: Option<&Value>) -> Result<MessageSender, ParseErr
         }),
         _ => Err(ParseError::MissingField),
     }
+}
+
+/// `draftMessage` / `draftMessageContentText`. Other content constructors are
+/// not restored into the text field (Unigram only fills the field from text).
+fn parse_chat_draft(value: Option<&Value>) -> Option<ChatDraft> {
+    let value = value.filter(|v| !v.is_null())?;
+    if value.get("@type").and_then(Value::as_str) != Some("draftMessage") {
+        return None;
+    }
+    let content = value.get("content")?;
+    if content.get("@type").and_then(Value::as_str) != Some("draftMessageContentText") {
+        return None;
+    }
+    let text = content
+        .get("text")
+        .and_then(|formatted| formatted.get("text"))
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    let reply_to_message_id = value.get("reply_to").and_then(|reply| {
+        if reply.get("@type").and_then(Value::as_str) != Some("inputMessageReplyToMessage") {
+            return None;
+        }
+        int53(reply.get("message_id")).ok().map(MessageId)
+    });
+    if text.trim().is_empty() && reply_to_message_id.is_none() {
+        return None;
+    }
+    Some(ChatDraft {
+        text,
+        reply_to_message_id,
+    })
 }
 
 fn parse_chat_action(value: Option<&Value>) -> ChatAction {
@@ -2336,6 +2409,57 @@ mod tests {
             } => {
                 assert_eq!(chat_id.0, 4);
                 assert_eq!(last_read_outbox_message_id.0, 91);
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn draft_message_text_and_same_chat_reply() {
+        let json = r#"{"@type":"updateNewChat","chat":{"id":11,"title":"Ada","type":{"@type":"chatTypePrivate","user_id":11},"unread_count":0,"draft_message":{"@type":"draftMessage","reply_to":{"@type":"inputMessageReplyToMessage","message_id":101,"quote":null,"checklist_task_id":0,"poll_option_id":""},"date":1700000000,"content":{"@type":"draftMessageContentText","text":{"@type":"formattedText","text":"meet at 6","entities":[]},"link_preview_options":null},"effect_id":"0","suggested_post_info":null}}}"#;
+        let env = parse_envelope(json).unwrap();
+        match env.payload {
+            EnvelopePayload::UpdateNewChat { draft, .. } => {
+                let draft = draft.expect("draft");
+                assert_eq!(draft.text, "meet at 6");
+                assert_eq!(draft.reply_to_message_id, Some(MessageId(101)));
+            }
+            other => panic!("{other:?}"),
+        }
+        let update = parse_envelope(
+            r#"{"@type":"updateChatDraftMessage","chat_id":11,"draft_message":null,"positions":[{"@type":"chatPosition","list":{"@type":"chatListMain"},"order":"9","is_pinned":false}]}"#,
+        )
+        .unwrap();
+        match update.payload {
+            EnvelopePayload::UpdateChatDraftMessage {
+                draft, positions, ..
+            } => {
+                assert!(draft.is_none());
+                assert_eq!(positions.len(), 1);
+                assert_eq!(positions[0].order, 9);
+            }
+            other => panic!("{other:?}"),
+        }
+        let external = parse_envelope(
+            r#"{"@type":"updateChatDraftMessage","chat_id":11,"draft_message":{"@type":"draftMessage","reply_to":{"@type":"inputMessageReplyToExternalMessage","chat_id":12,"message_id":4,"quote":null,"checklist_task_id":0,"poll_option_id":""},"date":1,"content":{"@type":"draftMessageContentText","text":{"@type":"formattedText","text":"hi","entities":[]},"link_preview_options":null},"effect_id":"0","suggested_post_info":null},"positions":[]}"#,
+        )
+        .unwrap();
+        match external.payload {
+            EnvelopePayload::UpdateChatDraftMessage { draft, .. } => {
+                let draft = draft.expect("text kept");
+                assert_eq!(draft.text, "hi");
+                assert_eq!(draft.reply_to_message_id, None);
+            }
+            other => panic!("{other:?}"),
+        }
+        let bot = parse_envelope(
+            r#"{"@type":"updateUser","user":{"id":11,"first_name":"Bot","type":{"@type":"userTypeBot","can_be_edited":false,"can_join_groups":true,"can_read_all_group_messages":false,"has_main_web_app":false,"has_topics":false,"allows_users_to_create_topics":false,"can_manage_bots":false,"is_inline":false,"inline_query_placeholder":"","supports_guest_queries":false,"is_guard":false,"need_location":false,"can_connect_to_business":false,"can_be_added_to_attachment_menu":false,"active_user_count":0}}}"#,
+        )
+        .unwrap();
+        match bot.payload {
+            EnvelopePayload::UpdateUser { user_id, is_bot } => {
+                assert_eq!(user_id, UserId(11));
+                assert!(is_bot);
             }
             other => panic!("{other:?}"),
         }

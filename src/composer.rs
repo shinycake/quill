@@ -179,6 +179,25 @@ pub fn cancel_edit_draft(
     (None, saved_draft)
 }
 
+/// Enter edit without dropping the normal draft's reply. Flush `saved_reply`
+/// with the stashed text first; cancel/finish restores both.
+pub fn begin_edit_keeping_reply(
+    current_text: String,
+    edit: ComposerEdit,
+    reply: Option<ComposerReplyTo>,
+) -> (ComposerEdit, String, String, Option<ComposerReplyTo>) {
+    let (edit, field, saved) = begin_edit_draft(current_text, edit);
+    (edit, field, saved, reply)
+}
+
+/// Cancel edit: normal draft text and its reply come back together.
+pub fn cancel_edit_keeping_reply(
+    saved_draft: String,
+    saved_reply: Option<ComposerReplyTo>,
+) -> (String, Option<ComposerReplyTo>) {
+    (saved_draft, saved_reply)
+}
+
 /// Pending delete confirm (tdesktop `DeleteMessagesBox` / Unigram
 /// `DeleteMessagesPopup`). Own outgoing only in this slice.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -262,6 +281,63 @@ impl ForwardDraft {
 pub fn cancel_forward_draft(draft: Option<ForwardDraft>) -> (Option<ForwardDraft>, bool) {
     let _ = draft;
     (None, false)
+}
+
+/// tdesktop `ComposeControls::kSaveDraftTimeout` — quiet period before a local draft write.
+pub const DRAFT_SAVE_TIMEOUT_MS: u64 = 1_000;
+/// tdesktop `kSaveDraftAnywayTimeout` — keep resetting the 1s timer only inside this window.
+pub const DRAFT_SAVE_ANYWAY_MS: u64 = 5_000;
+
+/// Clock for tdesktop `saveDraft(delayed)`: first edit arms 1s; further edits
+/// reset that 1s until 5s from the first edit, then the write happens immediately.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DraftSaveClock {
+    pub started_ms: Option<u64>,
+}
+
+impl DraftSaveClock {
+    pub fn idle() -> Self {
+        Self { started_ms: None }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DraftSaveStep {
+    /// Arm or reset the quiet timer. `delay_ms` is `kSaveDraftTimeout`.
+    Wait { delay_ms: u64, started_ms: u64 },
+    /// `writeDrafts` — quiet window elapsed, the 5s cap fired, or the caller forced a flush.
+    Write,
+}
+
+/// `delayed == false` is Unigram `SaveDraft(force: true)` on leaving the chat
+/// (and tdesktop's non-delayed `saveDraft`). `delayed == true` is tdesktop's
+/// field-changed path.
+pub fn schedule_draft_save(clock: DraftSaveClock, now_ms: u64, delayed: bool) -> DraftSaveStep {
+    if !delayed {
+        return DraftSaveStep::Write;
+    }
+    match clock.started_ms {
+        None => DraftSaveStep::Wait {
+            delay_ms: DRAFT_SAVE_TIMEOUT_MS,
+            started_ms: now_ms,
+        },
+        Some(started) if now_ms.saturating_sub(started) < DRAFT_SAVE_ANYWAY_MS => {
+            DraftSaveStep::Wait {
+                delay_ms: DRAFT_SAVE_TIMEOUT_MS,
+                started_ms: started,
+            }
+        }
+        Some(_) => DraftSaveStep::Write,
+    }
+}
+
+/// Text TDLib should store. Unigram saves when the field is non-whitespace or a reply is set.
+pub fn draft_text_to_store(text: &str, has_reply: bool) -> Option<&str> {
+    if text.trim().is_empty() && !has_reply {
+        None
+    } else {
+        Some(text)
+    }
 }
 
 /// Snapshot of a send attempt: destination is frozen at submit time.
@@ -504,6 +580,28 @@ mod tests {
     }
 
     #[test]
+    fn edit_keeps_reply_on_the_normal_draft() {
+        let edit = ComposerEdit::from_own_content(
+            ChatId(11),
+            MessageId(102),
+            true,
+            false,
+            &MessageContent::Text("original outgoing".into()),
+        )
+        .unwrap();
+        let reply = ComposerReplyTo::new(ChatId(11), MessageId(101), "quoted");
+        let (edit, field, saved, stashed) =
+            begin_edit_keeping_reply("keep this draft".into(), edit, Some(reply.clone()));
+        assert_eq!(field, "original outgoing");
+        assert_eq!(saved, "keep this draft");
+        assert_eq!(stashed, Some(reply.clone()));
+        let _ = edit;
+        let (restored, reply_back) = cancel_edit_keeping_reply(saved, stashed);
+        assert_eq!(restored, "keep this draft");
+        assert_eq!(reply_back, Some(reply));
+    }
+
+    #[test]
     fn delete_confirm_is_own_outgoing_only() {
         assert!(DeleteConfirm::own(ChatId(11), MessageId(102), true, false).is_some());
         assert!(DeleteConfirm::own(ChatId(11), MessageId(101), false, false).is_none());
@@ -525,5 +623,38 @@ mod tests {
         let (cleared, picker) = cancel_forward_draft(Some(draft));
         assert_eq!(cleared, None);
         assert!(!picker);
+    }
+
+    #[test]
+    fn draft_save_matches_tdesktop_quiet_and_anyway_windows() {
+        let idle = DraftSaveClock::idle();
+        assert_eq!(
+            schedule_draft_save(idle, 10_000, true),
+            DraftSaveStep::Wait {
+                delay_ms: DRAFT_SAVE_TIMEOUT_MS,
+                started_ms: 10_000,
+            }
+        );
+        let armed = DraftSaveClock {
+            started_ms: Some(10_000),
+        };
+        assert_eq!(
+            schedule_draft_save(armed, 11_500, true),
+            DraftSaveStep::Wait {
+                delay_ms: DRAFT_SAVE_TIMEOUT_MS,
+                started_ms: 10_000,
+            }
+        );
+        assert_eq!(
+            schedule_draft_save(armed, 15_000, true),
+            DraftSaveStep::Write
+        );
+        assert_eq!(
+            schedule_draft_save(armed, 10_100, false),
+            DraftSaveStep::Write
+        );
+        assert_eq!(draft_text_to_store("  ", false), None);
+        assert_eq!(draft_text_to_store("  ", true), Some("  "));
+        assert_eq!(draft_text_to_store("hi", false), Some("hi"));
     }
 }

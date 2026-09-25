@@ -2,7 +2,8 @@
 //! Never logs api_hash, phone numbers, or codes.
 
 use crate::composer::{
-    AttachmentKind, ComposerEdit, ComposerEditKind, ComposerSnapshot, DeleteConfirm, ForwardDraft,
+    AttachmentKind, ComposerEdit, ComposerEditKind, ComposerSnapshot, DeleteConfirm,
+    DraftSaveClock, DraftSaveStep, ForwardDraft, draft_text_to_store, schedule_draft_save,
 };
 use crate::credentials::TelegramCredentials;
 use crate::diagnostics::DiagnosticSink;
@@ -15,7 +16,7 @@ use crate::state::{
 };
 use crate::telegram::client::{LiveTdJson, OwnedEnvelope, ReceiveBridge};
 use crate::telegram::envelope::{
-    AuthorizationState, ChatNotificationSettings, EnvelopePayload, MUTE_FOREVER,
+    AuthorizationState, ChatDraft, ChatNotificationSettings, EnvelopePayload, MUTE_FOREVER,
 };
 use crate::telegram::ffi::{LibraryOrigin, TdJsonError, resolve_tdjson_path};
 use crate::telegram::requests::{
@@ -27,8 +28,8 @@ use crate::telegram::requests::{
     open_message_content, pin_chat_message, remove_message_reaction, search_chat_messages,
     search_chats, search_messages, search_recently_found_chats, send_animation, send_chat_action,
     send_chat_action_kind, send_document, send_photo, send_sticker, send_text, send_voice_note,
-    set_authentication_phone_number, set_chat_notification_settings, unpin_chat_message,
-    view_messages,
+    set_authentication_phone_number, set_chat_draft_message, set_chat_notification_settings,
+    unpin_chat_message, view_messages,
 };
 use crate::voice::VoiceDraft;
 use std::path::Path;
@@ -55,6 +56,8 @@ pub const RECENT_SEARCH_LIMIT: i32 = 50;
 /// tdesktop `kSearchRequestDelay` / `AutoSearchTimeout` (config.h): 900 ms.
 /// ComposeSearch `requestSearchDelayed` uses the same `AutoSearchTimeout`.
 pub const SEARCH_DEBOUNCE: Duration = Duration::from_millis(900);
+/// tdesktop `kSaveDraftTimeout` — quiet time before `setChatDraftMessage`.
+pub const DRAFT_SAVE_DEBOUNCE: Duration = Duration::from_millis(1_000);
 /// tdesktop `kSearchPerPage` (`api_messages_search.cpp`).
 pub const CHAT_SEARCH_LIMIT: i32 = 50;
 /// Unigram `LoadMessageSliceImpl`: `GetChatHistory(chatId, maxId, -25, 50)`.
@@ -310,11 +313,30 @@ pub struct ConnectDriver<S: JsonSender> {
     outgoing_typing: Option<OutgoingTyping>,
     /// Last `chatActionRecordingVoiceNote` (Unigram record button).
     outgoing_voice: Option<OutgoingTyping>,
+    /// tdesktop `saveDraft` clock for the open composer.
+    draft_clock: DraftSaveClock,
+    draft_save_token: u64,
+    pending_draft: Option<PendingDraft>,
 }
 
 struct OutgoingTyping {
     chat_id: ChatId,
     last_sent_ms: u64,
+}
+
+struct PendingDraft {
+    token: u64,
+    chat_id: ChatId,
+    text: String,
+    reply_to: Option<MessageId>,
+}
+
+/// Result of noting a composer edit. UI arms a timer only for `Debounced`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DraftSaveOutcome {
+    Debounced { token: u64, delay: Duration },
+    Sent,
+    Skipped,
 }
 
 impl<S: JsonSender> ConnectDriver<S> {
@@ -337,6 +359,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             pending_typed_chat_search: None,
             outgoing_typing: None,
             outgoing_voice: None,
+            draft_clock: DraftSaveClock::idle(),
+            draft_save_token: 0,
+            pending_draft: None,
         }
     }
 
@@ -462,6 +487,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         self.cancel_outgoing_typing()?;
         self.close_open_chat()?;
+        self.draft_clock = DraftSaveClock::idle();
+        self.pending_draft = None;
         self.session.open_chat(chat_id);
         if !self
             .session
@@ -475,6 +502,163 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.maybe_view_open_messages()?;
         self.maybe_download_open_thumbs()?;
         self.fetch_history()
+    }
+
+    /// Composer edit in a private chat. `delayed` follows tdesktop `saveDraft(true)`
+    /// (1s quiet, 5s cap). `delayed == false` is Unigram's flush on leaving the chat.
+    pub fn note_composer_draft(
+        &mut self,
+        chat_id: ChatId,
+        text: &str,
+        reply_to: Option<MessageId>,
+        now_ms: u64,
+        delayed: bool,
+    ) -> Result<DraftSaveOutcome, ConnectSendError> {
+        if !self.chats_path_active() || !self.session.accepts_composer_draft(chat_id) {
+            return Ok(DraftSaveOutcome::Skipped);
+        }
+        let stored = draft_text_to_store(text, reply_to.is_some()).map(str::to_string);
+        let reply_to = stored.as_ref().and(reply_to);
+        if self.draft_matches(chat_id, stored.as_deref(), reply_to) {
+            self.pending_draft = None;
+            self.draft_clock = DraftSaveClock::idle();
+            let existing = self
+                .session
+                .chats
+                .get(&chat_id.0)
+                .and_then(|chat| chat.draft.clone());
+            self.session.store_composer_draft(chat_id, existing);
+            return Ok(DraftSaveOutcome::Skipped);
+        }
+        self.session.mark_draft_dirty(chat_id);
+        match schedule_draft_save(self.draft_clock, now_ms, delayed) {
+            DraftSaveStep::Wait {
+                delay_ms,
+                started_ms,
+            } => {
+                self.draft_clock = DraftSaveClock {
+                    started_ms: Some(started_ms),
+                };
+                self.draft_save_token = self.draft_save_token.saturating_add(1);
+                let token = self.draft_save_token;
+                self.pending_draft = Some(PendingDraft {
+                    token,
+                    chat_id,
+                    text: stored.unwrap_or_default(),
+                    reply_to,
+                });
+                Ok(DraftSaveOutcome::Debounced {
+                    token,
+                    delay: Duration::from_millis(delay_ms),
+                })
+            }
+            DraftSaveStep::Write => {
+                self.pending_draft = None;
+                self.draft_clock = DraftSaveClock::idle();
+                self.send_draft(chat_id, stored.as_deref(), reply_to)?;
+                Ok(DraftSaveOutcome::Sent)
+            }
+        }
+    }
+
+    /// Timer fired. Sends only if `token` is still the latest quiet window.
+    pub fn commit_debounced_draft(
+        &mut self,
+        token: u64,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        let Some(pending) = self.pending_draft.take() else {
+            return Ok(None);
+        };
+        if pending.token != token {
+            self.pending_draft = Some(pending);
+            return Ok(None);
+        }
+        self.draft_clock = DraftSaveClock::idle();
+        let text = draft_text_to_store(&pending.text, pending.reply_to.is_some());
+        let reply_to = text.and(pending.reply_to);
+        if self.draft_matches(pending.chat_id, text, reply_to) {
+            self.session.store_composer_draft(
+                pending.chat_id,
+                self.session
+                    .chats
+                    .get(&pending.chat_id.0)
+                    .and_then(|chat| chat.draft.clone()),
+            );
+            return Ok(None);
+        }
+        self.send_draft(pending.chat_id, text, reply_to).map(Some)
+    }
+
+    /// Successful send: drop the draft when the composer is still idle.
+    pub fn clear_draft_after_send(
+        &mut self,
+        chat_id: ChatId,
+        composer_idle: bool,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !composer_idle || self.session.draft_is_dirty(chat_id) {
+            return Ok(None);
+        }
+        if !self.session.accepts_composer_draft(chat_id) {
+            return Ok(None);
+        }
+        self.pending_draft = None;
+        self.draft_clock = DraftSaveClock::idle();
+        self.send_draft(chat_id, None, None).map(Some)
+    }
+
+    pub fn cancel_pending_draft(&mut self) {
+        self.pending_draft = None;
+        self.draft_clock = DraftSaveClock::idle();
+    }
+
+    fn draft_matches(
+        &self,
+        chat_id: ChatId,
+        text: Option<&str>,
+        reply_to: Option<MessageId>,
+    ) -> bool {
+        let current = self
+            .session
+            .chats
+            .get(&chat_id.0)
+            .and_then(|chat| chat.draft.as_ref());
+        match (current, text) {
+            (None, None) => true,
+            (Some(draft), Some(text)) => {
+                draft.text == text && draft.reply_to_message_id == reply_to
+            }
+            _ => false,
+        }
+    }
+
+    fn send_draft(
+        &mut self,
+        chat_id: ChatId,
+        text: Option<&str>,
+        reply_to: Option<MessageId>,
+    ) -> Result<RequestId, ConnectSendError> {
+        let extra = self
+            .session
+            .request(RequestPurpose::SetChatDraftMessage, Some(chat_id));
+        match self
+            .sender
+            .send_json(&set_chat_draft_message(extra, chat_id, text, reply_to))
+        {
+            Ok(()) => {
+                let draft = text
+                    .filter(|text| !text.trim().is_empty() || reply_to.is_some())
+                    .map(|text| ChatDraft {
+                        text: text.to_string(),
+                        reply_to_message_id: reply_to,
+                    });
+                self.session.store_composer_draft(chat_id, draft);
+                Ok(extra)
+            }
+            Err(err) => {
+                self.session.requests.take(extra);
+                Err(err)
+            }
+        }
     }
 
     fn close_open_chat(&mut self) -> Result<(), ConnectSendError> {
@@ -1750,25 +1934,53 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     /// Open a chat from search via `addRecentlyFoundChat` then `openChat`.
+    /// Flushes the leaving composer's draft before `select_chat` drops `pending_draft`.
     pub fn select_search_chat(
         &mut self,
         chat_id: ChatId,
+        leaving_text: &str,
+        leaving_reply: Option<MessageId>,
+        now_ms: u64,
     ) -> Result<Option<RequestId>, ConnectSendError> {
+        self.flush_leaving_composer(chat_id, leaving_text, leaving_reply, now_ms)?;
         self.remember_found_chat(chat_id);
         self.session.close_search();
         self.select_chat(chat_id)
     }
 
     /// Jump to a found message: upsert it into history, then `select_chat`.
+    /// Same flush-before-drop as [`Self::select_search_chat`].
     pub fn select_search_message(
         &mut self,
         chat_id: ChatId,
         message_id: MessageId,
+        leaving_text: &str,
+        leaving_reply: Option<MessageId>,
+        now_ms: u64,
     ) -> Result<Option<RequestId>, ConnectSendError> {
+        self.flush_leaving_composer(chat_id, leaving_text, leaving_reply, now_ms)?;
         self.remember_found_chat(chat_id);
         self.session.promote_search_message(chat_id, message_id);
         self.session.close_search();
         self.select_chat(chat_id)
+    }
+
+    /// Persist the open chat's composer before a search result switches chats.
+    fn flush_leaving_composer(
+        &mut self,
+        next_chat: ChatId,
+        leaving_text: &str,
+        leaving_reply: Option<MessageId>,
+        now_ms: u64,
+    ) -> Result<(), ConnectSendError> {
+        let Some(prev) = self.session.open_chat else {
+            return Ok(());
+        };
+        if prev == next_chat {
+            return Ok(());
+        }
+        self.note_composer_draft(prev, leaving_text, leaving_reply, now_ms, false)?;
+        Ok(())
     }
 
     /// tdesktop `searchInChat` when history is focused (`Command::Search` / Ctrl+F).
@@ -3532,7 +3744,7 @@ mod tests {
         assert_eq!(driver.session.search.status, SearchStatus::Ready);
         assert_eq!(driver.session.search.chat_ids, vec![ChatId(7)]);
         driver
-            .select_search_message(ChatId(7), MessageId(50))
+            .select_search_message(ChatId(7), MessageId(50), "", None, 0)
             .unwrap();
         assert_eq!(driver.session.search.status, SearchStatus::Closed);
         assert_eq!(driver.session.open_chat, Some(ChatId(7)));
@@ -4107,7 +4319,7 @@ mod tests {
             v["input_message_content"]["text"]["text"],
             "CANARY_EDIT_text"
         );
-        assert_eq!(v["input_message_content"]["clear_draft"], true);
+        assert_eq!(v["input_message_content"]["clear_draft"], false);
 
         driver
             .ingest(
@@ -4672,6 +4884,183 @@ mod tests {
             )
             .unwrap();
         assert!(driver.session.chats.get(&7).unwrap().is_peer_typing());
+        assert!(!sink.rendered().contains("CANARY"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn private_draft_debounces_then_flushes_and_skips_channels() {
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = Arc::new(RecordingSender::new());
+        let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+        let mut driver =
+            ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+        let seq = AtomicU64::new(0);
+        driver
+            .ingest(
+                copy_and_parse(
+                    r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        driver
+            .ingest(
+                copy_and_parse(
+                    r#"{"@type":"updateNewChat","chat":{"id":7,"title":"Ada","type":{"@type":"chatTypePrivate","user_id":7},"unread_count":0,"draft_message":{"@type":"draftMessage","reply_to":{"@type":"inputMessageReplyToMessage","message_id":3,"quote":null,"checklist_task_id":0,"poll_option_id":""},"date":1,"content":{"@type":"draftMessageContentText","text":{"@type":"formattedText","text":"meet at 6","entities":[]},"link_preview_options":null},"effect_id":"0","suggested_post_info":null}}}"#,
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        driver
+            .ingest(
+                copy_and_parse(
+                    r#"{"@type":"updateNewChat","chat":{"id":8,"title":"News","type":{"@type":"chatTypeSupergroup","supergroup_id":8,"is_channel":true},"unread_count":0}}"#,
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        let restored = driver.session.chats.get(&7).unwrap().draft.clone().unwrap();
+        assert_eq!(restored.text, "meet at 6");
+        assert_eq!(restored.reply_to_message_id, Some(MessageId(3)));
+        let outcome = driver
+            .note_composer_draft(ChatId(7), "meet at 6!", None, 1_000, true)
+            .unwrap();
+        let DraftSaveOutcome::Debounced { token, delay } = outcome else {
+            panic!("expected debounce");
+        };
+        assert_eq!(delay, DRAFT_SAVE_DEBOUNCE);
+        assert!(
+            driver
+                .commit_debounced_draft(token.wrapping_add(9))
+                .unwrap()
+                .is_none()
+        );
+        driver.commit_debounced_draft(token).unwrap();
+        let sent = recorder.snapshot();
+        let draft_json = sent.last().unwrap();
+        assert!(draft_json.contains("setChatDraftMessage"));
+        assert!(draft_json.contains("meet at 6!"));
+        assert!(draft_json.contains("\"topic_id\":null"));
+        assert_eq!(
+            driver
+                .session
+                .chats
+                .get(&7)
+                .unwrap()
+                .draft
+                .as_ref()
+                .unwrap()
+                .text,
+            "meet at 6!"
+        );
+        let flushed = driver
+            .note_composer_draft(ChatId(7), "leaving", Some(MessageId(3)), 2_000, false)
+            .unwrap();
+        assert_eq!(flushed, DraftSaveOutcome::Sent);
+        assert!(
+            driver
+                .note_composer_draft(ChatId(8), "nope", None, 3_000, false)
+                .unwrap()
+                == DraftSaveOutcome::Skipped
+        );
+        driver
+            .ingest(
+                copy_and_parse(
+                    r#"{"@type":"updateMessageSendSucceeded","message":{"id":9,"chat_id":7,"is_outgoing":true,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"leaving","entities":[]}}},"old_message_id":-1}"#,
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        assert_eq!(driver.session.draft_clears, vec![ChatId(7)]);
+        driver.clear_draft_after_send(ChatId(7), true).unwrap();
+        assert!(driver.session.chats.get(&7).unwrap().draft.is_none());
+        assert!(!sink.rendered().contains("CANARY"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn search_open_flushes_leaving_draft_and_media_send_drops_reply() {
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = Arc::new(RecordingSender::new());
+        let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+        let mut driver =
+            ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+        let seq = AtomicU64::new(0);
+        driver
+            .ingest(
+                copy_and_parse(
+                    r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        for (id, title) in [(7, "Ada"), (8, "Bob")] {
+            driver
+                .ingest(
+                    copy_and_parse(
+                        &format!(
+                            r#"{{"@type":"updateNewChat","chat":{{"id":{id},"title":"{title}","type":{{"@type":"chatTypePrivate","user_id":{id}}},"unread_count":0}}}}"#
+                        ),
+                        &seq,
+                        &dyn_sink,
+                    )
+                    .unwrap(),
+                )
+                .unwrap();
+        }
+        driver.select_chat(ChatId(7)).unwrap();
+        let outcome = driver
+            .note_composer_draft(ChatId(7), "hello", Some(MessageId(3)), 1_000, true)
+            .unwrap();
+        assert!(matches!(outcome, DraftSaveOutcome::Debounced { .. }));
+        driver
+            .select_search_chat(ChatId(8), "hello", Some(MessageId(3)), 1_500)
+            .unwrap();
+        assert_eq!(driver.session.open_chat, Some(ChatId(8)));
+        let saved = driver.session.chats.get(&7).unwrap().draft.clone().unwrap();
+        assert_eq!(saved.text, "hello");
+        assert_eq!(saved.reply_to_message_id, Some(MessageId(3)));
+        let sent = recorder.snapshot();
+        assert!(sent.iter().any(|json| {
+            json.contains("setChatDraftMessage")
+                && json.contains("\"chat_id\":7")
+                && json.contains("hello")
+                && json.contains("\"message_id\":3")
+        }));
+        driver.select_chat(ChatId(7)).unwrap();
+        driver
+            .note_composer_draft(ChatId(7), "caption", Some(MessageId(3)), 2_000, false)
+            .unwrap();
+        driver
+            .note_composer_draft(ChatId(7), "caption", None, 2_100, false)
+            .unwrap();
+        let after = driver.session.chats.get(&7).unwrap().draft.clone().unwrap();
+        assert_eq!(after.text, "caption");
+        assert_eq!(after.reply_to_message_id, None);
+        driver
+            .note_composer_draft(ChatId(7), "  ", Some(MessageId(9)), 3_000, false)
+            .unwrap();
+        driver
+            .select_search_message(ChatId(8), MessageId(1), "  ", None, 3_100)
+            .unwrap();
+        assert!(driver.session.chats.get(&7).unwrap().draft.is_none());
         assert!(!sink.rendered().contains("CANARY"));
         let _ = std::fs::remove_dir_all(&dir);
     }

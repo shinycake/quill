@@ -5,7 +5,7 @@ pub mod requests;
 
 pub use client::{BridgeCommand, LiveTdJson, OwnedEnvelope, ReceiveBridge, ordered_receive_loop};
 pub use envelope::{
-    AnimationContent, AnimationItem, AuthorizationState, ChatKind, ChatPositionUpdate,
+    AnimationContent, AnimationItem, AuthorizationState, ChatDraft, ChatKind, ChatPositionUpdate,
     ConnectionState, DEFAULT_EMOJI_REACTIONS, DocumentContent, Envelope, EnvelopePayload,
     LocalFileState, MessageContent, MessageForwardInfo, MessageInteractionInfo, MessageOrigin,
     MessageReaction, MessageReactions, MessageReplyTo, ParsedFile, ParsedMessage, PhotoContent,
@@ -22,5 +22,5 @@ pub use requests::{
     reaction_type_emoji, remove_message_reaction, search_chat_messages, search_chats,
     search_messages, search_recently_found_chats, send_animation, send_chat_action_kind,
     send_document, send_photo, send_sticker, send_text, send_voice_note,
-    set_authentication_phone_number, view_messages,
+    set_authentication_phone_number, set_chat_draft_message, view_messages,
 };

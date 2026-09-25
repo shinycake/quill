@@ -269,6 +269,48 @@ pub fn download_file(extra: RequestId, file_id: FileId, priority: i32) -> String
     .to_string()
 }
 
+/// `setChatDraftMessage` (TDLib 1.8.67). `topic_id` null updates the chat itself.
+/// `draft_message` null removes the draft. Text uses `draftMessageContentText`.
+/// `date` 0 and `effect_id` `"0"` match Unigram's `DraftMessage` constructor
+/// (`int64` is a JSON string). `link_preview_options` null keeps the default.
+pub fn set_chat_draft_message(
+    extra: RequestId,
+    chat_id: ChatId,
+    text: Option<&str>,
+    reply_to: Option<MessageId>,
+) -> String {
+    let draft_message = match text {
+        None if reply_to.is_none() => Value::Null,
+        text => {
+            let body = text.unwrap_or("");
+            json!({
+                "@type": "draftMessage",
+                "reply_to": input_message_reply_to(reply_to),
+                "date": 0,
+                "content": {
+                    "@type": "draftMessageContentText",
+                    "text": {
+                        "@type": "formattedText",
+                        "text": body,
+                        "entities": []
+                    },
+                    "link_preview_options": Value::Null
+                },
+                "effect_id": "0",
+                "suggested_post_info": Value::Null
+            })
+        }
+    };
+    json!({
+        "@type": "setChatDraftMessage",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0,
+        "topic_id": Value::Null,
+        "draft_message": draft_message,
+    })
+    .to_string()
+}
+
 /// Same-chat reply: schema `inputMessageReplyToMessage` (quote null = whole message).
 pub fn input_message_reply_to(message_id: Option<MessageId>) -> Value {
     match message_id {
@@ -530,7 +572,7 @@ pub fn edit_message_text(
                 "entities": []
             },
             "link_preview_options": Value::Null,
-            "clear_draft": true
+            "clear_draft": false
         }
     })
     .to_string()
@@ -1153,9 +1195,46 @@ mod tests {
             v["input_message_content"]["link_preview_options"],
             Value::Null
         );
-        assert_eq!(v["input_message_content"]["clear_draft"], true);
+        assert_eq!(v["input_message_content"]["clear_draft"], false);
         assert!(!json.contains("CANARY"));
         assert!(!json.contains("message_thread_id"));
+    }
+
+    #[test]
+    fn set_chat_draft_message_matches_1_8_67() {
+        let save = set_chat_draft_message(
+            RequestId(41),
+            ChatId(11),
+            Some("meet at 6"),
+            Some(MessageId(101)),
+        );
+        let v: serde_json::Value = serde_json::from_str(&save).unwrap();
+        assert_eq!(v["@type"], "setChatDraftMessage");
+        assert_eq!(v["@extra"], "41");
+        assert_eq!(v["chat_id"], 11);
+        assert_eq!(v["topic_id"], Value::Null);
+        assert_eq!(v["draft_message"]["@type"], "draftMessage");
+        assert_eq!(v["draft_message"]["date"], 0);
+        assert_eq!(v["draft_message"]["effect_id"], "0");
+        assert_eq!(v["draft_message"]["suggested_post_info"], Value::Null);
+        assert_eq!(
+            v["draft_message"]["content"]["@type"],
+            "draftMessageContentText"
+        );
+        assert_eq!(v["draft_message"]["content"]["text"]["text"], "meet at 6");
+        assert_eq!(
+            v["draft_message"]["content"]["link_preview_options"],
+            Value::Null
+        );
+        assert_eq!(
+            v["draft_message"]["reply_to"]["@type"],
+            "inputMessageReplyToMessage"
+        );
+        assert_eq!(v["draft_message"]["reply_to"]["message_id"], 101);
+        let clear = set_chat_draft_message(RequestId(42), ChatId(11), None, None);
+        let v: serde_json::Value = serde_json::from_str(&clear).unwrap();
+        assert_eq!(v["draft_message"], Value::Null);
+        assert!(!save.contains("CANARY"));
     }
 
     #[test]
