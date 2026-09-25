@@ -35,6 +35,237 @@ pub fn discard_frame_cache(file_id: i32) {
     let _ = std::fs::remove_dir_all(video_frame_cache_dir(file_id));
 }
 
+/// Dimensions and streaming hint for `inputVideo` (TDLib 1.8.67).
+///
+/// tdesktop probes with ffmpeg before `documentAttributeVideo`. Duration, width,
+/// and height are required ints. `supports_streaming` is the sender hint levlam
+/// describes: a `moov` atom at the start or end of an MPEG-4 file. Thumbnail
+/// upload is skipped (`inputVideo.thumbnail` null); TDLib generates one for
+/// small clips.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct VideoProbe {
+    pub duration: i32,
+    pub width: i32,
+    pub height: i32,
+    pub supports_streaming: bool,
+}
+
+/// Read duration, width, and height from a user-picked local video.
+/// Prefers `ffprobe` (same ffmpeg family as playback). Falls back to the
+/// MPEG-4 `mvhd` / `tkhd` boxes when ffprobe is missing.
+pub fn probe_local_video(path: &Path) -> Result<VideoProbe, String> {
+    if !is_playable_video("", path) {
+        return Err("unsupported video".into());
+    }
+    let supports_streaming = mpeg4_has_moov(path);
+    if let Some(probe) = probe_with_ffprobe(path, supports_streaming) {
+        return Ok(probe);
+    }
+    if let Some(probe) = probe_mp4_boxes(path, supports_streaming) {
+        return Ok(probe);
+    }
+    Err("could not read video duration or size".into())
+}
+
+fn probe_with_ffprobe(path: &Path, supports_streaming: bool) -> Option<VideoProbe> {
+    let output = Command::new("ffprobe")
+        .args([
+            "-v",
+            "error",
+            "-select_streams",
+            "v:0",
+            "-show_entries",
+            "stream=width,height,duration",
+            "-of",
+            "json",
+        ])
+        .arg(path)
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).ok()?;
+    let stream = value.get("streams")?.get(0)?;
+    let width = stream.get("width")?.as_i64()?;
+    let height = stream.get("height")?.as_i64()?;
+    let duration = stream.get("duration").and_then(|v| {
+        v.as_f64()
+            .or_else(|| v.as_str().and_then(|s| s.parse::<f64>().ok()))
+    })?;
+    finish_probe(duration, width, height, supports_streaming)
+}
+
+fn probe_mp4_boxes(path: &Path, supports_streaming: bool) -> Option<VideoProbe> {
+    let meta = std::fs::metadata(path).ok()?;
+    if meta.len() > 32 * 1024 * 1024 {
+        return None;
+    }
+    let bytes = std::fs::read(path).ok()?;
+    let mut offset = 0usize;
+    let mut movie: Option<(u32, u32)> = None;
+    let mut track: Option<(i64, i64)> = None;
+    while offset + 8 <= bytes.len() {
+        let size = u32::from_be_bytes(bytes[offset..offset + 4].try_into().ok()?) as usize;
+        let kind = &bytes[offset + 4..offset + 8];
+        if size < 8 || offset + size > bytes.len() {
+            break;
+        }
+        if kind == b"moov" {
+            walk_moov(&bytes[offset + 8..offset + size], &mut movie, &mut track);
+        }
+        offset += size;
+    }
+    let (timescale, duration) = movie?;
+    let (width, height) = track?;
+    if timescale == 0 {
+        return None;
+    }
+    let seconds = duration as f64 / f64::from(timescale);
+    finish_probe(seconds, width, height, supports_streaming)
+}
+
+fn walk_moov(data: &[u8], movie: &mut Option<(u32, u32)>, track: &mut Option<(i64, i64)>) {
+    let mut offset = 0usize;
+    while offset + 8 <= data.len() {
+        let size =
+            u32::from_be_bytes(data[offset..offset + 4].try_into().unwrap_or([0; 4])) as usize;
+        if size < 8 || offset + size > data.len() {
+            break;
+        }
+        let kind = &data[offset + 4..offset + 8];
+        let body = &data[offset + 8..offset + size];
+        if kind == b"mvhd" {
+            *movie = parse_mvhd(body);
+        } else if kind == b"trak"
+            && track.is_none()
+            && let Some(size) = find_tkhd(body)
+        {
+            *track = Some(size);
+        }
+        offset += size;
+    }
+}
+
+fn find_tkhd(data: &[u8]) -> Option<(i64, i64)> {
+    let mut offset = 0usize;
+    while offset + 8 <= data.len() {
+        let size = u32::from_be_bytes(data[offset..offset + 4].try_into().ok()?) as usize;
+        if size < 8 || offset + size > data.len() {
+            break;
+        }
+        let kind = &data[offset + 4..offset + 8];
+        let body = &data[offset + 8..offset + size];
+        if kind == b"tkhd" {
+            return parse_tkhd(body);
+        }
+        if (kind == b"mdia" || kind == b"minf" || kind == b"stbl")
+            && let Some(found) = find_tkhd(body)
+        {
+            return Some(found);
+        }
+        offset += size;
+    }
+    None
+}
+
+fn parse_mvhd(body: &[u8]) -> Option<(u32, u32)> {
+    let version = *body.first()?;
+    if version == 0 && body.len() >= 20 {
+        let timescale = u32::from_be_bytes(body[12..16].try_into().ok()?);
+        let duration = u32::from_be_bytes(body[16..20].try_into().ok()?);
+        Some((timescale, duration))
+    } else if version == 1 && body.len() >= 32 {
+        let timescale = u32::from_be_bytes(body[20..24].try_into().ok()?);
+        let duration = u64::from_be_bytes(body[24..32].try_into().ok()?) as u32;
+        Some((timescale, duration))
+    } else {
+        None
+    }
+}
+
+fn parse_tkhd(body: &[u8]) -> Option<(i64, i64)> {
+    let version = *body.first()?;
+    let (width, height) = if version == 0 && body.len() >= 84 {
+        (&body[76..80], &body[80..84])
+    } else if version == 1 && body.len() >= 96 {
+        (&body[88..92], &body[92..96])
+    } else {
+        return None;
+    };
+    let width = i32::from_be_bytes(width.try_into().ok()?) as i64 >> 16;
+    let height = i32::from_be_bytes(height.try_into().ok()?) as i64 >> 16;
+    if width <= 0 || height <= 0 {
+        return None;
+    }
+    Some((width, height))
+}
+
+fn finish_probe(
+    seconds: f64,
+    width: i64,
+    height: i64,
+    supports_streaming: bool,
+) -> Option<VideoProbe> {
+    if !(width > 0 && height > 0 && width <= i32::MAX as i64 && height <= i32::MAX as i64) {
+        return None;
+    }
+    if !seconds.is_finite() || seconds < 0.0 {
+        return None;
+    }
+    let rounded = seconds.round() as i64;
+    let duration = if seconds > 0.0 && rounded == 0 {
+        1
+    } else {
+        i32::try_from(rounded).unwrap_or(i32::MAX)
+    };
+    Some(VideoProbe {
+        duration,
+        width: width as i32,
+        height: height as i32,
+        supports_streaming,
+    })
+}
+
+/// True when an MPEG-4 `moov` box is present. That is the layout official
+/// clients mark with `supports_streaming` (moov at the start or the end).
+fn mpeg4_has_moov(path: &Path) -> bool {
+    use std::io::{Read, Seek, SeekFrom};
+    let Ok(mut file) = std::fs::File::open(path) else {
+        return false;
+    };
+    let Ok(len) = file.metadata().map(|meta| meta.len()) else {
+        return false;
+    };
+    let mut offset = 0u64;
+    let mut header = [0u8; 8];
+    while offset + 8 <= len {
+        if file.seek(SeekFrom::Start(offset)).is_err() || file.read_exact(&mut header).is_err() {
+            return false;
+        }
+        let size32 = u32::from_be_bytes(header[0..4].try_into().unwrap_or([0; 4]));
+        let size = if size32 == 1 {
+            let mut ext = [0u8; 8];
+            if file.read_exact(&mut ext).is_err() {
+                return false;
+            }
+            u64::from_be_bytes(ext)
+        } else if size32 == 0 {
+            len - offset
+        } else {
+            u64::from(size32)
+        };
+        if size < 8 || offset.saturating_add(size) > len {
+            return false;
+        }
+        if &header[4..8] == b"moov" {
+            return true;
+        }
+        offset += size;
+    }
+    false
+}
+
 pub fn is_playable_video(mime: &str, path: &Path) -> bool {
     let mime = mime.to_ascii_lowercase();
     if mime.starts_with("video/") {
@@ -157,5 +388,19 @@ mod tests {
         let _ = std::fs::remove_dir_all(&account);
         let _ = std::fs::remove_file(&stray);
         let _ = std::fs::remove_dir_all(&gif_layout);
+    }
+
+    #[test]
+    fn demo_clip_probe_matches_ffprobe_layout() {
+        let clip = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("docs/screenshots/fixtures/demo-clip.mp4");
+        let probe = probe_local_video(&clip).expect("demo clip");
+        assert_eq!(probe.duration, 1);
+        assert_eq!(probe.width, 320);
+        assert_eq!(probe.height, 180);
+        assert!(probe.supports_streaming);
+        let notes = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("docs/screenshots/fixtures/demo-notes.txt");
+        assert!(probe_local_video(&notes).is_err());
     }
 }

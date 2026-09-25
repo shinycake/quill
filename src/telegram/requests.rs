@@ -512,6 +512,63 @@ pub fn send_animation(extra: RequestId, chat_id: ChatId, animation: AnimationSen
     .to_string()
 }
 
+/// Fields for `inputVideo` (TDLib 1.8.67). Thumbnail stays null: the schema says
+/// pass null to skip thumbnail uploading, and TDLib fills one for small files.
+pub struct VideoSend {
+    pub duration: i32,
+    pub width: i32,
+    pub height: i32,
+    pub supports_streaming: bool,
+}
+
+/// `sendMessage` + `inputMessageVideo` / `inputVideo` / `inputFileLocal` (1.8.67).
+/// `path` must already be an explicitly picked local file — never a JSON `local.path`.
+pub fn send_video(
+    extra: RequestId,
+    chat_id: ChatId,
+    path: &str,
+    video: &VideoSend,
+    caption: &str,
+    reply_to: Option<MessageId>,
+) -> String {
+    json!({
+        "@type": "sendMessage",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0,
+        "topic_id": Value::Null,
+        "reply_to": input_message_reply_to(reply_to),
+        "options": Value::Null,
+        "reply_markup": Value::Null,
+        "input_message_content": {
+            "@type": "inputMessageVideo",
+            "video": {
+                "@type": "inputVideo",
+                "video": {
+                    "@type": "inputFileLocal",
+                    "path": path
+                },
+                "thumbnail": Value::Null,
+                "cover": Value::Null,
+                "start_timestamp": 0,
+                "added_sticker_file_ids": [],
+                "duration": video.duration,
+                "width": video.width,
+                "height": video.height,
+                "supports_streaming": video.supports_streaming
+            },
+            "caption": {
+                "@type": "formattedText",
+                "text": caption,
+                "entities": []
+            },
+            "show_caption_above_media": false,
+            "self_destruct_type": Value::Null,
+            "has_spoiler": false
+        }
+    })
+    .to_string()
+}
+
 /// `sendMessage` + `inputMessageDocument` / `inputDocument` / `inputFileLocal` (1.8.67).
 /// `path` must already be an explicitly picked local file — never a JSON `local.path`.
 pub fn send_document(
@@ -1037,6 +1094,58 @@ mod tests {
         assert_eq!(saved["@type"], "getSavedAnimations");
         assert_eq!(saved["@extra"], "22");
         assert!(saved.get("query").is_none());
+    }
+
+    #[test]
+    fn send_video_shape_matches_1_8_67() {
+        let json = send_video(
+            RequestId(17),
+            ChatId(7),
+            "/tmp/picked.mp4",
+            &VideoSend {
+                duration: 1,
+                width: 320,
+                height: 180,
+                supports_streaming: true,
+            },
+            "CANARY_VIDEO",
+            Some(MessageId(9)),
+        );
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "sendMessage");
+        assert_eq!(v["@extra"], "17");
+        assert_eq!(v["chat_id"], 7);
+        assert_eq!(v["topic_id"], Value::Null);
+        assert_eq!(v["input_message_content"]["@type"], "inputMessageVideo");
+        let video = &v["input_message_content"]["video"];
+        assert_eq!(video["@type"], "inputVideo");
+        assert_eq!(video["video"]["@type"], "inputFileLocal");
+        assert_eq!(video["video"]["path"], "/tmp/picked.mp4");
+        assert_eq!(video["thumbnail"], Value::Null);
+        assert_eq!(video["cover"], Value::Null);
+        assert_eq!(video["start_timestamp"], 0);
+        assert_eq!(video["added_sticker_file_ids"], serde_json::json!([]));
+        assert_eq!(video["duration"], 1);
+        assert_eq!(video["width"], 320);
+        assert_eq!(video["height"], 180);
+        assert_eq!(video["supports_streaming"], true);
+        assert_eq!(
+            v["input_message_content"]["caption"]["text"],
+            "CANARY_VIDEO"
+        );
+        assert_eq!(
+            v["input_message_content"]["show_caption_above_media"],
+            false
+        );
+        assert_eq!(
+            v["input_message_content"]["self_destruct_type"],
+            Value::Null
+        );
+        assert_eq!(v["input_message_content"]["has_spoiler"], false);
+        assert_eq!(v["reply_to"]["@type"], "inputMessageReplyToMessage");
+        assert_eq!(v["reply_to"]["message_id"], 9);
+        assert!(!json.contains("inputMessageVideoNote"));
+        assert!(!json.contains("api_hash"));
     }
 
     #[test]

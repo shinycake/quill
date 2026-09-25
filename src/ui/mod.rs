@@ -210,6 +210,8 @@ pub enum ScreenshotDemo {
     ReadyGifs,
     /// Video bubble with Play/Pause in history (injected, no live Telegram).
     ReadyVideo,
+    /// Composer video attach chip plus an own-sent video playing in history.
+    ReadyVideoSend,
     /// Restored private-chat composer draft (`draftMessage`).
     ReadyDrafts,
 }
@@ -599,6 +601,15 @@ impl QuillApp {
                     AuthorizationState::Ready,
                 )
             }
+            Some(ScreenshotDemo::ReadyVideoSend) => {
+                demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
+                (
+                    ConnectUiStatus::DemoReadyChats,
+                    None,
+                    "screenshot demo — local video attach + own-sent playback".into(),
+                    AuthorizationState::Ready,
+                )
+            }
             Some(ScreenshotDemo::ReadyDrafts) => {
                 demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
                 (
@@ -616,6 +627,12 @@ impl QuillApp {
             pending_attachment = ComposerAttachment::pick(
                 &demo_media_allowlist().join("demo-notes.txt"),
                 AttachmentKind::Document,
+            );
+        }
+        if matches!(demo, Some(ScreenshotDemo::ReadyVideoSend)) {
+            pending_attachment = ComposerAttachment::pick(
+                &demo_media_allowlist().join("demo-clip.mp4"),
+                AttachmentKind::Video,
             );
         }
 
@@ -830,6 +847,22 @@ impl QuillApp {
             ];
             app.spawn_video_tick(cx);
             app.status_note = "screenshot demo — video · playing".into();
+        }
+        if matches!(demo, Some(ScreenshotDemo::ReadyVideoSend)) {
+            app.composer.update(cx, |input, cx| {
+                input.set_value("sending a clip", window, cx);
+            });
+            if let Some(session) = app.demo_session.as_mut() {
+                app.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_video_send(session, &app.demo_sink, &app.demo_seq);
+            }
+            app.playing_video = Some(MessageId(701));
+            app.video_frames = vec![
+                demo_media_allowlist().join("demo-gif-1.png"),
+                demo_media_allowlist().join("demo-gif-2.png"),
+            ];
+            app.spawn_video_tick(cx);
+            app.status_note = "screenshot demo — attach video · own clip playing".into();
         }
         if matches!(demo, Some(ScreenshotDemo::ReadyDrafts)) {
             if let Some(session) = app.demo_session.as_mut() {
@@ -1093,12 +1126,14 @@ impl QuillApp {
         let env_key = match kind {
             AttachmentKind::Photo => "QUILL_ATTACH_PHOTO",
             AttachmentKind::Document => "QUILL_ATTACH_FILE",
+            AttachmentKind::Video => "QUILL_ATTACH_VIDEO",
         };
         let path = std::env::var_os(env_key)
             .map(PathBuf::from)
             .unwrap_or_else(|| match kind {
                 AttachmentKind::Photo => demo_media_allowlist().join("demo-thumb.png"),
                 AttachmentKind::Document => demo_media_allowlist().join("demo-notes.txt"),
+                AttachmentKind::Video => demo_media_allowlist().join("demo-clip.mp4"),
             });
         match ComposerAttachment::pick(&path, kind) {
             Some(att) => {
@@ -1149,6 +1184,28 @@ impl QuillApp {
                 format!(
                     r#"{{"@type":"updateNewMessage","message":{{"id":{id},"chat_id":{},"is_outgoing":true,"content":{{"@type":"messagePhoto","photo":{{"@type":"photo","has_stickers":false,"sizes":[{{"@type":"photoSize","type":"m","photo":{file},"width":240,"height":160,"progressive_sizes":[]}}]}},"caption":{{"@type":"formattedText","text":{},"entities":[]}},"has_spoiler":false,"is_secret":false}}{reply_json}}}}}"#,
                     chat_id.0,
+                    serde_json::to_string(caption).unwrap_or_else(|_| "\"\"".into()),
+                )
+            }
+            Some(att) if att.kind == AttachmentKind::Video => {
+                let path = att.path.to_string_lossy();
+                let file = demo_file_json(902, &path, true);
+                let probe = quill::video::probe_local_video(&att.path).unwrap_or(
+                    quill::video::VideoProbe {
+                        duration: 0,
+                        width: 0,
+                        height: 0,
+                        supports_streaming: false,
+                    },
+                );
+                format!(
+                    r#"{{"@type":"updateNewMessage","message":{{"id":{id},"chat_id":{},"is_outgoing":true,"content":{{"@type":"messageVideo","video":{{"@type":"video","duration":{},"width":{},"height":{},"file_name":{},"mime_type":"video/mp4","has_stickers":false,"supports_streaming":{},"minithumbnail":null,"thumbnail":null,"video":{file}}},"alternative_videos":[],"storyboards":[],"cover":null,"start_timestamp":0,"caption":{{"@type":"formattedText","text":{},"entities":[]}},"show_caption_above_media":false,"has_spoiler":false,"is_secret":false}}}}{reply_json}}}}}"#,
+                    chat_id.0,
+                    probe.duration,
+                    probe.width,
+                    probe.height,
+                    serde_json::to_string(&att.file_name).unwrap_or_else(|_| "\"clip.mp4\"".into()),
+                    probe.supports_streaming,
                     serde_json::to_string(caption).unwrap_or_else(|_| "\"\"".into()),
                 )
             }
@@ -4832,6 +4889,7 @@ impl QuillApp {
                         let label = match att.kind {
                             AttachmentKind::Photo => format!("Photo · {}", att.file_name),
                             AttachmentKind::Document => format!("Document · {}", att.file_name),
+                            AttachmentKind::Video => format!("Video · {}", att.file_name),
                         };
                         label
                     })
@@ -4866,6 +4924,13 @@ impl QuillApp {
                                         Button::new("attach-file").label("Attach file").on_click(
                                             cx.listener(|this, _, _, cx| {
                                                 this.attach_local(AttachmentKind::Document, cx);
+                                            }),
+                                        ),
+                                    )
+                                    .child(
+                                        Button::new("attach-video").label("Attach video").on_click(
+                                            cx.listener(|this, _, _, cx| {
+                                                this.attach_local(AttachmentKind::Video, cx);
                                             }),
                                         ),
                                     )
@@ -5583,6 +5648,26 @@ fn apply_ready_video(session: &mut Session, sink: &Arc<MemorySink>, seq: &Atomic
     );
     let drop_seed = r#"{"@type":"updateDeleteMessages","chat_id":11,"message_ids":[101,102,103],"is_permanent":true,"from_cache":false}"#;
     for json in [playing, waiting, drop_seed.to_string()] {
+        if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
+            session.apply(owned);
+        }
+    }
+}
+
+fn apply_ready_video_send(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let clip_path = demo_media_allowlist()
+        .join("demo-clip.mp4")
+        .to_string_lossy()
+        .into_owned();
+    let thumb_path = demo_thumb_png_path();
+    let clip = demo_file_json(81, &clip_path, true);
+    let thumb = demo_file_json(82, &thumb_path, true);
+    let sent = format!(
+        r#"{{"@type":"updateNewMessage","message":{{"id":701,"chat_id":11,"is_outgoing":true,"content":{{"@type":"messageVideo","video":{{"@type":"video","duration":1,"width":320,"height":180,"file_name":"demo-clip.mp4","mime_type":"video/mp4","has_stickers":false,"supports_streaming":true,"minithumbnail":null,"thumbnail":{{"@type":"thumbnail","format":{{"@type":"thumbnailFormatJpeg"}},"width":240,"height":140,"file":{thumb}}},"video":{clip}}},"alternative_videos":[],"storyboards":[],"cover":null,"start_timestamp":0,"caption":{{"@type":"formattedText","text":"Sent clip","entities":[]}},"show_caption_above_media":false,"has_spoiler":false,"is_secret":false}}}}}}"#
+    );
+    let drop_seed = r#"{"@type":"updateDeleteMessages","chat_id":11,"message_ids":[101,102,103],"is_permanent":true,"from_cache":false}"#;
+    for json in [sent, drop_seed.to_string()] {
         if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
             session.apply(owned);
         }

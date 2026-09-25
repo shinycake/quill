@@ -119,6 +119,8 @@ pub const REQUIRED_SCHEMA_CONSTRUCTORS: &[&str] = &[
     "inputMessageText",
     "inputMessagePhoto",
     "inputMessageDocument",
+    "inputMessageVideo",
+    "inputVideo",
     "inputPhoto",
     "inputDocument",
     "inputFileLocal",
