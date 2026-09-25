@@ -221,6 +221,8 @@ pub enum ScreenshotDemo {
     ReadyVideoNote,
     /// Music file bubble with title, performer, cover, and Play/Pause.
     ReadyAudio,
+    /// Composer audio attach chip plus an own-sent music file in history.
+    ReadyAudioSend,
     /// Composer video attach chip plus an own-sent video playing in history.
     ReadyVideoSend,
     /// Composer video-note attach chip plus an own-sent round note in history.
@@ -634,6 +636,15 @@ impl QuillApp {
                     AuthorizationState::Ready,
                 )
             }
+            Some(ScreenshotDemo::ReadyAudioSend) => {
+                demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
+                (
+                    ConnectUiStatus::DemoReadyChats,
+                    None,
+                    "screenshot demo — local audio attach + own-sent playback".into(),
+                    AuthorizationState::Ready,
+                )
+            }
             Some(ScreenshotDemo::ReadyVideoSend) => {
                 demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
                 (
@@ -694,6 +705,14 @@ impl QuillApp {
             && let Some(att) = ComposerAttachment::pick(
                 &demo_media_allowlist().join("demo-video-note.mp4"),
                 AttachmentKind::VideoNote,
+            )
+        {
+            ComposerAttachment::push_attachment(&mut pending_attachments, att);
+        }
+        if matches!(demo, Some(ScreenshotDemo::ReadyAudioSend))
+            && let Some(att) = ComposerAttachment::pick(
+                &demo_media_allowlist().join("demo-track.mp3"),
+                AttachmentKind::Audio,
             )
         {
             ComposerAttachment::push_attachment(&mut pending_attachments, att);
@@ -949,6 +968,17 @@ impl QuillApp {
             }
             app.playing_audio = Some(MessageId(801));
             app.status_note = "screenshot demo — audio · playing".into();
+        }
+        if matches!(demo, Some(ScreenshotDemo::ReadyAudioSend)) {
+            app.composer.update(cx, |input, cx| {
+                input.set_value("sending a track", window, cx);
+            });
+            if let Some(session) = app.demo_session.as_mut() {
+                app.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_audio_send(session, &app.demo_sink, &app.demo_seq);
+            }
+            app.playing_audio = Some(MessageId(811));
+            app.status_note = "screenshot demo — attach audio · own track playing".into();
         }
         if matches!(demo, Some(ScreenshotDemo::ReadyVideoSend)) {
             app.composer.update(cx, |input, cx| {
@@ -1231,10 +1261,16 @@ impl QuillApp {
                                 att.kind == AttachmentKind::VideoNote
                                     && quill::video::probe_local_video_note(&att.path).is_err()
                             });
+                            let audio_unreadable = snap.attachment.iter().any(|att| {
+                                att.kind == AttachmentKind::Audio
+                                    && quill::audio::probe_local_audio(&att.path).is_err()
+                            });
                             self.status_note = if note_unreadable {
                                 "video note must be a square clip (max 60s, 640px)".into()
                             } else if video_unreadable {
                                 "could not read video duration or size".into()
+                            } else if audio_unreadable {
+                                "could not read audio duration".into()
                             } else {
                                 "could not send message".into()
                             };
@@ -1251,6 +1287,14 @@ impl QuillApp {
                     }) {
                         self.status_note =
                             "video note must be a square clip (max 60s, 640px)".into();
+                        cx.notify();
+                        return;
+                    }
+                    if attachments.iter().any(|att| {
+                        att.kind == AttachmentKind::Audio
+                            && quill::audio::probe_local_audio(&att.path).is_err()
+                    }) {
+                        self.status_note = "could not read audio duration".into();
                         cx.notify();
                         return;
                     }
@@ -1294,6 +1338,7 @@ impl QuillApp {
             AttachmentKind::Document => "QUILL_ATTACH_FILE",
             AttachmentKind::Video => "QUILL_ATTACH_VIDEO",
             AttachmentKind::VideoNote => "QUILL_ATTACH_VIDEO_NOTE",
+            AttachmentKind::Audio => "QUILL_ATTACH_AUDIO",
         };
         let path = std::env::var_os(env_key)
             .map(PathBuf::from)
@@ -1302,6 +1347,7 @@ impl QuillApp {
                 AttachmentKind::Document => demo_media_allowlist().join("demo-notes.txt"),
                 AttachmentKind::Video => demo_media_allowlist().join("demo-clip.mp4"),
                 AttachmentKind::VideoNote => demo_media_allowlist().join("demo-video-note.mp4"),
+                AttachmentKind::Audio => demo_media_allowlist().join("demo-track.mp3"),
             });
         match ComposerAttachment::pick(&path, kind) {
             Some(att) => {
@@ -1387,7 +1433,9 @@ impl QuillApp {
                         serde_json::to_string(item_caption).unwrap_or_else(|_| "\"\"".into()),
                     )
                 }
-                AttachmentKind::Document | AttachmentKind::VideoNote => continue,
+                AttachmentKind::Document | AttachmentKind::VideoNote | AttachmentKind::Audio => {
+                    continue;
+                }
             };
             if let Some(owned) = copy_and_parse(&json, &self.demo_seq, &dyn_sink) {
                 session.apply(owned);
@@ -1454,6 +1502,40 @@ impl QuillApp {
                 format!(
                     r#"{{"@type":"updateNewMessage","message":{{"id":{id},"chat_id":{},"is_outgoing":true,"content":{{"@type":"messageVideoNote","video_note":{{"@type":"videoNote","duration":{},"waveform":"","length":{},"minithumbnail":null,"thumbnail":{thumb_obj},"speech_recognition_result":null,"video":{file}}},"is_viewed":true,"is_secret":false}}}}{reply_json}}}}}"#,
                     chat_id.0, probe.duration, probe.length,
+                )
+            }
+            Some(att) if att.kind == AttachmentKind::Audio => {
+                let path = att.path.to_string_lossy();
+                let file = demo_file_json(905, &path, true);
+                let probe = quill::audio::probe_local_audio(&att.path).unwrap_or(
+                    quill::audio::AudioProbe {
+                        duration: 0,
+                        title: String::new(),
+                        performer: String::new(),
+                    },
+                );
+                let cover = quill::audio::write_album_cover(&att.path);
+                let cover_json = cover
+                    .as_ref()
+                    .map(|thumb| {
+                        let file = demo_file_json(906, &thumb.path.to_string_lossy(), true);
+                        format!(
+                            r#"{{"@type":"thumbnail","format":{{"@type":"thumbnailFormatJpeg"}},"width":{},"height":{},"file":{file}}}"#,
+                            thumb.width, thumb.height
+                        )
+                    })
+                    .unwrap_or_else(|| "null".into());
+                let mime = quill::audio::mime_type_for_path(&att.path);
+                format!(
+                    r#"{{"@type":"updateNewMessage","message":{{"id":{id},"chat_id":{},"is_outgoing":true,"content":{{"@type":"messageAudio","audio":{{"@type":"audio","duration":{},"title":{},"performer":{},"file_name":{},"mime_type":{},"album_cover_minithumbnail":null,"album_cover_thumbnail":{cover_json},"external_album_covers":[],"audio":{file}}},"caption":{{"@type":"formattedText","text":{},"entities":[]}}}}{reply_json}}}}}"#,
+                    chat_id.0,
+                    probe.duration,
+                    serde_json::to_string(&probe.title).unwrap_or_else(|_| "\"\"".into()),
+                    serde_json::to_string(&probe.performer).unwrap_or_else(|_| "\"\"".into()),
+                    serde_json::to_string(&att.file_name)
+                        .unwrap_or_else(|_| "\"track.mp3\"".into()),
+                    serde_json::to_string(mime).unwrap_or_else(|_| "\"audio/mpeg\"".into()),
+                    serde_json::to_string(caption).unwrap_or_else(|_| "\"\"".into()),
                 )
             }
             Some(att) if att.kind == AttachmentKind::Video => {
@@ -5259,6 +5341,7 @@ impl QuillApp {
                             AttachmentKind::Document => format!("Document · {}", att.file_name),
                             AttachmentKind::Video => format!("Video · {}", att.file_name),
                             AttachmentKind::VideoNote => format!("Video note · {}", att.file_name),
+                            AttachmentKind::Audio => format!("Audio · {}", att.file_name),
                         })
                         .collect()
                 } else {
@@ -5308,6 +5391,13 @@ impl QuillApp {
                                             .on_click(cx.listener(|this, _, _, cx| {
                                                 this.attach_local(AttachmentKind::VideoNote, cx);
                                             })),
+                                    )
+                                    .child(
+                                        Button::new("attach-audio").label("Attach audio").on_click(
+                                            cx.listener(|this, _, _, cx| {
+                                                this.attach_local(AttachmentKind::Audio, cx);
+                                            }),
+                                        ),
                                     )
                                     .child(
                                         Button::new("open-gifs")
@@ -6077,6 +6167,26 @@ fn apply_ready_audio(session: &mut Session, sink: &Arc<MemorySink>, seq: &Atomic
     );
     let drop_seed = r#"{"@type":"updateDeleteMessages","chat_id":11,"message_ids":[101,102,103],"is_permanent":true,"from_cache":false}"#;
     for json in [playing, waiting, drop_seed.to_string()] {
+        if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
+            session.apply(owned);
+        }
+    }
+}
+
+fn apply_ready_audio_send(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let track_path = demo_media_allowlist()
+        .join("demo-track.mp3")
+        .to_string_lossy()
+        .into_owned();
+    let cover_path = demo_thumb_png_path();
+    let track = demo_file_json(111, &track_path, true);
+    let cover = demo_file_json(112, &cover_path, true);
+    let sent = format!(
+        r#"{{"@type":"updateNewMessage","message":{{"id":811,"chat_id":11,"is_outgoing":true,"content":{{"@type":"messageAudio","audio":{{"@type":"audio","duration":2,"title":"Night Drive","performer":"Ada Lovelace","file_name":"demo-track.mp3","mime_type":"audio/mpeg","album_cover_minithumbnail":null,"album_cover_thumbnail":{{"@type":"thumbnail","format":{{"@type":"thumbnailFormatJpeg"}},"width":90,"height":90,"file":{cover}}},"external_album_covers":[],"audio":{track}}},"caption":{{"@type":"formattedText","text":"Sent track","entities":[]}}}}}}}}"#
+    );
+    let drop_seed = r#"{"@type":"updateDeleteMessages","chat_id":11,"message_ids":[101,102,103],"is_permanent":true,"from_cache":false}"#;
+    for json in [sent, drop_seed.to_string()] {
         if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
             session.apply(owned);
         }

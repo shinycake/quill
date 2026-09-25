@@ -20,18 +20,18 @@ use crate::telegram::envelope::{
 };
 use crate::telegram::ffi::{LibraryOrigin, TdJsonError, resolve_tdjson_path};
 use crate::telegram::requests::{
-    AnimationSend, SetTdlibParameters, StickerSend, VideoNoteSend, VideoNoteThumbnailSend,
-    VideoSend, add_chat_to_list, add_message_reaction, add_recently_found_chat,
-    check_authentication_code, check_authentication_password, close_chat, close_request,
-    delete_messages, download_file as download_file_request, edit_message_caption,
+    AnimationSend, AudioCoverSend, AudioSend, SetTdlibParameters, StickerSend, VideoNoteSend,
+    VideoNoteThumbnailSend, VideoSend, add_chat_to_list, add_message_reaction,
+    add_recently_found_chat, check_authentication_code, check_authentication_password, close_chat,
+    close_request, delete_messages, download_file as download_file_request, edit_message_caption,
     edit_message_text, forward_messages, get_authorization_state, get_chat_history,
     get_installed_sticker_sets, get_saved_animations, get_sticker_set, input_message_photo,
     input_message_video, load_chats, open_chat, open_message_content, pin_chat_message,
     remove_message_reaction, search_chat_messages, search_chats, search_messages,
-    search_recently_found_chats, send_animation, send_chat_action, send_chat_action_kind,
-    send_document, send_message_album, send_photo, send_sticker, send_text, send_video,
-    send_video_note, send_voice_note, set_authentication_phone_number, set_chat_draft_message,
-    set_chat_notification_settings, unpin_chat_message, view_messages,
+    search_recently_found_chats, send_animation, send_audio, send_chat_action,
+    send_chat_action_kind, send_document, send_message_album, send_photo, send_sticker, send_text,
+    send_video, send_video_note, send_voice_note, set_authentication_phone_number,
+    set_chat_draft_message, set_chat_notification_settings, unpin_chat_message, view_messages,
 };
 use crate::voice::VoiceDraft;
 use std::path::Path;
@@ -1011,7 +1011,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.send_snapshot(snapshot)
     }
 
-    /// Send text, photo, document, or local video via `sendMessage` (TDLib 1.8.67).
+    /// Send text, photo, document, local video, or local audio via `sendMessage` (TDLib 1.8.67).
     pub fn send_snapshot(
         &mut self,
         snapshot: &ComposerSnapshot,
@@ -1052,6 +1052,25 @@ impl<S: JsonSender> ConnectDriver<S> {
                 crate::video::probe_local_video(&att.path)
                     .map_err(|_| ConnectSendError::InvalidRequest)?,
             ),
+            _ => None,
+        };
+        let audio_send = match snapshot.attachment.as_ref() {
+            Some(att) if att.kind == AttachmentKind::Audio => {
+                let probe = crate::audio::probe_local_audio(&att.path)
+                    .map_err(|_| ConnectSendError::InvalidRequest)?;
+                let album_cover =
+                    crate::audio::write_album_cover(&att.path).map(|cover| AudioCoverSend {
+                        path: cover.path.to_string_lossy().into_owned(),
+                        width: cover.width,
+                        height: cover.height,
+                    });
+                Some(AudioSend {
+                    duration: probe.duration,
+                    title: probe.title,
+                    performer: probe.performer,
+                    album_cover,
+                })
+            }
             _ => None,
         };
         let video_note = match snapshot.attachment.as_ref() {
@@ -1106,6 +1125,13 @@ impl<S: JsonSender> ConnectDriver<S> {
                         ConnectSendError::InvalidRequest
                     })?;
                     send_video_note(extra, chat_id, path, &note, reply_to)
+                }
+                AttachmentKind::Audio => {
+                    let audio = audio_send.ok_or_else(|| {
+                        self.session.requests.take(extra);
+                        ConnectSendError::InvalidRequest
+                    })?;
+                    send_audio(extra, chat_id, path, &audio, caption, reply_to)
                 }
             },
             (None, None) => send_text(extra, chat_id, caption, reply_to),
@@ -1164,7 +1190,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                         item_caption,
                     )
                 }
-                AttachmentKind::Document | AttachmentKind::VideoNote => {
+                AttachmentKind::Document | AttachmentKind::VideoNote | AttachmentKind::Audio => {
                     return Err(ConnectSendError::InvalidRequest);
                 }
             };
@@ -3839,6 +3865,56 @@ mod tests {
         );
         assert_eq!(
             driver.send_snapshot(&bad),
+            Err(ConnectSendError::InvalidRequest)
+        );
+
+        let track = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("docs/screenshots/fixtures/demo-track.mp3");
+        let audio_att = ComposerAttachment::pick(&track, AttachmentKind::Audio).unwrap();
+        let audio_path = audio_att.send_path_str().unwrap();
+        let audio_snap = ComposerSnapshot::capture_with_attachment(
+            ChatId(7),
+            driver.session.view_generation,
+            "CANARY_AUDIO_CAP",
+            Some(audio_att),
+        );
+        let audio_extra = driver.send_snapshot(&audio_snap).unwrap();
+        let audio_json: Value = serde_json::from_str(recorder.snapshot().last().unwrap()).unwrap();
+        assert_eq!(audio_json["@extra"], audio_extra.0.to_string());
+        assert_eq!(
+            audio_json["input_message_content"]["@type"],
+            "inputMessageAudio"
+        );
+        let sent_audio = &audio_json["input_message_content"]["audio"];
+        assert_eq!(sent_audio["audio"]["path"], audio_path);
+        assert_eq!(sent_audio["duration"], 2);
+        assert_eq!(sent_audio["title"], "Night Drive");
+        assert_eq!(sent_audio["performer"], "Ada Lovelace");
+        assert!(sent_audio.get("file_name").is_none());
+        assert!(sent_audio.get("mime_type").is_none());
+        assert_eq!(
+            audio_json["input_message_content"]["caption"]["text"],
+            "CANARY_AUDIO_CAP"
+        );
+        let cover = &sent_audio["album_cover_thumbnail"];
+        if !cover.is_null() {
+            assert_eq!(cover["@type"], "inputThumbnail");
+            assert!(
+                cover["thumbnail"]["path"]
+                    .as_str()
+                    .unwrap_or("")
+                    .ends_with(".jpg")
+            );
+        }
+        let notes_as_audio = ComposerAttachment::pick(&doc, AttachmentKind::Audio).unwrap();
+        let bad_audio = ComposerSnapshot::capture_with_attachment(
+            ChatId(7),
+            driver.session.view_generation,
+            "",
+            Some(notes_as_audio),
+        );
+        assert_eq!(
+            driver.send_snapshot(&bad_audio),
             Err(ConnectSendError::InvalidRequest)
         );
 
