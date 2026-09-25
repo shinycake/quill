@@ -1,4 +1,5 @@
 use crate::ids::{ChatId, FileId, MessageId, RequestId, UserId};
+use crate::text::{TextEntity, TextEntityKind, utf16_to_utf8_offset};
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use serde::Deserialize;
@@ -561,7 +562,7 @@ pub struct ParsedMessage {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MessageContent {
-    Text(String),
+    Text(TextContent),
     Photo(PhotoContent),
     Document(DocumentContent),
     Sticker(StickerContent),
@@ -569,10 +570,64 @@ pub enum MessageContent {
     Unsupported { type_name: String },
 }
 
+/// `formattedText` plus optional `messageText.link_preview` (TDLib 1.8.67).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TextContent {
+    pub text: String,
+    pub entities: Vec<TextEntity>,
+    pub link_preview: Option<LinkPreview>,
+}
+
+impl TextContent {
+    pub fn plain(text: impl Into<String>) -> Self {
+        Self {
+            text: text.into(),
+            entities: Vec::new(),
+            link_preview: None,
+        }
+    }
+}
+
+impl From<&str> for TextContent {
+    fn from(text: &str) -> Self {
+        Self::plain(text)
+    }
+}
+
+impl From<String> for TextContent {
+    fn from(text: String) -> Self {
+        Self::plain(text)
+    }
+}
+
+/// `linkPreview` card. Photo comes from `type` when that constructor carries a `photo`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LinkPreview {
+    pub url: String,
+    pub display_url: String,
+    pub site_name: String,
+    pub title: String,
+    pub description: String,
+    pub show_large_media: bool,
+    pub show_media_above_description: bool,
+    pub show_above_text: bool,
+    pub photo: Option<PhotoContent>,
+}
+
+impl LinkPreview {
+    pub fn has_card(&self) -> bool {
+        !self.url.is_empty()
+            || !self.site_name.is_empty()
+            || !self.title.is_empty()
+            || !self.description.is_empty()
+            || self.photo.is_some()
+    }
+}
+
 impl MessageContent {
     pub fn preview(&self) -> String {
         match self {
-            MessageContent::Text(text) => text.chars().take(80).collect(),
+            MessageContent::Text(text) => text.text.chars().take(80).collect(),
             MessageContent::Photo(photo) if photo.caption.is_empty() => "Photo".into(),
             MessageContent::Photo(photo) => photo.caption.chars().take(80).collect(),
             MessageContent::Document(doc) if !doc.caption.is_empty() => {
@@ -1489,10 +1544,7 @@ fn parse_content(value: Option<&Value>) -> (MessageContent, Vec<ParsedFile>) {
         );
     };
     match value.get("@type").and_then(Value::as_str) {
-        Some("messageText") => (
-            MessageContent::Text(parse_formatted_text(value.get("text"))),
-            Vec::new(),
-        ),
+        Some("messageText") => parse_message_text(value),
         Some("messagePhoto") => parse_message_photo(value),
         Some("messageDocument") => parse_message_document(value),
         Some("messageSticker") => parse_message_sticker(value),
@@ -1520,28 +1572,142 @@ fn parse_formatted_text(value: Option<&Value>) -> String {
         .to_string()
 }
 
-fn parse_message_photo(value: &Value) -> (MessageContent, Vec<ParsedFile>) {
-    let photo = value.get("photo");
-    let mut files = Vec::new();
-    let mut sizes = Vec::new();
-    if let Some(entries) = photo.and_then(|p| p.get("sizes")).and_then(Value::as_array) {
-        for entry in entries {
-            let Ok(file) = parse_file(entry.get("photo")) else {
-                continue;
-            };
-            sizes.push(PhotoSizeView {
-                type_name: entry
-                    .get("type")
+fn parse_message_text(value: &Value) -> (MessageContent, Vec<ParsedFile>) {
+    let mut content = parse_text_content(value.get("text"));
+    let (preview, files) = parse_link_preview(value.get("link_preview"));
+    content.link_preview = preview.filter(LinkPreview::has_card);
+    (MessageContent::Text(content), files)
+}
+
+fn parse_text_content(value: Option<&Value>) -> TextContent {
+    let text = parse_formatted_text(value);
+    TextContent {
+        text: text.clone(),
+        entities: parse_link_entities(&text, value),
+        link_preview: None,
+    }
+}
+
+/// Keep `textEntityTypeUrl` and `textEntityTypeTextUrl`. Other entity types are ignored.
+fn parse_link_entities(text: &str, formatted: Option<&Value>) -> Vec<TextEntity> {
+    let Some(entries) = formatted
+        .and_then(|value| value.get("entities"))
+        .and_then(Value::as_array)
+    else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for entry in entries {
+        let offset = int53_or_zero(entry.get("offset"));
+        let length = int53_or_zero(entry.get("length"));
+        if length <= 0 || offset > i32::MAX as i64 || length > i32::MAX as i64 {
+            continue;
+        }
+        let offset = offset as i32;
+        let length = length as i32;
+        let Ok(start) = utf16_to_utf8_offset(text, offset) else {
+            continue;
+        };
+        let end_units = offset.saturating_add(length);
+        let Ok(end) = utf16_to_utf8_offset(text, end_units) else {
+            continue;
+        };
+        if start >= end || end > text.len() {
+            continue;
+        }
+        let type_value = entry.get("type");
+        let kind = match type_value
+            .and_then(|t| t.get("@type"))
+            .and_then(Value::as_str)
+        {
+            Some("textEntityTypeUrl") => TextEntityKind::Url,
+            Some("textEntityTypeTextUrl") => TextEntityKind::TextUrl {
+                url: type_value
+                    .and_then(|t| t.get("url"))
                     .and_then(Value::as_str)
                     .unwrap_or("")
                     .to_string(),
-                width: int53_or_zero(entry.get("width")) as i32,
-                height: int53_or_zero(entry.get("height")) as i32,
-                file_id: file.id,
-            });
-            files.push(file);
-        }
+            },
+            _ => continue,
+        };
+        out.push(TextEntity {
+            utf8_start: start,
+            utf8_end: end,
+            kind,
+        });
     }
+    out
+}
+
+fn parse_link_preview(value: Option<&Value>) -> (Option<LinkPreview>, Vec<ParsedFile>) {
+    let Some(value) = value.filter(|value| !value.is_null()) else {
+        return (None, Vec::new());
+    };
+    if value.get("@type").and_then(Value::as_str) != Some("linkPreview") {
+        return (None, Vec::new());
+    }
+    let (photo, files) = value
+        .get("type")
+        .filter(|preview_type| !preview_type.is_null())
+        .map(parse_link_preview_photo)
+        .unwrap_or((None, Vec::new()));
+    (
+        Some(LinkPreview {
+            url: json_field_str(value, "url"),
+            display_url: json_field_str(value, "display_url"),
+            site_name: json_field_str(value, "site_name"),
+            title: json_field_str(value, "title"),
+            description: parse_formatted_text(value.get("description")),
+            show_large_media: json_bool(value.get("show_large_media"), false),
+            show_media_above_description: json_bool(
+                value.get("show_media_above_description"),
+                false,
+            ),
+            show_above_text: json_bool(value.get("show_above_text"), false),
+            photo,
+        }),
+        files,
+    )
+}
+
+/// Photo on `linkPreviewTypeArticle` / `Photo` (`photo`) and embedded players (`thumbnail` / `cover`).
+fn parse_link_preview_photo(preview_type: &Value) -> (Option<PhotoContent>, Vec<ParsedFile>) {
+    for key in ["photo", "thumbnail", "cover"] {
+        let Some(candidate) = preview_type.get(key).filter(|value| !value.is_null()) else {
+            continue;
+        };
+        let typed_photo = candidate.get("@type").and_then(Value::as_str) == Some("photo");
+        if !typed_photo && candidate.get("sizes").and_then(Value::as_array).is_none() {
+            continue;
+        }
+        let (sizes, files) = parse_photo_sizes(candidate);
+        if sizes.is_empty() {
+            continue;
+        }
+        return (
+            Some(PhotoContent {
+                caption: String::new(),
+                sizes,
+                is_secret: false,
+                has_spoiler: false,
+            }),
+            files,
+        );
+    }
+    (None, Vec::new())
+}
+
+fn json_field_str(value: &Value, key: &str) -> String {
+    value
+        .get(key)
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string()
+}
+
+fn parse_message_photo(value: &Value) -> (MessageContent, Vec<ParsedFile>) {
+    let photo = value.get("photo");
+    let (sizes, files) = photo.map(parse_photo_sizes).unwrap_or_default();
     (
         MessageContent::Photo(PhotoContent {
             caption: parse_formatted_text(value.get("caption")),
@@ -1807,6 +1973,30 @@ fn parse_sticker_set(value: &Value) -> EnvelopePayload {
         stickers,
         files,
     }
+}
+
+fn parse_photo_sizes(photo: &Value) -> (Vec<PhotoSizeView>, Vec<ParsedFile>) {
+    let mut files = Vec::new();
+    let mut sizes = Vec::new();
+    if let Some(entries) = photo.get("sizes").and_then(Value::as_array) {
+        for entry in entries {
+            let Ok(file) = parse_file(entry.get("photo")) else {
+                continue;
+            };
+            sizes.push(PhotoSizeView {
+                type_name: entry
+                    .get("type")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string(),
+                width: int53_or_zero(entry.get("width")) as i32,
+                height: int53_or_zero(entry.get("height")) as i32,
+                file_id: file.id,
+            });
+            files.push(file);
+        }
+    }
+    (sizes, files)
 }
 
 fn parse_file(value: Option<&Value>) -> Result<ParsedFile, ParseError> {
@@ -2100,6 +2290,46 @@ mod tests {
             }
             other => panic!("{other:?}"),
         }
+    }
+
+    #[test]
+    fn message_text_parses_link_entities_and_article_preview() {
+        let text = "see https://example.com and the notes";
+        let url_at = text.find("https").unwrap();
+        let notes_at = text.find("notes").unwrap();
+        let thumb = local_file_json(7, "", false, true);
+        let json = format!(
+            r#"{{"@type":"updateNewMessage","message":{{"id":8,"chat_id":4,"is_outgoing":false,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":{text_json},"entities":[{{"@type":"textEntity","offset":{url_at},"length":19,"type":{{"@type":"textEntityTypeUrl"}}}},{{"@type":"textEntity","offset":{notes_at},"length":5,"type":{{"@type":"textEntityTypeTextUrl","url":"https://example.com/notes"}}}},{{"@type":"textEntity","offset":0,"length":3,"type":{{"@type":"textEntityTypeBold"}}}}]}},"link_preview":{{"@type":"linkPreview","url":"https://example.com/story","display_url":"example.com","site_name":"Example","title":"A short story","description":{{"@type":"formattedText","text":"Preview body","entities":[]}},"author":"","type":{{"@type":"linkPreviewTypeArticle","photo":{{"@type":"photo","has_stickers":false,"minithumbnail":null,"sizes":[{{"@type":"photoSize","type":"m","photo":{thumb},"width":90,"height":90,"progressive_sizes":[]}}]}}}},"has_large_media":false,"show_large_media":false,"show_media_above_description":false,"skip_confirmation":true,"show_above_text":false,"instant_view_version":0}},"link_preview_options":null}}}}}}"#,
+            text_json = serde_json::to_string(text).unwrap(),
+        );
+        let env = parse_envelope(&json).unwrap();
+        let EnvelopePayload::UpdateNewMessage(message) = env.payload else {
+            panic!("expected message");
+        };
+        let MessageContent::Text(content) = message.content else {
+            panic!("expected text");
+        };
+        assert_eq!(content.text, text);
+        assert_eq!(content.entities.len(), 2);
+        assert!(matches!(
+            content.entities[0].kind,
+            crate::text::TextEntityKind::Url
+        ));
+        assert_eq!(
+            content.entities[1].open_href(&content.text),
+            Some("https://example.com/notes")
+        );
+        let preview = content.link_preview.expect("preview");
+        assert_eq!(preview.site_name, "Example");
+        assert_eq!(preview.title, "A short story");
+        assert_eq!(preview.description, "Preview body");
+        assert_eq!(preview.url, "https://example.com/story");
+        assert!(!preview.show_large_media);
+        assert!(!preview.show_above_text);
+        let photo = preview.photo.expect("article photo");
+        assert_eq!(photo.thumb_size().map(|size| size.file_id), Some(FileId(7)));
+        assert_eq!(message.files.len(), 1);
+        assert_eq!(message.files[0].id, FileId(7));
     }
 
     fn local_file_json(id: i32, path: &str, completed: bool, can_download: bool) -> String {

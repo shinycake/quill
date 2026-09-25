@@ -37,7 +37,7 @@ use std::process::{Child, Command, Stdio};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
-use synthetic::{SyntheticChat, session_bubble_quoted};
+use synthetic::{SyntheticChat, session_bubble_quoted, session_bubble_rich};
 use zeroize::Zeroize;
 
 actions!(
@@ -181,6 +181,8 @@ pub enum ScreenshotDemo {
     ReadyStickers,
     /// Voice record bar + history playback (injected, no live Telegram).
     ReadyVoice,
+    /// Link entities + web page (`linkPreview`) card (injected, no live Telegram).
+    ReadyLinkPreview,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -540,6 +542,15 @@ impl QuillApp {
                     AuthorizationState::Ready,
                 )
             }
+            Some(ScreenshotDemo::ReadyLinkPreview) => {
+                demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
+                (
+                    ConnectUiStatus::DemoReadyChats,
+                    None,
+                    "screenshot demo — link + web page preview".into(),
+                    AuthorizationState::Ready,
+                )
+            }
             None => bootstrap_connect(credentials),
         };
 
@@ -722,6 +733,13 @@ impl QuillApp {
             ));
             app.playing_voice = Some(MessageId(91));
             app.status_note = "screenshot demo — recording voice · playing voice note".into();
+        }
+        if matches!(demo, Some(ScreenshotDemo::ReadyLinkPreview)) {
+            if let Some(session) = app.demo_session.as_mut() {
+                app.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_link_preview(session, &app.demo_sink, &app.demo_seq);
+            }
+            app.status_note = "screenshot demo — link preview".into();
         }
         if app.live.is_some() {
             app.spawn_poll_loop(cx);
@@ -1072,7 +1090,11 @@ impl QuillApp {
                     match &mut message.content {
                         MessageContent::Photo(photo) => photo.caption = text.to_string(),
                         MessageContent::Document(doc) => doc.caption = text.to_string(),
-                        MessageContent::Text(body) => *body = text.to_string(),
+                        MessageContent::Text(body) => {
+                            body.text = text.to_string();
+                            body.entities.clear();
+                            body.link_preview = None;
+                        }
                         MessageContent::VoiceNote(note) => note.caption = text.to_string(),
                         MessageContent::Sticker(_) | MessageContent::Unsupported { .. } => {}
                     }
@@ -1159,6 +1181,15 @@ impl QuillApp {
         }
         let text = self.composer.read(cx).value().to_string();
         self.sync_composer_typing(&text);
+        cx.notify();
+    }
+
+    fn open_message_url(&mut self, url: &str, cx: &mut Context<Self>) {
+        self.status_note = if quill::platform::open_external_url(url) {
+            "opened link".into()
+        } else {
+            "could not open link".into()
+        };
         cx.notify();
     }
 
@@ -4374,6 +4405,21 @@ fn seed_ready_unread_read_session(sink: Arc<MemorySink>) -> Session {
     seed_demo_session(sink, DemoSeed::AfterMarkRead)
 }
 
+fn apply_ready_link_preview(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let thumb = demo_file_json(41, &demo_thumb_png_path(), true);
+    let body = "see https://example.com/story";
+    let url_at = body.find("https").unwrap();
+    let url_len = "https://example.com/story".len();
+    let text_json = serde_json::to_string(body).unwrap();
+    let json = format!(
+        r#"{{"@type":"updateMessageContent","chat_id":11,"message_id":101,"new_content":{{"@type":"messageText","text":{{"@type":"formattedText","text":{text_json},"entities":[{{"@type":"textEntity","offset":{url_at},"length":{url_len},"type":{{"@type":"textEntityTypeUrl"}}}}]}},"link_preview":{{"@type":"linkPreview","url":"https://example.com/story","display_url":"example.com","site_name":"Example","title":"A short story","description":{{"@type":"formattedText","text":"Telegram-style link preview for a private chat.","entities":[]}},"author":"","type":{{"@type":"linkPreviewTypeArticle","photo":{{"@type":"photo","has_stickers":false,"minithumbnail":null,"sizes":[{{"@type":"photoSize","type":"m","photo":{thumb},"width":90,"height":90,"progressive_sizes":[]}}]}}}},"has_large_media":true,"show_large_media":false,"show_media_above_description":false,"skip_confirmation":true,"show_above_text":false,"instant_view_version":0}},"link_preview_options":null}}}}"#
+    );
+    if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
+        session.apply(owned);
+    }
+}
+
 fn seed_ready_media_session(sink: Arc<MemorySink>) -> Session {
     seed_demo_session(sink, DemoSeed::Media)
 }
@@ -5178,6 +5224,17 @@ fn session_history_row(
         }
         row
     });
+    let text_body = match &message.content {
+        MessageContent::Text(text) => Some(message_text_block(
+            message.id.0 as u64,
+            text,
+            files,
+            downloading,
+            media_roots,
+            cx,
+        )),
+        _ => None,
+    };
     let extra_media = match &message.content {
         MessageContent::Photo(photo) => Some(photo_attachment(
             message.id.0 as u64,
@@ -5234,13 +5291,23 @@ fn session_history_row(
             .into_any_element(),
     );
     let body = match &message.content {
-        MessageContent::Text(text) => text.clone(),
+        MessageContent::Text(_) => String::new(),
         MessageContent::Unsupported { type_name } => format!("({type_name})"),
         MessageContent::Photo(photo) => photo.caption.clone(),
         MessageContent::Document(doc) => doc.caption.clone(),
         MessageContent::Sticker(_) => String::new(),
         MessageContent::VoiceNote(note) => note.caption.clone(),
     };
+    if let Some(text_body) = text_body {
+        return session_bubble_rich(
+            message.id.0 as u64,
+            label,
+            message.is_outgoing,
+            text_body,
+            extra,
+            header,
+        );
+    }
     session_bubble_quoted(
         message.id.0 as u64,
         label,
@@ -5249,6 +5316,215 @@ fn session_history_row(
         extra,
         header,
     )
+}
+
+fn message_text_block(
+    row_id: u64,
+    text: &quill::telegram::envelope::TextContent,
+    files: &HashMap<i32, ParsedFile>,
+    downloading: &std::collections::HashSet<i32>,
+    media_roots: &[PathBuf],
+    cx: &mut Context<QuillApp>,
+) -> AnyElement {
+    let runs = quill::text::link_runs(&text.text, &text.entities);
+    let mut line = div()
+        .id(("msg-text", row_id))
+        .text_sm()
+        .flex()
+        .flex_wrap()
+        .gap_0();
+    if runs.is_empty() {
+        line = line.child(text.text.clone());
+    }
+    for (index, run) in runs.into_iter().enumerate() {
+        if let Some(href) = run.href.clone() {
+            line = line.child(
+                div()
+                    .id(("msg-link", row_id * 32 + index as u64))
+                    .text_color(rgb(0x9ecbff))
+                    .underline()
+                    .cursor_pointer()
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.open_message_url(&href, cx);
+                    }))
+                    .child(run.text),
+            );
+        } else if !run.text.is_empty() {
+            line = line.child(run.text);
+        }
+    }
+    let card = text.link_preview.as_ref().and_then(|preview| {
+        preview
+            .has_card()
+            .then(|| link_preview_card(row_id, preview, files, downloading, media_roots, cx))
+    });
+    let above = text
+        .link_preview
+        .as_ref()
+        .is_some_and(|preview| preview.show_above_text);
+    let has_text = !text.text.is_empty();
+    let mut block = div().id(("msg-text-block", row_id)).flex().flex_col();
+    if above {
+        block = block.when_some(card, |this, card| this.child(card));
+        if has_text {
+            block = block.child(line);
+        }
+    } else {
+        if has_text {
+            block = block.child(line);
+        }
+        block = block.when_some(card, |this, card| this.child(card));
+    }
+    block.into_any_element()
+}
+
+fn link_preview_card(
+    row_id: u64,
+    preview: &quill::telegram::envelope::LinkPreview,
+    files: &HashMap<i32, ParsedFile>,
+    downloading: &std::collections::HashSet<i32>,
+    media_roots: &[PathBuf],
+    cx: &mut Context<QuillApp>,
+) -> AnyElement {
+    let url = preview.url.clone();
+    let site_empty = preview.site_name.is_empty();
+    let title_empty = preview.title.is_empty();
+    let description_empty = preview.description.is_empty();
+    let site = preview.site_name.clone();
+    let title = preview.title.clone();
+    let description = preview.description.clone();
+    let display = if preview.display_url.is_empty() {
+        preview.url.clone()
+    } else {
+        preview.display_url.clone()
+    };
+    let thumb = preview.photo.as_ref().map(|photo| {
+        preview_thumb(
+            row_id,
+            photo,
+            preview.show_large_media,
+            files,
+            downloading,
+            media_roots,
+        )
+    });
+    let mut copy = div()
+        .id(("link-preview-copy", row_id))
+        .flex()
+        .flex_col()
+        .min_w_0()
+        .gap_0();
+    if !site_empty {
+        copy = copy.child(
+            div()
+                .text_xs()
+                .font_medium()
+                .text_color(rgb(0x58a6ff))
+                .child(site),
+        );
+    }
+    if !title_empty {
+        copy = copy.child(div().text_sm().font_medium().child(title));
+    }
+    if !description_empty {
+        copy = copy.child(div().text_xs().text_color(rgb(0xc9d1d9)).child(description));
+    }
+    if site_empty && title_empty && description_empty && !display.is_empty() {
+        copy = copy.child(div().text_xs().text_color(rgb(0x58a6ff)).child(display));
+    }
+    let body = if preview.show_large_media {
+        let mut column = div()
+            .id(("link-preview-large", row_id))
+            .flex()
+            .flex_col()
+            .gap_1();
+        if preview.show_media_above_description {
+            column = column.when_some(thumb, |this, thumb| this.child(thumb));
+            column = column.child(copy);
+        } else {
+            column = column.child(copy);
+            column = column.when_some(thumb, |this, thumb| this.child(thumb));
+        }
+        column.into_any_element()
+    } else {
+        div()
+            .id(("link-preview-small", row_id))
+            .flex()
+            .items_start()
+            .gap_2()
+            .child(copy.flex_1())
+            .when_some(thumb, |this, thumb| this.child(thumb))
+            .into_any_element()
+    };
+    div()
+        .id(("link-preview", row_id))
+        .mt_2()
+        .px_2()
+        .py_1()
+        .rounded_md()
+        .border_l_2()
+        .border_color(rgb(0x58a6ff))
+        .bg(rgb(0x161b22))
+        .cursor_pointer()
+        .on_click(cx.listener(move |this, _, _, cx| {
+            this.open_message_url(&url, cx);
+        }))
+        .child(body)
+        .into_any_element()
+}
+
+fn preview_thumb(
+    row_id: u64,
+    photo: &quill::telegram::envelope::PhotoContent,
+    large: bool,
+    files: &HashMap<i32, ParsedFile>,
+    downloading: &std::collections::HashSet<i32>,
+    media_roots: &[PathBuf],
+) -> AnyElement {
+    let (w, h) = if large {
+        (px(240.), px(140.))
+    } else {
+        (px(72.), px(72.))
+    };
+    if let Some(path) = photo_display_path(photo, files, media_roots) {
+        return img(path)
+            .id(("link-preview-img", row_id))
+            .w(w)
+            .h(h)
+            .rounded_md()
+            .object_fit(ObjectFit::Cover)
+            .flex_shrink_0()
+            .with_fallback(move || {
+                div()
+                    .w(w)
+                    .h(h)
+                    .rounded_md()
+                    .bg(rgb(0x444c56))
+                    .into_any_element()
+            })
+            .into_any_element();
+    }
+    let file_id = photo
+        .thumb_size()
+        .map(|size| size.file_id)
+        .unwrap_or(FileId(0));
+    let label = if file_is_downloading(file_id, files, downloading) {
+        "…"
+    } else {
+        "Preview"
+    };
+    div()
+        .id(("link-preview-ph", row_id))
+        .w(w)
+        .h(h)
+        .rounded_md()
+        .bg(rgb(0x444c56))
+        .flex()
+        .flex_shrink_0()
+        .items_center()
+        .justify_center()
+        .child(div().text_xs().text_color(rgb(0xffffff)).child(label))
+        .into_any_element()
 }
 
 fn forward_from_strip(row_id: MessageId, label: String) -> AnyElement {

@@ -204,17 +204,35 @@ pub(crate) fn session_bubble_quoted(
         row(id, sender, body, SyntheticKind::Text, outgoing),
         extra,
         quote,
+        None,
+    )
+}
+
+pub(crate) fn session_bubble_rich(
+    id: u64,
+    sender: impl Into<SharedString>,
+    outgoing: bool,
+    body: AnyElement,
+    extra: Option<AnyElement>,
+    quote: Option<AnyElement>,
+) -> AnyElement {
+    message_bubble_with_quote(
+        row(id, sender, "", SyntheticKind::Text, outgoing),
+        extra,
+        quote,
+        Some(body),
     )
 }
 
 fn message_bubble(row: SyntheticRow) -> AnyElement {
-    message_bubble_with_quote(row, None, None)
+    message_bubble_with_quote(row, None, None, None)
 }
 
 fn message_bubble_with_quote(
     row: SyntheticRow,
     extra: Option<AnyElement>,
     quote: Option<AnyElement>,
+    body_el: Option<AnyElement>,
 ) -> AnyElement {
     let image_h = match row.kind {
         SyntheticKind::Image { loaded: false } => px(40.),
@@ -224,6 +242,7 @@ fn message_bubble_with_quote(
     let rtl = matches!(row.kind, SyntheticKind::Rtl | SyntheticKind::Emoji);
     let body = row.body.clone();
     let has_body = !body.is_empty();
+    let rich_body = body_el.is_some();
     let bubble = div()
         .id(("bubble", row.id))
         .max_w(px(520.))
@@ -239,7 +258,10 @@ fn message_bubble_with_quote(
         .when(rtl, |this| this.text_right())
         .child(div().text_xs().opacity(0.8).child(row.sender.clone()))
         .when_some(quote, |this, quote| this.child(quote))
-        .when(has_body, |this| this.child(div().text_sm().child(body)))
+        .when_some(body_el, |this, body_el| this.child(body_el))
+        .when(!rich_body && has_body, |this| {
+            this.child(div().text_sm().child(body))
+        })
         .when(image_h > px(0.), |this| {
             this.child(
                 div()

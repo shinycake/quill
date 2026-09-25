@@ -28,6 +28,7 @@ Captured from a real GPUI window on 2026-09-17 (Linux Xvfb + lavapipe). **Not** 
 | `ready-typing.png` | Ready chat open with **typing…** in the header and the sidebar row. Injected `updateChatAction` / `chatActionTyping`, no live Telegram. Driven by `quill --screenshot-demo ready-typing`. |
 | `ready-stickers.png` | Ready chat open, **Stickers** panel (installed set + thumb) and a sticker in history. Injected `getInstalledStickerSets` / `getStickerSet` / `messageSticker`, no live Telegram. Driven by `quill --screenshot-demo ready-stickers`. |
 | `ready-voice.png` | Ready chat open, **Recording voice** bar (duration, waveform, Cancel, Send) plus history voice notes (incoming **New** / **Play**, outgoing **Pause** while playing). Injected `messageVoiceNote`, no live Telegram. Driven by `quill --screenshot-demo ready-voice`. |
+| `ready-link-preview.png` | Ready chat open, a message URL plus a **link preview** card (site name, title, description, photo). Injected `messageText` / `textEntityTypeUrl` / `linkPreview`, no live Telegram. Driven by `quill --screenshot-demo ready-link-preview`. |
 | `fixtures/demo-voice.ogg` | Tiny local file used as the completed voice `local.path` in the voice demo (not a screenshot). |
 | `fixtures/demo-thumb.png` | Tiny checkerboard PNG used as the completed photo `local.path` in the media demo (not a screenshot). |
 | `fixtures/demo-notes.txt` | Tiny text file used for outgoing document attach / send demos (not a screenshot). |
@@ -59,6 +60,7 @@ bash scripts/capture-connect-screenshots.sh
 #   cargo run --features ui -- --screenshot-demo ready-typing docs/screenshots
 #   cargo run --features ui -- --screenshot-demo ready-stickers docs/screenshots
 #   cargo run --features ui -- --screenshot-demo ready-voice docs/screenshots
+#   cargo run --features ui -- --screenshot-demo ready-link-preview docs/screenshots
 ```
 
 Environment used by the script: `DISPLAY`, `LIBGL_ALWAYS_SOFTWARE=1`, `WGPU_BACKEND=vulkan`, `VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json`.

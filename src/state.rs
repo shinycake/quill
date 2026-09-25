@@ -1687,6 +1687,15 @@ impl Session {
                         ids.push(size.file_id);
                     }
                 }
+                MessageContent::Text(text) => {
+                    if let Some(preview) = &text.link_preview
+                        && let Some(photo) = &preview.photo
+                        && let Some(size) = photo.thumb_size()
+                        && self.should_download(size.file_id)
+                    {
+                        ids.push(size.file_id);
+                    }
+                }
                 MessageContent::Sticker(sticker) => {
                     if let Some(file_id) = sticker.display_file_id()
                         && self.should_download(file_id)
