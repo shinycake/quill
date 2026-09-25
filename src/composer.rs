@@ -171,7 +171,9 @@ impl ComposerEdit {
                 (ComposerEditKind::Caption, animation.caption.clone())
             }
             MessageContent::Video(video) => (ComposerEditKind::Caption, video.caption.clone()),
-            MessageContent::Sticker(_) | MessageContent::Unsupported { .. } => return None,
+            MessageContent::VideoNote(_)
+            | MessageContent::Sticker(_)
+            | MessageContent::Unsupported { .. } => return None,
         };
         Some(Self {
             chat_id,
