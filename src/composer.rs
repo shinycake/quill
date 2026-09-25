@@ -38,11 +38,13 @@ pub fn enter_event_from_kit(
     }
 }
 
-/// How the user chose to send a local file (`inputMessagePhoto` vs document).
+/// How the user chose to send a local file.
+/// Video is `inputMessageVideo`, not a document (tdesktop Photo/Video vs File).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AttachmentKind {
     Photo,
     Document,
+    Video,
 }
 
 /// A local file the user explicitly attached. Path is canonical at pick time.

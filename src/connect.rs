@@ -20,14 +20,15 @@ use crate::telegram::envelope::{
 };
 use crate::telegram::ffi::{LibraryOrigin, TdJsonError, resolve_tdjson_path};
 use crate::telegram::requests::{
-    AnimationSend, SetTdlibParameters, StickerSend, add_chat_to_list, add_message_reaction,
-    add_recently_found_chat, check_authentication_code, check_authentication_password, close_chat,
-    close_request, delete_messages, download_file as download_file_request, edit_message_caption,
-    edit_message_text, forward_messages, get_authorization_state, get_chat_history,
-    get_installed_sticker_sets, get_saved_animations, get_sticker_set, load_chats, open_chat,
-    open_message_content, pin_chat_message, remove_message_reaction, search_chat_messages,
-    search_chats, search_messages, search_recently_found_chats, send_animation, send_chat_action,
-    send_chat_action_kind, send_document, send_photo, send_sticker, send_text, send_voice_note,
+    AnimationSend, SetTdlibParameters, StickerSend, VideoSend, add_chat_to_list,
+    add_message_reaction, add_recently_found_chat, check_authentication_code,
+    check_authentication_password, close_chat, close_request, delete_messages,
+    download_file as download_file_request, edit_message_caption, edit_message_text,
+    forward_messages, get_authorization_state, get_chat_history, get_installed_sticker_sets,
+    get_saved_animations, get_sticker_set, load_chats, open_chat, open_message_content,
+    pin_chat_message, remove_message_reaction, search_chat_messages, search_chats, search_messages,
+    search_recently_found_chats, send_animation, send_chat_action, send_chat_action_kind,
+    send_document, send_photo, send_sticker, send_text, send_video, send_voice_note,
     set_authentication_phone_number, set_chat_draft_message, set_chat_notification_settings,
     unpin_chat_message, view_messages,
 };
@@ -1009,7 +1010,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.send_snapshot(snapshot)
     }
 
-    /// Send text, photo, or document via `sendMessage` (TDLib 1.8.67).
+    /// Send text, photo, document, or local video via `sendMessage` (TDLib 1.8.67).
     pub fn send_snapshot(
         &mut self,
         snapshot: &ComposerSnapshot,
@@ -1042,6 +1043,13 @@ impl<S: JsonSender> ConnectDriver<S> {
             ),
             None => None,
         };
+        let video_probe = match snapshot.attachment.as_ref() {
+            Some(att) if att.kind == AttachmentKind::Video => Some(
+                crate::video::probe_local_video(&att.path)
+                    .map_err(|_| ConnectSendError::InvalidRequest)?,
+            ),
+            _ => None,
+        };
         let extra = self
             .session
             .request(RequestPurpose::SendMessage, Some(chat_id));
@@ -1050,6 +1058,25 @@ impl<S: JsonSender> ConnectDriver<S> {
             (Some(att), Some(path)) => match att.kind {
                 AttachmentKind::Photo => send_photo(extra, chat_id, path, caption, reply_to),
                 AttachmentKind::Document => send_document(extra, chat_id, path, caption, reply_to),
+                AttachmentKind::Video => {
+                    let probe = video_probe.ok_or_else(|| {
+                        self.session.requests.take(extra);
+                        ConnectSendError::InvalidRequest
+                    })?;
+                    send_video(
+                        extra,
+                        chat_id,
+                        path,
+                        &VideoSend {
+                            duration: probe.duration,
+                            width: probe.width,
+                            height: probe.height,
+                            supports_streaming: probe.supports_streaming,
+                        },
+                        caption,
+                        reply_to,
+                    )
+                }
             },
             (None, None) => send_text(extra, chat_id, caption, reply_to),
             _ => {
@@ -3636,6 +3663,43 @@ mod tests {
             doc_path
         );
         assert_eq!(doc_json["input_message_content"]["caption"]["text"], "");
+
+        let clip = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("docs/screenshots/fixtures/demo-clip.mp4");
+        let video_att = ComposerAttachment::pick(&clip, AttachmentKind::Video).unwrap();
+        let video_path = video_att.send_path_str().unwrap();
+        let video_snap = ComposerSnapshot::capture_with_attachment(
+            ChatId(7),
+            driver.session.view_generation,
+            "CANARY_VIDEO_CAP",
+            Some(video_att),
+        );
+        let video_extra = driver.send_snapshot(&video_snap).unwrap();
+        let video_json: Value = serde_json::from_str(recorder.snapshot().last().unwrap()).unwrap();
+        assert_eq!(video_json["@extra"], video_extra.0.to_string());
+        assert_eq!(
+            video_json["input_message_content"]["@type"],
+            "inputMessageVideo"
+        );
+        assert_eq!(
+            video_json["input_message_content"]["video"]["video"]["path"],
+            video_path
+        );
+        assert_eq!(
+            video_json["input_message_content"]["video"]["thumbnail"],
+            Value::Null
+        );
+        assert_eq!(video_json["input_message_content"]["video"]["duration"], 1);
+        assert_eq!(video_json["input_message_content"]["video"]["width"], 320);
+        assert_eq!(video_json["input_message_content"]["video"]["height"], 180);
+        assert_eq!(
+            video_json["input_message_content"]["video"]["supports_streaming"],
+            true
+        );
+        assert_eq!(
+            video_json["input_message_content"]["caption"]["text"],
+            "CANARY_VIDEO_CAP"
+        );
 
         // Reject paths that were not picked through ComposerAttachment.
         let forged = ComposerSnapshot::capture_with_attachment(
