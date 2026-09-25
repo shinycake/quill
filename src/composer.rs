@@ -141,7 +141,7 @@ impl ComposerEdit {
             return None;
         }
         let (kind, original_text) = match content {
-            MessageContent::Text(text) => (ComposerEditKind::Text, text.clone()),
+            MessageContent::Text(text) => (ComposerEditKind::Text, text.text.clone()),
             MessageContent::Photo(photo) => (ComposerEditKind::Caption, photo.caption.clone()),
             MessageContent::Document(doc) => (ComposerEditKind::Caption, doc.caption.clone()),
             MessageContent::VoiceNote(note) => (ComposerEditKind::Caption, note.caption.clone()),

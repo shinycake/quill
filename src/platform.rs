@@ -332,6 +332,35 @@ pub mod keychain {
     }
 }
 
+/// Open an `http`/`https` URL with the OS (`xdg-open` / `open`). No WebView.
+///
+/// The argument is passed without a shell. Non-HTTP schemes are refused so a
+/// message entity cannot launch a local file or a command.
+pub fn open_external_url(url: &str) -> bool {
+    if !crate::text::openable_http_url(url) {
+        return false;
+    }
+    let url = url.trim();
+    let mut command = external_open_command(url);
+    command.spawn().is_ok()
+}
+
+fn external_open_command(url: &str) -> std::process::Command {
+    if cfg!(target_os = "macos") {
+        let mut command = std::process::Command::new("open");
+        command.arg(url);
+        command
+    } else if cfg!(target_os = "windows") {
+        let mut command = std::process::Command::new("cmd");
+        command.args(["/C", "start", "", url]);
+        command
+    } else {
+        let mut command = std::process::Command::new("xdg-open");
+        command.arg(url);
+        command
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
