@@ -2982,11 +2982,10 @@ mod tests {
         );
         assert_eq!(sent["input_message_content"]["voice_note"]["duration"], 3);
         assert!(
-            sent["input_message_content"]["voice_note"]["waveform"]
+            !sent["input_message_content"]["voice_note"]["waveform"]
                 .as_str()
                 .unwrap()
-                .len()
-                > 0
+                .is_empty()
         );
         assert_eq!(sent["input_message_content"]["caption"], Value::Null);
         assert_eq!(sent["reply_to"]["message_id"], 4);
