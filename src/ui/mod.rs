@@ -169,6 +169,8 @@ pub enum ScreenshotDemo {
     ReadyMuteArchive,
     /// Peer `chatActionTyping` in the open-chat header and sidebar row.
     ReadyTyping,
+    /// Sticker panel + sticker in history (injected, no live Telegram).
+    ReadyStickers,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -510,6 +512,15 @@ impl QuillApp {
                     AuthorizationState::Ready,
                 )
             }
+            Some(ScreenshotDemo::ReadyStickers) => {
+                demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
+                (
+                    ConnectUiStatus::DemoReadyChats,
+                    None,
+                    "screenshot demo — sticker panel + sticker in history".into(),
+                    AuthorizationState::Ready,
+                )
+            }
             None => bootstrap_connect(credentials),
         };
 
@@ -667,6 +678,13 @@ impl QuillApp {
                 apply_ready_typing(session, &app.demo_sink, &app.demo_seq);
             }
             app.status_note = "screenshot demo — typing…".into();
+        }
+        if matches!(demo, Some(ScreenshotDemo::ReadyStickers)) {
+            if let Some(session) = app.demo_session.as_mut() {
+                app.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_stickers(session, &app.demo_sink, &app.demo_seq);
+            }
+            app.status_note = "screenshot demo — stickers · tap to send".into();
         }
         if app.live.is_some() {
             app.spawn_poll_loop(cx);
@@ -956,6 +974,42 @@ impl QuillApp {
         }
     }
 
+    fn apply_demo_sticker(
+        &mut self,
+        chat_id: ChatId,
+        emoji: &str,
+        file_id: FileId,
+        reply: Option<MessageId>,
+    ) {
+        let Some(session) = self.demo_session.as_mut() else {
+            return;
+        };
+        let dyn_sink: Arc<dyn DiagnosticSink> = self.demo_sink.clone();
+        let id = -(session.view_generation.0 as i64);
+        let path = session
+            .files
+            .get(&file_id.0)
+            .and_then(|file| file.usable_path())
+            .unwrap_or("");
+        let file = demo_file_json(file_id.0, path, !path.is_empty());
+        let reply_json = reply
+            .map(|message_id| {
+                format!(
+                    r#","reply_to":{{"@type":"messageReplyToMessage","chat_id":{},"message_id":{},"quote":null,"checklist_task_id":0,"poll_option_id":""}}"#,
+                    chat_id.0, message_id.0
+                )
+            })
+            .unwrap_or_default();
+        let emoji = serde_json::to_string(emoji).unwrap_or_else(|_| "\"\"".into());
+        let json = format!(
+            r#"{{"@type":"updateNewMessage","message":{{"id":{id},"chat_id":{},"is_outgoing":true,"content":{{"@type":"messageSticker","is_premium":false,"sticker":{{"@type":"sticker","id":"0","set_id":"0","width":512,"height":512,"emoji":{emoji},"format":{{"@type":"stickerFormatWebp"}},"full_type":{{"@type":"stickerFullTypeRegular","premium_animation":null}},"thumbnail":{{"@type":"thumbnail","format":{{"@type":"thumbnailFormatPng"}},"width":128,"height":128,"file":{file}}},"sticker":{file}}}}}{reply_json}}}}}"#,
+            chat_id.0
+        );
+        if let Some(owned) = copy_and_parse(&json, &self.demo_seq, &dyn_sink) {
+            session.apply(owned);
+        }
+    }
+
     fn apply_demo_edit(&mut self, edit: &ComposerEdit, text: &str) {
         let Some(session) = self.demo_session.as_mut() else {
             return;
@@ -982,7 +1036,7 @@ impl QuillApp {
                         MessageContent::Photo(photo) => photo.caption = text.to_string(),
                         MessageContent::Document(doc) => doc.caption = text.to_string(),
                         MessageContent::Text(body) => *body = text.to_string(),
-                        MessageContent::Unsupported { .. } => {}
+                        MessageContent::Sticker(_) | MessageContent::Unsupported { .. } => {}
                     }
                 }
             }
@@ -1039,6 +1093,13 @@ impl QuillApp {
             .is_some_and(|(react_chat, _)| react_chat != chat_id)
         {
             self.pending_react = None;
+        }
+        if self.sticker_panel_open() {
+            if let Some(live) = self.live.as_mut() {
+                live.driver.close_sticker_panel();
+            } else if let Some(session) = self.demo_session.as_mut() {
+                session.stickers.close();
+            }
         }
         if self.live.is_some() {
             let result = self
@@ -1232,6 +1293,10 @@ impl QuillApp {
     }
 
     fn cancel_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.sticker_panel_open() {
+            self.close_sticker_panel(cx);
+            return;
+        }
         if self.mute_menu_open {
             self.close_mute_menu(cx);
             return;
@@ -1607,6 +1672,94 @@ impl QuillApp {
     fn close_reaction_picker(&mut self, cx: &mut Context<Self>) {
         self.pending_react = None;
         self.status_note = "reaction picker closed".into();
+        cx.notify();
+    }
+
+    fn sticker_panel_open(&self) -> bool {
+        self.session().is_some_and(|session| session.stickers.open)
+    }
+
+    fn toggle_sticker_panel(&mut self, cx: &mut Context<Self>) {
+        if self.sticker_panel_open() {
+            self.close_sticker_panel(cx);
+            return;
+        }
+        if let Some(live) = self.live.as_mut() {
+            self.status_note = match live.driver.open_sticker_panel() {
+                Ok(_) => "stickers".into(),
+                Err(_) => "could not open stickers".into(),
+            };
+        } else if let Some(session) = self.demo_session.as_mut() {
+            session.stickers.open = true;
+            self.status_note = "stickers".into();
+        }
+        cx.notify();
+    }
+
+    fn close_sticker_panel(&mut self, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            live.driver.close_sticker_panel();
+        } else if let Some(session) = self.demo_session.as_mut() {
+            session.stickers.close();
+        }
+        self.status_note = "stickers closed".into();
+        cx.notify();
+    }
+
+    fn select_sticker_set(&mut self, set_id: i64, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            self.status_note = match live.driver.select_sticker_set(set_id) {
+                Ok(_) => "sticker set".into(),
+                Err(_) => "could not open sticker set".into(),
+            };
+        } else if let Some(session) = self.demo_session.as_mut() {
+            session.select_sticker_set(set_id);
+            self.status_note = "sticker set".into();
+        }
+        cx.notify();
+    }
+
+    fn send_sticker_pick(
+        &mut self,
+        file_id: FileId,
+        emoji: String,
+        width: i32,
+        height: i32,
+        thumb: Option<(FileId, i32, i32)>,
+        cx: &mut Context<Self>,
+    ) {
+        let chat_id = self.session().and_then(|session| session.open_chat);
+        let Some(chat_id) = chat_id else {
+            return;
+        };
+        let reply = self
+            .pending_reply
+            .as_ref()
+            .filter(|reply| reply.chat_id == chat_id)
+            .map(|reply| reply.message_id);
+        if let Some(live) = self.live.as_mut() {
+            self.status_note = match live.driver.send_sticker(
+                chat_id,
+                quill::telegram::requests::StickerSend {
+                    file_id,
+                    emoji: &emoji,
+                    width,
+                    height,
+                    thumb,
+                    reply_to: reply,
+                },
+            ) {
+                Ok(_) => "sticker sent".into(),
+                Err(_) => "could not send sticker".into(),
+            };
+            if reply.is_some() {
+                self.pending_reply = None;
+            }
+        } else if self.demo_session.is_some() {
+            self.apply_demo_sticker(chat_id, &emoji, file_id, reply);
+            self.pending_reply = None;
+            self.status_note = "sticker sent".into();
+        }
         cx.notify();
     }
 
@@ -2170,6 +2323,158 @@ impl QuillApp {
                     .child("Tap an emoji to react. Tap yours again to remove."),
             )
             .child(row)
+    }
+
+    fn sticker_picker_panel(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let panel = self
+            .session()
+            .map(|session| session.stickers.clone())
+            .unwrap_or_default();
+        let files = self
+            .session()
+            .map(|session| session.files.clone())
+            .unwrap_or_default();
+        let roots = self.media_display_roots();
+        let mut sets = div().id("sticker-set-row").flex().flex_wrap().gap_1();
+        for set in &panel.sets {
+            let set_id = set.id;
+            let selected = panel.selected_set_id == Some(set_id);
+            let title = if set.title.is_empty() {
+                set.name.clone()
+            } else {
+                set.title.clone()
+            };
+            sets = sets.child(
+                Button::new(format!("sticker-set-{set_id}"))
+                    .label(if selected {
+                        format!("{title} · open")
+                    } else {
+                        title
+                    })
+                    .ghost()
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.select_sticker_set(set_id, cx);
+                    })),
+            );
+        }
+        let mut grid = div().id("sticker-grid").flex().flex_wrap().gap_2();
+        for sticker in &panel.stickers {
+            let file_id = sticker.file_id;
+            let emoji = sticker.emoji.clone();
+            let width = sticker.width;
+            let height = sticker.height;
+            let thumb = sticker
+                .thumb_file_id
+                .filter(|id| id.0 != 0)
+                .map(|id| (id, sticker.thumb_width, sticker.thumb_height));
+            let display_id = sticker.thumb_file_id.filter(|id| id.0 != 0).or_else(|| {
+                (sticker.format == quill::telegram::envelope::StickerFormat::Webp && file_id.0 != 0)
+                    .then_some(file_id)
+            });
+            let path = display_id.and_then(|id| {
+                files
+                    .get(&id.0)
+                    .and_then(|file| file.usable_path())
+                    .and_then(|path| sandboxed_display_path(path, &roots))
+            });
+            let label = if emoji.is_empty() {
+                "Sticker".to_string()
+            } else {
+                emoji.clone()
+            };
+            let cell_id = format!("sticker-pick-{}-{}", sticker.set_id, sticker.id);
+            let cell = if let Some(path) = path {
+                img(path)
+                    .id(SharedString::from(cell_id.clone()))
+                    .w(px(72.))
+                    .h(px(72.))
+                    .rounded_md()
+                    .object_fit(ObjectFit::Contain)
+                    .cursor_pointer()
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.send_sticker_pick(file_id, emoji.clone(), width, height, thumb, cx);
+                    }))
+                    .with_fallback({
+                        let label = label.clone();
+                        move || {
+                            div()
+                                .w(px(72.))
+                                .h(px(72.))
+                                .rounded_md()
+                                .bg(rgb(0x444c56))
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .child(label.clone())
+                                .into_any_element()
+                        }
+                    })
+                    .into_any_element()
+            } else {
+                div()
+                    .id(SharedString::from(cell_id))
+                    .w(px(72.))
+                    .h(px(72.))
+                    .rounded_md()
+                    .bg(rgb(0x21262d))
+                    .border_1()
+                    .border_color(rgb(0x8b949e))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .cursor_pointer()
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.send_sticker_pick(file_id, emoji.clone(), width, height, thumb, cx);
+                    }))
+                    .child(label)
+                    .into_any_element()
+            };
+            grid = grid.child(cell);
+        }
+        let status = if panel.loading_sets || panel.loading_set {
+            "Loading installed sticker sets…"
+        } else if panel.failed {
+            "Could not load stickers."
+        } else if panel.sets.is_empty() {
+            "No installed sticker sets."
+        } else if panel.stickers.is_empty() {
+            "This set is empty."
+        } else {
+            "Tap a sticker to send it."
+        };
+        div()
+            .id("sticker-picker")
+            .flex()
+            .flex_col()
+            .gap_2()
+            .px_3()
+            .py_2()
+            .border_b_1()
+            .border_color(cx.theme().border)
+            .bg(cx.theme().sidebar)
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .child(div().font_semibold().child("Stickers"))
+                    .child(
+                        Button::new("close-sticker-picker")
+                            .label("Close")
+                            .ghost()
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.close_sticker_panel(cx);
+                            })),
+                    ),
+            )
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(status),
+            )
+            .child(sets)
+            .child(grid)
     }
 
     fn composer_edit_banner(
@@ -3299,6 +3604,17 @@ impl QuillApp {
                                             }),
                                         ),
                                     )
+                                    .child(
+                                        Button::new("open-stickers")
+                                            .label(if self.sticker_panel_open() {
+                                                "Stickers open"
+                                            } else {
+                                                "Stickers"
+                                            })
+                                            .on_click(cx.listener(|this, _, _, cx| {
+                                                this.toggle_sticker_panel(cx);
+                                            })),
+                                    )
                                     .when(self.pending_attachment.is_some(), |row| {
                                         row.child(
                                             Button::new("clear-attach").label("Clear").on_click(
@@ -3427,6 +3743,9 @@ impl QuillApp {
             })
             .when(self.pending_react.is_some(), |this| {
                 this.child(self.reaction_picker_panel(cx))
+            })
+            .when(self.sticker_panel_open(), |this| {
+                this.child(self.sticker_picker_panel(cx))
             })
             .when(chat_search_open, |this| {
                 this.child(self.chat_search_bar(cx))
@@ -3813,6 +4132,40 @@ fn notification_settings_json(settings: &ChatNotificationSettings) -> String {
         settings.use_default_disable_mention_notifications,
         settings.disable_mention_notifications
     )
+}
+
+fn apply_ready_stickers(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let thumb_path = demo_thumb_png_path();
+    let loaded = demo_file_json(41, &thumb_path, true);
+    let pending = demo_file_json(43, "", false);
+    let history = format!(
+        r#"{{"@type":"updateNewMessage","message":{{"id":401,"chat_id":11,"is_outgoing":false,"content":{{"@type":"messageSticker","is_premium":false,"sticker":{{"@type":"sticker","id":"9001","set_id":"77","width":512,"height":512,"emoji":"😀","format":{{"@type":"stickerFormatWebp"}},"full_type":{{"@type":"stickerFullTypeRegular","premium_animation":null}},"thumbnail":{{"@type":"thumbnail","format":{{"@type":"thumbnailFormatPng"}},"width":128,"height":128,"file":{loaded}}},"sticker":{pending}}}}}}}}}"#
+    );
+    if let Some(owned) = copy_and_parse(&history, seq, &dyn_sink) {
+        session.apply(owned);
+    }
+    session.stickers.open = true;
+    session.stickers.loading_sets = true;
+    let sets_extra = session.request(RequestPurpose::GetInstalledStickerSets, None);
+    let sets = format!(
+        r#"{{"@type":"stickerSets","@extra":"{}","total_count":1,"sets":[{{"@type":"stickerSetInfo","id":"77","title":"Demo stickers","name":"DemoStickers","thumbnail":null,"thumbnail_outline":null,"is_owned":false,"is_installed":true,"is_archived":false,"is_official":true,"sticker_type":{{"@type":"stickerTypeRegular"}},"needs_repainting":false,"is_allowed_as_chat_emoji_status":false,"is_viewed":true,"size":2,"covers":[]}}]}}"#,
+        sets_extra.0
+    );
+    if let Some(owned) = copy_and_parse(&sets, seq, &dyn_sink) {
+        session.apply(owned);
+    }
+    session.mark_sticker_set_loading();
+    let set_extra = session.request(RequestPurpose::GetStickerSet, None);
+    let smile = demo_file_json(41, &thumb_path, true);
+    let wave = demo_file_json(44, "", false);
+    let set = format!(
+        r#"{{"@type":"stickerSet","@extra":"{}","id":"77","title":"Demo stickers","name":"DemoStickers","thumbnail":null,"thumbnail_outline":null,"is_owned":false,"is_installed":true,"is_archived":false,"is_official":true,"sticker_type":{{"@type":"stickerTypeRegular"}},"needs_repainting":false,"is_allowed_as_chat_emoji_status":false,"is_viewed":true,"stickers":[{{"@type":"sticker","id":"9001","set_id":"77","width":512,"height":512,"emoji":"😀","format":{{"@type":"stickerFormatWebp"}},"full_type":{{"@type":"stickerFullTypeRegular","premium_animation":null}},"thumbnail":{{"@type":"thumbnail","format":{{"@type":"thumbnailFormatPng"}},"width":128,"height":128,"file":{smile}}},"sticker":{pending}}},{{"@type":"sticker","id":"9002","set_id":"77","width":512,"height":512,"emoji":"👋","format":{{"@type":"stickerFormatTgs"}},"full_type":{{"@type":"stickerFullTypeRegular","premium_animation":null}},"thumbnail":null,"sticker":{wave}}}],"emojis":[]}}"#,
+        set_extra.0
+    );
+    if let Some(owned) = copy_and_parse(&set, seq, &dyn_sink) {
+        session.apply(owned);
+    }
 }
 
 fn apply_ready_typing(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
@@ -4453,6 +4806,14 @@ fn session_history_row(
             downloading,
             cx,
         )),
+        MessageContent::Sticker(sticker) => Some(sticker_attachment(
+            message.id.0 as u64,
+            sticker,
+            files,
+            downloading,
+            media_roots,
+            cx,
+        )),
         MessageContent::Text(_) | MessageContent::Unsupported { .. } => None,
     };
     let extra = Some(
@@ -4479,6 +4840,7 @@ fn session_history_row(
         MessageContent::Unsupported { type_name } => format!("({type_name})"),
         MessageContent::Photo(photo) => photo.caption.clone(),
         MessageContent::Document(doc) => doc.caption.clone(),
+        MessageContent::Sticker(_) => String::new(),
     };
     session_bubble_quoted(
         message.id.0 as u64,
@@ -4667,6 +5029,78 @@ fn photo_attachment(
         })
         .child(div().text_xs().text_color(rgb(0xffffff)).child(status))
         .into_any_element()
+}
+
+fn sticker_attachment(
+    row_id: u64,
+    sticker: &quill::telegram::envelope::StickerContent,
+    files: &HashMap<i32, ParsedFile>,
+    downloading: &std::collections::HashSet<i32>,
+    media_roots: &[PathBuf],
+    cx: &mut Context<QuillApp>,
+) -> AnyElement {
+    let display_id = sticker.display_file_id().unwrap_or(FileId(0));
+    let fallback_label = sticker_label(sticker);
+    if let Some(path) = files
+        .get(&display_id.0)
+        .and_then(|file| file.usable_path())
+        .and_then(|path| sandboxed_display_path(path, media_roots))
+    {
+        let fallback_label = fallback_label.clone();
+        return img(path)
+            .id(("sticker-img", row_id))
+            .mt_2()
+            .w(px(128.))
+            .h(px(128.))
+            .object_fit(ObjectFit::Contain)
+            .with_fallback(move || {
+                div()
+                    .w(px(128.))
+                    .h(px(128.))
+                    .rounded_md()
+                    .bg(rgb(0x444c56))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(fallback_label.clone())
+                    .into_any_element()
+            })
+            .into_any_element();
+    }
+    let downloading_now = file_is_downloading(display_id, files, downloading);
+    let label = if downloading_now {
+        format!("{} — downloading…", sticker_label(sticker))
+    } else if display_id.0 == 0 {
+        sticker_label(sticker)
+    } else {
+        format!("{} — not downloaded", sticker_label(sticker))
+    };
+    div()
+        .id(("sticker-ph", row_id))
+        .mt_2()
+        .w(px(128.))
+        .h(px(88.))
+        .rounded_md()
+        .bg(rgb(0x444c56))
+        .flex()
+        .items_center()
+        .justify_center()
+        .when(display_id.0 != 0, |this| {
+            this.cursor_pointer()
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.request_media_download(display_id, cx);
+                }))
+        })
+        .child(div().text_xs().text_color(rgb(0xffffff)).child(label))
+        .into_any_element()
+}
+
+fn sticker_label(sticker: &quill::telegram::envelope::StickerContent) -> String {
+    if sticker.emoji.is_empty() {
+        "Sticker".into()
+    } else {
+        format!("Sticker {}", sticker.emoji)
+    }
 }
 
 fn document_chip(

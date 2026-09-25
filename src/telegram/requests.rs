@@ -356,6 +356,71 @@ pub fn send_photo(
     .to_string()
 }
 
+/// `getInstalledStickerSets` for regular stickers (Unigram `StickerTypeRegular`).
+pub fn get_installed_sticker_sets(extra: RequestId) -> String {
+    json!({
+        "@type": "getInstalledStickerSets",
+        "@extra": extra.as_extra(),
+        "sticker_type": { "@type": "stickerTypeRegular" },
+    })
+    .to_string()
+}
+
+/// `getStickerSet`. `set_id` is int64 — JSON string, not a float.
+pub fn get_sticker_set(extra: RequestId, set_id: i64) -> String {
+    json!({
+        "@type": "getStickerSet",
+        "@extra": extra.as_extra(),
+        "set_id": set_id.to_string(),
+    })
+    .to_string()
+}
+
+/// Fields for `inputMessageSticker` (TDLib 1.8.67). Thumbnail matches Unigram `Thumbnail.ToInput`.
+pub struct StickerSend<'a> {
+    pub file_id: FileId,
+    pub emoji: &'a str,
+    pub width: i32,
+    pub height: i32,
+    pub thumb: Option<(FileId, i32, i32)>,
+    pub reply_to: Option<MessageId>,
+}
+
+/// `sendMessage` + `inputMessageSticker` / `inputSticker` / `inputFileId` (1.8.67).
+/// Thumbnail is `inputThumbnail` + `inputFileId` when the sticker has one (Unigram `Thumbnail.ToInput`).
+pub fn send_sticker(extra: RequestId, chat_id: ChatId, sticker: StickerSend<'_>) -> String {
+    let thumbnail = match sticker.thumb {
+        Some((id, thumb_width, thumb_height)) if id.0 != 0 => json!({
+            "@type": "inputThumbnail",
+            "thumbnail": { "@type": "inputFileId", "id": id.0 },
+            "width": thumb_width,
+            "height": thumb_height,
+        }),
+        _ => Value::Null,
+    };
+    json!({
+        "@type": "sendMessage",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0,
+        "topic_id": Value::Null,
+        "reply_to": input_message_reply_to(sticker.reply_to),
+        "options": Value::Null,
+        "reply_markup": Value::Null,
+        "input_message_content": {
+            "@type": "inputMessageSticker",
+            "sticker": {
+                "@type": "inputSticker",
+                "sticker": { "@type": "inputFileId", "id": sticker.file_id.0 },
+                "thumbnail": thumbnail,
+                "width": sticker.width,
+                "height": sticker.height,
+            },
+            "emoji": sticker.emoji,
+        }
+    })
+    .to_string()
+}
+
 /// `sendMessage` + `inputMessageDocument` / `inputDocument` / `inputFileLocal` (1.8.67).
 /// `path` must already be an explicitly picked local file — never a JSON `local.path`.
 pub fn send_document(
@@ -722,6 +787,59 @@ mod tests {
             Value::Null
         );
         assert!(!json.contains("message_thread_id"));
+    }
+
+    #[test]
+    fn send_sticker_uses_input_file_id_and_int64_set() {
+        let json = send_sticker(
+            RequestId(13),
+            ChatId(7),
+            StickerSend {
+                file_id: FileId(41),
+                emoji: "😀",
+                width: 512,
+                height: 512,
+                thumb: Some((FileId(42), 128, 128)),
+                reply_to: Some(MessageId(101)),
+            },
+        );
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "sendMessage");
+        assert_eq!(v["input_message_content"]["@type"], "inputMessageSticker");
+        assert_eq!(v["input_message_content"]["emoji"], "😀");
+        let sticker = &v["input_message_content"]["sticker"];
+        assert_eq!(sticker["@type"], "inputSticker");
+        assert_eq!(sticker["sticker"]["@type"], "inputFileId");
+        assert_eq!(sticker["sticker"]["id"], 41);
+        assert_eq!(sticker["width"], 512);
+        assert_eq!(sticker["height"], 512);
+        assert_eq!(sticker["thumbnail"]["@type"], "inputThumbnail");
+        assert_eq!(sticker["thumbnail"]["thumbnail"]["id"], 42);
+        assert_eq!(v["reply_to"]["@type"], "inputMessageReplyToMessage");
+        let installed = get_installed_sticker_sets(RequestId(14));
+        let installed: serde_json::Value = serde_json::from_str(&installed).unwrap();
+        assert_eq!(installed["@type"], "getInstalledStickerSets");
+        assert_eq!(installed["sticker_type"]["@type"], "stickerTypeRegular");
+        let set = get_sticker_set(RequestId(15), 77);
+        let set: serde_json::Value = serde_json::from_str(&set).unwrap();
+        assert_eq!(set["set_id"], "77");
+        let bare = send_sticker(
+            RequestId(16),
+            ChatId(7),
+            StickerSend {
+                file_id: FileId(41),
+                emoji: "",
+                width: 512,
+                height: 512,
+                thumb: None,
+                reply_to: None,
+            },
+        );
+        let bare: serde_json::Value = serde_json::from_str(&bare).unwrap();
+        assert_eq!(
+            bare["input_message_content"]["sticker"]["thumbnail"],
+            Value::Null
+        );
     }
 
     #[test]
