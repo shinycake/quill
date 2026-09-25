@@ -176,6 +176,7 @@ impl ComposerEdit {
                 (ComposerEditKind::Caption, animation.caption.clone())
             }
             MessageContent::Video(video) => (ComposerEditKind::Caption, video.caption.clone()),
+            MessageContent::Audio(audio) => (ComposerEditKind::Caption, audio.caption.clone()),
             MessageContent::VideoNote(_)
             | MessageContent::Sticker(_)
             | MessageContent::Unsupported { .. } => return None,

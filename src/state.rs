@@ -1869,6 +1869,13 @@ impl Session {
                         ids.push(file_id);
                     }
                 }
+                MessageContent::Audio(audio) => {
+                    if let Some(file_id) = audio.cover_file_id()
+                        && self.should_download(file_id)
+                    {
+                        ids.push(file_id);
+                    }
+                }
                 _ => {}
             }
         }
@@ -3263,6 +3270,42 @@ mod tests {
         assert!(note.is_viewed);
         assert_eq!(note.length, 240);
         assert_eq!(content.preview(), "Video note");
+    }
+
+    #[test]
+    fn audio_cover_auto_downloads_track_does_not() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        session.open_chat(ChatId(1));
+        let cover = media_file_json(61, "", false);
+        let track = media_file_json(62, "", false);
+        let external = media_file_json(63, "", false);
+        let open = format!(
+            r#"{{"@type":"updateNewMessage","message":{{"id":40,"chat_id":1,"is_outgoing":false,"content":{{"@type":"messageAudio","audio":{{"@type":"audio","duration":90,"title":"Night Drive","performer":"Ada","file_name":"night.mp3","mime_type":"audio/mpeg","album_cover_minithumbnail":null,"album_cover_thumbnail":{{"@type":"thumbnail","format":{{"@type":"thumbnailFormatJpeg"}},"width":90,"height":90,"file":{cover}}},"external_album_covers":[{{"@type":"thumbnail","format":{{"@type":"thumbnailFormatJpeg"}},"width":40,"height":40,"file":{external}}}],"audio":{track}}},"caption":{{"@type":"formattedText","text":"","entities":[]}}}}}}}}"#
+        );
+        apply_json(&mut session, &seq, &sink, &open);
+        assert_eq!(session.thumb_file_ids_to_download(), vec![FileId(61)]);
+        assert!(session.should_download(FileId(62)));
+        let fallback = format!(
+            r#"{{"@type":"updateNewMessage","message":{{"id":41,"chat_id":1,"is_outgoing":false,"content":{{"@type":"messageAudio","audio":{{"@type":"audio","duration":10,"title":"","performer":"","file_name":"b.mp3","mime_type":"audio/mpeg","album_cover_minithumbnail":null,"album_cover_thumbnail":null,"external_album_covers":[{{"@type":"thumbnail","format":{{"@type":"thumbnailFormatJpeg"}},"width":40,"height":40,"file":{external}}}],"audio":{track}}},"caption":{{"@type":"formattedText","text":"","entities":[]}}}}}}}}"#
+        );
+        apply_json(&mut session, &seq, &sink, &fallback);
+        let ids = session.thumb_file_ids_to_download();
+        assert!(ids.contains(&FileId(61)));
+        assert!(ids.contains(&FileId(63)));
+        assert!(!ids.contains(&FileId(62)));
+        assert_eq!(
+            session
+                .histories
+                .get(&1)
+                .unwrap()
+                .messages
+                .get(&40)
+                .unwrap()
+                .content
+                .preview(),
+            "Night Drive"
+        );
     }
 
     #[test]
