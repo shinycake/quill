@@ -20,18 +20,18 @@ use crate::telegram::envelope::{
 };
 use crate::telegram::ffi::{LibraryOrigin, TdJsonError, resolve_tdjson_path};
 use crate::telegram::requests::{
-    AnimationSend, SetTdlibParameters, StickerSend, VideoSend, add_chat_to_list,
-    add_message_reaction, add_recently_found_chat, check_authentication_code,
-    check_authentication_password, close_chat, close_request, delete_messages,
-    download_file as download_file_request, edit_message_caption, edit_message_text,
-    forward_messages, get_authorization_state, get_chat_history, get_installed_sticker_sets,
-    get_saved_animations, get_sticker_set, input_message_photo, input_message_video, load_chats,
-    open_chat, open_message_content, pin_chat_message, remove_message_reaction,
-    search_chat_messages, search_chats, search_messages, search_recently_found_chats,
-    send_animation, send_chat_action, send_chat_action_kind, send_document, send_message_album,
-    send_photo, send_sticker, send_text, send_video, send_voice_note,
-    set_authentication_phone_number, set_chat_draft_message, set_chat_notification_settings,
-    unpin_chat_message, view_messages,
+    AnimationSend, SetTdlibParameters, StickerSend, VideoNoteSend, VideoNoteThumbnailSend,
+    VideoSend, add_chat_to_list, add_message_reaction, add_recently_found_chat,
+    check_authentication_code, check_authentication_password, close_chat, close_request,
+    delete_messages, download_file as download_file_request, edit_message_caption,
+    edit_message_text, forward_messages, get_authorization_state, get_chat_history,
+    get_installed_sticker_sets, get_saved_animations, get_sticker_set, input_message_photo,
+    input_message_video, load_chats, open_chat, open_message_content, pin_chat_message,
+    remove_message_reaction, search_chat_messages, search_chats, search_messages,
+    search_recently_found_chats, send_animation, send_chat_action, send_chat_action_kind,
+    send_document, send_message_album, send_photo, send_sticker, send_text, send_video,
+    send_video_note, send_voice_note, set_authentication_phone_number, set_chat_draft_message,
+    set_chat_notification_settings, unpin_chat_message, view_messages,
 };
 use crate::voice::VoiceDraft;
 use std::path::Path;
@@ -1054,6 +1054,25 @@ impl<S: JsonSender> ConnectDriver<S> {
             ),
             _ => None,
         };
+        let video_note = match snapshot.attachment.as_ref() {
+            Some(att) if att.kind == AttachmentKind::VideoNote => {
+                let probe = crate::video::probe_local_video_note(&att.path)
+                    .map_err(|_| ConnectSendError::InvalidRequest)?;
+                let thumbnail = crate::video::write_video_note_thumbnail(&att.path).map(|thumb| {
+                    VideoNoteThumbnailSend {
+                        path: thumb.path.to_string_lossy().into_owned(),
+                        width: thumb.width,
+                        height: thumb.height,
+                    }
+                });
+                Some(VideoNoteSend {
+                    duration: probe.duration,
+                    length: probe.length,
+                    thumbnail,
+                })
+            }
+            _ => None,
+        };
         let extra = self
             .session
             .request(RequestPurpose::SendMessage, Some(chat_id));
@@ -1080,6 +1099,13 @@ impl<S: JsonSender> ConnectDriver<S> {
                         caption,
                         reply_to,
                     )
+                }
+                AttachmentKind::VideoNote => {
+                    let note = video_note.ok_or_else(|| {
+                        self.session.requests.take(extra);
+                        ConnectSendError::InvalidRequest
+                    })?;
+                    send_video_note(extra, chat_id, path, &note, reply_to)
                 }
             },
             (None, None) => send_text(extra, chat_id, caption, reply_to),
@@ -1138,7 +1164,9 @@ impl<S: JsonSender> ConnectDriver<S> {
                         item_caption,
                     )
                 }
-                AttachmentKind::Document => return Err(ConnectSendError::InvalidRequest),
+                AttachmentKind::Document | AttachmentKind::VideoNote => {
+                    return Err(ConnectSendError::InvalidRequest);
+                }
             };
             contents.push(content);
         }
@@ -3762,6 +3790,56 @@ mod tests {
         assert_eq!(
             video_json["input_message_content"]["caption"]["text"],
             "CANARY_VIDEO_CAP"
+        );
+
+        let note = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("docs/screenshots/fixtures/demo-video-note.mp4");
+        let note_att = ComposerAttachment::pick(&note, AttachmentKind::VideoNote).unwrap();
+        let note_path = note_att.send_path_str().unwrap();
+        let note_snap = ComposerSnapshot::capture_with_attachment(
+            ChatId(7),
+            driver.session.view_generation,
+            "ignored caption",
+            Some(note_att),
+        );
+        let note_extra = driver.send_snapshot(&note_snap).unwrap();
+        let note_json: Value = serde_json::from_str(recorder.snapshot().last().unwrap()).unwrap();
+        assert_eq!(note_json["@extra"], note_extra.0.to_string());
+        assert_eq!(
+            note_json["input_message_content"]["@type"],
+            "inputMessageVideoNote"
+        );
+        let sent_note = &note_json["input_message_content"]["video_note"];
+        assert_eq!(sent_note["video_note"]["path"], note_path);
+        assert_eq!(sent_note["duration"], 1);
+        assert_eq!(sent_note["length"], 240);
+        assert_eq!(
+            note_json["input_message_content"]["self_destruct_type"],
+            Value::Null
+        );
+        assert!(note_json["input_message_content"].get("caption").is_none());
+        let thumb = &sent_note["thumbnail"];
+        if !thumb.is_null() {
+            assert_eq!(thumb["@type"], "inputThumbnail");
+            assert_eq!(thumb["width"], 240);
+            assert_eq!(thumb["height"], 240);
+            assert!(
+                thumb["thumbnail"]["path"]
+                    .as_str()
+                    .unwrap_or("")
+                    .ends_with(".jpg")
+            );
+        }
+        let landscape = ComposerAttachment::pick(&clip, AttachmentKind::VideoNote).unwrap();
+        let bad = ComposerSnapshot::capture_with_attachment(
+            ChatId(7),
+            driver.session.view_generation,
+            "",
+            Some(landscape),
+        );
+        assert_eq!(
+            driver.send_snapshot(&bad),
+            Err(ConnectSendError::InvalidRequest)
         );
 
         let album_photo = ComposerAttachment::pick(&photo, AttachmentKind::Photo).unwrap();
