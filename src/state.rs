@@ -5,10 +5,10 @@ use crate::ids::{
 };
 use crate::telegram::client::OwnedEnvelope;
 use crate::telegram::envelope::{
-    AuthorizationState, ChatKind, ChatList, ChatNotificationSettings, ChatPositionUpdate,
-    ConnectionState, EnvelopePayload, ErrorClass, MessageContent, MessageForwardInfo,
-    MessageInteractionInfo, MessageOrigin, MessageReaction, MessageReplyTo, ParsedFile,
-    ParsedMessage,
+    AuthorizationState, ChatAction, ChatKind, ChatList, ChatNotificationSettings,
+    ChatPositionUpdate, ConnectionState, EnvelopePayload, ErrorClass, MessageContent,
+    MessageForwardInfo, MessageInteractionInfo, MessageOrigin, MessageReaction, MessageReplyTo,
+    MessageSender, ParsedFile, ParsedMessage,
 };
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
@@ -55,6 +55,8 @@ pub enum RequestPurpose {
     /// `addChatToList` (`chatListArchive` or `chatListMain`). Response is `ok`;
     /// list membership via position / added-to-list updates.
     AddChatToList,
+    /// `sendChatAction` (`chatActionTyping` / `chatActionCancel`). Response is `ok`.
+    SendChatAction,
     Close,
     LogOut,
     Other,
@@ -364,6 +366,8 @@ pub struct ChatSummary {
     pub notification_settings: ChatNotificationSettings,
     /// Sidebar preview from `updateChatLastMessage`. Not logged.
     pub last_preview: String,
+    /// Senders with an active `chatActionTyping` (`updateChatAction`).
+    pub typing_senders: Vec<MessageSender>,
 }
 
 impl ChatSummary {
@@ -375,9 +379,23 @@ impl ChatSummary {
         self.notification_settings.is_muted()
     }
 
+    pub fn is_peer_typing(&self) -> bool {
+        !self.typing_senders.is_empty()
+    }
+
+    pub fn set_sender_action(&mut self, sender: MessageSender, action: ChatAction) {
+        self.typing_senders.retain(|existing| *existing != sender);
+        if action == ChatAction::Typing {
+            self.typing_senders.push(sender);
+        }
+    }
+
     pub fn sidebar_preview(&self) -> String {
         if let Some(reason) = self.kind.gate_reason() {
             return reason.to_string();
+        }
+        if self.is_peer_typing() {
+            return "typing…".into();
         }
         if !self.last_preview.is_empty() {
             return self.last_preview.clone();
@@ -418,6 +436,7 @@ fn placeholder_chat(chat_id: ChatId) -> ChatSummary {
         archive_is_pinned: false,
         notification_settings: ChatNotificationSettings::default(),
         last_preview: String::new(),
+        typing_senders: Vec::new(),
     }
 }
 
@@ -1075,6 +1094,16 @@ impl Session {
                     .entry(chat_id.0)
                     .or_insert_with(|| placeholder_chat(chat_id))
                     .notification_settings = notification_settings;
+            }
+            EnvelopePayload::UpdateChatAction {
+                chat_id,
+                sender,
+                action,
+            } => {
+                self.chats
+                    .entry(chat_id.0)
+                    .or_insert_with(|| placeholder_chat(chat_id))
+                    .set_sender_action(sender, action);
             }
             EnvelopePayload::UpdateChatTitle { chat_id, title } => {
                 self.chats
@@ -2454,6 +2483,42 @@ mod tests {
             r#"{"@type":"updateChatNotificationSettings","chat_id":7,"notification_settings":{"@type":"chatNotificationSettings","use_default_mute_for":false,"mute_for":0,"use_default_sound":true,"sound_id":"0","use_default_show_preview":true,"show_preview":false,"use_default_mute_stories":true,"mute_stories":false,"use_default_story_sound":true,"story_sound_id":"0","use_default_show_story_poster":true,"show_story_poster":false,"use_default_disable_pinned_message_notifications":true,"disable_pinned_message_notifications":false,"use_default_disable_mention_notifications":true,"disable_mention_notifications":false}}"#,
         );
         assert!(!session.chats.get(&7).unwrap().is_muted());
+    }
+
+    #[test]
+    fn chat_action_typing_then_cancel() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateNewChat","chat":{"id":7,"title":"Alice","type":{"@type":"chatTypePrivate","user_id":7},"unread_count":0}}"#,
+        );
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateChatAction","chat_id":7,"topic_id":null,"sender_id":{"@type":"messageSenderUser","user_id":7},"action":{"@type":"chatActionTyping"}}"#,
+        );
+        let chat = session.chats.get(&7).unwrap();
+        assert!(chat.is_peer_typing());
+        assert_eq!(chat.sidebar_preview(), "typing…");
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateChatAction","chat_id":7,"sender_id":{"@type":"messageSenderUser","user_id":7},"action":{"@type":"chatActionCancel"}}"#,
+        );
+        let chat = session.chats.get(&7).unwrap();
+        assert!(!chat.is_peer_typing());
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateChatAction","chat_id":7,"sender_id":{"@type":"messageSenderUser","user_id":9},"action":{"@type":"chatActionRecordingVoiceNote"}}"#,
+        );
+        assert!(!session.chats.get(&7).unwrap().is_peer_typing());
     }
 
     #[test]

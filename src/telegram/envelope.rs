@@ -82,6 +82,12 @@ pub enum EnvelopePayload {
         chat_id: ChatId,
         notification_settings: ChatNotificationSettings,
     },
+    /// `updateChatAction` — peer activity (`chatActionTyping` / `chatActionCancel`).
+    UpdateChatAction {
+        chat_id: ChatId,
+        sender: MessageSender,
+        action: ChatAction,
+    },
     Ok,
     Error(TdError),
     Messages(Vec<ParsedMessage>),
@@ -249,6 +255,24 @@ pub const MUTE_FOR_2_DAYS: i32 = 2 * 86400;
 /// TDLib: mute_for longer than 366 days is muted forever.
 pub const MUTE_FOREVER: i32 = i32::MAX;
 pub const MUTE_FOREVER_AFTER_SECONDS: i32 = 366 * 86400;
+
+/// `messageSenderUser` / `messageSenderChat` (TDLib 1.8.67).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MessageSender {
+    User { user_id: i64 },
+    Chat { chat_id: i64 },
+}
+
+/// `ChatAction` values this slice acts on. Other constructors stay `Other`
+/// so a replacement action clears typing without inventing labels.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChatAction {
+    /// `chatActionTyping`
+    Typing,
+    /// `chatActionCancel`, or a null action (schema: null cancels).
+    Cancel,
+    Other,
+}
 
 /// `chatNotificationSettings` (TDLib 1.8.67). Other fields are copied through
 /// so a mute change does not reset sound / preview exceptions.
@@ -812,6 +836,11 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
                 value.get("notification_settings"),
             ),
         }),
+        "updateChatAction" => Ok(EnvelopePayload::UpdateChatAction {
+            chat_id: ChatId(int53(value.get("chat_id"))?),
+            sender: parse_message_sender(value.get("sender_id"))?,
+            action: parse_chat_action(value.get("action")),
+        }),
         "updateConnectionState" => Ok(EnvelopePayload::UpdateConnectionState(parse_connection(
             value.get("state"),
         ))),
@@ -1053,6 +1082,27 @@ fn json_i64_field(value: Option<&Value>, default: i64) -> i64 {
                 .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
         })
         .unwrap_or(default)
+}
+
+fn parse_message_sender(value: Option<&Value>) -> Result<MessageSender, ParseError> {
+    let value = value.ok_or(ParseError::MissingField)?;
+    match value.get("@type").and_then(Value::as_str) {
+        Some("messageSenderUser") => Ok(MessageSender::User {
+            user_id: int53(value.get("user_id"))?,
+        }),
+        Some("messageSenderChat") => Ok(MessageSender::Chat {
+            chat_id: int53(value.get("chat_id"))?,
+        }),
+        _ => Err(ParseError::MissingField),
+    }
+}
+
+fn parse_chat_action(value: Option<&Value>) -> ChatAction {
+    match value.and_then(|v| v.get("@type")).and_then(Value::as_str) {
+        Some("chatActionTyping") => ChatAction::Typing,
+        None | Some("chatActionCancel") => ChatAction::Cancel,
+        Some(_) => ChatAction::Other,
+    }
 }
 
 fn parse_chat_notification_settings(value: Option<&Value>) -> ChatNotificationSettings {
