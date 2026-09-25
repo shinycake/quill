@@ -61,8 +61,9 @@ pub enum RequestPurpose {
     /// `sendChatAction` (`chatActionTyping` / `chatActionCancel` /
     /// `chatActionRecordingVoiceNote`). Response is `ok`.
     SendChatAction,
-    /// `openMessageContent` when a voice note starts playing. Response is `ok`;
-    /// `is_listened` arrives as `updateMessageContentOpened`.
+    /// `openMessageContent` when a voice note or video note starts playing.
+    /// Response is `ok`. `is_listened` / `is_viewed` arrive as
+    /// `updateMessageContentOpened`.
     OpenMessageContent,
     /// `getInstalledStickerSets` (`stickerTypeRegular`). Response is `stickerSets`.
     GetInstalledStickerSets,
@@ -593,9 +594,9 @@ impl HistoryState {
         }
     }
 
-    fn mark_voice_listened(&mut self, id: MessageId) {
+    fn mark_content_opened(&mut self, id: MessageId) {
         if let Some(message) = self.messages.get_mut(&id.0) {
-            message.content.mark_voice_listened();
+            message.content.mark_content_opened();
         }
     }
 
@@ -1380,7 +1381,7 @@ impl Session {
                 message_id,
             } => {
                 if let Some(history) = self.histories.get_mut(&chat_id.0) {
-                    history.mark_voice_listened(message_id);
+                    history.mark_content_opened(message_id);
                 }
             }
             EnvelopePayload::UpdateMessageContent {
@@ -1853,6 +1854,16 @@ impl Session {
                         continue;
                     }
                     if let Some(file_id) = video.thumb_file_id()
+                        && self.should_download(file_id)
+                    {
+                        ids.push(file_id);
+                    }
+                }
+                MessageContent::VideoNote(note) => {
+                    if note.is_secret {
+                        continue;
+                    }
+                    if let Some(file_id) = note.thumb_file_id()
                         && self.should_download(file_id)
                     {
                         ids.push(file_id);
@@ -3210,6 +3221,48 @@ mod tests {
                 .preview(),
             "clip"
         );
+    }
+
+    #[test]
+    fn video_note_thumb_auto_downloads_secret_note_does_not() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        session.open_chat(ChatId(1));
+        let thumb = media_file_json(51, "", false);
+        let clip = media_file_json(52, "", false);
+        let secret_thumb = media_file_json(53, "", false);
+        let secret_clip = media_file_json(54, "", false);
+        let open = format!(
+            r#"{{"@type":"updateNewMessage","message":{{"id":30,"chat_id":1,"is_outgoing":false,"content":{{"@type":"messageVideoNote","video_note":{{"@type":"videoNote","duration":6,"waveform":"","length":240,"minithumbnail":null,"thumbnail":{{"@type":"thumbnail","format":{{"@type":"thumbnailFormatJpeg"}},"width":90,"height":90,"file":{thumb}}},"speech_recognition_result":null,"video":{clip}}},"is_viewed":false,"is_secret":false}}}}}}"#
+        );
+        let secret = format!(
+            r#"{{"@type":"updateNewMessage","message":{{"id":31,"chat_id":1,"is_outgoing":false,"content":{{"@type":"messageVideoNote","video_note":{{"@type":"videoNote","duration":1,"waveform":"","length":200,"minithumbnail":null,"thumbnail":{{"@type":"thumbnail","format":{{"@type":"thumbnailFormatJpeg"}},"width":40,"height":40,"file":{secret_thumb}}},"speech_recognition_result":null,"video":{secret_clip}}},"is_viewed":false,"is_secret":true}}}}}}"#
+        );
+        apply_json(&mut session, &seq, &sink, &open);
+        apply_json(&mut session, &seq, &sink, &secret);
+        assert_eq!(session.thumb_file_ids_to_download(), vec![FileId(51)]);
+        assert!(session.should_download(FileId(52)));
+        assert!(session.should_download(FileId(53)));
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateMessageContentOpened","chat_id":1,"message_id":30}"#,
+        );
+        let content = &session
+            .histories
+            .get(&1)
+            .unwrap()
+            .messages
+            .get(&30)
+            .unwrap()
+            .content;
+        let crate::telegram::envelope::MessageContent::VideoNote(note) = content else {
+            panic!("{content:?}");
+        };
+        assert!(note.is_viewed);
+        assert_eq!(note.length, 240);
+        assert_eq!(content.preview(), "Video note");
     }
 
     #[test]

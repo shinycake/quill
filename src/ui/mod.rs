@@ -167,7 +167,8 @@ pub struct QuillApp {
     video_tick: bool,
     video_cache_file: Option<i32>,
     /// Play was tapped before the video was local. Resume when `downloadFile` finishes.
-    pending_video_play: Option<(MessageId, FileId, String, i32)>,
+    /// The last field is the chat to mark opened (`openMessageContent`) once playback starts.
+    pending_video_play: Option<(MessageId, FileId, String, i32, Option<ChatId>)>,
 }
 
 /// Forced UI surfaces for screenshot proof (no live Telegram / no real credentials).
@@ -212,6 +213,8 @@ pub enum ScreenshotDemo {
     ReadyGifs,
     /// Video bubble with Play/Pause in history (injected, no live Telegram).
     ReadyVideo,
+    /// Round video note with Play/Pause in history (injected, no live Telegram).
+    ReadyVideoNote,
     /// Composer video attach chip plus an own-sent video playing in history.
     ReadyVideoSend,
     /// Restored private-chat composer draft (`draftMessage`).
@@ -605,6 +608,15 @@ impl QuillApp {
                     AuthorizationState::Ready,
                 )
             }
+            Some(ScreenshotDemo::ReadyVideoNote) => {
+                demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
+                (
+                    ConnectUiStatus::DemoReadyChats,
+                    None,
+                    "screenshot demo — round video note playback".into(),
+                    AuthorizationState::Ready,
+                )
+            }
             Some(ScreenshotDemo::ReadyVideoSend) => {
                 demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
                 (
@@ -880,6 +892,19 @@ impl QuillApp {
             ];
             app.spawn_video_tick(cx);
             app.status_note = "screenshot demo — video · playing".into();
+        }
+        if matches!(demo, Some(ScreenshotDemo::ReadyVideoNote)) {
+            if let Some(session) = app.demo_session.as_mut() {
+                app.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_video_note(session, &app.demo_sink, &app.demo_seq);
+            }
+            app.playing_video = Some(MessageId(611));
+            app.video_frames = vec![
+                demo_media_allowlist().join("demo-gif-1.png"),
+                demo_media_allowlist().join("demo-gif-2.png"),
+            ];
+            app.spawn_video_tick(cx);
+            app.status_note = "screenshot demo — video note · playing".into();
         }
         if matches!(demo, Some(ScreenshotDemo::ReadyVideoSend)) {
             app.composer.update(cx, |input, cx| {
@@ -1480,7 +1505,9 @@ impl QuillApp {
                             animation.caption = text.to_string()
                         }
                         MessageContent::Video(video) => video.caption = text.to_string(),
-                        MessageContent::Sticker(_) | MessageContent::Unsupported { .. } => {}
+                        MessageContent::VideoNote(_)
+                        | MessageContent::Sticker(_)
+                        | MessageContent::Unsupported { .. } => {}
                     }
                 }
             }
@@ -2453,6 +2480,7 @@ impl QuillApp {
         file_id: FileId,
         mime: String,
         start_timestamp: i32,
+        mark_opened: Option<ChatId>,
         cx: &mut Context<Self>,
     ) {
         if self.playing_video == Some(message_id) {
@@ -2469,7 +2497,8 @@ impl QuillApp {
                 .map(str::to_string)
         });
         let Some(path) = path else {
-            self.pending_video_play = Some((message_id, file_id, mime, start_timestamp));
+            self.pending_video_play =
+                Some((message_id, file_id, mime, start_timestamp, mark_opened));
             self.request_media_download(file_id, cx);
             self.status_note = "downloading video".into();
             return;
@@ -2497,6 +2526,9 @@ impl QuillApp {
                 self.video_frames = frames;
                 self.video_frame = 0;
                 self.spawn_video_tick(cx);
+                if let Some(chat_id) = mark_opened {
+                    self.mark_voice_opened(chat_id, message_id);
+                }
                 self.status_note = "playing video".into();
             }
             _ => {
@@ -2507,7 +2539,8 @@ impl QuillApp {
     }
 
     fn resume_pending_video(&mut self, cx: &mut Context<Self>) {
-        let Some((message_id, file_id, mime, start_timestamp)) = self.pending_video_play.clone()
+        let Some((message_id, file_id, mime, start_timestamp, mark_opened)) =
+            self.pending_video_play.clone()
         else {
             return;
         };
@@ -2519,7 +2552,7 @@ impl QuillApp {
                 .is_some()
         });
         if ready {
-            self.toggle_video_playback(message_id, file_id, mime, start_timestamp, cx);
+            self.toggle_video_playback(message_id, file_id, mime, start_timestamp, mark_opened, cx);
         }
     }
 
@@ -5824,6 +5857,30 @@ fn apply_ready_video(session: &mut Session, sink: &Arc<MemorySink>, seq: &Atomic
     }
 }
 
+fn apply_ready_video_note(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let thumb_path = demo_thumb_png_path();
+    let clip_path = demo_media_allowlist()
+        .join("demo-clip.mp4")
+        .to_string_lossy()
+        .into_owned();
+    let thumb = demo_file_json(91, &thumb_path, true);
+    let clip = demo_file_json(92, &clip_path, true);
+    let pending = demo_file_json(93, "", false);
+    let playing = format!(
+        r#"{{"@type":"updateNewMessage","message":{{"id":611,"chat_id":11,"is_outgoing":false,"content":{{"@type":"messageVideoNote","video_note":{{"@type":"videoNote","duration":8,"waveform":"","length":240,"minithumbnail":null,"thumbnail":{{"@type":"thumbnail","format":{{"@type":"thumbnailFormatJpeg"}},"width":120,"height":120,"file":{thumb}}},"speech_recognition_result":null,"video":{clip}}},"is_viewed":false,"is_secret":false}}}}}}"#
+    );
+    let waiting = format!(
+        r#"{{"@type":"updateNewMessage","message":{{"id":612,"chat_id":11,"is_outgoing":true,"content":{{"@type":"messageVideoNote","video_note":{{"@type":"videoNote","duration":3,"waveform":"","length":240,"minithumbnail":null,"thumbnail":null,"speech_recognition_result":null,"video":{pending}}},"is_viewed":true,"is_secret":false}}}}}}"#
+    );
+    let drop_seed = r#"{"@type":"updateDeleteMessages","chat_id":11,"message_ids":[101,102,103],"is_permanent":true,"from_cache":false}"#;
+    for json in [playing, waiting, drop_seed.to_string()] {
+        if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
+            session.apply(owned);
+        }
+    }
+}
+
 fn apply_ready_video_send(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
     let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
     let clip_path = demo_media_allowlist()
@@ -6627,6 +6684,7 @@ fn album_tile(
                                 play_id,
                                 mime.clone(),
                                 start_timestamp,
+                                None,
                                 cx,
                             );
                         })),
@@ -6864,6 +6922,18 @@ fn session_history_row(
             video_frame.as_deref(),
             cx,
         )),
+        MessageContent::VideoNote(note) => Some(video_note_attachment(
+            message.chat_id,
+            message.id,
+            message.is_outgoing,
+            note,
+            files,
+            downloading,
+            media_roots,
+            video_playing,
+            video_frame.as_deref(),
+            cx,
+        )),
         MessageContent::Text(_) | MessageContent::Unsupported { .. } => None,
     };
     let extra = Some(
@@ -6893,6 +6963,7 @@ fn session_history_row(
         MessageContent::Sticker(_) => String::new(),
         MessageContent::Animation(animation) => animation.caption.clone(),
         MessageContent::Video(video) => video.caption.clone(),
+        MessageContent::VideoNote(_) => String::new(),
         MessageContent::VoiceNote(note) => note.caption.clone(),
     };
     if let Some(text_body) = text_body {
@@ -7532,6 +7603,177 @@ fn video_attachment(
                         play_id,
                         mime.clone(),
                         start_timestamp,
+                        None,
+                        cx,
+                    );
+                })),
+        )
+        .into_any_element()
+}
+
+/// Round video note. tdesktop paints `history/view/media` round video as a
+/// circle (JPEG thumb, duration, play). Quill uses the same ffmpeg frames as
+/// `messageVideo`, clipped to a circle. Diameter on screen is fixed; schema
+/// `length` is the sender's pixel size, shown when the file is not local yet.
+fn video_note_attachment(
+    chat_id: ChatId,
+    message_id: MessageId,
+    outgoing: bool,
+    note: &quill::telegram::envelope::VideoNoteContent,
+    files: &HashMap<i32, ParsedFile>,
+    downloading: &std::collections::HashSet<i32>,
+    media_roots: &[PathBuf],
+    playing: bool,
+    frame: Option<&std::path::Path>,
+    cx: &mut Context<QuillApp>,
+) -> AnyElement {
+    let row_id = message_id.0 as u64;
+    let play_id = note.play_file_id().unwrap_or(FileId(0));
+    let thumb_id = note.thumb_file_id().unwrap_or(FileId(0));
+    let play_label = if playing { "Pause" } else { "Play" };
+    let duration = format_voice_duration(note.duration);
+    let visual = if playing {
+        frame.and_then(|path| sandboxed_display_path(&path.to_string_lossy(), media_roots))
+    } else {
+        None
+    };
+    let visual = visual.or_else(|| {
+        [thumb_id, play_id].into_iter().find_map(|id| {
+            if id.0 == 0 {
+                return None;
+            }
+            files
+                .get(&id.0)
+                .and_then(|file| file.usable_path())
+                .and_then(|path| sandboxed_display_path(path, media_roots))
+        })
+    });
+    let downloading_now = file_is_downloading(play_id, files, downloading)
+        || file_is_downloading(thumb_id, files, downloading);
+    let blocked = note.is_secret;
+    let unseen = !outgoing && !note.is_viewed && !playing;
+    let badge = if playing {
+        "Video note · playing"
+    } else if unseen {
+        "New · Video note"
+    } else {
+        "Video note"
+    };
+    let ring = if playing {
+        rgb(0x3fb950)
+    } else if unseen {
+        rgb(0x58a6ff)
+    } else {
+        rgb(0x8b949e)
+    };
+    let picture = if !blocked && let Some(path) = visual {
+        img(path)
+            .id(("video-note-img", row_id))
+            .size(px(200.))
+            .rounded(px(100.))
+            .object_fit(ObjectFit::Cover)
+            .with_fallback(|| {
+                div()
+                    .size(px(200.))
+                    .rounded(px(100.))
+                    .bg(rgb(0x238636))
+                    .into_any_element()
+            })
+            .into_any_element()
+    } else {
+        let label = if blocked {
+            "Video note".to_string()
+        } else if downloading_now {
+            "Video note — downloading…".into()
+        } else if note.length > 0 {
+            format!("Video note {} — not downloaded", note.length)
+        } else {
+            "Video note — not downloaded".into()
+        };
+        div()
+            .id(("video-note-ph", row_id))
+            .size(px(200.))
+            .rounded(px(100.))
+            .bg(rgb(0x238636))
+            .flex()
+            .items_center()
+            .justify_center()
+            .px_2()
+            .child(
+                div()
+                    .text_xs()
+                    .text_center()
+                    .text_color(rgb(0xffffff))
+                    .child(label),
+            )
+            .into_any_element()
+    };
+    let viewed = note.is_viewed;
+    div()
+        .id(("video-note", row_id))
+        .mt_2()
+        .flex()
+        .flex_col()
+        .gap_1()
+        .child(
+            div()
+                .relative()
+                .size(px(200.))
+                .rounded(px(100.))
+                .overflow_hidden()
+                .border_2()
+                .border_color(ring)
+                .child(picture)
+                .child(
+                    div()
+                        .absolute()
+                        .top(px(72.))
+                        .left(px(16.))
+                        .w(px(168.))
+                        .flex()
+                        .justify_center()
+                        .child(
+                            div()
+                                .px_1()
+                                .rounded_sm()
+                                .bg(rgb(0x0d1117))
+                                .text_xs()
+                                .text_color(rgb(0xffffff))
+                                .child(badge),
+                        ),
+                )
+                .child(
+                    div()
+                        .absolute()
+                        .bottom(px(28.))
+                        .left(px(16.))
+                        .w(px(168.))
+                        .flex()
+                        .justify_center()
+                        .child(
+                            div()
+                                .px_1()
+                                .rounded_sm()
+                                .bg(rgb(0x0d1117))
+                                .text_xs()
+                                .text_color(rgb(0xffffff))
+                                .child(duration),
+                        ),
+                ),
+        )
+        .child(
+            Button::new(format!("video-note-play-{row_id}"))
+                .label(play_label)
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    if blocked {
+                        return;
+                    }
+                    this.toggle_video_playback(
+                        message_id,
+                        play_id,
+                        "video/mp4".into(),
+                        0,
+                        if viewed { None } else { Some(chat_id) },
                         cx,
                     );
                 })),

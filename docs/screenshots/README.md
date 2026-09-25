@@ -31,6 +31,7 @@ Captured from a real GPUI window on 2026-09-17 (Linux Xvfb + lavapipe). **Not** 
 | `ready-link-preview.png` | Ready chat open, a message URL plus a **link preview** card (site name, title, description, photo). Injected `messageText` / `textEntityTypeUrl` / `linkPreview`, no live Telegram. Driven by `quill --screenshot-demo ready-link-preview`. |
 | `ready-gifs.png` | Ready chat open, **GIFs** panel (saved animations) and a history GIF (**GIF · playing** / **Pause**, plus a not-yet-downloaded clip). Injected `getSavedAnimations` / `messageAnimation`, no live Telegram. Driven by `quill --screenshot-demo ready-gifs`. |
 | `ready-video.png` | Ready private chat open, a history video (**Video · playing** / **Pause**, duration, caption) plus a not-yet-downloaded video. Injected `messageVideo`, no live Telegram. Driven by `quill --screenshot-demo ready-video`. |
+| `ready-video-note.png` | Ready private chat open, a round video note (**Video note · playing** / **Pause**, duration) plus a not-yet-downloaded round note. Injected `messageVideoNote`, no live Telegram. Driven by `quill --screenshot-demo ready-video-note`. |
 | `ready-video-send.png` | Composer **Attach video** chip (`demo-clip.mp4`) plus an own-sent video (**Video · playing** / **Pause**, caption). Injected send path; no live Telegram. Driven by `quill --screenshot-demo ready-video-send`. |
 | `ready-drafts.png` | Ready private chat open with a restored composer draft (`meet at 6`) and **Replying to** the message the draft quotes. Sidebar row shows **Draft:**. Injected `draftMessage` / `updateChatDraftMessage`, no live Telegram. Driven by `quill --screenshot-demo ready-drafts`. |
 | `ready-albums.png` | Ready private chat with a **received** photo album (mosaic + caption) and an **own-sent** photo/video album. Composer shows a multi-attach album chip (photo + video). Injected `media_album_id`, no live Telegram. Driven by `quill --screenshot-demo ready-albums`. |
@@ -68,6 +69,7 @@ bash scripts/capture-connect-screenshots.sh
 #   cargo run --features ui -- --screenshot-demo ready-link-preview docs/screenshots
 #   cargo run --features ui -- --screenshot-demo ready-gifs docs/screenshots
 #   cargo run --features ui -- --screenshot-demo ready-video docs/screenshots
+#   cargo run --features ui -- --screenshot-demo ready-video-note docs/screenshots
 #   cargo run --features ui -- --screenshot-demo ready-video-send docs/screenshots
 #   cargo run --features ui -- --screenshot-demo ready-drafts docs/screenshots
 #   cargo run --features ui -- --screenshot-demo ready-albums docs/screenshots

@@ -43,7 +43,8 @@ pub enum EnvelopePayload {
         content: MessageContent,
         files: Vec<ParsedFile>,
     },
-    /// `updateMessageContentOpened` — voice note listened (`is_listened`).
+    /// `updateMessageContentOpened` — voice note listened (`is_listened`) or
+    /// video note viewed (`is_viewed`).
     UpdateMessageContentOpened {
         chat_id: ChatId,
         message_id: MessageId,
@@ -600,6 +601,7 @@ pub enum MessageContent {
     Sticker(StickerContent),
     Animation(AnimationContent),
     Video(VideoContent),
+    VideoNote(VideoNoteContent),
     VoiceNote(VoiceNoteContent),
     Unsupported { type_name: String },
 }
@@ -681,6 +683,7 @@ impl MessageContent {
                 video.caption.chars().take(80).collect()
             }
             MessageContent::Video(_) => "Video".into(),
+            MessageContent::VideoNote(_) => "Video note".into(),
             MessageContent::VoiceNote(note) if !note.caption.is_empty() => {
                 note.caption.chars().take(80).collect()
             }
@@ -689,10 +692,13 @@ impl MessageContent {
         }
     }
 
-    /// `updateMessageContentOpened` sets `messageVoiceNote.is_listened`.
-    pub fn mark_voice_listened(&mut self) {
-        if let MessageContent::VoiceNote(note) = self {
-            note.is_listened = true;
+    /// `updateMessageContentOpened` sets `messageVoiceNote.is_listened` and
+    /// `messageVideoNote.is_viewed`.
+    pub fn mark_content_opened(&mut self) {
+        match self {
+            MessageContent::VoiceNote(note) => note.is_listened = true,
+            MessageContent::VideoNote(note) => note.is_viewed = true,
+            _ => {}
         }
     }
 }
@@ -913,6 +919,39 @@ impl VideoContent {
     }
 
     /// The clip itself (`video.video`).
+    pub fn play_file_id(&self) -> Option<FileId> {
+        (self.file_id.0 != 0).then_some(self.file_id)
+    }
+}
+
+/// `videoNote` inside `messageVideoNote` (TDLib 1.8.67).
+///
+/// Schema: square MPEG4 cropped to a circle. Fields stored are `duration`,
+/// `waveform`, `length` (width and height), `thumbnail`, `video`, plus
+/// `is_viewed` and `is_secret` on the message. `minithumbnail` and
+/// `speech_recognition_result` are left unused.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VideoNoteContent {
+    pub duration: i32,
+    /// Raw `waveform` bytes (5-bit packed). Empty when unknown.
+    pub waveform: Vec<u8>,
+    /// Video width and height, as defined by the sender.
+    pub length: i32,
+    pub is_viewed: bool,
+    pub is_secret: bool,
+    pub file_id: FileId,
+    pub thumb_file_id: Option<FileId>,
+    pub thumb_width: i32,
+    pub thumb_height: i32,
+}
+
+impl VideoNoteContent {
+    /// JPEG thumbnail file, when the sender attached one.
+    pub fn thumb_file_id(&self) -> Option<FileId> {
+        self.thumb_file_id.filter(|id| id.0 != 0)
+    }
+
+    /// The clip itself (`videoNote.video`). Schema: MPEG4.
     pub fn play_file_id(&self) -> Option<FileId> {
         (self.file_id.0 != 0).then_some(self.file_id)
     }
@@ -1737,6 +1776,7 @@ fn parse_content(value: Option<&Value>) -> (MessageContent, Vec<ParsedFile>) {
         Some("messageSticker") => parse_message_sticker(value),
         Some("messageAnimation") => parse_message_animation(value),
         Some("messageVideo") => parse_message_video(value),
+        Some("messageVideoNote") => parse_message_video_note(value),
         Some("messageVoiceNote") => parse_message_voice_note(value),
         Some(other) => (
             MessageContent::Unsupported {
@@ -2101,6 +2141,71 @@ fn parse_message_video(value: &Value) -> (MessageContent, Vec<ParsedFile>) {
                 .unwrap_or(false),
             has_stickers: video
                 .get("has_stickers")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            file_id,
+            thumb_file_id,
+            thumb_width,
+            thumb_height,
+        }),
+        files,
+    )
+}
+
+fn parse_message_video_note(value: &Value) -> (MessageContent, Vec<ParsedFile>) {
+    let note = value.get("video_note");
+    if note
+        .and_then(|note| note.get("@type"))
+        .and_then(Value::as_str)
+        != Some("videoNote")
+    {
+        return (
+            MessageContent::Unsupported {
+                type_name: "messageVideoNote".into(),
+            },
+            Vec::new(),
+        );
+    }
+    let note = note.expect("videoNote");
+    let mut files = Vec::new();
+    let file_id = match parse_file(note.get("video")) {
+        Ok(file) => {
+            let id = file.id;
+            files.push(file);
+            id
+        }
+        Err(_) => FileId(0),
+    };
+    let thumb = note.get("thumbnail").filter(|thumb| !thumb.is_null());
+    let (thumb_file_id, thumb_width, thumb_height) = if let Some(thumb) = thumb {
+        let id = match parse_file(thumb.get("file")) {
+            Ok(file) => {
+                let id = file.id;
+                files.push(file);
+                Some(id)
+            }
+            Err(_) => None,
+        };
+        (
+            id.filter(|id| id.0 != 0),
+            int53_or_zero(thumb.get("width")) as i32,
+            int53_or_zero(thumb.get("height")) as i32,
+        )
+    } else {
+        (None, 0, 0)
+    };
+    files.retain(|file| file.id.0 != 0);
+    (
+        MessageContent::VideoNote(VideoNoteContent {
+            duration: int53_or_zero(note.get("duration")) as i32,
+            waveform: parse_tdlib_bytes(note.get("waveform")),
+            length: int53_or_zero(note.get("length")) as i32,
+            is_viewed: value
+                .get("is_viewed")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            is_secret: value
+                .get("is_secret")
                 .and_then(Value::as_bool)
                 .unwrap_or(false),
             file_id,
@@ -2983,6 +3088,36 @@ mod tests {
         assert_eq!(video.thumb_height, 68);
         assert_eq!(video.caption, "see this");
         assert_eq!(message.content.preview(), "see this");
+        assert!(message.files.iter().any(|file| file.id == FileId(33)));
+        assert!(message.files.iter().any(|file| file.id == FileId(42)));
+    }
+
+    #[test]
+    fn message_video_note_parses_1_8_67_fields() {
+        let waveform = base64::engine::general_purpose::STANDARD.encode([0xF8, 0x02]);
+        let clip = local_file_json(33, "", false, true);
+        let thumb = local_file_json(42, "/tmp/note-thumb.jpg", true, true);
+        let json = format!(
+            r#"{{"@type":"updateNewMessage","message":{{"id":9,"chat_id":11,"is_outgoing":false,"content":{{"@type":"messageVideoNote","video_note":{{"@type":"videoNote","duration":8,"waveform":"{waveform}","length":240,"minithumbnail":null,"thumbnail":{{"@type":"thumbnail","format":{{"@type":"thumbnailFormatJpeg"}},"width":120,"height":120,"file":{thumb}}},"speech_recognition_result":null,"video":{clip}}},"is_viewed":false,"is_secret":false}}}}}}"#
+        );
+        let env = parse_envelope(&json).unwrap();
+        let EnvelopePayload::UpdateNewMessage(message) = env.payload else {
+            panic!("expected message");
+        };
+        let MessageContent::VideoNote(note) = &message.content else {
+            panic!("{:?}", message.content);
+        };
+        assert_eq!(note.duration, 8);
+        assert_eq!(note.length, 240);
+        assert_eq!(note.waveform, vec![0xF8, 0x02]);
+        assert!(!note.is_viewed);
+        assert!(!note.is_secret);
+        assert_eq!(note.file_id, FileId(33));
+        assert_eq!(note.play_file_id(), Some(FileId(33)));
+        assert_eq!(note.thumb_file_id(), Some(FileId(42)));
+        assert_eq!(note.thumb_width, 120);
+        assert_eq!(note.thumb_height, 120);
+        assert_eq!(message.content.preview(), "Video note");
         assert!(message.files.iter().any(|file| file.id == FileId(33)));
         assert!(message.files.iter().any(|file| file.id == FileId(42)));
     }
