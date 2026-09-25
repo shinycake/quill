@@ -665,15 +665,84 @@ pub fn set_chat_notification_settings(
 /// otherwise `chatActionCancel` (Unigram `CancelTyping`). `topic_id` null,
 /// `business_connection_id` empty (not a bot business connection).
 pub fn send_chat_action(extra: RequestId, chat_id: ChatId, typing: bool) -> String {
+    send_chat_action_kind(
+        extra,
+        chat_id,
+        if typing {
+            "chatActionTyping"
+        } else {
+            "chatActionCancel"
+        },
+    )
+}
+
+/// `sendChatAction` with an explicit `ChatAction` constructor (1.8.67).
+pub fn send_chat_action_kind(extra: RequestId, chat_id: ChatId, action: &str) -> String {
     json!({
         "@type": "sendChatAction",
         "@extra": extra.as_extra(),
         "chat_id": chat_id.0,
         "topic_id": Value::Null,
         "business_connection_id": "",
-        "action": {
-            "@type": if typing { "chatActionTyping" } else { "chatActionCancel" }
+        "action": { "@type": action }
+    })
+    .to_string()
+}
+
+/// `sendMessage` + `inputMessageVoiceNote` / `inputVoiceNote` / `inputFileLocal`.
+/// `path` must already be an explicitly recorded or picked file.
+/// `waveform_b64` is the 5-bit waveform as TDLib `bytes` (base64); empty if unknown.
+pub fn send_voice_note(
+    extra: RequestId,
+    chat_id: ChatId,
+    path: &str,
+    duration: i32,
+    waveform_b64: &str,
+    caption: &str,
+    reply_to: Option<MessageId>,
+) -> String {
+    let caption_json = if caption.is_empty() {
+        Value::Null
+    } else {
+        json!({
+            "@type": "formattedText",
+            "text": caption,
+            "entities": []
+        })
+    };
+    json!({
+        "@type": "sendMessage",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0,
+        "topic_id": Value::Null,
+        "reply_to": input_message_reply_to(reply_to),
+        "options": Value::Null,
+        "reply_markup": Value::Null,
+        "input_message_content": {
+            "@type": "inputMessageVoiceNote",
+            "voice_note": {
+                "@type": "inputVoiceNote",
+                "voice_note": {
+                    "@type": "inputFileLocal",
+                    "path": path
+                },
+                "duration": duration,
+                "waveform": waveform_b64
+            },
+            "caption": caption_json,
+            "self_destruct_type": Value::Null
         }
+    })
+    .to_string()
+}
+
+/// `openMessageContent` — user started listening to a voice note (1.8.67).
+pub fn open_message_content(extra: RequestId, chat_id: ChatId, message_id: MessageId) -> String {
+    json!({
+        "@type": "openMessageContent",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0,
+        "message_id": message_id.0
     })
     .to_string()
 }
@@ -1155,5 +1224,55 @@ mod tests {
         let v: serde_json::Value = serde_json::from_str(&cancel).unwrap();
         assert_eq!(v["action"]["@type"], "chatActionCancel");
         assert!(!cancel.contains("chatActionTyping"));
+
+        let recording =
+            send_chat_action_kind(RequestId(44), ChatId(11), "chatActionRecordingVoiceNote");
+        let v: serde_json::Value = serde_json::from_str(&recording).unwrap();
+        assert_eq!(v["action"]["@type"], "chatActionRecordingVoiceNote");
+    }
+
+    #[test]
+    fn send_voice_note_shape_matches_1_8_67() {
+        let json = send_voice_note(
+            RequestId(15),
+            ChatId(7),
+            "/tmp/picked.ogg",
+            3,
+            "BASE64WAVE",
+            "",
+            Some(MessageId(9)),
+        );
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "sendMessage");
+        assert_eq!(v["@extra"], "15");
+        assert_eq!(v["chat_id"], 7);
+        assert_eq!(v["topic_id"], Value::Null);
+        assert_eq!(v["input_message_content"]["@type"], "inputMessageVoiceNote");
+        assert_eq!(
+            v["input_message_content"]["voice_note"]["@type"],
+            "inputVoiceNote"
+        );
+        assert_eq!(
+            v["input_message_content"]["voice_note"]["voice_note"]["@type"],
+            "inputFileLocal"
+        );
+        assert_eq!(
+            v["input_message_content"]["voice_note"]["voice_note"]["path"],
+            "/tmp/picked.ogg"
+        );
+        assert_eq!(v["input_message_content"]["voice_note"]["duration"], 3);
+        assert_eq!(
+            v["input_message_content"]["voice_note"]["waveform"],
+            "BASE64WAVE"
+        );
+        assert_eq!(v["input_message_content"]["caption"], Value::Null);
+        assert_eq!(
+            v["input_message_content"]["self_destruct_type"],
+            Value::Null
+        );
+        assert_eq!(v["reply_to"]["@type"], "inputMessageReplyToMessage");
+        assert_eq!(v["reply_to"]["message_id"], 9);
+        assert!(!json.contains("inputMessageVideoNote"));
+        assert!(!json.contains("CANARY"));
     }
 }

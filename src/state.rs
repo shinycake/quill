@@ -55,8 +55,12 @@ pub enum RequestPurpose {
     /// `addChatToList` (`chatListArchive` or `chatListMain`). Response is `ok`;
     /// list membership via position / added-to-list updates.
     AddChatToList,
-    /// `sendChatAction` (`chatActionTyping` / `chatActionCancel`). Response is `ok`.
+    /// `sendChatAction` (`chatActionTyping` / `chatActionCancel` /
+    /// `chatActionRecordingVoiceNote`). Response is `ok`.
     SendChatAction,
+    /// `openMessageContent` when a voice note starts playing. Response is `ok`;
+    /// `is_listened` arrives as `updateMessageContentOpened`.
+    OpenMessageContent,
     /// `getInstalledStickerSets` (`stickerTypeRegular`). Response is `stickerSets`.
     GetInstalledStickerSets,
     /// `getStickerSet`. Response is `stickerSet`.
@@ -563,6 +567,12 @@ impl HistoryState {
             true
         } else {
             false
+        }
+    }
+
+    fn mark_voice_listened(&mut self, id: MessageId) {
+        if let Some(message) = self.messages.get_mut(&id.0) {
+            message.content.mark_voice_listened();
         }
     }
 
@@ -1252,6 +1262,14 @@ impl Session {
             } => {
                 if let Some(history) = self.histories.get_mut(&chat_id.0) {
                     history.update_is_pinned(message_id, is_pinned);
+                }
+            }
+            EnvelopePayload::UpdateMessageContentOpened {
+                chat_id,
+                message_id,
+            } => {
+                if let Some(history) = self.histories.get_mut(&chat_id.0) {
+                    history.mark_voice_listened(message_id);
                 }
             }
             EnvelopePayload::UpdateMessageContent {
