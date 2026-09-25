@@ -50,6 +50,72 @@ pub struct VideoProbe {
     pub supports_streaming: bool,
 }
 
+/// Square side and duration for `inputVideoNote` (TDLib 1.8.67).
+///
+/// `length` is width and height. The schema requires it positive and at most
+/// 640. `duration` is seconds in 0–60. A non-square clip is not a round note.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct VideoNoteProbe {
+    pub duration: i32,
+    pub length: i32,
+}
+
+/// JPEG still for `inputVideoNote.thumbnail`. Width and height are the scaled
+/// frame (schema: usually not above 320). Missing `ffmpeg` skips the upload.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VideoNoteThumbnail {
+    pub path: PathBuf,
+    pub width: i32,
+    pub height: i32,
+}
+
+/// Probe a user-picked round clip. Rejects landscape/portrait video, a side
+/// above 640, and a duration above 60. Does not re-encode.
+pub fn probe_local_video_note(path: &Path) -> Result<VideoNoteProbe, String> {
+    let probe = probe_local_video(path)?;
+    if probe.width != probe.height {
+        return Err("video note must be square".into());
+    }
+    if !(1..=640).contains(&probe.width) {
+        return Err("video note length must be 1-640".into());
+    }
+    if !(0..=60).contains(&probe.duration) {
+        return Err("video note duration must be 0-60".into());
+    }
+    Ok(VideoNoteProbe {
+        duration: probe.duration,
+        length: probe.width,
+    })
+}
+
+/// First frame as JPEG, 240×240. `None` when ffmpeg is missing or the file
+/// cannot be read — the schema says pass null to skip thumbnail uploading.
+pub fn write_video_note_thumbnail(src: &Path) -> Option<VideoNoteThumbnail> {
+    let dir = std::env::temp_dir().join("quill-video-note-thumbs");
+    std::fs::create_dir_all(&dir).ok()?;
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()?
+        .as_nanos();
+    let dest = dir.join(format!("{}-{nanos}.jpg", std::process::id()));
+    let status = Command::new("ffmpeg")
+        .args(["-y", "-hide_banner", "-loglevel", "error", "-i"])
+        .arg(src)
+        .args(["-frames:v", "1", "-vf", "scale=240:240", "-q:v", "5"])
+        .arg(&dest)
+        .status()
+        .ok()?;
+    if !status.success() || !dest.is_file() {
+        let _ = std::fs::remove_file(&dest);
+        return None;
+    }
+    Some(VideoNoteThumbnail {
+        path: dest,
+        width: 240,
+        height: 240,
+    })
+}
+
 /// Read duration, width, and height from a user-picked local video.
 /// Prefers `ffprobe` (same ffmpeg family as playback). Stream duration is used
 /// when it is a number; `N/A` or a missing stream duration falls back to
@@ -456,5 +522,17 @@ mod tests {
         let notes = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("docs/screenshots/fixtures/demo-notes.txt");
         assert!(probe_local_video(&notes).is_err());
+    }
+
+    #[test]
+    fn square_note_probe_accepts_fixture_and_rejects_landscape() {
+        let note = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("docs/screenshots/fixtures/demo-video-note.mp4");
+        let probe = probe_local_video_note(&note).expect("square note");
+        assert_eq!(probe.duration, 1);
+        assert_eq!(probe.length, 240);
+        let clip = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("docs/screenshots/fixtures/demo-clip.mp4");
+        assert!(probe_local_video_note(&clip).is_err());
     }
 }

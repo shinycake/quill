@@ -556,6 +556,73 @@ pub fn input_message_video(path: &str, video: &VideoSend, caption: &str) -> Valu
     })
 }
 
+/// `inputVideoNote.thumbnail` when a JPEG was written locally. `None` is JSON null
+/// (schema: pass null to skip thumbnail uploading).
+pub struct VideoNoteThumbnailSend {
+    pub path: String,
+    pub width: i32,
+    pub height: i32,
+}
+
+/// Fields for `inputVideoNote` (TDLib 1.8.67). `duration` is 0–60. `length` is
+/// the square side, positive and at most 640.
+pub struct VideoNoteSend {
+    pub duration: i32,
+    pub length: i32,
+    pub thumbnail: Option<VideoNoteThumbnailSend>,
+}
+
+fn input_video_note_thumbnail(thumb: Option<&VideoNoteThumbnailSend>) -> Value {
+    match thumb {
+        Some(thumb) => json!({
+            "@type": "inputThumbnail",
+            "thumbnail": {
+                "@type": "inputFileLocal",
+                "path": thumb.path
+            },
+            "width": thumb.width,
+            "height": thumb.height
+        }),
+        None => Value::Null,
+    }
+}
+
+/// `sendMessage` + `inputMessageVideoNote` / `inputVideoNote` / `inputFileLocal` (1.8.67).
+/// No caption: the constructor is `video_note` and `self_destruct_type` only.
+/// `path` must already be an explicitly picked local file.
+pub fn send_video_note(
+    extra: RequestId,
+    chat_id: ChatId,
+    path: &str,
+    note: &VideoNoteSend,
+    reply_to: Option<MessageId>,
+) -> String {
+    json!({
+        "@type": "sendMessage",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0,
+        "topic_id": Value::Null,
+        "reply_to": input_message_reply_to(reply_to),
+        "options": Value::Null,
+        "reply_markup": Value::Null,
+        "input_message_content": {
+            "@type": "inputMessageVideoNote",
+            "video_note": {
+                "@type": "inputVideoNote",
+                "video_note": {
+                    "@type": "inputFileLocal",
+                    "path": path
+                },
+                "thumbnail": input_video_note_thumbnail(note.thumbnail.as_ref()),
+                "duration": note.duration,
+                "length": note.length
+            },
+            "self_destruct_type": Value::Null
+        }
+    })
+    .to_string()
+}
+
 /// `sendMessage` + `inputMessageVideo` / `inputVideo` / `inputFileLocal` (1.8.67).
 /// `path` must already be an explicitly picked local file — never a JSON `local.path`.
 pub fn send_video(
@@ -1176,6 +1243,65 @@ mod tests {
         assert_eq!(v["reply_to"]["message_id"], 9);
         assert!(!json.contains("inputMessageVideoNote"));
         assert!(!json.contains("api_hash"));
+    }
+
+    #[test]
+    fn send_video_note_shape_matches_1_8_67() {
+        let json = send_video_note(
+            RequestId(18),
+            ChatId(7),
+            "/tmp/round.mp4",
+            &VideoNoteSend {
+                duration: 1,
+                length: 240,
+                thumbnail: Some(VideoNoteThumbnailSend {
+                    path: "/tmp/round.jpg".into(),
+                    width: 240,
+                    height: 240,
+                }),
+            },
+            Some(MessageId(9)),
+        );
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "sendMessage");
+        assert_eq!(v["@extra"], "18");
+        assert_eq!(v["chat_id"], 7);
+        assert_eq!(v["input_message_content"]["@type"], "inputMessageVideoNote");
+        let note = &v["input_message_content"]["video_note"];
+        assert_eq!(note["@type"], "inputVideoNote");
+        assert_eq!(note["video_note"]["@type"], "inputFileLocal");
+        assert_eq!(note["video_note"]["path"], "/tmp/round.mp4");
+        assert_eq!(note["thumbnail"]["@type"], "inputThumbnail");
+        assert_eq!(note["thumbnail"]["thumbnail"]["path"], "/tmp/round.jpg");
+        assert_eq!(note["thumbnail"]["width"], 240);
+        assert_eq!(note["thumbnail"]["height"], 240);
+        assert_eq!(note["duration"], 1);
+        assert_eq!(note["length"], 240);
+        assert_eq!(
+            v["input_message_content"]["self_destruct_type"],
+            Value::Null
+        );
+        assert!(v["input_message_content"].get("caption").is_none());
+        assert_eq!(v["reply_to"]["message_id"], 9);
+        assert!(!json.contains("api_hash"));
+
+        let bare = send_video_note(
+            RequestId(19),
+            ChatId(7),
+            "/tmp/round.mp4",
+            &VideoNoteSend {
+                duration: 0,
+                length: 1,
+                thumbnail: None,
+            },
+            None,
+        );
+        let bare: serde_json::Value = serde_json::from_str(&bare).unwrap();
+        assert_eq!(
+            bare["input_message_content"]["video_note"]["thumbnail"],
+            Value::Null
+        );
+        assert_eq!(bare["reply_to"], Value::Null);
     }
 
     #[test]

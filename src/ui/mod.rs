@@ -217,6 +217,8 @@ pub enum ScreenshotDemo {
     ReadyVideoNote,
     /// Composer video attach chip plus an own-sent video playing in history.
     ReadyVideoSend,
+    /// Composer video-note attach chip plus an own-sent round note in history.
+    ReadyVideoNoteSend,
     /// Restored private-chat composer draft (`draftMessage`).
     ReadyDrafts,
     /// Received photo album plus an own-sent album and a multi-attach composer.
@@ -626,6 +628,15 @@ impl QuillApp {
                     AuthorizationState::Ready,
                 )
             }
+            Some(ScreenshotDemo::ReadyVideoNoteSend) => {
+                demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
+                (
+                    ConnectUiStatus::DemoReadyChats,
+                    None,
+                    "screenshot demo — local video note attach + own-sent round note".into(),
+                    AuthorizationState::Ready,
+                )
+            }
             Some(ScreenshotDemo::ReadyDrafts) => {
                 demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
                 (
@@ -660,6 +671,14 @@ impl QuillApp {
             && let Some(att) = ComposerAttachment::pick(
                 &demo_media_allowlist().join("demo-clip.mp4"),
                 AttachmentKind::Video,
+            )
+        {
+            ComposerAttachment::push_attachment(&mut pending_attachments, att);
+        }
+        if matches!(demo, Some(ScreenshotDemo::ReadyVideoNoteSend))
+            && let Some(att) = ComposerAttachment::pick(
+                &demo_media_allowlist().join("demo-video-note.mp4"),
+                AttachmentKind::VideoNote,
             )
         {
             ComposerAttachment::push_attachment(&mut pending_attachments, att);
@@ -922,6 +941,19 @@ impl QuillApp {
             app.spawn_video_tick(cx);
             app.status_note = "screenshot demo — attach video · own clip playing".into();
         }
+        if matches!(demo, Some(ScreenshotDemo::ReadyVideoNoteSend)) {
+            if let Some(session) = app.demo_session.as_mut() {
+                app.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_video_note_send(session, &app.demo_sink, &app.demo_seq);
+            }
+            app.playing_video = Some(MessageId(721));
+            app.video_frames = vec![
+                demo_media_allowlist().join("demo-gif-1.png"),
+                demo_media_allowlist().join("demo-gif-2.png"),
+            ];
+            app.spawn_video_tick(cx);
+            app.status_note = "screenshot demo — video note attach · own round note".into();
+        }
         if matches!(demo, Some(ScreenshotDemo::ReadyAlbums)) {
             if let Some(session) = app.demo_session.as_mut() {
                 app.demo_seq.store(session.last_seq, Ordering::SeqCst);
@@ -1169,7 +1201,13 @@ impl QuillApp {
                                     att.kind == AttachmentKind::Video
                                         && quill::video::probe_local_video(&att.path).is_err()
                                 });
-                            self.status_note = if video_unreadable {
+                            let note_unreadable = snap.attachment.iter().any(|att| {
+                                att.kind == AttachmentKind::VideoNote
+                                    && quill::video::probe_local_video_note(&att.path).is_err()
+                            });
+                            self.status_note = if note_unreadable {
+                                "video note must be a square clip (max 60s, 640px)".into()
+                            } else if video_unreadable {
                                 "could not read video duration or size".into()
                             } else {
                                 "could not send message".into()
@@ -1181,6 +1219,15 @@ impl QuillApp {
                 }
                 if self.demo_session.is_some() {
                     let attachments = self.pending_attachments.clone();
+                    if attachments.iter().any(|att| {
+                        att.kind == AttachmentKind::VideoNote
+                            && quill::video::probe_local_video_note(&att.path).is_err()
+                    }) {
+                        self.status_note =
+                            "video note must be a square clip (max 60s, 640px)".into();
+                        cx.notify();
+                        return;
+                    }
                     let reply = self.pending_reply.clone();
                     if attachments.len() >= 2
                         && attachments.iter().all(|att| {
@@ -1220,6 +1267,7 @@ impl QuillApp {
             AttachmentKind::Photo => "QUILL_ATTACH_PHOTO",
             AttachmentKind::Document => "QUILL_ATTACH_FILE",
             AttachmentKind::Video => "QUILL_ATTACH_VIDEO",
+            AttachmentKind::VideoNote => "QUILL_ATTACH_VIDEO_NOTE",
         };
         let path = std::env::var_os(env_key)
             .map(PathBuf::from)
@@ -1227,6 +1275,7 @@ impl QuillApp {
                 AttachmentKind::Photo => demo_media_allowlist().join("demo-thumb.png"),
                 AttachmentKind::Document => demo_media_allowlist().join("demo-notes.txt"),
                 AttachmentKind::Video => demo_media_allowlist().join("demo-clip.mp4"),
+                AttachmentKind::VideoNote => demo_media_allowlist().join("demo-video-note.mp4"),
             });
         match ComposerAttachment::pick(&path, kind) {
             Some(att) => {
@@ -1312,7 +1361,7 @@ impl QuillApp {
                         serde_json::to_string(item_caption).unwrap_or_else(|_| "\"\"".into()),
                     )
                 }
-                AttachmentKind::Document => continue,
+                AttachmentKind::Document | AttachmentKind::VideoNote => continue,
             };
             if let Some(owned) = copy_and_parse(&json, &self.demo_seq, &dyn_sink) {
                 session.apply(owned);
@@ -1352,6 +1401,33 @@ impl QuillApp {
                     r#"{{"@type":"updateNewMessage","message":{{"id":{id},"chat_id":{},"is_outgoing":true,"content":{{"@type":"messagePhoto","photo":{{"@type":"photo","has_stickers":false,"sizes":[{{"@type":"photoSize","type":"m","photo":{file},"width":240,"height":160,"progressive_sizes":[]}}]}},"caption":{{"@type":"formattedText","text":{},"entities":[]}},"has_spoiler":false,"is_secret":false}}{reply_json}}}}}"#,
                     chat_id.0,
                     serde_json::to_string(caption).unwrap_or_else(|_| "\"\"".into()),
+                )
+            }
+            Some(att) if att.kind == AttachmentKind::VideoNote => {
+                let path = att.path.to_string_lossy();
+                let file = demo_file_json(903, &path, true);
+                let probe = quill::video::probe_local_video_note(&att.path).unwrap_or(
+                    quill::video::VideoNoteProbe {
+                        duration: 1,
+                        length: 240,
+                    },
+                );
+                let thumb_path = quill::video::write_video_note_thumbnail(&att.path)
+                    .map(|thumb| thumb.path.to_string_lossy().into_owned());
+                let thumb = thumb_path
+                    .as_deref()
+                    .map(|path| demo_file_json(904, path, true))
+                    .unwrap_or_else(|| "null".into());
+                let thumb_obj = if thumb == "null" {
+                    "null".to_string()
+                } else {
+                    format!(
+                        r#"{{"@type":"thumbnail","format":{{"@type":"thumbnailFormatJpeg"}},"width":240,"height":240,"file":{thumb}}}"#
+                    )
+                };
+                format!(
+                    r#"{{"@type":"updateNewMessage","message":{{"id":{id},"chat_id":{},"is_outgoing":true,"content":{{"@type":"messageVideoNote","video_note":{{"@type":"videoNote","duration":{},"waveform":"","length":{},"minithumbnail":null,"thumbnail":{thumb_obj},"speech_recognition_result":null,"video":{file}}},"is_viewed":true,"is_secret":false}}}}{reply_json}}}}}"#,
+                    chat_id.0, probe.duration, probe.length,
                 )
             }
             Some(att) if att.kind == AttachmentKind::Video => {
@@ -5066,6 +5142,7 @@ impl QuillApp {
                             AttachmentKind::Photo => format!("Photo · {}", att.file_name),
                             AttachmentKind::Document => format!("Document · {}", att.file_name),
                             AttachmentKind::Video => format!("Video · {}", att.file_name),
+                            AttachmentKind::VideoNote => format!("Video note · {}", att.file_name),
                         })
                         .collect()
                 } else {
@@ -5108,6 +5185,13 @@ impl QuillApp {
                                                 this.attach_local(AttachmentKind::Video, cx);
                                             }),
                                         ),
+                                    )
+                                    .child(
+                                        Button::new("attach-video-note")
+                                            .label("Video note")
+                                            .on_click(cx.listener(|this, _, _, cx| {
+                                                this.attach_local(AttachmentKind::VideoNote, cx);
+                                            })),
                                     )
                                     .child(
                                         Button::new("open-gifs")
@@ -5875,6 +5959,26 @@ fn apply_ready_video_note(session: &mut Session, sink: &Arc<MemorySink>, seq: &A
     );
     let drop_seed = r#"{"@type":"updateDeleteMessages","chat_id":11,"message_ids":[101,102,103],"is_permanent":true,"from_cache":false}"#;
     for json in [playing, waiting, drop_seed.to_string()] {
+        if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
+            session.apply(owned);
+        }
+    }
+}
+
+fn apply_ready_video_note_send(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let clip_path = demo_media_allowlist()
+        .join("demo-video-note.mp4")
+        .to_string_lossy()
+        .into_owned();
+    let thumb_path = demo_thumb_png_path();
+    let clip = demo_file_json(94, &clip_path, true);
+    let thumb = demo_file_json(95, &thumb_path, true);
+    let sent = format!(
+        r#"{{"@type":"updateNewMessage","message":{{"id":721,"chat_id":11,"is_outgoing":true,"content":{{"@type":"messageVideoNote","video_note":{{"@type":"videoNote","duration":1,"waveform":"","length":240,"minithumbnail":null,"thumbnail":{{"@type":"thumbnail","format":{{"@type":"thumbnailFormatJpeg"}},"width":240,"height":240,"file":{thumb}}},"speech_recognition_result":null,"video":{clip}}},"is_viewed":true,"is_secret":false}}}}}}"#
+    );
+    let drop_seed = r#"{"@type":"updateDeleteMessages","chat_id":11,"message_ids":[101,102,103],"is_permanent":true,"from_cache":false}"#;
+    for json in [sent, drop_seed.to_string()] {
         if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
             session.apply(owned);
         }
