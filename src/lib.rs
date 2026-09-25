@@ -17,6 +17,7 @@ pub mod settings;
 pub mod state;
 pub mod telegram;
 pub mod text;
+pub mod voice;
 
 use sha2::{Digest, Sha256};
 use std::fs;

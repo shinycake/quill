@@ -30,8 +30,10 @@ use quill::telegram::envelope::{
     MUTE_FOR_2_DAYS, MUTE_FOR_8_HOURS, MUTE_FOREVER, MessageContent, MessageInteractionInfo,
     ParsedFile, toggle_chosen_emoji_reaction,
 };
+use quill::voice::{self, VoiceCapture, format_voice_duration};
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::process::{Child, Command, Stdio};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
@@ -135,6 +137,12 @@ pub struct QuillApp {
     pending_react: Option<(ChatId, MessageId)>,
     /// tdesktop Mute submenu (1 hour / 8 hours / 2 days / Forever).
     mute_menu_open: bool,
+    /// tdesktop `VoiceRecordBar` (click mic to record; Esc / Cancel discards).
+    voice_capture: Option<VoiceCapture>,
+    voice_tick: bool,
+    /// History row whose voice note is playing.
+    playing_voice: Option<MessageId>,
+    voice_player: Option<Child>,
 }
 
 /// Forced UI surfaces for screenshot proof (no live Telegram / no real credentials).
@@ -171,6 +179,8 @@ pub enum ScreenshotDemo {
     ReadyTyping,
     /// Sticker panel + sticker in history (injected, no live Telegram).
     ReadyStickers,
+    /// Voice record bar + history playback (injected, no live Telegram).
+    ReadyVoice,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -521,6 +531,15 @@ impl QuillApp {
                     AuthorizationState::Ready,
                 )
             }
+            Some(ScreenshotDemo::ReadyVoice) => {
+                demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
+                (
+                    ConnectUiStatus::DemoReadyChats,
+                    None,
+                    "screenshot demo — voice record bar + history playback".into(),
+                    AuthorizationState::Ready,
+                )
+            }
             None => bootstrap_connect(credentials),
         };
 
@@ -567,6 +586,10 @@ impl QuillApp {
             forward_result: None,
             pending_react: None,
             mute_menu_open: false,
+            voice_capture: None,
+            voice_tick: false,
+            playing_voice: None,
+            voice_player: None,
         };
         if matches!(demo, Some(ScreenshotDemo::ReadyChatsComposer)) {
             app.composer.update(cx, |input, cx| {
@@ -685,6 +708,20 @@ impl QuillApp {
                 apply_ready_stickers(session, &app.demo_sink, &app.demo_seq);
             }
             app.status_note = "screenshot demo — stickers · tap to send".into();
+        }
+        if matches!(demo, Some(ScreenshotDemo::ReadyVoice)) {
+            if let Some(session) = app.demo_session.as_mut() {
+                app.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_voice(session, &app.demo_sink, &app.demo_seq);
+            }
+            let bars = vec![4, 16, 28, 12, 8, 20, 6, 18, 10, 24, 8, 14];
+            app.voice_capture = Some(VoiceCapture::preview(
+                demo_media_allowlist().join("demo-voice.ogg"),
+                2,
+                bars,
+            ));
+            app.playing_voice = Some(MessageId(91));
+            app.status_note = "screenshot demo — recording voice · playing voice note".into();
         }
         if app.live.is_some() {
             app.spawn_poll_loop(cx);
@@ -1036,6 +1073,7 @@ impl QuillApp {
                         MessageContent::Photo(photo) => photo.caption = text.to_string(),
                         MessageContent::Document(doc) => doc.caption = text.to_string(),
                         MessageContent::Text(body) => *body = text.to_string(),
+                        MessageContent::VoiceNote(note) => note.caption = text.to_string(),
                         MessageContent::Sticker(_) | MessageContent::Unsupported { .. } => {}
                     }
                 }
@@ -1094,6 +1132,10 @@ impl QuillApp {
         {
             self.pending_react = None;
         }
+        if self.voice_capture.is_some() {
+            self.cancel_voice_recording(cx);
+        }
+        self.stop_voice_playback();
         if self.sticker_panel_open() {
             if let Some(live) = self.live.as_mut() {
                 live.driver.close_sticker_panel();
@@ -1293,6 +1335,10 @@ impl QuillApp {
     }
 
     fn cancel_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.voice_capture.is_some() {
+            self.cancel_voice_recording(cx);
+            return;
+        }
         if self.sticker_panel_open() {
             self.close_sticker_panel(cx);
             return;
@@ -1675,11 +1721,254 @@ impl QuillApp {
         cx.notify();
     }
 
+    fn start_voice_recording(&mut self, cx: &mut Context<Self>) {
+        if self.pending_edit.is_some() || self.voice_capture.is_some() {
+            return;
+        }
+        if self.sticker_panel_open() {
+            self.close_sticker_panel(cx);
+        }
+        match VoiceCapture::start() {
+            Ok(capture) => {
+                self.voice_capture = Some(capture);
+                self.sync_voice_action();
+                self.spawn_voice_tick(cx);
+                self.status_note = "recording voice note".into();
+            }
+            Err(err) => {
+                self.status_note = err;
+            }
+        }
+        cx.notify();
+    }
+
+    fn cancel_voice_recording(&mut self, cx: &mut Context<Self>) {
+        if let Some(capture) = self.voice_capture.take() {
+            capture.discard();
+        }
+        self.sync_voice_action();
+        self.status_note = "voice recording cancelled".into();
+        cx.notify();
+    }
+
+    fn send_voice_recording(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(capture) = self.voice_capture.take() else {
+            return;
+        };
+        let caption = self.composer.read(cx).value().to_string();
+        let draft = match capture.finish() {
+            Ok(draft) => draft,
+            Err(err) => {
+                self.sync_voice_action();
+                self.status_note = err;
+                cx.notify();
+                return;
+            }
+        };
+        let reply = self.pending_reply.clone();
+        if self.live.is_some() {
+            let reply_to = reply
+                .as_ref()
+                .filter(|reply| {
+                    self.live
+                        .as_ref()
+                        .is_some_and(|live| live.driver.session.open_chat == Some(reply.chat_id))
+                })
+                .map(|reply| reply.message_id);
+            let result = self.live.as_mut().expect("live").driver.send_voice_note(
+                &draft,
+                caption.trim(),
+                reply_to,
+            );
+            self.status_note = match result {
+                Ok(_) => "sending voice note".into(),
+                Err(_) => "could not send voice note".into(),
+            };
+            if self.status_note == "sending voice note" {
+                self.pending_reply = None;
+                self.composer
+                    .update(cx, |input, cx| input.set_value("", window, cx));
+            }
+        } else if self.demo_session.is_some() {
+            self.apply_demo_voice(&draft, caption.trim(), reply.as_ref());
+            self.pending_reply = None;
+            self.composer
+                .update(cx, |input, cx| input.set_value("", window, cx));
+            self.status_note = "demo voice note applied locally (no live Telegram)".into();
+        }
+        self.sync_voice_action();
+        cx.notify();
+    }
+
+    fn apply_demo_voice(
+        &mut self,
+        draft: &quill::voice::VoiceDraft,
+        caption: &str,
+        reply: Option<&ComposerReplyTo>,
+    ) {
+        let Some(session) = self.demo_session.as_mut() else {
+            return;
+        };
+        let Some(chat_id) = session.open_chat else {
+            return;
+        };
+        let dyn_sink: Arc<dyn DiagnosticSink> = self.demo_sink.clone();
+        let id = -(session.view_generation.0 as i64);
+        let path = draft.path.to_string_lossy();
+        let file = demo_file_json(910, &path, true);
+        let waveform = draft.waveform_b64();
+        let reply_json = reply
+            .filter(|r| r.chat_id == chat_id)
+            .map(|r| {
+                format!(
+                    r#","reply_to":{{"@type":"messageReplyToMessage","chat_id":{},"message_id":{},"quote":null,"checklist_task_id":0,"poll_option_id":""}}"#,
+                    r.chat_id.0, r.message_id.0
+                )
+            })
+            .unwrap_or_default();
+        let json = format!(
+            r#"{{"@type":"updateNewMessage","message":{{"id":{id},"chat_id":{},"is_outgoing":true,"content":{{"@type":"messageVoiceNote","voice_note":{{"@type":"voiceNote","duration":{},"waveform":{},"mime_type":"audio/ogg","speech_recognition_result":null,"voice":{file}}},"caption":{{"@type":"formattedText","text":{},"entities":[]}},"is_listened":true}}{reply_json}}}}}"#,
+            chat_id.0,
+            draft.duration_secs,
+            serde_json::to_string(&waveform).unwrap_or_else(|_| "\"\"".into()),
+            serde_json::to_string(caption).unwrap_or_else(|_| "\"\"".into()),
+        );
+        if let Some(owned) = copy_and_parse(&json, &self.demo_seq, &dyn_sink) {
+            session.apply(owned);
+        }
+    }
+
+    fn sync_voice_action(&mut self) {
+        let active = self.voice_capture.is_some();
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0);
+        if let Some(live) = self.live.as_mut() {
+            let _ = live.driver.sync_voice_recording(active, now_ms);
+        }
+    }
+
+    fn spawn_voice_tick(&mut self, cx: &mut Context<Self>) {
+        if self.voice_tick {
+            return;
+        }
+        self.voice_tick = true;
+        cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor()
+                    .timer(Duration::from_millis(200))
+                    .await;
+                let cont = this
+                    .update(cx, |this, cx| {
+                        let recording = this.voice_capture.is_some();
+                        if let Some(capture) = this.voice_capture.as_mut() {
+                            capture.sample_bar();
+                            this.sync_voice_action();
+                            cx.notify();
+                        }
+                        recording
+                    })
+                    .unwrap_or(false);
+                if !cont {
+                    break;
+                }
+            }
+            let _ = this.update(cx, |this, _| {
+                this.voice_tick = false;
+            });
+        })
+        .detach();
+    }
+
+    fn stop_voice_playback(&mut self) {
+        if let Some(mut child) = self.voice_player.take() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+        self.playing_voice = None;
+    }
+
+    fn toggle_voice_playback(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        file_id: FileId,
+        listened: bool,
+        cx: &mut Context<Self>,
+    ) {
+        if self.playing_voice == Some(message_id) {
+            self.stop_voice_playback();
+            self.status_note = "voice note paused".into();
+            cx.notify();
+            return;
+        }
+        let path = self.session().and_then(|session| {
+            session
+                .files
+                .get(&file_id.0)
+                .and_then(|file| file.usable_path())
+                .map(str::to_string)
+        });
+        let Some(path) = path else {
+            self.request_media_download(file_id, cx);
+            return;
+        };
+        let roots = self.media_display_roots();
+        if sandboxed_display_path(&path, &roots).is_none() {
+            self.status_note = "voice file is outside the account files".into();
+            cx.notify();
+            return;
+        }
+        self.stop_voice_playback();
+        self.playing_voice = Some(message_id);
+        if !listened {
+            self.mark_voice_opened(chat_id, message_id);
+        }
+        match Command::new("ffplay")
+            .args(["-nodisp", "-autoexit", "-loglevel", "quiet", &path])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+        {
+            Ok(child) => {
+                self.voice_player = Some(child);
+                self.status_note = "playing voice note".into();
+            }
+            Err(_) => {
+                self.status_note = "playing voice note (no audio player)".into();
+            }
+        }
+        cx.notify();
+    }
+
+    fn mark_voice_opened(&mut self, chat_id: ChatId, message_id: MessageId) {
+        if let Some(live) = self.live.as_mut() {
+            let _ = live.driver.open_voice_content(chat_id, message_id);
+            return;
+        }
+        let Some(session) = self.demo_session.as_mut() else {
+            return;
+        };
+        let dyn_sink: Arc<dyn DiagnosticSink> = self.demo_sink.clone();
+        let json = format!(
+            r#"{{"@type":"updateMessageContentOpened","chat_id":{},"message_id":{}}}"#,
+            chat_id.0, message_id.0
+        );
+        if let Some(owned) = copy_and_parse(&json, &self.demo_seq, &dyn_sink) {
+            session.apply(owned);
+        }
+    }
+
     fn sticker_panel_open(&self) -> bool {
         self.session().is_some_and(|session| session.stickers.open)
     }
 
     fn toggle_sticker_panel(&mut self, cx: &mut Context<Self>) {
+        if self.voice_capture.is_some() {
+            self.cancel_voice_recording(cx);
+        }
         if self.sticker_panel_open() {
             self.close_sticker_panel(cx);
             return;
@@ -3584,6 +3873,9 @@ impl QuillApp {
                         .flex()
                         .flex_col()
                         .gap_2()
+                        .when(self.voice_capture.is_some(), |this| {
+                            this.child(self.voice_record_bar(cx))
+                        })
                         .when(show_attach, |box_| {
                             box_.child(
                                 div()
@@ -3613,6 +3905,17 @@ impl QuillApp {
                                             })
                                             .on_click(cx.listener(|this, _, _, cx| {
                                                 this.toggle_sticker_panel(cx);
+                                            })),
+                                    )
+                                    .child(
+                                        Button::new("record-voice")
+                                            .label(if self.voice_capture.is_some() {
+                                                "Recording"
+                                            } else {
+                                                "Voice"
+                                            })
+                                            .on_click(cx.listener(|this, _, _, cx| {
+                                                this.start_voice_recording(cx);
                                             })),
                                     )
                                     .when(self.pending_attachment.is_some(), |row| {
@@ -3679,6 +3982,64 @@ impl QuillApp {
                         .child(note),
                 )
             })
+    }
+
+    fn voice_record_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let seconds = self
+            .voice_capture
+            .as_ref()
+            .map(|capture| capture.elapsed_secs())
+            .unwrap_or(0);
+        let bars = self
+            .voice_capture
+            .as_ref()
+            .map(|capture| capture.bars.clone())
+            .unwrap_or_default();
+        div()
+            .id("voice-record-bar")
+            .px_3()
+            .py_2()
+            .rounded_md()
+            .border_1()
+            .border_color(rgb(0xf85149))
+            .bg(rgb(0x21262d))
+            .flex()
+            .flex_col()
+            .gap_2()
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .child(
+                        div()
+                            .text_sm()
+                            .font_medium()
+                            .text_color(rgb(0xffffff))
+                            .child(format!(
+                                "Recording voice · {}",
+                                format_voice_duration(seconds)
+                            )),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .gap_2()
+                            .child(Button::new("cancel-voice").label("Cancel").on_click(
+                                cx.listener(|this, _, _, cx| {
+                                    this.cancel_voice_recording(cx);
+                                }),
+                            ))
+                            .child(
+                                Button::new("send-voice")
+                                    .label("Send")
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.send_voice_recording(window, cx);
+                                    })),
+                            ),
+                    ),
+            )
+            .child(waveform_row(0, &bars))
     }
 
     fn session_history(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -3805,6 +4166,7 @@ impl QuillApp {
                     let reaction_open = self
                         .pending_react
                         .is_some_and(|(chat, id)| chat == message.chat_id && id == message.id);
+                    let voice_playing = self.playing_voice == Some(message.id);
                     let row = session_history_row(
                         &message,
                         &files,
@@ -3815,6 +4177,7 @@ impl QuillApp {
                         forward_from,
                         selected_forward,
                         reaction_open,
+                        voice_playing,
                         cx,
                     );
                     list = list.child(
@@ -4165,6 +4528,30 @@ fn apply_ready_stickers(session: &mut Session, sink: &Arc<MemorySink>, seq: &Ato
     );
     if let Some(owned) = copy_and_parse(&set, seq, &dyn_sink) {
         session.apply(owned);
+    }
+}
+
+fn apply_ready_voice(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let path = demo_media_allowlist()
+        .join("demo-voice.ogg")
+        .to_string_lossy()
+        .into_owned();
+    let wave = voice::waveform_base64(&[4, 16, 28, 12, 8, 20, 6, 18, 10, 24, 8, 14]);
+    let incoming_file = demo_file_json(81, &path, true);
+    let outgoing_file = demo_file_json(82, &path, true);
+    let wave_json = serde_json::to_string(&wave).unwrap_or_else(|_| "\"\"".into());
+    let incoming = format!(
+        r#"{{"@type":"updateNewMessage","message":{{"id":90,"chat_id":11,"is_outgoing":false,"content":{{"@type":"messageVoiceNote","voice_note":{{"@type":"voiceNote","duration":12,"waveform":{wave_json},"mime_type":"audio/ogg","speech_recognition_result":null,"voice":{incoming_file}}},"caption":{{"@type":"formattedText","text":"","entities":[]}},"is_listened":false}}}}}}"#
+    );
+    let outgoing = format!(
+        r#"{{"@type":"updateNewMessage","message":{{"id":91,"chat_id":11,"is_outgoing":true,"content":{{"@type":"messageVoiceNote","voice_note":{{"@type":"voiceNote","duration":3,"waveform":{wave_json},"mime_type":"audio/ogg","speech_recognition_result":null,"voice":{outgoing_file}}},"caption":{{"@type":"formattedText","text":"","entities":[]}},"is_listened":true}}}}}}"#
+    );
+    let drop_seed = r#"{"@type":"updateDeleteMessages","chat_id":11,"message_ids":[101,102,103],"is_permanent":true,"from_cache":false}"#;
+    for json in [incoming, outgoing, drop_seed.to_string()] {
+        if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
+            session.apply(owned);
+        }
     }
 }
 
@@ -4643,6 +5030,7 @@ fn session_history_row(
     forward_from: Option<String>,
     selected_forward: bool,
     reaction_open: bool,
+    voice_playing: bool,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
     let quote = message.reply_to.as_ref().and_then(|reply| {
@@ -4814,6 +5202,16 @@ fn session_history_row(
             media_roots,
             cx,
         )),
+        MessageContent::VoiceNote(note) => Some(voice_note_row(
+            message.chat_id,
+            message.id,
+            message.is_outgoing,
+            note,
+            files,
+            downloading,
+            voice_playing,
+            cx,
+        )),
         MessageContent::Text(_) | MessageContent::Unsupported { .. } => None,
     };
     let extra = Some(
@@ -4841,6 +5239,7 @@ fn session_history_row(
         MessageContent::Photo(photo) => photo.caption.clone(),
         MessageContent::Document(doc) => doc.caption.clone(),
         MessageContent::Sticker(_) => String::new(),
+        MessageContent::VoiceNote(note) => note.caption.clone(),
     };
     session_bubble_quoted(
         message.id.0 as u64,
@@ -5101,6 +5500,111 @@ fn sticker_label(sticker: &quill::telegram::envelope::StickerContent) -> String 
     } else {
         format!("Sticker {}", sticker.emoji)
     }
+}
+
+fn waveform_row(row_key: u64, bars: &[u8]) -> impl IntoElement {
+    let mut row = div()
+        .id(("waveform", row_key))
+        .flex()
+        .items_end()
+        .gap_0()
+        .h(px(28.));
+    let shown: Vec<u8> = if bars.is_empty() {
+        vec![6, 10, 14, 8, 12]
+    } else {
+        bars.iter().copied().take(48).collect()
+    };
+    for (index, bar) in shown.into_iter().enumerate() {
+        let h = 4.0 + f32::from(bar.min(31)) * 0.7;
+        row = row.child(
+            div()
+                .id(("wave-bar", row_key * 64 + index as u64))
+                .w(px(3.))
+                .h(px(h))
+                .rounded_sm()
+                .bg(rgb(0x58a6ff)),
+        );
+    }
+    row
+}
+
+fn voice_note_row(
+    chat_id: ChatId,
+    message_id: MessageId,
+    outgoing: bool,
+    note: &quill::telegram::envelope::VoiceNoteContent,
+    files: &HashMap<i32, ParsedFile>,
+    downloading: &std::collections::HashSet<i32>,
+    playing: bool,
+    cx: &mut Context<QuillApp>,
+) -> AnyElement {
+    let file_id = note.file_id;
+    let ready = files
+        .get(&file_id.0)
+        .and_then(|file| file.usable_path())
+        .is_some();
+    let downloading_now = file_is_downloading(file_id, files, downloading);
+    let bars = voice::waveform_bars_from_bytes(&note.waveform);
+    let listened = note.is_listened;
+    let play_label = if playing {
+        "Pause"
+    } else if downloading_now {
+        "Downloading"
+    } else if ready {
+        "Play"
+    } else {
+        "Play"
+    };
+    let mut meta = format_voice_duration(note.duration);
+    if !outgoing && !note.is_listened && !playing {
+        meta = format!("New · {meta}");
+    }
+    if !ready && !downloading_now {
+        meta = format!("{meta} · not downloaded");
+    } else if downloading_now {
+        meta = format!("{meta} · downloading…");
+    } else if playing {
+        meta = format!("Playing · {meta}");
+    }
+    div()
+        .id(("voice-note", message_id.0 as u64))
+        .mt_2()
+        .px_3()
+        .py_2()
+        .rounded_md()
+        .border_1()
+        .border_color(if playing {
+            rgb(0x3fb950)
+        } else {
+            rgb(0x8b949e)
+        })
+        .bg(rgb(0x21262d))
+        .flex()
+        .flex_col()
+        .gap_1()
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .gap_2()
+                .child(
+                    Button::new(format!("voice-play-{}", message_id.0))
+                        .label(play_label)
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.toggle_voice_playback(chat_id, message_id, file_id, listened, cx);
+                        })),
+                )
+                .child(
+                    div()
+                        .text_sm()
+                        .font_medium()
+                        .text_color(rgb(0xffffff))
+                        .child("Voice message"),
+                )
+                .child(div().text_xs().text_color(rgb(0xffffff)).child(meta)),
+        )
+        .child(waveform_row(message_id.0 as u64, &bars))
+        .into_any_element()
 }
 
 fn document_chip(

@@ -23,12 +23,13 @@ use crate::telegram::requests::{
     add_recently_found_chat, check_authentication_code, check_authentication_password, close_chat,
     close_request, delete_messages, download_file as download_file_request, edit_message_caption,
     edit_message_text, forward_messages, get_authorization_state, get_chat_history,
-    get_installed_sticker_sets, get_sticker_set, load_chats, open_chat, pin_chat_message,
-    remove_message_reaction, search_chat_messages, search_chats, search_messages,
-    search_recently_found_chats, send_chat_action, send_document, send_photo, send_sticker,
-    send_text, set_authentication_phone_number, set_chat_notification_settings, unpin_chat_message,
-    view_messages,
+    get_installed_sticker_sets, get_sticker_set, load_chats, open_chat, open_message_content,
+    pin_chat_message, remove_message_reaction, search_chat_messages, search_chats, search_messages,
+    search_recently_found_chats, send_chat_action, send_chat_action_kind, send_document,
+    send_photo, send_sticker, send_text, send_voice_note, set_authentication_phone_number,
+    set_chat_notification_settings, unpin_chat_message, view_messages,
 };
+use crate::voice::VoiceDraft;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -306,6 +307,8 @@ pub struct ConnectDriver<S: JsonSender> {
     pending_typed_chat_search: Option<(u64, String)>,
     /// Last `chatActionTyping` we sent (Unigram `_lastTypingTime`).
     outgoing_typing: Option<OutgoingTyping>,
+    /// Last `chatActionRecordingVoiceNote` (Unigram record button).
+    outgoing_voice: Option<OutgoingTyping>,
 }
 
 struct OutgoingTyping {
@@ -332,6 +335,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             chat_search_debounce_token: 0,
             pending_typed_chat_search: None,
             outgoing_typing: None,
+            outgoing_voice: None,
         }
     }
 
@@ -794,6 +798,146 @@ impl<S: JsonSender> ConnectDriver<S> {
             Ok(()) => {
                 let _ = self.cancel_outgoing_typing();
                 Ok(extra)
+            }
+            Err(err) => {
+                self.session.requests.take(extra);
+                Err(err)
+            }
+        }
+    }
+
+    /// `sendMessage` + `inputMessageVoiceNote` for a finished local capture.
+    pub fn send_voice_note(
+        &mut self,
+        draft: &VoiceDraft,
+        caption: &str,
+        reply_to: Option<MessageId>,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let Some(chat_id) = self.session.open_chat else {
+            return Err(ConnectSendError::InvalidRequest);
+        };
+        let supported = self
+            .session
+            .chats
+            .get(&chat_id.0)
+            .is_some_and(|chat| chat.supported());
+        if !supported {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let path = crate::local_path::pick_send_path(&draft.path)
+            .ok_or(ConnectSendError::InvalidRequest)?;
+        let path = path.to_string_lossy().into_owned();
+        let extra = self
+            .session
+            .request(RequestPurpose::SendMessage, Some(chat_id));
+        let json = send_voice_note(
+            extra,
+            chat_id,
+            &path,
+            draft.duration_secs,
+            &draft.waveform_b64(),
+            caption,
+            reply_to,
+        );
+        match self.sender.send_json(&json) {
+            Ok(()) => {
+                let _ = self.cancel_outgoing_typing();
+                let _ = self.sync_voice_recording(false, 0);
+                Ok(extra)
+            }
+            Err(err) => {
+                self.session.requests.take(extra);
+                Err(err)
+            }
+        }
+    }
+
+    /// `openMessageContent` when playback of a voice note starts.
+    pub fn open_voice_content(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::OpenMessageContent, Some(chat_id));
+        let json = open_message_content(extra, chat_id, message_id);
+        match self.sender.send_json(&json) {
+            Ok(()) => Ok(extra),
+            Err(err) => {
+                self.session.requests.take(extra);
+                Err(err)
+            }
+        }
+    }
+
+    /// While the voice bar is recording, send `chatActionRecordingVoiceNote`
+    /// at most every [`OUTGOING_TYPING_INTERVAL_MS`] (Unigram record action).
+    /// Stopping sends `chatActionCancel`.
+    pub fn sync_voice_recording(
+        &mut self,
+        active: bool,
+        now_ms: u64,
+    ) -> Result<(), ConnectSendError> {
+        let chat_id = self
+            .session
+            .open_chat
+            .filter(|id| self.typing_chat_allowed(*id));
+        let Some(chat_id) = chat_id.filter(|_| active) else {
+            return self.cancel_outgoing_voice();
+        };
+        let _ = self.cancel_outgoing_typing();
+        if let Some(prev) = &self.outgoing_voice {
+            if prev.chat_id != chat_id {
+                self.cancel_outgoing_voice()?;
+            } else if now_ms.saturating_sub(prev.last_sent_ms) < OUTGOING_TYPING_INTERVAL_MS {
+                return Ok(());
+            }
+        }
+        self.send_voice_action(chat_id, true, now_ms)
+    }
+
+    fn cancel_outgoing_voice(&mut self) -> Result<(), ConnectSendError> {
+        let Some(prev) = self.outgoing_voice.take() else {
+            return Ok(());
+        };
+        if !self.typing_chat_allowed(prev.chat_id) {
+            return Ok(());
+        }
+        self.send_voice_action(prev.chat_id, false, 0)
+    }
+
+    fn send_voice_action(
+        &mut self,
+        chat_id: ChatId,
+        recording: bool,
+        now_ms: u64,
+    ) -> Result<(), ConnectSendError> {
+        let extra = self
+            .session
+            .request(RequestPurpose::SendChatAction, Some(chat_id));
+        let json = send_chat_action_kind(
+            extra,
+            chat_id,
+            if recording {
+                "chatActionRecordingVoiceNote"
+            } else {
+                "chatActionCancel"
+            },
+        );
+        match self.sender.send_json(&json) {
+            Ok(()) => {
+                self.outgoing_voice = recording.then_some(OutgoingTyping {
+                    chat_id,
+                    last_sent_ms: now_ms,
+                });
+                Ok(())
             }
             Err(err) => {
                 self.session.requests.take(extra);
@@ -2771,6 +2915,123 @@ mod tests {
             41
         );
         assert_eq!(sent["input_message_content"]["emoji"], "😀");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn voice_note_send_uses_input_file_local_and_recording_action() {
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = Arc::new(RecordingSender::new());
+        let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+        let mut driver =
+            ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+        let seq = AtomicU64::new(0);
+        driver
+            .ingest(
+                copy_and_parse(
+                    r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        driver
+            .ingest(
+                copy_and_parse(
+                    r#"{"@type":"updateNewChat","chat":{"id":7,"title":"Alice","type":{"@type":"chatTypePrivate","user_id":7},"unread_count":0}}"#,
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        driver.select_chat(ChatId(7)).unwrap();
+        driver.sync_voice_recording(true, 1_000).unwrap();
+        driver.sync_voice_recording(true, 1_100).unwrap();
+        let actions: Vec<String> = recorder
+            .snapshot()
+            .into_iter()
+            .filter(|json| json.contains("sendChatAction"))
+            .collect();
+        assert_eq!(actions.len(), 1);
+        assert!(actions[0].contains("chatActionRecordingVoiceNote"));
+        let voice = dir.join("note.ogg");
+        std::fs::write(&voice, b"OggS").unwrap();
+        let draft = VoiceDraft {
+            path: voice,
+            duration_secs: 3,
+            bars: vec![31, 0, 1],
+        };
+        driver
+            .send_voice_note(&draft, "", Some(MessageId(4)))
+            .unwrap();
+        let sent = recorder
+            .snapshot()
+            .into_iter()
+            .rev()
+            .find(|json| json.contains("inputMessageVoiceNote"))
+            .expect("send voice");
+        let sent: Value = serde_json::from_str(&sent).unwrap();
+        assert_eq!(
+            sent["input_message_content"]["voice_note"]["voice_note"]["@type"],
+            "inputFileLocal"
+        );
+        assert_eq!(sent["input_message_content"]["voice_note"]["duration"], 3);
+        assert!(
+            !sent["input_message_content"]["voice_note"]["waveform"]
+                .as_str()
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(sent["input_message_content"]["caption"], Value::Null);
+        assert_eq!(sent["reply_to"]["message_id"], 4);
+        assert!(
+            recorder
+                .snapshot()
+                .iter()
+                .any(|json| json.contains("chatActionCancel"))
+        );
+        let file = r#"{"@type":"file","id":4,"size":4,"expected_size":4,"local":{"@type":"localFile","path":"","can_be_downloaded":true,"can_be_deleted":false,"is_downloading_active":false,"is_downloading_completed":false,"download_offset":0,"downloaded_prefix_size":0,"downloaded_size":0},"remote":{"@type":"remoteFile","id":"r","unique_id":"u","is_uploading_active":false,"is_uploading_completed":true,"uploaded_size":4}}"#;
+        let history = format!(
+            r#"{{"@type":"updateNewMessage","message":{{"id":8,"chat_id":7,"is_outgoing":false,"content":{{"@type":"messageVoiceNote","voice_note":{{"@type":"voiceNote","duration":12,"waveform":"","mime_type":"audio/ogg","speech_recognition_result":null,"voice":{file}}},"caption":{{"@type":"formattedText","text":"","entities":[]}},"is_listened":false}}}}}}"#
+        );
+        driver
+            .ingest(copy_and_parse(&history, &seq, &dyn_sink).unwrap())
+            .unwrap();
+        driver.open_voice_content(ChatId(7), MessageId(8)).unwrap();
+        assert!(
+            recorder
+                .snapshot()
+                .iter()
+                .any(|json| json.contains("openMessageContent"))
+        );
+        driver
+            .ingest(
+                copy_and_parse(
+                    r#"{"@type":"updateMessageContentOpened","chat_id":7,"message_id":8}"#,
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        let row = driver
+            .session
+            .histories
+            .get(&7)
+            .and_then(|h| h.messages.get(&8))
+            .expect("voice row");
+        match &row.content {
+            crate::telegram::envelope::MessageContent::VoiceNote(note) => {
+                assert!(note.is_listened);
+                assert_eq!(note.duration, 12);
+            }
+            other => panic!("{other:?}"),
+        }
         let _ = std::fs::remove_dir_all(&dir);
     }
 

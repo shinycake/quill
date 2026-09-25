@@ -1,4 +1,6 @@
 use crate::ids::{ChatId, FileId, MessageId, RequestId, UserId};
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD;
 use serde::Deserialize;
 use serde_json::Value;
 use std::str::FromStr;
@@ -39,6 +41,11 @@ pub enum EnvelopePayload {
         message_id: MessageId,
         content: MessageContent,
         files: Vec<ParsedFile>,
+    },
+    /// `updateMessageContentOpened` — voice note listened (`is_listened`).
+    UpdateMessageContentOpened {
+        chat_id: ChatId,
+        message_id: MessageId,
     },
     UpdateChatPosition(ChatPositionUpdate),
     UpdateChatTitle {
@@ -558,6 +565,7 @@ pub enum MessageContent {
     Photo(PhotoContent),
     Document(DocumentContent),
     Sticker(StickerContent),
+    VoiceNote(VoiceNoteContent),
     Unsupported { type_name: String },
 }
 
@@ -576,7 +584,18 @@ impl MessageContent {
             MessageContent::Document(_) => "Document".into(),
             MessageContent::Sticker(sticker) if !sticker.emoji.is_empty() => sticker.emoji.clone(),
             MessageContent::Sticker(_) => "Sticker".into(),
+            MessageContent::VoiceNote(note) if !note.caption.is_empty() => {
+                note.caption.chars().take(80).collect()
+            }
+            MessageContent::VoiceNote(_) => "Voice message".into(),
             MessageContent::Unsupported { type_name } => format!("({type_name})"),
+        }
+    }
+
+    /// `updateMessageContentOpened` sets `messageVoiceNote.is_listened`.
+    pub fn mark_voice_listened(&mut self) {
+        if let MessageContent::VoiceNote(note) = self {
+            note.is_listened = true;
         }
     }
 }
@@ -671,6 +690,18 @@ pub enum StickerFormat {
     Tgs,
     Webm,
     Unknown,
+}
+
+/// `messageVoiceNote` / `voiceNote` (TDLib 1.8.67).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VoiceNoteContent {
+    pub duration: i32,
+    /// Raw `waveform` bytes (5-bit packed), not the decoded bars.
+    pub waveform: Vec<u8>,
+    pub mime_type: String,
+    pub caption: String,
+    pub is_listened: bool,
+    pub file_id: FileId,
 }
 
 /// `messageSticker` (TDLib 1.8.67). Display uses `thumbnail` (WEBP/JPEG) or a WEBP `sticker` file.
@@ -864,6 +895,10 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
                 files,
             })
         }
+        "updateMessageContentOpened" => Ok(EnvelopePayload::UpdateMessageContentOpened {
+            chat_id: ChatId(int53(value.get("chat_id"))?),
+            message_id: MessageId(int53(value.get("message_id"))?),
+        }),
         "updateChatPosition" => Ok(EnvelopePayload::UpdateChatPosition(parse_position(&value)?)),
         "updateChatTitle" => Ok(EnvelopePayload::UpdateChatTitle {
             chat_id: ChatId(int53(value.get("chat_id"))?),
@@ -1461,6 +1496,7 @@ fn parse_content(value: Option<&Value>) -> (MessageContent, Vec<ParsedFile>) {
         Some("messagePhoto") => parse_message_photo(value),
         Some("messageDocument") => parse_message_document(value),
         Some("messageSticker") => parse_message_sticker(value),
+        Some("messageVoiceNote") => parse_message_voice_note(value),
         Some(other) => (
             MessageContent::Unsupported {
                 type_name: other.to_string(),
@@ -1589,6 +1625,53 @@ fn parse_message_sticker(value: &Value) -> (MessageContent, Vec<ParsedFile>) {
             files
         },
     )
+}
+
+fn parse_message_voice_note(value: &Value) -> (MessageContent, Vec<ParsedFile>) {
+    let voice_note = value.get("voice_note");
+    let mut files = Vec::new();
+    let file_id = match voice_note.and_then(|note| parse_file(note.get("voice")).ok()) {
+        Some(file) => {
+            let id = file.id;
+            files.push(file);
+            id
+        }
+        None => FileId(0),
+    };
+    let duration = voice_note
+        .and_then(|note| note.get("duration"))
+        .and_then(Value::as_i64)
+        .unwrap_or(0)
+        .clamp(0, i64::from(i32::MAX)) as i32;
+    (
+        MessageContent::VoiceNote(VoiceNoteContent {
+            duration,
+            waveform: parse_tdlib_bytes(voice_note.and_then(|note| note.get("waveform"))),
+            mime_type: voice_note
+                .and_then(|note| note.get("mime_type"))
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string(),
+            caption: parse_formatted_text(value.get("caption")),
+            is_listened: value
+                .get("is_listened")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            file_id,
+        }),
+        files,
+    )
+}
+
+/// TDLib JSON `bytes` is a base64 string (empty when the waveform is unknown).
+fn parse_tdlib_bytes(value: Option<&Value>) -> Vec<u8> {
+    let Some(text) = value.and_then(Value::as_str) else {
+        return Vec::new();
+    };
+    if text.is_empty() {
+        return Vec::new();
+    }
+    STANDARD.decode(text).unwrap_or_default()
 }
 
 fn parse_sticker_format(value: Option<&Value>) -> StickerFormat {
@@ -2504,5 +2587,40 @@ mod tests {
         );
         assert!(schema.lines().any(|l| l.starts_with("pinChatMessage ")));
         assert!(schema.lines().any(|l| l.starts_with("unpinChatMessage ")));
+    }
+
+    #[test]
+    fn message_voice_note_keeps_duration_waveform_and_listened() {
+        let waveform = base64::engine::general_purpose::STANDARD.encode([0xF8, 0x02]);
+        let json = format!(
+            r#"{{"@type":"updateNewMessage","message":{{"id":8,"chat_id":11,"is_outgoing":false,"content":{{"@type":"messageVoiceNote","voice_note":{{"@type":"voiceNote","duration":12,"waveform":"{waveform}","mime_type":"audio/ogg","speech_recognition_result":null,"voice":{{"@type":"file","id":4,"size":9,"expected_size":9,"local":{{"@type":"localFile","path":"","can_be_downloaded":true,"can_be_deleted":false,"is_downloading_active":false,"is_downloading_completed":false,"download_offset":0,"downloaded_prefix_size":0,"downloaded_size":0}},"remote":{{"@type":"remoteFile","id":"CANARY_REMOTE","unique_id":"u","is_uploading_active":false,"is_uploading_completed":true,"uploaded_size":9}}}}}},"caption":{{"@type":"formattedText","text":"","entities":[]}},"is_listened":false}}}}}}"#
+        );
+        let env = parse_envelope(&json).unwrap();
+        let EnvelopePayload::UpdateNewMessage(message) = env.payload else {
+            panic!("voice note");
+        };
+        let MessageContent::VoiceNote(note) = &message.content else {
+            panic!("content");
+        };
+        assert_eq!(note.duration, 12);
+        assert_eq!(note.mime_type, "audio/ogg");
+        assert!(!note.is_listened);
+        assert_eq!(note.file_id, FileId(4));
+        assert_eq!(note.waveform, vec![0xF8, 0x02]);
+        assert_eq!(message.content.preview(), "Voice message");
+        assert_eq!(message.files[0].id, FileId(4));
+        let opened =
+            parse_envelope(r#"{"@type":"updateMessageContentOpened","chat_id":11,"message_id":8}"#)
+                .unwrap();
+        match opened.payload {
+            EnvelopePayload::UpdateMessageContentOpened {
+                chat_id,
+                message_id,
+            } => {
+                assert_eq!(chat_id.0, 11);
+                assert_eq!(message_id.0, 8);
+            }
+            other => panic!("{other:?}"),
+        }
     }
 }

@@ -33,6 +33,7 @@ Toolchain: Rust **1.98.1**. UI pin: **gpui-kit 0.6.1**. TDLib schema: **1.8.67**
 - [x] Forward message(s) (`forwardMessages`; dest picker + attribution; injected/replay; live needs tdjson)
 - [x] Emoji reactions (`addMessageReaction` / `removeMessageReaction`; chips + own highlight; injected/replay; live needs tdjson)
 - [x] Stickers (`getInstalledStickerSets` / `getStickerSet` / `inputMessageSticker`; picker + history thumb; injected/replay; live needs tdjson)
+- [x] Voice notes (`inputMessageVoiceNote` / `messageVoiceNote`; record bar + history play; injected/replay; live needs tdjson + ffmpeg)
 - [ ] VoiceOver pass on macOS
 - [ ] Channels / bots (blocked on sponsored-content implementation)
 
