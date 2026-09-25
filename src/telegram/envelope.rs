@@ -603,6 +603,7 @@ pub enum MessageContent {
     Video(VideoContent),
     VideoNote(VideoNoteContent),
     VoiceNote(VoiceNoteContent),
+    Audio(AudioContent),
     Unsupported { type_name: String },
 }
 
@@ -688,6 +689,16 @@ impl MessageContent {
                 note.caption.chars().take(80).collect()
             }
             MessageContent::VoiceNote(_) => "Voice message".into(),
+            MessageContent::Audio(audio) if !audio.caption.is_empty() => {
+                audio.caption.chars().take(80).collect()
+            }
+            MessageContent::Audio(audio) if !audio.title.is_empty() => {
+                audio.title.chars().take(80).collect()
+            }
+            MessageContent::Audio(audio) if !audio.file_name.is_empty() => {
+                audio.file_name.chars().take(80).collect()
+            }
+            MessageContent::Audio(_) => "Audio".into(),
             MessageContent::Unsupported { type_name } => format!("({type_name})"),
         }
     }
@@ -793,6 +804,66 @@ pub enum StickerFormat {
     Tgs,
     Webm,
     Unknown,
+}
+
+/// `minithumbnail` (TDLib 1.8.67): JPEG bytes, usually ≤ 40px.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MiniThumbnail {
+    pub width: i32,
+    pub height: i32,
+    /// Raw JPEG from `minithumbnail.data` (`bytes`).
+    pub data: Vec<u8>,
+}
+
+/// One `thumbnail` used as an album cover (`album_cover_thumbnail` or
+/// `external_album_covers`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AlbumCoverThumb {
+    pub width: i32,
+    pub height: i32,
+    pub file_id: FileId,
+}
+
+/// `audio` inside `messageAudio` (TDLib 1.8.67). Music files, not voice notes.
+///
+/// Schema: `duration`, `title`, `performer`, `file_name`, `mime_type`,
+/// `album_cover_minithumbnail`, `album_cover_thumbnail`,
+/// `external_album_covers`, `audio:file`, plus `messageAudio.caption`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AudioContent {
+    pub duration: i32,
+    pub title: String,
+    pub performer: String,
+    pub file_name: String,
+    pub mime_type: String,
+    pub caption: String,
+    pub album_cover_minithumbnail: Option<MiniThumbnail>,
+    pub album_cover_thumbnail: Option<AlbumCoverThumb>,
+    pub external_album_covers: Vec<AlbumCoverThumb>,
+    pub file_id: FileId,
+}
+
+impl AudioContent {
+    /// The track itself (`audio.audio`).
+    pub fn play_file_id(&self) -> Option<FileId> {
+        (self.file_id.0 != 0).then_some(self.file_id)
+    }
+
+    /// Cover to show and auto-download. The sender thumbnail wins; otherwise
+    /// the largest `external_album_covers` entry (schema: fallback when the
+    /// file has no embedded cover).
+    pub fn cover_file_id(&self) -> Option<FileId> {
+        if let Some(cover) = &self.album_cover_thumbnail
+            && cover.file_id.0 != 0
+        {
+            return Some(cover.file_id);
+        }
+        self.external_album_covers
+            .iter()
+            .filter(|cover| cover.file_id.0 != 0)
+            .max_by_key(|cover| i64::from(cover.width) * i64::from(cover.height))
+            .map(|cover| cover.file_id)
+    }
 }
 
 /// `messageVoiceNote` / `voiceNote` (TDLib 1.8.67).
@@ -1778,6 +1849,7 @@ fn parse_content(value: Option<&Value>) -> (MessageContent, Vec<ParsedFile>) {
         Some("messageVideo") => parse_message_video(value),
         Some("messageVideoNote") => parse_message_video_note(value),
         Some("messageVoiceNote") => parse_message_voice_note(value),
+        Some("messageAudio") => parse_message_audio(value),
         Some(other) => (
             MessageContent::Unsupported {
                 type_name: other.to_string(),
@@ -2289,6 +2361,93 @@ fn parse_animations(value: &Value) -> EnvelopePayload {
     }
     files.retain(|file| file.id.0 != 0);
     EnvelopePayload::Animations { animations, files }
+}
+
+fn parse_message_audio(value: &Value) -> (MessageContent, Vec<ParsedFile>) {
+    let audio = value.get("audio");
+    if audio
+        .and_then(|audio| audio.get("@type"))
+        .and_then(Value::as_str)
+        != Some("audio")
+    {
+        return (
+            MessageContent::Unsupported {
+                type_name: "messageAudio".into(),
+            },
+            Vec::new(),
+        );
+    }
+    let audio = audio.expect("audio");
+    let mut files = Vec::new();
+    let file_id = match parse_file(audio.get("audio")) {
+        Ok(file) => {
+            let id = file.id;
+            files.push(file);
+            id
+        }
+        Err(_) => FileId(0),
+    };
+    let album_cover_thumbnail = audio
+        .get("album_cover_thumbnail")
+        .filter(|thumb| !thumb.is_null())
+        .and_then(|thumb| parse_album_cover_thumb(thumb, &mut files));
+    let mut external_album_covers = Vec::new();
+    if let Some(entries) = audio.get("external_album_covers").and_then(Value::as_array) {
+        for entry in entries {
+            if let Some(cover) = parse_album_cover_thumb(entry, &mut files) {
+                external_album_covers.push(cover);
+            }
+        }
+    }
+    files.retain(|file| file.id.0 != 0);
+    (
+        MessageContent::Audio(AudioContent {
+            duration: int53_or_zero(audio.get("duration")) as i32,
+            title: json_field_str(audio, "title"),
+            performer: json_field_str(audio, "performer"),
+            file_name: json_field_str(audio, "file_name"),
+            mime_type: json_field_str(audio, "mime_type"),
+            caption: parse_formatted_text(value.get("caption")),
+            album_cover_minithumbnail: parse_minithumbnail(audio.get("album_cover_minithumbnail")),
+            album_cover_thumbnail,
+            external_album_covers,
+            file_id,
+        }),
+        files,
+    )
+}
+
+fn parse_minithumbnail(value: Option<&Value>) -> Option<MiniThumbnail> {
+    let value = value.filter(|value| !value.is_null())?;
+    if value.get("@type").and_then(Value::as_str) != Some("minithumbnail") {
+        return None;
+    }
+    let data = parse_tdlib_bytes(value.get("data"));
+    if data.is_empty() {
+        return None;
+    }
+    Some(MiniThumbnail {
+        width: int53_or_zero(value.get("width")) as i32,
+        height: int53_or_zero(value.get("height")) as i32,
+        data,
+    })
+}
+
+fn parse_album_cover_thumb(value: &Value, files: &mut Vec<ParsedFile>) -> Option<AlbumCoverThumb> {
+    if value.get("@type").and_then(Value::as_str) != Some("thumbnail") {
+        return None;
+    }
+    let file = parse_file(value.get("file")).ok()?;
+    if file.id.0 == 0 {
+        return None;
+    }
+    let cover = AlbumCoverThumb {
+        width: int53_or_zero(value.get("width")) as i32,
+        height: int53_or_zero(value.get("height")) as i32,
+        file_id: file.id,
+    };
+    files.push(file);
+    Some(cover)
 }
 
 fn parse_message_voice_note(value: &Value) -> (MessageContent, Vec<ParsedFile>) {
@@ -3497,5 +3656,44 @@ mod tests {
             }
             other => panic!("{other:?}"),
         }
+    }
+
+    #[test]
+    fn message_audio_parses_1_8_67_fields() {
+        let mini = base64::engine::general_purpose::STANDARD.encode([0xFF, 0xD8, 0xFF]);
+        let track = local_file_json(7, "", false, true);
+        let cover = local_file_json(8, "/tmp/cover.jpg", true, true);
+        let external = local_file_json(9, "", false, true);
+        let json = format!(
+            r#"{{"@type":"updateNewMessage","message":{{"id":12,"chat_id":11,"is_outgoing":false,"content":{{"@type":"messageAudio","audio":{{"@type":"audio","duration":214,"title":"Night Drive","performer":"Ada","file_name":"night.mp3","mime_type":"audio/mpeg","album_cover_minithumbnail":{{"@type":"minithumbnail","width":8,"height":8,"data":"{mini}"}},"album_cover_thumbnail":{{"@type":"thumbnail","format":{{"@type":"thumbnailFormatJpeg"}},"width":90,"height":90,"file":{cover}}},"external_album_covers":[{{"@type":"thumbnail","format":{{"@type":"thumbnailFormatJpeg"}},"width":320,"height":320,"file":{external}}}],"audio":{track}}},"caption":{{"@type":"formattedText","text":"from the album","entities":[]}}}}}}}}"#
+        );
+        let env = parse_envelope(&json).unwrap();
+        let EnvelopePayload::UpdateNewMessage(message) = env.payload else {
+            panic!("expected message");
+        };
+        let MessageContent::Audio(audio) = &message.content else {
+            panic!("{:?}", message.content);
+        };
+        assert_eq!(audio.duration, 214);
+        assert_eq!(audio.title, "Night Drive");
+        assert_eq!(audio.performer, "Ada");
+        assert_eq!(audio.file_name, "night.mp3");
+        assert_eq!(audio.mime_type, "audio/mpeg");
+        assert_eq!(audio.caption, "from the album");
+        assert_eq!(audio.file_id, FileId(7));
+        assert_eq!(audio.play_file_id(), Some(FileId(7)));
+        let mini_thumb = audio.album_cover_minithumbnail.as_ref().expect("mini");
+        assert_eq!(mini_thumb.width, 8);
+        assert_eq!(mini_thumb.data, vec![0xFF, 0xD8, 0xFF]);
+        let cover_thumb = audio.album_cover_thumbnail.as_ref().expect("cover");
+        assert_eq!(cover_thumb.file_id, FileId(8));
+        assert_eq!(cover_thumb.width, 90);
+        assert_eq!(audio.external_album_covers.len(), 1);
+        assert_eq!(audio.external_album_covers[0].file_id, FileId(9));
+        assert_eq!(audio.cover_file_id(), Some(FileId(8)));
+        assert_eq!(message.content.preview(), "from the album");
+        assert!(message.files.iter().any(|file| file.id == FileId(7)));
+        assert!(message.files.iter().any(|file| file.id == FileId(8)));
+        assert!(message.files.iter().any(|file| file.id == FileId(9)));
     }
 }

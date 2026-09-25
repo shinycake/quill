@@ -150,6 +150,10 @@ pub struct QuillApp {
     voice_tick: bool,
     /// History row whose voice note is playing.
     playing_voice: Option<MessageId>,
+    /// History row whose music file (`messageAudio`) is playing. Shares `voice_player`.
+    playing_audio: Option<MessageId>,
+    /// Play was tapped before the track was local. Resume when `downloadFile` finishes.
+    pending_audio_play: Option<(MessageId, FileId)>,
     voice_player: Option<Child>,
     /// History row whose GIF is looping (tdesktop clip / Unigram player).
     playing_animation: Option<MessageId>,
@@ -215,6 +219,8 @@ pub enum ScreenshotDemo {
     ReadyVideo,
     /// Round video note with Play/Pause in history (injected, no live Telegram).
     ReadyVideoNote,
+    /// Music file bubble with title, performer, cover, and Play/Pause.
+    ReadyAudio,
     /// Composer video attach chip plus an own-sent video playing in history.
     ReadyVideoSend,
     /// Composer video-note attach chip plus an own-sent round note in history.
@@ -619,6 +625,15 @@ impl QuillApp {
                     AuthorizationState::Ready,
                 )
             }
+            Some(ScreenshotDemo::ReadyAudio) => {
+                demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
+                (
+                    ConnectUiStatus::DemoReadyChats,
+                    None,
+                    "screenshot demo — audio file playback".into(),
+                    AuthorizationState::Ready,
+                )
+            }
             Some(ScreenshotDemo::ReadyVideoSend) => {
                 demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
                 (
@@ -740,6 +755,8 @@ impl QuillApp {
             voice_capture: None,
             voice_tick: false,
             playing_voice: None,
+            playing_audio: None,
+            pending_audio_play: None,
             voice_player: None,
             playing_animation: None,
             animation_frames: Vec::new(),
@@ -925,6 +942,14 @@ impl QuillApp {
             app.spawn_video_tick(cx);
             app.status_note = "screenshot demo — video note · playing".into();
         }
+        if matches!(demo, Some(ScreenshotDemo::ReadyAudio)) {
+            if let Some(session) = app.demo_session.as_mut() {
+                app.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_audio(session, &app.demo_sink, &app.demo_seq);
+            }
+            app.playing_audio = Some(MessageId(801));
+            app.status_note = "screenshot demo — audio · playing".into();
+        }
         if matches!(demo, Some(ScreenshotDemo::ReadyVideoSend)) {
             app.composer.update(cx, |input, cx| {
                 input.set_value("sending a clip", window, cx);
@@ -1051,6 +1076,7 @@ impl QuillApp {
         }
         self.resume_pending_gif(cx);
         self.resume_pending_video(cx);
+        self.resume_pending_audio(cx);
     }
 
     fn finish_successful_sends(&mut self, cx: &mut Context<Self>) {
@@ -1581,6 +1607,7 @@ impl QuillApp {
                             animation.caption = text.to_string()
                         }
                         MessageContent::Video(video) => video.caption = text.to_string(),
+                        MessageContent::Audio(audio) => audio.caption = text.to_string(),
                         MessageContent::VideoNote(_)
                         | MessageContent::Sticker(_)
                         | MessageContent::Unsupported { .. } => {}
@@ -1647,6 +1674,7 @@ impl QuillApp {
             self.cancel_voice_recording(cx);
         }
         self.stop_voice_playback();
+        self.stop_audio_playback();
         self.stop_animation_playback();
         self.stop_video_playback();
         if self.gif_panel_open() {
@@ -2488,6 +2516,7 @@ impl QuillApp {
         match quill::animation::playback_frames(&safe, &mime, &cache) {
             Ok(frames) if !frames.is_empty() => {
                 self.stop_voice_playback();
+                self.stop_audio_playback();
                 self.stop_video_playback();
                 self.pending_gif_play = None;
                 if self.animation_cache_file.is_some_and(|id| id != file_id.0)
@@ -2590,6 +2619,7 @@ impl QuillApp {
         match quill::video::playback_frames(&safe, &mime, &cache, start_timestamp) {
             Ok(frames) if !frames.is_empty() => {
                 self.stop_voice_playback();
+                self.stop_audio_playback();
                 self.stop_animation_playback();
                 self.pending_video_play = None;
                 if self.video_cache_file.is_some_and(|id| id != file_id.0)
@@ -2680,12 +2710,26 @@ impl QuillApp {
         .detach();
     }
 
-    fn stop_voice_playback(&mut self) {
+    fn kill_shared_player(&mut self) {
         if let Some(mut child) = self.voice_player.take() {
             let _ = child.kill();
             let _ = child.wait();
         }
+    }
+
+    fn stop_voice_playback(&mut self) {
+        if self.playing_voice.is_some() {
+            self.kill_shared_player();
+        }
         self.playing_voice = None;
+    }
+
+    fn stop_audio_playback(&mut self) {
+        if self.playing_audio.is_some() {
+            self.kill_shared_player();
+        }
+        self.playing_audio = None;
+        self.pending_audio_play = None;
     }
 
     fn toggle_voice_playback(
@@ -2720,6 +2764,7 @@ impl QuillApp {
             return;
         }
         self.stop_voice_playback();
+        self.stop_audio_playback();
         self.stop_video_playback();
         self.playing_voice = Some(message_id);
         if !listened {
@@ -2741,6 +2786,77 @@ impl QuillApp {
             }
         }
         cx.notify();
+    }
+
+    fn toggle_audio_playback(
+        &mut self,
+        message_id: MessageId,
+        file_id: FileId,
+        cx: &mut Context<Self>,
+    ) {
+        if self.playing_audio == Some(message_id) {
+            self.stop_audio_playback();
+            self.status_note = "audio paused".into();
+            cx.notify();
+            return;
+        }
+        let path = self.session().and_then(|session| {
+            session
+                .files
+                .get(&file_id.0)
+                .and_then(|file| file.usable_path())
+                .map(str::to_string)
+        });
+        let Some(path) = path else {
+            self.pending_audio_play = Some((message_id, file_id));
+            self.request_media_download(file_id, cx);
+            self.status_note = "downloading audio".into();
+            return;
+        };
+        self.pending_audio_play = None;
+        let roots = self.media_display_roots();
+        if sandboxed_display_path(&path, &roots).is_none() {
+            self.status_note = "audio file is outside the account files".into();
+            cx.notify();
+            return;
+        }
+        self.stop_voice_playback();
+        self.stop_audio_playback();
+        self.stop_video_playback();
+        self.stop_animation_playback();
+        self.playing_audio = Some(message_id);
+        match Command::new("ffplay")
+            .args(["-nodisp", "-autoexit", "-loglevel", "quiet", &path])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+        {
+            Ok(child) => {
+                self.voice_player = Some(child);
+                self.status_note = "playing audio".into();
+            }
+            Err(_) => {
+                self.status_note = "playing audio (no audio player)".into();
+            }
+        }
+        cx.notify();
+    }
+
+    fn resume_pending_audio(&mut self, cx: &mut Context<Self>) {
+        let Some((message_id, file_id)) = self.pending_audio_play else {
+            return;
+        };
+        let ready = self.session().is_some_and(|session| {
+            session
+                .files
+                .get(&file_id.0)
+                .and_then(|file| file.usable_path())
+                .is_some()
+        });
+        if ready {
+            self.toggle_audio_playback(message_id, file_id, cx);
+        }
     }
 
     fn mark_voice_opened(&mut self, chat_id: ChatId, message_id: MessageId) {
@@ -5506,6 +5622,7 @@ impl QuillApp {
                         .pending_react
                         .is_some_and(|(chat, id)| chat == message.chat_id && id == message.id);
                     let voice_playing = self.playing_voice == Some(message.id);
+                    let audio_playing = self.playing_audio == Some(message.id);
                     let animation_playing = self.playing_animation == Some(message.id);
                     let animation_frame = if animation_playing {
                         self.animation_frames
@@ -5535,6 +5652,7 @@ impl QuillApp {
                         selected_forward,
                         reaction_open,
                         voice_playing,
+                        audio_playing,
                         animation_playing,
                         animation_frame,
                         video_playing,
@@ -5932,6 +6050,30 @@ fn apply_ready_video(session: &mut Session, sink: &Arc<MemorySink>, seq: &Atomic
     );
     let waiting = format!(
         r#"{{"@type":"updateNewMessage","message":{{"id":602,"chat_id":11,"is_outgoing":true,"content":{{"@type":"messageVideo","video":{{"@type":"video","duration":3,"width":320,"height":180,"file_name":"pending.mp4","mime_type":"video/mp4","has_stickers":false,"supports_streaming":false,"minithumbnail":null,"thumbnail":null,"video":{pending}}},"alternative_videos":[],"storyboards":[],"cover":null,"start_timestamp":0,"caption":{{"@type":"formattedText","text":"","entities":[]}},"show_caption_above_media":false,"has_spoiler":false,"is_secret":false}}}}}}"#
+    );
+    let drop_seed = r#"{"@type":"updateDeleteMessages","chat_id":11,"message_ids":[101,102,103],"is_permanent":true,"from_cache":false}"#;
+    for json in [playing, waiting, drop_seed.to_string()] {
+        if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
+            session.apply(owned);
+        }
+    }
+}
+
+fn apply_ready_audio(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let cover_path = demo_thumb_png_path();
+    let track_path = demo_media_allowlist()
+        .join("demo-voice.ogg")
+        .to_string_lossy()
+        .into_owned();
+    let cover = demo_file_json(101, &cover_path, true);
+    let track = demo_file_json(102, &track_path, true);
+    let pending = demo_file_json(103, "", false);
+    let playing = format!(
+        r#"{{"@type":"updateNewMessage","message":{{"id":801,"chat_id":11,"is_outgoing":false,"content":{{"@type":"messageAudio","audio":{{"@type":"audio","duration":214,"title":"Night Drive","performer":"Ada Lovelace","file_name":"night.mp3","mime_type":"audio/mpeg","album_cover_minithumbnail":null,"album_cover_thumbnail":{{"@type":"thumbnail","format":{{"@type":"thumbnailFormatJpeg"}},"width":90,"height":90,"file":{cover}}},"external_album_covers":[],"audio":{track}}},"caption":{{"@type":"formattedText","text":"","entities":[]}}}}}}}}"#
+    );
+    let waiting = format!(
+        r#"{{"@type":"updateNewMessage","message":{{"id":802,"chat_id":11,"is_outgoing":true,"content":{{"@type":"messageAudio","audio":{{"@type":"audio","duration":45,"title":"Untitled","performer":"","file_name":"pending.mp3","mime_type":"audio/mpeg","album_cover_minithumbnail":null,"album_cover_thumbnail":null,"external_album_covers":[],"audio":{pending}}},"caption":{{"@type":"formattedText","text":"","entities":[]}}}}}}}}"#
     );
     let drop_seed = r#"{"@type":"updateDeleteMessages","chat_id":11,"message_ids":[101,102,103],"is_permanent":true,"from_cache":false}"#;
     for json in [playing, waiting, drop_seed.to_string()] {
@@ -6810,6 +6952,7 @@ fn session_history_row(
     selected_forward: bool,
     reaction_open: bool,
     voice_playing: bool,
+    audio_playing: bool,
     animation_playing: bool,
     animation_frame: Option<PathBuf>,
     video_playing: bool,
@@ -7006,6 +7149,15 @@ fn session_history_row(
             voice_playing,
             cx,
         )),
+        MessageContent::Audio(audio) => Some(audio_row(
+            message.id,
+            audio,
+            files,
+            downloading,
+            media_roots,
+            audio_playing,
+            cx,
+        )),
         MessageContent::Animation(animation) => Some(animation_attachment(
             message.id,
             animation,
@@ -7069,6 +7221,7 @@ fn session_history_row(
         MessageContent::Video(video) => video.caption.clone(),
         MessageContent::VideoNote(_) => String::new(),
         MessageContent::VoiceNote(note) => note.caption.clone(),
+        MessageContent::Audio(audio) => audio.caption.clone(),
     };
     if let Some(text_body) = text_body {
         return session_bubble_rich(
@@ -8059,6 +8212,125 @@ fn voice_note_row(
                 .child(div().text_xs().text_color(rgb(0xffffff)).child(meta)),
         )
         .child(waveform_row(message_id.0 as u64, &bars))
+        .into_any_element()
+}
+
+fn audio_row(
+    message_id: MessageId,
+    audio: &quill::telegram::envelope::AudioContent,
+    files: &HashMap<i32, ParsedFile>,
+    downloading: &std::collections::HashSet<i32>,
+    media_roots: &[PathBuf],
+    playing: bool,
+    cx: &mut Context<QuillApp>,
+) -> AnyElement {
+    let file_id = audio.file_id;
+    let ready = files
+        .get(&file_id.0)
+        .and_then(|file| file.usable_path())
+        .is_some();
+    let downloading_now = file_is_downloading(file_id, files, downloading);
+    let play_label = if playing {
+        "Pause"
+    } else if downloading_now {
+        "Downloading"
+    } else {
+        "Play"
+    };
+    let title = if !audio.title.is_empty() {
+        audio.title.clone()
+    } else if !audio.file_name.is_empty() {
+        audio.file_name.clone()
+    } else {
+        "Audio".to_string()
+    };
+    let mut meta = voice::format_voice_duration(audio.duration);
+    if !audio.performer.is_empty() {
+        meta = format!("{} · {meta}", audio.performer);
+    }
+    if playing {
+        meta = format!("Playing · {meta}");
+    } else if downloading_now {
+        meta = format!("{meta} · downloading…");
+    } else if !ready {
+        meta = format!("{meta} · not downloaded");
+    }
+    let cover_id = audio.cover_file_id().unwrap_or(FileId(0));
+    let cover = files
+        .get(&cover_id.0)
+        .and_then(|file| file.usable_path())
+        .and_then(|path| sandboxed_display_path(path, media_roots));
+    let cover_box = if let Some(path) = cover {
+        img(path)
+            .id(("audio-cover", message_id.0 as u64))
+            .w(px(56.))
+            .h(px(56.))
+            .rounded_md()
+            .object_fit(ObjectFit::Cover)
+            .with_fallback(|| {
+                div()
+                    .w(px(56.))
+                    .h(px(56.))
+                    .rounded_md()
+                    .bg(rgb(0x444c56))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child("Audio")
+                    .into_any_element()
+            })
+            .into_any_element()
+    } else {
+        div()
+            .id(("audio-cover-ph", message_id.0 as u64))
+            .w(px(56.))
+            .h(px(56.))
+            .rounded_md()
+            .bg(rgb(0x444c56))
+            .flex()
+            .items_center()
+            .justify_center()
+            .child(div().text_xs().text_color(rgb(0xffffff)).child("Audio"))
+            .into_any_element()
+    };
+    div()
+        .id(("audio", message_id.0 as u64))
+        .mt_2()
+        .px_3()
+        .py_2()
+        .rounded_md()
+        .border_1()
+        .border_color(if playing {
+            rgb(0x3fb950)
+        } else {
+            rgb(0x8b949e)
+        })
+        .bg(rgb(0x21262d))
+        .flex()
+        .items_center()
+        .gap_3()
+        .child(cover_box)
+        .child(
+            div()
+                .flex()
+                .flex_col()
+                .gap_1()
+                .child(
+                    div()
+                        .text_sm()
+                        .font_medium()
+                        .text_color(rgb(0xffffff))
+                        .child(title),
+                )
+                .child(div().text_xs().text_color(rgb(0xc9d1d9)).child(meta))
+                .child(
+                    Button::new(format!("audio-play-{}", message_id.0))
+                        .label(play_label)
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.toggle_audio_playback(message_id, file_id, cx);
+                        })),
+                ),
+        )
         .into_any_element()
 }
 
