@@ -148,6 +148,10 @@ pub struct QuillApp {
     animation_frames: Vec<PathBuf>,
     animation_frame: usize,
     animation_tick: bool,
+    /// File whose extracted frames should be deleted when playback stops.
+    animation_cache_file: Option<i32>,
+    /// Play was tapped before the clip was local. Resume when `downloadFile` finishes.
+    pending_gif_play: Option<(MessageId, FileId, String)>,
 }
 
 /// Forced UI surfaces for screenshot proof (no live Telegram / no real credentials).
@@ -621,6 +625,8 @@ impl QuillApp {
             animation_frames: Vec::new(),
             animation_frame: 0,
             animation_tick: false,
+            animation_cache_file: None,
+            pending_gif_play: None,
         };
         if matches!(demo, Some(ScreenshotDemo::ReadyChatsComposer)) {
             app.composer.update(cx, |input, cx| {
@@ -843,6 +849,7 @@ impl QuillApp {
         if progressed || send_failed {
             cx.notify();
         }
+        self.resume_pending_gif(cx);
     }
 
     fn current_auth(&self) -> AuthorizationState {
@@ -863,12 +870,17 @@ impl QuillApp {
     }
 
     fn media_display_roots(&self) -> Vec<PathBuf> {
-        if let Some(live) = self.live.as_ref() {
+        let primary = if let Some(live) = self.live.as_ref() {
             vec![live.driver.tdlib_files().to_path_buf()]
         } else if self.demo_session.is_some() {
             vec![demo_media_allowlist()]
         } else {
             Vec::new()
+        };
+        if primary.is_empty() {
+            primary
+        } else {
+            quill::animation::with_gif_frame_cache(primary)
         }
     }
 
@@ -1969,9 +1981,13 @@ impl QuillApp {
     }
 
     fn stop_animation_playback(&mut self) {
+        if let Some(file_id) = self.animation_cache_file.take() {
+            quill::animation::discard_frame_cache(file_id);
+        }
         self.playing_animation = None;
         self.animation_frames.clear();
         self.animation_frame = 0;
+        self.pending_gif_play = None;
     }
 
     fn spawn_animation_tick(&mut self, cx: &mut Context<Self>) {
@@ -2028,20 +2044,29 @@ impl QuillApp {
                 .map(str::to_string)
         });
         let Some(path) = path else {
+            self.pending_gif_play = Some((message_id, file_id, mime));
             self.request_media_download(file_id, cx);
             self.status_note = "downloading GIF".into();
             return;
         };
+        self.pending_gif_play = None;
         let roots = self.media_display_roots();
         let Some(safe) = sandboxed_display_path(&path, &roots) else {
             self.status_note = "GIF file is outside the account files".into();
             cx.notify();
             return;
         };
-        let cache = std::env::temp_dir().join(format!("quill-gif-{}", file_id.0));
+        let cache = quill::animation::gif_frame_cache_dir(file_id.0);
         match quill::animation::playback_frames(&safe, &mime, &cache) {
             Ok(frames) if !frames.is_empty() => {
                 self.stop_voice_playback();
+                self.pending_gif_play = None;
+                if self.animation_cache_file.is_some_and(|id| id != file_id.0)
+                    && let Some(old) = self.animation_cache_file.take()
+                {
+                    quill::animation::discard_frame_cache(old);
+                }
+                self.animation_cache_file = Some(file_id.0);
                 self.playing_animation = Some(message_id);
                 self.animation_frames = frames;
                 self.animation_frame = 0;
@@ -2053,6 +2078,22 @@ impl QuillApp {
             }
         }
         cx.notify();
+    }
+
+    fn resume_pending_gif(&mut self, cx: &mut Context<Self>) {
+        let Some((message_id, file_id, mime)) = self.pending_gif_play.clone() else {
+            return;
+        };
+        let ready = self.session().is_some_and(|session| {
+            session
+                .files
+                .get(&file_id.0)
+                .and_then(|file| file.usable_path())
+                .is_some()
+        });
+        if ready {
+            self.toggle_animation_playback(message_id, file_id, mime, cx);
+        }
     }
 
     fn spawn_voice_tick(&mut self, cx: &mut Context<Self>) {
