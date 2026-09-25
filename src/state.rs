@@ -5,7 +5,7 @@ use crate::ids::{
 };
 use crate::telegram::client::OwnedEnvelope;
 use crate::telegram::envelope::{
-    AuthorizationState, ChatAction, ChatKind, ChatList, ChatNotificationSettings,
+    AnimationItem, AuthorizationState, ChatAction, ChatKind, ChatList, ChatNotificationSettings,
     ChatPositionUpdate, ConnectionState, EnvelopePayload, ErrorClass, MessageContent,
     MessageForwardInfo, MessageInteractionInfo, MessageOrigin, MessageReaction, MessageReplyTo,
     MessageSender, ParsedFile, ParsedMessage, StickerFormat, StickerItem, StickerSetInfo,
@@ -65,6 +65,8 @@ pub enum RequestPurpose {
     GetInstalledStickerSets,
     /// `getStickerSet`. Response is `stickerSet`.
     GetStickerSet,
+    /// `getSavedAnimations`. Response is `animations`.
+    GetSavedAnimations,
     Close,
     LogOut,
     Other,
@@ -990,6 +992,23 @@ pub struct StickerPanel {
     pub failed: bool,
 }
 
+/// Saved GIFs (`getSavedAnimations`). tdesktop Gifs tab / Unigram animation drawer.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct GifPanel {
+    pub open: bool,
+    pub animations: Vec<AnimationItem>,
+    pub loading: bool,
+    pub failed: bool,
+    /// `updateSavedAnimations` arrived while the panel was open.
+    pub stale: bool,
+}
+
+impl GifPanel {
+    pub fn close(&mut self) {
+        self.open = false;
+    }
+}
+
 impl StickerPanel {
     pub fn close(&mut self) {
         self.open = false;
@@ -1037,6 +1056,8 @@ pub struct Session {
     pub chat_search: ChatSearchState,
     /// Installed regular sticker sets + the loaded `stickerSet` for the picker.
     pub stickers: StickerPanel,
+    /// Saved animations (`getSavedAnimations`) for the GIF picker.
+    pub gifs: GifPanel,
     diagnostics: Arc<dyn DiagnosticSink>,
 }
 
@@ -1068,6 +1089,7 @@ impl Session {
             search: SearchState::default(),
             chat_search: ChatSearchState::default(),
             stickers: StickerPanel::default(),
+            gifs: GifPanel::default(),
             diagnostics,
         }
     }
@@ -1433,6 +1455,17 @@ impl Session {
                     self.accept_sticker_set(id, stickers);
                 }
             }
+            EnvelopePayload::Animations { animations, files } => {
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetSavedAnimations) {
+                    self.remember_files(&files);
+                    self.accept_saved_animations(animations);
+                }
+            }
+            EnvelopePayload::UpdateSavedAnimations { .. } => {
+                if self.gifs.open {
+                    self.gifs.stale = true;
+                }
+            }
             EnvelopePayload::Ok => {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::LoadChats) {
                     // A short OK is not exhaustion; 404 is.
@@ -1492,6 +1525,11 @@ impl Session {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetStickerSet) {
                     self.stickers.loading_set = false;
                     self.stickers.failed = true;
+                }
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetSavedAnimations) {
+                    self.gifs.loading = false;
+                    self.gifs.failed = true;
+                    self.gifs.stale = false;
                 }
                 let download_id = pending
                     .filter(|p| p.purpose == RequestPurpose::DownloadFile)
@@ -1703,7 +1741,27 @@ impl Session {
                         ids.push(file_id);
                     }
                 }
+                MessageContent::Animation(animation) => {
+                    if animation.is_secret || animation.has_spoiler {
+                        continue;
+                    }
+                    if let Some(file_id) = animation.thumb_file_id()
+                        && self.should_download(file_id)
+                    {
+                        ids.push(file_id);
+                    }
+                }
                 _ => {}
+            }
+        }
+        if self.gifs.open {
+            for animation in &self.gifs.animations {
+                let file_id = animation.thumb_file_id.filter(|id| id.0 != 0);
+                if let Some(file_id) = file_id
+                    && self.should_download(file_id)
+                {
+                    ids.push(file_id);
+                }
             }
         }
         if self.stickers.open {
@@ -1753,6 +1811,13 @@ impl Session {
     pub fn mark_sticker_set_loading(&mut self) {
         self.stickers.loading_set = true;
         self.stickers.failed = false;
+    }
+
+    pub fn accept_saved_animations(&mut self, animations: Vec<AnimationItem>) {
+        self.gifs.loading = false;
+        self.gifs.failed = false;
+        self.gifs.stale = false;
+        self.gifs.animations = animations;
     }
 
     pub fn accept_sticker_set(&mut self, id: i64, stickers: Vec<StickerItem>) {

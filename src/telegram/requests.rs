@@ -421,6 +421,55 @@ pub fn send_sticker(extra: RequestId, chat_id: ChatId, sticker: StickerSend<'_>)
     .to_string()
 }
 
+/// Fields for `inputMessageAnimation` (TDLib 1.8.67). Saved GIFs use `inputFileId`.
+/// Thumbnail stays null: `inputThumbnail` says file_id upload is not supported, and a
+/// saved animation is already known to the server (Unigram sends the file id only).
+pub struct AnimationSend {
+    pub file_id: FileId,
+    pub duration: i32,
+    pub width: i32,
+    pub height: i32,
+    pub reply_to: Option<MessageId>,
+}
+
+/// `getSavedAnimations` — saved GIFs, no query and no third-party key.
+pub fn get_saved_animations(extra: RequestId) -> String {
+    json!({
+        "@type": "getSavedAnimations",
+        "@extra": extra.as_extra(),
+    })
+    .to_string()
+}
+
+/// `sendMessage` + `inputMessageAnimation` / `inputAnimation` / `inputFileId` (1.8.67).
+pub fn send_animation(extra: RequestId, chat_id: ChatId, animation: AnimationSend) -> String {
+    json!({
+        "@type": "sendMessage",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0,
+        "topic_id": Value::Null,
+        "reply_to": input_message_reply_to(animation.reply_to),
+        "options": Value::Null,
+        "reply_markup": Value::Null,
+        "input_message_content": {
+            "@type": "inputMessageAnimation",
+            "animation": {
+                "@type": "inputAnimation",
+                "animation": { "@type": "inputFileId", "id": animation.file_id.0 },
+                "thumbnail": Value::Null,
+                "added_sticker_file_ids": [],
+                "duration": animation.duration,
+                "width": animation.width,
+                "height": animation.height,
+            },
+            "caption": Value::Null,
+            "show_caption_above_media": false,
+            "has_spoiler": false,
+        }
+    })
+    .to_string()
+}
+
 /// `sendMessage` + `inputMessageDocument` / `inputDocument` / `inputFileLocal` (1.8.67).
 /// `path` must already be an explicitly picked local file — never a JSON `local.path`.
 pub fn send_document(
@@ -909,6 +958,43 @@ mod tests {
             bare["input_message_content"]["sticker"]["thumbnail"],
             Value::Null
         );
+    }
+
+    #[test]
+    fn send_animation_uses_input_animation_and_saved_list_has_no_query() {
+        let json = send_animation(
+            RequestId(21),
+            ChatId(7),
+            AnimationSend {
+                file_id: FileId(33),
+                duration: 2,
+                width: 240,
+                height: 140,
+                reply_to: Some(MessageId(101)),
+            },
+        );
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "sendMessage");
+        assert_eq!(v["@extra"], "21");
+        assert_eq!(v["input_message_content"]["@type"], "inputMessageAnimation");
+        let animation = &v["input_message_content"]["animation"];
+        assert_eq!(animation["@type"], "inputAnimation");
+        assert_eq!(animation["animation"]["@type"], "inputFileId");
+        assert_eq!(animation["animation"]["id"], 33);
+        assert_eq!(animation["thumbnail"], Value::Null);
+        assert_eq!(animation["added_sticker_file_ids"], serde_json::json!([]));
+        assert_eq!(animation["duration"], 2);
+        assert_eq!(animation["width"], 240);
+        assert_eq!(animation["height"], 140);
+        assert_eq!(v["input_message_content"]["caption"], Value::Null);
+        assert_eq!(v["input_message_content"]["has_spoiler"], false);
+        assert_eq!(v["reply_to"]["message_id"], 101);
+        assert!(!json.contains("tenor"));
+        let saved = get_saved_animations(RequestId(22));
+        let saved: serde_json::Value = serde_json::from_str(&saved).unwrap();
+        assert_eq!(saved["@type"], "getSavedAnimations");
+        assert_eq!(saved["@extra"], "22");
+        assert!(saved.get("query").is_none());
     }
 
     #[test]
