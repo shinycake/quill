@@ -597,3 +597,90 @@ Research snapshot 2026-09-16, pin recheck **2026-09-17**.
   `CallbackGame`, `Buy` payment flow, `User` mention insertion; rendering
   `icon_custom_emoji_id`; rendering `replyMarkupForceReply` /
   `replyMarkupShowKeyboard`.
+
+## Phase 3.3 — Bot commands menu (2026-09-26)
+
+- **Rationale:** bot private chats expose their commands through `botInfo`,
+  but the composer had no way to browse them — the user had to know the
+  exact command names. This slice adds the tdesktop-style `/` menu: typing
+  `/` (or `/prefix`) in a bot chat pops a menu above the composer with the
+  bot's commands; tapping or pressing Enter inserts the highlighted
+  command. Global-scope commands (the `getCommands` result) are fetched
+  too and shown below the bot-specific ones.
+- **Schema (1.8.67, verified in `schema/td_api.tl`):**
+  - `botCommand command:string description:string is_ephemeral:Bool =
+    BotCommand;` (line 826)
+  - `botCommands bot_user_id:int53 commands:vector<botCommand> =
+    BotCommands;` (line 829) — the `getCommands` response wrapper
+  - `botInfo … commands:vector<botCommand> … = BotInfo;` (line 2430) —
+    already cached by 3.1
+  - `getCommands scope:BotCommandScope language_code:string = BotCommands;`
+    (line 14953), annotated **"for bots only"**
+  - `botCommandScopeDefault = BotCommandScope;` (line 10360, "a scope
+    covering all users") — the default scope a null `scope` selects;
+    other scopes exist at lines 10363–10378
+- **The `getCommands` caveat (honest limitation):** the schema's own
+  annotation says `getCommands` is for bots only — a user session gets an
+  `error` answer, never a `botCommands`. The fetch is still implemented
+  exactly as typed (`scope:null` selects the default scope,
+  `language_code:""`), sent once per bot chat (deduped by cache +
+  in-flight purpose, alongside the `getUserFullInfo` fetch). A
+  successful `botCommands` is cached in `Session::bot_commands` keyed by
+  bot user id; an `error` is recorded as an empty set (mirroring
+  `bot_info`'s `None` negative cache) so the driver never retries.
+  Either way the `/` menu degrades gracefully to
+  the `botInfo` commands. A real user account therefore shows the bot's
+  `botInfo` commands only — documented, not worked around (sending other
+  scopes or polling would not change the bot-only restriction).
+- **Menu semantics:**
+  - Trigger is pure: `composer::command_menu_trigger` — the trailing
+    whitespace-separated token must start with `/` at a word boundary
+    (bare `/` → empty prefix = show all; `/st` → filter `st`). Mid-word
+    slashes (`a/b`, `http://…`, `/a/b`) never open the menu; a trailing
+    space closes it. The trailing-token convention exists because
+    `TextareaState` exposes no cursor offset (no mid-text `/` menu, like
+    tdesktop's full behavior — documented limitation).
+  - Rows: `Session::command_menu_items` merges `botInfo` commands first,
+    then cached `getCommands` results, deduped by command name
+    (bot-specific description wins). Only for private chats with a
+    `userTypeBot` peer; non-bot chats and empty command lists never open
+    the menu.
+  - Filter is case-insensitive; empty prefix matches all.
+  - Open: every composer event (`Change`) + after programmatic
+    `set_value` writes (bot-panel chips, switch-inline insert, demo
+    seeding), which suppress `Change`. Closed: Esc (keystroke
+    interceptor, runs before keymap dispatch since the `Input` context
+    consumes Escape), Up/Down move the highlight (wrap), Enter picks the
+    highlighted row instead of sending, tap picks via `on_click` (buttons
+    avoid focus-on-mousedown so the composer keeps focus), Blur /
+    outside interaction / chat switch / selection close it.
+  - Pick replaces the partial token (`/st` + pick `start` → `/start`)
+    through the existing 3.1 `insert_bot_command_text` helper, then
+    closes the menu.
+- **Rendering:** a `command-menu` popup above the composer (accent-tinted
+  highlight on the selected row, `hover` tint on the rest, muted
+  section header), in the same style family as the 3.1 bot panel and the
+  search-result rows. A "Global" header appears only when both sections
+  have rows.
+- **Screenshot demo:** `quill --screenshot-demo ready-bot-command-menu` →
+  `docs/screenshots/ready-bot-command-menu.png` (bot chat seeded with
+  `botInfo` commands + an injected global `botCommands` response through
+  the real reducer path, composer set to `/` and focused so the menu
+  renders open with both sections).
+- **Replay proof:** `tests/replay.rs` gains
+  `replay_bot_commands_cached_from_get_commands` (`botCommands` lands in
+  the cache, merges below `botInfo` rows, duplicates dropped,
+  bot-specific description wins, stray response without a matching
+  `@extra` ignored) and `replay_bot_commands_error_records_empty_set`
+  (`error` → empty set, menu falls back to `botInfo` only).
+  `connect.rs` unit-tests the fetch-once dedup, the JSON shape
+  (null scope + empty language) in `requests.rs`, the `botCommands`
+  parse (incl. missing `commands`) in `envelope.rs`, and `composer.rs` unit-tests the trigger boundary (bare `/`, `/prefix`,
+  mid-word rejection, trailing-space close), token stripping, merge
+  dedup, and case-insensitive filtering.
+- **Out of this slice (→ future):** mid-text `/` menu at the cursor
+  (needs a cursor-offset API on the input); per-language scopes
+  (`botCommandScope…` with non-empty `language_code`); `@botname`
+  namespaced commands in groups; sending `/`-commands as typed (already
+  works — they are plain text); ephemeral-command rendering
+  (`is_ephemeral` is not kept).

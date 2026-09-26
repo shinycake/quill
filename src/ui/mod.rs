@@ -7,10 +7,11 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::auth::{AuthAction, AuthView, view_for};
 use quill::composer::{
-    AttachmentKind, ComposerAttachment, ComposerEdit, ComposerReplyTo, ComposerSnapshot,
-    DeleteConfirm, ForwardDraft, begin_edit_keeping_reply, cancel_edit_draft,
-    cancel_edit_keeping_reply, cancel_forward_draft, cancel_reply_draft, draft_text_to_store,
-    should_send_on_enter,
+    AttachmentKind, CommandMenuItem, ComposerAttachment, ComposerEdit, ComposerReplyTo,
+    ComposerSnapshot, DeleteConfirm, ForwardDraft, begin_edit_keeping_reply, cancel_edit_draft,
+    cancel_edit_keeping_reply, cancel_forward_draft, cancel_reply_draft, command_menu_trigger,
+    draft_text_to_store, filter_command_menu_items, should_send_on_enter,
+    strip_command_menu_trigger,
 };
 use quill::connect::{
     ChatSearchQueryOutcome, ConnectBlocker, ConnectGate, DraftSaveOutcome, LiveConnect,
@@ -103,6 +104,11 @@ pub enum ConnectUiStatus {
 pub struct QuillApp {
     chat: Entity<SyntheticChat>,
     composer: Entity<TextareaState>,
+    /// Phase 3.3: `/` command menu state. Open while the composer text
+    /// ends with a `/`-led token and the open bot chat has commands;
+    /// `command_menu_selected` is the highlighted row (Up/Down/Enter).
+    command_menu_open: bool,
+    command_menu_selected: usize,
     phone_input: Entity<TextareaState>,
     code_input: Entity<TextareaState>,
     password_input: Entity<TextareaState>,
@@ -257,6 +263,11 @@ pub enum ScreenshotDemo {
     /// `replyMarkupInlineKeyboard` with URL / callback / switchInline /
     /// copy-text / unknown (disabled) buttons (Phase 3.2).
     ReadyBotKeyboard,
+    /// Bot command menu demo (injected, no live Telegram): like
+    /// `ReadyBotChat`, plus a cached `getCommands` response (global
+    /// scope) so the `/` command menu renders open above the composer
+    /// with the bot-specific and "Global" sections (Phase 3.3).
+    ReadyBotCommandMenu,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -331,12 +342,23 @@ impl QuillApp {
                 let text = state.read(cx).value().to_string();
                 this.sync_composer_typing(&text);
                 this.note_open_draft(true, cx);
+                // Phase 3.3: the `/` menu tracks the composer text (Blur
+                // dismisses it); Enter picks the highlighted command
+                // instead of sending while the menu is open.
+                match event {
+                    InputEvent::Blur => {
+                        this.close_command_menu(cx);
+                    }
+                    _ => this.sync_command_menu(cx),
+                }
                 if let InputEvent::PressEnter { secondary, shift } = event {
                     let marked = state.update(cx, |input, cx| input.marked_text_range(window, cx));
                     if should_send_on_enter(quill::composer::enter_event_from_kit(
                         *shift, *secondary, marked,
                     )) {
-                        if !text.trim().is_empty() {
+                        if this.pick_command_menu_selection(window, cx) {
+                            // Enter was consumed by the open menu.
+                        } else if !text.trim().is_empty() {
                             this.submit_composer(text, window, cx);
                         }
                     }
@@ -743,6 +765,15 @@ impl QuillApp {
                     AuthorizationState::Ready,
                 )
             }
+            Some(ScreenshotDemo::ReadyBotCommandMenu) => {
+                demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
+                (
+                    ConnectUiStatus::DemoReadyChats,
+                    None,
+                    "screenshot demo — bot chat with / command menu".into(),
+                    AuthorizationState::Ready,
+                )
+            }
             None => bootstrap_connect(credentials),
         };
 
@@ -791,6 +822,8 @@ impl QuillApp {
         let mut app = Self {
             chat,
             composer,
+            command_menu_open: false,
+            command_menu_selected: 0,
             phone_input,
             code_input,
             password_input,
@@ -1119,6 +1152,45 @@ impl QuillApp {
             }
             app.status_note = "screenshot demo — bot chat with inline keyboard".into();
         }
+        if matches!(demo, Some(ScreenshotDemo::ReadyBotCommandMenu)) {
+            if let Some(session) = app.demo_session.as_mut() {
+                app.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_bot_command_menu(session, &app.demo_sink, &app.demo_seq);
+            }
+            app.composer.update(cx, |input, cx| {
+                input.set_value("/", window, cx);
+            });
+            app.sync_command_menu(cx);
+            app.status_note = "screenshot demo — bot chat with / command menu".into();
+        }
+        // Phase 3.3: Esc / Up / Down for the `/` command menu. The
+        // composer input consumes Escape and arrows in its own `Input`
+        // key context, so a keystroke interceptor — which runs before
+        // keymap dispatch — is the only reliable hook. It acts only while
+        // the menu is open and stops propagation so the input never sees
+        // the swallowed keystroke.
+        let menu_app = cx.weak_entity();
+        cx.intercept_keystrokes(move |event, _window, cx| {
+            if event.keystroke.modifiers.modified() {
+                return;
+            }
+            let handled = match event.keystroke.key.as_str() {
+                "escape" => menu_app
+                    .update(cx, |this, cx| this.close_command_menu(cx))
+                    .unwrap_or(false),
+                "up" => menu_app
+                    .update(cx, |this, cx| this.step_command_menu(-1, cx))
+                    .unwrap_or(false),
+                "down" => menu_app
+                    .update(cx, |this, cx| this.step_command_menu(1, cx))
+                    .unwrap_or(false),
+                _ => false,
+            };
+            if handled {
+                cx.stop_propagation();
+            }
+        })
+        .detach();
         if app.live.is_some() {
             app.spawn_poll_loop(cx);
         }
@@ -1883,6 +1955,190 @@ impl QuillApp {
             let next = quill::composer::insert_switch_inline_text(&input.value(), query);
             input.set_value(next, window, cx);
         });
+        self.sync_command_menu(cx);
+    }
+
+    /// Phase 3.3: recompute the `/` command menu from the composer text.
+    /// Called on every composer event (`Change` path) and after
+    /// programmatic `set_value` writes, which suppress `Change`. Opens
+    /// when the text ends with a `/`-led token at a word boundary and the
+    /// open chat's bot has commands; closes otherwise (non-bot chat, no
+    /// commands, invalid trigger, empty composer).
+    fn sync_command_menu(&mut self, cx: &mut Context<Self>) {
+        let text = self.composer.read(cx).value().to_string();
+        let triggered = command_menu_trigger(&text).is_some();
+        let open_chat = self.session().and_then(|session| session.open_chat);
+        let has_items = open_chat.is_some_and(|chat_id| {
+            self.session()
+                .map(|session| !session.command_menu_items(chat_id).is_empty())
+                .unwrap_or(false)
+        });
+        let open = triggered && has_items;
+        if open == self.command_menu_open {
+            return;
+        }
+        self.command_menu_open = open;
+        self.command_menu_selected = 0;
+        cx.notify();
+    }
+
+    /// Phase 3.3: Esc / blur / selection / chat-switch dismissal. Returns
+    /// true when the menu was open (the key interceptor swallows the
+    /// keystroke only then).
+    fn close_command_menu(&mut self, cx: &mut Context<Self>) -> bool {
+        if !self.command_menu_open {
+            return false;
+        }
+        self.command_menu_open = false;
+        self.command_menu_selected = 0;
+        cx.notify();
+        true
+    }
+
+    /// Phase 3.3: Up/Down highlight. Returns true when the menu consumed
+    /// the key (open with rows to move between); the selection wraps.
+    fn step_command_menu(&mut self, delta: i32, cx: &mut Context<Self>) -> bool {
+        let rows = self
+            .command_menu_state(cx)
+            .map(|(_, items)| items.len())
+            .unwrap_or(0);
+        if !self.command_menu_open || rows == 0 {
+            return false;
+        }
+        self.command_menu_selected =
+            (self.command_menu_selected as i32 + delta).rem_euclid(rows as i32) as usize;
+        cx.notify();
+        true
+    }
+
+    /// Phase 3.3: current menu rows — (typed prefix, prefix-filtered
+    /// items). `None` when the menu is closed, the composer has no `/`
+    /// trigger, the open chat's bot has no commands, or nothing matches.
+    fn command_menu_state(&self, cx: &Context<Self>) -> Option<(String, Vec<CommandMenuItem>)> {
+        if !self.command_menu_open {
+            return None;
+        }
+        let text = self.composer.read(cx).value().to_string();
+        let prefix = command_menu_trigger(&text)?;
+        let chat_id = self.session()?.open_chat?;
+        let items = self.session()?.command_menu_items(chat_id);
+        if items.is_empty() {
+            return None;
+        }
+        let filtered: Vec<CommandMenuItem> = filter_command_menu_items(&items, prefix)
+            .into_iter()
+            .cloned()
+            .collect();
+        if filtered.is_empty() {
+            return None;
+        }
+        Some((prefix.to_string(), filtered))
+    }
+
+    /// Phase 3.3: Enter with the menu open picks the highlighted row.
+    /// Returns true when Enter was consumed.
+    fn pick_command_menu_selection(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        let items = self
+            .command_menu_state(cx)
+            .map(|(_, items)| items)
+            .unwrap_or_default();
+        if !self.command_menu_open || items.is_empty() {
+            return false;
+        }
+        let index = self.command_menu_selected.min(items.len() - 1);
+        self.pick_command_menu_index(index, window, cx);
+        true
+    }
+
+    /// Phase 3.3: tap / Enter pick. The partial `/`-token is replaced via
+    /// the 3.1 insert helper, then the menu closes (the next `Change`
+    /// reopens it if a trigger token remains).
+    fn pick_command_menu_index(
+        &mut self,
+        index: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let items = self
+            .command_menu_state(cx)
+            .map(|(_, items)| items)
+            .unwrap_or_default();
+        let Some(item) = items.get(index) else {
+            return;
+        };
+        let command = item.command.clone();
+        let current = self.composer.read(cx).value().to_string();
+        let base = strip_command_menu_trigger(&current).unwrap_or(current.as_str());
+        // Trailing space (tdesktop behavior): without it, the `/`-token
+        // trigger still matches `/command`, the menu reopens on the next
+        // Enter and consumes it in a no-op loop — Enter could never send.
+        let next = format!(
+            "{} ",
+            quill::composer::insert_bot_command_text(base, &command).trim_end()
+        );
+        self.composer.update(cx, |input, cx| {
+            input.set_value(next, window, cx);
+        });
+        self.close_command_menu(cx);
+    }
+
+    /// Phase 3.3: the `/` command menu popup above the composer.
+    /// Bot-specific commands first, then the global (`getCommands`)
+    /// section when both exist. Tap inserts; Up/Down/Enter via the key
+    /// interceptor; Esc / blur / outside tap dismisses.
+    fn command_menu_dropdown(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let (_, items) = self.command_menu_state(cx)?;
+        let selected = self.command_menu_selected.min(items.len() - 1);
+        let has_specific = items.iter().any(|item| !item.global);
+        let has_global = items.iter().any(|item| item.global);
+        let show_headers = has_specific && has_global;
+        let mut list = div()
+            .id("command-menu")
+            .flex()
+            .flex_col()
+            .mx_4()
+            .mb_2()
+            .rounded_md()
+            .border_1()
+            .border_color(cx.theme().border)
+            .bg(cx.theme().sidebar);
+        let mut global_header_shown = false;
+        for (index, item) in items.iter().enumerate() {
+            if show_headers && item.global && !global_header_shown {
+                global_header_shown = true;
+                list = list.child(
+                    div()
+                        .px_3()
+                        .pt_2()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child("Global"),
+                );
+            }
+            let name = item.command.clone();
+            let label = if item.description.is_empty() {
+                format!("/{name}")
+            } else {
+                format!("/{name} — {}", item.description)
+            };
+            let highlighted = index == selected;
+            list = list.child(
+                div()
+                    .id(("command-menu-item", index as u64))
+                    .w_full()
+                    .px_3()
+                    .py_2()
+                    .rounded_md()
+                    .cursor_pointer()
+                    .when(highlighted, |this| this.bg(cx.theme().selection))
+                    .hover(|style| style.bg(cx.theme().accent.opacity(0.12)))
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.pick_command_menu_index(index, window, cx);
+                    }))
+                    .child(div().text_sm().child(label)),
+            );
+        }
+        Some(list.into_any_element())
     }
 
     /// Phase 3.2: `inlineKeyboardButtonTypeCopyText` — copy to the clipboard.
@@ -3695,6 +3951,9 @@ impl QuillApp {
         {
             self.pending_react = None;
         }
+        // Phase 3.3: the `/` menu never survives a chat switch.
+        self.command_menu_open = false;
+        self.command_menu_selected = 0;
         if self.voice_capture.is_some() {
             self.cancel_voice_recording(cx);
         }
@@ -4033,6 +4292,7 @@ impl QuillApp {
                 quill::composer::insert_bot_command_text(&input.value().to_string(), command);
             input.set_value(next, window, cx);
         });
+        self.sync_command_menu(cx);
     }
 
     fn pinned_message_banner(
@@ -5711,6 +5971,10 @@ impl QuillApp {
                         .when_some(self.pending_reply.clone(), |this, reply| {
                             this.child(self.composer_reply_banner(&reply, cx))
                         })
+                        // Phase 3.3: `/` command menu above the composer.
+                        .when_some(self.command_menu_dropdown(cx), |this, panel| {
+                            this.child(panel)
+                        })
                         .child(Textarea::new(&self.composer).h(px(88.))),
                 )
             })
@@ -6700,6 +6964,23 @@ fn apply_ready_bot_keyboard(session: &mut Session, sink: &Arc<MemorySink>, seq: 
         if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
             session.apply(owned);
         }
+    }
+}
+
+/// `ReadyBotCommandMenu` fixture (Phase 3.3): like `apply_ready_bot_chat`,
+/// plus a global-scope `botCommands` response through the real
+/// `getCommands` reducer path, so the `/` menu shows the bot-specific
+/// commands and a "Global" section below.
+fn apply_ready_bot_command_menu(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
+    apply_ready_bot_chat(session, sink, seq);
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let cmd_extra = session.request(RequestPurpose::GetCommands, Some(ChatId(21)));
+    let json = format!(
+        r#"{{"@type":"botCommands","@extra":"{}","bot_user_id":21,"commands":[{{"@type":"botCommand","command":"settings","description":"Tweak the bot","is_ephemeral":false}}]}}"#,
+        cmd_extra.0,
+    );
+    if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
+        session.apply(owned);
     }
 }
 
