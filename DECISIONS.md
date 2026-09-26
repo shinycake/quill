@@ -2194,10 +2194,10 @@ are rough (S < 1 day, M = days, L = week+).
   calls/voice chats, transport, and debug/log upload are out of slice.
 - **Schema (1.8.67, verified verbatim in `schema/td_api.tl`):**
   `callProtocol` (:7008); `callId` (:7034);
-  `callStatePending` (:7058) / `callStateExchangingKeys` (:7063) /
-  `callStateReady` (:7066) / `callStateHangingUp` (:7077) /
-  `callStateDiscarded` (:7080, `need_rating` documented :7081) /
-  `callStateError` (:7086); `call` (:7287); `updateCall` (:10816);
+  `callStatePending` (:7054) / `callStateExchangingKeys` (:7057) /
+  `callStateReady` (:7068) / `callStateHangingUp` (:7071) /
+  `callStateDiscarded` (:7078, `need_rating` field :7078) /
+  `callStateError` (:7081); `call` (:7287); `updateCall` (:10816);
   `updateNewCallSignalingData` (:10862); `createCall` (:14212);
   `acceptCall` (:14215); `sendCallSignalingData` (:14218);
   `discardCall` (:14227); `sendCallRating` (:14234);

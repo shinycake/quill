@@ -7724,7 +7724,7 @@ impl QuillApp {
 
     /// Phase C1: the call-end screen — reason line, duration, and the
     /// optional 1–5 rating card (`callStateDiscarded.need_rating`,
-    /// schema 1.8.67, line 7081). `need_debug_information` /
+    /// schema 1.8.67, line 7078). `need_debug_information` /
     /// `need_log` are out of this slice, stated honestly.
     fn call_summary_card(
         &self,
