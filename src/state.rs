@@ -2231,6 +2231,21 @@ impl Session {
                 self.stories.insert((story.poster_chat_id, story.id), story);
                 self.story_tray_refresh.insert(poster_chat_id);
             }
+            EnvelopePayload::UpdateStoryPostFailed { story, error: _ } => {
+                // Phase 9.2: a story failed to post — drop it like a delete
+                // (it never went live). Unreachable without `sendStory`,
+                // which is absent from TDLib 1.8.67.
+                self.stories.remove(&(story.poster_chat_id, story.id));
+                let empty = if let Some(tray) = self.story_tray.get_mut(&story.poster_chat_id) {
+                    tray.stories.retain(|info| info.story_id != story.id);
+                    tray.stories.is_empty()
+                } else {
+                    false
+                };
+                if empty {
+                    self.story_tray.remove(&story.poster_chat_id);
+                }
+            }
             EnvelopePayload::StoryAvailableReactions { reactions } => {
                 // Phase 9.2: `getStoryAvailableReactions` answer — the
                 // viewer picker options.

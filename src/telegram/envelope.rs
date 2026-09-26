@@ -377,6 +377,15 @@ pub enum EnvelopePayload {
         files: Vec<ParsedFile>,
         old_story_id: i32,
     },
+    /// Phase 9.2: `updateStoryPostFailed` (TDLib 1.8.67,
+    /// `schema/td_api.tl:10907`) — a story failed to post. The reducer drops
+    /// the failed story from `Session::stories` and the poster's tray entry
+    /// (it never went live). Unreachable without `sendStory` (absent from
+    /// 1.8.67), parsed for schema completeness.
+    UpdateStoryPostFailed {
+        story: ParsedStory,
+        error: TdError,
+    },
     /// Phase 9.2: `availableReactions` — the `getStoryAvailableReactions`
     /// response (TDLib 1.8.67, `schema/td_api.tl:13802`). The reducer keeps
     /// it in `Session::story_available_reactions` for the viewer picker.
@@ -2639,6 +2648,14 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
                     .get("old_story_id")
                     .and_then(Value::as_i64)
                     .ok_or(ParseError::MissingField)? as i32,
+            })
+        }
+        "updateStoryPostFailed" => {
+            let story = value.get("story").ok_or(ParseError::MissingField)?;
+            let (story, _files) = parse_story(story).ok_or(ParseError::MissingField)?;
+            Ok(EnvelopePayload::UpdateStoryPostFailed {
+                story,
+                error: parse_error(value.get("error")),
             })
         }
         "availableReactions" => {
@@ -7487,6 +7504,21 @@ mod channel_envelope_tests {
                 assert_eq!(story.id, 7);
                 assert_eq!(story.poster_chat_id, 11);
                 assert_eq!(old_story_id, 6);
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn update_story_post_failed_parsed() {
+        // `updateStoryPostFailed` (schema 1.8.67 line 10907).
+        let json = r#"{"@type":"updateStoryPostFailed","story":{"@type":"story","id":7,"poster_chat_id":11,"date":1,"content":{"@type":"storyContentUnsupported"},"caption":{"@type":"formattedText","text":"","entities":[]}},"error":{"@type":"error","code":400,"message":"STORY_SEND_FAILED"},"error_type":{"@type":"canPostStoryResultOk"}}"#;
+        let env = parse_envelope(json).unwrap();
+        match env.payload {
+            EnvelopePayload::UpdateStoryPostFailed { story, error } => {
+                assert_eq!(story.id, 7);
+                assert_eq!(story.poster_chat_id, 11);
+                assert_eq!(error.code, 400);
             }
             other => panic!("{other:?}"),
         }

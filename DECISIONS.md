@@ -1542,7 +1542,7 @@ Research snapshot 2026-09-16, pin recheck **2026-09-17**.
   story_poster_chat_id:int53 story_id:int32 = Update` (line 10898);
   `updateStoryPostSucceeded story:story old_story_id:int32 = Update`
   (line 10901); `updateStoryPostFailed story:story error:error
-  edit_story:Bool = Update` (line 10907); `deleteStory
+  error_type:CanPostStoryResult = Update` (line 10907); `deleteStory
   story_poster_chat_id:int53 story_id:int32 = Ok` (line 13754);
   `getStoryAvailableReactions row_size:int32 = AvailableReactions`
   (line 13802); `setStoryReaction story_poster_chat_id:int53
@@ -1569,7 +1569,7 @@ Research snapshot 2026-09-16, pin recheck **2026-09-17**.
   1.8.67 in unit tests.
 - **Driver (`src/connect.rs`).** `get_story_available_reactions`
   (cache + in-flight dedupe), `set_story_reaction` (rejects unknown or
-  live stories and empty emoji; returns `Ok(None)` when deduped),
+  live stories and empty emoji),
   `delete_story` (gated on cached `can_be_deleted`), `send_story_reply`
   (gated on cached `can_be_replied`, non-empty text, supported chat).
   Reducer: delete removes the story from the cache and the poster's tray
@@ -1583,7 +1583,8 @@ Research snapshot 2026-09-16, pin recheck **2026-09-17**.
   **React…** (picker fed by `getStoryAvailableReactions`), **Reply**
   (gated on `can_be_replied`, text input + Send), **Delete** (gated on
   `can_be_deleted`; the viewer closes when its story disappears from the
-  cache). Escape closes the picker before the viewer. Screenshot proof:
+  cache). Escape closes the story viewer (resetting picker flags inside
+  `close_story_viewer`). Screenshot proof:
   `docs/screenshots/ready-story-post.png` (`ready-story-post` demo —
   picker + reply row open on an own story; its caption states the
   `sendStory` blocker).
