@@ -14,3 +14,6 @@ credentials.json
 .idea
 .vscode
 quill.local.env
+
+# ntgcalls prebuilt engine (125MB .so) — procured by scripts/vendor-ntgcalls.sh, NEVER committed
+vendor/
