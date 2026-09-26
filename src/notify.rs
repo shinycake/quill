@@ -190,6 +190,9 @@ fn linux_notify_send_command(notification: &OsNotification) -> NotificationComma
             "--app-name=Quill".to_string(),
             "--wait".to_string(),
             "--action=default=Open".to_string(),
+            // `--` ends option parsing so a title like `--action=x=Label`
+            // is treated as the title, not another action button.
+            "--".to_string(),
             notification.title.clone(),
             notification.body.clone(),
         ],
@@ -198,12 +201,18 @@ fn linux_notify_send_command(notification: &OsNotification) -> NotificationComma
 }
 
 /// Escape a string for embedding in an AppleScript double-quoted literal.
+/// `\\` and `"` are the only AppleScript string metacharacters (injection
+/// safety); control characters are mapped to AppleScript escapes so a
+/// multi-line title/body can't terminate the literal and break osascript.
 fn applescript_escape(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     for ch in text.chars() {
         match ch {
             '\\' => out.push_str("\\\\"),
             '"' => out.push_str("\\\""),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
             _ => out.push(ch),
         }
     }
@@ -439,6 +448,7 @@ mod tests {
                 "--app-name=Quill",
                 "--wait",
                 "--action=default=Open",
+                "--",
                 "Ada",
                 "hello",
             ]
@@ -462,6 +472,16 @@ mod tests {
             "display notification \"back\\\\slash\" with title \"Ada \\\"the\\\" dev\""
         );
         assert!(!cmd.report_click);
+    }
+
+    #[test]
+    fn macos_command_escapes_control_characters() {
+        // Newlines must become AppleScript escapes, not literal line breaks —
+        // a raw newline would terminate the string literal and break osascript.
+        assert_eq!(
+            applescript_escape("line1\nline2\r\nline3\tend"),
+            "line1\\nline2\\r\\nline3\\tend"
+        );
     }
 
     #[test]
