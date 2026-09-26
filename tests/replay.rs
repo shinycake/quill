@@ -1253,9 +1253,9 @@ fn replay_broadcast_posts_with_view_counts() {
     );
 }
 
-/// Phase 2.2: the composer stays hidden in channels; own membership flows
-/// through `getMe` / `getChatMember` / `joinChat` / `updateChatMember` /
-/// `leaveChat`.
+/// Phase 2.2/2.3: own membership flows through `getMe` / `getChatMember` /
+/// `joinChat` / `updateChatMember` / `leaveChat`; the composer stays hidden
+/// for non-admins and appears for admins (2.3).
 #[test]
 fn replay_channel_membership_and_join_leave() {
     use quill::telegram::envelope::ChannelMemberStatus;
@@ -1312,7 +1312,8 @@ fn replay_channel_membership_and_join_leave() {
         Some(ChannelMemberStatus::Member)
     );
 
-    // updateChatMember confirms the admin promotion (composer still hidden in 2.2).
+    // updateChatMember confirms the admin promotion; in 2.3 a bare admin
+    // (no rights block → no explicit restriction) gets the composer.
     apply_all_seq(
         &mut session,
         &sink,
@@ -1327,7 +1328,7 @@ fn replay_channel_membership_and_join_leave() {
         Some(ChannelMemberStatus::Administrator)
     );
     assert!(chat.my_member_status.unwrap().is_admin());
-    assert!(!chat.can_post());
+    assert!(chat.can_post());
 
     // leaveChat → ok flips to Left optimistically.
     let leave_extra = session.request(RequestPurpose::LeaveChat, Some(chat_id));
@@ -1363,7 +1364,7 @@ fn replay_join_chat_non_success_keeps_status() {
         ],
     );
     let chat = session.chats.get_mut(&13).unwrap();
-    chat.set_member_status(ChannelMemberStatus::Left);
+    chat.set_member_status(ChannelMemberStatus::Left, None);
     for ctor in [
         "chatJoinResultRequestSent",
         "chatJoinResultGuardBotApprovalRequired",
@@ -1395,4 +1396,199 @@ fn replay_join_chat_non_success_keeps_status() {
         session.chats.get(&13).unwrap().my_member_status,
         Some(ChannelMemberStatus::Left)
     );
+}
+
+/// Phase 2.3: an administrator with `rights.can_post_messages: true` gets the
+/// composer (`ChatSummary::can_post()` true — the exact predicate the
+/// composer gate in `src/ui/mod.rs` reads).
+#[test]
+fn replay_channel_admin_sees_composer() {
+    use quill::telegram::envelope::ChannelMemberStatus;
+
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn quill::diagnostics::DiagnosticSink> = sink.clone();
+    let mut session = Session::new(AccountKey::primary(), dyn_sink);
+    let seq = AtomicU64::new(0);
+    let chat_id = quill::ids::ChatId(13);
+    apply_all_seq(
+        &mut session,
+        &sink,
+        &seq,
+        &[
+            r#"{"@type":"updateNewChat","chat":{"id":13,"title":"Demo channel","type":{"@type":"chatTypeSupergroup","supergroup_id":13,"is_channel":true},"unread_count":0}}"#,
+        ],
+    );
+    // No membership yet: composer stays hidden.
+    assert!(!session.chats.get(&13).unwrap().can_post());
+
+    let me_extra = session.request(RequestPurpose::GetMe, None);
+    let member_extra = session.request(RequestPurpose::GetChatMember, Some(chat_id));
+    apply_all_seq(
+        &mut session,
+        &sink,
+        &seq,
+        &[
+            &format!(r#"{{"@type":"user","@extra":"{}","id":777}}"#, me_extra.0),
+            &format!(
+                r#"{{"@type":"chatMember","@extra":"{}","member_id":{{"@type":"messageSenderUser","user_id":777}},"status":{{"@type":"chatMemberStatusAdministrator","can_be_edited":true,"rights":{{"@type":"chatAdministratorRights","can_post_messages":true}}}}}}"#,
+                member_extra.0
+            ),
+        ],
+    );
+    let chat = session.chats.get(&13).unwrap();
+    assert_eq!(
+        chat.my_member_status,
+        Some(ChannelMemberStatus::Administrator)
+    );
+    assert_eq!(chat.my_admin_can_post_messages, Some(true));
+    assert!(chat.can_post());
+
+    // A channel post sent through the normal pipeline still renders.
+    apply_all_seq(
+        &mut session,
+        &sink,
+        &seq,
+        &[
+            r#"{"@type":"updateNewMessage","message":{"id":301,"chat_id":13,"sender_id":{"@type":"messageSenderChat","chat_id":13},"is_outgoing":false,"is_channel_post":true,"interaction_info":{"@type":"messageInteractionInfo","view_count":5,"forward_count":0,"reply_info":null,"reactions":null},"content":{"@type":"messageText","text":{"@type":"formattedText","text":"admin post echo","entities":[]}}}}"#,
+        ],
+    );
+    assert!(
+        session
+            .histories
+            .get(&13)
+            .unwrap()
+            .messages
+            .contains_key(&301)
+    );
+}
+
+/// Phase 2.3: non-admins keep the hidden composer; so does an administrator
+/// whose `rights.can_post_messages` is explicitly false.
+#[test]
+fn replay_channel_non_admin_composer_hidden() {
+    use quill::telegram::envelope::ChannelMemberStatus;
+
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn quill::diagnostics::DiagnosticSink> = sink.clone();
+    let mut session = Session::new(AccountKey::primary(), dyn_sink);
+    let seq = AtomicU64::new(0);
+    let chat_id = quill::ids::ChatId(13);
+    session.my_user_id = Some(777);
+    apply_all_seq(
+        &mut session,
+        &sink,
+        &seq,
+        &[
+            r#"{"@type":"updateNewChat","chat":{"id":13,"title":"Demo channel","type":{"@type":"chatTypeSupergroup","supergroup_id":13,"is_channel":true},"unread_count":0}}"#,
+        ],
+    );
+
+    // Plain member: composer hidden.
+    let member_extra = session.request(RequestPurpose::GetChatMember, Some(chat_id));
+    apply_all_seq(
+        &mut session,
+        &sink,
+        &seq,
+        &[&format!(
+            r#"{{"@type":"chatMember","@extra":"{}","member_id":{{"@type":"messageSenderUser","user_id":777}},"status":{{"@type":"chatMemberStatusMember"}}}}"#,
+            member_extra.0
+        )],
+    );
+    let chat = session.chats.get(&13).unwrap();
+    assert_eq!(chat.my_member_status, Some(ChannelMemberStatus::Member));
+    assert!(!chat.can_post());
+
+    // Administrator with the posting right revoked: composer hidden too.
+    let member_extra = session.request(RequestPurpose::GetChatMember, Some(chat_id));
+    apply_all_seq(
+        &mut session,
+        &sink,
+        &seq,
+        &[&format!(
+            r#"{{"@type":"chatMember","@extra":"{}","member_id":{{"@type":"messageSenderUser","user_id":777}},"status":{{"@type":"chatMemberStatusAdministrator","can_be_edited":true,"rights":{{"@type":"chatAdministratorRights","can_post_messages":false}}}}}}"#,
+            member_extra.0
+        )],
+    );
+    let chat = session.chats.get(&13).unwrap();
+    assert_eq!(
+        chat.my_member_status,
+        Some(ChannelMemberStatus::Administrator)
+    );
+    assert_eq!(chat.my_admin_can_post_messages, Some(false));
+    assert!(!chat.can_post());
+}
+
+/// Phase 2.3: `updateChatMember` flips the composer gate both ways —
+/// member → admin shows it, admin → left hides it, creator shows it.
+#[test]
+fn replay_channel_admin_status_change_flips_composer() {
+    use quill::telegram::envelope::ChannelMemberStatus;
+
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn quill::diagnostics::DiagnosticSink> = sink.clone();
+    let mut session = Session::new(AccountKey::primary(), dyn_sink);
+    let seq = AtomicU64::new(0);
+    session.my_user_id = Some(777);
+    apply_all_seq(
+        &mut session,
+        &sink,
+        &seq,
+        &[
+            r#"{"@type":"updateNewChat","chat":{"id":13,"title":"Demo channel","type":{"@type":"chatTypeSupergroup","supergroup_id":13,"is_channel":true},"unread_count":0}}"#,
+        ],
+    );
+    let chat = session.chats.get_mut(&13).unwrap();
+    chat.set_member_status(ChannelMemberStatus::Member, None);
+    assert!(!session.chats.get(&13).unwrap().can_post());
+
+    let promote = |status_json: &str| {
+        format!(
+            r#"{{"@type":"updateChatMember","chat_id":13,"actor_user_id":1,"date":1,"invite_link":null,"via_join_request":false,"via_chat_folder_invite_link":false,"old_chat_member":{{"@type":"chatMember","member_id":{{"@type":"messageSenderUser","user_id":777}},"status":{{"@type":"chatMemberStatusMember"}}}},"new_chat_member":{{"@type":"chatMember","member_id":{{"@type":"messageSenderUser","user_id":777}},"status":{}}}}}"#,
+            status_json
+        )
+    };
+    let admin_rights = |can_post: bool| {
+        format!(
+            r#"{{"@type":"chatMemberStatusAdministrator","can_be_edited":true,"rights":{{"@type":"chatAdministratorRights","can_post_messages":{can_post}}}}}"#
+        )
+    };
+
+    // Promoted to admin with the posting right: composer appears.
+    apply_all_seq(&mut session, &sink, &seq, &[&promote(&admin_rights(true))]);
+    let chat = session.chats.get(&13).unwrap();
+    assert_eq!(
+        chat.my_member_status,
+        Some(ChannelMemberStatus::Administrator)
+    );
+    assert!(chat.can_post());
+
+    // Right revoked server-side: composer hides again.
+    apply_all_seq(&mut session, &sink, &seq, &[&promote(&admin_rights(false))]);
+    let chat = session.chats.get(&13).unwrap();
+    assert_eq!(chat.my_admin_can_post_messages, Some(false));
+    assert!(!chat.can_post());
+
+    // Left the channel: still hidden.
+    apply_all_seq(
+        &mut session,
+        &sink,
+        &seq,
+        &[&promote(r#"{"@type":"chatMemberStatusLeft"}"#)],
+    );
+    assert_eq!(
+        session.chats.get(&13).unwrap().my_member_status,
+        Some(ChannelMemberStatus::Left)
+    );
+    assert!(!session.chats.get(&13).unwrap().can_post());
+
+    // Became the creator: composer appears.
+    apply_all_seq(
+        &mut session,
+        &sink,
+        &seq,
+        &[&promote(r#"{"@type":"chatMemberStatusCreator"}"#)],
+    );
+    let chat = session.chats.get(&13).unwrap();
+    assert_eq!(chat.my_member_status, Some(ChannelMemberStatus::Creator));
+    assert!(chat.can_post());
 }

@@ -31,8 +31,14 @@ handling exists.
   probe (`getMe` → `getChatMember`, `updateChatMember` refresh).
   `ScreenshotDemo::ReadyChannels` → `docs/screenshots/ready-channels.png`.
   Composer hidden for admins too in this slice (admin posting is 2.3).
-- **2.3 Channel admin posting.** Admins get the composer in channels
-  (`sendMessage` with channel semantics); view-count updates live.
+- **2.3 Channel admin posting.** ✅ Done (2026-09-26). Admins get the
+  composer in channels: posting rights derive from own membership (Creator,
+  or Administrator with `rights.can_post_messages` true); `sendMessage`
+  with channel semantics through the existing send path (the server echoes
+  `message.is_channel_post` / `sender_id: messageSenderChat`); view-count
+  updates live via `updateMessageInteractionInfo`. Non-admins keep the
+  hidden composer + join/leave footer. `ScreenshotDemo::ReadyChannelsAdmin`
+  → `docs/screenshots/ready-channels-admin.png`.
 
 ## Phase 3 — Bots
 

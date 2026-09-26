@@ -241,6 +241,11 @@ pub enum ScreenshotDemo {
     /// counts, composer hidden for the non-admin viewer, and the join/leave
     /// footer.
     ReadyChannels,
+    /// Broadcast channel demo (injected, no live Telegram): the demo channel
+    /// (id 13) with the viewer as an administrator
+    /// (`rights.can_post_messages: true`), so the composer is visible above
+    /// the broadcast posts (Phase 2.3).
+    ReadyChannelsAdmin,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -700,6 +705,15 @@ impl QuillApp {
                     AuthorizationState::Ready,
                 )
             }
+            Some(ScreenshotDemo::ReadyChannelsAdmin) => {
+                demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
+                (
+                    ConnectUiStatus::DemoReadyChats,
+                    None,
+                    "screenshot demo — broadcast channel, admin composer".into(),
+                    AuthorizationState::Ready,
+                )
+            }
             None => bootstrap_connect(credentials),
         };
 
@@ -805,6 +819,11 @@ impl QuillApp {
         if matches!(demo, Some(ScreenshotDemo::ReadyChatsComposer)) {
             app.composer.update(cx, |input, cx| {
                 input.set_value("hello from composer", window, cx);
+            });
+        }
+        if matches!(demo, Some(ScreenshotDemo::ReadyChannelsAdmin)) {
+            app.composer.update(cx, |input, cx| {
+                input.set_value("admin post — hello from the channel", window, cx);
             });
         }
         if matches!(demo, Some(ScreenshotDemo::ReadySendMedia)) {
@@ -1049,6 +1068,13 @@ impl QuillApp {
                 apply_ready_channels(session, &app.demo_sink, &app.demo_seq);
             }
             app.status_note = "screenshot demo — broadcast channel".into();
+        }
+        if matches!(demo, Some(ScreenshotDemo::ReadyChannelsAdmin)) {
+            if let Some(session) = app.demo_session.as_mut() {
+                app.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_channels_admin(session, &app.demo_sink, &app.demo_seq);
+            }
+            app.status_note = "screenshot demo — broadcast channel admin".into();
         }
         if app.live.is_some() {
             app.spawn_poll_loop(cx);
@@ -5515,8 +5541,10 @@ impl QuillApp {
             .when_some(self.channel_footer(cx), |this, footer| this.child(footer))
     }
 
-    /// Join/leave footer for an open broadcast channel (Phase 2.2). The
-    /// composer stays hidden in channels; admin posting lands in 2.3.
+    /// Join/leave footer for an open broadcast channel (Phase 2.3). Admins
+    /// with posting rights see the composer; the footer keeps the leave
+    /// affordance and notes the posting state. Non-admins keep the 2.2
+    /// behavior (composer hidden).
     fn channel_footer(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let session = self.session()?;
         let open = session.open_chat?;
@@ -5560,7 +5588,7 @@ impl QuillApp {
                         .into_any_element(),
                 )
             }
-            Some(ChannelMemberStatus::Member) | Some(ChannelMemberStatus::Administrator) => Some(
+            Some(ChannelMemberStatus::Member) => Some(
                 footer
                     .child(
                         Button::new("channel-leave")
@@ -5574,21 +5602,43 @@ impl QuillApp {
                         div()
                             .text_sm()
                             .text_color(cx.theme().muted_foreground)
-                            .child(if status == Some(ChannelMemberStatus::Administrator) {
-                                "You are an admin; posting unlocks in 2.3."
-                            } else {
-                                "Posting in channels is admin-only."
-                            }),
+                            .child("Posting in channels is admin-only."),
                     )
                     .into_any_element(),
             ),
+            Some(ChannelMemberStatus::Administrator) => {
+                let can_post = chat.channel_admin_can_post();
+                let note = if can_post {
+                    format!("Posting as {}.", chat.title)
+                } else {
+                    "You are an admin, but posting is disabled for you.".to_string()
+                };
+                Some(
+                    footer
+                        .child(
+                            Button::new("channel-leave")
+                                .label("Leave channel")
+                                .ghost()
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.leave_channel(open, cx);
+                                })),
+                        )
+                        .child(
+                            div()
+                                .text_sm()
+                                .text_color(cx.theme().muted_foreground)
+                                .child(note),
+                        )
+                        .into_any_element(),
+                )
+            }
             Some(ChannelMemberStatus::Creator) => Some(
                 footer
                     .child(
                         div()
                             .text_sm()
                             .text_color(cx.theme().muted_foreground)
-                            .child("You own this channel; posting unlocks in 2.3."),
+                            .child(format!("Posting as {}.", chat.title)),
                     )
                     .into_any_element(),
             ),
@@ -5625,7 +5675,7 @@ impl QuillApp {
             };
         } else if let Some(session) = self.demo_session.as_mut() {
             if let Some(chat) = session.chats.get_mut(&chat_id.0) {
-                chat.set_member_status(ChannelMemberStatus::Member);
+                chat.set_member_status(ChannelMemberStatus::Member, None);
             }
             self.status_note = "joined channel (demo)".into();
         }
@@ -5641,7 +5691,7 @@ impl QuillApp {
             };
         } else if let Some(session) = self.demo_session.as_mut() {
             if let Some(chat) = session.chats.get_mut(&chat_id.0) {
-                chat.set_member_status(ChannelMemberStatus::Left);
+                chat.set_member_status(ChannelMemberStatus::Left, None);
             }
             self.status_note = "left channel (demo)".into();
         }
@@ -6389,6 +6439,54 @@ fn apply_ready_channels(session: &mut Session, sink: &Arc<MemorySink>, seq: &Ato
         format!(
             r#"{{"@type":"chatMember","@extra":"{}","member_id":{{"@type":"messageSenderUser","user_id":777}},"tag":"","inviter_user_id":0,"joined_chat_date":0,"status":{{"@type":"chatMemberStatusLeft"}}}}"#,
             member_extra.0,
+        ),
+        post(201, "Broadcast one — channel post from the channel itself.", 12345),
+        post(202, "Broadcast two — a second post with fewer views.", 987),
+        // Live view-count bump on the first post.
+        r#"{"@type":"updateMessageInteractionInfo","chat_id":13,"message_id":201,"interaction_info":{"@type":"messageInteractionInfo","view_count":12402,"forward_count":7,"reply_info":null,"reactions":null}}"#
+            .to_string(),
+    ];
+    for json in jsons {
+        if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
+            session.apply(owned);
+        }
+    }
+}
+
+/// `ReadyChannelsAdmin` fixture (Phase 2.3): like `apply_ready_channels`,
+/// but the `getMe`/`getChatMember` pair leaves the viewer as an administrator
+/// with `rights.can_post_messages: true` (full `chatAdministratorRights`
+/// block per schema 1.8.67), so the composer is visible above the broadcast
+/// posts. A later `updateMessageInteractionInfo` proves view counts update
+/// live.
+fn apply_ready_channels_admin(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    session.open_chat(ChatId(13));
+    let me_extra = session.request(RequestPurpose::GetMe, None);
+    let member_extra = session.request(RequestPurpose::GetChatMember, Some(ChatId(13)));
+    let views = |count: i32| {
+        format!(
+            r#""interaction_info":{{"@type":"messageInteractionInfo","view_count":{count},"forward_count":7,"reply_info":null,"reactions":null}}"#
+        )
+    };
+    let post = |id: i64, text: &str, view_count: i32| {
+        format!(
+            r#"{{"@type":"updateNewMessage","message":{{"id":{id},"chat_id":13,"sender_id":{{"@type":"messageSenderChat","chat_id":13}},"is_outgoing":false,"is_channel_post":true,{},"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"{text}","entities":[]}}}}}}}}"#,
+            views(view_count),
+        )
+    };
+    // `chatMemberStatusAdministrator can_be_edited:Bool
+    // rights:chatAdministratorRights` — full rights block, `can_post_messages`
+    // true (TDLib 1.8.67 `chatAdministratorRights` field order).
+    let admin_status = r#"{"@type":"chatMemberStatusAdministrator","can_be_edited":true,"rights":{"@type":"chatAdministratorRights","can_manage_chat":true,"can_change_info":true,"can_post_messages":true,"can_edit_messages":true,"can_delete_messages":true,"can_invite_users":true,"can_restrict_members":true,"can_pin_messages":true,"can_manage_topics":true,"can_promote_members":true,"can_manage_video_chats":true,"can_post_stories":false,"can_edit_stories":false,"can_delete_stories":false,"can_manage_direct_messages":true,"can_manage_tags":false,"can_send_welcome_messages":false,"is_anonymous":false}}"#;
+    let jsons = [
+        format!(
+            r#"{{"@type":"user","@extra":"{}","id":777,"first_name":"Demo","last_name":"Viewer","usernames":null,"phone_number":"","status":null,"profile_photo":null,"is_contact":false,"is_mutual_contact":false,"is_close_friend":false,"is_verified":false,"is_premium":false,"is_support":false,"restriction_reason":"","is_scam":false,"is_fake":false,"is_bot":false,"type":{{"@type":"userTypeRegular"}}}}"#,
+            me_extra.0,
+        ),
+        format!(
+            r#"{{"@type":"chatMember","@extra":"{}","member_id":{{"@type":"messageSenderUser","user_id":777}},"tag":"","inviter_user_id":0,"joined_chat_date":0,"status":{}}}"#,
+            member_extra.0, admin_status,
         ),
         post(201, "Broadcast one — channel post from the channel itself.", 12345),
         post(202, "Broadcast two — a second post with fewer views.", 987),

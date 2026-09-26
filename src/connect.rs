@@ -1255,8 +1255,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             return self.send_album_snapshot(snapshot);
         }
         let chat_id = snapshot.chat_id();
-        // Phase 2.2: the composer stays hidden in channels (`can_post`); the
-        // driver rejects channel sends too. Admin posting lands in 2.3.
+        // Phase 2.3: channel posting is admin-gated (`can_post` derives the
+        // right from own membership); the driver rejects non-admin channel
+        // sends the same way the hidden composer does.
         let can_post = self
             .session
             .chats
@@ -3133,6 +3134,105 @@ mod tests {
             Err(ConnectSendError::InvalidRequest)
         );
         assert!(!sink.rendered().contains("CANARY_SEND"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn channel_admin_send_succeeds_non_admin_send_rejected() {
+        // Phase 2.3: the driver gate mirrors the composer gate — an admin
+        // channel sends `sendMessage` with the channel chat_id; a channel
+        // without posting rights rejects like a hidden composer.
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = Arc::new(RecordingSender::new());
+        let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+        let mut driver =
+            ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+        let seq = AtomicU64::new(0);
+        driver
+            .ingest(
+                copy_and_parse(
+                    r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        // Admin channel (id 9) and plain-member channel (id 10).
+        for (id, title) in [(9, "Admin news"), (10, "Member news")] {
+            driver
+                .ingest(
+                    copy_and_parse(
+                        &format!(
+                            r#"{{"@type":"updateNewChat","chat":{{"id":{id},"title":"{title}","type":{{"@type":"chatTypeSupergroup","supergroup_id":{id},"is_channel":true}},"unread_count":0}}}}"#
+                        ),
+                        &seq,
+                        &dyn_sink,
+                    )
+                    .unwrap(),
+                )
+                .unwrap();
+        }
+        // getMe + getChatMember leave the viewer as an admin with the posting
+        // right in channel 9.
+        driver.session.my_user_id = Some(777);
+        let me_extra = driver.session.request(RequestPurpose::GetMe, None);
+        let admin_extra = driver
+            .session
+            .request(RequestPurpose::GetChatMember, Some(ChatId(9)));
+        driver
+            .ingest(
+                copy_and_parse(
+                    &format!(r#"{{"@type":"user","@extra":"{}","id":777}}"#, me_extra.0),
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        driver
+            .ingest(
+                copy_and_parse(
+                    &format!(
+                        r#"{{"@type":"chatMember","@extra":"{}","member_id":{{"@type":"messageSenderUser","user_id":777}},"status":{{"@type":"chatMemberStatusAdministrator","can_be_edited":true,"rights":{{"@type":"chatAdministratorRights","can_post_messages":true}}}}}}"#,
+                        admin_extra.0
+                    ),
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        assert!(driver.session.chats.get(&9).unwrap().can_post());
+
+        let snap = crate::composer::ComposerSnapshot::capture(
+            ChatId(9),
+            driver.session.view_generation,
+            "CANARY_ADMIN_post",
+        );
+        let send_extra = driver.send_text_snapshot(&snap).unwrap();
+        let sent = recorder.snapshot();
+        let send_json = sent.last().unwrap();
+        assert!(send_json.contains("sendMessage"));
+        assert!(send_json.contains("\"chat_id\":9"));
+        assert!(send_json.contains("CANARY_ADMIN_post"));
+        assert!(send_json.contains(&format!("\"@extra\":\"{}\"", send_extra.0)));
+
+        // Channel 10: membership unknown → composer hidden, send rejected.
+        assert!(!driver.session.chats.get(&10).unwrap().can_post());
+        let member_snap = crate::composer::ComposerSnapshot::capture(
+            ChatId(10),
+            driver.session.view_generation,
+            "nope",
+        );
+        assert_eq!(
+            driver.send_text_snapshot(&member_snap),
+            Err(ConnectSendError::InvalidRequest)
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }
