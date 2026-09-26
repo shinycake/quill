@@ -14,8 +14,8 @@ use crate::telegram::envelope::{
     ChatPositionUpdate, ConnectionState, EnvelopePayload, ErrorClass, ForumTopic, InlineKeyboard,
     MessageAutoDelete, MessageContent, MessageForwardInfo, MessageInteractionInfo, MessageOrigin,
     MessageReaction, MessageReplyTo, MessageSelfDestruct, MessageSender, NotificationSettingsScope,
-    NotificationSound, ParsedCall, ParsedChatMember, ParsedFile, ParsedMessage, ParsedSecretChat, ParsedStory,
-    ParsedUser, Poll, ReportOption, ReportSponsoredResult, ScopeNotificationSettings,
+    NotificationSound, ParsedCall, ParsedChatMember, ParsedFile, ParsedMessage, ParsedSecretChat,
+    ParsedStory, ParsedUser, Poll, ReportOption, ReportSponsoredResult, ScopeNotificationSettings,
     SecretChatState, SponsoredMessage, StickerFormat, StickerItem, StickerSetInfo,
     StoryAvailableReactionView, StoryListView, TdError,
 };

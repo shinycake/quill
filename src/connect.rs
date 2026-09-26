@@ -47,9 +47,8 @@ use crate::telegram::requests::{
     send_call_rating, send_chat_action, send_chat_action_kind, send_document, send_message_album,
     send_photo, send_poll, send_sticker, send_text, send_text_story_reply, send_video,
     send_video_note, send_voice_note, set_authentication_phone_number, set_chat_draft_message,
-    set_chat_message_auto_delete_time,
-    set_chat_notification_settings, set_chat_slow_mode_delay, set_poll_answer,
-    set_scope_notification_settings, set_story_reaction, toggle_chat_folder_tags,
+    set_chat_message_auto_delete_time, set_chat_notification_settings, set_chat_slow_mode_delay,
+    set_poll_answer, set_scope_notification_settings, set_story_reaction, toggle_chat_folder_tags,
     unpin_chat_message, view_messages, view_sponsored_chat,
 };
 use crate::voice::VoiceDraft;

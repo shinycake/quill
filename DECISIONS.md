@@ -2134,9 +2134,11 @@ are rough (S < 1 day, M = days, L = week+).
   DialogType::User`; `DialogId.h` lists `User` and `SecretChat` as
   distinct `DialogType` values — so "private chats" means 1:1 **cloud**
   chats, **not** secret chats (secret chats likely handle
-  self-destruction through a different mechanism — unverified, no
-  corresponding constructor in the pinned schema — and are out of
-  this slice). `MessageSelfDestructType.cpp` validates the
+  self-destruction through a different mechanism — ~~unverified, no
+  corresponding constructor in the pinned schema~~ **(wrong — corrected
+  in Phase B4: the chat-level timer `setChatMessageAutoDeleteTime` /
+  `chat.message_auto_delete_time`, schema 1.8.67 :13454 / :3616 / :3627)** —
+  and are out of this slice). `MessageSelfDestructType.cpp` validates the
   timer as 1..=60 (`MAX_PRIVATE_MESSAGE_TTL = 60`, "server-side
   limit"). Consequence: this slice ships for **private chats only**;
   the original "secret chats" assumption in the task brief was wrong
@@ -2283,7 +2285,7 @@ are rough (S < 1 day, M = days, L = week+).
   countdown from view in secret chats, from send date otherwise).
   `updateChatMessageAutoDeleteTime` (:10549). The timer-change service
   message `messageChatSetMessageAutoDeleteTime` (:5387). Per-message
-  `message.auto_delete_in` (:3148, float seconds, in the message
+  `message.auto_delete_in` (:3148, `double` seconds, in the message
   constructor at :3165).
 - **Scope decision.** Secret-chat timers are fully implemented: send
   path, receive state, live updates, picker UI, service rows,

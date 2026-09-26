@@ -9839,9 +9839,10 @@ impl QuillApp {
     }
 
     /// Phase B4: self-destruct / auto-delete timer picker below the
-    /// conversation header. Secret chats (Ready only — the header button
-    /// is gated) offer Off / 5s / 30s / 1m / 1h / 1d / 1w; other chats
-    /// offer the schema-valid day multiples Off / 1d / 1w / 30d
+    /// conversation header. The picker is secret-chat-only (the header
+    /// button is gated), so only the secret presets are reachable today;
+    /// the non-secret day-multiple branch below is defensive, kept for
+    /// the planned regular-chat picker follow-up
     /// (`setChatMessageAutoDeleteTime`, schema 1.8.67 line 13454).
     fn ttl_picker_panel(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let session = self.session();
