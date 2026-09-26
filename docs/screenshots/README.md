@@ -88,6 +88,7 @@ bash scripts/capture-connect-screenshots.sh
 #   cargo run --features ui -- --screenshot-demo ready-poll docs/screenshots
 #   QUILL_DEMO_WINDOW_SIZE=1200x1100 cargo run --features ui -- --screenshot-demo ready-location docs/screenshots
 #   QUILL_DEMO_WINDOW_SIZE=1200x1000 cargo run --features ui -- --screenshot-demo ready-dice docs/screenshots
+#   QUILL_DEMO_WINDOW_SIZE=1200x1050 cargo run --features ui -- --screenshot-demo ready-seek-bars docs/screenshots
 ```
 
 Environment used by the script: `DISPLAY`, `LIBGL_ALWAYS_SOFTWARE=1`, `WGPU_BACKEND=vulkan`, `VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json`.
@@ -103,3 +104,4 @@ VoiceOver was **not** recorded here (no macOS GUI runner). Keyboard shortcuts ar
 | `ready-location.png` | **Phase 4.3** Dedicated **Demo places** chat: a `messageLocation` (San Francisco coordinates + accuracy, "🗺 Open map" link), a `messageLiveLocation` (live status line — "Live · expires in 10:00 · heading 90° · proximity alert ≤ 500 m"), a `messageVenue` (Ferry Building title + address + "via foursquare" + map link), and a `messageContact` (Ada Lovelace, phone, "Telegram user" note). Injected `updateNewChat` / `updateNewMessage` JSON through the real reducer, no live Telegram. Driven by `quill --screenshot-demo ready-location`. |
 | `ready-dice.png` | **Phase 4.4** Dedicated **Demo dice** chat: three `messageDice` rows — an incoming 🎲 ("Rolled 4"), an outgoing 🎲 ("Rolled 6"), and an incoming 🎯 ("Rolled 5") — each showing the large static emoji face plus the rolled value. Injected `updateNewChat` / `updateNewMessage` JSON through the real reducer, no live Telegram. Driven by `quill --screenshot-demo ready-dice`. |
 | `ready-media-viewer.png` | **Phase 4.5** Ready chat open with the **fullscreen media viewer** on the first photo: dark backdrop, Close button, Prev/Next, `1 / 2` position counter, and caption. Injected `messagePhoto` / `messageVideo` through the real reducer, no live Telegram. Driven by `quill --screenshot-demo ready-media-viewer`. |
+| `ready-seek-bars.png` | **Phase 4.6** Ready chat open with a voice note **playing** (`Playing · 0:07 / 0:12`, interactive seek bar with thumb mid-track) plus the **Night Drive** music track paused with a remembered 1:27 position (static bar at ~40%). Injected `messageVoiceNote` / `messageAudio` through the real reducer, no live Telegram; playback state faked (no ffplay). Driven by `quill --screenshot-demo ready-seek-bars`. |
