@@ -21,10 +21,16 @@ handling exists.
   (integration deferred to 2.2+). Sponsored
   media follows the existing download sandbox (thumbs at priority 1, click for
   full at 32). Channel gate retained for 2.2.
-- **2.2 Broadcast channels.** Ungate `chatTypeSupergroup` with `is_channel`;
-  channels appear in the chat list; history renders broadcast posts
-  (author = channel, `message.interaction_info.view_count`); composer hidden
-  for non-admins; `joinChat` / leave for public channels.
+- **2.2 Broadcast channels.** ✅ Done (2026-09-26). Ungated
+  `chatTypeSupergroup` with `is_channel`; channels appear in the chat list;
+  history renders broadcast posts (author = channel,
+  `message.interaction_info.view_count`, live via
+  `updateMessageInteractionInfo`); composer hidden in channels
+  (`ChatSummary::can_post()` false — driver rejects channel sends the same
+  way); `joinChat` / `leaveChat` for public channels with own-membership
+  probe (`getMe` → `getChatMember`, `updateChatMember` refresh).
+  `ScreenshotDemo::ReadyChannels` → `docs/screenshots/ready-channels.png`.
+  Composer hidden for admins too in this slice (admin posting is 2.3).
 - **2.3 Channel admin posting.** Admins get the composer in channels
   (`sendMessage` with channel semantics); view-count updates live.
 

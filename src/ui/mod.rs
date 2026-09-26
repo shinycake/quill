@@ -27,9 +27,10 @@ use quill::state::{
 };
 use quill::telegram::client::copy_and_parse;
 use quill::telegram::envelope::{
-    AuthorizationState, ChatDraft, ChatNotificationSettings, DEFAULT_EMOJI_REACTIONS,
-    MUTE_FOR_1_HOUR, MUTE_FOR_2_DAYS, MUTE_FOR_8_HOURS, MUTE_FOREVER, MessageContent,
-    MessageInteractionInfo, ParsedFile, SponsoredMessage, toggle_chosen_emoji_reaction,
+    AuthorizationState, ChannelMemberStatus, ChatDraft, ChatNotificationSettings,
+    DEFAULT_EMOJI_REACTIONS, MUTE_FOR_1_HOUR, MUTE_FOR_2_DAYS, MUTE_FOR_8_HOURS, MUTE_FOREVER,
+    MessageContent, MessageInteractionInfo, ParsedFile, SponsoredMessage,
+    toggle_chosen_emoji_reaction,
 };
 use quill::voice::{self, VoiceCapture, format_voice_duration};
 use std::collections::HashMap;
@@ -173,8 +174,8 @@ pub struct QuillApp {
     /// Play was tapped before the video was local. Resume when `downloadFile` finishes.
     /// The last field is the chat to mark opened (`openMessageContent`) once playback starts.
     pending_video_play: Option<(MessageId, FileId, String, i32, Option<ChatId>)>,
-    /// `ReadySponsored` fixture surface: the gated channel renders sponsored rows
-    /// instead of the unsupported-chat placeholder. Normal live path unchanged.
+    /// `ReadySponsored` fixture surface: the demo channel renders sponsored rows
+    /// instead of history. Normal live path unchanged.
     sponsored_demo: bool,
 }
 
@@ -233,8 +234,13 @@ pub enum ScreenshotDemo {
     /// Received photo album plus an own-sent album and a multi-attach composer.
     ReadyAlbums,
     /// Channel sponsored / recommended rows + report flow (injected, no live Telegram).
-    /// The channel itself stays gated; this is the fixture/proof surface.
+    /// Fixture/proof surface only; the channel opens normally in live use.
     ReadySponsored,
+    /// Broadcast channel demo (injected, no live Telegram): the ungated demo
+    /// channel (id 13) renders broadcast posts with channel author + view
+    /// counts, composer hidden for the non-admin viewer, and the join/leave
+    /// footer.
+    ReadyChannels,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -685,6 +691,15 @@ impl QuillApp {
                     AuthorizationState::Ready,
                 )
             }
+            Some(ScreenshotDemo::ReadyChannels) => {
+                demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
+                (
+                    ConnectUiStatus::DemoReadyChats,
+                    None,
+                    "screenshot demo — broadcast channel posts + join footer".into(),
+                    AuthorizationState::Ready,
+                )
+            }
             None => bootstrap_connect(credentials),
         };
 
@@ -1027,6 +1042,13 @@ impl QuillApp {
             }
             app.sponsored_demo = true;
             app.status_note = "screenshot demo — sponsored messages".into();
+        }
+        if matches!(demo, Some(ScreenshotDemo::ReadyChannels)) {
+            if let Some(session) = app.demo_session.as_mut() {
+                app.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_channels(session, &app.demo_sink, &app.demo_seq);
+            }
+            app.status_note = "screenshot demo — broadcast channel".into();
         }
         if app.live.is_some() {
             app.spawn_poll_loop(cx);
@@ -5285,19 +5307,36 @@ impl QuillApp {
             PaneMode::Ready => {
                 let session = self.session();
                 let open = session.and_then(|s| s.open_chat);
-                let supported = open
-                    .and_then(|id| session.and_then(|s| s.chats.get(&id.0).map(|c| c.supported())))
+                let can_post = open
+                    .and_then(|id| session.and_then(|s| s.chats.get(&id.0).map(|c| c.can_post())))
                     .unwrap_or(false);
-                if supported { Some(true) } else { None }
+                if can_post { Some(true) } else { None }
             }
         };
         let composer_note = match mode {
             PaneMode::Connecting => Some("Sign in to send messages."),
             PaneMode::Ready if composer.is_none() => {
-                if self.session().and_then(|s| s.open_chat).is_none() {
+                let open = self.session().and_then(|s| s.open_chat);
+                let is_channel = open.is_some_and(|id| {
+                    self.session()
+                        .and_then(|s| s.chats.get(&id.0).map(|c| c.is_channel()))
+                        .unwrap_or(false)
+                });
+                if is_channel {
+                    // The join/leave footer replaces the plain note for channels.
+                    None
+                } else if open.is_none() {
                     Some("Select a supported cloud chat to send.")
                 } else {
-                    Some("This chat type is gated until sponsored-content handling exists.")
+                    Some(
+                        self.session()
+                            .and_then(|s| {
+                                open.and_then(|id| {
+                                    s.chats.get(&id.0).and_then(|c| c.kind.gate_reason())
+                                })
+                            })
+                            .unwrap_or("This conversation type is not supported yet."),
+                    )
                 }
             }
             _ => None,
@@ -5473,6 +5512,140 @@ impl QuillApp {
                         .child(note),
                 )
             })
+            .when_some(self.channel_footer(cx), |this, footer| this.child(footer))
+    }
+
+    /// Join/leave footer for an open broadcast channel (Phase 2.2). The
+    /// composer stays hidden in channels; admin posting lands in 2.3.
+    fn channel_footer(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let session = self.session()?;
+        let open = session.open_chat?;
+        let chat = session.chats.get(&open.0)?;
+        if !chat.is_channel() {
+            return None;
+        }
+        let status = chat.my_member_status;
+        let footer = div()
+            .p_3()
+            .border_t_1()
+            .border_color(cx.theme().border)
+            .flex()
+            .items_center()
+            .gap_3();
+        match status {
+            None => Some(
+                footer
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("Checking channel membership…"),
+                    )
+                    .into_any_element(),
+            ),
+            Some(ChannelMemberStatus::Left) => {
+                Some(
+                    footer
+                        .child(Button::new("channel-join").label("Join channel").on_click(
+                            cx.listener(move |this, _, _, cx| {
+                                this.join_channel(open, cx);
+                            }),
+                        ))
+                        .child(
+                            div()
+                                .text_sm()
+                                .text_color(cx.theme().muted_foreground)
+                                .child("Join to follow new posts."),
+                        )
+                        .into_any_element(),
+                )
+            }
+            Some(ChannelMemberStatus::Member) | Some(ChannelMemberStatus::Administrator) => Some(
+                footer
+                    .child(
+                        Button::new("channel-leave")
+                            .label("Leave channel")
+                            .ghost()
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.leave_channel(open, cx);
+                            })),
+                    )
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(if status == Some(ChannelMemberStatus::Administrator) {
+                                "You are an admin; posting unlocks in 2.3."
+                            } else {
+                                "Posting in channels is admin-only."
+                            }),
+                    )
+                    .into_any_element(),
+            ),
+            Some(ChannelMemberStatus::Creator) => Some(
+                footer
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("You own this channel; posting unlocks in 2.3."),
+                    )
+                    .into_any_element(),
+            ),
+            Some(ChannelMemberStatus::Banned) => Some(
+                footer
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("You are banned from this channel."),
+                    )
+                    .into_any_element(),
+            ),
+            Some(ChannelMemberStatus::Restricted) | Some(ChannelMemberStatus::Unknown) => Some(
+                footer
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("Channel membership is unknown."),
+                    )
+                    .into_any_element(),
+            ),
+        }
+    }
+
+    /// `joinChat` for the open public channel. Demo sessions flip the status
+    /// locally (no live driver).
+    fn join_channel(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            self.status_note = match live.driver.join_channel(chat_id) {
+                Ok(()) => "joining channel…".into(),
+                Err(_) => "could not join channel".into(),
+            };
+        } else if let Some(session) = self.demo_session.as_mut() {
+            if let Some(chat) = session.chats.get_mut(&chat_id.0) {
+                chat.set_member_status(ChannelMemberStatus::Member);
+            }
+            self.status_note = "joined channel (demo)".into();
+        }
+        cx.notify();
+    }
+
+    /// `leaveChat` for the open channel. Demo sessions flip the status locally.
+    fn leave_channel(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            self.status_note = match live.driver.leave_channel(chat_id) {
+                Ok(()) => "leaving channel…".into(),
+                Err(_) => "could not leave channel".into(),
+            };
+        } else if let Some(session) = self.demo_session.as_mut() {
+            if let Some(chat) = session.chats.get_mut(&chat_id.0) {
+                chat.set_member_status(ChannelMemberStatus::Left);
+            }
+            self.status_note = "left channel (demo)".into();
+        }
+        cx.notify();
     }
 
     fn voice_record_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -5607,8 +5780,8 @@ impl QuillApp {
             })
             .child(if let Some(reason) = gate {
                 if self.sponsored_demo {
-                    // Fixture/proof surface only: the gated channel renders its
-                    // sponsored rows. The live path keeps the placeholder.
+                    // Fixture/proof surface only: the demo channel renders its
+                    // sponsored rows. The live path renders history normally.
                     self.sponsored_rows_pane(cx).into_any_element()
                 } else {
                     pane_placeholder("Unsupported chat", reason, cx).into_any_element()
@@ -5744,9 +5917,9 @@ impl QuillApp {
             })
     }
 
-    /// Fixture/proof surface for `ReadySponsored`: the gated channel renders
+    /// Fixture/proof surface for `ReadySponsored`: the demo channel renders
     /// its `getChatSponsoredMessages` rows with Sponsored / Recommended labels
-    /// instead of the unsupported-chat placeholder.
+    /// instead of history.
     fn sponsored_rows_pane(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let session = self.session();
         let open = session.and_then(|s| s.open_chat);
@@ -6160,9 +6333,10 @@ fn apply_ready_link_preview(session: &mut Session, sink: &Arc<MemorySink>, seq: 
     }
 }
 
-/// `ReadySponsored` fixture: open the demo channel (id 13, still gated) and
+/// `ReadySponsored` fixture: open the demo channel (id 13, now ungated) and
 /// inject a `sponsoredMessages` response through the same reducer the live
 /// `getChatSponsoredMessages` path uses — one Sponsored row, one Recommended.
+/// The fixture still swaps the history pane for the sponsored rows pane.
 fn apply_ready_sponsored(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
     let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
     session.open_chat(ChatId(13));
@@ -6183,6 +6357,50 @@ fn seed_ready_media_session(sink: Arc<MemorySink>) -> Session {
 
 fn seed_ready_send_media_session(sink: Arc<MemorySink>) -> Session {
     seed_demo_session(sink, DemoSeed::SendMedia)
+}
+
+/// `ReadyChannels` fixture: open the demo channel (id 13) and inject broadcast
+/// posts through the normal reducer — `sender_id: messageSenderChat`,
+/// `is_channel_post: true`, `interaction_info.view_count` — plus the
+/// `getMe`/`getChatMember` pair that leaves the viewer as a non-member, so
+/// the composer is hidden and the Join footer shows. A later
+/// `updateMessageInteractionInfo` proves view counts update live.
+fn apply_ready_channels(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    session.open_chat(ChatId(13));
+    let me_extra = session.request(RequestPurpose::GetMe, None);
+    let member_extra = session.request(RequestPurpose::GetChatMember, Some(ChatId(13)));
+    let views = |count: i32| {
+        format!(
+            r#""interaction_info":{{"@type":"messageInteractionInfo","view_count":{count},"forward_count":7,"reply_info":null,"reactions":null}}"#
+        )
+    };
+    let post = |id: i64, text: &str, view_count: i32| {
+        format!(
+            r#"{{"@type":"updateNewMessage","message":{{"id":{id},"chat_id":13,"sender_id":{{"@type":"messageSenderChat","chat_id":13}},"is_outgoing":false,"is_channel_post":true,{},"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"{text}","entities":[]}}}}}}}}"#,
+            views(view_count),
+        )
+    };
+    let jsons = [
+        format!(
+            r#"{{"@type":"user","@extra":"{}","id":777,"first_name":"Demo","last_name":"Viewer","usernames":null,"phone_number":"","status":null,"profile_photo":null,"is_contact":false,"is_mutual_contact":false,"is_close_friend":false,"is_verified":false,"is_premium":false,"is_support":false,"restriction_reason":"","is_scam":false,"is_fake":false,"is_bot":false,"type":{{"@type":"userTypeRegular"}}}}"#,
+            me_extra.0,
+        ),
+        format!(
+            r#"{{"@type":"chatMember","@extra":"{}","member_id":{{"@type":"messageSenderUser","user_id":777}},"tag":"","inviter_user_id":0,"joined_chat_date":0,"status":{{"@type":"chatMemberStatusLeft"}}}}"#,
+            member_extra.0,
+        ),
+        post(201, "Broadcast one — channel post from the channel itself.", 12345),
+        post(202, "Broadcast two — a second post with fewer views.", 987),
+        // Live view-count bump on the first post.
+        r#"{"@type":"updateMessageInteractionInfo","chat_id":13,"message_id":201,"interaction_info":{"@type":"messageInteractionInfo","view_count":12402,"forward_count":7,"reply_info":null,"reactions":null}}"#
+            .to_string(),
+    ];
+    for json in jsons {
+        if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
+            session.apply(owned);
+        }
+    }
 }
 
 fn chat_search_jump_note(session: &Session) -> String {
@@ -7380,6 +7598,17 @@ fn album_tile(
     }
 }
 
+/// Compact view-count formatting for broadcast posts (`👁 1.2K`, `👁 3.4M`).
+fn format_view_count(count: i32) -> String {
+    if count >= 1_000_000 {
+        format!("{:.1}M", count as f64 / 1_000_000.0)
+    } else if count >= 1_000 {
+        format!("{:.1}K", count as f64 / 1_000.0)
+    } else {
+        count.to_string()
+    }
+}
+
 fn session_history_row(
     message: &HistoryMessage,
     files: &HashMap<i32, ParsedFile>,
@@ -7501,6 +7730,22 @@ fn session_history_row(
                 this.toggle_pin_message(chat_id, message_id, cx);
             }))
     });
+    // Broadcast posts (Phase 2.2): eye glyph + compact view count, like the
+    // official clients' post footer. Renders whenever views exist; only
+    // channel posts carry a view count in practice.
+    let views_footer = message
+        .interaction_info
+        .as_ref()
+        .map(|info| info.view_count)
+        .filter(|&count| count > 0)
+        .map(|count| {
+            div()
+                .id(("row-views", message_id.0 as u64))
+                .mt_1()
+                .text_xs()
+                .opacity(0.75)
+                .child(format!("👁 {}", format_view_count(count)))
+        });
     let chips = message.emoji_reaction_chips();
     let chip_row = (!chips.is_empty()).then(|| {
         let mut row = div()
@@ -7639,6 +7884,7 @@ fn session_history_row(
         div()
             .id(("bubble-extra", message.id.0 as u64))
             .when_some(extra_media, |this, media| this.child(media))
+            .when_some(views_footer, |this, footer| this.child(footer))
             .when_some(chip_row, |this, chips| this.child(chips))
             .child(
                 div()

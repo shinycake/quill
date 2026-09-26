@@ -5,11 +5,12 @@ use crate::ids::{
 };
 use crate::telegram::client::OwnedEnvelope;
 use crate::telegram::envelope::{
-    AnimationItem, AuthorizationState, ChatAction, ChatDraft, ChatKind, ChatList,
-    ChatNotificationSettings, ChatPositionUpdate, ConnectionState, EnvelopePayload, ErrorClass,
-    MessageContent, MessageForwardInfo, MessageInteractionInfo, MessageOrigin, MessageReaction,
-    MessageReplyTo, MessageSender, ParsedFile, ParsedMessage, ReportOption, ReportSponsoredResult,
-    SponsoredMessage, StickerFormat, StickerItem, StickerSetInfo,
+    AnimationItem, AuthorizationState, ChannelMemberStatus, ChatAction, ChatDraft, ChatJoinResult,
+    ChatKind, ChatList, ChatNotificationSettings, ChatPositionUpdate, ConnectionState,
+    EnvelopePayload, ErrorClass, MessageContent, MessageForwardInfo, MessageInteractionInfo,
+    MessageOrigin, MessageReaction, MessageReplyTo, MessageSender, ParsedChatMember, ParsedFile,
+    ParsedMessage, ReportOption, ReportSponsoredResult, SponsoredMessage, StickerFormat,
+    StickerItem, StickerSetInfo,
 };
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
@@ -84,6 +85,17 @@ pub enum RequestPurpose {
     ViewSponsoredChat,
     /// `clickChatSponsoredMessage`. Response is `ok`; fire-and-forget.
     ClickChatSponsoredMessage,
+    /// `getMe`. Response is `user`; only the id is kept.
+    GetMe,
+    /// `getChatMember` for the current user in a channel. Response is
+    /// `chatMember`; drives the composer gate and join/leave affordance.
+    GetChatMember,
+    /// `joinChat`. Response is `ChatJoinResult`; own status also arrives via
+    /// `updateChatMember`.
+    JoinChat,
+    /// `leaveChat`. Response is `ok`; own status also arrives via
+    /// `updateChatMember`.
+    LeaveChat,
     Close,
     LogOut,
     Other,
@@ -442,11 +454,35 @@ pub struct ChatSummary {
     pub typing_senders: Vec<MessageSender>,
     /// `chat.draft_message` text draft. Voice/rich drafts are not stored.
     pub draft: Option<ChatDraft>,
+    /// Own `chatMemberStatus*` in a broadcast channel (`getChatMember` /
+    /// `updateChatMember`). `None` until the first fetch completes; drives the
+    /// composer gate and the join/leave affordance.
+    pub my_member_status: Option<ChannelMemberStatus>,
 }
 
 impl ChatSummary {
     pub fn supported(&self) -> bool {
         self.kind.is_supported_cloud_chat()
+    }
+
+    /// `chatTypeSupergroup` with `is_channel: true`.
+    pub fn is_channel(&self) -> bool {
+        self.kind.is_channel()
+    }
+
+    /// Whether the composer is shown for this chat. In 2.2 the composer stays
+    /// hidden in every broadcast channel (admin posting lands in 2.3); all
+    /// other supported chats keep the composer.
+    pub fn can_post(&self) -> bool {
+        self.supported() && !self.is_channel()
+    }
+
+    /// Record own channel membership (`getChatMember` / `updateChatMember` /
+    /// join/leave responses). Returns true when the status changed.
+    pub fn set_member_status(&mut self, status: ChannelMemberStatus) -> bool {
+        let changed = self.my_member_status != Some(status);
+        self.my_member_status = Some(status);
+        changed
     }
 
     pub fn is_muted(&self) -> bool {
@@ -522,6 +558,7 @@ fn placeholder_chat(chat_id: ChatId) -> ChatSummary {
         last_preview: String::new(),
         typing_senders: Vec::new(),
         draft: None,
+        my_member_status: None,
     }
 }
 
@@ -1154,6 +1191,9 @@ pub struct Session {
     sponsored_report_target: Option<(ChatId, i64)>,
     /// Last `reportChatSponsoredMessage` outcome note.
     pub last_sponsored_report: Option<SponsoredReportOutcome>,
+    /// Own user id from `getMe` (TDLib 1.8.67). `None` until the first
+    /// `getMe` response; needed to resolve `getChatMember` ownership.
+    pub my_user_id: Option<i64>,
     diagnostics: Arc<dyn DiagnosticSink>,
 }
 
@@ -1193,6 +1233,7 @@ impl Session {
             sponsored_report: None,
             sponsored_report_target: None,
             last_sponsored_report: None,
+            my_user_id: None,
             diagnostics,
         }
     }
@@ -1656,6 +1697,30 @@ impl Session {
                     self.accept_sponsored_report(pending, result);
                 }
             }
+            EnvelopePayload::Me { user_id } => {
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetMe) {
+                    self.my_user_id = Some(user_id);
+                }
+            }
+            EnvelopePayload::ChatMember { member } => {
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetChatMember)
+                    && let Some(pending) = pending
+                    && let Some(chat_id) = pending.chat_id
+                {
+                    self.accept_own_chat_member(chat_id, member);
+                }
+            }
+            EnvelopePayload::UpdateChatMember { chat_id, member } => {
+                self.accept_own_chat_member(chat_id, member);
+            }
+            EnvelopePayload::JoinChatResult(result) => {
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::JoinChat)
+                    && let Some(pending) = pending
+                    && let Some(chat_id) = pending.chat_id
+                {
+                    self.accept_join_chat_result(chat_id, result);
+                }
+            }
             EnvelopePayload::UpdateSavedAnimations { .. } => {
                 if self.gifs.open {
                     self.gifs.stale = true;
@@ -1669,6 +1734,14 @@ impl Session {
                     && let Some(chat_id) = pending.and_then(|p| p.chat_id)
                 {
                     self.commit_viewed(chat_id);
+                }
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::LeaveChat)
+                    && let Some(chat_id) = pending.and_then(|p| p.chat_id)
+                    && let Some(chat) = self.chats.get_mut(&chat_id.0)
+                {
+                    // Optimistic: `updateChatMember` confirms. TDLib errors
+                    // keep the old status (Error arm below does not touch it).
+                    chat.set_member_status(ChannelMemberStatus::Left);
                 }
                 if pending.is_some_and(|p| is_auth_submit(p.purpose)) {
                     self.last_auth_error = None;
@@ -2071,6 +2144,54 @@ impl Session {
         self.stickers.failed = false;
         self.stickers.loaded_set_id = Some(id);
         self.stickers.stickers = stickers;
+    }
+
+    /// Record own channel membership from `getChatMember` / `updateChatMember`.
+    /// The member is only trusted when `member_id` is the current user.
+    pub fn accept_own_chat_member(&mut self, chat_id: ChatId, member: ParsedChatMember) {
+        let own = self
+            .my_user_id
+            .is_some_and(|me| member.member_id == MessageSender::User { user_id: me });
+        if !own {
+            self.diagnostics.record(Diagnostic {
+                category: "reducer",
+                type_name: Some("chatMember".into()),
+                extra: Some(chat_id.0 as u64),
+                seq: None,
+                note: "foreign-member-ignored",
+            });
+            return;
+        }
+        if let Some(chat) = self.chats.get_mut(&chat_id.0) {
+            chat.set_member_status(member.status);
+        }
+    }
+
+    /// Record a `joinChat` outcome. `Success` flips status optimistically;
+    /// `updateChatMember` confirms. The other variants keep the old status and
+    /// are logged (the UI shows a fixed note).
+    pub fn accept_join_chat_result(&mut self, chat_id: ChatId, result: ChatJoinResult) {
+        match result {
+            ChatJoinResult::Success { .. } => {
+                if let Some(chat) = self.chats.get_mut(&chat_id.0) {
+                    chat.set_member_status(ChannelMemberStatus::Member);
+                }
+            }
+            other => {
+                self.diagnostics.record(Diagnostic {
+                    category: "reducer",
+                    type_name: Some("joinChat".into()),
+                    extra: Some(chat_id.0 as u64),
+                    seq: None,
+                    note: match other {
+                        ChatJoinResult::RequestSent => "join-request-sent",
+                        ChatJoinResult::GuardBotApprovalRequired => "join-guard-bot-approval",
+                        ChatJoinResult::Declined => "join-declined",
+                        ChatJoinResult::Success { .. } => "join-success",
+                    },
+                });
+            }
+        }
     }
 
     /// Store `sponsoredMessages` for a chat (TDLib display order kept; files
@@ -2860,13 +2981,19 @@ mod tests {
     }
 
     #[test]
-    fn channel_is_gated() {
+    fn channel_is_supported() {
         let kind = ChatKind::Supergroup {
             supergroup_id: 1,
             is_channel: true,
         };
-        assert!(!kind.is_supported_cloud_chat());
-        assert!(kind.gate_reason().unwrap().contains("sponsored"));
+        assert!(kind.is_supported_cloud_chat());
+        assert!(kind.gate_reason().is_none());
+        assert!(kind.is_channel());
+        let group = ChatKind::Supergroup {
+            supergroup_id: 2,
+            is_channel: false,
+        };
+        assert!(!group.is_channel());
     }
 
     #[test]

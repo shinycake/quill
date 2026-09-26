@@ -300,3 +300,82 @@ Research snapshot 2026-09-16, pin recheck **2026-09-17**.
   (`from_fullscreen=true` path); sponsored-message inline buttons beyond the
   single sponsor URL button; premium upsell UI for
   `reportSponsoredResultPremiumRequired` (a fixed message is shown).
+
+## Phase 2.2 — Broadcast channels (2026-09-26)
+
+- **Rationale:** Channels were the last gated chat type in the README parity
+  checklist. This slice un-gates `chatTypeSupergroup { is_channel: true }`:
+  channels appear in the chat list, open normal history, render broadcast
+  posts with view counts, hide the composer (admin posting is 2.3), and offer
+  join/leave for public channels.
+- **Official clients first (verified in source, 2026-09-26):**
+  - tdesktop (`dev`, `Telegram/SourceFiles/history/history_item.cpp`):
+    `HistoryItem::viewsCount()` reads the per-message
+    `HistoryMessageViews.views.count` (line ~4341) — views are a per-message
+    count tracked on the item and rendered alongside the post, bottom-right
+    next to the time. Channel posts render with the channel as author.
+  - Unigram (`develop`, `Telegram/Controls/Messages/MessageFooter.xaml.cs`,
+    `UpdateMessage`, line ~399): view label is rendered only when
+    `message.InteractionInfo?.ViewCount > 0`, as an eye glyph plus a compact
+    number — `"\uEA03\u00A0" + Formatter.ShortNumber(ViewCount)`. Quill's
+    footer ("👁 12.4K") follows this exactly: eye glyph, compact thousands,
+    shown only for positive counts.
+  - Unigram (`develop`, `Telegram/ViewModels/DialogViewModel.cs`):
+    `JoinChannel()` sends `new JoinChat(chat.Id)` then routes the result
+    through `MessageHelper.HandleChatJoinResult(..., isChannel: true,
+    response)` (line ~3803); leaving is `ClientService.Send(new
+    LeaveChat(chat.Id))`, fire-and-forget (line ~3958). Quill mirrors this:
+    `joinChat` handles all four `ChatJoinResult` variants, `leaveChat` flips
+    status on `ok`.
+- **Schema (1.8.67, verified in `schema/td_api.tl`):**
+  - `chatTypeSupergroup supergroup_id:int53 is_channel:Bool`
+  - `message.is_channel_post:Bool`; `sender_id` is `messageSenderChat` for
+    channel posts (channel = author)
+  - `messageInteractionInfo view_count:int32 forward_count:int32
+    reply_info:messageReplyInfo reactions:messageReactions`
+  - `updateMessageInteractionInfo chat_id:int53 message_id:int53
+    interaction_info:messageInteractionInfo`
+  - `chatMember member_id:MessageSender status:ChatMemberStatus`
+  - `chatMemberStatusCreator`, `chatMemberStatusAdministrator`,
+    `chatMemberStatusMember`, `chatMemberStatusRestricted`,
+    `chatMemberStatusLeft`, `chatMemberStatusBanned`
+  - `updateChatMember ... new_chat_member:chatMember`
+  - `getMe = User`; `getChatMember chat_id:int53 member_id:MessageSender =
+    ChatMember`
+  - `joinChat chat_id:int53 = ChatJoinResult`;
+    `chatJoinResultSuccess chat_id:int53`, `chatJoinResultRequestSent`,
+    `chatJoinResultGuardBotApprovalRequired bot_user_id:int53 query_id:int64`,
+    `chatJoinResultDeclined` (no invite-link variant exists in this schema —
+    none invented)
+  - `leaveChat chat_id:int53 = Ok`
+- **UX:**
+  - Channels list with title; history opens via the normal
+    `openChat`/`getChatHistory` pipeline (sponsored fetch runs as before).
+    Sidebar rows are text-only (title + preview) everywhere in Quill — chat
+    avatars are not rendered for any chat type yet, so channels follow the
+    same convention rather than gaining one-off photos.
+  - History rows show the channel name as author and an "👁 <count>" footer
+    when `interaction_info.view_count > 0`; live
+    `updateMessageInteractionInfo` bumps the count.
+  - Composer stays hidden in every channel in this slice
+    (`ChatSummary::can_post()` is false for channels; the driver rejects
+    channel sends the same way). The footer instead shows, by membership:
+    "Checking…" (unknown), **Join channel** (Left), **Leave channel** + note
+    (Member/Administrator), "posting lands in 2.3" (Creator), and fixed notes
+    for Banned/Restricted/Unknown.
+  - Membership is probed once per open channel: `getMe` (cached) → then
+    `getChatMember`; `updateChatMember` for own `user_id` refreshes status.
+- **Replay proof:** `tests/replay.rs` covers channel ungating + chat-list
+  order, broadcast posts with view counts (including the live bump),
+  `can_post`/composer gating, the `getMe`/`getChatMember`/`joinChat`/
+  `updateChatMember`/`leaveChat` cycle, non-success `joinChat` results
+  keeping the old status, and foreign `updateChatMember` being ignored.
+  Request JSON shapes are asserted in `requests.rs`; envelope parse variants
+  in `envelope.rs`. Screenshot demo: `quill --screenshot-demo ready-channels`
+  → `docs/screenshots/ready-channels.png`.
+- **Out of this slice (→ 2.3 and beyond):** admin channel posting
+  (`sendMessage` with channel semantics); discussion-group comment links;
+  private-channel invite links and join-request approval UI; subscriber
+  counts; channel header extras (photo, description, username); chat-list
+  avatars for any chat type; comment threading inside channels; admin log;
+  boosts/statistics.
