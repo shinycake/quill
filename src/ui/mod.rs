@@ -186,8 +186,9 @@ pub struct QuillApp {
     /// instead of history. Normal live path unchanged.
     sponsored_demo: bool,
     /// Phase 4.1: revealed text-entity spoilers, keyed by
-    /// (message row id, run index, is-caption block).
-    spoiler_revealed: HashSet<(u64, u64, bool)>,
+    /// (chat id, message id, run index, is-caption block). Message ids are
+    /// only unique within a chat, so the chat id is part of the key.
+    spoiler_revealed: HashSet<(i64, u64, u64, bool)>,
 }
 
 /// Forced UI surfaces for screenshot proof (no live Telegram / no real credentials).
@@ -7967,7 +7968,7 @@ fn sponsored_message_row(
     files: &HashMap<i32, ParsedFile>,
     downloading: &std::collections::HashSet<i32>,
     media_roots: &[PathBuf],
-    revealed: &std::collections::HashSet<(u64, u64, bool)>,
+    revealed: &std::collections::HashSet<(i64, u64, u64, bool)>,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
     let row_id = message.message_id as u64;
@@ -7990,7 +7991,7 @@ fn sponsored_message_row(
         .child(div().font_semibold().text_sm().child(message.title.clone()));
     let content: Option<AnyElement> = match &message.content {
         MessageContent::Text(text) => Some(message_text_block(
-            row_id,
+            (chat_id.0, row_id),
             text,
             files,
             downloading,
@@ -8500,7 +8501,7 @@ fn session_history_row(
     animation_frame: Option<PathBuf>,
     video_playing: bool,
     video_frame: Option<PathBuf>,
-    revealed: &std::collections::HashSet<(u64, u64, bool)>,
+    revealed: &std::collections::HashSet<(i64, u64, u64, bool)>,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
     let quote = message.reply_to.as_ref().and_then(|reply| {
@@ -8666,7 +8667,7 @@ fn session_history_row(
     });
     let text_body = match &message.content {
         MessageContent::Text(text) => Some(message_text_block(
-            message.id.0 as u64,
+            (message.chat_id.0, message.id.0 as u64),
             text,
             files,
             downloading,
@@ -8821,7 +8822,7 @@ fn session_history_row(
             rich_text_line(
                 caption_text,
                 caption_entities,
-                message.id.0 as u64,
+                (message.chat_id.0, message.id.0 as u64),
                 true,
                 revealed,
                 cx,
@@ -8855,13 +8856,13 @@ const MONO_FONT: &str = "monospace";
 fn rich_text_line(
     text: &str,
     entities: &[TextEntity],
-    row_id: u64,
+    msg_key: (i64, u64),
     is_caption: bool,
-    revealed: &std::collections::HashSet<(u64, u64, bool)>,
+    revealed: &std::collections::HashSet<(i64, u64, u64, bool)>,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
     let mut line = div()
-        .id(("msg-rich-text", row_id * 2 + is_caption as u64))
+        .id(("msg-rich-text", msg_key.1 * 2 + is_caption as u64))
         .text_sm()
         .flex()
         .flex_wrap()
@@ -8870,11 +8871,15 @@ fn rich_text_line(
         if run.text.is_empty() {
             continue;
         }
-        let run_id = format!("msg-run-{row_id}-{}-{index}", is_caption as u64);
+        let run_id = format!(
+            "msg-run-{}-{}-{}-{index}",
+            msg_key.0, msg_key.1, is_caption as u64
+        );
         let style = &run.style;
-        let revealed = !style.spoiler || revealed.contains(&(row_id, index as u64, is_caption));
+        let revealed =
+            !style.spoiler || revealed.contains(&(msg_key.0, msg_key.1, index as u64, is_caption));
         if !revealed {
-            let key = (row_id, index as u64, is_caption);
+            let key = (msg_key.0, msg_key.1, index as u64, is_caption);
             line = line.child(
                 div()
                     .id(run_id)
@@ -8932,17 +8937,20 @@ fn rich_text_line(
     line.into_any_element()
 }
 
-/// Read-only spoiler-reveal lookup without borrowing the app mutably.
+/// Phase 4.1: plain/link message text (with optional link-preview card).
+/// `msg_key` is (chat id, message id); the spoiler-reveal lookup needs the
+/// chat id because message ids are only unique within a chat.
 fn message_text_block(
-    row_id: u64,
+    msg_key: (i64, u64),
     text: &quill::telegram::envelope::TextContent,
     files: &HashMap<i32, ParsedFile>,
     downloading: &std::collections::HashSet<i32>,
     media_roots: &[PathBuf],
-    revealed: &std::collections::HashSet<(u64, u64, bool)>,
+    revealed: &std::collections::HashSet<(i64, u64, u64, bool)>,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
-    let line = rich_text_line(&text.text, &text.entities, row_id, false, revealed, cx);
+    let row_id = msg_key.1;
+    let line = rich_text_line(&text.text, &text.entities, msg_key, false, revealed, cx);
     let card = text.link_preview.as_ref().and_then(|preview| {
         preview
             .has_card()

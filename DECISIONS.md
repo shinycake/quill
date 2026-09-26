@@ -720,7 +720,7 @@ Research snapshot 2026-09-16, pin recheck **2026-09-17**.
   spans starting past the text end, and offsets that don't land on
   UTF-16 code-unit boundaries are skipped by `parse_text_entities`.
 - **Rendering (`rich_text_line`, used for message text and captions):**
-  bold → semibold weight; italic; underline; strikethrough via
+  bold → `FontWeight::BOLD`; italic; underline; strikethrough via
   `line_through`; inline code → monospace chip; `pre` / `preCode` →
   full-width monospace block (pre visually wins over code, both stay
   monospace; the `preCode` language is retained in the run style but not
@@ -729,8 +729,8 @@ Research snapshot 2026-09-16, pin recheck **2026-09-17**.
 - **Spoiler UX (tdesktop-style tap-to-reveal):** spoiler runs render as
   an opaque chip (same-color text on a solid background) until tapped;
   tapping toggles reveal. Reveal state lives in
-  `QuillApp::spoiler_revealed`, keyed by `(message row id, run index,
-  is_caption)`, threaded through the row render functions as a
+  `QuillApp::spoiler_revealed`, keyed by `(chat id, message id, run index,
+  is_caption)` (message ids are only unique within a chat), threaded through the row render functions as a
   read-only set (rendering cannot read the app entity mid-update, so
   the set is passed down rather than re-read).
 - **Screenshot:** `docs/screenshots/ready-text-entities.png` — a
