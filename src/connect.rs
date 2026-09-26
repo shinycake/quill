@@ -32,13 +32,13 @@ use crate::telegram::requests::{
     get_chat_member, get_chat_sponsored_messages, get_commands, get_contacts, get_forum_topics,
     get_installed_sticker_sets, get_me, get_saved_animations, get_sticker_set, get_supergroup,
     get_supergroup_full_info, get_user_full_info, input_message_photo, input_message_video,
-    join_chat, leave_chat, load_chats, open_chat, open_message_content, pin_chat_message,
-    remove_message_reaction, report_chat_sponsored_message, search_chat_messages, search_chats,
-    search_messages, search_recently_found_chats, send_animation, send_chat_action,
-    send_chat_action_kind, send_document, send_message_album, send_photo, send_poll, send_sticker,
-    send_text, send_video, send_video_note, send_voice_note, set_authentication_phone_number,
-    set_chat_draft_message, set_chat_notification_settings, set_poll_answer, unpin_chat_message,
-    view_messages, view_sponsored_chat,
+    join_chat, leave_chat, load_chats, load_chats_list, open_chat, open_message_content,
+    pin_chat_message, remove_message_reaction, report_chat_sponsored_message, search_chat_messages,
+    search_chats, search_messages, search_public_chats, search_recently_found_chats,
+    send_animation, send_chat_action, send_chat_action_kind, send_document, send_message_album,
+    send_photo, send_poll, send_sticker, send_text, send_video, send_video_note, send_voice_note,
+    set_authentication_phone_number, set_chat_draft_message, set_chat_notification_settings,
+    set_poll_answer, unpin_chat_message, view_messages, view_sponsored_chat,
 };
 use crate::voice::VoiceDraft;
 use std::path::Path;
@@ -82,7 +82,8 @@ pub const HISTORY_AROUND_LIMIT: i32 = 50;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SearchFlight {
     Recents(RequestId),
-    Query(RequestId, RequestId),
+    /// `searchChats` + `searchMessages` + `searchPublicChats` extras.
+    Query(RequestId, RequestId, RequestId),
 }
 
 /// Empty/open recents send immediately; typed queries wait for [`SEARCH_DEBOUNCE`].
@@ -486,6 +487,23 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.sender
             .send_json(&load_chats(extra, MAIN_CHAT_LOAD_LIMIT))?;
         Ok(Some(extra))
+    }
+
+    /// Phase 7.1: single-shot `loadChats(chatListFolder)` when a folder tab
+    /// is selected, so TDLib delivers the folder's chats / positions.
+    /// Unlike the main list, folders are not paged here — one page is
+    /// enough for the folder-tab filter in this slice.
+    pub fn load_folder_chats(&mut self, folder_id: i32) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self.session.request(RequestPurpose::LoadFolderChats, None);
+        self.sender.send_json(&load_chats_list(
+            extra,
+            serde_json::json!({ "@type": "chatListFolder", "chat_folder_id": folder_id }),
+            MAIN_CHAT_LOAD_LIMIT,
+        ))?;
+        Ok(extra)
     }
 
     /// Select a chat, inform TDLib it is open, and request history.
@@ -2813,6 +2831,26 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.search_debounce_token = self.search_debounce_token.saturating_add(1);
     }
 
+    /// Correlate a failed typed search: drop the pending requests and mark
+    /// all three searches errored so the status resolves instead of
+    /// stranding the query in `Searching`.
+    fn abort_typed_search(
+        &mut self,
+        chats_extra: RequestId,
+        messages_extra: RequestId,
+        public_extra: RequestId,
+    ) {
+        self.session.requests.take(chats_extra);
+        self.session.requests.take(messages_extra);
+        self.session.requests.take(public_extra);
+        self.session.search.accept_chats(Vec::new(), true);
+        self.session.search.accept_messages(Vec::new(), true);
+        self.session.search.accept_public_chats(Vec::new(), true);
+    }
+
+    /// Typed query: `searchChats` + `searchPublicChats` + `searchMessages`
+    /// (Phase 7.2 adds the public username lookup alongside the offline
+    /// known-chat search).
     fn send_typed_search(
         &mut self,
         trimmed: &str,
@@ -2824,27 +2862,34 @@ impl<S: JsonSender> ConnectDriver<S> {
         let messages_extra = self
             .session
             .request_search(RequestPurpose::SearchMessages, search_gen);
-        match self
+        let public_extra = self
+            .session
+            .request_search(RequestPurpose::SearchPublicChats, search_gen);
+        if let Err(err) = self
             .sender
             .send_json(&search_chats(chats_extra, trimmed, SEARCH_LIMIT))
         {
-            Ok(()) => {}
-            Err(err) => {
-                self.session.requests.take(chats_extra);
-                self.session.requests.take(messages_extra);
-                self.session.search.accept_chats(Vec::new(), true);
-                self.session.search.accept_messages(Vec::new(), true);
-                return Err(err);
-            }
+            self.abort_typed_search(chats_extra, messages_extra, public_extra);
+            return Err(err);
+        }
+        if let Err(err) =
+            self.sender
+                .send_json(&search_messages(messages_extra, trimmed, SEARCH_LIMIT))
+        {
+            self.abort_typed_search(chats_extra, messages_extra, public_extra);
+            return Err(err);
         }
         match self
             .sender
-            .send_json(&search_messages(messages_extra, trimmed, SEARCH_LIMIT))
+            .send_json(&search_public_chats(public_extra, trimmed))
         {
-            Ok(()) => Ok(Some(SearchFlight::Query(chats_extra, messages_extra))),
+            Ok(()) => Ok(Some(SearchFlight::Query(
+                chats_extra,
+                messages_extra,
+                public_extra,
+            ))),
             Err(err) => {
-                self.session.requests.take(messages_extra);
-                self.session.search.accept_messages(Vec::new(), true);
+                self.abort_typed_search(chats_extra, messages_extra, public_extra);
                 Err(err)
             }
         }
@@ -3733,6 +3778,81 @@ mod tests {
             Err(ConnectSendError::InvalidRequest)
         );
         assert!(!sink.rendered().contains("CANARY_SEND"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn driver_load_folder_chats_single_shot_chat_list_folder() {
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = Arc::new(RecordingSender::new());
+        let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+        let mut driver =
+            ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+        assert_eq!(
+            driver.load_folder_chats(2),
+            Err(ConnectSendError::InvalidRequest)
+        );
+
+        let seq = AtomicU64::new(0);
+        driver
+            .ingest(
+                copy_and_parse(
+                    r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+
+        let extra = driver.load_folder_chats(2).expect("folder load");
+        let sent = recorder.snapshot();
+        let folder_load = sent
+            .iter()
+            .rev()
+            .find(|j| j.contains("chatListFolder"))
+            .expect("loadChats(chatListFolder)");
+        let v: Value = serde_json::from_str(folder_load).unwrap();
+        assert_eq!(v["@type"], "loadChats");
+        assert_eq!(v["chat_list"]["@type"], "chatListFolder");
+        assert_eq!(v["chat_list"]["chat_folder_id"], 2);
+        assert_eq!(v["limit"], MAIN_CHAT_LOAD_LIMIT);
+        assert_eq!(v["@extra"].as_str().unwrap(), extra.0.to_string());
+        assert!(
+            driver
+                .session
+                .requests
+                .has_purpose(RequestPurpose::LoadFolderChats)
+        );
+
+        // Single-shot: the ok response must not re-trigger main-list paging.
+        let loads_before = sent.iter().filter(|j| j.contains("loadChats")).count();
+        driver
+            .ingest(
+                copy_and_parse(
+                    &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        let loads_after = recorder
+            .snapshot()
+            .iter()
+            .filter(|j| j.contains("loadChats"))
+            .count();
+        assert_eq!(loads_before, loads_after);
+        assert!(
+            !driver
+                .session
+                .requests
+                .has_purpose(RequestPurpose::LoadFolderChats)
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -5563,7 +5683,7 @@ mod tests {
             .unwrap();
 
         let extras = commit_typed_search(&mut driver, "alice");
-        let SearchFlight::Query(chats_extra, messages_extra) = extras else {
+        let SearchFlight::Query(chats_extra, messages_extra, public_extra) = extras else {
             panic!("expected typed search");
         };
         let sent = recorder.snapshot();
@@ -5574,12 +5694,29 @@ mod tests {
         assert!(sent.iter().any(|j| {
             j.contains("\"@type\":\"searchMessages\"") && j.contains("\"chat_list\":null")
         }));
+        assert!(
+            sent.iter()
+                .any(|j| { j.contains("\"@type\":\"searchPublicChats\"") && j.contains("alice") })
+        );
         driver
             .ingest(
                 copy_and_parse(
                     &format!(
                         r#"{{"@type":"chats","@extra":"{}","total_count":1,"chat_ids":[7]}}"#,
                         chats_extra.0
+                    ),
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        driver
+            .ingest(
+                copy_and_parse(
+                    &format!(
+                        r#"{{"@type":"chats","@extra":"{}","total_count":0,"chat_ids":[]}}"#,
+                        public_extra.0
                     ),
                     &seq,
                     &dyn_sink,
@@ -5653,7 +5790,7 @@ mod tests {
         assert!(driver.session.search.recents);
 
         let empty = commit_typed_search(&mut driver, "zzz");
-        let SearchFlight::Query(empty_chats, empty_messages) = empty else {
+        let SearchFlight::Query(empty_chats, empty_messages, empty_public) = empty else {
             panic!("expected typed empty search");
         };
         driver
@@ -5682,10 +5819,25 @@ mod tests {
                 .unwrap(),
             )
             .unwrap();
+        // Phase 7.2: `Empty` only once the public search settles too.
+        assert_eq!(driver.session.search.status, SearchStatus::Searching);
+        driver
+            .ingest(
+                copy_and_parse(
+                    &format!(
+                        r#"{{"@type":"chats","@extra":"{}","total_count":0,"chat_ids":[]}}"#,
+                        empty_public.0
+                    ),
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
         assert_eq!(driver.session.search.status, SearchStatus::Empty);
 
         let fail = commit_typed_search(&mut driver, "nope");
-        let SearchFlight::Query(fail_chats, fail_messages) = fail else {
+        let SearchFlight::Query(fail_chats, fail_messages, fail_public) = fail else {
             panic!("expected typed fail search");
         };
         driver
@@ -5707,6 +5859,21 @@ mod tests {
                     &format!(
                         r#"{{"@type":"error","code":400,"message":"CANARY_DRV_ERR2","@extra":"{}"}}"#,
                         fail_messages.0
+                    ),
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        // Phase 7.2: the public request still in flight keeps `Searching`.
+        assert_eq!(driver.session.search.status, SearchStatus::Searching);
+        driver
+            .ingest(
+                copy_and_parse(
+                    &format!(
+                        r#"{{"@type":"error","code":400,"message":"CANARY_DRV_ERR3","@extra":"{}"}}"#,
+                        fail_public.0
                     ),
                     &seq,
                     &dyn_sink,
@@ -5788,7 +5955,7 @@ mod tests {
             .commit_debounced_search(t3)
             .unwrap()
             .expect("settled");
-        let SearchFlight::Query(_, _) = settled else {
+        let SearchFlight::Query(_, _, _) = settled else {
             panic!("expected typed pair");
         };
         let sent: Vec<String> = recorder

@@ -104,10 +104,16 @@ pub fn log_out(extra: RequestId) -> String {
 }
 
 pub fn load_chats(extra: RequestId, limit: i32) -> String {
+    load_chats_list(extra, json!({ "@type": "chatListMain" }), limit)
+}
+
+/// `loadChats` for an arbitrary chat list (Phase 7.1: `chatListFolder`).
+/// Schema 1.8.67: `loadChats chat_list:ChatList limit:int32 = Ok` (line 11595).
+pub fn load_chats_list(extra: RequestId, chat_list: Value, limit: i32) -> String {
     json!({
         "@type": "loadChats",
         "@extra": extra.as_extra(),
-        "chat_list": { "@type": "chatListMain" },
+        "chat_list": chat_list,
         "limit": limit,
     })
     .to_string()
@@ -122,6 +128,20 @@ pub fn search_chats(extra: RequestId, query: &str, limit: i32) -> String {
         "query": query,
         "type_filter": Value::Null,
         "limit": limit,
+    })
+    .to_string()
+}
+
+/// `searchPublicChats` (TDLib 1.8.67, schema line 11609). Public username /
+/// title lookup across all public chats (private chats, supergroups,
+/// channels) — unlike `searchChats`, not limited to known chats.
+/// `type_filter` is null = all chat types. Returns `chats`.
+pub fn search_public_chats(extra: RequestId, query: &str) -> String {
+    json!({
+        "@type": "searchPublicChats",
+        "@extra": extra.as_extra(),
+        "query": query,
+        "type_filter": Value::Null,
     })
     .to_string()
 }
@@ -1829,6 +1849,43 @@ mod tests {
         assert_eq!(v["@extra"], "62");
         assert_eq!(v["supergroup_id"], 77);
         assert!(!json.contains("CANARY"));
+    }
+
+    #[test]
+    fn search_public_chats_shape_matches_1_8_67() {
+        // `searchPublicChats query:string type_filter:SearchChatTypeFilter =
+        // Chats` (schema 1.8.67, line 11609); type_filter null = all types.
+        let json = search_public_chats(RequestId(23), "quill");
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "searchPublicChats");
+        assert_eq!(v["@extra"], "23");
+        assert_eq!(v["query"], "quill");
+        assert!(v["type_filter"].is_null());
+        let schema = include_str!("../../schema/td_api.tl");
+        let line = schema
+            .lines()
+            .find(|l| l.starts_with("searchPublicChats "))
+            .expect("searchPublicChats in schema");
+        assert_eq!(
+            line,
+            "searchPublicChats query:string type_filter:SearchChatTypeFilter = Chats;"
+        );
+    }
+
+    #[test]
+    fn load_chats_folder_list_shape_matches_1_8_67() {
+        // `loadChats chat_list:ChatList limit:int32 = Ok` (line 11595) with
+        // `chatListFolder` (line 3524) — Phase 7.1 folder load.
+        let json = load_chats_list(
+            RequestId(24),
+            json!({ "@type": "chatListFolder", "chat_folder_id": 3 }),
+            100,
+        );
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "loadChats");
+        assert_eq!(v["chat_list"]["@type"], "chatListFolder");
+        assert_eq!(v["chat_list"]["chat_folder_id"], 3);
+        assert_eq!(v["limit"], 100);
     }
 
     #[test]

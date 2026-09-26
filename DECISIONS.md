@@ -1175,3 +1175,85 @@ Research snapshot 2026-09-16, pin recheck **2026-09-17**.
   parsed and cached, so server-pushed profile changes land in the panel
   on the next render; the panel fetch itself is cache-deduped (no
   refetch while cached).
+
+## Phase 7 — Folders & discovery (2026-09-26)
+
+- **Rationale:** the sidebar gains folder tabs (Telegram's chat folders)
+  beyond Main/Archive, and global search gains a public-username lookup
+  (`searchPublicChats`) alongside the offline known-chat search.
+- **Schema (1.8.67, verified in `schema/td_api.tl`):**
+  - There is **no `getChatFolders`** function in 1.8.67. The folder list
+    arrives as `updateChatFolders
+    chat_folders:vector<chatFolderInfo> main_chat_list_position:int32
+    are_tags_enabled:Bool = Update` (line 10606) — pushed after
+    authorization and on every change. `chatFolderInfo id:int32
+    name:chatFolderName icon:chatFolderIcon color_id:int32 is_shareable:Bool
+    has_my_invite_links:Bool = ChatFolderInfo` (line 3485);
+    `chatFolderIcon name:string = ChatFolderIcon` (line 3453);
+    `chatFolderName text:formattedText animate_custom_emoji:Bool =
+    ChatFolderName` (line 3458); `formattedText text:string
+    entities:vector<textEntity> = FormattedText` (line 117).
+  - Folder **membership** is positional: `chatListFolder
+    chat_folder_id:int32 = ChatList` (line 3524) appears in
+    `chatPosition.list`, `updateChatAddedToList`/`updateChatRemovedFromList`
+    `chat_list`, and the full positions set of `updateChatLastMessage`.
+    `getChatListsToAddChat chat_id:int53 = ChatLists` (line 13347) is *not*
+    folder membership — it lists the chat lists a chat may be added to for
+    `addChatToList` — so it is not used here.
+  - `getChats chat_list:ChatList limit:int32 = Chats` (line 11600) and
+    `loadChats chat_list:ChatList limit:int32 = Ok` (line 11595) both accept
+    a `chatListFolder`; the tab-select path uses `loadChats`.
+  - `searchPublicChats query:string type_filter:SearchChatTypeFilter =
+    Chats` (line 11609); `chats total_count:int32 chat_ids:vector<int53> =
+    Chats` (line 3630). `type_filter` null = all chat types (same as the
+    existing `searchChats` call). `SearchChatTypeFilter` has only
+    `searchChatTypeFilterBot` / `searchChatTypeFilterChannel` constructors
+    (lines 6350–6353), so null is the only "all" option.
+- **Folder membership approach:** `ChatSummary.folder_positions:
+  BTreeMap<i32, i64>` (folder id → TDLib order), maintained by the same
+  reducers as Main/Archive: `updateChatPosition` (order 0 removes),
+  `updateChatLastMessage` full positions set (drops folder ids no longer
+  present), `updateChatAddedToList` (membership confirmed, order 0 until
+  the position arrives), `updateChatRemovedFromList`. `updateChatFolders`
+  replaces `Session::chat_folders` wholesale (the update carries the full
+  ordered list). `Session::ordered_folder_chats(id)` sorts by folder order
+  desc, then chat id desc — the same convention as main/archive.
+- **Tab UX:** sidebar renders `Main` + folder tabs above the search field
+  only when the account has folders. Selecting a folder tab filters the
+  chat list to that folder's chats (Archive section hidden in folder
+  view — it stays as-is under the main list). Tab-select also fires a
+  single-shot `loadChats(chatListFolder)` (`RequestPurpose::LoadFolderChats`,
+  deliberately *not* `LoadChats` so the ok-response does not re-trigger
+  main-list paging). The selected tab is App view state (`folder_tab:
+  Option<i32>`, `None` = Main), next to `contacts_tab_open`.
+- **Public lookup:** typed global search now sends `searchChats` +
+  `searchPublicChats` + `searchMessages` (new
+  `RequestPurpose::SearchPublicChats`); `SearchState` gained
+  `public_chat_ids` + its own done/error flags, and the Ready/Empty/Failed
+  status waits for all three legs (`SearchFlight::Query` is now a
+  3-tuple). Results render in their own **Public chats** section (TDLib
+  excludes known chats from `searchPublicChats` results, so no merging
+  with the Chats section). **Selecting a public chat opens it** — the same
+  `select_search_chat` path as known chats (`addRecentlyFoundChat` +
+  `openChat`); unknown chats arrive via `updateNewChat` before the `chats`
+  response, with a "chat {id}" fallback row title until then.
+- **Dropped fields (documented, not forgotten):** from `chatFolderInfo`:
+  `is_shareable`, `has_my_invite_links` (folder sharing out of scope);
+  from `chatFolderName`: `animate_custom_emoji` and all text entities
+  (names may only carry CustomEmoji entities per the schema docs — dropped
+  to plain text); `chatFolder` full specs (create/edit/delete/reorder) are
+  not parsed — only the info list. `updateChatFolders`'s
+  `main_chat_list_position` / `are_tags_enabled` are dropped (reorder and
+  tags out of scope). Folder `is_pinned` is not tracked separately —
+  pinned folder chats already sort first by TDLib order.
+- **Screenshot:** `docs/screenshots/ready-folders.png` — injected
+  `updateChatFolders` (Work / News) with the non-default **News** folder
+  selected, showing only its chats; driven by
+  `quill --screenshot-demo ready-folders`.
+- **Out of this slice (→ future):** folder create/edit/delete/reorder
+  (`createChatFolder`, `editChatFolder`, `deleteChatFolder`,
+  `reorderChatFolders`, `toggleChatFolderTags`); folder icons rendered as
+  images (only the icon *name* is kept); folder invite links; per-chat
+  "add to folder" (`addChatToList` with `chatListFolder`); folder tags UI;
+  paging folder chats beyond one `loadChats` page; `getChatListsToAddChat`
+  surfacing in the archive/unarchive menu.

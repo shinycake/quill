@@ -136,10 +136,22 @@ handling exists.
 
 ## Phase 7 — Folders & discovery
 
-- **7.1 Chat folders.** Folder tabs beyond Main/Archive (`getChatListsToAddChat`
-  / folder UI).
-- **7.2 Public username lookup.** `searchPublicChats` in global search
-  (backlog).
+- **7.1 Chat folders.** ✅ Done (2026-09-26). Folder list from
+  `updateChatFolders` (there is no `getChatFolders` in 1.8.67);
+  `chatListFolder` membership tracked positionally on each chat
+  (`updateChatPosition` / full positions set / add-remove-from-list).
+  Sidebar folder tabs (Main + user folders) above the search field;
+  selecting a folder filters the chat list to that folder's chats (Archive
+  section unchanged under the main list) and fires a single-shot
+  `loadChats(chatListFolder)`. `getChatListsToAddChat` verified as
+  *not* folder membership (per-chat add-to-list suitability) — not used.
+  `ScreenshotDemo::ReadyFolders` → `docs/screenshots/ready-folders.png`.
+- **7.2 Public username lookup.** ✅ Done (2026-09-26).
+  `searchPublicChats` (type_filter null = all types) sent alongside
+  `searchChats` + `searchMessages` on every typed global search; results
+  in a separate **Public chats** section (TDLib excludes known chats from
+  these results). Selecting a public chat opens it (same
+  `addRecentlyFoundChat` + `openChat` path as known chats).
 
 ## Phase 8 — OS notifications
 
