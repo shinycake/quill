@@ -2023,17 +2023,48 @@ impl Session {
     }
 
     /// Phase 6: info-panel target for a chat header — the peer user for a
-    /// private chat, the supergroup for a group/channel chat, `None` for
-    /// basic groups, secret chats and unknown kinds.
+    /// private chat, the supergroup for a group/channel chat, the chat
+    /// partner for a secret chat (Phase B2: their panel hosts the
+    /// encryption-key section), `None` for basic groups and unknown
+    /// kinds.
     pub fn info_panel_target_for_chat(&self, chat_id: ChatId) -> Option<InfoPanelTarget> {
         let chat = self.chats.get(&chat_id.0)?;
         match chat.kind {
             ChatKind::Private { user_id } => Some(InfoPanelTarget::User(user_id.0)),
+            ChatKind::Secret { user_id, .. } => Some(InfoPanelTarget::User(user_id.0)),
             ChatKind::Supergroup { supergroup_id, .. } => {
                 Some(InfoPanelTarget::Supergroup(supergroup_id))
             }
             _ => None,
         }
+    }
+
+    /// Phase B2: the full `ParsedSecretChat` record behind the *open*
+    /// chat, when the open chat is a **Ready** secret chat whose partner is
+    /// `user_id`. Drives the encryption-key section of the partner's info
+    /// panel. `None` for non-Ready chats (the key is only meaningful once
+    /// the session is established) and while the record hasn't arrived.
+    ///
+    /// Security: the returned record borrows session memory; callers pass
+    /// the bytes through `key_fingerprint::key_hash_pixels` and render
+    /// pixel colors only — raw bytes never leave `Session`.
+    pub fn open_ready_secret_chat_for_user(&self, user_id: i64) -> Option<&ParsedSecretChat> {
+        let open = self.open_chat?;
+        let chat = self.chats.get(&open.0)?;
+        let ChatKind::Secret {
+            secret_chat_id,
+            user_id: partner,
+        } = &chat.kind
+        else {
+            return None;
+        };
+        if partner.0 != user_id {
+            return None;
+        }
+        if chat.secret_state != Some(SecretChatState::Ready) {
+            return None;
+        }
+        self.secret_chat_states.get(secret_chat_id)
     }
 
     /// Phase 6: cached user object, if an `updateUser` has been seen.
@@ -8312,5 +8343,62 @@ mod tests {
             r#"{"@type":"updateNewChat","chat":{"id":24,"title":"Slow group","type":{"@type":"chatTypeSupergroup","supergroup_id":24,"is_channel":false},"unread_count":0}}"#,
         );
         assert_eq!(session.slow_mode_wait_secs(ChatId(24), unix_ms_now()), None);
+    }
+
+    /// Phase B2: `open_ready_secret_chat_for_user` returns the record
+    /// (with its 36-byte hash) only when the open chat is a **Ready**
+    /// secret chat with the matching partner — `None` for Pending chats,
+    /// other users, and non-secret open chats. The header's info-panel
+    /// target resolves to the secret chat partner.
+    #[test]
+    fn open_ready_secret_chat_for_user_gates_on_ready() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        // Deterministic 36-byte key_hash (same fixture as the
+        // ready-key-verification screenshot demo).
+        let hash_b64 = "GUYMUT5VLuA6j7l7taiDAR9tM+Y30on50Cklur/t+/w57sWo";
+        let secret_ready = format!(
+            r#"{{"@type":"updateSecretChat","secret_chat":{{"@type":"secretChat","id":7,"user_id":41,"state":{{"@type":"secretChatStateReady"}},"is_outbound":true,"key_hash":"{hash_b64}","layer":144}}}}"#
+        );
+        apply_json(&mut session, &seq, &sink, &secret_ready);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateNewChat","chat":{"id":41,"title":"Zed","type":{"@type":"chatTypeSecret","secret_chat_id":7,"user_id":41},"unread_count":0}}"#,
+        );
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateSecretChat","secret_chat":{"@type":"secretChat","id":8,"user_id":43,"state":{"@type":"secretChatStatePending"},"is_outbound":false,"key_hash":"","layer":144}}"#,
+        );
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateNewChat","chat":{"id":42,"title":"Wendy","type":{"@type":"chatTypeSecret","secret_chat_id":8,"user_id":43},"unread_count":0}}"#,
+        );
+
+        session.open_chat(ChatId(41));
+        let record = session
+            .open_ready_secret_chat_for_user(41)
+            .expect("Ready secret chat record");
+        assert_eq!(record.id, 7);
+        assert_eq!(record.key_hash.len(), 36);
+        let pixels = crate::key_fingerprint::key_hash_pixels(&record.key_hash)
+            .expect("36-byte hash is renderable");
+        assert_eq!(pixels.len(), 144);
+        // Wrong partner → None.
+        assert!(session.open_ready_secret_chat_for_user(999).is_none());
+        // The header opens the partner's panel for secret chats too.
+        assert_eq!(
+            session.info_panel_target_for_chat(ChatId(41)),
+            Some(InfoPanelTarget::User(41))
+        );
+
+        // Pending chat → no record for the key UI.
+        session.open_chat(ChatId(42));
+        assert!(session.open_ready_secret_chat_for_user(43).is_none());
     }
 }

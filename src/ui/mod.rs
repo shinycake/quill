@@ -23,6 +23,7 @@ use quill::credentials::TelegramCredentials;
 use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::folders::FolderEditor;
 use quill::ids::{AccountKey, ChatId, FileId, MessageId};
+use quill::key_fingerprint;
 use quill::local_path::sandboxed_display_path;
 use quill::media_viewer::{
     MediaViewer, MediaViewerItem, MediaViewerKind, ViewerVideoStart, ViewerZoom,
@@ -47,8 +48,8 @@ use quill::telegram::envelope::{
     DEFAULT_EMOJI_REACTIONS, ForumTopic, InlineKeyboardButton, InlineKeyboardButtonStyle,
     InlineKeyboardButtonType, MUTE_FOR_1_HOUR, MUTE_FOR_2_DAYS, MUTE_FOR_8_HOURS, MUTE_FOREVER,
     MessageContent, MessageInteractionInfo, NotificationSettingsScope, NotificationSound,
-    ParsedFile, ParsedStory, PollContent, PollOption, PollType, ScopeNotificationSettings,
-    SecretChatState, SponsoredMessage, toggle_chosen_emoji_reaction,
+    ParsedFile, ParsedSecretChat, ParsedStory, PollContent, PollOption, PollType,
+    ScopeNotificationSettings, SecretChatState, SponsoredMessage, toggle_chosen_emoji_reaction,
 };
 use quill::text::{TextEntity, styled_runs, utf8_to_utf16_offset};
 use quill::voice::{self, VoiceCapture, format_voice_duration};
@@ -725,6 +726,12 @@ pub enum ScreenshotDemo {
     /// the composer is live (a Pending chat would show "Waiting for Zed
     /// to come online…" and a Closed chat "Secret chat closed" instead).
     ReadySecretChat,
+    /// Phase B2: key verification UI (injected, no live Telegram) — the
+    /// same Ready secret chat as `ReadySecretChat` but with a real
+    /// 36-byte `key_hash` (deterministic fixture), and the partner's
+    /// info panel open showing the "Encryption key" 12×12 fingerprint
+    /// grid plus the verification copy.
+    ReadyKeyVerification,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1451,6 +1458,18 @@ impl QuillApp {
                     AuthorizationState::Ready,
                 )
             }
+            // Phase B2: key verification UI fixture (injected, no live
+            // Telegram).
+            Some(ScreenshotDemo::ReadyKeyVerification) => {
+                demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
+                (
+                    ConnectUiStatus::DemoReadyChats,
+                    None,
+                    "screenshot demo — secret chat key verification (injected, no live Telegram)"
+                        .into(),
+                    AuthorizationState::Ready,
+                )
+            }
             None => bootstrap_connect(credentials),
         };
 
@@ -1886,6 +1905,17 @@ impl QuillApp {
                 input.set_value("this goes through the E2E session…", window, cx);
             });
             app.status_note = "secret chat — Ready, 🔒 badge in the chat list".into();
+        }
+        // Phase B2: key verification fixture — the Ready secret chat with
+        // a real 36-byte key_hash and Zed's info panel open on the
+        // "Encryption key" fingerprint grid.
+        if matches!(demo, Some(ScreenshotDemo::ReadyKeyVerification)) {
+            if let Some(session) = app.demo_session.as_mut() {
+                app.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_key_verification(session, &app.demo_sink, &app.demo_seq);
+            }
+            app.status_note =
+                "secret chat key verification — compare with your contact's device".into();
         }
         if matches!(demo, Some(ScreenshotDemo::ReadyVideoSend)) {
             app.composer.update(cx, |input, cx| {
@@ -6554,9 +6584,93 @@ impl QuillApp {
                                 })),
                         ),
                 )
-                .child(div().flex_1().child(content))
+                // Phase B2: the content scrolls — the encryption-key
+                // section can push a contact panel past the window
+                // height.
+                .child(
+                    div()
+                        .id("info-panel-body")
+                        .flex_1()
+                        .overflow_y_scroll()
+                        .child(content),
+                )
                 .into_any_element(),
         )
+    }
+
+    /// Phase B2: the "Encryption key" section of a secret chat partner's
+    /// info panel — the 12×12 fingerprint grid from `secretChat.key_hash`
+    /// (schema 1.8.67 lines 2812–2813: 36 little-endian bytes → 144
+    /// two-bit pixels in FFFFFF / D5E6F3 / 2D5775 / 2F99C9) with
+    /// Telegram-style verification copy. A Ready record whose hash isn't
+    /// 36 bytes yet (still resolving) shows a loading note instead of
+    /// the grid — graceful missing-key handling.
+    ///
+    /// Security: `record.key_hash` bytes are passed straight into
+    /// `key_fingerprint::key_hash_pixels`; only pixel indices / colors
+    /// enter the element tree — raw key bytes never leave `Session`.
+    fn encryption_key_section(
+        &self,
+        record: &ParsedSecretChat,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        const CELL_PX: f32 = 18.0;
+        let pixels = key_fingerprint::key_hash_pixels(&record.key_hash);
+        let mut body = div()
+            .flex()
+            .flex_col()
+            .w_full()
+            .gap_2()
+            .pt_2()
+            .border_t_1()
+            .border_color(cx.theme().border)
+            .child(
+                div()
+                    .text_xs()
+                    .font_semibold()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("Encryption key"),
+            );
+        match pixels {
+            Some(pixels) => {
+                let mut grid = div().flex().flex_col();
+                for row in pixels.chunks(key_fingerprint::KEY_GRID_SIZE) {
+                    let mut line = div().flex().flex_row();
+                    for pixel in row {
+                        line = line.child(
+                            div()
+                                .w(px(CELL_PX))
+                                .h(px(CELL_PX))
+                                .bg(rgb(key_fingerprint::key_pixel_color(*pixel))),
+                        );
+                    }
+                    grid = grid.child(line);
+                }
+                body = body
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .items_center()
+                            .child(grid.border_1().border_color(cx.theme().border)),
+                    )
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("If this image matches the one on your contact's device, your conversation is secure."),
+                    );
+            }
+            None => {
+                body = body.child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child("Encryption key · still loading…"),
+                );
+            }
+        }
+        body.into_any_element()
     }
 
     /// User profile panel: photo (downloaded `userFullInfo.photo` size, or
@@ -6689,6 +6803,16 @@ impl QuillApp {
                         this.start_secret_chat_for_user(user_id, cx);
                     })),
             );
+        }
+        // Phase B2: encryption-key section — only when the open chat is a
+        // Ready secret chat with this user (the key is meaningful once
+        // the session is established). Missing/short hashes render the
+        // still-loading note inside the section.
+        if let Some(record) = session
+            .as_ref()
+            .and_then(|s| s.open_ready_secret_chat_for_user(user_id))
+        {
+            body = body.child(self.encryption_key_section(record, cx));
         }
         body.into_any_element()
     }
@@ -13823,6 +13947,47 @@ fn apply_ready_secret_chat(session: &mut Session, sink: &Arc<MemorySink>, seq: &
         }
     }
     session.open_chat(ChatId(chat_id));
+}
+
+/// Phase B2: key verification UI fixture — the Ready secret chat (id 41)
+/// with Zed (user 41), but with a real deterministic 36-byte `key_hash`
+/// (base64; the B1 fixture left it empty), opened with E2E history, and
+/// Zed's info panel open on the "Encryption key" 12×12 fingerprint grid.
+fn apply_ready_key_verification(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let chat_id = 41i64;
+    let user_id = 41i64;
+    let secret_chat_id = 7i32;
+    // Deterministic 36-byte fixture (xorshift32, seed 0x9E3779B9) — the
+    // grid is fixed across captures. NOT a real key: injected demo data.
+    let key_hash_b64 = "GUYMUT5VLuA6j7l7taiDAR9tM+Y30on50Cklur/t+/w57sWo";
+    let jsons = [
+        format!(
+            r#"{{"@type":"updateUser","user":{{"id":{user_id},"first_name":"Zed","last_name":"Hopper","usernames":{{"@type":"usernames","active_usernames":["zedhopper"],"disabled_usernames":[],"editable_username":"zedhopper","collectible_usernames":[]}},"phone_number":"+15550101041","status":{{"@type":"userStatusOnline","expires":9999999999}},"is_contact":false,"type":{{"@type":"userTypeRegular"}}}}}}"#
+        ),
+        format!(
+            r#"{{"@type":"updateSecretChat","secret_chat":{{"@type":"secretChat","id":{secret_chat_id},"user_id":{user_id},"state":{{"@type":"secretChatStateReady"}},"is_outbound":true,"key_hash":"{key_hash_b64}","layer":144}}}}"#
+        ),
+        format!(
+            r#"{{"@type":"updateNewChat","chat":{{"id":{chat_id},"title":"Zed","type":{{"@type":"chatTypeSecret","secret_chat_id":{secret_chat_id},"user_id":{user_id}}},"unread_count":0}}}}"#
+        ),
+        format!(
+            r#"{{"@type":"updateChatPosition","chat_id":{chat_id},"position":{{"@type":"chatPosition","list":{{"@type":"chatListMain"}},"order":"85","is_pinned":false}}}}"#
+        ),
+        format!(
+            r#"{{"@type":"updateNewMessage","message":{{"id":401,"chat_id":{chat_id},"sender_id":{{"@type":"messageSenderUser","user_id":{user_id}}},"is_outgoing":false,"date":1700000100,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"Tap my name above, then compare the key image.","entities":[]}}}}}}}}"#
+        ),
+        format!(
+            r#"{{"@type":"updateNewMessage","message":{{"id":402,"chat_id":{chat_id},"sender_id":{{"@type":"messageSenderUser","user_id":{user_id}}},"is_outgoing":false,"date":1700000160,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"If it matches on both devices, nobody else can read this.","entities":[]}}}}}}}}"#
+        ),
+    ];
+    for json in jsons {
+        if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
+            session.apply(owned);
+        }
+    }
+    session.open_chat(ChatId(chat_id));
+    session.open_info_panel = Some(InfoPanelTarget::User(user_id));
 }
 
 fn apply_ready_drafts(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {

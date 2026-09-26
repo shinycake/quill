@@ -615,7 +615,11 @@ impl SecretChatState {
 /// is_outbound:Bool key_hash:bytes layer:int32 = SecretChat;`
 /// `key_hash` (36 little-endian bytes) is kept raw for the B2 key
 /// verification UI; the layer is kept for future capability gating.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// Security: key material stays in memory only — never logged, never
+/// written to disk. `Debug` is hand-written and prints only the hash
+/// *length*, so formatting an envelope can never leak key bytes.
+#[derive(Clone, PartialEq, Eq)]
 pub struct ParsedSecretChat {
     pub id: i32,
     pub user_id: i64,
@@ -623,6 +627,19 @@ pub struct ParsedSecretChat {
     pub is_outbound: bool,
     pub key_hash: Vec<u8>,
     pub layer: i32,
+}
+
+impl std::fmt::Debug for ParsedSecretChat {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ParsedSecretChat")
+            .field("id", &self.id)
+            .field("user_id", &self.user_id)
+            .field("state", &self.state)
+            .field("is_outbound", &self.is_outbound)
+            .field("key_hash_len", &self.key_hash.len())
+            .field("layer", &self.layer)
+            .finish()
+    }
 }
 
 fn parse_secret_chat(value: Option<&Value>) -> Option<ParsedSecretChat> {
@@ -5745,6 +5762,25 @@ mod tests {
                 other => panic!("unexpected {other:?}"),
             }
         }
+    }
+
+    /// Phase B2: `Debug` on `ParsedSecretChat` redacts the key bytes
+    /// (length only) — a stray `{env:?}` in a log can never leak key
+    /// material.
+    #[test]
+    fn secret_chat_debug_redacts_key_hash() {
+        let secret_chat = ParsedSecretChat {
+            id: 7,
+            user_id: 41,
+            state: SecretChatState::Ready,
+            is_outbound: true,
+            key_hash: vec![0xAB; 36],
+            layer: 144,
+        };
+        let debug = format!("{secret_chat:?}");
+        assert!(debug.contains("key_hash_len: 36"));
+        // 0xAB = 171; a full-bytes Debug would print it 36 times.
+        assert!(!debug.contains("171"));
     }
 
     /// Phase B1: an unknown `SecretChatState` constructor degrades to

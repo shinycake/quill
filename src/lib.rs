@@ -11,6 +11,7 @@ pub mod credentials;
 pub mod diagnostics;
 pub mod folders;
 pub mod ids;
+pub mod key_fingerprint;
 pub mod layout;
 pub mod lifecycle;
 pub mod local_path;

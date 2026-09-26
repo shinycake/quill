@@ -2060,3 +2060,54 @@ are rough (S < 1 day, M = days, L = week+).
   (`messageSelfDestructType`); secret-chat-specific notification
   behavior; honoring `can_be_copied_to_secret_chat` in the forward
   flow; secret-chat file-download UI differences.
+
+## Phase B2 — Secret chat key verification UI (2026-09-26)
+
+- **Rationale.** A secret chat's security hinges on the two devices
+  agreeing on the E2E key; official clients let the user compare a
+  visual fingerprint of the key. B1 retained the raw `key_hash` exactly
+  for this slice.
+- **Schema (1.8.67, not invented):** the `secretChat.key_hash` comment
+  (:2812–2813, verified verbatim) — "36 little-endian bytes, which must
+  be split into groups of 2 bits, each denoting a pixel of one of 4
+  colors FFFFFF, D5E6F3, 2D5775, and 2F99C9"; "The pixels must be used
+  to make a 12x12 square image filled from left to right, top to
+  bottom." Constructor `secretChat` at :2816. No new constructors were
+  needed — the whole slice is derived from the retained hash.
+- **Mapping (pure, deterministic).** New `src/key_fingerprint.rs`:
+  `key_hash_pixels(&[u8]) -> Option<[u8; 144]>` — `None` unless the
+  slice is exactly 36 bytes; pixel `4i+j` = `(byte[i] >> (2*j)) & 3`
+  (little-endian 2-bit groups, least-significant pair first),
+  row-major left-to-right, top-to-bottom. Color table
+  `[0xFFFFFF, 0xD5E6F3, 0x2D5775, 0x2F99C9]` in schema-comment order.
+- **UI.** The secret chat partner's info panel (opened by clicking the
+  secret chat's header title — `Session::info_panel_target_for_chat`
+  now returns the partner user for `ChatKind::Secret` too) gains an
+  **Encryption key** section: the 12×12 grid (18px cells) plus
+  Telegram-style verification copy ("If this image matches the one on
+  your contact's device, your conversation is secure."). Shown only
+  when the open chat is a **Ready** secret chat with that user
+  (`Session::open_ready_secret_chat_for_user`); a Ready record whose
+  hash isn't 36 bytes yet renders "Encryption key · still loading…"
+  instead of the grid. Non-Ready chats show no key section.
+- **Security hygiene.** Key material stays in memory only: `Session`
+  has no `Debug`/`serde`; `ParsedSecretChat`'s derived `Debug` was
+  replaced with a hand-written impl printing only `key_hash_len` (a
+  canary test asserts the byte values never appear); no logging or
+  disk writes of key bytes anywhere; the UI receives only pixel
+  indices/colors, never the raw bytes. E2E crypto remains inside TDLib.
+- **Screenshot:** `docs/screenshots/ready-key-verification.png` —
+  `quill --screenshot-demo ready-key-verification`: Ready secret chat
+  (id 41) with Zed, deterministic 36-byte `key_hash` fixture, info
+  panel open on the fingerprint grid + verification copy.
+- **Tests.** 5 unit tests on the byte→pixel mapping (zero hash → all
+  white; 0xE4 → little-endian group order [0,1,2,3]; 35/37/empty → not
+  renderable; color table order; full 0x00–0x23 fixture incl. tail byte
+  0x23 → [3,0,2,0]); the `Debug`-redaction canary test.
+- **Out of this slice (→ future):** B3 self-destructing messages
+  (`messageSelfDestructType`); secret-chat-specific notification
+  behavior; honoring `can_be_copied_to_secret_chat` in the forward
+  flow; secret-chat file-download UI differences; hex-format key
+  display alternative (the schema comment's "alternatively" clause —
+  official mobile clients show the image, so the image is the parity
+  target).
