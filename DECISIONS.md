@@ -486,7 +486,7 @@ Research snapshot 2026-09-16, pin recheck **2026-09-17**.
   - On first open of a known bot chat the driver sends one `getUserFullInfo`
     (deduped: cached infos and in-flight requests are not refetched);
     send failures drop the pending request so a retry can happen.
-  - The panel shows the bot description and one outlined button per
+  - The panel shows the bot description and one text-chip button per
     command (`/start — Start the bot` style). Tapping inserts `/command`
     into the composer (bare when empty, space-separated after text).
   - Screenshot demo: `quill --screenshot-demo ready-bot-chat` →
