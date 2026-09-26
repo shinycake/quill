@@ -29,12 +29,13 @@ use quill::poll::{
     POLL_OPTIONS_MAX, POLL_OPTIONS_MIN, PollDraft, poll_bar_fraction, voter_count_label,
 };
 use quill::state::{
-    ChatSearchJump, ChatSummary, ForwardResult, HistoryMessage, OutboxReceipt, RequestPurpose,
-    SearchStatus, Session, SponsoredReportFlight, outgoing_status_label, unread_badge_text,
+    ChatSearchJump, ChatSummary, ContactRow, ForwardResult, HistoryMessage, InfoPanelTarget,
+    OutboxReceipt, RequestPurpose, SearchStatus, Session, SponsoredReportFlight,
+    outgoing_status_label, unread_badge_text,
 };
 use quill::telegram::client::copy_and_parse;
 use quill::telegram::envelope::{
-    AuthorizationState, BotInfo, CallbackQueryAnswer, ChannelMemberStatus, ChatDraft,
+    AuthorizationState, BotInfo, CallbackQueryAnswer, ChannelMemberStatus, ChatDraft, ChatKind,
     ChatNotificationSettings, DEFAULT_EMOJI_REACTIONS, ForumTopic, InlineKeyboardButton,
     InlineKeyboardButtonStyle, InlineKeyboardButtonType, MUTE_FOR_1_HOUR, MUTE_FOR_2_DAYS,
     MUTE_FOR_8_HOURS, MUTE_FOREVER, MessageContent, MessageInteractionInfo, ParsedFile,
@@ -159,6 +160,72 @@ impl PollDialog {
     }
 }
 
+/// Phase 6: add-contact dialog opened from the user info panel. The phone
+/// number is required — `addContact` needs an `importedContact` and Quill
+/// does not offer adding by bare user id.
+pub struct AddContactDialog {
+    user_id: i64,
+    phone_input: Entity<TextareaState>,
+    first_name_input: Entity<TextareaState>,
+    last_name_input: Entity<TextareaState>,
+}
+
+impl AddContactDialog {
+    fn new(
+        window: &mut Window,
+        cx: &mut Context<QuillApp>,
+        user_id: i64,
+        phone: &str,
+        first_name: &str,
+        last_name: &str,
+    ) -> Self {
+        let phone_input = cx.new(|cx| {
+            let mut state = TextareaState::new(window, cx)
+                .placeholder("Phone number")
+                .auto_grow(1, 1)
+                .submit_on_enter(false);
+            state.set_value(phone, window, cx);
+            state
+        });
+        let first_name_input = cx.new(|cx| {
+            let mut state = TextareaState::new(window, cx)
+                .placeholder("First name")
+                .auto_grow(1, 1)
+                .submit_on_enter(false);
+            state.set_value(first_name, window, cx);
+            state
+        });
+        let last_name_input = cx.new(|cx| {
+            let mut state = TextareaState::new(window, cx)
+                .placeholder("Last name")
+                .auto_grow(1, 1)
+                .submit_on_enter(false);
+            state.set_value(last_name, window, cx);
+            state
+        });
+        Self {
+            user_id,
+            phone_input,
+            first_name_input,
+            last_name_input,
+        }
+    }
+
+    /// `None` when the phone field is empty (the Add button no-ops then).
+    fn draft(&self, cx: &App) -> Option<(i64, String, String, String)> {
+        let phone = self.phone_input.read(cx).value().to_string();
+        if phone.trim().is_empty() {
+            return None;
+        }
+        Some((
+            self.user_id,
+            phone,
+            self.first_name_input.read(cx).value().to_string(),
+            self.last_name_input.read(cx).value().to_string(),
+        ))
+    }
+}
+
 pub struct QuillApp {
     chat: Entity<SyntheticChat>,
     composer: Entity<TextareaState>,
@@ -266,6 +333,12 @@ pub struct QuillApp {
     poll_dialog: Option<PollDialog>,
     /// Phase 4.5: fullscreen media viewer (photo/video overlay).
     media_viewer: MediaViewer,
+    /// Phase 6: sidebar tab — `true` shows the contacts list instead of
+    /// the chat list.
+    contacts_tab_open: bool,
+    /// Phase 6: add-contact dialog (phone + first/last name) opened from
+    /// the user info panel.
+    add_contact_dialog: Option<AddContactDialog>,
 }
 
 /// Forced UI surfaces for screenshot proof (no live Telegram / no real credentials).
@@ -386,6 +459,12 @@ pub enum ScreenshotDemo {
     /// with a last-message preview, Random closed), shown as the topic
     /// list (Phase 5.1).
     ReadyForumTopics,
+    /// Contacts demo (injected, no live Telegram): the sidebar shows the
+    /// **Contacts** tab (three injected contacts: Ada online, Zed last
+    /// seen within a week, Noor recently) and the user info panel is open
+    /// for Zed (bio from an injected `userFullInfo`) with the **Add
+    /// contact** affordance (Phase 6).
+    ReadyContacts,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -986,6 +1065,15 @@ impl QuillApp {
                     AuthorizationState::Ready,
                 )
             }
+            Some(ScreenshotDemo::ReadyContacts) => {
+                demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
+                (
+                    ConnectUiStatus::DemoReadyChats,
+                    None,
+                    "screenshot demo — contacts & profile".into(),
+                    AuthorizationState::Ready,
+                )
+            }
             None => bootstrap_connect(credentials),
         };
 
@@ -1099,6 +1187,8 @@ impl QuillApp {
             spoiler_revealed: HashSet::new(),
             poll_dialog: None,
             media_viewer: MediaViewer::closed(),
+            contacts_tab_open: false,
+            add_contact_dialog: None,
         };
         if matches!(demo, Some(ScreenshotDemo::ReadyChatsComposer)) {
             app.composer.update(cx, |input, cx| {
@@ -1304,6 +1394,14 @@ impl QuillApp {
                 apply_ready_forum_topics(session, &app.demo_sink, &app.demo_seq);
             }
             app.status_note = "screenshot demo — forum topics list".into();
+        }
+        if matches!(demo, Some(ScreenshotDemo::ReadyContacts)) {
+            if let Some(session) = app.demo_session.as_mut() {
+                app.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_contacts(session, &app.demo_sink, &app.demo_seq);
+            }
+            app.contacts_tab_open = true;
+            app.status_note = "screenshot demo — contacts tab + user info panel".into();
         }
         if matches!(demo, Some(ScreenshotDemo::ReadyVideoSend)) {
             app.composer.update(cx, |input, cx| {
@@ -4356,6 +4454,643 @@ impl QuillApp {
         cx.notify();
     }
 
+    // ------------------------------------------------------------------
+    // Phase 6: Contacts tab, info panels, add-contact dialog.
+    // ------------------------------------------------------------------
+
+    /// Sidebar "Chats | Contacts" tabs (Ready mode). Other modes keep the
+    /// plain "Chats" title.
+    fn list_tabs(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        if self.pane_mode() != PaneMode::Ready {
+            return div().font_semibold().child("Chats").into_any_element();
+        }
+        let chats_active = !self.contacts_tab_open;
+        div()
+            .flex()
+            .items_center()
+            .gap_2()
+            .child(
+                div()
+                    .id("tab-chats")
+                    .cursor_pointer()
+                    .px_2()
+                    .py_1()
+                    .rounded_md()
+                    .text_sm()
+                    .font_medium()
+                    .bg(if chats_active {
+                        cx.theme().accent.opacity(0.15)
+                    } else {
+                        cx.theme().sidebar
+                    })
+                    .child("Chats")
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.open_chats_tab(cx);
+                    })),
+            )
+            .child(
+                div()
+                    .id("tab-contacts")
+                    .cursor_pointer()
+                    .px_2()
+                    .py_1()
+                    .rounded_md()
+                    .text_sm()
+                    .font_medium()
+                    .bg(if chats_active {
+                        cx.theme().sidebar
+                    } else {
+                        cx.theme().accent.opacity(0.15)
+                    })
+                    .child("Contacts")
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.open_contacts_tab(cx);
+                    })),
+            )
+            .into_any_element()
+    }
+
+    fn open_chats_tab(&mut self, cx: &mut Context<Self>) {
+        self.contacts_tab_open = false;
+        cx.notify();
+    }
+
+    fn open_contacts_tab(&mut self, cx: &mut Context<Self>) {
+        self.contacts_tab_open = true;
+        if let Some(live) = self.live.as_mut()
+            && let Err(err) = live.driver.fetch_contacts()
+        {
+            self.status_note = format!("contacts request failed: {err:?}");
+        }
+        cx.notify();
+    }
+
+    fn retry_contacts(&mut self, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut()
+            && let Err(err) = live.driver.fetch_contacts()
+        {
+            self.status_note = format!("contacts request failed: {err:?}");
+        }
+        cx.notify();
+    }
+
+    /// Contacts list for the Contacts tab: loading / error / empty /
+    /// rows. A tap opens the user info panel.
+    fn contacts_list(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let rows: Vec<ContactRow> = self.session().map(|s| s.contact_rows()).unwrap_or_default();
+        let failed = self.session().is_some_and(|s| s.contacts_error);
+        let loading = self.session().is_some_and(|s| s.contacts.is_none()) && !failed;
+        let mut list = div().id("contacts-list").flex().flex_col().gap_1();
+        if failed {
+            list = list
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child("Couldn’t load contacts."),
+                )
+                .child(
+                    Button::new("contacts-retry")
+                        .label("Retry")
+                        .ghost()
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.retry_contacts(cx);
+                        })),
+                );
+        } else if loading {
+            list = list.child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("Loading contacts…"),
+            );
+        } else if rows.is_empty() {
+            list = list.child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("No contacts yet."),
+            );
+        } else {
+            for row in rows {
+                list = list.child(self.contact_row(&row, cx));
+            }
+        }
+        list
+    }
+
+    fn contact_row(&self, row: &ContactRow, cx: &mut Context<Self>) -> impl IntoElement {
+        let user_id = row.user_id;
+        let name = row.name.clone();
+        let status = row.status_text.clone();
+        let selected =
+            self.session().and_then(|s| s.open_info_panel) == Some(InfoPanelTarget::User(user_id));
+        div()
+            .id(("contact-row", user_id as u64))
+            .px_2()
+            .py_2()
+            .rounded_md()
+            .cursor_pointer()
+            .bg(if selected {
+                cx.theme().accent.opacity(0.15)
+            } else {
+                cx.theme().sidebar
+            })
+            .on_click(cx.listener(move |this, _, window, cx| {
+                this.open_user_panel(user_id, window, cx);
+            }))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .child(initials_avatar(&name, 32.))
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .min_w_0()
+                            .child(div().font_medium().text_sm().child(name))
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(status),
+                            ),
+                    ),
+            )
+    }
+
+    fn open_user_panel(&mut self, user_id: i64, window: &mut Window, cx: &mut Context<Self>) {
+        self.open_info_panel_target(InfoPanelTarget::User(user_id), window, cx);
+    }
+
+    fn open_supergroup_panel(
+        &mut self,
+        supergroup_id: i64,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.open_info_panel_target(InfoPanelTarget::Supergroup(supergroup_id), window, cx);
+    }
+
+    /// Open an info panel: set the target, then fetch its data on the live
+    /// path (full info + profile photo for users, full info for
+    /// supergroups). The demo path only sets the target — the fixture
+    /// pre-seeds the data.
+    fn open_info_panel_target(
+        &mut self,
+        target: InfoPanelTarget,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(live) = self.live.as_mut() {
+            live.driver.set_info_panel(Some(target));
+            let fetch = match target {
+                InfoPanelTarget::User(user_id) => {
+                    live.driver.fetch_user_full_info(user_id).map(|_| ())
+                }
+                InfoPanelTarget::Supergroup(supergroup_id) => live
+                    .driver
+                    .fetch_supergroup_full_info(supergroup_id)
+                    .map(|_| ()),
+            };
+            if let Err(err) = fetch {
+                self.status_note = format!("info request failed: {err:?}");
+            } else if let InfoPanelTarget::User(user_id) = target
+                && let Err(err) = live.driver.download_user_photo(user_id)
+            {
+                self.status_note = format!("photo download failed: {err:?}");
+            }
+        } else if let Some(session) = self.demo_session.as_mut() {
+            session.open_info_panel = Some(target);
+        }
+        let _ = window;
+        cx.notify();
+    }
+
+    fn close_info_panel(&mut self, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            live.driver.set_info_panel(None);
+        } else if let Some(session) = self.demo_session.as_mut() {
+            session.open_info_panel = None;
+        }
+        cx.notify();
+    }
+
+    /// Right-side info panel for the open `InfoPanelTarget` (user profile
+    /// or group info). Rendered next to the conversation in the shell.
+    fn info_panel(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let target = self.session()?.open_info_panel?;
+        let (title, content) = match target {
+            InfoPanelTarget::User(user_id) => ("Contact info", self.user_info_panel(user_id, cx)),
+            InfoPanelTarget::Supergroup(supergroup_id) => {
+                ("Group info", self.supergroup_info_panel(supergroup_id, cx))
+            }
+        };
+        Some(
+            div()
+                .id("info-panel")
+                .w(px(300.))
+                .h_full()
+                .flex_shrink_0()
+                .border_l_1()
+                .border_color(cx.theme().border)
+                .bg(cx.theme().sidebar)
+                .flex()
+                .flex_col()
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .px_3()
+                        .py_2()
+                        .border_b_1()
+                        .border_color(cx.theme().border)
+                        .child(div().font_semibold().child(title))
+                        .child(
+                            div()
+                                .id("info-panel-close")
+                                .cursor_pointer()
+                                .px_2()
+                                .py_1()
+                                .rounded_md()
+                                .text_color(cx.theme().muted_foreground)
+                                .child("✕")
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.close_info_panel(cx);
+                                })),
+                        ),
+                )
+                .child(div().flex_1().child(content))
+                .into_any_element(),
+        )
+    }
+
+    /// User profile panel: photo (downloaded `userFullInfo.photo` size, or
+    /// an initials avatar), name, status, username/phone rows, bio, and an
+    /// Add contact affordance for known non-contacts.
+    fn user_info_panel(&self, user_id: i64, cx: &mut Context<Self>) -> AnyElement {
+        let session = self.session();
+        let user = session.and_then(|s| s.user(user_id)).cloned();
+        let info = session.and_then(|s| s.user_full_info(user_id)).cloned();
+        let name = user
+            .as_ref()
+            .map(|u| u.display_name())
+            .unwrap_or_else(|| format!("User {user_id}"));
+        let status = user
+            .as_ref()
+            .map(|u| u.status.display())
+            .unwrap_or_default();
+        let username = user
+            .as_ref()
+            .map(|u| u.username.clone())
+            .unwrap_or_default();
+        let phone = user
+            .as_ref()
+            .map(|u| u.phone_number.clone())
+            .unwrap_or_default();
+        let bio = info.as_ref().map(|i| i.bio.clone()).unwrap_or_default();
+        let show_add = user.as_ref().is_some_and(|u| !u.is_contact && !u.is_bot);
+        let roots = self.media_display_roots();
+        let photo_path: Option<PathBuf> = session
+            .and_then(|s| {
+                info.as_ref()
+                    .and_then(|i| i.photo_file_id)
+                    .and_then(|id| s.files.get(&id))
+                    .and_then(|file| file.usable_path())
+            })
+            .and_then(|path| sandboxed_display_path(path, &roots));
+        let avatar: AnyElement = match photo_path {
+            Some(path) => img(path)
+                .id(("info-panel-photo", user_id as u64))
+                .w(px(96.))
+                .h(px(96.))
+                .rounded_full()
+                .object_fit(ObjectFit::Cover)
+                .into_any_element(),
+            None => initials_avatar(&name, 96.).into_any_element(),
+        };
+        let mut detail_rows: Vec<(&str, String)> = Vec::new();
+        if !username.is_empty() {
+            detail_rows.push(("Username", format!("@{username}")));
+        }
+        if !phone.is_empty() {
+            detail_rows.push(("Phone", phone));
+        }
+        let mut body = div()
+            .flex()
+            .flex_col()
+            .items_center()
+            .gap_3()
+            .p_4()
+            .child(avatar)
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .gap_1()
+                    .child(div().text_lg().font_semibold().child(name.clone()))
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(status),
+                    ),
+            );
+        for (label, value) in detail_rows {
+            body = body.child(
+                div()
+                    .flex()
+                    .w_full()
+                    .justify_between()
+                    .gap_2()
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(label),
+                    )
+                    .child(div().text_sm().child(value)),
+            );
+        }
+        if !bio.is_empty() {
+            body = body.child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .w_full()
+                    .gap_1()
+                    .child(
+                        div()
+                            .text_xs()
+                            .font_semibold()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("Bio"),
+                    )
+                    .child(div().text_sm().child(bio)),
+            );
+        }
+        if show_add {
+            body = body.child(
+                Button::new("info-panel-add-contact")
+                    .label("Add contact")
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.open_add_contact_dialog(user_id, window, cx);
+                    })),
+            );
+        }
+        body.into_any_element()
+    }
+
+    /// Supergroup/channel panel: title, member count, description.
+    fn supergroup_info_panel(&self, supergroup_id: i64, cx: &mut Context<Self>) -> AnyElement {
+        let session = self.session();
+        let title = session
+            .and_then(|s| {
+                s.chats.values().find_map(|chat| match chat.kind {
+                    ChatKind::Supergroup {
+                        supergroup_id: id, ..
+                    } if id == supergroup_id => Some(chat.title.clone()),
+                    _ => None,
+                })
+            })
+            .unwrap_or_else(|| format!("Group {supergroup_id}"));
+        let info = session
+            .and_then(|s| s.supergroup_full_infos.get(&supergroup_id))
+            .cloned();
+        let description = info
+            .as_ref()
+            .map(|i| i.description.clone())
+            .unwrap_or_default();
+        let members = info.map(|i| i.member_count).unwrap_or(0);
+        let mut body = div()
+            .flex()
+            .flex_col()
+            .items_center()
+            .gap_3()
+            .p_4()
+            .child(initials_avatar(&title, 96.))
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .gap_1()
+                    .child(div().text_lg().font_semibold().child(title.clone()))
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(if members > 0 {
+                                format!("{members} members")
+                            } else {
+                                "members unknown".to_string()
+                            }),
+                    ),
+            );
+        if !description.is_empty() {
+            body = body.child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .w_full()
+                    .gap_1()
+                    .child(
+                        div()
+                            .text_xs()
+                            .font_semibold()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("Description"),
+                    )
+                    .child(div().text_sm().child(description)),
+            );
+        }
+        body.into_any_element()
+    }
+
+    fn open_add_contact_dialog(
+        &mut self,
+        user_id: i64,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let (phone, first, last) = self
+            .session()
+            .and_then(|s| s.user(user_id))
+            .map(|u| {
+                (
+                    u.phone_number.clone(),
+                    u.first_name.clone(),
+                    u.last_name.clone(),
+                )
+            })
+            .unwrap_or_default();
+        self.add_contact_dialog = Some(AddContactDialog::new(
+            window, cx, user_id, &phone, &first, &last,
+        ));
+        if let Some(dialog) = &self.add_contact_dialog {
+            dialog
+                .phone_input
+                .update(cx, |input, cx| input.focus(window, cx));
+        }
+        cx.notify();
+    }
+
+    fn close_add_contact_dialog(&mut self, cx: &mut Context<Self>) {
+        self.add_contact_dialog = None;
+        cx.notify();
+    }
+
+    /// Submit the add-contact dialog. The phone field is required —
+    /// `addContact` needs an `importedContact`, and Quill does not offer
+    /// adding by bare user id.
+    fn submit_add_contact_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let draft = self
+            .add_contact_dialog
+            .as_ref()
+            .and_then(|dialog| dialog.draft(cx));
+        let Some((user_id, phone, first, last)) = draft else {
+            self.status_note = "Enter a phone number to add the contact.".into();
+            cx.notify();
+            return;
+        };
+        if let Some(live) = self.live.as_mut() {
+            match live.driver.add_contact(user_id, &phone, &first, &last) {
+                Ok(_) => {
+                    self.add_contact_dialog = None;
+                    self.status_note = "Contact add requested.".into();
+                }
+                Err(err) => {
+                    self.status_note = format!("add contact failed: {err:?}");
+                }
+            }
+        } else {
+            // Demo: no driver — just close.
+            self.add_contact_dialog = None;
+            self.status_note = "Contact add requested.".into();
+        }
+        let _ = window;
+        cx.notify();
+    }
+
+    /// Add-contact dialog overlay (phone + first/last name), centered over
+    /// the shell like the media viewer.
+    fn add_contact_dialog_overlay(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let dialog = self.add_contact_dialog.as_ref()?;
+        let name = self
+            .session()
+            .and_then(|s| s.user(dialog.user_id))
+            .map(|u| u.display_name())
+            .unwrap_or_else(|| format!("User {}", dialog.user_id));
+        Some(
+            div()
+                .id("add-contact-overlay")
+                .absolute()
+                .top_0()
+                .left_0()
+                .right_0()
+                .bottom_0()
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(
+                    div()
+                        .id("add-contact-backdrop")
+                        .absolute()
+                        .top_0()
+                        .left_0()
+                        .right_0()
+                        .bottom_0()
+                        .bg(rgba(0x000000e6))
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.close_add_contact_dialog(cx);
+                        })),
+                )
+                .child(
+                    div()
+                        .id("add-contact-panel")
+                        .flex()
+                        .flex_col()
+                        .gap_2()
+                        .p_4()
+                        .w(px(360.))
+                        .rounded_md()
+                        .border_1()
+                        .border_color(cx.theme().border)
+                        .bg(cx.theme().sidebar)
+                        .child(
+                            div()
+                                .text_sm()
+                                .font_semibold()
+                                .child(format!("Add {name} to contacts")),
+                        )
+                        .child(
+                            div()
+                                .flex()
+                                .flex_col()
+                                .gap_1()
+                                .child(
+                                    div()
+                                        .text_xs()
+                                        .text_color(cx.theme().muted_foreground)
+                                        .child("Phone number"),
+                                )
+                                .child(Textarea::new(&dialog.phone_input).h(px(40.))),
+                        )
+                        .child(
+                            div()
+                                .flex()
+                                .flex_col()
+                                .gap_1()
+                                .child(
+                                    div()
+                                        .text_xs()
+                                        .text_color(cx.theme().muted_foreground)
+                                        .child("First name"),
+                                )
+                                .child(Textarea::new(&dialog.first_name_input).h(px(40.))),
+                        )
+                        .child(
+                            div()
+                                .flex()
+                                .flex_col()
+                                .gap_1()
+                                .child(
+                                    div()
+                                        .text_xs()
+                                        .text_color(cx.theme().muted_foreground)
+                                        .child("Last name"),
+                                )
+                                .child(Textarea::new(&dialog.last_name_input).h(px(40.))),
+                        )
+                        .child(
+                            div()
+                                .flex()
+                                .gap_2()
+                                .child(
+                                    Button::new("add-contact-submit")
+                                        .label("Add contact")
+                                        .on_click(cx.listener(|this, _, window, cx| {
+                                            this.submit_add_contact_dialog(window, cx);
+                                        })),
+                                )
+                                .child(
+                                    Button::new("add-contact-cancel")
+                                        .label("Cancel")
+                                        .ghost()
+                                        .on_click(cx.listener(|this, _, _, cx| {
+                                            this.close_add_contact_dialog(cx);
+                                        })),
+                                ),
+                        ),
+                )
+                .into_any_element(),
+        )
+    }
+
     fn add_poll_option_row(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(dialog) = self.poll_dialog.as_mut() else {
             return;
@@ -4940,6 +5675,31 @@ impl QuillApp {
     ) -> impl IntoElement {
         let (chat_id, muted, forever, archived) =
             actions.unwrap_or((ChatId(0), false, false, false));
+        // Phase 6: the header title opens the info panel for private chats
+        // (user profile) and supergroups/channels (group info). Other chat
+        // kinds keep the plain title.
+        let info_target = actions.and_then(|(chat_id, _, _, _)| {
+            self.session()
+                .and_then(|s| s.info_panel_target_for_chat(chat_id))
+        });
+        let title_div = div().font_semibold().child(title.to_string());
+        let title_div = match info_target {
+            Some(InfoPanelTarget::User(user_id)) => title_div
+                .id("conversation-title")
+                .cursor_pointer()
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    this.open_user_panel(user_id, window, cx);
+                }))
+                .into_any_element(),
+            Some(InfoPanelTarget::Supergroup(supergroup_id)) => title_div
+                .id("conversation-title")
+                .cursor_pointer()
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    this.open_supergroup_panel(supergroup_id, window, cx);
+                }))
+                .into_any_element(),
+            None => title_div.into_any_element(),
+        };
         div()
             .id("conversation-header")
             .px_4()
@@ -4955,7 +5715,7 @@ impl QuillApp {
                     .flex()
                     .flex_col()
                     .min_w_0()
-                    .child(div().font_semibold().child(title.to_string()))
+                    .child(title_div)
                     .when(typing, |this| {
                         this.child(
                             div()
@@ -6871,7 +7631,9 @@ impl Render for QuillApp {
                     .flex_1()
                     .min_h_0()
                     .child(self.sidebar(&auth, show_phone, show_code, show_password, cx))
-                    .child(self.conversation(cx)),
+                    .child(self.conversation(cx))
+                    // Phase 6: user / group info panel beside the conversation.
+                    .when_some(self.info_panel(cx), |this, panel| this.child(panel)),
             )
             .child(status_bar(
                 &auth,
@@ -6881,6 +7643,10 @@ impl Render for QuillApp {
             ))
             .when(self.media_viewer.is_open(), |this| {
                 this.child(self.media_viewer_overlay(cx))
+            })
+            // Phase 6: add-contact dialog above everything else.
+            .when_some(self.add_contact_dialog_overlay(cx), |this, overlay| {
+                this.child(overlay)
             })
     }
 }
@@ -8099,13 +8865,15 @@ impl QuillApp {
             .flex()
             .flex_col()
             .gap_2()
-            .child(div().font_semibold().child("Chats"))
-            .child(
-                div()
-                    .text_sm()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(chat_list_caption(mode, self.session())),
-            );
+            .child(self.list_tabs(cx))
+            .when(!self.contacts_tab_open, |this| {
+                this.child(
+                    div()
+                        .text_sm()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(chat_list_caption(mode, self.session())),
+                )
+            });
         match mode {
             PaneMode::Synthetic => {
                 list = list
@@ -8126,49 +8894,53 @@ impl QuillApp {
                 );
             }
             PaneMode::Ready => {
-                list = list.child(self.sidebar_search_field(cx));
-                if self.search_is_open() {
-                    list = list.child(self.search_results(cx));
+                if self.contacts_tab_open {
+                    list = list.child(self.contacts_list(cx));
                 } else {
-                    let open = self.session().and_then(|s| s.open_chat);
-                    let chats: Vec<ChatSummary> = self
-                        .session()
-                        .map(|s| s.ordered_chats().into_iter().cloned().collect())
-                        .unwrap_or_default();
-                    if chats.is_empty() {
-                        let loading = self.session().is_some_and(|s| !s.chats_exhausted);
-                        list = list.child(
-                            div()
-                                .text_xs()
-                                .text_color(cx.theme().muted_foreground)
-                                .child(if loading {
-                                    "Loading chats…"
-                                } else {
-                                    "No chats in the main list."
-                                }),
-                        );
-                    }
-                    for chat in chats {
-                        let selected = open == Some(chat.id);
-                        list = list.child(session_chat_row(&chat, selected, cx));
-                    }
-                    let archived: Vec<ChatSummary> = self
-                        .session()
-                        .map(|s| s.ordered_archived_chats().into_iter().cloned().collect())
-                        .unwrap_or_default();
-                    if !archived.is_empty() {
-                        list = list.child(
-                            div()
-                                .id("archive-section")
-                                .mt_2()
-                                .text_xs()
-                                .font_semibold()
-                                .text_color(cx.theme().muted_foreground)
-                                .child("Archived"),
-                        );
-                        for chat in archived {
+                    list = list.child(self.sidebar_search_field(cx));
+                    if self.search_is_open() {
+                        list = list.child(self.search_results(cx));
+                    } else {
+                        let open = self.session().and_then(|s| s.open_chat);
+                        let chats: Vec<ChatSummary> = self
+                            .session()
+                            .map(|s| s.ordered_chats().into_iter().cloned().collect())
+                            .unwrap_or_default();
+                        if chats.is_empty() {
+                            let loading = self.session().is_some_and(|s| !s.chats_exhausted);
+                            list = list.child(
+                                div()
+                                    .text_xs()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(if loading {
+                                        "Loading chats…"
+                                    } else {
+                                        "No chats in the main list."
+                                    }),
+                            );
+                        }
+                        for chat in chats {
                             let selected = open == Some(chat.id);
                             list = list.child(session_chat_row(&chat, selected, cx));
+                        }
+                        let archived: Vec<ChatSummary> = self
+                            .session()
+                            .map(|s| s.ordered_archived_chats().into_iter().cloned().collect())
+                            .unwrap_or_default();
+                        if !archived.is_empty() {
+                            list = list.child(
+                                div()
+                                    .id("archive-section")
+                                    .mt_2()
+                                    .text_xs()
+                                    .font_semibold()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child("Archived"),
+                            );
+                            for chat in archived {
+                                let selected = open == Some(chat.id);
+                                list = list.child(session_chat_row(&chat, selected, cx));
+                            }
                         }
                     }
                 }
@@ -8659,6 +9431,85 @@ fn apply_ready_forum_topics(session: &mut Session, sink: &Arc<MemorySink>, seq: 
         session.apply(owned);
     }
     session.open_chat(ChatId(16));
+}
+
+/// `ReadyContacts` fixture: inject three users via `updateUser` (Ada online
+/// and already a contact, Zed last-week and *not* a contact so the Add
+/// affordance shows, Noor recently seen and a contact), a `getContacts`
+/// `users` response through the same reducer the live path uses, and a
+/// `userFullInfo` response with a bio for Zed. Opens the user info panel
+/// for Zed; the demo block opens the contacts sidebar tab.
+fn apply_ready_contacts(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let user_json = |id: i64,
+                     first: &str,
+                     last: &str,
+                     phone: &str,
+                     username: &str,
+                     contact: bool,
+                     status: &str| {
+        format!(
+            r#"{{"@type":"updateUser","user":{{"id":{id},"first_name":"{first}","last_name":"{last}","usernames":{{"@type":"usernames","active_usernames":["{username}"],"disabled_usernames":[],"editable_username":"{username}","collectible_usernames":[]}},"phone_number":"{phone}","status":{status},"is_contact":{contact},"type":{{"@type":"userTypeRegular"}}}}}}"#,
+            id = id,
+            first = first,
+            last = last,
+            phone = phone,
+            username = username,
+            contact = contact,
+            status = status,
+        )
+    };
+    let jsons = [
+        user_json(
+            31,
+            "Ada",
+            "Lovelace",
+            "+15550101031",
+            "adalove",
+            true,
+            r#"{"@type":"userStatusOnline","expires":9999999999}"#,
+        ),
+        user_json(
+            32,
+            "Zed",
+            "Hopper",
+            "+15550101032",
+            "zedhopper",
+            false,
+            r#"{"@type":"userStatusLastWeek","by_my_privacy_settings":false}"#,
+        ),
+        user_json(
+            33,
+            "Noor",
+            "Haddad",
+            "+15550101033",
+            "noorhaddad",
+            true,
+            r#"{"@type":"userStatusRecently","by_my_privacy_settings":false}"#,
+        ),
+    ];
+    for json in jsons {
+        if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
+            session.apply(owned);
+        }
+    }
+    let extra = session.request(RequestPurpose::GetContacts, None);
+    let json = format!(
+        r#"{{"@type":"users","@extra":"{}","total_count":3,"user_ids":[31,32,33]}}"#,
+        extra.0,
+    );
+    if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
+        session.apply(owned);
+    }
+    let extra = session.request_for_user(RequestPurpose::GetUserFullInfo, 32);
+    let json = format!(
+        r#"{{"@type":"userFullInfo","@extra":"{}","block_list":null,"bio":{{"@type":"formattedText","text":"Demo bio — systems programmer, occasional keyboard builder. This panel comes from the cached userFullInfo slice (Phase 6).","entities":[]}},"bot_info":null}}"#,
+        extra.0,
+    );
+    if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
+        session.apply(owned);
+    }
+    session.open_info_panel = Some(InfoPanelTarget::User(32));
 }
 
 fn seed_ready_media_session(sink: Arc<MemorySink>) -> Session {
@@ -9599,6 +10450,34 @@ fn static_chat_row(
                 .text_color(cx.theme().muted_foreground)
                 .child(preview),
         )
+}
+
+/// Phase 6: circular initials avatar (contact rows, info panels) shown
+/// when no downloaded profile photo is available.
+fn initials_avatar(name: &str, size: f32) -> impl IntoElement {
+    let initials: String = name
+        .split_whitespace()
+        .filter_map(|word| word.chars().next())
+        .take(2)
+        .collect();
+    let initials = if initials.is_empty() {
+        "?".to_string()
+    } else {
+        initials
+    };
+    div()
+        .w(px(size))
+        .h(px(size))
+        .rounded_full()
+        .flex_shrink_0()
+        .flex()
+        .items_center()
+        .justify_center()
+        .bg(rgb(0x2f81f7))
+        .text_color(rgb(0xffffff))
+        .text_sm()
+        .font_semibold()
+        .child(initials)
 }
 
 fn session_chat_row(

@@ -1086,3 +1086,92 @@ Research snapshot 2026-09-16, pin recheck **2026-09-17**.
   (>100 topics); General-topic special-casing (e.g. its messages also
   appearing in the main history); per-topic notification settings and
   unread-marking; draft messages in topics.
+
+## Phase 6 — Contacts & profiles (2026-09-26)
+
+- **Rationale:** the sidebar gains a **Contacts** tab (Telegram's people
+  list), and private chats / supergroups get a side info panel (user
+  profile with bio + photo, group description + member count). A known
+  non-contact user can be added to contacts from their panel.
+- **Schema (1.8.67, verified in `schema/td_api.tl`):**
+  - `getContacts = Users` (line 14520); `users total_count:int32
+    user_ids:vector<int53> = Users` (line 2471). The response carries
+    only ids — user objects arrive via `updateUser`.
+  - `user … first_name:string last_name:string usernames:usernames
+    phone_number:string status:UserStatus profile_photo:profilePhoto …
+    is_contact:Bool … type:UserType … = User` (line 2403);
+    `usernames` has `active_usernames` but no singular `username`
+    (line 2372) — the first active username is kept.
+  - `profilePhoto … small:file big:file … = ProfilePhoto` (line 754).
+  - `updateUserStatus user_id:int53 status:UserStatus = Update`
+    (line 10729); `userStatusEmpty`, `userStatusOnline expires:int32`,
+    `userStatusOffline was_online:int32`, `userStatusRecently`,
+    `userStatusLastWeek`, `userStatusLastMonth` (lines 6407–6422).
+  - `getUserFullInfo user_id:int53 = UserFullInfo` (line 11501);
+    `userFullInfo personal_photo:chatPhoto photo:chatPhoto
+    public_photo:chatPhoto … bio:formattedText … bot_info:botInfo =
+    UserFullInfo` (line 2468); `chatPhoto … sizes:vector<photoSize> …
+    = ChatPhoto` (line 1030).
+  - `getSupergroupFullInfo supergroup_id:int53 = SupergroupFullInfo`
+    (line 11513); `supergroupFullInfo photo:chatPhoto …
+    description:string member_count:int32 … = SupergroupFullInfo`
+    (line 2792).
+  - `addContact user_id:int53 contact:importedContact
+    share_phone_number:Bool = Ok` (line 14513);
+    `importedContact phone_number:string first_name:string
+    last_name:string note:formattedText = ImportedContact` (line 7382).
+- **Correlation decision:** `users`, `userFullInfo`, and
+  `supergroupFullInfo` responses carry no subject id, so
+  `PendingRequest` gained explicit `user_id` / `supergroup_id` fields
+  (`Session::request_for_user`, `RequestPurpose::{GetContacts,
+  AddContact, GetUserFullInfo, GetSupergroupFullInfo}`). The user panel
+  opened from a chat header resolves the user through the private chat
+  instead (`RequestPurpose::GetUserFullInfo` + `chat_id`).
+- **Photo decision:** the panel photo comes from
+  `userFullInfo.photo:chatPhoto` — the preferred size (`type == "m"`,
+  else largest ≤ 320px wide, else smallest) is parsed, its
+  `photo:file` cached in `Session::files`, and downloaded at panel-open
+  priority. `user.profile_photo.small` is kept only as a download
+  fallback when no full info is cached. Rationale: the task calls for
+  "bio + photo via `getUserFullInfo`", and the fresh fetch beats the
+  possibly stale `updateUser` photo handle. Personal/public photo
+  variants and animation/sticker chat-photo extras are dropped.
+- **Add-contact honesty:** `addContact` needs a known Telegram
+  `user_id` — there is no phone-number-only discovery in this flow, so
+  the UI only offers adding a known user (from their info panel), and
+  the dialog *requires* a phone number (prefilled from the cached user
+  when known) because `importedContact` needs one. Quill does not offer
+  adding by bare user id. `share_phone_number` is `false` — sharing the
+  user's own number is a privacy choice this minimal flow does not
+  make. A successful `addContact` invalidates the contacts cache so
+  the tab refetches.
+- **Dropped fields (documented, not forgotten):** from `user`:
+  accent/background colors, emoji status, verification status, premium,
+  story state, restrictions, `added_to_attachment_menu`, language code;
+  from `userFullInfo`: block list, call capabilities, story flags; from
+  `supergroupFullInfo`: photo, invite link, sticker set, slow-mode,
+  join settings. Status keeps a display string only (no exact
+  `was_online` timestamps — "last seen recently/within a week/within a
+  month" labels).
+- **UI (`src/ui/mod.rs`):** sidebar **Chats | Contacts** tabs (Ready
+  mode only); the Contacts tab fires `getContacts` on open (deduped by
+  settled cache + in-flight purpose) and renders loading / error +
+  Retry / empty / rows (initials avatar, name, status; tap → user
+  panel). The conversation header title is clickable for private chats
+  and supergroups/channels and opens the right-side info panel (close
+  ✕); user panel shows photo-or-initials, name, status,
+  @username/phone rows, bio, and **Add contact** for known non-contact
+  non-bot users; group panel shows title, member count, description.
+  The add-contact dialog is a centered overlay (phone + first/last
+  name, prefilled) over the media-viewer-style backdrop.
+- **Screenshot:** `docs/screenshots/ready-contacts.png` — injected
+  contacts tab (Ada online, Noor recently, Zed last-week) with Zed's
+  info panel open (bio from injected `userFullInfo`, Add contact
+  button); driven by `quill --screenshot-demo ready-contacts`.
+- **Out of this slice (→ future):** contact search; importing device
+  contacts (`importContacts`); phone-number lookup of unknown users;
+  profile-photo *setting*; per-contact notification/privacy settings;
+  group member lists and admin management. `updateUserFullInfo` is
+  parsed and cached, so server-pushed profile changes land in the panel
+  on the next render; the panel fetch itself is cache-deduped (no
+  refetch while cached).

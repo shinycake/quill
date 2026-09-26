@@ -337,6 +337,62 @@ pub fn get_user_full_info(extra: RequestId, user_id: i64) -> String {
     .to_string()
 }
 
+/// Phase 6: `getContacts` (TDLib 1.8.67, `schema/td_api.tl:14520`):
+/// `getContacts = Users;` — no parameters. Response is `users`
+/// (`total_count:int32 user_ids:vector<int53>`, line 2471); the user
+/// objects themselves arrive via `updateUser`.
+pub fn get_contacts(extra: RequestId) -> String {
+    json!({
+        "@type": "getContacts",
+        "@extra": extra.as_extra(),
+    })
+    .to_string()
+}
+
+/// Phase 6: `addContact` (TDLib 1.8.67, `schema/td_api.tl:14513`):
+/// `addContact user_id:int53 contact:importedContact
+/// share_phone_number:Bool = Ok;`
+/// with `importedContact phone_number:string first_name:string
+/// last_name:string note:formattedText = ImportedContact` (line 7382).
+/// The note is sent as an empty `formattedText` — Quill has no contact
+/// notes UI.
+pub fn add_contact(
+    extra: RequestId,
+    user_id: i64,
+    phone_number: &str,
+    first_name: &str,
+    last_name: &str,
+) -> String {
+    json!({
+        "@type": "addContact",
+        "@extra": extra.as_extra(),
+        "user_id": user_id,
+        "contact": {
+            "@type": "importedContact",
+            "phone_number": phone_number,
+            "first_name": first_name,
+            "last_name": last_name,
+            "note": { "@type": "formattedText", "text": "", "entities": [] },
+        },
+        "share_phone_number": false,
+    })
+    .to_string()
+}
+
+/// Phase 6: `getSupergroupFullInfo` (TDLib 1.8.67,
+/// `schema/td_api.tl:11513`):
+/// `getSupergroupFullInfo supergroup_id:int53 = SupergroupFullInfo;`
+/// Response is `supergroupFullInfo` (carries no id — correlated via the
+/// pending request in `Session::apply`).
+pub fn get_supergroup_full_info(extra: RequestId, supergroup_id: i64) -> String {
+    json!({
+        "@type": "getSupergroupFullInfo",
+        "@extra": extra.as_extra(),
+        "supergroup_id": supergroup_id,
+    })
+    .to_string()
+}
+
 /// Phase 3.3: `getCommands` for a bot's global (default) command scope
 /// (TDLib 1.8.67, `schema/td_api.tl:14953`):
 /// `getCommands scope:BotCommandScope language_code:string = BotCommands;`
@@ -1722,6 +1778,56 @@ mod tests {
         assert_eq!(v["offset"], 0);
         assert_eq!(v["limit"], 0);
         assert_eq!(v["synchronous"], false);
+        assert!(!json.contains("CANARY"));
+    }
+
+    #[test]
+    fn get_contacts_shape_matches_1_8_67() {
+        // `getContacts = Users;` — no parameters (schema 1.8.67, line 14520).
+        let json = get_contacts(RequestId(60));
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "getContacts");
+        assert_eq!(v["@extra"], "60");
+        assert_eq!(v.as_object().unwrap().len(), 2);
+        assert!(!json.contains("CANARY"));
+    }
+
+    #[test]
+    fn add_contact_shape_matches_1_8_67() {
+        // `addContact user_id:int53 contact:importedContact
+        // share_phone_number:Bool = Ok;` (schema 1.8.67, line 14513) with
+        // `importedContact phone_number:string first_name:string
+        // last_name:string note:formattedText` (line 7382).
+        let json = add_contact(
+            RequestId(61),
+            31,
+            "+15550131",
+            "CANARY-first",
+            "CANARY-last",
+        );
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "addContact");
+        assert_eq!(v["@extra"], "61");
+        assert_eq!(v["user_id"], 31);
+        let contact = &v["contact"];
+        assert_eq!(contact["@type"], "importedContact");
+        assert_eq!(contact["phone_number"], "+15550131");
+        assert_eq!(contact["first_name"], "CANARY-first");
+        assert_eq!(contact["last_name"], "CANARY-last");
+        assert_eq!(contact["note"]["@type"], "formattedText");
+        assert_eq!(contact["note"]["text"], "");
+        assert_eq!(v["share_phone_number"], false);
+    }
+
+    #[test]
+    fn get_supergroup_full_info_shape_matches_1_8_67() {
+        // `getSupergroupFullInfo supergroup_id:int53 = SupergroupFullInfo;`
+        // (schema 1.8.67, line 11513).
+        let json = get_supergroup_full_info(RequestId(62), 77);
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "getSupergroupFullInfo");
+        assert_eq!(v["@extra"], "62");
+        assert_eq!(v["supergroup_id"], 77);
         assert!(!json.contains("CANARY"));
     }
 

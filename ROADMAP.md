@@ -122,9 +122,17 @@ handling exists.
 
 ## Phase 6 — Contacts & profiles
 
-- **6.1 Contacts.** `getContacts` list; `addContact` flow.
-- **6.2 Info panels.** User info (`getUserFullInfo`: bio, photo) and
-  supergroup info (`getSupergroupFullInfo`: description, member count) panels.
+- **6.1 Contacts.** ✅ 2026-09-26 — `getContacts` list in a sidebar
+  **Contacts** tab (name + online/last-seen status rows, tap → user
+  panel); `addContact` flow from the user panel via an `importedContact`
+  dialog (phone required, prefilled; `share_phone_number: false`).
+  `docs/screenshots/ready-contacts.png`.
+- **6.2 Info panels.** ✅ 2026-09-26 — User info
+  (`getUserFullInfo`: bio + `photo:chatPhoto` preferred size, downloaded
+  on panel open) and supergroup info (`getSupergroupFullInfo`:
+  description, member count) side panels, opened from the Contacts tab
+  and from clickable conversation-header titles.
+  `docs/screenshots/ready-contacts.png`.
 
 ## Phase 7 — Folders & discovery
 

@@ -109,10 +109,24 @@ pub enum EnvelopePayload {
         draft: Option<ChatDraft>,
         positions: Vec<ChatPositionUpdate>,
     },
-    /// `updateUser` — only the bot bit is kept (private-chat draft gate).
+    /// `updateUser` — Phase 6 keeps the full parsed user (contacts list,
+    /// user info panel) in `Session::users`; the bot bit still drives the
+    /// private-chat draft gate.
     UpdateUser {
         user_id: UserId,
-        is_bot: bool,
+        user: ParsedUser,
+    },
+    /// `updateUserStatus` (schema 1.8.67, line 10729) — online / last-seen
+    /// for a known user; refreshes the contacts list row.
+    UpdateUserStatus {
+        user_id: UserId,
+        status: UserStatusKind,
+    },
+    /// `users` — `getContacts` response (schema 1.8.67, line 2471). Only
+    /// the ids are authoritative here; the user objects themselves arrive
+    /// via `updateUser`. `total_count` is dropped.
+    Users {
+        user_ids: Vec<i64>,
     },
     /// `updateChatNotificationSettings` — chat mute / sound exception changed.
     UpdateChatNotificationSettings {
@@ -227,16 +241,35 @@ pub enum EnvelopePayload {
     /// `userFullInfo` — `getUserFullInfo` response (schema 1.8.67,
     /// `getUserFullInfo user_id:int53 = UserFullInfo`, line 11501). The
     /// response carries no user id; it is resolved from the pending
-    /// request's chat in `Session::apply`, so only `bot_info` (from
-    /// `userFullInfo.bot_info:botInfo`, line 2468) is kept.
+    /// request in `Session::apply`, so only `bot_info` (from
+    /// `userFullInfo.bot_info:botInfo`, line 2468), `bio` (from
+    /// `userFullInfo.bio:formattedText`) and the preferred profile-photo
+    /// file (from `userFullInfo.photo:chatPhoto` sizes) are kept.
     UserFullInfo {
         bot_info: Option<BotInfo>,
+        bio: String,
+        /// Preferred size's `photo:file` from `chatPhoto.sizes`
+        /// (schema 1.8.67, line 1030); `None` when the user has no photo.
+        photo: Option<ParsedFile>,
     },
     /// `updateUserFullInfo` — full info changed (schema 1.8.67, line 10744);
     /// the user id is explicit here.
     UpdateUserFullInfo {
         user_id: UserId,
         bot_info: Option<BotInfo>,
+        bio: String,
+        photo: Option<ParsedFile>,
+    },
+    /// `supergroupFullInfo` — `getSupergroupFullInfo` response (schema
+    /// 1.8.67, line 11513). The response carries no supergroup id; it is
+    /// resolved from the pending request in `Session::apply`. Only what
+    /// the group panel renders is kept — `description` and `member_count`
+    /// (schema 1.8.67, line 2792). Dropped: admin/restricted/banned
+    /// counts, slow mode, invite link, sticker sets, boost/gift fields,
+    /// paid-message and statistics flags, linked chats, location.
+    SupergroupFullInfo {
+        description: String,
+        member_count: i32,
     },
     /// `botCommands` — `getCommands` response (TDLib 1.8.67,
     /// `schema/td_api.tl:829`): the bot's commands for the requested scope
@@ -470,6 +503,117 @@ pub struct BotInfo {
     pub short_description: String,
     pub description: String,
     pub commands: Vec<BotCommand>,
+}
+
+/// Phase 6: `userStatus*` (TDLib 1.8.67, `schema/td_api.tl:6407`).
+/// Unknown constructors fall back to `Empty` — a hostile status can never
+/// crash the parse.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum UserStatusKind {
+    #[default]
+    Empty,
+    Online,
+    Offline {
+        was_online: i32,
+    },
+    Recently,
+    LastWeek,
+    LastMonth,
+}
+
+impl UserStatusKind {
+    /// Cheap status line for the contacts list / user info panel.
+    pub fn display(&self) -> String {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        self.display_at(now)
+    }
+
+    fn display_at(&self, now_secs: u64) -> String {
+        match *self {
+            UserStatusKind::Empty => String::new(),
+            UserStatusKind::Online => "online".to_string(),
+            UserStatusKind::Recently => "last seen recently".to_string(),
+            UserStatusKind::LastWeek => "last seen within a week".to_string(),
+            UserStatusKind::LastMonth => "last seen within a month".to_string(),
+            UserStatusKind::Offline { was_online } => {
+                let was = was_online.max(0) as u64;
+                if was == 0 || was > now_secs {
+                    return "last seen a long time ago".to_string();
+                }
+                let ago = now_secs - was;
+                if ago < 60 {
+                    "last seen just now".to_string()
+                } else if ago < 3600 {
+                    format!("last seen {}m ago", ago / 60)
+                } else if ago < 86400 {
+                    format!("last seen {}h ago", ago / 3600)
+                } else if ago < 7 * 86400 {
+                    format!("last seen {}d ago", ago / 86400)
+                } else {
+                    "last seen a long time ago".to_string()
+                }
+            }
+        }
+    }
+
+    pub fn is_online(&self) -> bool {
+        matches!(self, UserStatusKind::Online)
+    }
+}
+
+/// Phase 6: `user` subset (TDLib 1.8.67, `schema/td_api.tl:2403`) kept for
+/// the contacts list and the user info panel. Dropped (documented, not
+/// forgotten): accent/background color ids, emoji status, verification
+/// status, premium/support flags, restriction info, active story state,
+/// new-chat restrictions, paid-message star count, access flags, chat
+/// language, attachment-menu flag.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ParsedUser {
+    pub id: i64,
+    pub first_name: String,
+    pub last_name: String,
+    /// First entry of `usernames.active_usernames` (schema 1.8.67, line
+    /// 2372 — this schema version has no singular `username` field).
+    pub username: String,
+    pub phone_number: String,
+    pub is_contact: bool,
+    pub is_bot: bool,
+    pub status: UserStatusKind,
+    /// `profile_photo.small.id` (`profilePhoto`, schema 1.8.67 line 754);
+    /// 0 = no photo.
+    pub photo_small_file_id: i32,
+}
+
+impl ParsedUser {
+    pub fn display_name(&self) -> String {
+        let name = format!("{} {}", self.first_name, self.last_name);
+        let name = name.trim();
+        if name.is_empty() {
+            format!("User {}", self.id)
+        } else {
+            name.to_string()
+        }
+    }
+
+    /// Two-letter avatar fallback ("Ada Lovelace" → "AL").
+    pub fn initials(&self) -> String {
+        let mut out = String::new();
+        for part in [&self.first_name, &self.last_name] {
+            if let Some(ch) = part.chars().next() {
+                out.push(ch);
+                if out.chars().count() == 2 {
+                    break;
+                }
+            }
+        }
+        if out.is_empty() {
+            out.push('?');
+        }
+        out
+    }
 }
 
 /// `buttonStyle*` (TDLib 1.8.67, `schema/td_api.tl:3696`). Unknown styles
@@ -2023,15 +2167,23 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
         }
         "updateUser" => {
             let user = value.get("user").ok_or(ParseError::MissingField)?;
+            let parsed = parse_user(user).ok_or(ParseError::MissingField)?;
             Ok(EnvelopePayload::UpdateUser {
-                user_id: UserId(int53(user.get("id"))?),
-                is_bot: user
-                    .get("type")
-                    .and_then(|t| t.get("@type"))
-                    .and_then(Value::as_str)
-                    == Some("userTypeBot"),
+                user_id: UserId(parsed.id),
+                user: parsed,
             })
         }
+        "updateUserStatus" => Ok(EnvelopePayload::UpdateUserStatus {
+            user_id: UserId(int53(value.get("user_id"))?),
+            status: parse_user_status(value.get("status")),
+        }),
+        "users" => Ok(EnvelopePayload::Users {
+            user_ids: value
+                .get("user_ids")
+                .and_then(Value::as_array)
+                .map(|ids| ids.iter().filter_map(|id| int53(Some(id)).ok()).collect())
+                .unwrap_or_default(),
+        }),
         "updateConnectionState" => Ok(EnvelopePayload::UpdateConnectionState(parse_connection(
             value.get("state"),
         ))),
@@ -2234,6 +2386,8 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
         }),
         "userFullInfo" => Ok(EnvelopePayload::UserFullInfo {
             bot_info: parse_bot_info(value.get("bot_info")),
+            bio: parse_formatted_text(value.get("bio")),
+            photo: parse_user_full_info_photo(&value),
         }),
         "updateUserFullInfo" => Ok(EnvelopePayload::UpdateUserFullInfo {
             user_id: UserId(int53(value.get("user_id"))?),
@@ -2242,6 +2396,21 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
                     .get("user_full_info")
                     .and_then(|info| info.get("bot_info")),
             ),
+            bio: parse_formatted_text(value.get("user_full_info").and_then(|info| info.get("bio"))),
+            photo: value
+                .get("user_full_info")
+                .and_then(parse_user_full_info_photo),
+        }),
+        "supergroupFullInfo" => Ok(EnvelopePayload::SupergroupFullInfo {
+            description: value
+                .get("description")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string(),
+            member_count: value
+                .get("member_count")
+                .and_then(Value::as_i64)
+                .unwrap_or(0) as i32,
         }),
         "botCommands" => Ok(EnvelopePayload::BotCommands {
             bot_user_id: UserId(int53(value.get("bot_user_id"))?),
@@ -2497,6 +2666,80 @@ fn parse_bot_info(value: Option<&Value>) -> Option<BotInfo> {
                     .collect()
             })
             .unwrap_or_default(),
+    })
+}
+
+/// Phase 6: `userStatus*` parser — null/absent/unknown → `Empty`.
+fn parse_user_status(value: Option<&Value>) -> UserStatusKind {
+    let Some(value) = value.filter(|v| !v.is_null()) else {
+        return UserStatusKind::Empty;
+    };
+    match value.get("@type").and_then(Value::as_str) {
+        Some("userStatusOnline") => UserStatusKind::Online,
+        Some("userStatusOffline") => UserStatusKind::Offline {
+            was_online: value.get("was_online").and_then(Value::as_i64).unwrap_or(0) as i32,
+        },
+        Some("userStatusRecently") => UserStatusKind::Recently,
+        Some("userStatusLastWeek") => UserStatusKind::LastWeek,
+        Some("userStatusLastMonth") => UserStatusKind::LastMonth,
+        _ => UserStatusKind::Empty,
+    }
+}
+
+/// Phase 6: full `user` parser (schema 1.8.67, line 2403). `None` when the
+/// object carries no id.
+fn parse_user(value: &Value) -> Option<ParsedUser> {
+    let id = int53(value.get("id")).ok()?;
+    let first_name = value
+        .get("first_name")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    let last_name = value
+        .get("last_name")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    let username = value
+        .get("usernames")
+        .and_then(|u| u.get("active_usernames"))
+        .and_then(Value::as_array)
+        .and_then(|names| names.first())
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    let phone_number = value
+        .get("phone_number")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    let is_contact = value
+        .get("is_contact")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let is_bot = value
+        .get("type")
+        .and_then(|t| t.get("@type"))
+        .and_then(Value::as_str)
+        == Some("userTypeBot");
+    let status = parse_user_status(value.get("status"));
+    let photo_small_file_id = i32::try_from(int53_or_zero(
+        value
+            .get("profile_photo")
+            .and_then(|p| p.get("small"))
+            .and_then(|f| f.get("id")),
+    ))
+    .unwrap_or(0);
+    Some(ParsedUser {
+        id,
+        first_name,
+        last_name,
+        username,
+        phone_number,
+        is_contact,
+        is_bot,
+        status,
+        photo_small_file_id,
     })
 }
 
@@ -4187,6 +4430,31 @@ fn parse_sticker_set(value: &Value) -> EnvelopePayload {
     }
 }
 
+/// Phase 6: preferred profile-photo file from a `userFullInfo` (or the
+/// nested `user_full_info` of an `updateUserFullInfo`) object's
+/// `photo:chatPhoto` (schema 1.8.67, lines 1030 and 2468). Reuses
+/// `parse_photo_sizes`; prefers `type == "m"`, else the largest size up to
+/// 320px wide, else the smallest size. `None` when there is no photo or
+/// the constructor is not a `chatPhoto`.
+fn parse_user_full_info_photo(value: &Value) -> Option<ParsedFile> {
+    let photo = value.get("photo")?;
+    if photo.get("@type").and_then(Value::as_str) != Some("chatPhoto") {
+        return None;
+    }
+    let (sizes, files) = parse_photo_sizes(photo);
+    let pick = sizes
+        .iter()
+        .find(|size| size.type_name == "m")
+        .or_else(|| {
+            sizes
+                .iter()
+                .filter(|size| size.width > 0 && size.width <= 320)
+                .max_by_key(|size| size.width)
+        })
+        .or_else(|| sizes.iter().min_by_key(|size| (size.width, size.height)))?;
+    files.into_iter().find(|file| file.id == pick.file_id)
+}
+
 fn parse_photo_sizes(photo: &Value) -> (Vec<PhotoSizeView>, Vec<ParsedFile>) {
     let mut files = Vec::new();
     let mut sizes = Vec::new();
@@ -4445,7 +4713,11 @@ mod tests {
         let json = r#"{"@type":"userFullInfo","@extra":"7","block_list":null,"bio":{"@type":"formattedText","text":"","entities":[]},"birthdate":null,"bot_info":{"@type":"botInfo","short_description":"A demo bot","description":"This bot demonstrates the info panel.","commands":[{"@type":"botCommand","command":"start","description":"Start the bot","is_ephemeral":false},{"@type":"botCommand","command":"help","description":"Show help","is_ephemeral":false}]}}"#;
         let env = parse_envelope(json).unwrap();
         match env.payload {
-            EnvelopePayload::UserFullInfo { bot_info } => {
+            EnvelopePayload::UserFullInfo {
+                bot_info,
+                bio,
+                photo,
+            } => {
                 let info = bot_info.expect("bot_info");
                 assert_eq!(info.short_description, "A demo bot");
                 assert_eq!(info.description, "This bot demonstrates the info panel.");
@@ -4453,6 +4725,8 @@ mod tests {
                 assert_eq!(info.commands[0].command, "start");
                 assert_eq!(info.commands[0].description, "Start the bot");
                 assert_eq!(info.commands[1].command, "help");
+                assert!(bio.is_empty());
+                assert!(photo.is_none());
             }
             other => panic!("{other:?}"),
         }
@@ -4462,7 +4736,7 @@ mod tests {
         )
         .unwrap();
         match env.payload {
-            EnvelopePayload::UserFullInfo { bot_info } => assert!(bot_info.is_none()),
+            EnvelopePayload::UserFullInfo { bot_info, .. } => assert!(bot_info.is_none()),
             other => panic!("{other:?}"),
         }
     }
@@ -4474,7 +4748,9 @@ mod tests {
         let json = r#"{"@type":"updateUserFullInfo","user_id":21,"user_full_info":{"@type":"userFullInfo","bot_info":{"@type":"botInfo","short_description":"","description":"Refreshed description.","commands":[{"@type":"botCommand","command":"ping","description":"","is_ephemeral":false}]}}}"#;
         let env = parse_envelope(json).unwrap();
         match env.payload {
-            EnvelopePayload::UpdateUserFullInfo { user_id, bot_info } => {
+            EnvelopePayload::UpdateUserFullInfo {
+                user_id, bot_info, ..
+            } => {
                 assert_eq!(user_id.0, 21);
                 let info = bot_info.expect("bot_info");
                 assert_eq!(info.description, "Refreshed description.");
@@ -4692,9 +4968,10 @@ mod tests {
         )
         .unwrap();
         match bot.payload {
-            EnvelopePayload::UpdateUser { user_id, is_bot } => {
+            EnvelopePayload::UpdateUser { user_id, user } => {
                 assert_eq!(user_id, UserId(11));
-                assert!(is_bot);
+                assert!(user.is_bot);
+                assert_eq!(user.first_name, "Bot");
             }
             other => panic!("{other:?}"),
         }
@@ -5972,6 +6249,216 @@ mod channel_envelope_tests {
                 other => panic!("{other:?}"),
             },
             other => panic!("{other:?}"),
+        }
+    }
+
+    // Phase 6: full `user` parse (schema 1.8.67 line 2403) — names,
+    // username from `usernames.active_usernames` (no singular `username`
+    // field in 1.8.67), phone, contact flag, status, and the
+    // `profile_photo.small` file id.
+    #[test]
+    fn update_user_parses_full_user() {
+        let json = r#"{"@type":"updateUser","user":{"id":31,"first_name":"Ada","last_name":"Lovelace","usernames":{"@type":"usernames","active_usernames":["adalove"],"disabled_usernames":[],"editable_username":"adalove","collectible_usernames":[]},"phone_number":"+15550131","status":{"@type":"userStatusOnline","expires":9999999999},"profile_photo":{"@type":"profilePhoto","id":7,"small":{"@type":"file","id":41,"size":0,"expected_size":0,"local":{"@type":"localFile","path":"","can_be_downloaded":true,"can_delete":false,"is_downloading_active":false,"is_downloading_completed":false,"download_offset":0,"downloaded_prefix_size":0,"downloaded_size":0},"remote":{"@type":"remoteFile","id":"","is_uploading_active":false,"is_uploading_completed":false,"uploaded_size":0}},"big":{"@type":"file","id":42,"size":0,"expected_size":0,"local":{"@type":"localFile","path":"","can_be_downloaded":true,"can_delete":false,"is_downloading_active":false,"is_downloading_completed":false,"download_offset":0,"downloaded_prefix_size":0,"downloaded_size":0},"remote":{"@type":"remoteFile","id":"","is_uploading_active":false,"is_uploading_completed":false,"uploaded_size":0}},"minithumbnail":null,"has_animation":false,"is_personal":false},"accent_color_id":0,"background_custom_emoji_id":0,"upgraded_gift_colors":null,"profile_accent_color_id":-1,"profile_background_custom_emoji_id":0,"emoji_status":null,"is_contact":true,"is_mutual_contact":true,"is_close_friend":false,"verification_status":null,"is_premium":false,"is_support":false,"restriction_info":null,"active_story_state":null,"restricts_new_chats":false,"paid_message_star_count":0,"have_access":true,"type":{"@type":"userTypeRegular"},"language_code":"en","added_to_attachment_menu":false}}"#;
+        let env = parse_envelope(json).unwrap();
+        match env.payload {
+            EnvelopePayload::UpdateUser { user_id, user } => {
+                assert_eq!(user_id, UserId(31));
+                assert_eq!(user.first_name, "Ada");
+                assert_eq!(user.last_name, "Lovelace");
+                assert_eq!(user.display_name(), "Ada Lovelace");
+                assert_eq!(user.initials(), "AL");
+                assert_eq!(user.username, "adalove");
+                assert_eq!(user.phone_number, "+15550131");
+                assert!(user.is_contact);
+                assert!(!user.is_bot);
+                assert_eq!(user.status, UserStatusKind::Online);
+                assert!(user.status.is_online());
+                assert_eq!(user.photo_small_file_id, 41);
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    // Phase 6: status buckets map to their display text; offline with a
+    // timestamp formats relative to "now"; unknown constructors → Empty.
+    #[test]
+    fn user_status_display_buckets() {
+        assert_eq!(UserStatusKind::Online.display_at(1_700_000_000), "online");
+        assert_eq!(
+            UserStatusKind::Recently.display_at(1_700_000_000),
+            "last seen recently"
+        );
+        assert_eq!(
+            UserStatusKind::LastWeek.display_at(1_700_000_000),
+            "last seen within a week"
+        );
+        assert_eq!(
+            UserStatusKind::LastMonth.display_at(1_700_000_000),
+            "last seen within a month"
+        );
+        assert_eq!(
+            UserStatusKind::Offline {
+                was_online: 1_699_999_970
+            }
+            .display_at(1_700_000_000),
+            "last seen just now"
+        );
+        assert_eq!(
+            UserStatusKind::Offline {
+                was_online: 1_699_999_400
+            }
+            .display_at(1_700_000_000),
+            "last seen 10m ago"
+        );
+        assert_eq!(
+            UserStatusKind::Offline { was_online: 0 }.display_at(1_700_000_000),
+            "last seen a long time ago"
+        );
+        assert!(UserStatusKind::Empty.display_at(1_700_000_000).is_empty());
+    }
+
+    #[test]
+    fn update_user_status_parsed() {
+        // Schema 1.8.67 line 10729.
+        let env = parse_envelope(
+            r#"{"@type":"updateUserStatus","user_id":31,"status":{"@type":"userStatusLastWeek","by_my_privacy_settings":false}}"#,
+        )
+        .unwrap();
+        match env.payload {
+            EnvelopePayload::UpdateUserStatus { user_id, status } => {
+                assert_eq!(user_id, UserId(31));
+                assert_eq!(status, UserStatusKind::LastWeek);
+            }
+            other => panic!("{other:?}"),
+        }
+        // Unknown status constructor → Empty, never a parse failure.
+        let env = parse_envelope(
+            r#"{"@type":"updateUserStatus","user_id":31,"status":{"@type":"userStatusFromTheFuture"}}"#,
+        )
+        .unwrap();
+        match env.payload {
+            EnvelopePayload::UpdateUserStatus { status, .. } => {
+                assert_eq!(status, UserStatusKind::Empty)
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn users_response_parsed() {
+        // `getContacts` → `users` (schema 1.8.67 lines 14520 / 2471).
+        let env =
+            parse_envelope(r#"{"@type":"users","@extra":"3","total_count":2,"user_ids":[31,32]}"#)
+                .unwrap();
+        match env.payload {
+            EnvelopePayload::Users { user_ids } => assert_eq!(user_ids, vec![31, 32]),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn user_full_info_bio_parsed() {
+        // Phase 6: `bio:formattedText` is kept alongside `bot_info`.
+        let env = parse_envelope(
+            r#"{"@type":"userFullInfo","@extra":"4","block_list":null,"bio":{"@type":"formattedText","text":"CANARY bio text","entities":[]},"birthdate":null,"bot_info":null}"#,
+        )
+        .unwrap();
+        match env.payload {
+            EnvelopePayload::UserFullInfo {
+                bio,
+                bot_info,
+                photo,
+            } => {
+                assert_eq!(bio, "CANARY bio text");
+                assert!(bot_info.is_none());
+                assert!(photo.is_none());
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn user_full_info_photo_parsed_from_chat_photo() {
+        // `userFullInfo.photo:chatPhoto` (schema 1.8.67, lines 1030/2468):
+        // the preferred size is `type == "m"`; the file is kept.
+        let file = |id: i32| {
+            format!(
+                r#"{{"@type":"file","id":{id},"size":100,"expected_size":100,"local":{{"@type":"localFile","path":"","can_be_downloaded":true,"can_delete":false,"is_downloading_active":false,"is_downloading_completed":false,"download_offset":0,"downloaded_prefix_size":0,"downloaded_size":0}},"remote":{{"@type":"remoteFile","id":"","is_uploading_active":false,"is_uploading_completed":false,"uploaded_size":0}}}}"#
+            )
+        };
+        let json = format!(
+            r#"{{"@type":"userFullInfo","@extra":"9","bio":null,"bot_info":null,"photo":{{"@type":"chatPhoto","id":1,"added_date":1,"minithumbnail":null,"sizes":[{{"@type":"photoSize","type":"s","photo":{s},"width":90,"height":90,"progressive_sizes":[]}},{{"@type":"photoSize","type":"m","photo":{m},"width":320,"height":320,"progressive_sizes":[]}}],"animation":null,"small_animation":null,"sticker":null}}}}"#,
+            s = file(901),
+            m = file(902),
+        );
+        let env = parse_envelope(&json).unwrap();
+        match env.payload {
+            EnvelopePayload::UserFullInfo { photo, .. } => {
+                let photo = photo.expect("chatPhoto size");
+                assert_eq!(photo.id.0, 902);
+            }
+            other => panic!("{other:?}"),
+        }
+        // No photo field at all → None.
+        let env =
+            parse_envelope(r#"{"@type":"userFullInfo","@extra":"10","bio":null,"bot_info":null}"#)
+                .unwrap();
+        match env.payload {
+            EnvelopePayload::UserFullInfo { photo, .. } => assert!(photo.is_none()),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn supergroup_full_info_parsed() {
+        // `getSupergroupFullInfo` → `supergroupFullInfo` (schema 1.8.67
+        // lines 11513 / 2792): description + member_count kept.
+        let env = parse_envelope(
+            r#"{"@type":"supergroupFullInfo","@extra":"5","description":"CANARY group description","member_count":1234,"administrator_count":2}"#,
+        )
+        .unwrap();
+        match env.payload {
+            EnvelopePayload::SupergroupFullInfo {
+                description,
+                member_count,
+            } => {
+                assert_eq!(description, "CANARY group description");
+                assert_eq!(member_count, 1234);
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn add_contact_shape_uses_imported_contact() {
+        // The `addContact` JSON shape lives in requests.rs, but the schema
+        // contract it must match is pinned here: `addContact
+        // user_id:int53 contact:importedContact share_phone_number:Bool =
+        // Ok` with `importedContact phone_number:string first_name:string
+        // last_name:string note:formattedText` (schema 1.8.67 lines 14513 /
+        // 7382). This test guards the field list, not the builder.
+        let line = include_str!("../../schema/td_api.tl")
+            .lines()
+            .find(|l| l.starts_with("addContact "))
+            .expect("addContact in schema");
+        assert!(
+            line.contains("contact:importedContact"),
+            "unexpected addContact signature: {line}"
+        );
+        let imported = include_str!("../../schema/td_api.tl")
+            .lines()
+            .find(|l| l.starts_with("importedContact "))
+            .expect("importedContact in schema");
+        for field in [
+            "phone_number:string",
+            "first_name:string",
+            "last_name:string",
+            "note:formattedText",
+        ] {
+            assert!(
+                imported.contains(field),
+                "importedContact missing {field}: {imported}"
+            );
         }
     }
 }
