@@ -36,9 +36,9 @@ use quill::poll::{
     POLL_OPTIONS_MAX, POLL_OPTIONS_MIN, PollDraft, poll_bar_fraction, voter_count_label,
 };
 use quill::state::{
-    ActiveCall, CallSummary, ChatSearchJump, ChatSummary, ContactRow, ForwardResult,
-    HistoryMessage, InfoPanelTarget, OutboxReceipt, RequestPurpose, SearchStatus, Session,
-    SponsoredReportFlight, outgoing_status_label, unix_ms_now, unread_badge_text,
+    ActiveCall, ActiveGroupCall, CallSummary, ChatSearchJump, ChatSummary, ContactRow,
+    ForwardResult, HistoryMessage, InfoPanelTarget, OutboxReceipt, RequestPurpose, SearchStatus,
+    Session, SponsoredReportFlight, outgoing_status_label, unix_ms_now, unread_badge_text,
 };
 use quill::story_viewer::{StoryViewer, StoryViewerItem, StoryViewerKind, collect_story_items};
 use quill::telegram::client::copy_and_parse;
@@ -47,10 +47,10 @@ use quill::telegram::envelope::{
     ChatFolderInfo, ChatFolderSpec, ChatKind, ChatList, ChatNotificationSettings,
     DEFAULT_EMOJI_REACTIONS, ForumTopic, InlineKeyboardButton, InlineKeyboardButtonStyle,
     InlineKeyboardButtonType, MUTE_FOR_1_HOUR, MUTE_FOR_2_DAYS, MUTE_FOR_8_HOURS, MUTE_FOREVER,
-    MessageContent, MessageInteractionInfo, NotificationSettingsScope, NotificationSound,
-    ParsedFile, ParsedSecretChat, ParsedStory, PollContent, PollOption, PollType,
-    ScopeNotificationSettings, SecretChatState, SponsoredMessage, chat_ttl_service_label,
-    format_ttl_setting, toggle_chosen_emoji_reaction,
+    MessageContent, MessageInteractionInfo, MessageSender, NotificationSettingsScope,
+    NotificationSound, ParsedFile, ParsedGroupCallParticipant, ParsedSecretChat, ParsedStory,
+    PollContent, PollOption, PollType, ScopeNotificationSettings, SecretChatState,
+    SponsoredMessage, chat_ttl_service_label, format_ttl_setting, toggle_chosen_emoji_reaction,
 };
 use quill::telegram::requests::SelfDestructSend;
 use quill::text::{TextEntity, styled_runs, utf8_to_utf16_offset};
@@ -212,6 +212,28 @@ impl PollDialog {
             is_anonymous: self.is_anonymous,
             allows_multiple_answers: self.allows_multiple_answers,
         }
+    }
+}
+
+/// Phase C3a: voice-chat title rename dialog (`setVideoChatTitle`,
+/// schema 1.8.67, line 14312). Created when the dialog opens with the
+/// current title pre-filled.
+pub struct GroupCallTitleDialog {
+    title_input: Entity<TextareaState>,
+}
+
+impl GroupCallTitleDialog {
+    fn new(window: &mut Window, cx: &mut Context<QuillApp>, current: &str) -> Self {
+        let title_input = cx.new(|cx| {
+            TextareaState::new(window, cx)
+                .placeholder("Voice chat title")
+                .auto_grow(1, 2)
+                .submit_on_enter(false)
+        });
+        title_input.update(cx, |input, cx| {
+            input.set_value(current, window, cx);
+        });
+        Self { title_input }
     }
 }
 
@@ -410,6 +432,8 @@ pub struct QuillApp {
     /// Phase B4: self-destruct / auto-delete timer picker below the
     /// conversation header (`setChatMessageAutoDeleteTime`).
     ttl_picker_open: bool,
+    /// Phase C3a: voice-chat title rename dialog (`setVideoChatTitle`).
+    group_call_title_dialog: Option<GroupCallTitleDialog>,
     /// Parity slice: the notifications panel's sound picker sub-view is open.
     notif_sound_picker_open: bool,
     /// Parity slice: scope-default notification settings dialog is open.
@@ -780,6 +804,12 @@ pub enum ScreenshotDemo {
     /// `messageChatSetMessageAutoDeleteTime` service row, and the timer
     /// picker expanded under the header.
     ReadyChatTtl,
+    /// Phase C3a: a joined group voice chat (injected, no live
+    /// Telegram) — the overlay renders the title, participant grid
+    /// (speaking / muted / hand-raised badges), E2E verification
+    /// emojis, self controls, admin controls, and the always-visible
+    /// honest note "No audio yet — voice transport ships in Phase C2."
+    ReadyGroupCall,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1555,6 +1585,15 @@ impl QuillApp {
                     AuthorizationState::Ready,
                 )
             }
+            Some(ScreenshotDemo::ReadyGroupCall) => {
+                demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
+                (
+                    ConnectUiStatus::DemoReadyChats,
+                    None,
+                    "screenshot demo — group voice chat (injected, no live Telegram)".into(),
+                    AuthorizationState::Ready,
+                )
+            }
             None => bootstrap_connect(credentials),
         };
 
@@ -1654,6 +1693,7 @@ impl QuillApp {
             pending_react: None,
             mute_menu_open: false,
             ttl_picker_open: false,
+            group_call_title_dialog: None,
             notif_sound_picker_open: false,
             notification_defaults_open: false,
             defaults_sound_picker: None,
@@ -2066,6 +2106,14 @@ impl QuillApp {
             app.status_note =
                 "screenshot demo — chat self-destruct timer 1h · picker open (injected, no live Telegram)"
                     .into();
+        }
+        if matches!(demo, Some(ScreenshotDemo::ReadyGroupCall)) {
+            if let Some(session) = app.demo_session.as_mut() {
+                app.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_group_call(session, &app.demo_sink, &app.demo_seq);
+            }
+            app.status_note =
+                "screenshot demo — group voice chat (injected, no live Telegram)".into();
         }
         if matches!(demo, Some(ScreenshotDemo::ReadyVideoSend)) {
             app.composer.update(cx, |input, cx| {
@@ -8003,6 +8051,761 @@ impl QuillApp {
         card
     }
 
+    // ── Phase C3a: group-call (voice chat) signaling UI ──
+
+    /// Phase C3a: group-call overlay — the voice-chat card above
+    /// everything else. **Signaling only**: no audio/video transport
+    /// exists yet (Phase C2), so the card always carries the honest
+    /// no-transport note.
+    fn group_call_overlay(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let call = self.session()?.active_group_call.clone()?;
+        Some(self.group_call_card(&call, cx).into_any_element())
+    }
+
+    fn group_call_participant_name(&self, sender: &MessageSender) -> String {
+        match sender {
+            MessageSender::User { user_id } => self
+                .session()
+                .and_then(|s| s.user(*user_id))
+                .map(|u| u.display_name())
+                .unwrap_or_else(|| format!("User {user_id}")),
+            MessageSender::Chat { chat_id } => self
+                .session()
+                .and_then(|s| s.chats.get(chat_id))
+                .map(|c| c.title.clone())
+                .unwrap_or_else(|| format!("Chat {chat_id}")),
+        }
+    }
+
+    fn group_call_participant_tile(
+        &self,
+        call: &ActiveGroupCall,
+        participant: &ParsedGroupCallParticipant,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let name = self.group_call_participant_name(&participant.participant_id);
+        let mut badges: Vec<String> = Vec::new();
+        if participant.is_speaking {
+            badges.push("🔊 speaking".to_string());
+        }
+        if participant.is_muted_for_all_users || participant.is_muted_for_current_user {
+            badges.push("🔇 muted".to_string());
+        }
+        if participant.is_hand_raised {
+            badges.push("✋ hand raised".to_string());
+        }
+        if participant.video_enabled {
+            badges.push("📹 video".to_string());
+        }
+        if participant.screen_sharing_enabled {
+            badges.push("🖥 sharing".to_string());
+        }
+        let mut tile = div()
+            .w(px(150.))
+            .flex()
+            .flex_col()
+            .items_center()
+            .gap_1()
+            .p_2()
+            .rounded_md()
+            .border_1()
+            .border_color(cx.theme().border)
+            .bg(cx.theme().background)
+            .child(initials_avatar(&name, 56.))
+            .child(
+                div()
+                    .text_xs()
+                    .font_semibold()
+                    .child(if participant.is_current_user {
+                        format!("{name} (you)")
+                    } else {
+                        name
+                    }),
+            );
+        if !badges.is_empty() {
+            tile = tile.child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(badges.join(" · ")),
+            );
+        }
+        // Phase C3a: admin participant controls, gated on the actual
+        // TDLib flags — mute for all, lower a raised hand.
+        let sender = participant.participant_id.clone();
+        if call.can_be_managed && !participant.is_current_user {
+            if participant.is_hand_raised {
+                let sender2 = sender.clone();
+                tile = tile.child(
+                    Button::new(format!("gc-lower-hand-{sender2:?}"))
+                        .label("Lower hand")
+                        .ghost()
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.toggle_group_call_participant_hand(sender2.clone(), false, cx);
+                        })),
+                );
+            }
+            if participant.can_be_muted_for_all_users || participant.can_be_unmuted_for_all_users {
+                let mute = !participant.is_muted_for_all_users;
+                let sender2 = sender.clone();
+                tile = tile.child(
+                    Button::new(format!("gc-mute-participant-{sender2:?}"))
+                        .label(if mute { "Mute" } else { "Unmute" })
+                        .ghost()
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.toggle_group_call_participant_muted(sender2.clone(), mute, cx);
+                        })),
+                );
+            }
+        }
+        tile
+    }
+
+    fn group_call_card(&self, call: &ActiveGroupCall, cx: &mut Context<Self>) -> impl IntoElement {
+        let mut card = div()
+            .id("group-call-card")
+            .flex()
+            .flex_col()
+            .items_center()
+            .gap_3()
+            .p_6()
+            .w(px(600.))
+            .max_h(px(640.))
+            .rounded_lg()
+            .border_1()
+            .border_color(cx.theme().border)
+            .bg(cx.theme().sidebar);
+
+        // Title + kind line.
+        card = card
+            .child(
+                div()
+                    .text_lg()
+                    .font_semibold()
+                    .child(if call.title.is_empty() {
+                        "Voice chat".to_string()
+                    } else {
+                        call.title.clone()
+                    }),
+            )
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(format!(
+                        "{} participant{}",
+                        call.participant_count,
+                        if call.participant_count == 1 { "" } else { "s" }
+                    )),
+            );
+
+        if !call.is_joined {
+            card = card.child(self.group_call_join_prompt(call, cx));
+        } else {
+            card = self.group_call_joined_card(card, call, cx);
+        }
+
+        // Backdrop, like the 1:1 call overlay.
+        div()
+            .id("group-call-overlay")
+            .absolute()
+            .top_0()
+            .left_0()
+            .right_0()
+            .bottom_0()
+            .flex()
+            .items_center()
+            .justify_center()
+            .child(
+                div()
+                    .id("group-call-backdrop")
+                    .absolute()
+                    .top_0()
+                    .left_0()
+                    .right_0()
+                    .bottom_0()
+                    .bg(rgba(0x000000e6)),
+            )
+            .child(card)
+    }
+
+    /// Phase C3a: the joined voice-chat card body — reconnect banner,
+    /// verification emojis, participant grid, self/admin controls.
+    fn group_call_joined_card(
+        &self,
+        mut card: Stateful<Div>,
+        call: &ActiveGroupCall,
+        cx: &mut Context<Self>,
+    ) -> Stateful<Div> {
+        // Reconnect banner (`need_rejoin`): the call dropped and must be
+        // rejoined. Live driver re-issues `joinVideoChat`.
+        if call.reconnecting {
+            card = card
+                .child(
+                    div().w_full().p_2().rounded_md().bg(rgb(0x3a2a10)).child(
+                        div()
+                            .text_sm()
+                            .font_semibold()
+                            .text_color(rgb(0xffc861))
+                            .child("Connection lost — the voice chat needs to be rejoined."),
+                    ),
+                )
+                .child(
+                    Button::new("group-call-rejoin")
+                        .label("Rejoin")
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.rejoin_active_group_call(cx);
+                        })),
+                );
+        }
+
+        // E2E verification emojis, straight from the update.
+        if let Some(verification) = &call.verification {
+            card = card.child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("End-to-end verification:"),
+                    )
+                    .child(div().text_2xl().child(verification.emojis.join(" "))),
+            );
+        }
+
+        // Participant grid. Scrolls internally so the self/admin
+        // controls below never clip when the roster is tall.
+        let mut grid = div()
+            .id("group-call-participants")
+            .w_full()
+            .flex()
+            .flex_wrap()
+            .justify_center()
+            .gap_2()
+            .max_h(px(320.))
+            .overflow_y_scroll();
+        for participant in &call.participants {
+            grid = grid.child(self.group_call_participant_tile(call, participant, cx));
+        }
+        card = card.child(grid);
+        if !call.loaded_all_participants && call.participants.len() >= 100 {
+            card = card.child(
+                Button::new("group-call-load-more")
+                    .label("Load more participants")
+                    .ghost()
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.load_more_group_call_participants(cx);
+                    })),
+            );
+        }
+
+        // The always-visible honest note — exact wording required.
+        card = card.child(
+            div()
+                .text_xs()
+                .text_color(cx.theme().muted_foreground)
+                .child("No audio yet — voice transport ships in Phase C2."),
+        );
+
+        // Self controls. Self mute is local-only: TDLib group calls
+        // have no "mute self" outside the join parameters, and no
+        // audio path exists yet — the label says so.
+        let self_muted = call.is_muted_self;
+        let self_video = call.is_my_video_enabled;
+        let self_hand = call
+            .participants
+            .iter()
+            .any(|p| p.is_current_user && p.is_hand_raised);
+        let mut controls = div().flex().gap_2().flex_wrap().justify_center();
+        controls = controls.child(
+            Button::new("group-call-mute")
+                .label(if self_muted { "Unmute" } else { "Mute" })
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.toggle_group_call_self_mute(cx);
+                })),
+        );
+        controls = controls.child(
+            Button::new("group-call-hand")
+                .label(if self_hand {
+                    "Lower hand"
+                } else {
+                    "Raise hand"
+                })
+                .on_click(cx.listener({
+                    let raise = !self_hand;
+                    move |this, _, _, cx| {
+                        this.toggle_group_call_self_hand(raise, cx);
+                    }
+                })),
+        );
+        if call.can_enable_video {
+            controls = controls.child(
+                Button::new("group-call-video")
+                    .label(if self_video {
+                        "Stop video"
+                    } else {
+                        "Start video"
+                    })
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.toggle_group_call_video(cx);
+                    })),
+            );
+        }
+        controls = controls.child(Button::new("group-call-leave").label("Leave").on_click(
+            cx.listener(|this, _, _, cx| {
+                this.leave_active_group_call(cx);
+            }),
+        ));
+        card = card.child(controls);
+        card = card.child(
+            div()
+                .text_xs()
+                .text_color(cx.theme().muted_foreground)
+                .child("Mute is local-only: no audio path exists to mute yet."),
+        );
+
+        // Admin controls, gated on the actual TDLib flags.
+        if call.can_be_managed || call.can_toggle_mute_new_participants {
+            let mut admin = div().flex().gap_2().flex_wrap().justify_center();
+            if call.can_be_managed {
+                admin = admin.child(
+                    Button::new("group-call-invite")
+                        .label("Get invite link")
+                        .ghost()
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.fetch_group_call_invite_link(cx);
+                        })),
+                );
+                admin = admin.child(
+                    Button::new("group-call-rename")
+                        .label("Rename")
+                        .ghost()
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            this.open_group_call_title_dialog(window, cx);
+                        })),
+                );
+                admin = admin.child(
+                    Button::new("group-call-end")
+                        .label("End voice chat")
+                        .ghost()
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.end_active_group_call(cx);
+                        })),
+                );
+            }
+            if call.can_toggle_mute_new_participants {
+                let label = if call.mute_new_participants {
+                    "Mute new: on"
+                } else {
+                    "Mute new: off"
+                };
+                admin = admin.child(
+                    Button::new("group-call-mute-new")
+                        .label(label)
+                        .ghost()
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.toggle_video_chat_mute_new(cx);
+                        })),
+                );
+            }
+            card = card.child(admin);
+        }
+
+        // Invite link once fetched.
+        if let Some(link) = &call.invite_link {
+            card = card.child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(format!("Invite link: {link}")),
+            );
+        }
+
+        // Title rename dialog.
+        if let Some(dialog) = &self.group_call_title_dialog {
+            card = card.child(
+                div()
+                    .w_full()
+                    .flex()
+                    .flex_col()
+                    .gap_2()
+                    .p_3()
+                    .rounded_md()
+                    .border_1()
+                    .border_color(cx.theme().border)
+                    .child(div().text_sm().font_semibold().child("Rename voice chat"))
+                    .child(Textarea::new(&dialog.title_input).h(px(40.)))
+                    .child(
+                        div()
+                            .flex()
+                            .gap_2()
+                            .child(Button::new("group-call-title-save").label("Save").on_click(
+                                cx.listener(|this, _, _, cx| {
+                                    this.save_group_call_title(cx);
+                                }),
+                            ))
+                            .child(
+                                Button::new("group-call-title-cancel")
+                                    .label("Cancel")
+                                    .ghost()
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.close_group_call_title_dialog(cx);
+                                    })),
+                            ),
+                    ),
+            );
+        }
+
+        card
+    }
+
+    // ── Phase C3a: group-call action handlers ──
+
+    /// Phase C3a: header voice-chat affordance — join a live voice chat,
+    /// or start one for a group/channel with none.
+    fn start_or_join_video_chat(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
+        let group_call_id = self
+            .session()
+            .and_then(|s| s.chats.get(&chat_id.0))
+            .and_then(|c| c.video_chat.clone())
+            .map(|vc| vc.group_call_id);
+        let title = self
+            .session()
+            .and_then(|s| s.chats.get(&chat_id.0))
+            .map(|c| c.title.clone())
+            .unwrap_or_default();
+        if let Some(group_call_id) = group_call_id {
+            if let Some(live) = self.live.as_mut() {
+                self.status_note = match live.driver.fetch_group_call(group_call_id) {
+                    Ok(_) => "Joining voice chat…".into(),
+                    Err(_) => "Couldn't reach the voice chat.".into(),
+                };
+            } else if let Some(session) = self.demo_session.as_mut() {
+                // Screenshot demo: no live TDLib — the fixture already
+                // tracks the call; just surface the overlay.
+                let _ = session;
+                self.status_note = "screenshot demo — voice chat (no audio yet)".into();
+            }
+        } else if let Some(live) = self.live.as_mut() {
+            self.status_note = match live.driver.start_video_chat(chat_id.0, title) {
+                Ok(_) => "Starting voice chat…".into(),
+                Err(_) => "Couldn't start a voice chat here.".into(),
+            };
+        } else {
+            self.status_note = "Voice chats need a live connection.".into();
+        }
+        cx.notify();
+    }
+
+    /// Phase C3a: join the tracked voice chat.
+    fn join_active_group_call(&mut self, cx: &mut Context<Self>) {
+        let id = self
+            .session()
+            .and_then(|s| s.active_group_call.as_ref())
+            .map(|c| c.id);
+        let Some(id) = id else {
+            self.status_note = "No voice chat to join.".into();
+            cx.notify();
+            return;
+        };
+        if let Some(live) = self.live.as_mut() {
+            self.status_note = match live.driver.join_video_chat(id) {
+                Ok(_) => "Joining voice chat…".into(),
+                Err(_) => "Couldn't join the voice chat.".into(),
+            };
+        } else if let Some(session) = self.demo_session.as_mut() {
+            if let Some(call) = session.active_group_call.as_mut() {
+                call.is_joined = true;
+            }
+            self.status_note = "screenshot demo — voice chat (no audio yet)".into();
+        }
+        cx.notify();
+    }
+
+    /// Phase C3a: leave the tracked voice chat.
+    fn leave_active_group_call(&mut self, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            let result = live.driver.leave_group_call();
+            live.driver.session.leave_group_call_local();
+            self.status_note = match result {
+                Ok(_) => "Left the voice chat.".into(),
+                Err(_) => "Left the voice chat (local).".into(),
+            };
+        } else if let Some(session) = self.demo_session.as_mut() {
+            session.leave_group_call_local();
+            self.status_note = "screenshot demo — left the voice chat".into();
+        }
+        cx.notify();
+    }
+
+    /// Phase C3a: rejoin after `need_rejoin`.
+    fn rejoin_active_group_call(&mut self, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            self.status_note = match live.driver.rejoin_group_call() {
+                Ok(_) => "Rejoining voice chat…".into(),
+                Err(_) => "Couldn't rejoin the voice chat.".into(),
+            };
+        } else if let Some(session) = self.demo_session.as_mut() {
+            session.clear_group_call_reconnecting();
+            self.status_note = "screenshot demo — rejoined".into();
+        }
+        cx.notify();
+    }
+
+    /// Phase C3a: local-only self mute — no TDLib request (group calls
+    /// have no "mute self" outside the join parameters, and no audio
+    /// path exists yet). The state rides on the next (re)join.
+    fn toggle_group_call_self_mute(&mut self, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            live.driver.toggle_group_call_self_mute();
+            self.status_note = "Muted (local — no audio path yet).".into();
+        } else if let Some(session) = self.demo_session.as_mut() {
+            let muted = !session
+                .active_group_call
+                .as_ref()
+                .is_some_and(|c| c.is_muted_self);
+            session.set_group_call_self_muted(muted);
+        }
+        cx.notify();
+    }
+
+    /// Phase C3a: raise/lower the self hand (live) or flip the demo
+    /// fixture's participant flag.
+    fn toggle_group_call_self_hand(&mut self, raise: bool, cx: &mut Context<Self>) {
+        let me = self
+            .session()
+            .and_then(|s| s.active_group_call.as_ref())
+            .and_then(|c| {
+                c.participants
+                    .iter()
+                    .find(|p| p.is_current_user)
+                    .map(|p| p.participant_id.clone())
+            });
+        let Some(me) = me else {
+            cx.notify();
+            return;
+        };
+        if let Some(live) = self.live.as_mut() {
+            self.status_note = match live.driver.toggle_group_call_participant_hand(me, raise) {
+                Ok(_) => if raise {
+                    "Hand raised."
+                } else {
+                    "Hand lowered."
+                }
+                .into(),
+                Err(_) => "Couldn't change the hand state.".into(),
+            };
+        } else if let Some(session) = self.demo_session.as_mut() {
+            if let Some(call) = session.active_group_call.as_mut() {
+                if let Some(p) = call
+                    .participants
+                    .iter_mut()
+                    .find(|p| p.participant_id == me)
+                {
+                    p.is_hand_raised = raise;
+                }
+            }
+        }
+        cx.notify();
+    }
+
+    /// Phase C3a: `toggleGroupCallIsMyVideoEnabled` (live only —
+    /// signaling-only, no camera).
+    fn toggle_group_call_video(&mut self, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            self.status_note = match live.driver.toggle_group_call_my_video() {
+                Ok(_) => "Toggling video (signaling only).".into(),
+                Err(_) => "Couldn't toggle video.".into(),
+            };
+        } else {
+            self.status_note = "Video needs a live connection.".into();
+        }
+        cx.notify();
+    }
+
+    /// Phase C3a: mute/unmute a participant for all users (admin).
+    fn toggle_group_call_participant_muted(
+        &mut self,
+        sender: MessageSender,
+        mute: bool,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(live) = self.live.as_mut() {
+            self.status_note = match live
+                .driver
+                .toggle_group_call_participant_muted(sender, mute)
+            {
+                Ok(_) => if mute {
+                    "Muting participant…"
+                } else {
+                    "Unmuting participant…"
+                }
+                .into(),
+                Err(_) => "Couldn't change the participant mute.".into(),
+            };
+        } else {
+            self.status_note = "Participant mute needs a live connection.".into();
+        }
+        cx.notify();
+    }
+
+    /// Phase C3a: lower a participant's raised hand (admin).
+    fn toggle_group_call_participant_hand(
+        &mut self,
+        sender: MessageSender,
+        raise: bool,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(live) = self.live.as_mut() {
+            self.status_note = match live
+                .driver
+                .toggle_group_call_participant_hand(sender, raise)
+            {
+                Ok(_) => "Hand state sent.".into(),
+                Err(_) => "Couldn't change the hand state.".into(),
+            };
+        } else {
+            self.status_note = "Hand controls need a live connection.".into();
+        }
+        cx.notify();
+    }
+
+    /// Phase C3a: `endGroupCall` (admin).
+    fn end_active_group_call(&mut self, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            self.status_note = match live.driver.end_group_call() {
+                Ok(_) => "Ending voice chat…".into(),
+                Err(_) => "Couldn't end the voice chat.".into(),
+            };
+        } else {
+            self.status_note = "Ending needs a live connection.".into();
+        }
+        cx.notify();
+    }
+
+    /// Phase C3a: `toggleVideoChatMuteNewParticipants`.
+    fn toggle_video_chat_mute_new(&mut self, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            self.status_note = match live.driver.toggle_video_chat_mute_new() {
+                Ok(_) => "Toggling mute-new…".into(),
+                Err(_) => "Couldn't toggle mute-new.".into(),
+            };
+        } else {
+            self.status_note = "Mute-new needs a live connection.".into();
+        }
+        cx.notify();
+    }
+
+    /// Phase C3a: `getVideoChatInviteLink` — the `HttpUrl` answer lands
+    /// on the tracked call via the state router.
+    fn fetch_group_call_invite_link(&mut self, cx: &mut Context<Self>) {
+        let can_self_unmute = self
+            .session()
+            .and_then(|s| s.active_group_call.as_ref())
+            .is_some_and(|c| c.can_be_managed);
+        if let Some(live) = self.live.as_mut() {
+            self.status_note = match live.driver.fetch_video_chat_invite_link(can_self_unmute) {
+                Ok(_) => "Fetching invite link…".into(),
+                Err(_) => "Couldn't fetch the invite link.".into(),
+            };
+        } else {
+            self.status_note = "Invite links need a live connection.".into();
+        }
+        cx.notify();
+    }
+
+    /// Phase C3a: `loadGroupCallParticipants` — page more participants.
+    fn load_more_group_call_participants(&mut self, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            let _ = live.driver.load_more_group_call_participants();
+        }
+        cx.notify();
+    }
+
+    /// Phase C3a: open the voice-chat rename dialog (`setVideoChatTitle`).
+    fn open_group_call_title_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let current = self
+            .session()
+            .and_then(|s| s.active_group_call.as_ref())
+            .map(|c| c.title.clone())
+            .unwrap_or_default();
+        let dialog = GroupCallTitleDialog::new(window, cx, &current);
+        self.group_call_title_dialog = Some(dialog);
+        cx.notify();
+    }
+
+    fn close_group_call_title_dialog(&mut self, cx: &mut Context<Self>) {
+        self.group_call_title_dialog = None;
+        cx.notify();
+    }
+
+    fn save_group_call_title(&mut self, cx: &mut Context<Self>) {
+        let title = self
+            .group_call_title_dialog
+            .as_ref()
+            .map(|d| d.title_input.read(cx).value().to_string())
+            .unwrap_or_default();
+        self.group_call_title_dialog = None;
+        if let Some(live) = self.live.as_mut() {
+            self.status_note = match live.driver.set_video_chat_title(title) {
+                Ok(_) => "Renaming voice chat…".into(),
+                Err(_) => "Couldn't rename the voice chat.".into(),
+            };
+        } else {
+            self.status_note = "Renaming needs a live connection.".into();
+        }
+        cx.notify();
+    }
+
+    /// Phase C3a: not-joined tracked call — show the join prompt card.
+    /// (Handled inside `group_call_card` via `call.is_joined`.)
+    fn group_call_join_prompt(&self, call: &ActiveGroupCall, cx: &mut Context<Self>) -> AnyElement {
+        div()
+            .id("group-call-join")
+            .flex()
+            .flex_col()
+            .items_center()
+            .gap_2()
+            .p_4()
+            .rounded_md()
+            .border_1()
+            .border_color(cx.theme().border)
+            .bg(cx.theme().background)
+            .child(
+                div()
+                    .text_sm()
+                    .font_semibold()
+                    .child("A voice chat is live"),
+            )
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(format!(
+                        "{} participant{}",
+                        call.participant_count,
+                        if call.participant_count == 1 { "" } else { "s" }
+                    )),
+            )
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("No audio yet — voice transport ships in Phase C2."),
+            )
+            .child(
+                Button::new("group-call-join-btn")
+                    .label("Join voice chat")
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.join_active_group_call(cx);
+                    })),
+            )
+            .into_any_element()
+    }
+
     /// Parity slice: folder manage / editor / delete-confirm overlays.
     /// The editor replaces the manage list while open (modal flow).
     fn folder_overlays(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
@@ -9724,10 +10527,38 @@ impl QuillApp {
                     .and_then(|s| s.chats.get(&chat_id.0))
                     .map(|c| format!("⏱ {}", format_ttl_setting(c.message_auto_delete_time)))
                     .unwrap_or_else(|| "⏱ Off".to_string());
+                // Phase C3a: voice-chat affordance for groups/channels —
+                // join the live voice chat, or start one when none is
+                // live. Signaling only (no audio transport yet).
+                let (voice_ok, voice_live) = self
+                    .session()
+                    .and_then(|s| s.chats.get(&chat_id.0))
+                    .map(|c| {
+                        let kind_ok = matches!(
+                            c.kind,
+                            ChatKind::BasicGroup { .. } | ChatKind::Supergroup { .. }
+                        );
+                        (kind_ok, kind_ok && c.video_chat.is_some())
+                    })
+                    .unwrap_or((false, false));
                 this.child(
                     div()
                         .flex()
                         .gap_1()
+                        .when(voice_ok, |this| {
+                            this.child(
+                                Button::new("chat-voice-chat")
+                                    .label(if voice_live {
+                                        "🔊 Voice chat"
+                                    } else {
+                                        "Start voice chat"
+                                    })
+                                    .ghost()
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        this.start_or_join_video_chat(chat_id, cx);
+                                    })),
+                            )
+                        })
                         // Phase B1: close a secret chat (confirm banner
                         // below, like delete confirm).
                         .when(is_secret, |this| {
@@ -13440,6 +14271,11 @@ impl Render for QuillApp {
             })
             // Phase C1: call overlay above everything else.
             .when_some(self.call_overlay(cx), |this, overlay| this.child(overlay))
+            // Phase C3a: group-call (voice chat) overlay above the call
+            // overlay.
+            .when_some(self.group_call_overlay(cx), |this, overlay| {
+                this.child(overlay)
+            })
     }
 }
 
@@ -15076,6 +15912,56 @@ fn apply_ready_call_video(session: &mut Session, sink: &Arc<MemorySink>, seq: &A
             session.apply(owned);
         }
     }
+}
+
+/// Phase C3a: joined group voice-chat fixture — the "Design voice"
+/// supergroup (id 51) has a live voice chat (id 555), joined as the
+/// demo user (777), with Zed speaking, Mia's hand raised, and one
+/// muted participant, plus E2E verification emojis. The overlay
+/// renders its participant grid, controls, and the honest no-audio
+/// note. Injected, no live Telegram, no media.
+fn apply_ready_group_call(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let chat_id = 51i64;
+    let call_id = 555i32;
+    let user = |id: i64, first: &str, last: &str| {
+        format!(
+            r#"{{"@type":"updateUser","user":{{"id":{id},"first_name":"{first}","last_name":"{last}","type":{{"@type":"userTypeRegular"}}}}}}"#
+        )
+    };
+    let participant = |id: i64, flags: &str, order: &str| {
+        format!(
+            r#"{{"@type":"updateGroupCallParticipant","group_call_id":{call_id},"participant":{{"@type":"groupCallParticipant","participant_id":{{"@type":"messageSenderUser","user_id":{id}}},"audio_source_id":0,"screen_sharing_audio_source_id":0,"video_info":null,"screen_sharing_video_info":null,"bio":"","is_current_user":false,"is_speaking":false,"is_hand_raised":false,"can_be_muted_for_all_users":true,"can_be_unmuted_for_all_users":true,"can_be_muted_for_current_user":true,"can_be_unmuted_for_current_user":true,"is_muted_for_all_users":false,"is_muted_for_current_user":false,"can_unmute_self":false,"volume_level":10000,"order":"{order}"{flags}}}}}"#
+        )
+    };
+    let jsons = [
+        user(777, "Demo", "Viewer"),
+        user(41, "Zed", "Hopper"),
+        user(42, "Mia", "Chen"),
+        user(43, "Raj", "Patel"),
+        format!(
+            r#"{{"@type":"updateNewChat","chat":{{"id":{chat_id},"title":"Design voice","type":{{"@type":"chatTypeSupergroup","supergroup_id":{chat_id},"is_channel":false}},"unread_count":0}}}}"#
+        ),
+        format!(
+            r#"{{"@type":"updateChatVideoChat","chat_id":{chat_id},"video_chat":{{"@type":"videoChat","group_call_id":{call_id},"has_participants":true,"default_participant_id":null}}}}"#
+        ),
+        format!(
+            r#"{{"@type":"updateGroupCall","group_call":{{"@type":"groupCall","id":{call_id},"unique_id":"999","title":"Weekly design sync","invite_link":"","paid_message_star_count":0,"scheduled_start_date":0,"enabled_start_notification":false,"is_active":true,"is_video_chat":true,"is_live_story":false,"is_rtmp_stream":false,"is_joined":true,"need_rejoin":false,"is_owned":false,"can_be_managed":true,"participant_count":4,"has_hidden_listeners":false,"loaded_all_participants":true,"message_sender_id":null,"recent_speakers":[{{"@type":"groupCallRecentSpeaker","participant_id":{{"@type":"messageSenderUser","user_id":41}},"is_speaking":true}}],"is_my_video_enabled":false,"is_my_video_paused":false,"can_enable_video":true,"mute_new_participants":false,"can_toggle_mute_new_participants":true,"can_send_messages":true,"are_messages_allowed":true,"can_toggle_are_messages_allowed":false,"can_delete_messages":false,"record_duration":0,"is_video_recorded":false,"duration":0}}}}"#
+        ),
+        participant(777, r#","is_current_user":true"#, "a4"),
+        participant(41, r#","is_speaking":true"#, "a3"),
+        participant(42, r#","is_hand_raised":true"#, "a2"),
+        participant(43, r#","is_muted_for_all_users":true"#, "a1"),
+        format!(
+            r#"{{"@type":"updateGroupCallVerificationState","group_call_id":{call_id},"generation":7,"emojis":["🍎","🍌"]}}"#
+        ),
+    ];
+    for json in jsons {
+        if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
+            session.apply(owned);
+        }
+    }
+    session.open_chat(ChatId(chat_id));
 }
 
 /// Phase B2: key verification UI fixture — the Ready secret chat (id 41)

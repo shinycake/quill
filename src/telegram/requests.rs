@@ -551,6 +551,415 @@ pub fn send_call_rating(extra: RequestId, call_id: i32, rating: i32) -> String {
     .to_string()
 }
 
+/// Phase C3a: a `MessageSender` reference for group-call request
+/// fields (e.g. `toggleGroupCallParticipantIsMuted participant_id`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MessageSenderRef {
+    User(i64),
+    Chat(i64),
+}
+
+impl MessageSenderRef {
+    /// Renders `messageSenderUser` (TDLib 1.8.67,
+    /// `schema/td_api.tl:2831`) / `messageSenderChat`
+    /// (`schema/td_api.tl:2834`), matching the inline convention
+    /// used elsewhere in this file.
+    pub fn to_value(&self) -> Value {
+        match *self {
+            MessageSenderRef::User(user_id) => {
+                json!({ "@type": "messageSenderUser", "user_id": user_id })
+            }
+            MessageSenderRef::Chat(chat_id) => {
+                json!({ "@type": "messageSenderChat", "chat_id": chat_id })
+            }
+        }
+    }
+}
+
+/// Phase C3a: an `InputGroupCall` reference for non-chat-bound group
+/// calls (TDLib 1.8.67, `schema/td_api.tl:7242` /
+/// `schema/td_api.tl:7247`):
+/// `inputGroupCallLink link:string = InputGroupCall;`
+/// `inputGroupCallMessage chat_id:int53 message_id:int53 =
+/// InputGroupCall;`
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum InputGroupCallRef {
+    Link(String),
+    Message { chat_id: i64, message_id: i64 },
+}
+
+impl InputGroupCallRef {
+    pub fn to_value(&self) -> Value {
+        match self {
+            InputGroupCallRef::Link(link) => {
+                json!({ "@type": "inputGroupCallLink", "link": link })
+            }
+            InputGroupCallRef::Message {
+                chat_id,
+                message_id,
+            } => {
+                json!({
+                    "@type": "inputGroupCallMessage",
+                    "chat_id": chat_id,
+                    "message_id": message_id,
+                })
+            }
+        }
+    }
+}
+
+/// Phase C3a: `groupCallJoinParameters` (TDLib 1.8.67,
+/// `schema/td_api.tl:7089`):
+/// `groupCallJoinParameters audio_source_id:int32 payload:string
+/// is_muted:Bool is_my_video_enabled:Bool = GroupCallJoinParameters;`
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GroupCallJoinParams {
+    pub audio_source_id: i32,
+    pub payload: String,
+    pub is_muted: bool,
+    pub is_my_video_enabled: bool,
+}
+
+impl GroupCallJoinParams {
+    /// The honest signaling-only join: Quill has no audio device and no
+    /// tgcalls engine yet (Phase C2), so `audio_source_id` is 0 and
+    /// `payload` is empty. TDLib accepts these; the call joins muted
+    /// only in the signaling sense — there is no audio path at all.
+    pub fn honest_no_device() -> Self {
+        GroupCallJoinParams {
+            audio_source_id: 0,
+            payload: String::new(),
+            is_muted: false,
+            is_my_video_enabled: false,
+        }
+    }
+
+    pub fn to_value(&self) -> Value {
+        json!({
+            "@type": "groupCallJoinParameters",
+            "audio_source_id": self.audio_source_id,
+            "payload": self.payload,
+            "is_muted": self.is_muted,
+            "is_my_video_enabled": self.is_my_video_enabled,
+        })
+    }
+}
+
+/// Phase C3a: `createVideoChat` (TDLib 1.8.67,
+/// `schema/td_api.tl:14256`):
+/// `createVideoChat chat_id:int53 title:string start_date:int32
+/// is_rtmp_stream:Bool = GroupCallId;`
+/// This is the chat-bound voice/video-chat creation path (groups and
+/// channels). An immediate voice chat passes `start_date: 0` and
+/// `is_rtmp_stream: false`. (`createGroupCall` is for group calls that
+/// *aren't* bound to a chat.)
+pub fn create_video_chat(
+    extra: RequestId,
+    chat_id: i64,
+    title: &str,
+    start_date: i32,
+    is_rtmp_stream: bool,
+) -> String {
+    json!({
+        "@type": "createVideoChat",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id,
+        "title": title,
+        "start_date": start_date,
+        "is_rtmp_stream": is_rtmp_stream,
+    })
+    .to_string()
+}
+
+/// Phase C3a: `createGroupCall` (TDLib 1.8.67,
+/// `schema/td_api.tl:14259`):
+/// `createGroupCall join_parameters:groupCallJoinParameters =
+/// GroupCallInfo;`
+/// Creates a group call that isn't bound to a chat. Per the schema
+/// docs, pass null `join_parameters` to only create the call link
+/// without joining the call.
+pub fn create_group_call(extra: RequestId, join_params: Option<&GroupCallJoinParams>) -> String {
+    json!({
+        "@type": "createGroupCall",
+        "@extra": extra.as_extra(),
+        "join_parameters": join_params.map(|p| p.to_value()).unwrap_or(Value::Null),
+    })
+    .to_string()
+}
+
+/// Phase C3a: `joinVideoChat` (TDLib 1.8.67,
+/// `schema/td_api.tl:14292`):
+/// `joinVideoChat group_call_id:int32 participant_id:MessageSender
+/// join_parameters:groupCallJoinParameters invite_hash:string = Text;`
+/// "Joins an active video chat. Returns join response payload for
+/// tgcalls". `participant_id: None` serializes null (join as self).
+/// The returned payload is stored by the driver and never consumed —
+/// there is no media transport until Phase C2.
+pub fn join_video_chat(
+    extra: RequestId,
+    group_call_id: i32,
+    participant_id: Option<&MessageSenderRef>,
+    join_params: &GroupCallJoinParams,
+    invite_hash: &str,
+) -> String {
+    json!({
+        "@type": "joinVideoChat",
+        "@extra": extra.as_extra(),
+        "group_call_id": group_call_id,
+        "participant_id": participant_id.map(|p| p.to_value()).unwrap_or(Value::Null),
+        "join_parameters": join_params.to_value(),
+        "invite_hash": invite_hash,
+    })
+    .to_string()
+}
+
+/// Phase C3a: `joinGroupCall` (TDLib 1.8.67,
+/// `schema/td_api.tl:14285`):
+/// `joinGroupCall input_group_call:InputGroupCall
+/// join_parameters:groupCallJoinParameters = GroupCallInfo;`
+/// Joins a regular group call that is not bound to a chat.
+pub fn join_group_call(
+    extra: RequestId,
+    input_group_call: &InputGroupCallRef,
+    join_params: &GroupCallJoinParams,
+) -> String {
+    json!({
+        "@type": "joinGroupCall",
+        "@extra": extra.as_extra(),
+        "input_group_call": input_group_call.to_value(),
+        "join_parameters": join_params.to_value(),
+    })
+    .to_string()
+}
+
+/// Phase C3a: `getGroupCall` (TDLib 1.8.67, `schema/td_api.tl:14274`):
+/// `getGroupCall group_call_id:int32 = GroupCall;`
+pub fn get_group_call(extra: RequestId, group_call_id: i32) -> String {
+    json!({
+        "@type": "getGroupCall",
+        "@extra": extra.as_extra(),
+        "group_call_id": group_call_id,
+    })
+    .to_string()
+}
+
+/// Phase C3a: `getGroupCallParticipants` (TDLib 1.8.67,
+/// `schema/td_api.tl:14449`):
+/// `getGroupCallParticipants input_group_call:InputGroupCall
+/// limit:int32 = GroupCallParticipants;`
+/// "Returns information about participants of a non-joined group call
+/// that is not bound to a chat".
+pub fn get_group_call_participants(
+    extra: RequestId,
+    input_group_call: &InputGroupCallRef,
+    limit: i32,
+) -> String {
+    json!({
+        "@type": "getGroupCallParticipants",
+        "@extra": extra.as_extra(),
+        "input_group_call": input_group_call.to_value(),
+        "limit": limit,
+    })
+    .to_string()
+}
+
+/// Phase C3a: `loadGroupCallParticipants` (TDLib 1.8.67,
+/// `schema/td_api.tl:14455`):
+/// `loadGroupCallParticipants group_call_id:int32 limit:int32 = Ok;`
+/// "Loads more participants of a group call … The group call must be
+/// previously received through getGroupCall and must be joined or
+/// being joined". Limit up to 100.
+pub fn load_group_call_participants(extra: RequestId, group_call_id: i32, limit: i32) -> String {
+    json!({
+        "@type": "loadGroupCallParticipants",
+        "@extra": extra.as_extra(),
+        "group_call_id": group_call_id,
+        "limit": limit,
+    })
+    .to_string()
+}
+
+/// Phase C3a: `leaveGroupCall` (TDLib 1.8.67,
+/// `schema/td_api.tl:14458`): `leaveGroupCall group_call_id:int32 =
+/// Ok;` "Leaves a group call".
+pub fn leave_group_call(extra: RequestId, group_call_id: i32) -> String {
+    json!({
+        "@type": "leaveGroupCall",
+        "@extra": extra.as_extra(),
+        "group_call_id": group_call_id,
+    })
+    .to_string()
+}
+
+/// Phase C3a: `endGroupCall` (TDLib 1.8.67, `schema/td_api.tl:14461`):
+/// `endGroupCall group_call_id:int32 = Ok;` "Ends a group call.
+/// Requires groupCall.can_be_managed right for video chats and live
+/// stories or groupCall.is_owned otherwise".
+pub fn end_group_call(extra: RequestId, group_call_id: i32) -> String {
+    json!({
+        "@type": "endGroupCall",
+        "@extra": extra.as_extra(),
+        "group_call_id": group_call_id,
+    })
+    .to_string()
+}
+
+/// Phase C3a: `toggleGroupCallIsMyVideoEnabled` (TDLib 1.8.67,
+/// `schema/td_api.tl:14414`):
+/// `toggleGroupCallIsMyVideoEnabled group_call_id:int32
+/// is_my_video_enabled:Bool = Ok;`
+/// Signaling-only in this slice: tracks state, no camera (Phase C2).
+pub fn toggle_group_call_is_my_video_enabled(
+    extra: RequestId,
+    group_call_id: i32,
+    is_enabled: bool,
+) -> String {
+    json!({
+        "@type": "toggleGroupCallIsMyVideoEnabled",
+        "@extra": extra.as_extra(),
+        "group_call_id": group_call_id,
+        "is_my_video_enabled": is_enabled,
+    })
+    .to_string()
+}
+
+/// Phase C3a: `toggleGroupCallIsMyVideoPaused` (TDLib 1.8.67,
+/// `schema/td_api.tl:14411`):
+/// `toggleGroupCallIsMyVideoPaused group_call_id:int32
+/// is_my_video_paused:Bool = Ok;`
+/// Signaling-only in this slice: tracks state, no camera (Phase C2).
+pub fn toggle_group_call_is_my_video_paused(
+    extra: RequestId,
+    group_call_id: i32,
+    is_paused: bool,
+) -> String {
+    json!({
+        "@type": "toggleGroupCallIsMyVideoPaused",
+        "@extra": extra.as_extra(),
+        "group_call_id": group_call_id,
+        "is_my_video_paused": is_paused,
+    })
+    .to_string()
+}
+
+/// Phase C3a: `toggleGroupCallParticipantIsMuted` (TDLib 1.8.67,
+/// `schema/td_api.tl:14431`):
+/// `toggleGroupCallParticipantIsMuted group_call_id:int32
+/// participant_id:MessageSender is_muted:Bool = Ok;`
+/// "Toggles whether a participant of an active group call is muted,
+/// unmuted, or allowed to unmute themselves; not supported for live
+/// stories". Gate the UI on the participant's `can_be_muted_for_all_users`
+/// / `can_be_unmuted_for_all_users` flags.
+pub fn toggle_group_call_participant_is_muted(
+    extra: RequestId,
+    group_call_id: i32,
+    participant_id: &MessageSenderRef,
+    is_muted: bool,
+) -> String {
+    json!({
+        "@type": "toggleGroupCallParticipantIsMuted",
+        "@extra": extra.as_extra(),
+        "group_call_id": group_call_id,
+        "participant_id": participant_id.to_value(),
+        "is_muted": is_muted,
+    })
+    .to_string()
+}
+
+/// Phase C3a: `toggleGroupCallParticipantIsHandRaised` (TDLib 1.8.67,
+/// `schema/td_api.tl:14444`):
+/// `toggleGroupCallParticipantIsHandRaised group_call_id:int32
+/// participant_id:MessageSender is_hand_raised:Bool = Ok;`
+/// "for video chats only … Only self hand can be raised. Requires
+/// groupCall.can_be_managed right to lower other's hand".
+pub fn toggle_group_call_participant_is_hand_raised(
+    extra: RequestId,
+    group_call_id: i32,
+    participant_id: &MessageSenderRef,
+    is_hand_raised: bool,
+) -> String {
+    json!({
+        "@type": "toggleGroupCallParticipantIsHandRaised",
+        "@extra": extra.as_extra(),
+        "group_call_id": group_call_id,
+        "participant_id": participant_id.to_value(),
+        "is_hand_raised": is_hand_raised,
+    })
+    .to_string()
+}
+
+/// Phase C3a: `toggleVideoChatMuteNewParticipants` (TDLib 1.8.67,
+/// `schema/td_api.tl:14317`):
+/// `toggleVideoChatMuteNewParticipants group_call_id:int32
+/// mute_new_participants:Bool = Ok;`
+/// "Toggles whether new participants of a video chat can be unmuted
+/// only by administrators of the video chat. Requires
+/// groupCall.can_toggle_mute_new_participants right".
+pub fn toggle_video_chat_mute_new_participants(
+    extra: RequestId,
+    group_call_id: i32,
+    mute_new_participants: bool,
+) -> String {
+    json!({
+        "@type": "toggleVideoChatMuteNewParticipants",
+        "@extra": extra.as_extra(),
+        "group_call_id": group_call_id,
+        "mute_new_participants": mute_new_participants,
+    })
+    .to_string()
+}
+
+/// Phase C3a: `setVideoChatTitle` (TDLib 1.8.67,
+/// `schema/td_api.tl:14312`):
+/// `setVideoChatTitle group_call_id:int32 title:string = Ok;`
+/// "Sets title of a video chat; requires groupCall.can_be_managed
+/// right". Title is 1-64 characters.
+pub fn set_video_chat_title(extra: RequestId, group_call_id: i32, title: &str) -> String {
+    json!({
+        "@type": "setVideoChatTitle",
+        "@extra": extra.as_extra(),
+        "group_call_id": group_call_id,
+        "title": title,
+    })
+    .to_string()
+}
+
+/// Phase C3a: `getVideoChatInviteLink` (TDLib 1.8.67,
+/// `schema/td_api.tl:14395`):
+/// `getVideoChatInviteLink group_call_id:int32 can_self_unmute:Bool =
+/// HttpUrl;`
+/// "Returns invite link to a video chat in a public chat".
+/// `can_self_unmute: true` requires `groupCall.can_be_managed`.
+pub fn get_video_chat_invite_link(
+    extra: RequestId,
+    group_call_id: i32,
+    can_self_unmute: bool,
+) -> String {
+    json!({
+        "@type": "getVideoChatInviteLink",
+        "@extra": extra.as_extra(),
+        "group_call_id": group_call_id,
+        "can_self_unmute": can_self_unmute,
+    })
+    .to_string()
+}
+
+/// Phase C3a: `declineGroupCallInvitation` (TDLib 1.8.67,
+/// `schema/td_api.tl:14380`):
+/// `declineGroupCallInvitation chat_id:int53 message_id:int53 = Ok;`
+/// Declines a `messageGroupCall` invitation (`schema/td_api.tl:5288`
+/// flow: `joinGroupCall` to accept, `declineGroupCallInvitation` to
+/// decline).
+pub fn decline_group_call_invitation(extra: RequestId, chat_id: i64, message_id: i64) -> String {
+    json!({
+        "@type": "declineGroupCallInvitation",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id,
+        "message_id": message_id,
+    })
+    .to_string()
+}
+
 /// Phase B4: `setChatMessageAutoDeleteTime` (TDLib 1.8.67,
 /// `schema/td_api.tl:13454`):
 /// `setChatMessageAutoDeleteTime chat_id:int53
@@ -3376,5 +3785,180 @@ mod channel_requests_tests {
         assert_eq!(v["rating"], 5);
         assert_eq!(v["comment"], "");
         assert_eq!(v["problems"].as_array().unwrap().len(), 0);
+    }
+
+    /// Phase C3a: group-call request shapes — verified against the
+    /// pinned schema (1.8.67) constructors, never invented.
+    #[test]
+    fn group_call_request_shapes() {
+        // The honest signaling-only join params: no device, no payload.
+        let p = GroupCallJoinParams::honest_no_device();
+        let pv = p.to_value();
+        assert_eq!(pv["@type"], "groupCallJoinParameters");
+        assert_eq!(pv["audio_source_id"], 0);
+        assert_eq!(pv["payload"], "");
+        assert_eq!(pv["is_muted"], false);
+        assert_eq!(pv["is_my_video_enabled"], false);
+
+        assert_eq!(
+            MessageSenderRef::User(41).to_value()["@type"],
+            "messageSenderUser"
+        );
+        assert_eq!(MessageSenderRef::User(41).to_value()["user_id"], 41);
+        assert_eq!(
+            MessageSenderRef::Chat(100).to_value()["@type"],
+            "messageSenderChat"
+        );
+        assert_eq!(MessageSenderRef::Chat(100).to_value()["chat_id"], 100);
+
+        assert_eq!(
+            InputGroupCallRef::Link("https://t.me/abc".to_string()).to_value()["@type"],
+            "inputGroupCallLink"
+        );
+        let mv = InputGroupCallRef::Message {
+            chat_id: 100,
+            message_id: 7,
+        }
+        .to_value();
+        assert_eq!(mv["@type"], "inputGroupCallMessage");
+        assert_eq!(mv["chat_id"], 100);
+        assert_eq!(mv["message_id"], 7);
+
+        let v: serde_json::Value =
+            serde_json::from_str(&create_video_chat(RequestId(1), 100, "Standup", 0, false))
+                .unwrap();
+        assert_eq!(v["@type"], "createVideoChat");
+        assert_eq!(v["chat_id"], 100);
+        assert_eq!(v["title"], "Standup");
+        assert_eq!(v["start_date"], 0);
+        assert_eq!(v["is_rtmp_stream"], false);
+
+        // `None` → null join_parameters: create the link only, don't join.
+        let v: serde_json::Value =
+            serde_json::from_str(&create_group_call(RequestId(2), None)).unwrap();
+        assert_eq!(v["@type"], "createGroupCall");
+        assert!(v["join_parameters"].is_null());
+        let v: serde_json::Value =
+            serde_json::from_str(&create_group_call(RequestId(3), Some(&p))).unwrap();
+        assert_eq!(v["join_parameters"]["@type"], "groupCallJoinParameters");
+
+        // `None` participant → null: join as self.
+        let v: serde_json::Value =
+            serde_json::from_str(&join_video_chat(RequestId(4), 555, None, &p, "")).unwrap();
+        assert_eq!(v["@type"], "joinVideoChat");
+        assert_eq!(v["group_call_id"], 555);
+        assert!(v["participant_id"].is_null());
+        assert_eq!(v["join_parameters"]["@type"], "groupCallJoinParameters");
+        assert_eq!(v["invite_hash"], "");
+
+        let v: serde_json::Value = serde_json::from_str(&join_video_chat(
+            RequestId(5),
+            555,
+            Some(&MessageSenderRef::User(42)),
+            &p,
+            "hash",
+        ))
+        .unwrap();
+        assert_eq!(v["participant_id"]["@type"], "messageSenderUser");
+        assert_eq!(v["participant_id"]["user_id"], 42);
+
+        let link = InputGroupCallRef::Link("https://t.me/abc".to_string());
+        let v: serde_json::Value =
+            serde_json::from_str(&join_group_call(RequestId(6), &link, &p)).unwrap();
+        assert_eq!(v["@type"], "joinGroupCall");
+        assert_eq!(v["input_group_call"]["@type"], "inputGroupCallLink");
+
+        let v: serde_json::Value =
+            serde_json::from_str(&get_group_call(RequestId(7), 555)).unwrap();
+        assert_eq!(v["@type"], "getGroupCall");
+        assert_eq!(v["group_call_id"], 555);
+
+        let v: serde_json::Value =
+            serde_json::from_str(&get_group_call_participants(RequestId(8), &link, 50)).unwrap();
+        assert_eq!(v["@type"], "getGroupCallParticipants");
+        assert_eq!(v["limit"], 50);
+
+        let v: serde_json::Value =
+            serde_json::from_str(&load_group_call_participants(RequestId(9), 555, 100)).unwrap();
+        assert_eq!(v["@type"], "loadGroupCallParticipants");
+        assert_eq!(v["group_call_id"], 555);
+        assert_eq!(v["limit"], 100);
+
+        let v: serde_json::Value =
+            serde_json::from_str(&leave_group_call(RequestId(10), 555)).unwrap();
+        assert_eq!(v["@type"], "leaveGroupCall");
+        assert_eq!(v["group_call_id"], 555);
+
+        let v: serde_json::Value =
+            serde_json::from_str(&end_group_call(RequestId(11), 555)).unwrap();
+        assert_eq!(v["@type"], "endGroupCall");
+        assert_eq!(v["group_call_id"], 555);
+
+        let v: serde_json::Value = serde_json::from_str(&toggle_group_call_is_my_video_enabled(
+            RequestId(12),
+            555,
+            true,
+        ))
+        .unwrap();
+        assert_eq!(v["@type"], "toggleGroupCallIsMyVideoEnabled");
+        assert_eq!(v["is_my_video_enabled"], true);
+
+        let v: serde_json::Value = serde_json::from_str(&toggle_group_call_is_my_video_paused(
+            RequestId(13),
+            555,
+            true,
+        ))
+        .unwrap();
+        assert_eq!(v["@type"], "toggleGroupCallIsMyVideoPaused");
+        assert_eq!(v["is_my_video_paused"], true);
+
+        let v: serde_json::Value = serde_json::from_str(&toggle_group_call_participant_is_muted(
+            RequestId(14),
+            555,
+            &MessageSenderRef::User(42),
+            true,
+        ))
+        .unwrap();
+        assert_eq!(v["@type"], "toggleGroupCallParticipantIsMuted");
+        assert_eq!(v["participant_id"]["user_id"], 42);
+        assert_eq!(v["is_muted"], true);
+
+        let v: serde_json::Value =
+            serde_json::from_str(&toggle_group_call_participant_is_hand_raised(
+                RequestId(15),
+                555,
+                &MessageSenderRef::User(41),
+                true,
+            ))
+            .unwrap();
+        assert_eq!(v["@type"], "toggleGroupCallParticipantIsHandRaised");
+        assert_eq!(v["is_hand_raised"], true);
+
+        // Exact schema name: toggleVideoChatMuteNewParticipants (not
+        // toggleGroupCallMuteNewParticipants).
+        let v: serde_json::Value = serde_json::from_str(&toggle_video_chat_mute_new_participants(
+            RequestId(16),
+            555,
+            true,
+        ))
+        .unwrap();
+        assert_eq!(v["@type"], "toggleVideoChatMuteNewParticipants");
+        assert_eq!(v["mute_new_participants"], true);
+
+        let v: serde_json::Value =
+            serde_json::from_str(&set_video_chat_title(RequestId(17), 555, "Standup")).unwrap();
+        assert_eq!(v["@type"], "setVideoChatTitle");
+        assert_eq!(v["title"], "Standup");
+
+        let v: serde_json::Value =
+            serde_json::from_str(&get_video_chat_invite_link(RequestId(18), 555, true)).unwrap();
+        assert_eq!(v["@type"], "getVideoChatInviteLink");
+        assert_eq!(v["can_self_unmute"], true);
+
+        let v: serde_json::Value =
+            serde_json::from_str(&decline_group_call_invitation(RequestId(19), 100, 7)).unwrap();
+        assert_eq!(v["@type"], "declineGroupCallInvitation");
+        assert_eq!(v["chat_id"], 100);
+        assert_eq!(v["message_id"], 7);
     }
 }

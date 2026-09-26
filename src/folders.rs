@@ -222,6 +222,7 @@ mod tests {
             can_send_basic_messages: true,
             secret_state: None,
             message_auto_delete_time: 0,
+            video_chat: None,
         }
     }
 

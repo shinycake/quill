@@ -21,26 +21,28 @@ use crate::state::{
 use crate::telegram::client::{LiveTdJson, OwnedEnvelope, ReceiveBridge};
 use crate::telegram::envelope::{
     AuthorizationState, CallState, ChatDraft, ChatFolderSpec, ChatKind, ChatNotificationSettings,
-    EnvelopePayload, MUTE_FOREVER, MessageContent, NotificationSettingsScope,
+    EnvelopePayload, MUTE_FOREVER, MessageContent, MessageSender, NotificationSettingsScope,
     ScopeNotificationSettings, StoryContentView,
 };
 use crate::telegram::ffi::{LibraryOrigin, TdJsonError, resolve_tdjson_path};
 use crate::telegram::requests::{
-    AnimationSend, PollSend, SetTdlibParameters, StickerSend, VideoNoteSend,
-    VideoNoteThumbnailSend, VideoSend, VoiceNoteSend, accept_call, add_chat_to_list,
-    add_chat_to_list_value, add_contact, add_message_reaction, add_recently_found_chat,
-    check_authentication_code, check_authentication_password, click_chat_sponsored_message,
-    close_chat, close_request, close_secret_chat as close_secret_chat_request, close_story,
-    create_call, create_chat_folder, create_new_secret_chat, delete_chat_folder, delete_messages,
-    delete_story, discard_call as discard_call_request, download_file as download_file_request,
-    edit_chat_folder, edit_message_caption, edit_message_text, forward_messages,
+    AnimationSend, GroupCallJoinParams, MessageSenderRef, PollSend, SetTdlibParameters,
+    StickerSend, VideoNoteSend, VideoNoteThumbnailSend, VideoSend, VoiceNoteSend, accept_call,
+    add_chat_to_list, add_chat_to_list_value, add_contact, add_message_reaction,
+    add_recently_found_chat, check_authentication_code, check_authentication_password,
+    click_chat_sponsored_message, close_chat, close_request,
+    close_secret_chat as close_secret_chat_request, close_story, create_call, create_chat_folder,
+    create_new_secret_chat, create_video_chat, delete_chat_folder, delete_messages, delete_story,
+    discard_call as discard_call_request, download_file as download_file_request, edit_chat_folder,
+    edit_message_caption, edit_message_text, end_group_call, forward_messages,
     get_authorization_state, get_callback_query_answer, get_chat_active_stories, get_chat_folder,
     get_chat_history, get_chat_lists_to_add_chat, get_chat_member, get_chat_sponsored_messages,
-    get_commands, get_contacts, get_forum_topics, get_installed_sticker_sets, get_me,
-    get_saved_animations, get_saved_notification_sounds, get_scope_notification_settings,
+    get_commands, get_contacts, get_forum_topics, get_group_call, get_installed_sticker_sets,
+    get_me, get_saved_animations, get_saved_notification_sounds, get_scope_notification_settings,
     get_secret_chat, get_sticker_set, get_story, get_story_available_reactions, get_supergroup,
-    get_supergroup_full_info, get_user_full_info, input_message_photo, input_message_video,
-    join_chat, leave_chat, load_active_stories, load_chats, load_chats_list, open_chat,
+    get_supergroup_full_info, get_user_full_info, get_video_chat_invite_link, input_message_photo,
+    input_message_video, join_chat, join_video_chat, leave_chat, leave_group_call,
+    load_active_stories, load_chats, load_chats_list, load_group_call_participants, open_chat,
     open_message_content, open_story, pin_chat_message, remove_message_reaction,
     reorder_chat_folders, report_chat_sponsored_message, search_chat_messages, search_chats,
     search_messages, search_public_chats, search_recently_found_chats, send_animation,
@@ -48,7 +50,10 @@ use crate::telegram::requests::{
     send_photo, send_poll, send_sticker, send_text, send_text_story_reply, send_video,
     send_video_note, send_voice_note, set_authentication_phone_number, set_chat_draft_message,
     set_chat_message_auto_delete_time, set_chat_notification_settings, set_chat_slow_mode_delay,
-    set_poll_answer, set_scope_notification_settings, set_story_reaction, toggle_chat_folder_tags,
+    set_poll_answer, set_scope_notification_settings, set_story_reaction, set_video_chat_title,
+    toggle_chat_folder_tags, toggle_group_call_is_my_video_enabled,
+    toggle_group_call_is_my_video_paused, toggle_group_call_participant_is_hand_raised,
+    toggle_group_call_participant_is_muted, toggle_video_chat_mute_new_participants,
     unpin_chat_message, view_messages, view_sponsored_chat,
 };
 use crate::voice::VoiceDraft;
@@ -505,6 +510,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         // Phase C1: incoming calls that arrived while another call was
         // active are declined (busy).
         let _ = self.maybe_decline_busy_calls();
+        // Phase C3a: freshly created voice chats get their full
+        // `groupCall` via `getGroupCall`.
+        let _ = self.maybe_fetch_group_calls();
         self.maybe_load_selected_sticker_set()?;
         self.maybe_refresh_saved_animations()?;
         if chat_search_hits {
@@ -1510,6 +1518,438 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         if let Some(summary) = self.session.call_summary.as_mut() {
             summary.rating_sent = true;
+        }
+        Ok(extra)
+    }
+
+    /// Phase C3a: `createVideoChat` — start a voice chat on a group or
+    /// channel (schema 1.8.67, :14256). Signaling only: the chat-bound
+    /// creation path. The `groupCallId` answer queues a `getGroupCall`
+    /// fetch; live state arrives as `updateGroupCall`.
+    pub fn start_video_chat(
+        &mut self,
+        chat_id: i64,
+        title: String,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let is_group_or_channel = self.session.chats.get(&chat_id).is_some_and(|chat| {
+            matches!(
+                chat.kind,
+                ChatKind::BasicGroup { .. } | ChatKind::Supergroup { .. }
+            )
+        });
+        if !is_group_or_channel {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if self.session.active_group_call.is_some() || self.session.active_call.is_some() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::CreateVideoChat { chat_id }, None);
+        if let Err(err) = self
+            .sender
+            .send_json(&create_video_chat(extra, chat_id, &title, 0, false))
+        {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(extra)
+    }
+
+    /// Phase C3a: `joinVideoChat` for a chat-bound voice chat (schema
+    /// 1.8.67, :14292). Joins as self with the honest no-device join
+    /// params (`audio_source_id` 0, empty payload — no audio device /
+    /// tgcalls engine until Phase C2). The `Text` response (tgcalls
+    /// join payload) is stored, never consumed.
+    pub fn join_video_chat(&mut self, group_call_id: i32) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        // Never join while a 1:1 call is active. A tracked group call is
+        // fine to join when it is the same call and not yet joined (the
+        // normal flow: getGroupCall creates the unjoined tracker, then the
+        // overlay's Join button calls this). Reject a different tracked call
+        // or one already joined.
+        if self.session.active_call.is_some() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        match &self.session.active_group_call {
+            Some(call) if call.id == group_call_id && !call.is_joined => {}
+            _ => return Err(ConnectSendError::InvalidRequest),
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::JoinVideoChat { group_call_id }, None);
+        let params = GroupCallJoinParams::honest_no_device();
+        if let Err(err) =
+            self.sender
+                .send_json(&join_video_chat(extra, group_call_id, None, &params, ""))
+        {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(extra)
+    }
+
+    /// Phase C3a: `getGroupCall` for a known call id (schema 1.8.67,
+    /// :14274). Used to start tracking a voice chat found via a chat's
+    /// `video_chat` affordance.
+    pub fn fetch_group_call(&mut self, group_call_id: i32) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::GetGroupCall { group_call_id }, None);
+        if let Err(err) = self.sender.send_json(&get_group_call(extra, group_call_id)) {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(extra)
+    }
+
+    /// Phase C3a: drain `Session::group_call_fetch_queue` — `getGroupCall`
+    /// for freshly created voice chats. Called from `ingest`.
+    fn maybe_fetch_group_calls(&mut self) -> Result<(), ConnectSendError> {
+        if !self.chats_path_active() {
+            return Ok(());
+        }
+        let queued: Vec<i32> = std::mem::take(&mut self.session.group_call_fetch_queue);
+        for group_call_id in queued {
+            if let Err(err) = self.fetch_group_call(group_call_id) {
+                // Best-effort: re-queue for the next ingest tick; the
+                // `updateGroupCall` backstop still tracks the call.
+                let _ = err;
+                self.session.group_call_fetch_queue.push(group_call_id);
+            }
+        }
+        Ok(())
+    }
+
+    /// Phase C3a: rejoin after `need_rejoin` (schema 1.8.67, line 7154
+    /// docs: "user was kicked from the call because of network loss and
+    /// the call needs to be rejoined"). Clears the `reconnecting` flag
+    /// and re-issues `joinVideoChat` with the current self-mute state.
+    pub fn rejoin_group_call(&mut self) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let (group_call_id, is_muted) = match &self.session.active_group_call {
+            Some(call) if call.reconnecting => (call.id, call.is_muted_self),
+            _ => return Err(ConnectSendError::InvalidRequest),
+        };
+        self.session.clear_group_call_reconnecting();
+        let extra = self
+            .session
+            .request(RequestPurpose::JoinVideoChat { group_call_id }, None);
+        let mut params = GroupCallJoinParams::honest_no_device();
+        params.is_muted = is_muted;
+        if let Err(err) =
+            self.sender
+                .send_json(&join_video_chat(extra, group_call_id, None, &params, ""))
+        {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(extra)
+    }
+
+    /// Phase C3a: `leaveGroupCall` (schema 1.8.67, :14458). Drops the
+    /// tracked call; the `ok` confirms (state also handles the
+    /// `!is_active` backstop).
+    pub fn leave_group_call(&mut self) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let group_call_id = match &self.session.active_group_call {
+            Some(call) => call.id,
+            None => return Err(ConnectSendError::InvalidRequest),
+        };
+        let extra = self
+            .session
+            .request(RequestPurpose::LeaveGroupCall { group_call_id }, None);
+        if let Err(err) = self
+            .sender
+            .send_json(&leave_group_call(extra, group_call_id))
+        {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(extra)
+    }
+
+    /// Phase C3a: `endGroupCall` (schema 1.8.67, :14461). Gated on
+    /// `groupCall.can_be_managed` (video chats).
+    pub fn end_group_call(&mut self) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let group_call_id = match &self.session.active_group_call {
+            Some(call) if call.can_be_managed => call.id,
+            _ => return Err(ConnectSendError::InvalidRequest),
+        };
+        let extra = self
+            .session
+            .request(RequestPurpose::EndGroupCall { group_call_id }, None);
+        if let Err(err) = self.sender.send_json(&end_group_call(extra, group_call_id)) {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(extra)
+    }
+
+    /// Phase C3a: local-only self mute toggle. There is no TDLib "mute
+    /// self" for group calls outside the join parameters, and no audio
+    /// path exists yet (C2) — the UI labels this honestly as
+    /// local-only; the state rides on the next (re)join.
+    pub fn toggle_group_call_self_mute(&mut self) {
+        let muted = !self
+            .session
+            .active_group_call
+            .as_ref()
+            .is_some_and(|c| c.is_muted_self);
+        self.session.set_group_call_self_muted(muted);
+    }
+
+    /// Phase C3a: `toggleGroupCallIsMyVideoEnabled` (schema 1.8.67,
+    /// :14414). Signaling-only: tracks state, no camera (Phase C2).
+    pub fn toggle_group_call_my_video(&mut self) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let (group_call_id, enable) = match &self.session.active_group_call {
+            Some(call) => (call.id, !call.is_my_video_enabled),
+            None => return Err(ConnectSendError::InvalidRequest),
+        };
+        let extra = self
+            .session
+            .request(RequestPurpose::ToggleGroupCallVideo { group_call_id }, None);
+        if let Err(err) = self
+            .sender
+            .send_json(&toggle_group_call_is_my_video_enabled(
+                extra,
+                group_call_id,
+                enable,
+            ))
+        {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(extra)
+    }
+
+    /// Phase C3a: `toggleGroupCallIsMyVideoPaused` (schema 1.8.67,
+    /// :14411). Signaling-only: tracks state, no camera (Phase C2).
+    pub fn toggle_group_call_my_video_paused(&mut self) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let (group_call_id, pause) = match &self.session.active_group_call {
+            Some(call) if call.is_my_video_enabled => (call.id, !call.is_my_video_paused),
+            _ => return Err(ConnectSendError::InvalidRequest),
+        };
+        let extra = self
+            .session
+            .request(RequestPurpose::ToggleGroupCallVideo { group_call_id }, None);
+        if let Err(err) = self.sender.send_json(&toggle_group_call_is_my_video_paused(
+            extra,
+            group_call_id,
+            pause,
+        )) {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(extra)
+    }
+
+    /// Phase C3a: `toggleGroupCallParticipantIsMuted` (schema 1.8.67,
+    /// :14431). The caller gates on the participant's
+    /// `can_be_muted_for_all_users` / `can_be_unmuted_for_all_users`.
+    pub fn toggle_group_call_participant_muted(
+        &mut self,
+        participant_id: MessageSender,
+        mute: bool,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let group_call_id = match &self.session.active_group_call {
+            Some(call) => call.id,
+            None => return Err(ConnectSendError::InvalidRequest),
+        };
+        let sender_ref = match participant_id {
+            MessageSender::User { user_id } => MessageSenderRef::User(user_id),
+            MessageSender::Chat { chat_id } => MessageSenderRef::Chat(chat_id),
+        };
+        let extra = self.session.request(
+            RequestPurpose::ToggleGroupCallParticipantMute { group_call_id },
+            None,
+        );
+        if let Err(err) = self
+            .sender
+            .send_json(&toggle_group_call_participant_is_muted(
+                extra,
+                group_call_id,
+                &sender_ref,
+                mute,
+            ))
+        {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(extra)
+    }
+
+    /// Phase C3a: `toggleGroupCallParticipantIsHandRaised` (schema
+    /// 1.8.67, :14444). Only the self hand can be raised; lowering
+    /// others' hands requires `groupCall.can_be_managed` (gated by the
+    /// caller).
+    pub fn toggle_group_call_participant_hand(
+        &mut self,
+        participant_id: MessageSender,
+        raise: bool,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let group_call_id = match &self.session.active_group_call {
+            Some(call) => call.id,
+            None => return Err(ConnectSendError::InvalidRequest),
+        };
+        let sender_ref = match participant_id {
+            MessageSender::User { user_id } => MessageSenderRef::User(user_id),
+            MessageSender::Chat { chat_id } => MessageSenderRef::Chat(chat_id),
+        };
+        let extra = self.session.request(
+            RequestPurpose::ToggleGroupCallParticipantHand { group_call_id },
+            None,
+        );
+        if let Err(err) = self
+            .sender
+            .send_json(&toggle_group_call_participant_is_hand_raised(
+                extra,
+                group_call_id,
+                &sender_ref,
+                raise,
+            ))
+        {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(extra)
+    }
+
+    /// Phase C3a: `toggleVideoChatMuteNewParticipants` (schema 1.8.67,
+    /// :14317). Gated on `groupCall.can_toggle_mute_new_participants`.
+    pub fn toggle_video_chat_mute_new(&mut self) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let (group_call_id, mute_new) = match &self.session.active_group_call {
+            Some(call) if call.can_toggle_mute_new_participants => {
+                (call.id, !call.mute_new_participants)
+            }
+            _ => return Err(ConnectSendError::InvalidRequest),
+        };
+        let extra = self.session.request(
+            RequestPurpose::ToggleVideoChatMuteNew { group_call_id },
+            None,
+        );
+        if let Err(err) = self
+            .sender
+            .send_json(&toggle_video_chat_mute_new_participants(
+                extra,
+                group_call_id,
+                mute_new,
+            ))
+        {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(extra)
+    }
+
+    /// Phase C3a: `setVideoChatTitle` (schema 1.8.67, :14312). Gated on
+    /// `groupCall.can_be_managed`.
+    pub fn set_video_chat_title(&mut self, title: String) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let group_call_id = match &self.session.active_group_call {
+            Some(call) if call.can_be_managed => call.id,
+            _ => return Err(ConnectSendError::InvalidRequest),
+        };
+        let title = title.trim().to_string();
+        if title.is_empty() || title.chars().count() > 64 {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::SetVideoChatTitle { group_call_id }, None);
+        if let Err(err) = self
+            .sender
+            .send_json(&set_video_chat_title(extra, group_call_id, &title))
+        {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(extra)
+    }
+
+    /// Phase C3a: `getVideoChatInviteLink` (schema 1.8.67, :14395). The
+    /// `HttpUrl` answer is stored on the tracked call for the UI to
+    /// show. `can_self_unmute: true` requires `can_be_managed` — the
+    /// caller passes `call.can_be_managed`.
+    pub fn fetch_video_chat_invite_link(
+        &mut self,
+        can_self_unmute: bool,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let group_call_id = match &self.session.active_group_call {
+            Some(call) => call.id,
+            None => return Err(ConnectSendError::InvalidRequest),
+        };
+        let extra = self.session.request(
+            RequestPurpose::GetVideoChatInviteLink { group_call_id },
+            None,
+        );
+        if let Err(err) = self.sender.send_json(&get_video_chat_invite_link(
+            extra,
+            group_call_id,
+            can_self_unmute,
+        )) {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(extra)
+    }
+
+    /// Phase C3a: `loadGroupCallParticipants` (schema 1.8.67, :14455)
+    /// — page more participants (up to 100). Gated on
+    /// `!loaded_all_participants`.
+    pub fn load_more_group_call_participants(&mut self) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let group_call_id = match &self.session.active_group_call {
+            Some(call) if !call.loaded_all_participants => call.id,
+            _ => return Err(ConnectSendError::InvalidRequest),
+        };
+        let extra = self.session.request(
+            RequestPurpose::LoadGroupCallParticipants { group_call_id },
+            None,
+        );
+        if let Err(err) =
+            self.sender
+                .send_json(&load_group_call_participants(extra, group_call_id, 100))
+        {
+            self.session.requests.take(extra);
+            return Err(err);
         }
         Ok(extra)
     }
@@ -9702,6 +10142,61 @@ mod tests {
         assert_eq!(content["options"][0]["text"]["text"], "Sushi");
         assert_eq!(content["type"]["@type"], "inputPollTypeRegular");
         assert!(!sink.rendered().contains("CANARY"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Phase C3a: `join_video_chat` must accept the tracked, unjoined call
+    /// (the normal flow: `getGroupCall` creates the tracker, then the
+    /// overlay's Join button calls this) while rejecting a missing,
+    /// mismatched, or already-joined call.
+    #[test]
+    fn join_video_chat_guard_allows_tracked_unjoined_call() {
+        const UNJOINED_CALL: &str = r#"{"@type":"updateGroupCall","group_call":{"@type":"groupCall","id":555,"unique_id":"999","title":"Demo voice","invite_link":"","paid_message_star_count":0,"scheduled_start_date":0,"enabled_start_notification":false,"is_active":true,"is_video_chat":true,"is_live_story":false,"is_rtmp_stream":false,"is_joined":false,"need_rejoin":false,"is_owned":false,"can_be_managed":true,"participant_count":0,"has_hidden_listeners":false,"loaded_all_participants":false,"message_sender_id":null,"recent_speakers":[],"is_my_video_enabled":false,"is_my_video_paused":false,"can_enable_video":true,"mute_new_participants":false,"can_toggle_mute_new_participants":true,"can_send_messages":true,"are_messages_allowed":true,"can_toggle_are_messages_allowed":false,"can_delete_messages":false,"record_duration":0,"is_video_recorded":false,"duration":0}}"#;
+
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = Arc::new(RecordingSender::new());
+        let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+        let mut driver =
+            ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+        let seq = AtomicU64::new(0);
+        seed_ready_alice(&mut driver, &seq, &dyn_sink);
+
+        // No tracked call: rejected.
+        assert_invalid(driver.join_video_chat(555));
+
+        // Track call 555 unjoined, as `getGroupCall` would: join allowed.
+        driver
+            .ingest(copy_and_parse(UNJOINED_CALL, &seq, &dyn_sink).unwrap())
+            .unwrap();
+        assert!(
+            driver
+                .session
+                .active_group_call
+                .as_ref()
+                .is_some_and(|c| c.id == 555 && !c.is_joined)
+        );
+        let extra = driver
+            .join_video_chat(555)
+            .expect("join tracked unjoined call");
+        let sent = recorder
+            .snapshot()
+            .last()
+            .cloned()
+            .expect("joinVideoChat sent");
+        let v: Value = serde_json::from_str(&sent).unwrap();
+        assert_eq!(v["@type"], "joinVideoChat");
+        assert_eq!(v["@extra"], extra.0.to_string());
+        assert_eq!(v["group_call_id"], 555);
+
+        // A different tracked call id is rejected…
+        assert_invalid(driver.join_video_chat(777));
+        // …and so is the same call once joined.
+        driver.session.active_group_call.as_mut().unwrap().is_joined = true;
+        assert_invalid(driver.join_video_chat(555));
+
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

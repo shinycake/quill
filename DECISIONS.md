@@ -2701,6 +2701,52 @@ ntgcalls 3.0.0 speaks the call-protocol version TDLib 1.8.67 negotiates
 (min layer 65 / max from `ntg_get_protocol`, `library_versions`) before
 shipping real audio.
 
+## Phase C3a — group-call signaling surface (2026-09-26)
+
+**Scope: chat-bound voice chats, signaling only.** No audio/video
+transport (Phase C2), so the UI always carries the exact honest note
+"No audio yet — voice transport ships in Phase C2." (Mute is labeled
+local-only.)
+
+**Schema corrections (verified directly against `schema/td_api.tl`,
+TDLib 1.8.67 — the original brief had these wrong):**
+- Chat-bound voice/video chats are created with `createVideoChat
+  chat_id:int53 title:string start_date:int32 is_rtmp_stream:Bool =
+  GroupCallId` (line 14256), NOT `createGroupCall`.
+- `createGroupCall` (line 14259) creates a group call **not bound to a
+  chat**; this slice doesn't expose it (driver has the builder only).
+- Chat-bound joining uses `joinVideoChat` (line 14292); the
+  non-chat-bound join is `joinGroupCall` (line 14285).
+- The exact mute-new-participants method is
+  `toggleVideoChatMuteNewParticipants` (line 14317) — there is no
+  `toggleGroupCallMuteNewParticipants`.
+
+**Shipped:** `createVideoChat` / `joinVideoChat` (honest no-device
+join params: `audio_source_id` 0, empty payload) / `leaveGroupCall` /
+`endGroupCall` / self-video enable+pause toggles / participant
+mute+hand toggles / `toggleVideoChatMuteNewParticipants` /
+`setVideoChatTitle` / `getVideoChatInviteLink` / `loadGroupCallParticipants`
+/ `declineGroupCallInvitation` (builder only); full
+`updateGroupCall` + `updateGroupCallParticipant` +
+`updateGroupCallParticipants` + `updateGroupCallVerificationState` +
+`updateChatVideoChat` parsing and state (participant ordering: recent
+speakers first, then `order` desc lexicographic; `need_rejoin` →
+reconnect banner → rejoin; `!is_active` → clear; join `Text` payload
+stored, never consumed; invite-link `HttpUrl` stored); header
+voice-chat affordance ("Start voice chat" / "🔊 Voice chat") for
+groups/channels; overlay with participant grid (speaking / muted /
+hand-raised / video / screen-share badges), E2E verification emojis,
+self controls, admin controls gated on the actual flags
+(`can_be_managed`, `can_toggle_mute_new_participants`), invite-link
+display, rename dialog; `tests/replay.rs::replay_group_call_signaling`
+covers create → join → participants → speaking → mute/hand →
+verification → reconnect → leave/end (injected; live needs tdjson).
+
+**Out of this slice:** non-chat-bound group calls (`createGroupCall` /
+`joinGroupCall` UI), actual audio/video transport (Phase C2),
+`sendGroupCallDebugInformation`, call recording / RTMP / scheduled
+voice chats.
+
 ## Phase E — emoji × all languages (folded in 2026-09-26, per Idan)
 
 Emoji must play nice with every language, not just RTL. The E1 audit
