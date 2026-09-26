@@ -21,6 +21,32 @@ pub fn video_frame_cache_dir(file_id: i32) -> PathBuf {
     video_frame_cache_root().join(file_id.to_string())
 }
 
+/// Parent of every viewer frame directory. The media viewer extracts
+/// full-clip frames at viewer resolution, separate from the row preview's
+/// 12-frame cache, so the two never share a directory.
+pub fn viewer_frame_cache_root() -> PathBuf {
+    std::env::temp_dir().join("quill-viewer-frames")
+}
+
+/// Per-file viewer frame directory: `{viewer_frame_cache_root}/{file_id}`.
+pub fn viewer_frame_cache_dir(file_id: i32) -> PathBuf {
+    viewer_frame_cache_root().join(file_id.to_string())
+}
+
+/// Account or demo roots plus the viewer frame cache. Creates the cache root
+/// so `sandboxed_display_path` can canonicalize it.
+pub fn with_viewer_frame_cache(mut roots: Vec<PathBuf>) -> Vec<PathBuf> {
+    let root = viewer_frame_cache_root();
+    let _ = std::fs::create_dir_all(&root);
+    roots.push(root);
+    roots
+}
+
+/// Remove extracted viewer frames for one file.
+pub fn discard_viewer_frame_cache(file_id: i32) {
+    let _ = std::fs::remove_dir_all(viewer_frame_cache_dir(file_id));
+}
+
 /// Account or demo roots plus the video frame cache. Creates the cache root so
 /// `sandboxed_display_path` can canonicalize it.
 pub fn with_video_frame_cache(mut roots: Vec<PathBuf>) -> Vec<PathBuf> {
@@ -386,20 +412,73 @@ pub fn playback_frames(
     if !is_playable_video(mime, src) {
         return Err("unsupported video".into());
     }
-    let frames = extract_frames(src, cache_dir, start_timestamp)?;
+    let frames = extract_frames(src, cache_dir, start_timestamp, 8.0, 240, 12)?;
     if frames.is_empty() {
         return Err("ffmpeg produced no frames".into());
     }
     Ok(frames)
 }
 
+/// Full-clip frames for the media viewer (parity slice 5).
+///
+/// The row preview extracts 12 frames at 8 fps; the viewer needs the whole
+/// clip so decoded frames render in-place. Frame rate adapts to `duration_secs`
+/// to bound the cache: 8 fps for clips up to 75 s, then fewer fps to stay
+/// under `VIEWER_MAX_FRAMES` (600). `fps` is the actual extraction rate, used
+/// to map the playback clock to a frame index.
+pub struct ViewerFrames {
+    pub frames: Vec<PathBuf>,
+    pub fps: f64,
+}
+
+/// Maximum viewer frames per clip (75 s at 8 fps). Longer clips get a lower
+/// fps so the full duration stays covered.
+pub const VIEWER_MAX_FRAMES: i32 = 600;
+/// Viewer extraction frame rate for clips within the frame budget.
+pub const VIEWER_FPS: f64 = 8.0;
+/// Viewer frame width in px (matches the viewer's fixed frame).
+pub const VIEWER_FRAME_WIDTH: i32 = 720;
+
+pub fn viewer_playback_frames(
+    src: &Path,
+    mime: &str,
+    cache_dir: &Path,
+    start_timestamp: i32,
+    duration_secs: i32,
+) -> Result<ViewerFrames, String> {
+    if !is_playable_video(mime, src) {
+        return Err("unsupported video".into());
+    }
+    let fps = if duration_secs > 0 {
+        (f64::from(VIEWER_MAX_FRAMES) / f64::from(duration_secs)).min(VIEWER_FPS)
+    } else {
+        VIEWER_FPS
+    };
+    let fps = fps.max(1.0);
+    let frames = extract_frames(
+        src,
+        cache_dir,
+        start_timestamp,
+        fps,
+        VIEWER_FRAME_WIDTH,
+        VIEWER_MAX_FRAMES,
+    )?;
+    if frames.is_empty() {
+        return Err("ffmpeg produced no frames".into());
+    }
+    Ok(ViewerFrames { frames, fps })
+}
+
 fn extract_frames(
     src: &Path,
     cache_dir: &Path,
     start_timestamp: i32,
+    fps: f64,
+    width: i32,
+    max_frames: i32,
 ) -> Result<Vec<PathBuf>, String> {
     std::fs::create_dir_all(cache_dir).map_err(|err| err.to_string())?;
-    let pattern = cache_dir.join("frame-%02d.png");
+    let pattern = cache_dir.join("frame-%03d.png");
     let mut command = Command::new("ffmpeg");
     command.args(["-y", "-hide_banner", "-loglevel", "error"]);
     if start_timestamp > 0 {
@@ -408,7 +487,12 @@ fn extract_frames(
     let status = command
         .arg("-i")
         .arg(src)
-        .args(["-vf", "fps=8,scale=240:-1", "-frames:v", "12"])
+        .args([
+            "-vf",
+            &format!("fps={fps:.2},scale={width}:-1"),
+            "-frames:v",
+            &max_frames.to_string(),
+        ])
         .arg(&pattern)
         .status()
         .map_err(|err| format!("video playback needs ffmpeg ({err})"))?;
@@ -534,5 +618,31 @@ mod tests {
         let clip = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("docs/screenshots/fixtures/demo-clip.mp4");
         assert!(probe_local_video_note(&clip).is_err());
+    }
+
+    #[test]
+    fn viewer_frames_cover_full_clip_with_adaptive_fps() {
+        let clip = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("docs/screenshots/fixtures/demo-clip-12s.mp4");
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time")
+            .as_nanos();
+        let cache = std::env::temp_dir().join(format!("quill-viewer-test-{nanos}"));
+        // 12 s at 8 fps = 96 frames, under the 600-frame cap.
+        let vf = viewer_playback_frames(&clip, "video/mp4", &cache, 0, 12).expect("frames");
+        assert_eq!(vf.fps, 8.0);
+        assert_eq!(vf.frames.len(), 96);
+        // A long clip gets a lower fps so the full duration stays covered.
+        let vf_long = viewer_playback_frames(&clip, "video/mp4", &cache, 0, 300).expect("frames");
+        assert_eq!(vf_long.fps, 2.0);
+        assert!(vf_long.frames.len() <= 600);
+        let _ = std::fs::remove_dir_all(&cache);
+    }
+
+    #[test]
+    fn viewer_frame_cache_is_separate_from_row_preview_cache() {
+        assert_ne!(video_frame_cache_dir(96), viewer_frame_cache_dir(96));
+        assert!(viewer_frame_cache_dir(96).starts_with(viewer_frame_cache_root()));
     }
 }

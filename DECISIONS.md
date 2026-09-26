@@ -1674,3 +1674,66 @@ Research snapshot 2026-09-16, pin recheck **2026-09-17**.
   threading `sendChatAction` typing into the open topic; General-topic
   main-history special-casing; per-topic notification/unread behavior;
   topic-list pagination beyond 100; richer topic icons.
+
+## Parity slice — In-viewer video playback + photo zoom/pan (2026-09-26)
+
+- **Rationale:** The media viewer (slice 4) showed video thumbnails and
+  launched an external ffplay window for playback — not "in-viewer".
+  This slice renders decoded video frames inside the GPUI viewer, adds
+  photo zoom/pan, left/right viewer navigation, and opens the viewer
+  from album mosaics.
+- **Schema (1.8.67, verified in `schema/td_api.tl` — no invented
+  constructors/fields):**
+  - `file` (line 311); `thumbnail` (line 375); `video` (line 606);
+    `messageVideo` (line 5188).
+  - Reused `messageVideo.video`, `messageVideo.start_timestamp`,
+    `video.thumbnail`, `video.duration`, `video.mime_type`, and the
+    existing `downloadFile` request. No new TDLib constructors.
+- **Model (`src/ui/mod.rs`).** `MediaViewerItem` gains `play_file_id:
+  Option<FileId>`, `duration_secs: Option<i32>`, `mime_type:
+  Option<String>`, `start_timestamp: Option<i32>`. Photos set the
+  playback-specific fields to `None`. Video tests verify propagation
+  of file ID, duration, MIME type, and start timestamp.
+- **Playback (`src/video.rs`, `src/ui/mod.rs`).** Full-clip PNG
+  extraction via ffmpeg at viewer width (720 px):
+  - Normal rate 8 fps; cache capped at 600 frames; clips longer than
+    75 s use an adaptive lower fps (minimum 1 fps).
+  - Viewer clock maps elapsed time to the displayed frame; GPUI
+    refresh tick is 125 ms.
+  - `ffplay -nodisp -autoexit` provides audio only; if ffplay/audio is
+    unavailable, frame playback continues silently.
+  - Extraction runs async in normal use (thumbnail + "Loading video…"
+    until ready). Viewer frames use a separate cache under
+    `/tmp/quill-viewer-frames/{file_id}`, display-allowlisted.
+  - Closing or stepping the viewer stops audio, clears frames, and
+    removes the cache.
+  - **Known limitation:** GPUI's `img` element caches by element ID
+    and does not reliably reload when the path changes rapidly (every
+    125 ms). The screenshot demo uses a fixed frame index (stable
+    path) to render correctly. Smooth in-viewer animation requires a
+    custom GPUI element or pre-loaded image handles — out of scope.
+- **Zoom/pan (`src/ui/mod.rs`).** `ViewerZoom`: 1×–8×, factor 1.15,
+  center-preserving zoom, clamped drag pan, reset/fit. Controls: mouse
+  wheel zoom, drag pan while zoomed, double-click reset, `+`/`-`/Reset
+  buttons, `0`/`=`/`-` keyboard shortcuts. Key handlers only stop
+  propagation while the viewer is open. Opening or stepping resets
+  zoom and stops existing playback.
+- **Navigation/albums.** Left/Right arrows step through viewer items;
+  album photo/video tiles open the media viewer; clicking a
+  non-openable message no longer falls back to unrelated item zero.
+- **Overlay styling.** GPUI Kit Ghost buttons rendered effectively
+  black on the dark viewer overlay; added explicit white text to
+  viewer zoom, Play/Pause, Download, Prev, Next controls (and story
+  viewer Prev/Next).
+- **Screenshot:** `docs/screenshots/ready-video-playback.png` —
+  `quill --screenshot-demo ready-video-playback` opens the media
+  viewer on a 12 s demo clip (message 204, file 96,
+  `docs/screenshots/fixtures/demo-clip-12s.mp4`, ffmpeg `testsrc`
+  320×180 30 fps), extracts 96 frames synchronously (deterministic
+  capture), seeks to 5 s, and shows the decoded frame in-viewer with
+  "❚❚ Pause", "0:06 / 0:12", zoom controls, caption "Demo clip", and
+  Prev/Next navigation. The ffplay subprocess is skipped in the demo.
+- **Out of this slice (→ future):** smooth animated in-viewer
+  playback (GPUI img limitation above); streaming/HLS; storyboard
+  scrubbing; alternative qualities; opening documents/GIFs/stickers/
+  audio in the viewer; mpv IPC.

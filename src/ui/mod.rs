@@ -23,7 +23,9 @@ use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::folders::FolderEditor;
 use quill::ids::{AccountKey, ChatId, FileId, MessageId};
 use quill::local_path::sandboxed_display_path;
-use quill::media_viewer::{MediaViewer, MediaViewerItem, MediaViewerKind, collect_media_items};
+use quill::media_viewer::{
+    MediaViewer, MediaViewerItem, MediaViewerKind, ViewerZoom, collect_media_items,
+};
 use quill::notify::QueuedNotification;
 use quill::platform::live_secret_store;
 use quill::playback::PlaybackClock;
@@ -71,7 +73,17 @@ actions!(
         QuitApp,
         SubmitPhone,
         SubmitCode,
-        SubmitPassword
+        SubmitPassword,
+        /// Parity slice 5: step the fullscreen media viewer to the
+        /// previous / next item (left/right arrows, viewer-open only).
+        ViewerPrev,
+        ViewerNext,
+        /// Parity slice 5: reset the viewer visual's zoom/pan to fit (`0`).
+        ViewerZoomReset,
+        /// Parity slice 5: zoom the viewer visual in/out (`=` / `-`,
+        /// viewer-open only).
+        ViewerZoomIn,
+        ViewerZoomOut
     ]
 );
 
@@ -98,6 +110,13 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("cmd-shift-g", ChatSearchOlder, None),
         KeyBinding::new("ctrl-shift-g", ChatSearchOlder, None),
         KeyBinding::new("escape", CancelSearch, None),
+        // Parity slice 5: the handlers no-op (and let the keystroke reach
+        // text inputs) unless the media viewer is open.
+        KeyBinding::new("left", ViewerPrev, None),
+        KeyBinding::new("right", ViewerNext, None),
+        KeyBinding::new("0", ViewerZoomReset, None),
+        KeyBinding::new("=", ViewerZoomIn, None),
+        KeyBinding::new("-", ViewerZoomOut, None),
     ]);
 }
 
@@ -407,6 +426,42 @@ pub struct QuillApp {
     poll_dialog: Option<PollDialog>,
     /// Phase 4.5: fullscreen media viewer (photo/video overlay).
     media_viewer: MediaViewer,
+    /// Parity slice 5: zoom/pan of the viewer visual (reset on open/step).
+    viewer_zoom: ViewerZoom,
+    /// Parity slice 5: drag-pan anchor — last mouse position in px while the
+    /// left button is held over the zoomed visual.
+    viewer_drag: Option<(f32, f32)>,
+    /// Parity slice 5: message whose video clip is playing in the viewer
+    /// (ffplay child alive) or paused (clock frozen, no child).
+    viewer_video: Option<MessageId>,
+    /// Sandbox-checked local path of the viewer's clip, for pause/resume
+    /// ffplay restarts.
+    viewer_video_path: Option<PathBuf>,
+    /// The viewer's ffplay child (audio-only `-nodisp`; the video frames
+    /// render in-viewer). Killed when the viewer closes, steps, or pauses.
+    viewer_player: Option<Child>,
+    /// Playback clock for the viewer's clip (elapsed/total + pause freeze).
+    viewer_clock: Option<PlaybackClock>,
+    /// Decoded frames for the viewer's clip, rendered in-place (parity
+    /// slice 5). Empty until extraction finishes; the thumbnail shows meanwhile.
+    viewer_video_frames: Vec<PathBuf>,
+    /// Frame rate of `viewer_video_frames`, for clock → frame-index mapping.
+    viewer_video_fps: f64,
+    /// File ID whose frames are in `viewer_video_frames` (cache invalidation).
+    viewer_frame_cache_file: Option<i32>,
+    /// Frame extraction in progress (async); the viewer shows the thumbnail
+    /// with a "loading video" hint until frames land.
+    viewer_extracting: bool,
+    /// Screenshot demo only: skip the async frame extraction in
+    /// `maybe_autoplay_viewer_video` (the demo extracts synchronously), and
+    /// use a fixed frame index (GPUI's `img` doesn't handle rapidly changing
+    /// paths; a stable path renders correctly for the screenshot).
+    viewer_demo_sync_frames: bool,
+    /// Guard for the viewer's 250 ms elapsed tick.
+    viewer_tick: bool,
+    /// Play was requested before the clip was local. Resumed from the poll
+    /// loop when `downloadFile` finishes.
+    viewer_pending_play: Option<(MessageId, FileId)>,
     /// Phase 9.1: fullscreen story viewer (active-story tray → overlay).
     story_viewer: StoryViewer,
     /// Phase 9.1: `(chat_id, story_id)` the user tapped while the story's
@@ -542,6 +597,13 @@ pub enum ScreenshotDemo {
     /// photo chat with the viewer overlay open on the downloaded photo
     /// (Phase 4.5).
     ReadyMediaViewer,
+    /// Video-playback demo (injected, no live Telegram): the ReadyMedia
+    /// seed plus a downloaded video (message 204); the viewer opens on it
+    /// with playback faked mid-track (no ffplay subprocess — the tick
+    /// advances the elapsed label, like the seek-bars demo). The clip's
+    /// 12 s duration is fixture data for the screenshot.
+    /// (Parity slice 5.)
+    ReadyVideoPlayback,
     /// Story viewer demo (injected, no live Telegram): the story tray above
     /// the chat list for "Demo chat A"/"Demo chat B" plus the story viewer
     /// overlay open on Demo chat A's downloaded photo story (Phase 9.1).
@@ -1191,6 +1253,15 @@ impl QuillApp {
                     AuthorizationState::Ready,
                 )
             }
+            Some(ScreenshotDemo::ReadyVideoPlayback) => {
+                demo_session = Some(seed_ready_media_session(demo_sink.clone()));
+                (
+                    ConnectUiStatus::DemoReadyChats,
+                    None,
+                    "screenshot demo — in-viewer video playback".into(),
+                    AuthorizationState::Ready,
+                )
+            }
             Some(ScreenshotDemo::ReadyStories) => {
                 demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
                 (
@@ -1393,6 +1464,19 @@ impl QuillApp {
             spoiler_revealed: HashSet::new(),
             poll_dialog: None,
             media_viewer: MediaViewer::closed(),
+            viewer_zoom: ViewerZoom::new(),
+            viewer_drag: None,
+            viewer_video: None,
+            viewer_video_path: None,
+            viewer_player: None,
+            viewer_clock: None,
+            viewer_tick: false,
+            viewer_pending_play: None,
+            viewer_video_frames: Vec::new(),
+            viewer_video_fps: 0.0,
+            viewer_frame_cache_file: None,
+            viewer_extracting: false,
+            viewer_demo_sync_frames: false,
             story_viewer: StoryViewer::closed(),
             pending_story_open: None,
             story_reaction_picker_open: false,
@@ -1745,6 +1829,47 @@ impl QuillApp {
             app.open_media_viewer(ChatId(11), MessageId(201), cx);
             app.status_note = "screenshot demo — fullscreen media viewer".into();
         }
+        if matches!(demo, Some(ScreenshotDemo::ReadyVideoPlayback)) {
+            if let Some(session) = app.demo_session.as_mut() {
+                app.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_video_viewer(session, &app.demo_sink, &app.demo_seq);
+            }
+            // The Media seed plus a downloaded 12 s video (204, "Demo clip",
+            // file 96). The demo extracts frames synchronously (blocking
+            // ~2 s) for a deterministic capture — real in-viewer playback,
+            // not faked. `viewer_demo_sync_frames` suppresses the async
+            // extraction that `open_media_viewer` would otherwise start.
+            // The ffplay subprocess is skipped (demo), like the audio slice.
+            app.viewer_demo_sync_frames = true;
+            app.open_media_viewer(ChatId(11), MessageId(204), cx);
+            if let Some(item) = app.media_viewer.current().cloned()
+                && let Some(path) = app.viewer_clip_path(&item)
+            {
+                let file_id = item.play_file_id.map(|id| id.0).unwrap_or(0);
+                let cache = quill::video::viewer_frame_cache_dir(file_id);
+                let mime = item.mime_type.clone().unwrap_or_default();
+                let duration = item.duration_secs.unwrap_or(0);
+                let start_timestamp = item.start_timestamp.unwrap_or(0);
+                if let Ok(viewer_frames) = quill::video::viewer_playback_frames(
+                    &path,
+                    &mime,
+                    &cache,
+                    start_timestamp,
+                    duration,
+                ) {
+                    app.viewer_video_frames = viewer_frames.frames;
+                    app.viewer_video_fps = viewer_frames.fps;
+                    app.viewer_frame_cache_file = Some(file_id);
+                    app.play_viewer_video(&item, &path, cx);
+                    if let Some(clock) = app.viewer_clock.as_mut() {
+                        clock.seek(5.0);
+                    }
+                }
+            }
+            // Keep `viewer_demo_sync_frames` true so the viewer uses a fixed
+            // frame index (stable img path) for the screenshot.
+            app.status_note = "screenshot demo — in-viewer video playback".into();
+        }
         if matches!(demo, Some(ScreenshotDemo::ReadyStories)) {
             if let Some(session) = app.demo_session.as_mut() {
                 app.demo_seq.store(session.last_seq, Ordering::SeqCst);
@@ -1942,6 +2067,8 @@ impl QuillApp {
         self.resume_pending_gif(cx);
         self.resume_pending_video(cx);
         self.resume_pending_audio(cx);
+        // Parity slice 5: a viewer video whose clip just finished downloading.
+        self.resume_pending_viewer_video(cx);
     }
 
     /// Phase 8.1: drain notification click callbacks (focus the chat) and
@@ -2051,7 +2178,9 @@ impl QuillApp {
         if primary.is_empty() {
             primary
         } else {
-            quill::video::with_video_frame_cache(quill::animation::with_gif_frame_cache(primary))
+            quill::video::with_viewer_frame_cache(quill::video::with_video_frame_cache(
+                quill::animation::with_gif_frame_cache(primary),
+            ))
         }
     }
 
@@ -3554,16 +3683,24 @@ impl QuillApp {
         if items.is_empty() {
             return;
         }
-        let index = items
-            .iter()
-            .position(|item| item.message_id == message_id)
-            .unwrap_or(0);
+        let index = items.iter().position(|item| item.message_id == message_id);
+        // The clicked message may not be viewer-openable (e.g. an album
+        // tile for a non-photo/video part) — then stay closed instead of
+        // opening on an unrelated item.
+        let Some(index) = index else {
+            return;
+        };
         self.media_viewer = MediaViewer::open(items, index);
+        self.viewer_zoom.reset();
+        self.viewer_drag = None;
+        self.stop_viewer_video();
         self.ensure_viewer_download(cx);
+        self.maybe_autoplay_viewer_video(cx);
         cx.notify();
     }
 
     fn close_media_viewer(&mut self, cx: &mut Context<Self>) {
+        self.stop_viewer_video();
         self.media_viewer.close();
         cx.notify();
     }
@@ -3574,7 +3711,11 @@ impl QuillApp {
         } else {
             self.media_viewer.next();
         }
+        self.viewer_zoom.reset();
+        self.viewer_drag = None;
+        self.stop_viewer_video();
         self.ensure_viewer_download(cx);
+        self.maybe_autoplay_viewer_video(cx);
         cx.notify();
     }
 
@@ -3600,6 +3741,388 @@ impl QuillApp {
         if !local {
             self.request_media_download(item.download_file_id, None, cx);
         }
+    }
+
+    /// Parity slice 5: in-viewer video playback. The clip's frames are
+    /// extracted with ffmpeg and rendered in-place in the viewer overlay
+    /// (no GPUI video element in this stack — same frame-cycling approach
+    /// as the row video preview, but full-clip); ffplay runs `-nodisp`
+    /// for the audio track only. The overlay keeps Play/Pause and
+    /// elapsed/total; the thumbnail shows until frames are ready.
+    /// Closing or stepping the viewer stops playback and drops the frame cache.
+    /// Closing or stepping the viewer stops playback.
+    /// Fixed size of the viewer visual container (zoom/pan frame), in px.
+    const VIEWER_FRAME: (f32, f32) = (720.0, 480.0);
+
+    /// Sandbox-checked local path of the current item's full video clip.
+    fn viewer_clip_path(&self, item: &MediaViewerItem) -> Option<PathBuf> {
+        let play_id = item.play_file_id?;
+        let roots = self.media_display_roots();
+        self.session()?
+            .files
+            .get(&play_id.0)?
+            .usable_path()
+            .and_then(|path| sandboxed_display_path(path, &roots).map(|p| p.to_path_buf()))
+    }
+
+    /// Start viewer playback when the current item is a video whose clip is
+    /// local; otherwise trigger `downloadFile` for the clip and park the
+    /// request in `viewer_pending_play` (resumed from the poll loop).
+    ///
+    /// Parity slice 5: the clip's frames are extracted (async — ffmpeg takes
+    /// ~2 s for a 12 s clip) and rendered in-viewer; ffplay runs `-nodisp`
+    /// for audio only. If frames are already cached for this file (e.g. the
+    /// screenshot demo extracted them synchronously), playback starts at once.
+    fn maybe_autoplay_viewer_video(&mut self, cx: &mut Context<Self>) {
+        let Some(item) = self.media_viewer.current().cloned() else {
+            return;
+        };
+        if item.kind != MediaViewerKind::Video {
+            return;
+        }
+        let Some(path) = self.viewer_clip_path(&item) else {
+            if let Some(play_id) = item.play_file_id {
+                self.viewer_pending_play = Some((item.message_id, play_id));
+                self.request_media_download(play_id, None, cx);
+            }
+            return;
+        };
+        self.viewer_pending_play = None;
+        let file_id = item.play_file_id.map(|id| id.0).unwrap_or(0);
+        if self.viewer_frame_cache_file == Some(file_id) && !self.viewer_video_frames.is_empty() {
+            self.play_viewer_video(&item, &path, cx);
+            return;
+        }
+        // The screenshot demo extracts frames synchronously itself.
+        if self.viewer_demo_sync_frames {
+            return;
+        }
+        self.extract_viewer_frames(&item, &path, cx);
+    }
+
+    /// Extract the clip's frames on a background thread, then start playback
+    /// if the viewer is still on the same item. The thumbnail stays visible
+    /// with a loading hint meanwhile.
+    fn extract_viewer_frames(
+        &mut self,
+        item: &MediaViewerItem,
+        path: &std::path::Path,
+        cx: &mut Context<Self>,
+    ) {
+        let file_id = item.play_file_id.map(|id| id.0).unwrap_or(0);
+        if self
+            .viewer_frame_cache_file
+            .is_some_and(|cached| cached != file_id)
+            && let Some(old) = self.viewer_frame_cache_file.take()
+        {
+            quill::video::discard_viewer_frame_cache(old);
+        }
+        self.viewer_frame_cache_file = Some(file_id);
+        self.viewer_video_frames.clear();
+        self.viewer_extracting = true;
+        cx.notify();
+
+        let cache = quill::video::viewer_frame_cache_dir(file_id);
+        let mime = item.mime_type.clone().unwrap_or_default();
+        let duration = item.duration_secs.unwrap_or(0);
+        let start_timestamp = item.start_timestamp.unwrap_or(0);
+        let message_id = item.message_id;
+        let path = path.to_path_buf();
+        let item = item.clone();
+        let extract_path = path.clone();
+        cx.spawn(async move |this, cx| {
+            let extracted = cx
+                .background_executor()
+                .spawn(async move {
+                    quill::video::viewer_playback_frames(
+                        &extract_path,
+                        &mime,
+                        &cache,
+                        start_timestamp,
+                        duration,
+                    )
+                })
+                .await;
+            this.update(cx, |this, cx| {
+                this.viewer_extracting = false;
+                let still_current = this
+                    .media_viewer
+                    .current()
+                    .is_some_and(|current| current.message_id == message_id);
+                if !still_current {
+                    return;
+                }
+                match extracted {
+                    Ok(viewer_frames) => {
+                        // The screenshot demo extracts synchronously and
+                        // starts playback itself; don't restart it when the
+                        // background extraction lands.
+                        let already_playing = this.viewer_video == Some(message_id)
+                            && !this.viewer_video_frames.is_empty();
+                        if !already_playing {
+                            this.viewer_video_frames = viewer_frames.frames;
+                            this.viewer_video_fps = viewer_frames.fps;
+                            this.play_viewer_video(&item, &path, cx);
+                        }
+                    }
+                    Err(_) => {
+                        this.viewer_video_frames.clear();
+                        this.status_note = "could not play video".into();
+                    }
+                }
+                cx.notify();
+            })
+            .ok();
+        });
+    }
+
+    /// Resume a parked viewer play once `downloadFile` lands the clip.
+    fn resume_pending_viewer_video(&mut self, cx: &mut Context<Self>) {
+        let Some((message_id, file_id)) = self.viewer_pending_play else {
+            return;
+        };
+        let ready = self.session().is_some_and(|session| {
+            session
+                .files
+                .get(&file_id.0)
+                .and_then(|file| file.usable_path())
+                .is_some()
+        });
+        if !ready {
+            return;
+        }
+        let current = self.media_viewer.current().cloned();
+        let matches = current.as_ref().is_some_and(|item| {
+            item.message_id == message_id && item.kind == MediaViewerKind::Video
+        });
+        if !matches {
+            self.viewer_pending_play = None;
+            return;
+        }
+        let item = current.expect("viewer item checked");
+        if let Some(path) = self.viewer_clip_path(&item) {
+            self.viewer_pending_play = None;
+            self.play_viewer_video(&item, &path, cx);
+        }
+    }
+
+    /// Begin (or restart) viewer playback of `item`'s clip from offset 0.
+    /// Stops every other player first — one thing plays at a time.
+    /// Frames must already be in `viewer_video_frames` (extracted async by
+    /// `extract_viewer_frames`, or synchronously by the screenshot demo).
+    /// State only: the caller spawns ffplay (the screenshot demo skips the
+    /// subprocess, like the audio slice's demo).
+    fn begin_viewer_video(
+        &mut self,
+        item: &MediaViewerItem,
+        path: &std::path::Path,
+        cx: &mut Context<Self>,
+    ) {
+        self.stop_voice_playback();
+        self.stop_audio_playback();
+        self.stop_video_playback();
+        self.stop_animation_playback();
+        let duration = item.duration_secs.unwrap_or(0).max(0) as f64;
+        let mut clock = PlaybackClock::new(duration);
+        clock.seek(0.0);
+        clock.resume();
+        self.viewer_clock = Some(clock);
+        self.viewer_video = Some(item.message_id);
+        self.viewer_video_path = Some(path.to_path_buf());
+        self.spawn_viewer_tick(cx);
+        cx.notify();
+    }
+
+    /// Begin viewer playback *and* spawn ffplay for audio — unless this
+    /// is a screenshot demo, which skips the subprocess (same posture as
+    /// `request_media_download`'s demo branch).
+    fn play_viewer_video(
+        &mut self,
+        item: &MediaViewerItem,
+        path: &std::path::Path,
+        cx: &mut Context<Self>,
+    ) {
+        self.begin_viewer_video(item, path, cx);
+        if self.demo_session.is_none() {
+            self.spawn_viewer_ffplay(path, 0.0);
+        }
+    }
+
+    /// Spawn ffplay `-nodisp` (audio only) for the viewer clip. The video
+    /// frames render in-viewer from `viewer_video_frames`; ffplay only
+    /// supplies the soundtrack. `-autoexit` ends the child at the clip's
+    /// end; our tick clears state to match. A missing ffplay (or a clip
+    /// with no audio) just means silent playback — the frames still show.
+    fn spawn_viewer_ffplay(&mut self, path: &std::path::Path, offset_secs: f64) -> bool {
+        self.kill_viewer_player();
+        let mut command = Command::new("ffplay");
+        command.args(["-nodisp", "-autoexit", "-loglevel", "quiet"]);
+        if offset_secs > 0.05 {
+            command.arg("-ss").arg(format!("{offset_secs:.1}"));
+        }
+        match command
+            .arg(path)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+        {
+            Ok(child) => {
+                self.viewer_player = Some(child);
+                true
+            }
+            Err(_) => false,
+        }
+    }
+
+    fn kill_viewer_player(&mut self) {
+        if let Some(mut child) = self.viewer_player.take() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    }
+
+    /// Pause: freeze the clock, kill ffplay, keep the item active so the
+    /// controls stay and Play resumes from the frozen offset.
+    fn pause_viewer_video(&mut self, cx: &mut Context<Self>) {
+        if let Some(clock) = self.viewer_clock.as_mut() {
+            clock.pause();
+        }
+        self.kill_viewer_player();
+        cx.notify();
+    }
+
+    /// Resume from the frozen clock position.
+    fn resume_viewer_video(&mut self, cx: &mut Context<Self>) {
+        let offset = self.viewer_clock.as_ref().map(|c| c.elapsed_secs());
+        let path = self.viewer_video_path.clone();
+        match (offset, path) {
+            (Some(offset), Some(path)) => {
+                self.spawn_viewer_ffplay(&path, offset);
+                if let Some(clock) = self.viewer_clock.as_mut() {
+                    clock.resume();
+                }
+            }
+            _ => self.stop_viewer_video(),
+        }
+        cx.notify();
+    }
+
+    /// The viewer Play/Pause button: playing → pause, paused → resume,
+    /// never-started → begin from 0 (the clip is local here).
+    fn toggle_viewer_video(&mut self, cx: &mut Context<Self>) {
+        let playing = self
+            .viewer_clock
+            .as_ref()
+            .is_some_and(|clock| clock.is_playing());
+        if self.viewer_video.is_none() {
+            let item = self.media_viewer.current().cloned();
+            match item {
+                Some(item) if item.kind == MediaViewerKind::Video => {
+                    if let Some(path) = self.viewer_clip_path(&item) {
+                        self.play_viewer_video(&item, &path, cx);
+                    }
+                }
+                _ => {}
+            }
+            return;
+        }
+        if playing {
+            self.pause_viewer_video(cx);
+        } else {
+            self.resume_viewer_video(cx);
+        }
+    }
+
+    /// Full stop: kill ffplay and clear all viewer-video state. Called on
+    /// viewer close/step and when any other player starts.
+    fn stop_viewer_video(&mut self) {
+        self.kill_viewer_player();
+        self.viewer_video = None;
+        self.viewer_video_path = None;
+        self.viewer_clock = None;
+        self.viewer_pending_play = None;
+        self.viewer_video_frames.clear();
+        self.viewer_extracting = false;
+        if let Some(cached) = self.viewer_frame_cache_file.take() {
+            quill::video::discard_viewer_frame_cache(cached);
+        }
+    }
+
+    /// 125 ms tick while a viewer clip is active: re-renders so the
+    /// elapsed/total label advances and the in-viewer frame animates
+    /// (8 fps frames need a sub-250 ms refresh); auto-stops when the clock
+    /// reaches the duration (ffplay `-autoexit` exits on its own).
+    fn spawn_viewer_tick(&mut self, cx: &mut Context<Self>) {
+        if self.viewer_tick {
+            return;
+        }
+        self.viewer_tick = true;
+        cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor()
+                    .timer(Duration::from_millis(125))
+                    .await;
+                let cont = this
+                    .update(cx, |this, cx| {
+                        let active = this.viewer_video.is_some();
+                        if !active {
+                            return false;
+                        }
+                        let finished = this
+                            .viewer_clock
+                            .as_ref()
+                            .is_some_and(|clock| clock.is_playing() && clock.finished());
+                        if finished {
+                            this.stop_viewer_video();
+                            cx.notify();
+                            return false;
+                        }
+                        cx.notify();
+                        true
+                    })
+                    .unwrap_or(false);
+                if !cont {
+                    break;
+                }
+            }
+            let _ = this.update(cx, |this, _| {
+                this.viewer_tick = false;
+            });
+        })
+        .detach();
+    }
+
+    /// Parity slice 5: scroll-zoom the viewer visual (scroll up = zoom in,
+    /// matching the platform's positive-y convention).
+    fn viewer_zoom_scroll(&mut self, delta_y: f32, cx: &mut Context<Self>) {
+        if delta_y == 0.0 {
+            return;
+        }
+        self.viewer_zoom.step(delta_y > 0.0, Self::VIEWER_FRAME);
+        cx.notify();
+    }
+
+    /// Parity slice 5: drag-pan the zoomed visual by a mouse delta in px.
+    fn viewer_pan_drag(&mut self, dx: f32, dy: f32, cx: &mut Context<Self>) {
+        if !self.viewer_zoom.is_zoomed() {
+            return;
+        }
+        self.viewer_zoom.pan_by(dx, dy, Self::VIEWER_FRAME);
+        cx.notify();
+    }
+
+    /// Parity slice 5: step the viewer zoom in or out one notch.
+    fn viewer_zoom_step(&mut self, zoom_in: bool, cx: &mut Context<Self>) {
+        self.viewer_zoom.step(zoom_in, Self::VIEWER_FRAME);
+        cx.notify();
+    }
+
+    /// Parity slice 5: reset zoom/pan to fit (double-click / `0`).
+    fn viewer_reset_zoom(&mut self, cx: &mut Context<Self>) {
+        self.viewer_zoom.reset();
+        self.viewer_drag = None;
+        cx.notify();
     }
 
     /// Phase 9.1: open the fullscreen story viewer on `(chat_id, story_id)`.
@@ -4094,6 +4617,7 @@ impl QuillApp {
                 self.stop_voice_playback();
                 self.stop_audio_playback();
                 self.stop_video_playback();
+                self.stop_viewer_video();
                 self.pending_gif_play = None;
                 if self.animation_cache_file.is_some_and(|id| id != file_id.0)
                     && let Some(old) = self.animation_cache_file.take()
@@ -4197,6 +4721,7 @@ impl QuillApp {
                 self.stop_voice_playback();
                 self.stop_audio_playback();
                 self.stop_animation_playback();
+                self.stop_viewer_video();
                 self.pending_video_play = None;
                 if self.video_cache_file.is_some_and(|id| id != file_id.0)
                     && let Some(old) = self.video_cache_file.take()
@@ -4359,6 +4884,7 @@ impl QuillApp {
     ) {
         self.stop_voice_playback();
         self.stop_audio_playback();
+        self.stop_viewer_video();
         match kind {
             PlaybackKind::Voice => self.playing_voice = Some(message_id),
             PlaybackKind::Audio => self.playing_audio = Some(message_id),
@@ -8548,6 +9074,10 @@ impl QuillApp {
                 kind: MediaViewerKind::Photo,
                 display_file_ids: Vec::new(),
                 download_file_id: FileId(0),
+                play_file_id: None,
+                duration_secs: None,
+                mime_type: None,
+                start_timestamp: None,
                 caption: String::new(),
                 caption_entities: Vec::new(),
                 duration_label: None,
@@ -8560,7 +9090,34 @@ impl QuillApp {
             .map(|s| s.downloading.clone())
             .unwrap_or_default();
         let roots = self.media_display_roots();
-        let path = viewer_display_path(&item, &files, &roots);
+        let thumb_path = viewer_display_path(&item, &files, &roots);
+        // Parity slice 5: when the clip's frames are extracted, the viewer
+        // shows the frame matching the playback clock — real in-viewer video.
+        // Otherwise it falls back to the thumbnail (or the loading status).
+        let frame_path: Option<PathBuf> =
+            if item.kind == MediaViewerKind::Video && !self.viewer_video_frames.is_empty() {
+                // In the screenshot demo, use a fixed frame (GPUI img needs a
+                // stable path; rapidly changing paths don't render).
+                let idx = if self.viewer_demo_sync_frames {
+                    40.min(self.viewer_video_frames.len() - 1)
+                } else {
+                    let elapsed = self
+                        .viewer_clock
+                        .as_ref()
+                        .map(|clock| clock.elapsed_secs())
+                        .unwrap_or(0.0);
+                    ((elapsed * self.viewer_video_fps) as usize) % self.viewer_video_frames.len()
+                };
+                self.viewer_video_frames.get(idx).and_then(|frame| {
+                    frame
+                        .to_str()
+                        .and_then(|s| sandboxed_display_path(s, &roots))
+                        .map(|p| p.to_path_buf())
+                })
+            } else {
+                None
+            };
+        let path = frame_path.or(thumb_path);
         let row_id = item.message_id.0 as u64;
         let downloading_now = item
             .display_file_ids
@@ -8573,19 +9130,23 @@ impl QuillApp {
         } else {
             kind_label.to_string()
         };
-        let visual: AnyElement = if let Some(path) = path {
+        // Parity slice 5: the visual lives in a fixed 720×480 frame; scroll
+        // zooms (1×–8×, frame-center kept) and drag pans when zoomed.
+        let zoom = self.viewer_zoom;
+        let (frame_w, frame_h) = Self::VIEWER_FRAME;
+        let (zoom_w, zoom_h) = (frame_w * zoom.zoom, frame_h * zoom.zoom);
+        let (pan_x, pan_y) = zoom.pan;
+        let content: AnyElement = if let Some(path) = path {
             img(path)
                 .id(("media-viewer-img", row_id))
-                .w(px(720.))
-                .h(px(480.))
-                .rounded_md()
+                .w(px(zoom_w))
+                .h(px(zoom_h))
                 .object_fit(ObjectFit::Contain)
                 .bg(rgb(0x0d1117))
                 .with_fallback(move || {
                     div()
-                        .w(px(720.))
-                        .h(px(480.))
-                        .rounded_md()
+                        .w(px(zoom_w))
+                        .h(px(zoom_h))
                         .bg(rgb(0x0d1117))
                         .flex()
                         .items_center()
@@ -8596,20 +9157,16 @@ impl QuillApp {
                 })
                 .into_any_element()
         } else {
-            let status = if downloading_now {
-                format!("{kind_label} — downloading…")
-            } else {
-                format!("{kind_label} — not downloaded")
-            };
             let status = match (&item.duration_label, downloading_now) {
-                (Some(duration), _) => format!("Video · {duration} — {status}"),
-                _ => status,
+                (Some(duration), true) => format!("Video · {duration} — downloading…"),
+                (Some(duration), false) => format!("Video · {duration} — not downloaded"),
+                (None, true) => format!("{kind_label} — downloading…"),
+                (None, false) => format!("{kind_label} — not downloaded"),
             };
             div()
                 .id(("media-viewer-loading", row_id))
-                .w(px(720.))
-                .h(px(480.))
-                .rounded_md()
+                .w(px(zoom_w))
+                .h(px(zoom_h))
                 .bg(rgb(0x0d1117))
                 .flex()
                 .items_center()
@@ -8617,6 +9174,192 @@ impl QuillApp {
                 .child(div().text_sm().text_color(rgb(0xffffff)).child(status))
                 .into_any_element()
         };
+        let visual = {
+            let view = cx.entity().downgrade();
+            let scroll_view = view.clone();
+            let down_view = view.clone();
+            let move_view = view.clone();
+            let up_view = view;
+            div()
+                .id(("media-viewer-visual", row_id))
+                .relative()
+                .w(px(frame_w))
+                .h(px(frame_h))
+                .overflow_hidden()
+                .rounded_md()
+                .bg(rgb(0x0d1117))
+                .child(
+                    div()
+                        .absolute()
+                        .left(px(pan_x))
+                        .top(px(pan_y))
+                        .w(px(zoom_w))
+                        .h(px(zoom_h))
+                        .child(content),
+                )
+                .on_scroll_wheel(move |event, _window, cx| {
+                    let dy = match event.delta {
+                        ScrollDelta::Pixels(p) => f32::from(p.y),
+                        ScrollDelta::Lines(l) => l.y,
+                    };
+                    if let Some(view) = scroll_view.upgrade() {
+                        view.update(cx, |this, cx| this.viewer_zoom_scroll(dy, cx));
+                    }
+                })
+                .on_mouse_down(MouseButton::Left, move |event, _window, cx| {
+                    let pos = (f32::from(event.position.x), f32::from(event.position.y));
+                    if let Some(view) = down_view.upgrade() {
+                        view.update(cx, |this, cx| {
+                            this.viewer_drag = Some(pos);
+                            cx.notify();
+                        });
+                    }
+                })
+                .on_mouse_move(move |event, _window, cx| {
+                    let pos = (f32::from(event.position.x), f32::from(event.position.y));
+                    if let Some(view) = move_view.upgrade() {
+                        view.update(cx, |this, cx| {
+                            if let Some((lx, ly)) = this.viewer_drag {
+                                this.viewer_pan_drag(pos.0 - lx, pos.1 - ly, cx);
+                                this.viewer_drag = Some(pos);
+                            }
+                        });
+                    }
+                })
+                .on_mouse_up(MouseButton::Left, move |_event, _window, cx| {
+                    if let Some(view) = up_view.upgrade() {
+                        view.update(cx, |this, cx| {
+                            this.viewer_drag = None;
+                            cx.notify();
+                        });
+                    }
+                })
+                // Double-click resets zoom/pan to fit.
+                .on_click(cx.listener(|this, event: &ClickEvent, _, cx| {
+                    if event.click_count() >= 2 {
+                        this.viewer_reset_zoom(cx);
+                    }
+                }))
+        };
+        // Parity slice 5: video transport under the visual. The clip itself
+        // plays in an ffplay window (no GPUI video element in this stack);
+        // the overlay shows Play/Pause plus elapsed/total, or a download
+        // CTA while the clip is not local.
+        let video_controls: Option<AnyElement> =
+            (item.kind == MediaViewerKind::Video).then(|| {
+                let clip_path = self.viewer_clip_path(&item);
+                if let Some(_clip) = clip_path {
+                    let playing = self
+                        .viewer_clock
+                        .as_ref()
+                        .is_some_and(|clock| clock.is_playing())
+                        && self.viewer_video == Some(item.message_id);
+                    let elapsed = self
+                        .viewer_clock
+                        .as_ref()
+                        .map(|clock| clock.elapsed_secs())
+                        .unwrap_or(0.0);
+                    let total = item.duration_secs.unwrap_or(0) as f64;
+                    let label = format!(
+                        "{} / {}",
+                        format_voice_duration(elapsed as i32),
+                        format_voice_duration(total as i32)
+                    );
+                    // While ffmpeg extracts frames the thumbnail stays up;
+                    // the Play button appears once frames are ready.
+                    let extracting = self.viewer_extracting;
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap_2()
+                        .child(if extracting {
+                            div()
+                                .text_sm()
+                                .text_color(rgb(0xffffff))
+                                .child("Loading video…")
+                                .into_any_element()
+                        } else {
+                            Button::new(("media-viewer-play", row_id))
+                                .label(if playing { "❚❚ Pause" } else { "▶ Play" })
+                                .ghost()
+                                .text_color(rgb(0xffffff))
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.toggle_viewer_video(cx);
+                                }))
+                                .into_any_element()
+                        })
+                        .child(div().text_sm().text_color(rgb(0xffffff)).child(label))
+                        .into_any_element()
+                } else {
+                    let clip_downloading = item
+                        .play_file_id
+                        .is_some_and(|id| file_is_downloading(id, &files, &downloading));
+                    let play_id = item.play_file_id;
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap_2()
+                        .child(div().text_sm().text_color(rgb(0xffffff)).child(
+                            if clip_downloading {
+                                "Video — downloading clip…"
+                            } else {
+                                "Video — clip not downloaded"
+                            },
+                        ))
+                        .when_some(play_id.filter(|_| !clip_downloading), |this, id| {
+                            this.child(
+                                Button::new(("media-viewer-download", row_id))
+                                    .label("Download")
+                                    .ghost()
+                                    .text_color(rgb(0xffffff))
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        this.viewer_pending_play = Some((item.message_id, id));
+                                        this.request_media_download(id, None, cx);
+                                    })),
+                            )
+                        })
+                        .into_any_element()
+                }
+            });
+        // Parity slice 5: zoom controls share a row with the video
+        // transport — − / % / + / Reset, then Play/Pause + elapsed/total.
+        let zoom_pct = format!("{}%", (zoom.zoom * 100.0).round() as i32);
+        let mut transport = div()
+            .flex()
+            .items_center()
+            .gap_2()
+            .child(
+                Button::new(("media-viewer-zoom-out", row_id))
+                    .label("−")
+                    .ghost()
+                    .text_color(rgb(0xffffff))
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.viewer_zoom_step(false, cx);
+                    })),
+            )
+            .child(div().text_sm().text_color(rgb(0xffffff)).child(zoom_pct))
+            .child(
+                Button::new(("media-viewer-zoom-in", row_id))
+                    .label("+")
+                    .ghost()
+                    .text_color(rgb(0xffffff))
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.viewer_zoom_step(true, cx);
+                    })),
+            )
+            .child(
+                Button::new(("media-viewer-zoom-reset", row_id))
+                    .label("Reset")
+                    .ghost()
+                    .text_color(rgb(0xffffff))
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.viewer_reset_zoom(cx);
+                    })),
+            );
+        if let Some(controls) = video_controls {
+            transport = transport.child(controls);
+        }
+        let transport = transport.into_any_element();
         let caption: Option<AnyElement> = (!item.caption.is_empty()).then(|| {
             rich_text_line(
                 &item.caption,
@@ -8687,6 +9430,7 @@ impl QuillApp {
                             ),
                     )
                     .child(visual)
+                    .child(transport)
                     .when_some(caption, |this, caption| {
                         this.child(div().text_color(rgb(0xffffff)).child(caption))
                     })
@@ -8698,6 +9442,7 @@ impl QuillApp {
                                 Button::new("media-viewer-prev")
                                     .label("‹ Prev")
                                     .ghost()
+                                    .text_color(rgb(0xffffff))
                                     .disabled(position <= 1)
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         this.step_media_viewer(-1, cx);
@@ -8707,6 +9452,7 @@ impl QuillApp {
                                 Button::new("media-viewer-next")
                                     .label("Next ›")
                                     .ghost()
+                                    .text_color(rgb(0xffffff))
                                     .disabled(position >= total)
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         this.step_media_viewer(1, cx);
@@ -9054,6 +9800,7 @@ impl QuillApp {
                                 Button::new("story-viewer-prev")
                                     .label("‹ Prev")
                                     .ghost()
+                                    .text_color(rgb(0xffffff))
                                     .disabled(position <= 1)
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         this.step_story_viewer(-1, cx);
@@ -9063,6 +9810,7 @@ impl QuillApp {
                                 Button::new("story-viewer-next")
                                     .label("Next ›")
                                     .ghost()
+                                    .text_color(rgb(0xffffff))
                                     .disabled(position >= total)
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         this.step_story_viewer(1, cx);
@@ -9953,6 +10701,40 @@ impl Render for QuillApp {
             }))
             .on_action(cx.listener(|this, _: &CancelSearch, window, cx| {
                 this.cancel_search(window, cx);
+            }))
+            // Parity slice 5: left/right step the media viewer; `0` resets
+            // zoom. The handlers no-op unless the viewer is open, and only
+            // then stop propagation — otherwise the keystroke still reaches
+            // text inputs (composer caret movement keeps working).
+            .on_action(cx.listener(|this, _: &ViewerPrev, _, cx| {
+                if this.media_viewer.is_open() {
+                    this.step_media_viewer(-1, cx);
+                    cx.stop_propagation();
+                }
+            }))
+            .on_action(cx.listener(|this, _: &ViewerNext, _, cx| {
+                if this.media_viewer.is_open() {
+                    this.step_media_viewer(1, cx);
+                    cx.stop_propagation();
+                }
+            }))
+            .on_action(cx.listener(|this, _: &ViewerZoomReset, _, cx| {
+                if this.media_viewer.is_open() {
+                    this.viewer_reset_zoom(cx);
+                    cx.stop_propagation();
+                }
+            }))
+            .on_action(cx.listener(|this, _: &ViewerZoomIn, _, cx| {
+                if this.media_viewer.is_open() {
+                    this.viewer_zoom_step(true, cx);
+                    cx.stop_propagation();
+                }
+            }))
+            .on_action(cx.listener(|this, _: &ViewerZoomOut, _, cx| {
+                if this.media_viewer.is_open() {
+                    this.viewer_zoom_step(false, cx);
+                    cx.stop_propagation();
+                }
             }))
             .on_action(cx.listener(|this, _: &SubmitPhone, window, cx| {
                 this.submit_phone(window, cx);
@@ -12604,6 +13386,28 @@ fn apply_ready_audio(session: &mut Session, sink: &Arc<MemorySink>, seq: &Atomic
     }
 }
 
+/// Demo fixture (Parity slice 5): inject a downloaded video message into
+/// chat 11 of a Media-seeded demo session. The thumbnail (file 97) and the
+/// full clip (file 96, `demo-clip.mp4`) are both local/completed so the
+/// viewer opens straight onto playback. The 12 s duration is fixture data
+/// for the screenshot — the real fixture clip is 1 s.
+fn apply_ready_video_viewer(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let clip_path = demo_media_allowlist()
+        .join("demo-clip-12s.mp4")
+        .to_string_lossy()
+        .into_owned();
+    let thumb_path = demo_thumb_png_path();
+    let clip = demo_file_json(96, &clip_path, true);
+    let thumb = demo_file_json(97, &thumb_path, true);
+    let json = format!(
+        r#"{{"@type":"updateNewMessage","message":{{"id":204,"chat_id":11,"is_outgoing":false,"content":{{"@type":"messageVideo","video":{{"@type":"video","duration":12,"width":320,"height":180,"file_name":"demo-clip-12s.mp4","mime_type":"video/mp4","has_stickers":false,"supports_streaming":true,"minithumbnail":null,"thumbnail":{{"@type":"thumbnail","format":{{"@type":"thumbnailFormatJpeg"}},"width":240,"height":140,"file":{thumb}}},"video":{clip}}},"alternative_videos":[],"storyboards":[],"cover":null,"start_timestamp":0,"caption":{{"@type":"formattedText","text":"Demo clip","entities":[]}},"show_caption_above_media":false,"has_spoiler":false,"is_secret":false}}}}}}"#
+    );
+    if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
+        session.apply(owned);
+    }
+}
+
 fn apply_ready_video_note(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
     let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
     let thumb_path = demo_thumb_png_path();
@@ -13695,6 +14499,12 @@ fn album_tile(
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
     let row_id = message.id.0 as u64;
+    let chat_id = message.chat_id;
+    let message_id = message.id;
+    // Parity slice 5: tiles open the fullscreen media viewer. The Play
+    // button inside video tiles keeps its history-row playback — the
+    // component button stops propagation on mouse-down, so the tile click
+    // never double-fires.
     let frame = div()
         .id(("album-tile", row_id))
         .absolute()
@@ -13702,7 +14512,11 @@ fn album_tile(
         .top(px(part.y as f32))
         .w(px(part.width as f32))
         .h(px(part.height as f32))
-        .overflow_hidden();
+        .overflow_hidden()
+        .cursor_pointer()
+        .on_click(cx.listener(move |this, _, _, cx| {
+            this.open_media_viewer(chat_id, message_id, cx);
+        }));
     match &message.content {
         MessageContent::Photo(photo) => {
             if let Some(path) = photo_display_path(photo, files, media_roots) {
