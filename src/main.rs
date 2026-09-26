@@ -107,9 +107,10 @@ fn parse_screenshot_demo(args: &[String]) -> Option<(ui::ScreenshotDemo, std::pa
                 "ready-channels" => ScreenshotDemo::ReadyChannels,
                 "ready-channels-admin" => ScreenshotDemo::ReadyChannelsAdmin,
                 "ready-bot-chat" => ScreenshotDemo::ReadyBotChat,
+                "ready-bot-keyboard" => ScreenshotDemo::ReadyBotKeyboard,
                 _ => {
                     eprintln!(
-                        "unknown screenshot demo '{kind}' (expected need-tdjson|wait-phone|wait-code|wait-password|ready-chats|ready-chats-composer|ready-unread|ready-unread-read|ready-media|ready-send-media|ready-search|ready-search-in-chat|ready-reply|ready-edit-delete|ready-forward|ready-reactions|ready-pin|ready-mute-archive|ready-typing|ready-stickers|ready-voice|ready-link-preview|ready-gifs|ready-video|ready-video-note|ready-video-send|ready-video-note-send|ready-drafts|ready-albums|ready-audio|ready-sponsored|ready-channels|ready-channels-admin|ready-bot-chat)"
+                        "unknown screenshot demo '{kind}' (expected need-tdjson|wait-phone|wait-code|wait-password|ready-chats|ready-chats-composer|ready-unread|ready-unread-read|ready-media|ready-send-media|ready-search|ready-search-in-chat|ready-reply|ready-edit-delete|ready-forward|ready-reactions|ready-pin|ready-mute-archive|ready-typing|ready-stickers|ready-voice|ready-link-preview|ready-gifs|ready-video|ready-video-note|ready-video-send|ready-video-note-send|ready-drafts|ready-albums|ready-audio|ready-sponsored|ready-channels|ready-channels-admin|ready-bot-chat|ready-bot-keyboard)"
                     );
                     std::process::exit(2);
                 }
@@ -165,6 +166,7 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
         ScreenshotDemo::ReadyChannels => ".quill-ready-ready-channels",
         ScreenshotDemo::ReadyChannelsAdmin => ".quill-ready-ready-channels-admin",
         ScreenshotDemo::ReadyBotChat => ".quill-ready-ready-bot-chat",
+        ScreenshotDemo::ReadyBotKeyboard => ".quill-ready-ready-bot-keyboard",
     });
     let _ = std::fs::remove_file(&marker);
     let marker_for_spawn = marker.clone();

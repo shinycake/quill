@@ -27,10 +27,11 @@ use quill::state::{
 };
 use quill::telegram::client::copy_and_parse;
 use quill::telegram::envelope::{
-    AuthorizationState, BotInfo, ChannelMemberStatus, ChatDraft, ChatNotificationSettings,
-    DEFAULT_EMOJI_REACTIONS, MUTE_FOR_1_HOUR, MUTE_FOR_2_DAYS, MUTE_FOR_8_HOURS, MUTE_FOREVER,
-    MessageContent, MessageInteractionInfo, ParsedFile, SponsoredMessage,
-    toggle_chosen_emoji_reaction,
+    AuthorizationState, BotInfo, CallbackQueryAnswer, ChannelMemberStatus, ChatDraft,
+    ChatNotificationSettings, DEFAULT_EMOJI_REACTIONS, InlineKeyboardButton,
+    InlineKeyboardButtonStyle, InlineKeyboardButtonType, MUTE_FOR_1_HOUR, MUTE_FOR_2_DAYS,
+    MUTE_FOR_8_HOURS, MUTE_FOREVER, MessageContent, MessageInteractionInfo, ParsedFile,
+    SponsoredMessage, toggle_chosen_emoji_reaction,
 };
 use quill::voice::{self, VoiceCapture, format_voice_duration};
 use std::collections::HashMap;
@@ -251,6 +252,11 @@ pub enum ScreenshotDemo {
     /// `botInfo` (description + commands), so the bot panel renders under
     /// the header and the composer is visible (Phase 3.1).
     ReadyBotChat,
+    /// Inline keyboard demo (injected, no live Telegram): like
+    /// `ReadyBotChat`, but the bot message carries a
+    /// `replyMarkupInlineKeyboard` with URL / callback / switchInline /
+    /// copy-text / unknown (disabled) buttons (Phase 3.2).
+    ReadyBotKeyboard,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -728,6 +734,15 @@ impl QuillApp {
                     AuthorizationState::Ready,
                 )
             }
+            Some(ScreenshotDemo::ReadyBotKeyboard) => {
+                demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
+                (
+                    ConnectUiStatus::DemoReadyChats,
+                    None,
+                    "screenshot demo — bot chat with inline keyboard".into(),
+                    AuthorizationState::Ready,
+                )
+            }
             None => bootstrap_connect(credentials),
         };
 
@@ -1097,6 +1112,13 @@ impl QuillApp {
             }
             app.status_note = "screenshot demo — bot chat with info panel".into();
         }
+        if matches!(demo, Some(ScreenshotDemo::ReadyBotKeyboard)) {
+            if let Some(session) = app.demo_session.as_mut() {
+                app.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_bot_keyboard(session, &app.demo_sink, &app.demo_seq);
+            }
+            app.status_note = "screenshot demo — bot chat with inline keyboard".into();
+        }
         if app.live.is_some() {
             app.spawn_poll_loop(cx);
         }
@@ -1161,6 +1183,15 @@ impl QuillApp {
             .and_then(|live| live.driver.session.last_forward.take())
         {
             self.present_forward_result(result, cx);
+            progressed = true;
+        }
+        // Phase 3.2: bot answers to inline keyboard callback presses.
+        if let Some(answer) = self
+            .live
+            .as_mut()
+            .and_then(|live| live.driver.session.last_callback_answer.take())
+        {
+            self.present_callback_answer(answer, cx);
             progressed = true;
         }
         self.finish_successful_sends(cx);
@@ -1810,6 +1841,75 @@ impl QuillApp {
         } else {
             "could not open link".into()
         };
+        cx.notify();
+    }
+
+    /// Phase 3.2: press an inline keyboard callback button. Live sessions
+    /// send `getCallbackQueryAnswer`; the bot's `callbackQueryAnswer`
+    /// response is picked up by `poll_live` and shown in the status line.
+    /// Demo sessions have no live TDLib, so the press is an honest no-op.
+    fn press_inline_callback(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        data: Vec<u8>,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(live) = self.live.as_mut() {
+            let result = live.driver.send_callback_query(chat_id, message_id, &data);
+            self.status_note = match result {
+                Ok(_) => "sending…".into(),
+                Err(_) => "could not send callback".into(),
+            };
+            cx.notify();
+            return;
+        }
+        if self.demo_session.is_some() {
+            self.status_note = "demo — callback sent (no live Telegram)".into();
+            cx.notify();
+        }
+    }
+
+    /// Phase 3.2: insert a `switchInline` query into the current chat's
+    /// composer. `targetChatChosen` / `targetChatInternalLink` (no chat
+    /// picker in this slice) use the current chat, same as `targetChatCurrent`.
+    fn insert_switch_inline_query(
+        &mut self,
+        query: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.composer.update(cx, |input, cx| {
+            let next = quill::composer::insert_switch_inline_text(&input.value(), query);
+            input.set_value(next, window, cx);
+        });
+    }
+
+    /// Phase 3.2: `inlineKeyboardButtonTypeCopyText` — copy to the clipboard.
+    fn copy_inline_text(&mut self, text: &str, cx: &mut Context<Self>) {
+        cx.write_to_clipboard(ClipboardItem::new_string(text.to_string()));
+        self.status_note = "copied".into();
+        cx.notify();
+    }
+
+    /// Phase 3.2: show a `callbackQueryAnswer` in the status line (the
+    /// transient feedback surface this app has). A URL answer opens in the
+    /// OS browser, like message-text links; `show_alert` has no modal yet,
+    /// so its text lands in the status line too.
+    fn present_callback_answer(&mut self, answer: CallbackQueryAnswer, cx: &mut Context<Self>) {
+        if answer.url.is_empty() {
+            self.status_note = if answer.text.is_empty() {
+                "bot answered".into()
+            } else {
+                answer.text
+            };
+        } else {
+            self.status_note = if quill::platform::open_external_url(&answer.url) {
+                "opened link".into()
+            } else {
+                "could not open link".into()
+            };
+        }
         cx.notify();
     }
 
@@ -6574,6 +6674,35 @@ fn apply_ready_bot_chat(session: &mut Session, sink: &Arc<MemorySink>, seq: &Ato
     }
 }
 
+/// `ReadyBotKeyboard` fixture (Phase 3.2): like `apply_ready_bot_chat`,
+/// but the bot's message carries a `replyMarkupInlineKeyboard` (schema 1.8.67
+/// line 3855): a URL row, a callback + switchInline row, and a copy-text +
+/// unknown-type row (the unknown button renders disabled).
+fn apply_ready_bot_keyboard(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    session.open_chat(ChatId(21));
+    let info_extra = session.request(RequestPurpose::GetUserFullInfo, Some(ChatId(21)));
+    let keyboard_message = r#"{"@type":"updateNewMessage","message":{"id":301,"chat_id":21,"is_outgoing":false,"reply_markup":{"@type":"replyMarkupInlineKeyboard","rows":[[{"@type":"inlineKeyboardButton","text":"Visit site","icon_custom_emoji_id":0,"style":{"@type":"buttonStylePrimary"},"type":{"@type":"inlineKeyboardButtonTypeUrl","url":"https://example.com"}}],[{"@type":"inlineKeyboardButton","text":"Vote","icon_custom_emoji_id":0,"style":{"@type":"buttonStyleSuccess"},"type":{"@type":"inlineKeyboardButtonTypeCallback","data":"AQID"}},{"@type":"inlineKeyboardButton","text":"Search here","icon_custom_emoji_id":0,"style":{"@type":"buttonStyleDefault"},"type":{"@type":"inlineKeyboardButtonTypeSwitchInline","query":"cats","target_chat":{"@type":"targetChatCurrent"}}}],[{"@type":"inlineKeyboardButton","text":"Copy code","icon_custom_emoji_id":0,"style":{"@type":"buttonStyleDefault"},"type":{"@type":"inlineKeyboardButtonTypeCopyText","text":"PROMO-42"}},{"@type":"inlineKeyboardButton","text":"Mystery","icon_custom_emoji_id":0,"style":{"@type":"buttonStyleDefault"},"type":{"@type":"inlineKeyboardButtonTypeQuantum"}}]],"force_reply":false},"content":{"@type":"messageText","text":{"@type":"formattedText","text":"Tap a button below — this message has an inline keyboard.","entities":[]}}}}"#.to_string();
+    let jsons = [
+        r#"{"@type":"updateUser","user":{"id":21,"first_name":"Demo","type":{"@type":"userTypeBot","can_be_edited":false,"can_join_groups":false,"can_read_all_group_messages":false,"has_main_web_app":false,"has_topics":false,"allows_users_to_create_topics":false,"can_manage_bots":false,"is_inline":false,"inline_query_placeholder":"","supports_guest_queries":false,"is_guard":false,"need_location":false,"can_connect_to_business":false,"can_be_added_to_attachment_menu":false,"active_user_count":0}}}"#
+            .to_string(),
+        r#"{"@type":"updateNewChat","chat":{"id":21,"title":"Demo Bot","type":{"@type":"chatTypePrivate","user_id":21},"unread_count":0}}"#
+            .to_string(),
+        r#"{"@type":"updateChatPosition","chat_id":21,"position":{"@type":"chatPosition","list":{"@type":"chatListMain"},"order":"40","is_pinned":false}}"#
+            .to_string(),
+        keyboard_message,
+        format!(
+            r#"{{"@type":"userFullInfo","@extra":"{}","bot_info":{{"@type":"botInfo","short_description":"A demo bot","description":"Demo Bot answers questions and shows how the info panel looks. It understands /start, /help and /ping.","commands":[{{"@type":"botCommand","command":"start","description":"Start the bot","is_ephemeral":false}}]}}}}"#,
+            info_extra.0,
+        ),
+    ];
+    for json in jsons {
+        if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
+            session.apply(owned);
+        }
+    }
+}
+
 /// `ReadyChannelsAdmin` fixture (Phase 2.3): like `apply_ready_channels`,
 /// but the `getMe`/`getChatMember` pair leaves the viewer as an administrator
 /// with `rights.can_post_messages: true` (full `chatAdministratorRights`
@@ -7828,6 +7957,134 @@ fn format_view_count(count: i32) -> String {
     }
 }
 
+/// Phase 3.2: render `replyMarkupInlineKeyboard` as a button grid under the
+/// message it belongs to. Parsing is generic (bot chats, groups, channels
+/// all inherit it). Buttons stretch to share each row's width, like Telegram
+/// desktop; empty rows are skipped.
+fn inline_keyboard(message: &HistoryMessage, cx: &mut Context<QuillApp>) -> Option<AnyElement> {
+    let keyboard = message.reply_markup.as_ref()?;
+    let message_id = message.id.0 as u64;
+    let mut grid = div()
+        .id(("inline-keyboard", message_id))
+        .flex()
+        .flex_col()
+        .gap_1()
+        .mt_2();
+    let mut any = false;
+    for (row_index, row) in keyboard.rows.iter().enumerate() {
+        if row.is_empty() {
+            continue;
+        }
+        any = true;
+        let mut line = div()
+            .id(format!("inline-keyboard-row-{message_id}-{row_index}"))
+            .flex()
+            .gap_1();
+        for (button_index, button) in row.iter().enumerate() {
+            line = line.child(
+                inline_keyboard_button(
+                    message.chat_id,
+                    message.id,
+                    row_index,
+                    button_index,
+                    button,
+                    cx,
+                )
+                .flex_1(),
+            );
+        }
+        grid = grid.child(line);
+    }
+    any.then(|| grid.into_any_element())
+}
+
+/// Phase 3.2: one inline keyboard button. `Url` opens in the OS browser
+/// (same gate as URLs in message text); `Callback` sends
+/// `getCallbackQueryAnswer`; `SwitchInline` inserts the query into the
+/// current chat's composer; `CopyText` copies to the clipboard. Everything
+/// else (login/WebApp/password/game/buy/user buttons and unknown types)
+/// renders disabled — known-but-unsupported is honest, and a crash is never
+/// an option.
+fn inline_keyboard_button(
+    chat_id: ChatId,
+    message_id: MessageId,
+    row_index: usize,
+    button_index: usize,
+    button: &InlineKeyboardButton,
+    cx: &mut Context<QuillApp>,
+) -> Button {
+    let label = if button.text.is_empty() {
+        match &button.kind {
+            InlineKeyboardButtonType::Unknown { type_name } if !type_name.is_empty() => {
+                format!("({type_name})")
+            }
+            _ => "(button)".to_string(),
+        }
+    } else {
+        button.text.clone()
+    };
+    let element = Button::new(format!(
+        "inline-btn-{}-{row_index}-{button_index}",
+        message_id.0
+    ))
+    .label(label)
+    .tooltip(button_tooltip(button));
+    let element = match button.style {
+        InlineKeyboardButtonStyle::Primary => element.primary(),
+        InlineKeyboardButtonStyle::Danger => element.danger(),
+        InlineKeyboardButtonStyle::Success => element.success(),
+        InlineKeyboardButtonStyle::Link => element.link(),
+        InlineKeyboardButtonStyle::Default => element.ghost(),
+    };
+    match &button.kind {
+        InlineKeyboardButtonType::Url { url } => {
+            let url = url.clone();
+            element.on_click(cx.listener(move |this, _, _, cx| {
+                this.open_message_url(&url, cx);
+            }))
+        }
+        InlineKeyboardButtonType::Callback { data } => {
+            let data = data.clone();
+            element.on_click(cx.listener(move |this, _, _, cx| {
+                this.press_inline_callback(chat_id, message_id, data.clone(), cx);
+            }))
+        }
+        InlineKeyboardButtonType::SwitchInline { query, .. } => {
+            let query = query.clone();
+            element.on_click(cx.listener(move |this, _, window, cx| {
+                this.insert_switch_inline_query(&query, window, cx);
+            }))
+        }
+        InlineKeyboardButtonType::CopyText { text } => {
+            let text = text.clone();
+            element.on_click(cx.listener(move |this, _, _, cx| {
+                this.copy_inline_text(&text, cx);
+            }))
+        }
+        _ => element.disabled(true),
+    }
+}
+
+/// Short hint for unsupported / unknown inline buttons.
+fn button_tooltip(button: &InlineKeyboardButton) -> &'static str {
+    match &button.kind {
+        InlineKeyboardButtonType::Url { .. }
+        | InlineKeyboardButtonType::Callback { .. }
+        | InlineKeyboardButtonType::SwitchInline { .. }
+        | InlineKeyboardButtonType::CopyText { .. } => "",
+        InlineKeyboardButtonType::LoginUrl { .. } => "Login buttons are not supported yet",
+        InlineKeyboardButtonType::WebApp { .. } => "Web App buttons are not supported yet",
+        InlineKeyboardButtonType::CallbackWithPassword { .. } => {
+            "Password-protected buttons are not supported yet"
+        }
+        InlineKeyboardButtonType::CallbackGame => "Game buttons are not supported yet",
+        InlineKeyboardButtonType::Buy => "Payment buttons are not supported yet",
+        InlineKeyboardButtonType::User { .. } => "User buttons are not supported yet",
+        InlineKeyboardButtonType::Disabled => "This button is disabled",
+        InlineKeyboardButtonType::Unknown { .. } => "Unsupported button",
+    }
+}
+
 fn session_history_row(
     message: &HistoryMessage,
     files: &HashMap<i32, ParsedFile>,
@@ -8099,10 +8356,12 @@ fn session_history_row(
         )),
         MessageContent::Text(_) | MessageContent::Unsupported { .. } => None,
     };
+    let keyboard = inline_keyboard(message, cx);
     let extra = Some(
         div()
             .id(("bubble-extra", message.id.0 as u64))
             .when_some(extra_media, |this, media| this.child(media))
+            .when_some(keyboard, |this, keyboard| this.child(keyboard))
             .when_some(views_footer, |this, footer| this.child(footer))
             .when_some(chip_row, |this, chips| this.child(chips))
             .child(

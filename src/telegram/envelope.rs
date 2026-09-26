@@ -49,6 +49,15 @@ pub enum EnvelopePayload {
         chat_id: ChatId,
         message_id: MessageId,
     },
+    /// `updateMessageEdited` (TDLib 1.8.67, `schema/td_api.tl:10431`): bots
+    /// edit inline keyboards this way — the new `reply_markup` replaces the
+    /// message's keyboard (Phase 3.2).
+    UpdateMessageEdited {
+        chat_id: ChatId,
+        message_id: MessageId,
+        edit_date: i32,
+        reply_markup: Option<InlineKeyboard>,
+    },
     UpdateChatPosition(ChatPositionUpdate),
     UpdateChatTitle {
         chat_id: ChatId,
@@ -208,6 +217,9 @@ pub enum EnvelopePayload {
     },
     /// `ChatJoinResult` — `joinChat` response.
     JoinChatResult(ChatJoinResult),
+    /// `callbackQueryAnswer` — response to `getCallbackQueryAnswer` after an
+    /// inline keyboard callback-button press (Phase 3.2).
+    CallbackQueryAnswer(CallbackQueryAnswer),
     Unknown(UnknownKind),
 }
 
@@ -424,6 +436,97 @@ pub struct BotInfo {
     pub short_description: String,
     pub description: String,
     pub commands: Vec<BotCommand>,
+}
+
+/// `buttonStyle*` (TDLib 1.8.67, `schema/td_api.tl:3696`). Unknown styles
+/// fall back to `Default` — the keyboard must never fail to render.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum InlineKeyboardButtonStyle {
+    #[default]
+    Default,
+    Primary,
+    Danger,
+    Success,
+    Link,
+}
+
+/// `targetChat*` for `inlineKeyboardButtonTypeSwitchInline`
+/// (TDLib 1.8.67, `schema/td_api.tl:7476`). Only `Current` is actionable in
+/// this slice; the rest insert into the current chat's composer too (chat
+/// picker is out of scope).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InlineKeyboardTargetChat {
+    Current,
+    Chosen,
+    InternalLink,
+    Unknown,
+}
+
+/// `inlineKeyboardButtonType*` (TDLib 1.8.67, `schema/td_api.tl:3774`).
+/// Types needing a TDLib round-trip or platform flow we do not have yet
+/// (`LoginUrl` → `getLoginUrlInfo`, `WebApp` → `openWebApp`,
+/// `CallbackWithPassword` → password prompt, `CallbackGame`, `Buy`,
+/// `User`) are parsed and stored but render as disabled buttons. Anything
+/// unrecognized becomes `Unknown` and also renders disabled — never a crash.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum InlineKeyboardButtonType {
+    Url {
+        url: String,
+    },
+    LoginUrl {
+        url: String,
+    },
+    WebApp {
+        url: String,
+    },
+    Callback {
+        data: Vec<u8>,
+    },
+    CallbackWithPassword {
+        data: Vec<u8>,
+    },
+    CallbackGame,
+    SwitchInline {
+        query: String,
+        target: InlineKeyboardTargetChat,
+    },
+    Buy,
+    User {
+        user_id: i64,
+    },
+    CopyText {
+        text: String,
+    },
+    Disabled,
+    Unknown {
+        type_name: String,
+    },
+}
+
+/// `inlineKeyboardButton` (TDLib 1.8.67, `schema/td_api.tl:3828`).
+/// `icon_custom_emoji_id` is parsed (schema presence) but not rendered yet.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InlineKeyboardButton {
+    pub text: String,
+    pub style: InlineKeyboardButtonStyle,
+    pub kind: InlineKeyboardButtonType,
+}
+
+/// `replyMarkupInlineKeyboard` (TDLib 1.8.67, `schema/td_api.tl:3855`):
+/// `rows` is a vector of rows (`vector<vector<inlineKeyboardButton>>`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InlineKeyboard {
+    pub rows: Vec<Vec<InlineKeyboardButton>>,
+    pub force_reply: bool,
+}
+
+/// `callbackQueryAnswer` (TDLib 1.8.67, `schema/td_api.tl:7747`): the bot's
+/// answer to a callback query sent via `getCallbackQueryAnswer`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CallbackQueryAnswer {
+    pub text: String,
+    pub show_alert: bool,
+    pub url: String,
 }
 
 /// Typed `ChatJoinResult` — `joinChat` response (TDLib 1.8.67: no
@@ -721,6 +824,9 @@ pub struct ParsedMessage {
     pub reply_to: Option<MessageReplyTo>,
     pub forward_info: Option<MessageForwardInfo>,
     pub interaction_info: Option<MessageInteractionInfo>,
+    /// Schema `message.reply_markup` (TDLib 1.8.67). Only
+    /// `replyMarkupInlineKeyboard` is kept; other markups are `None`.
+    pub reply_markup: Option<InlineKeyboard>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1415,6 +1521,12 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
             chat_id: ChatId(int53(value.get("chat_id"))?),
             message_id: MessageId(int53(value.get("message_id"))?),
         }),
+        "updateMessageEdited" => Ok(EnvelopePayload::UpdateMessageEdited {
+            chat_id: ChatId(int53(value.get("chat_id"))?),
+            message_id: MessageId(int53(value.get("message_id"))?),
+            edit_date: value.get("edit_date").and_then(Value::as_i64).unwrap_or(0) as i32,
+            reply_markup: parse_reply_markup(value.get("reply_markup")),
+        }),
         "updateChatPosition" => Ok(EnvelopePayload::UpdateChatPosition(parse_position(&value)?)),
         "updateChatTitle" => Ok(EnvelopePayload::UpdateChatTitle {
             chat_id: ChatId(int53(value.get("chat_id"))?),
@@ -1519,6 +1631,9 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
             })
         }
         "ok" => Ok(EnvelopePayload::Ok),
+        "callbackQueryAnswer" => Ok(EnvelopePayload::CallbackQueryAnswer(
+            parse_callback_query_answer(&value),
+        )),
         "error" => Ok(EnvelopePayload::Error(parse_error(Some(&value)))),
         "messages" => {
             let messages = value
@@ -1903,6 +2018,135 @@ fn parse_bot_info(value: Option<&Value>) -> Option<BotInfo> {
     })
 }
 
+/// `replyMarkupInlineKeyboard` (TDLib 1.8.67 line 3855). `reply_markup`
+/// null/absent and other markup constructors → `None`. Rows and buttons are
+/// parsed tolerantly: malformed rows are skipped, malformed buttons become
+/// disabled `Unknown` placeholders — a hostile keyboard can never crash the
+/// parse.
+fn parse_reply_markup(value: Option<&Value>) -> Option<InlineKeyboard> {
+    let value = value.filter(|v| !v.is_null())?;
+    if value.get("@type").and_then(Value::as_str) != Some("replyMarkupInlineKeyboard") {
+        return None;
+    }
+    let rows = value
+        .get("rows")
+        .and_then(Value::as_array)
+        .map(|rows| {
+            rows.iter()
+                .filter_map(Value::as_array)
+                .map(|row| {
+                    row.iter()
+                        .map(parse_inline_keyboard_button)
+                        .collect::<Vec<_>>()
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    Some(InlineKeyboard {
+        rows,
+        force_reply: value
+            .get("force_reply")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+    })
+}
+
+fn parse_inline_keyboard_button(value: &Value) -> InlineKeyboardButton {
+    let text = value
+        .get("text")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    let style = match value
+        .get("style")
+        .and_then(|style| style.get("@type"))
+        .and_then(Value::as_str)
+    {
+        Some("buttonStylePrimary") => InlineKeyboardButtonStyle::Primary,
+        Some("buttonStyleDanger") => InlineKeyboardButtonStyle::Danger,
+        Some("buttonStyleSuccess") => InlineKeyboardButtonStyle::Success,
+        Some("buttonStyleLink") => InlineKeyboardButtonStyle::Link,
+        _ => InlineKeyboardButtonStyle::Default,
+    };
+    InlineKeyboardButton {
+        text,
+        style,
+        kind: parse_inline_keyboard_button_type(value.get("type")),
+    }
+}
+
+fn parse_inline_keyboard_button_type(value: Option<&Value>) -> InlineKeyboardButtonType {
+    let value = value.filter(|v| !v.is_null());
+    let Some(value) = value else {
+        return InlineKeyboardButtonType::Unknown {
+            type_name: String::new(),
+        };
+    };
+    let type_name = value
+        .get("@type")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    match type_name.as_str() {
+        "inlineKeyboardButtonTypeUrl" => InlineKeyboardButtonType::Url {
+            url: json_field_str(value, "url"),
+        },
+        "inlineKeyboardButtonTypeLoginUrl" => InlineKeyboardButtonType::LoginUrl {
+            url: json_field_str(value, "url"),
+        },
+        "inlineKeyboardButtonTypeWebApp" => InlineKeyboardButtonType::WebApp {
+            url: json_field_str(value, "url"),
+        },
+        "inlineKeyboardButtonTypeCallback" => InlineKeyboardButtonType::Callback {
+            data: parse_tdlib_bytes(value.get("data")),
+        },
+        "inlineKeyboardButtonTypeCallbackWithPassword" => {
+            InlineKeyboardButtonType::CallbackWithPassword {
+                data: parse_tdlib_bytes(value.get("data")),
+            }
+        }
+        "inlineKeyboardButtonTypeCallbackGame" => InlineKeyboardButtonType::CallbackGame,
+        "inlineKeyboardButtonTypeSwitchInline" => InlineKeyboardButtonType::SwitchInline {
+            query: json_field_str(value, "query"),
+            target: parse_inline_keyboard_target_chat(value.get("target_chat")),
+        },
+        "inlineKeyboardButtonTypeBuy" => InlineKeyboardButtonType::Buy,
+        "inlineKeyboardButtonTypeUser" => InlineKeyboardButtonType::User {
+            user_id: value.get("user_id").and_then(Value::as_i64).unwrap_or(0),
+        },
+        "inlineKeyboardButtonTypeCopyText" => InlineKeyboardButtonType::CopyText {
+            text: json_field_str(value, "text"),
+        },
+        "inlineKeyboardButtonTypeDisabled" => InlineKeyboardButtonType::Disabled,
+        _ => InlineKeyboardButtonType::Unknown { type_name },
+    }
+}
+
+fn parse_inline_keyboard_target_chat(value: Option<&Value>) -> InlineKeyboardTargetChat {
+    match value
+        .filter(|v| !v.is_null())
+        .and_then(|v| v.get("@type"))
+        .and_then(Value::as_str)
+    {
+        Some("targetChatCurrent") => InlineKeyboardTargetChat::Current,
+        Some("targetChatChosen") => InlineKeyboardTargetChat::Chosen,
+        Some("targetChatInternalLink") => InlineKeyboardTargetChat::InternalLink,
+        _ => InlineKeyboardTargetChat::Unknown,
+    }
+}
+
+/// `callbackQueryAnswer` (TDLib 1.8.67 line 7747).
+fn parse_callback_query_answer(value: &Value) -> CallbackQueryAnswer {
+    CallbackQueryAnswer {
+        text: json_field_str(value, "text"),
+        show_alert: value
+            .get("show_alert")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        url: json_field_str(value, "url"),
+    }
+}
+
 /// `draftMessage` / `draftMessageContentText`. Other content constructors are
 /// not restored into the text field (Unigram only fills the field from text).
 fn parse_chat_draft(value: Option<&Value>) -> Option<ChatDraft> {
@@ -2028,6 +2272,7 @@ fn parse_message(value: &Value) -> Result<ParsedMessage, ParseError> {
         reply_to: parse_reply_to(value.get("reply_to")),
         forward_info: parse_forward_info(value.get("forward_info")),
         interaction_info: parse_interaction_info(value.get("interaction_info")),
+        reply_markup: parse_reply_markup(value.get("reply_markup")),
     })
 }
 
@@ -3349,6 +3594,119 @@ mod tests {
                 assert_eq!(info.description, "Refreshed description.");
                 assert_eq!(info.commands.len(), 1);
                 assert_eq!(info.commands[0].command, "ping");
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn inline_keyboard_parsed_from_reply_markup() {
+        // `replyMarkupInlineKeyboard` (schema 1.8.67 line 3855):
+        // `rows` is a vector of rows; `inlineKeyboardButton` (line 3828)
+        // carries `text`, `style:ButtonStyle`, `type`.
+        let json = r#"{"@type":"updateNewMessage","message":{"id":301,"chat_id":21,"is_outgoing":false,"reply_markup":{"@type":"replyMarkupInlineKeyboard","rows":[[{"@type":"inlineKeyboardButton","text":"Open","icon_custom_emoji_id":0,"style":{"@type":"buttonStylePrimary"},"type":{"@type":"inlineKeyboardButtonTypeUrl","url":"https://example.com"}},{"@type":"inlineKeyboardButton","text":"Tap me","icon_custom_emoji_id":0,"style":{"@type":"buttonStyleDefault"},"type":{"@type":"inlineKeyboardButtonTypeCallback","data":"AQID"}}],[{"@type":"inlineKeyboardButton","text":"Search","icon_custom_emoji_id":0,"style":{"@type":"buttonStyleLink"},"type":{"@type":"inlineKeyboardButtonTypeSwitchInline","query":"pic","target_chat":{"@type":"targetChatCurrent"}}}]],"force_reply":false},"content":{"@type":"messageText","text":{"@type":"formattedText","text":"Pick one","entities":[]}}}}"#;
+        let env = parse_envelope(json).unwrap();
+        match env.payload {
+            EnvelopePayload::UpdateNewMessage(message) => {
+                let keyboard = message.reply_markup.expect("reply_markup");
+                assert!(!keyboard.force_reply);
+                assert_eq!(keyboard.rows.len(), 2);
+                assert_eq!(keyboard.rows[0].len(), 2);
+                let open = &keyboard.rows[0][0];
+                assert_eq!(open.text, "Open");
+                assert_eq!(open.style, InlineKeyboardButtonStyle::Primary);
+                assert_eq!(
+                    open.kind,
+                    InlineKeyboardButtonType::Url {
+                        url: "https://example.com".to_string()
+                    }
+                );
+                let tap = &keyboard.rows[0][1];
+                assert_eq!(tap.style, InlineKeyboardButtonStyle::Default);
+                assert_eq!(
+                    tap.kind,
+                    InlineKeyboardButtonType::Callback {
+                        data: vec![1, 2, 3]
+                    }
+                );
+                let search = &keyboard.rows[1][0];
+                assert_eq!(search.style, InlineKeyboardButtonStyle::Link);
+                assert_eq!(
+                    search.kind,
+                    InlineKeyboardButtonType::SwitchInline {
+                        query: "pic".to_string(),
+                        target: InlineKeyboardTargetChat::Current,
+                    }
+                );
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn inline_keyboard_tolerates_unknown_types() {
+        // Unknown button `@type`, unknown `style`, missing `type`, and a
+        // non-keyboard `reply_markup` must never crash the parse; unknown
+        // buttons become `Unknown` (rendered disabled) and other markups are
+        // ignored.
+        let json = r#"{"@type":"updateNewMessage","message":{"id":302,"chat_id":21,"is_outgoing":false,"reply_markup":{"@type":"replyMarkupInlineKeyboard","rows":[[{"@type":"inlineKeyboardButton","text":"Mystery","style":{"@type":"buttonStyleFuture"},"type":{"@type":"inlineKeyboardButtonTypeQuantum"}}],[{"@type":"inlineKeyboardButton","text":"No type here"}],"not an array"],"force_reply":true},"content":{"@type":"messageText","text":{"@type":"formattedText","text":"x","entities":[]}}}}"#;
+        let env = parse_envelope(json).unwrap();
+        match env.payload {
+            EnvelopePayload::UpdateNewMessage(message) => {
+                let keyboard = message.reply_markup.expect("reply_markup");
+                assert!(keyboard.force_reply);
+                // The `"not an array"` row is skipped; tolerance never crashes.
+                assert_eq!(keyboard.rows.len(), 2);
+                let mystery = &keyboard.rows[0][0];
+                assert_eq!(mystery.style, InlineKeyboardButtonStyle::Default);
+                assert_eq!(
+                    mystery.kind,
+                    InlineKeyboardButtonType::Unknown {
+                        type_name: "inlineKeyboardButtonTypeQuantum".to_string()
+                    }
+                );
+                assert!(matches!(
+                    keyboard.rows[1][0].kind,
+                    InlineKeyboardButtonType::Unknown { .. }
+                ));
+            }
+            other => panic!("{other:?}"),
+        }
+        let env = parse_envelope(
+            r#"{"@type":"updateNewMessage","message":{"id":303,"chat_id":21,"is_outgoing":false,"reply_markup":{"@type":"replyMarkupShowKeyboard","rows":[],"is_persistent":false,"resize_keyboard":false,"one_time":false,"is_personal":false,"force_reply":false,"input_field_placeholder":""},"content":{"@type":"messageText","text":{"@type":"formattedText","text":"x","entities":[]}}}}"#,
+        )
+        .unwrap();
+        match env.payload {
+            EnvelopePayload::UpdateNewMessage(message) => {
+                assert!(message.reply_markup.is_none());
+            }
+            other => panic!("{other:?}"),
+        }
+        // Absent / null `reply_markup` → None.
+        let env = parse_envelope(
+            r#"{"@type":"updateNewMessage","message":{"id":304,"chat_id":21,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"x","entities":[]}}}}"#,
+        )
+        .unwrap();
+        match env.payload {
+            EnvelopePayload::UpdateNewMessage(message) => {
+                assert!(message.reply_markup.is_none());
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn callback_query_answer_parsed() {
+        // `getCallbackQueryAnswer` response (schema 1.8.67 line 7747).
+        let env = parse_envelope(
+            r#"{"@type":"callbackQueryAnswer","@extra":"9","text":"Done!","show_alert":false,"url":""}"#,
+        )
+        .unwrap();
+        match env.payload {
+            EnvelopePayload::CallbackQueryAnswer(answer) => {
+                assert_eq!(answer.text, "Done!");
+                assert!(!answer.show_alert);
+                assert!(answer.url.is_empty());
             }
             other => panic!("{other:?}"),
         }

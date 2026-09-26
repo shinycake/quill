@@ -5,12 +5,12 @@ use crate::ids::{
 };
 use crate::telegram::client::OwnedEnvelope;
 use crate::telegram::envelope::{
-    AnimationItem, AuthorizationState, BotInfo, ChannelMemberStatus, ChatAction, ChatDraft,
-    ChatJoinResult, ChatKind, ChatList, ChatNotificationSettings, ChatPositionUpdate,
-    ConnectionState, EnvelopePayload, ErrorClass, MessageContent, MessageForwardInfo,
-    MessageInteractionInfo, MessageOrigin, MessageReaction, MessageReplyTo, MessageSender,
-    ParsedChatMember, ParsedFile, ParsedMessage, ReportOption, ReportSponsoredResult,
-    SponsoredMessage, StickerFormat, StickerItem, StickerSetInfo,
+    AnimationItem, AuthorizationState, BotInfo, CallbackQueryAnswer, ChannelMemberStatus,
+    ChatAction, ChatDraft, ChatJoinResult, ChatKind, ChatList, ChatNotificationSettings,
+    ChatPositionUpdate, ConnectionState, EnvelopePayload, ErrorClass, InlineKeyboard,
+    MessageContent, MessageForwardInfo, MessageInteractionInfo, MessageOrigin, MessageReaction,
+    MessageReplyTo, MessageSender, ParsedChatMember, ParsedFile, ParsedMessage, ReportOption,
+    ReportSponsoredResult, SponsoredMessage, StickerFormat, StickerItem, StickerSetInfo,
 };
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
@@ -93,6 +93,10 @@ pub enum RequestPurpose {
     /// `getUserFullInfo` for a bot user. Response is `userFullInfo`; the
     /// user id is resolved from the request's chat (`ChatKind::Private`).
     GetUserFullInfo,
+    /// `getCallbackQueryAnswer` for an inline keyboard callback-button press
+    /// (Phase 3.2). Response is `callbackQueryAnswer`; the answer is shown
+    /// via the transient status line (URL answers open in the OS browser).
+    GetCallbackQueryAnswer,
     /// `joinChat`. Response is `ChatJoinResult`; own status also arrives via
     /// `updateChatMember`.
     JoinChat,
@@ -627,6 +631,9 @@ pub struct HistoryMessage {
     pub is_pinned: bool,
     /// Schema `message.media_album_id`. `0` is not an album.
     pub media_album_id: i64,
+    /// Schema `message.reply_markup` — `replyMarkupInlineKeyboard` only
+    /// (Phase 3.2). Rendered as the button grid under the message.
+    pub reply_markup: Option<InlineKeyboard>,
 }
 
 impl HistoryMessage {
@@ -711,6 +718,17 @@ impl HistoryState {
         }
     }
 
+    /// Phase 3.2: `updateMessageEdited` replaces the message's inline
+    /// keyboard (or removes it when `None`).
+    fn update_reply_markup(&mut self, id: MessageId, reply_markup: Option<InlineKeyboard>) -> bool {
+        if let Some(message) = self.messages.get_mut(&id.0) {
+            message.reply_markup = reply_markup;
+            true
+        } else {
+            false
+        }
+    }
+
     fn update_interaction_info(
         &mut self,
         id: MessageId,
@@ -771,6 +789,7 @@ pub struct SearchMessageHit {
     pub interaction_info: Option<MessageInteractionInfo>,
     pub is_pinned: bool,
     pub media_album_id: i64,
+    pub reply_markup: Option<InlineKeyboard>,
 }
 
 impl SearchMessageHit {
@@ -786,6 +805,7 @@ impl SearchMessageHit {
             interaction_info: message.interaction_info.clone(),
             is_pinned: message.is_pinned,
             media_album_id: message.media_album_id,
+            reply_markup: message.reply_markup.clone(),
         }
     }
 
@@ -801,6 +821,7 @@ impl SearchMessageHit {
             interaction_info: self.interaction_info,
             is_pinned: self.is_pinned,
             media_album_id: self.media_album_id,
+            reply_markup: self.reply_markup,
         }
     }
 }
@@ -1210,6 +1231,10 @@ pub struct Session {
     pub in_flight_forward: Option<ForwardFlight>,
     /// Last `forwardMessages` outcome for the dest picker success surface.
     pub last_forward: Option<ForwardResult>,
+    /// Last `callbackQueryAnswer` to an inline keyboard callback-button press
+    /// (Phase 3.2). The UI takes it on the next poll and shows the answer in
+    /// the status line (URL answers open in the OS browser).
+    pub last_callback_answer: Option<CallbackQueryAnswer>,
     /// TDLib `file.id` → latest `file` / `localFile` snapshot.
     pub files: HashMap<i32, ParsedFile>,
     /// `downloadFile` in flight (until completed, undownloadable, idle, or error).
@@ -1270,6 +1295,7 @@ impl Session {
             last_auth_error: None,
             in_flight_forward: None,
             last_forward: None,
+            last_callback_answer: None,
             files: HashMap::new(),
             downloading: HashSet::new(),
             download_extras: HashMap::new(),
@@ -1571,6 +1597,19 @@ impl Session {
                     history.mark_content_opened(message_id);
                 }
             }
+            EnvelopePayload::UpdateMessageEdited {
+                chat_id,
+                message_id,
+                reply_markup,
+                ..
+            } => {
+                // Phase 3.2: bots edit inline keyboards via `updateMessageEdited`
+                // (schema 1.8.67 line 10431) — the new `reply_markup` (possibly
+                // None) replaces the message's keyboard.
+                if let Some(history) = self.histories.get_mut(&chat_id.0) {
+                    history.update_reply_markup(message_id, reply_markup);
+                }
+            }
             EnvelopePayload::UpdateMessageContent {
                 chat_id,
                 message_id,
@@ -1814,6 +1853,13 @@ impl Session {
                     self.accept_join_chat_result(chat_id, result);
                 }
             }
+            EnvelopePayload::CallbackQueryAnswer(answer) => {
+                // `getCallbackQueryAnswer` response: only answers to our own
+                // inline-button presses are surfaced (matched by `@extra`).
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetCallbackQueryAnswer) {
+                    self.last_callback_answer = Some(answer);
+                }
+            }
             EnvelopePayload::UpdateSavedAnimations { .. } => {
                 if self.gifs.open {
                     self.gifs.stale = true;
@@ -1896,6 +1942,16 @@ impl Session {
                     // A TDLib error dismisses the option picker; no outcome is shown.
                     self.sponsored_report = None;
                     self.sponsored_report_target = None;
+                }
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetCallbackQueryAnswer) {
+                    // TDLib returns error 502 when the bot misses the query
+                    // timeout: surface it as an answer note (no TDLib text is
+                    // echoed) so the press gets visible feedback.
+                    self.last_callback_answer = Some(CallbackQueryAnswer {
+                        text: "bot did not answer".to_string(),
+                        show_alert: false,
+                        url: String::new(),
+                    });
                 }
                 let download_id = pending
                     .filter(|p| p.purpose == RequestPurpose::DownloadFile)
@@ -2690,6 +2746,7 @@ impl Session {
                         interaction_info: message.interaction_info.clone(),
                         is_pinned: message.is_pinned,
                         media_album_id: message.media_album_id,
+                        reply_markup: message.reply_markup.clone(),
                     })
                     .collect()
             })
@@ -2778,6 +2835,7 @@ fn history_message(message: ParsedMessage, pending: bool) -> HistoryMessage {
         interaction_info: message.interaction_info,
         is_pinned: message.is_pinned,
         media_album_id: message.media_album_id,
+        reply_markup: message.reply_markup,
     }
 }
 
@@ -4188,6 +4246,7 @@ mod tests {
             interaction_info: None,
             is_pinned: false,
             media_album_id: 0,
+            reply_markup: None,
         });
         assert_eq!(
             session.begin_chat_search_jump(MessageId(70)),
@@ -4211,6 +4270,7 @@ mod tests {
             interaction_info: None,
             is_pinned: false,
             media_album_id: 0,
+            reply_markup: None,
         });
         assert_eq!(
             session.begin_chat_search_jump(MessageId(80)),
