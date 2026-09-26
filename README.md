@@ -42,6 +42,7 @@ Toolchain: Rust **1.98.1**. UI pin: **gpui-kit 0.6.1**. TDLib schema: **1.8.67**
 - [x] Folder management: create / edit / delete / reorder / tags toggle (`createChatFolder` / `editChatFolder` / `deleteChatFolder` / `reorderChatFolders` / `toggleChatFolderTags`); add/remove chats via `getChatListsToAddChat` + `addChatToList` / `getChatFolder` + `editChatFolder`; manage dialog + per-chat Folders picker (injected/replay; live needs tdjson)
 - [x] Chat-list avatars (downloaded `chat.photo.small` thumbnails + colored initial fallbacks; `updateChatPhoto` re-arms) and channel/supergroup header (photo, description snippet, @username, subscriber/member count, "Discuss" via `linked_chat_id`) (injected/replay; live needs tdjson)
 - [x] Stories: active-story tray + fullscreen viewer (Phase 9.1); reactions (quick-react + `getStoryAvailableReactions` picker), interaction counters, replies (`inputMessageReplyToStory`), own-story delete (`deleteStory`) (Phase 9.2; injected/replay; live needs tdjson)
+- [x] Media viewer: in-viewer video playback (ffmpeg frame extraction at 8 fps, 720 px, 600-frame cap; audio-only ffplay; silent fallback) + photo zoom/pan (1×–8×, wheel/drag/double-click/buttons/keyboard) + Left/Right navigation + album-mosaic opening (Parity slice 5; injected/replay; live needs tdjson + ffmpeg)
 - [ ] Post a story (photo composer / caption / privacy) — **blocked**: pinned TDLib 1.8.67 schema has no `sendStory` constructor (see DECISIONS.md Phase 9.2)
 
 Decisions, pins, and blockers: [DECISIONS.md](DECISIONS.md).  

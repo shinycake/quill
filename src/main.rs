@@ -23,6 +23,10 @@ fn main() {
 fn ui_main(args: &[String]) {
     use gpui_kit::*;
 
+    // Parity slice 5: drop leftover viewer frame caches from previous runs
+    // (abandoned extractions, unclean exits) before anything re-creates them.
+    quill::video::sweep_stale_viewer_frame_caches();
+
     if let Some(demo) = parse_screenshot_demo(args) {
         run_screenshot_demo(demo);
         return;
@@ -114,6 +118,7 @@ fn parse_screenshot_demo(args: &[String]) -> Option<(ui::ScreenshotDemo, std::pa
                 "ready-location" => ScreenshotDemo::ReadyLocation,
                 "ready-dice" => ScreenshotDemo::ReadyDice,
                 "ready-media-viewer" => ScreenshotDemo::ReadyMediaViewer,
+                "ready-video-playback" => ScreenshotDemo::ReadyVideoPlayback,
                 "ready-stories" => ScreenshotDemo::ReadyStories,
                 "ready-story-post" => ScreenshotDemo::ReadyStoryPost,
                 "ready-seek-bars" => ScreenshotDemo::ReadySeekBars,
@@ -125,7 +130,7 @@ fn parse_screenshot_demo(args: &[String]) -> Option<(ui::ScreenshotDemo, std::pa
                 "ready-chat-avatars" => ScreenshotDemo::ReadyChatAvatars,
                 _ => {
                     eprintln!(
-                        "unknown screenshot demo '{kind}' (expected need-tdjson|wait-phone|wait-code|wait-password|ready-chats|ready-chats-composer|ready-unread|ready-unread-read|ready-media|ready-send-media|ready-search|ready-search-in-chat|ready-reply|ready-edit-delete|ready-forward|ready-reactions|ready-pin|ready-mute-archive|ready-typing|ready-stickers|ready-voice|ready-link-preview|ready-gifs|ready-video|ready-video-note|ready-video-send|ready-video-note-send|ready-drafts|ready-albums|ready-audio|ready-sponsored|ready-channels|ready-channels-admin|ready-bot-chat|ready-bot-keyboard|ready-bot-command-menu|ready-text-entities|ready-poll|ready-location|ready-dice|ready-media-viewer|ready-stories|ready-story-post|ready-seek-bars|ready-forum-topics|ready-topic-post|ready-contacts|ready-folders|ready-folders-manage|ready-chat-avatars)"
+                        "unknown screenshot demo '{kind}' (expected need-tdjson|wait-phone|wait-code|wait-password|ready-chats|ready-chats-composer|ready-unread|ready-unread-read|ready-media|ready-send-media|ready-search|ready-search-in-chat|ready-reply|ready-edit-delete|ready-forward|ready-reactions|ready-pin|ready-mute-archive|ready-typing|ready-stickers|ready-voice|ready-link-preview|ready-gifs|ready-video|ready-video-note|ready-video-send|ready-video-note-send|ready-drafts|ready-albums|ready-audio|ready-sponsored|ready-channels|ready-channels-admin|ready-bot-chat|ready-bot-keyboard|ready-bot-command-menu|ready-text-entities|ready-poll|ready-location|ready-dice|ready-media-viewer|ready-video-playback|ready-stories|ready-story-post|ready-seek-bars|ready-forum-topics|ready-topic-post|ready-contacts|ready-folders|ready-folders-manage|ready-chat-avatars)"
                     );
                     std::process::exit(2);
                 }
@@ -188,6 +193,7 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
         ScreenshotDemo::ReadyLocation => ".quill-ready-ready-location",
         ScreenshotDemo::ReadyDice => ".quill-ready-ready-dice",
         ScreenshotDemo::ReadyMediaViewer => ".quill-ready-ready-media-viewer",
+        ScreenshotDemo::ReadyVideoPlayback => ".quill-ready-ready-video-playback",
         ScreenshotDemo::ReadyStories => ".quill-ready-ready-stories",
         ScreenshotDemo::ReadyStoryPost => ".quill-ready-ready-story-post",
         ScreenshotDemo::ReadySeekBars => ".quill-ready-ready-seek-bars",

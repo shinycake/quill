@@ -21,6 +21,39 @@ pub fn video_frame_cache_dir(file_id: i32) -> PathBuf {
     video_frame_cache_root().join(file_id.to_string())
 }
 
+/// Parent of every viewer frame directory. The media viewer extracts
+/// full-clip frames at viewer resolution, separate from the row preview's
+/// 12-frame cache, so the two never share a directory.
+pub fn viewer_frame_cache_root() -> PathBuf {
+    std::env::temp_dir().join("quill-viewer-frames")
+}
+
+/// Per-file viewer frame directory: `{viewer_frame_cache_root}/{file_id}`.
+pub fn viewer_frame_cache_dir(file_id: i32) -> PathBuf {
+    viewer_frame_cache_root().join(file_id.to_string())
+}
+
+/// Account or demo roots plus the viewer frame cache. Creates the cache root
+/// so `sandboxed_display_path` can canonicalize it.
+pub fn with_viewer_frame_cache(mut roots: Vec<PathBuf>) -> Vec<PathBuf> {
+    let root = viewer_frame_cache_root();
+    let _ = std::fs::create_dir_all(&root);
+    roots.push(root);
+    roots
+}
+
+/// Remove extracted viewer frames for one file.
+pub fn discard_viewer_frame_cache(file_id: i32) {
+    let _ = std::fs::remove_dir_all(viewer_frame_cache_dir(file_id));
+}
+
+/// Remove leftover viewer frame caches from previous runs (abandoned
+/// extractions, unclean exits). Called once at startup, before any new
+/// extraction creates the root again.
+pub fn sweep_stale_viewer_frame_caches() {
+    let _ = std::fs::remove_dir_all(viewer_frame_cache_root());
+}
+
 /// Account or demo roots plus the video frame cache. Creates the cache root so
 /// `sandboxed_display_path` can canonicalize it.
 pub fn with_video_frame_cache(mut roots: Vec<PathBuf>) -> Vec<PathBuf> {
@@ -386,32 +419,190 @@ pub fn playback_frames(
     if !is_playable_video(mime, src) {
         return Err("unsupported video".into());
     }
-    let frames = extract_frames(src, cache_dir, start_timestamp)?;
+    let frames = extract_frames(src, cache_dir, start_timestamp, 8.0, 240, 12, None)?;
     if frames.is_empty() {
         return Err("ffmpeg produced no frames".into());
     }
     Ok(frames)
 }
 
+/// Full-clip frames for the media viewer (parity slice 5).
+///
+/// The row preview extracts 12 frames at 8 fps; the viewer needs the whole
+/// clip so decoded frames render in-place. Frame rate adapts to `duration_secs`
+/// to bound the cache: 8 fps for clips up to 75 s, then fewer fps to stay
+/// under `VIEWER_MAX_FRAMES` (600). `fps` is the actual extraction rate, used
+/// to map the playback clock to a frame index.
+#[derive(Debug)]
+pub struct ViewerFrames {
+    pub frames: Vec<PathBuf>,
+    pub fps: f64,
+}
+
+/// Maximum viewer frames per clip (75 s at 8 fps). Longer clips get a lower
+/// fps so the full duration stays covered.
+pub const VIEWER_MAX_FRAMES: i32 = 600;
+/// Viewer extraction frame rate for clips within the frame budget.
+pub const VIEWER_FPS: f64 = 8.0;
+/// Viewer frame width in px (matches the viewer's fixed frame).
+pub const VIEWER_FRAME_WIDTH: i32 = 720;
+
+pub fn viewer_playback_frames(
+    src: &Path,
+    mime: &str,
+    cache_dir: &Path,
+    start_timestamp: i32,
+    duration_secs: i32,
+) -> Result<ViewerFrames, String> {
+    if !is_playable_video(mime, src) {
+        return Err("unsupported video".into());
+    }
+    let fps = viewer_fps_for_duration(duration_secs);
+    let frames = extract_frames(
+        src,
+        cache_dir,
+        start_timestamp,
+        fps,
+        VIEWER_FRAME_WIDTH,
+        VIEWER_MAX_FRAMES,
+        None,
+    )?;
+    if frames.is_empty() {
+        return Err("ffmpeg produced no frames".into());
+    }
+    Ok(ViewerFrames { frames, fps })
+}
+
+/// Like `viewer_playback_frames`, but the running ffmpeg child is published
+/// into `child_slot` while it runs (cleared when it exits), so the UI can
+/// kill an extraction the user abandoned (viewer closed/stepped) instead of
+/// letting it run to completion on a discarded cache dir. `cancelled` is a
+/// shared flag the UI sets when the run is abandoned: it is checked before
+/// spawning and right after publishing the child, closing the race where
+/// the UI kills between extraction start and the child being published —
+/// in that window the worker kills its own freshly spawned child.
+pub fn viewer_playback_frames_cancelable(
+    src: &Path,
+    mime: &str,
+    cache_dir: &Path,
+    start_timestamp: i32,
+    duration_secs: i32,
+    child_slot: &std::sync::Arc<std::sync::Mutex<Option<std::process::Child>>>,
+    cancelled: &std::sync::atomic::AtomicBool,
+) -> Result<ViewerFrames, String> {
+    if !is_playable_video(mime, src) {
+        return Err("unsupported video".into());
+    }
+    let fps = viewer_fps_for_duration(duration_secs);
+    let frames = extract_frames(
+        src,
+        cache_dir,
+        start_timestamp,
+        fps,
+        VIEWER_FRAME_WIDTH,
+        VIEWER_MAX_FRAMES,
+        Some((child_slot, cancelled)),
+    )?;
+    if frames.is_empty() {
+        return Err("ffmpeg produced no frames".into());
+    }
+    Ok(ViewerFrames { frames, fps })
+}
+
+/// Extraction fps for a clip: 8 fps up to 75 s, then fewer fps to stay
+/// under `VIEWER_MAX_FRAMES` (600). Minimum 1 fps.
+fn viewer_fps_for_duration(duration_secs: i32) -> f64 {
+    let fps = if duration_secs > 0 {
+        (f64::from(VIEWER_MAX_FRAMES) / f64::from(duration_secs)).min(VIEWER_FPS)
+    } else {
+        VIEWER_FPS
+    };
+    fps.max(1.0)
+}
+
 fn extract_frames(
     src: &Path,
     cache_dir: &Path,
     start_timestamp: i32,
+    fps: f64,
+    width: i32,
+    max_frames: i32,
+    child_slot: Option<(
+        &std::sync::Arc<std::sync::Mutex<Option<std::process::Child>>>,
+        &std::sync::atomic::AtomicBool,
+    )>,
 ) -> Result<Vec<PathBuf>, String> {
     std::fs::create_dir_all(cache_dir).map_err(|err| err.to_string())?;
-    let pattern = cache_dir.join("frame-%02d.png");
+    let pattern = cache_dir.join("frame-%03d.png");
     let mut command = Command::new("ffmpeg");
     command.args(["-y", "-hide_banner", "-loglevel", "error"]);
     if start_timestamp > 0 {
         command.arg("-ss").arg(start_timestamp.to_string());
     }
-    let status = command
+    command
         .arg("-i")
         .arg(src)
-        .args(["-vf", "fps=8,scale=240:-1", "-frames:v", "12"])
+        .args([
+            "-vf",
+            &format!("fps={fps:.2},scale={width}:-1"),
+            "-frames:v",
+            &max_frames.to_string(),
+        ])
         .arg(&pattern)
-        .status()
-        .map_err(|err| format!("video playback needs ffmpeg ({err})"))?;
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    let status = match child_slot {
+        Some((slot, cancelled)) => {
+            use std::sync::atomic::Ordering;
+            if cancelled.load(Ordering::SeqCst) {
+                return Err("ffmpeg extraction was cancelled".to_string());
+            }
+            let child = command
+                .spawn()
+                .map_err(|err| format!("video playback needs ffmpeg ({err})"))?;
+            // Publish the running child so the UI can kill an abandoned
+            // extraction (viewer closed/stepped). The worker polls
+            // `try_wait` instead of blocking in `wait` so it never holds
+            // the slot lock while the UI killer needs it.
+            if let Ok(mut guard) = slot.lock() {
+                *guard = Some(child);
+            }
+            if cancelled.load(Ordering::SeqCst) {
+                // The UI abandoned the run between spawn and publish and
+                // already took the (empty) slot: kill our own child instead
+                // of orphaning it.
+                if let Ok(mut guard) = slot.lock()
+                    && let Some(mut child) = guard.take()
+                {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                }
+                return Err("ffmpeg extraction was cancelled".to_string());
+            }
+            loop {
+                let mut guard = slot
+                    .lock()
+                    .map_err(|_| "extraction slot poisoned".to_string())?;
+                let Some(child) = guard.as_mut() else {
+                    // Slot emptied by the UI killer: it took the child and
+                    // is killing/reaping it — report cancellation. (The UI
+                    // drops stale completions by epoch instead of showing
+                    // an error.)
+                    return Err("ffmpeg extraction was cancelled".to_string());
+                };
+                if let Some(status) = child.try_wait().map_err(|err| err.to_string())? {
+                    guard.take();
+                    break status;
+                }
+                drop(guard);
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+        }
+        None => command
+            .status()
+            .map_err(|err| format!("video playback needs ffmpeg ({err})"))?,
+    };
     if !status.success() {
         return Err("ffmpeg could not read the video".into());
     }
@@ -534,5 +725,124 @@ mod tests {
         let clip = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("docs/screenshots/fixtures/demo-clip.mp4");
         assert!(probe_local_video_note(&clip).is_err());
+    }
+
+    #[test]
+    fn viewer_frames_cover_full_clip_with_adaptive_fps() {
+        let clip = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("docs/screenshots/fixtures/demo-clip-12s.mp4");
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time")
+            .as_nanos();
+        let cache = std::env::temp_dir().join(format!("quill-viewer-test-{nanos}"));
+        // 12 s at 8 fps = 96 frames, under the 600-frame cap.
+        let vf = viewer_playback_frames(&clip, "video/mp4", &cache, 0, 12).expect("frames");
+        assert_eq!(vf.fps, 8.0);
+        assert_eq!(vf.frames.len(), 96);
+        // A long clip gets a lower fps so the full duration stays covered.
+        let vf_long = viewer_playback_frames(&clip, "video/mp4", &cache, 0, 300).expect("frames");
+        assert_eq!(vf_long.fps, 2.0);
+        assert!(vf_long.frames.len() <= 600);
+        let _ = std::fs::remove_dir_all(&cache);
+    }
+
+    #[test]
+    fn cancelable_extraction_cancel_before_publish_aborts_without_orphan() {
+        // The UI can abandon the run before ffmpeg publishes its child
+        // (viewer closed between extraction start and spawn): the worker
+        // must report cancellation and must not leave a running ffmpeg
+        // behind.
+        let clip = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("docs/screenshots/fixtures/demo-clip-12s.mp4");
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time")
+            .as_nanos();
+        let cache = std::env::temp_dir().join(format!("quill-viewer-prepub-test-{nanos}"));
+        let slot = std::sync::Arc::new(std::sync::Mutex::new(None));
+        let cancel = std::sync::atomic::AtomicBool::new(true);
+        let err =
+            viewer_playback_frames_cancelable(&clip, "video/mp4", &cache, 0, 12, &slot, &cancel)
+                .unwrap_err();
+        assert!(
+            err.contains("cancelled"),
+            "expected a cancellation error, got: {err}"
+        );
+        assert!(
+            slot.lock().map(|guard| guard.is_none()).unwrap_or(true),
+            "no orphaned ffmpeg child may remain in the slot"
+        );
+        let _ = std::fs::remove_dir_all(&cache);
+    }
+
+    #[test]
+    fn viewer_frame_cache_is_separate_from_row_preview_cache() {
+        assert_ne!(video_frame_cache_dir(96), viewer_frame_cache_dir(96));
+        assert!(viewer_frame_cache_dir(96).starts_with(viewer_frame_cache_root()));
+    }
+
+    #[test]
+    fn cancelable_extraction_kill_aborts_and_reports_cancelled() {
+        let clip = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("docs/screenshots/fixtures/demo-clip-12s.mp4");
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time")
+            .as_nanos();
+        let cache = std::env::temp_dir().join(format!("quill-viewer-cancel-test-{nanos}"));
+        let slot = std::sync::Arc::new(std::sync::Mutex::new(None));
+        let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let worker_slot = slot.clone();
+        let worker_cancel = cancel.clone();
+        let worker_cache = cache.clone();
+        let handle = std::thread::spawn(move || {
+            viewer_playback_frames_cancelable(
+                &clip,
+                "video/mp4",
+                &worker_cache,
+                0,
+                12,
+                &worker_slot,
+                &worker_cancel,
+            )
+        });
+        // Wait for ffmpeg to be published, then kill it the way the UI
+        // does on viewer close/step.
+        let mut published = false;
+        for _ in 0..200 {
+            if slot.lock().map(|guard| guard.is_some()).unwrap_or(false) {
+                published = true;
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        assert!(published, "ffmpeg child was published to the slot");
+        let mut child = slot
+            .lock()
+            .ok()
+            .and_then(|mut guard| guard.take())
+            .expect("child present");
+        child.kill().expect("kill extraction");
+        child.wait().expect("reap extraction");
+        drop(child);
+        let err = handle.join().expect("worker thread").unwrap_err();
+        assert!(
+            err.contains("cancelled"),
+            "expected a cancellation error, got: {err}"
+        );
+        let _ = std::fs::remove_dir_all(&cache);
+    }
+
+    #[test]
+    fn sweep_removes_stale_viewer_frame_caches() {
+        let dir = viewer_frame_cache_dir(424242);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("frame-001.png"), b"stale").unwrap();
+        sweep_stale_viewer_frame_caches();
+        assert!(
+            !viewer_frame_cache_root().exists(),
+            "stale viewer frame caches are swept at startup"
+        );
     }
 }
