@@ -508,3 +508,92 @@ Research snapshot 2026-09-16, pin recheck **2026-09-17**.
   inline bots / `getCommands`; bot privacy modes and group membership
   details; menu-button / web-app buttons; bot photo/avatar headers; bot
   sponsored-message rows (fetching still skips bots).
+
+## Phase 3.2 — Inline keyboards (2026-09-26)
+
+- **Rationale:** bot messages often end with an inline keyboard
+  (`replyMarkupInlineKeyboard`) and until now those buttons were invisible —
+  the messages were silently uninteractive. This slice renders the keyboard
+  as a button grid under each history message that carries one (not just
+  bot private chats — the parse lives on the shared message path), and
+  wires the actionable button kinds to real behavior; everything else
+  renders honestly disabled instead of crashing or faking it.
+- **Schema (1.8.67, verified in `schema/td_api.tl`):**
+  - `replyMarkupInlineKeyboard rows:vector<vector<inlineKeyboardButton>>
+    force_reply:Bool = ReplyMarkup;` (line 3855) — only this markup is
+    kept on `ParsedMessage.reply_markup`; `replyMarkupShowKeyboard` and
+    friends stay `None`
+  - `inlineKeyboardButton text:string icon_custom_emoji_id:int64
+    style:ButtonStyle type:InlineKeyboardButtonType = InlineKeyboardButton;`
+    (line 3828) — `icon_custom_emoji_id` is parsed but not rendered yet
+  - `buttonStyleDefault/Primary/Danger/Success/Link = ButtonStyle;`
+    (lines 3696–3708); unknown styles fall back to `Default` so the
+    keyboard always renders
+  - `inlineKeyboardButtonTypeUrl/LoginUrl/WebApp/Callback/
+    CallbackWithPassword/CallbackGame/SwitchInline/Buy/User/CopyText/
+    Disabled` (lines 3774–3807) — all eleven parsed; only `Url`,
+    `Callback`, `SwitchInline`, and `CopyText` are actionable. Note
+    `inlineKeyboardButtonTypeCallbackWithPassword` carries `data:bytes`
+    (line 3789), stored on the variant for the future password prompt
+  - `targetChatCurrent/Chosen/InternalLink = TargetChat;` (lines 7476–7482)
+    — no chat picker in this slice: all three insert into the current
+    chat's composer, documented in the UI and the composer helper
+  - `getCallbackQueryAnswer chat_id:int53 message_id:int53
+    payload:CallbackQueryPayload = CallbackQueryAnswer;` (line 13138) —
+    clients press callback buttons with this, NOT `answerCallbackQuery`
+    (bots-only per its schema doc comment, line 13146).
+    `callbackQueryPayloadData data:bytes` (line 7737); `bytes` is base64
+    in the JSON interface
+  - `callbackQueryAnswer text:string show_alert:Bool url:string =
+    CallbackQueryAnswer;` (line 7747)
+  - `updateMessageEdited chat_id:int53 message_id:int53 edit_date:int32
+    reply_markup:ReplyMarkup = Update;` (line 10431) — bots edit keyboards
+    this way; previously unhandled by the parser, now replaces
+    `HistoryMessage.reply_markup` (null/absent `reply_markup` removes it).
+    `updateMessageContent` carries no markup, so it correctly leaves the
+    keyboard untouched
+- **UX:**
+  - Rows render as horizontal button rows under the message bubble; buttons
+    stretch to share the row width (Telegram-desktop style); empty rows are
+    skipped. Styles map to primary / danger / success / link / ghost
+    buttons. Search hits keep their keyboard (`SearchMessageHit`).
+  - `Url` buttons open in the OS browser through the same
+    non-http-scheme-refusing gate as message-text links. `Callback` sends
+    `getCallbackQueryAnswer` (driver-guarded: chats path active, supported
+    chat, real non-pending message); the `callbackQueryAnswer` is matched
+    by `@extra`, consumed by the UI on the next poll, and shown in the
+    transient status line — a URL answer opens in the OS browser; TDLib
+    error 502 (bot missed the query timeout) surfaces as "bot did not
+    answer" instead of echoing TDLib text. `SwitchInline` inserts the query
+    into the current chat's composer. `CopyText` copies to the clipboard.
+    `LoginUrl` / `WebApp` / `CallbackWithPassword` / `CallbackGame` / `Buy`
+    / `User` / `Disabled` / unknown render disabled with an explanatory
+    tooltip.
+  - Malformed rows are skipped and malformed buttons become disabled
+    `Unknown` placeholders — a hostile keyboard can never crash the parse.
+  - Screenshot demo: `quill --screenshot-demo ready-bot-keyboard` →
+    `docs/screenshots/ready-bot-keyboard.png` (URL row, callback +
+    switchInline row, copy-text + unknown/disabled row).
+- **Replay proof:** `tests/replay.rs` gains
+  `replay_inline_keyboard_mixed_lands_on_history` (mixed keyboard lands on
+  `HistoryMessage.reply_markup` with rows, styles, and types intact),
+  `replay_inline_keyboard_hostile_yields_disabled_placeholders` (unknown
+  type/style, missing `type`, non-array rows → skipped or disabled
+  placeholders), `replay_non_inline_markup_ignored`
+  (`replyMarkupShowKeyboard` and absent `reply_markup` → `None`), and
+  `replay_update_message_edited_replaces_keyboard` (edit replaces the
+  keyboard; null `reply_markup` removes it) — plus the prior
+  `replay_inline_keyboard_stored_from_real_json` and
+  `replay_callback_query_answer_surfaced` (`@extra`-matched answer stored,
+  stray answer ignored, 502 → fallback note). `envelope.rs` unit-tests the
+  keyboard parse, hostile tolerance, and `callbackQueryAnswer`;
+  `requests.rs` unit-tests the `getCallbackQueryAnswer` JSON shape
+  (base64 `bytes`, guard against `answerCallbackQuery`); `composer.rs`
+  unit-tests `insert_switch_inline_text`.
+- **Out of this slice (→ 3.3 and beyond):** full `/` command menu (3.3);
+  chat picker for `targetChatChosen`; opening `targetChatInternalLink`
+  links; `inlineKeyboardButtonTypeLoginUrl` (`getLoginUrlInfo` flow),
+  `WebApp` (`openWebApp`), `CallbackWithPassword` password prompt,
+  `CallbackGame`, `Buy` payment flow, `User` mention insertion; rendering
+  `icon_custom_emoji_id`; rendering `replyMarkupForceReply` /
+  `replyMarkupShowKeyboard`.

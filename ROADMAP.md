@@ -46,9 +46,12 @@ handling exists.
   users ungated; bot info panel (`getUserFullInfo` → `bot_info`:
   description, commands) with tap-to-insert command buttons.
   `docs/screenshots/ready-bot-chat.png`.
-- **3.2 Inline keyboards.** Render `replyMarkupInlineKeyboard` under bot
-  messages; callback buttons → `answerCallbackQuery`; URL buttons → OS open;
-  `switchInline` buttons → insert query in the chosen chat's composer.
+- **3.2 Inline keyboards.** ✅ done 2026-09-26 — Render
+  `replyMarkupInlineKeyboard` under messages; callback buttons →
+  `getCallbackQueryAnswer` (answer in the status line, URL answers opened);
+  URL buttons → OS open; `switchInline` buttons → insert query in the
+  current chat's composer; `updateMessageEdited` refreshes keyboards.
+  `docs/screenshots/ready-bot-keyboard.png`.
 - **3.3 Bot commands menu.** Composer `/` menu from `bot_info.commands` /
   `getCommands`; tap inserts the command.
 

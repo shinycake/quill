@@ -967,6 +967,32 @@ pub fn remove_message_reaction(
     .to_string()
 }
 
+/// `getCallbackQueryAnswer` (TDLib 1.8.67, `schema/td_api.tl:13138`).
+/// Pressing an `inlineKeyboardButtonTypeCallback` button: sends the callback
+/// query to the bot; TDLib returns `callbackQueryAnswer`. (Not
+/// `answerCallbackQuery` — that one is bots-only per its schema doc
+/// comment.) `payload` is `callbackQueryPayloadData` (line 7737); schema
+/// `bytes` is base64 in the JSON interface.
+pub fn get_callback_query_answer(
+    extra: RequestId,
+    chat_id: ChatId,
+    message_id: MessageId,
+    data: &[u8],
+) -> String {
+    use base64::Engine;
+    json!({
+        "@type": "getCallbackQueryAnswer",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0,
+        "message_id": message_id.0,
+        "payload": {
+            "@type": "callbackQueryPayloadData",
+            "data": base64::engine::general_purpose::STANDARD.encode(data),
+        },
+    })
+    .to_string()
+}
+
 /// `pinChatMessage` (TDLib 1.8.67). Official Pin: notify when the chat allows
 /// it (`disable_notification` false); pin for everyone (`only_for_self` false).
 /// Schema: notifications are always disabled in channels and private chats.
@@ -1555,6 +1581,24 @@ mod tests {
         assert_eq!(v["chat_id"], 11);
         assert!(!recents.contains("CANARY"));
         assert!(!add.contains("CANARY"));
+    }
+
+    #[test]
+    fn get_callback_query_answer_shape_matches_1_8_67() {
+        // `getCallbackQueryAnswer chat_id:int53 message_id:int53
+        // payload:CallbackQueryPayload = CallbackQueryAnswer` (schema line
+        // 13138); `callbackQueryPayloadData data:bytes` (line 7737) with
+        // base64 `bytes` in JSON.
+        let json = get_callback_query_answer(RequestId(51), ChatId(21), MessageId(301), &[1, 2, 3]);
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "getCallbackQueryAnswer");
+        assert_eq!(v["@extra"], "51");
+        assert_eq!(v["chat_id"], 21);
+        assert_eq!(v["message_id"], 301);
+        assert_eq!(v["payload"]["@type"], "callbackQueryPayloadData");
+        assert_eq!(v["payload"]["data"], "AQID");
+        assert!(!json.contains("answerCallbackQuery"));
+        assert!(!json.contains("CANARY"));
     }
 
     #[test]

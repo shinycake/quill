@@ -385,6 +385,21 @@ pub fn insert_bot_command_text(current: &str, command: &str) -> String {
     }
 }
 
+/// Phase 3.2: composer text after tapping a `switchInline` keyboard button.
+/// The button's query is inserted — bare when the field is empty, otherwise
+/// appended after a space (or directly when the field already ends in
+/// whitespace). `targetChatChosen` / `targetChatInternalLink` (no chat
+/// picker in this slice) use the current chat, same as `targetChatCurrent`.
+pub fn insert_switch_inline_text(current: &str, query: &str) -> String {
+    if current.trim().is_empty() {
+        query.to_string()
+    } else if current.ends_with(char::is_whitespace) {
+        format!("{current}{query}")
+    } else {
+        format!("{current} {query}")
+    }
+}
+
 /// Snapshot of a send attempt: destination is frozen at submit time.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ComposerSnapshot {
@@ -508,6 +523,15 @@ mod tests {
         assert_eq!(insert_bot_command_text("hello", "start"), "hello /start");
         assert_eq!(insert_bot_command_text("hello ", "start"), "hello /start");
         assert_eq!(insert_bot_command_text("/help", "start"), "/help /start");
+    }
+
+    #[test]
+    fn switch_inline_insert_text() {
+        // Phase 3.2: tapping a switchInline button inserts the query.
+        assert_eq!(insert_switch_inline_text("", "pic"), "pic");
+        assert_eq!(insert_switch_inline_text("   ", "pic"), "pic");
+        assert_eq!(insert_switch_inline_text("hello", "pic"), "hello pic");
+        assert_eq!(insert_switch_inline_text("hello ", "pic"), "hello pic");
     }
 
     #[test]

@@ -26,15 +26,15 @@ use crate::telegram::requests::{
     check_authentication_code, check_authentication_password, click_chat_sponsored_message,
     close_chat, close_request, delete_messages, download_file as download_file_request,
     edit_message_caption, edit_message_text, forward_messages, get_authorization_state,
-    get_chat_history, get_chat_member, get_chat_sponsored_messages, get_installed_sticker_sets,
-    get_me, get_saved_animations, get_sticker_set, get_user_full_info, input_message_photo,
-    input_message_video, join_chat, leave_chat, load_chats, open_chat, open_message_content,
-    pin_chat_message, remove_message_reaction, report_chat_sponsored_message, search_chat_messages,
-    search_chats, search_messages, search_recently_found_chats, send_animation, send_chat_action,
-    send_chat_action_kind, send_document, send_message_album, send_photo, send_sticker, send_text,
-    send_video, send_video_note, send_voice_note, set_authentication_phone_number,
-    set_chat_draft_message, set_chat_notification_settings, unpin_chat_message, view_messages,
-    view_sponsored_chat,
+    get_callback_query_answer, get_chat_history, get_chat_member, get_chat_sponsored_messages,
+    get_installed_sticker_sets, get_me, get_saved_animations, get_sticker_set, get_user_full_info,
+    input_message_photo, input_message_video, join_chat, leave_chat, load_chats, open_chat,
+    open_message_content, pin_chat_message, remove_message_reaction, report_chat_sponsored_message,
+    search_chat_messages, search_chats, search_messages, search_recently_found_chats,
+    send_animation, send_chat_action, send_chat_action_kind, send_document, send_message_album,
+    send_photo, send_sticker, send_text, send_video, send_video_note, send_voice_note,
+    set_authentication_phone_number, set_chat_draft_message, set_chat_notification_settings,
+    unpin_chat_message, view_messages, view_sponsored_chat,
 };
 use crate::voice::VoiceDraft;
 use std::path::Path;
@@ -1517,6 +1517,50 @@ impl<S: JsonSender> ConnectDriver<S> {
             .session
             .request(RequestPurpose::OpenMessageContent, Some(chat_id));
         let json = open_message_content(extra, chat_id, message_id);
+        match self.sender.send_json(&json) {
+            Ok(()) => Ok(extra),
+            Err(err) => {
+                self.session.requests.take(extra);
+                Err(err)
+            }
+        }
+    }
+
+    /// Phase 3.2: send a callback query for an inline keyboard button press
+    /// (`getCallbackQueryAnswer`; TDLib answers with `callbackQueryAnswer`).
+    /// Only real (non-pending) messages in a supported chat can be answered.
+    pub fn send_callback_query(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        data: &[u8],
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let supported = self
+            .session
+            .chats
+            .get(&chat_id.0)
+            .is_some_and(|chat| chat.supported());
+        if !supported {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let Some(message) = self
+            .session
+            .histories
+            .get(&chat_id.0)
+            .and_then(|history| history.messages.get(&message_id.0))
+        else {
+            return Err(ConnectSendError::InvalidRequest);
+        };
+        if message.pending || message.id.0 <= 0 {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::GetCallbackQueryAnswer, Some(chat_id));
+        let json = get_callback_query_answer(extra, chat_id, message_id, data);
         match self.sender.send_json(&json) {
             Ok(()) => Ok(extra),
             Err(err) => {
@@ -3362,6 +3406,67 @@ mod tests {
         // A regular private chat never triggers the fetch.
         driver.select_chat(ChatId(22)).unwrap();
         assert_eq!(info_fetches().len(), 1);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn callback_query_sent_for_button_press() {
+        // Phase 3.2: pressing a callback button sends `getCallbackQueryAnswer`
+        // (schema 1.8.67 line 13138) with the button's payload bytes
+        // (base64 in JSON). Pending messages and unknown chats are refused.
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = Arc::new(RecordingSender::new());
+        let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+        let mut driver =
+            ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+        let seq = AtomicU64::new(0);
+        for json in [
+            r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+            r#"{"@type":"updateUser","user":{"id":21,"first_name":"Bot","type":{"@type":"userTypeBot","can_be_edited":false,"can_join_groups":false,"can_read_all_group_messages":false,"has_main_web_app":false,"has_topics":false,"allows_users_to_create_topics":false,"can_manage_bots":false,"is_inline":false,"inline_query_placeholder":"","supports_guest_queries":false,"is_guard":false,"need_location":false,"can_connect_to_business":false,"can_be_added_to_attachment_menu":false,"active_user_count":0}}}"#,
+            r#"{"@type":"updateNewChat","chat":{"id":21,"title":"Demo Bot","type":{"@type":"chatTypePrivate","user_id":21},"unread_count":0}}"#,
+            r#"{"@type":"updateNewMessage","message":{"id":301,"chat_id":21,"is_outgoing":false,"reply_markup":{"@type":"replyMarkupInlineKeyboard","rows":[[{"@type":"inlineKeyboardButton","text":"Vote","icon_custom_emoji_id":0,"style":{"@type":"buttonStyleDefault"},"type":{"@type":"inlineKeyboardButtonTypeCallback","data":"AQID"}}]],"force_reply":false},"content":{"@type":"messageText","text":{"@type":"formattedText","text":"Pick","entities":[]}}}}"#,
+        ] {
+            driver
+                .ingest(copy_and_parse(json, &seq, &dyn_sink).unwrap())
+                .unwrap();
+        }
+        let extra = driver
+            .send_callback_query(ChatId(21), MessageId(301), &[1, 2, 3])
+            .expect("callback query sends");
+        let sent = recorder.snapshot();
+        let query = sent
+            .iter()
+            .find(|j| j.contains(r#""@type":"getCallbackQueryAnswer""#))
+            .expect("getCallbackQueryAnswer recorded");
+        let v: serde_json::Value = serde_json::from_str(query).unwrap();
+        assert_eq!(v["chat_id"], 21);
+        assert_eq!(v["message_id"], 301);
+        assert_eq!(v["payload"]["@type"], "callbackQueryPayloadData");
+        assert_eq!(v["payload"]["data"], "AQID");
+        assert_eq!(v["@extra"], extra.0.to_string());
+        assert!(
+            driver
+                .session
+                .requests
+                .pending_extra_for(RequestPurpose::GetCallbackQueryAnswer, Some(ChatId(21)))
+                .is_some()
+        );
+        // Pending (unsent, negative id) messages cannot be answered.
+        assert!(
+            driver
+                .send_callback_query(ChatId(21), MessageId(-1), &[1])
+                .is_err()
+        );
+        // Unknown chats are refused.
+        assert!(
+            driver
+                .send_callback_query(ChatId(99), MessageId(301), &[1])
+                .is_err()
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }

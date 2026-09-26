@@ -1743,3 +1743,299 @@ fn replay_non_bot_chat_gating_unchanged() {
     assert_eq!(session.bot_user_id_for_chat(quill::ids::ChatId(32)), None);
     assert!(session.bot_info_for_chat(quill::ids::ChatId(32)).is_none());
 }
+
+/// Phase 3.2: an `updateNewMessage` with real `replyMarkupInlineKeyboard`
+/// JSON stores the keyboard with the message. URL buttons carry an
+/// openable URL (the dispatch predicate — the browser itself is not opened
+/// in tests); callback buttons carry the payload bytes; switchInline buttons
+/// carry the query; unknown button types are kept as disabled placeholders.
+#[test]
+fn replay_inline_keyboard_stored_from_real_json() {
+    use quill::telegram::envelope::{InlineKeyboardButtonType, InlineKeyboardTargetChat};
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn quill::diagnostics::DiagnosticSink> = sink.clone();
+    let mut session = Session::new(AccountKey::primary(), dyn_sink);
+    let seq = AtomicU64::new(0);
+    apply_all_seq(
+        &mut session,
+        &sink,
+        &seq,
+        &[
+            r#"{"@type":"updateNewMessage","message":{"id":301,"chat_id":21,"is_outgoing":false,"reply_markup":{"@type":"replyMarkupInlineKeyboard","rows":[[{"@type":"inlineKeyboardButton","text":"Visit site","icon_custom_emoji_id":0,"style":{"@type":"buttonStylePrimary"},"type":{"@type":"inlineKeyboardButtonTypeUrl","url":"https://example.com/path"}}],[{"@type":"inlineKeyboardButton","text":"Vote","icon_custom_emoji_id":0,"style":{"@type":"buttonStyleDefault"},"type":{"@type":"inlineKeyboardButtonTypeCallback","data":"AQID"}},{"@type":"inlineKeyboardButton","text":"Search here","icon_custom_emoji_id":0,"style":{"@type":"buttonStyleDefault"},"type":{"@type":"inlineKeyboardButtonTypeSwitchInline","query":"cats","target_chat":{"@type":"targetChatCurrent"}}}],[{"@type":"inlineKeyboardButton","text":"Mystery","icon_custom_emoji_id":0,"style":{"@type":"buttonStyleDefault"},"type":{"@type":"inlineKeyboardButtonTypeQuantum"}}]],"force_reply":false},"content":{"@type":"messageText","text":{"@type":"formattedText","text":"Pick one","entities":[]}}}}"#,
+        ],
+    );
+    let message = session
+        .histories
+        .get(&21)
+        .and_then(|h| h.messages.get(&301))
+        .expect("message 301 stored");
+    let keyboard = message.reply_markup.as_ref().expect("keyboard stored");
+    assert_eq!(keyboard.rows.len(), 3);
+    match &keyboard.rows[0][0].kind {
+        InlineKeyboardButtonType::Url { url } => {
+            assert_eq!(url, "https://example.com/path");
+            // URL dispatch predicate (same gate the UI uses before OS open).
+            assert!(quill::text::openable_http_url(url));
+        }
+        other => panic!("{other:?}"),
+    }
+    match &keyboard.rows[1][0].kind {
+        InlineKeyboardButtonType::Callback { data } => assert_eq!(data, &[1, 2, 3]),
+        other => panic!("{other:?}"),
+    }
+    match &keyboard.rows[1][1].kind {
+        InlineKeyboardButtonType::SwitchInline { query, target } => {
+            assert_eq!(query, "cats");
+            assert_eq!(*target, InlineKeyboardTargetChat::Current);
+        }
+        other => panic!("{other:?}"),
+    }
+    // Unknown button types are kept and render disabled — never a crash.
+    assert!(matches!(
+        &keyboard.rows[2][0].kind,
+        InlineKeyboardButtonType::Unknown { .. }
+    ));
+}
+
+/// Phase 3.2: a `callbackQueryAnswer` response whose `@extra` matches the
+/// in-flight `getCallbackQueryAnswer` request is stored for the UI status
+/// line; an answer without a matching request is ignored. TDLib error 502
+/// (bot missed the query timeout) surfaces as an honest fallback note.
+#[test]
+fn replay_callback_query_answer_surfaced() {
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn quill::diagnostics::DiagnosticSink> = sink.clone();
+    let mut session = Session::new(AccountKey::primary(), dyn_sink);
+    let seq = AtomicU64::new(0);
+    let extra = session.request(
+        RequestPurpose::GetCallbackQueryAnswer,
+        Some(quill::ids::ChatId(21)),
+    );
+    apply_all_seq(
+        &mut session,
+        &sink,
+        &seq,
+        &[&format!(
+            r#"{{"@type":"callbackQueryAnswer","@extra":"{}","text":"Voted!","show_alert":false,"url":""}}"#,
+            extra.0
+        )],
+    );
+    let answer = session.last_callback_answer.take().expect("answer stored");
+    assert_eq!(answer.text, "Voted!");
+    assert!(!answer.show_alert);
+    assert!(answer.url.is_empty());
+    // No in-flight request: a stray answer is ignored.
+    apply_all_seq(
+        &mut session,
+        &sink,
+        &seq,
+        &[
+            r#"{"@type":"callbackQueryAnswer","@extra":"999","text":"stray","show_alert":false,"url":""}"#,
+        ],
+    );
+    assert!(session.last_callback_answer.is_none());
+    // Error on the in-flight request → fallback note, no TDLib text echoed.
+    let extra = session.request(
+        RequestPurpose::GetCallbackQueryAnswer,
+        Some(quill::ids::ChatId(21)),
+    );
+    apply_all_seq(
+        &mut session,
+        &sink,
+        &seq,
+        &[&format!(
+            r#"{{"@type":"error","@extra":"{}","code":502,"message":"BOT_QUERY_TIMEOUT"}}"#,
+            extra.0
+        )],
+    );
+    let answer = session.last_callback_answer.take().expect("fallback note");
+    assert_eq!(answer.text, "bot did not answer");
+    assert!(answer.url.is_empty());
+}
+
+/// Phase 3.2: a bot message carrying `replyMarkupInlineKeyboard` lands on
+/// `HistoryMessage.reply_markup` with rows, styles, and button types intact
+/// (callback, URL, switchInline, disabled-type buttons all parsed).
+#[test]
+fn replay_inline_keyboard_mixed_lands_on_history() {
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn quill::diagnostics::DiagnosticSink> = sink.clone();
+    let mut session = Session::new(AccountKey::primary(), dyn_sink);
+    let seq = AtomicU64::new(0);
+    apply_all_seq(
+        &mut session,
+        &sink,
+        &seq,
+        &[
+            BOT_USER_JSON,
+            r#"{"@type":"updateNewChat","chat":{"id":21,"title":"Demo Bot","type":{"@type":"chatTypePrivate","user_id":21},"unread_count":0}}"#,
+            r#"{"@type":"updateChatPosition","chat_id":21,"position":{"@type":"chatPosition","list":{"@type":"chatListMain"},"order":"40","is_pinned":false}}"#,
+            r#"{"@type":"updateNewMessage","message":{"id":301,"chat_id":21,"is_outgoing":false,"reply_markup":{"@type":"replyMarkupInlineKeyboard","rows":[[{"@type":"inlineKeyboardButton","text":"Visit site","icon_custom_emoji_id":0,"style":{"@type":"buttonStylePrimary"},"type":{"@type":"inlineKeyboardButtonTypeUrl","url":"https://example.com"}}],[{"@type":"inlineKeyboardButton","text":"Vote","icon_custom_emoji_id":0,"style":{"@type":"buttonStyleSuccess"},"type":{"@type":"inlineKeyboardButtonTypeCallback","data":"AQID"}},{"@type":"inlineKeyboardButton","text":"Search here","icon_custom_emoji_id":0,"style":{"@type":"buttonStyleDefault"},"type":{"@type":"inlineKeyboardButtonTypeSwitchInline","query":"cats","target_chat":{"@type":"targetChatCurrent"}}},{"@type":"inlineKeyboardButton","text":"Buy now","icon_custom_emoji_id":0,"style":{"@type":"buttonStyleDanger"},"type":{"@type":"inlineKeyboardButtonTypeBuy"}}]],"force_reply":false},"content":{"@type":"messageText","text":{"@type":"formattedText","text":"Pick one","entities":[]}}}}"#,
+        ],
+    );
+    use quill::telegram::envelope::{
+        InlineKeyboardButtonStyle, InlineKeyboardButtonType, InlineKeyboardTargetChat,
+    };
+    let keyboard = session.histories.get(&21).unwrap().messages[&301]
+        .reply_markup
+        .clone()
+        .expect("inline keyboard on history message");
+    assert!(!keyboard.force_reply);
+    assert_eq!(keyboard.rows.len(), 2);
+    assert_eq!(keyboard.rows[0].len(), 1);
+    assert_eq!(keyboard.rows[1].len(), 3);
+    let visit = &keyboard.rows[0][0];
+    assert_eq!(visit.text, "Visit site");
+    assert_eq!(visit.style, InlineKeyboardButtonStyle::Primary);
+    assert_eq!(
+        visit.kind,
+        InlineKeyboardButtonType::Url {
+            url: "https://example.com".to_string()
+        }
+    );
+    let vote = &keyboard.rows[1][0];
+    assert_eq!(vote.style, InlineKeyboardButtonStyle::Success);
+    assert_eq!(
+        vote.kind,
+        InlineKeyboardButtonType::Callback {
+            data: vec![1, 2, 3]
+        }
+    );
+    let search = &keyboard.rows[1][1];
+    assert_eq!(search.style, InlineKeyboardButtonStyle::Default);
+    assert_eq!(
+        search.kind,
+        InlineKeyboardButtonType::SwitchInline {
+            query: "cats".to_string(),
+            target: InlineKeyboardTargetChat::Current,
+        }
+    );
+    let buy = &keyboard.rows[1][2];
+    assert_eq!(buy.style, InlineKeyboardButtonStyle::Danger);
+    assert_eq!(buy.kind, InlineKeyboardButtonType::Buy);
+}
+
+/// Phase 3.2: a hostile keyboard (unknown button `@type`, unknown style,
+/// missing `type`, non-array rows) never breaks the parse — malformed rows
+/// are skipped and malformed buttons become disabled `Unknown` placeholders.
+#[test]
+fn replay_inline_keyboard_hostile_yields_disabled_placeholders() {
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn quill::diagnostics::DiagnosticSink> = sink.clone();
+    let mut session = Session::new(AccountKey::primary(), dyn_sink);
+    let seq = AtomicU64::new(0);
+    apply_all_seq(
+        &mut session,
+        &sink,
+        &seq,
+        &[
+            BOT_USER_JSON,
+            r#"{"@type":"updateNewChat","chat":{"id":21,"title":"Demo Bot","type":{"@type":"chatTypePrivate","user_id":21},"unread_count":0}}"#,
+            r#"{"@type":"updateNewMessage","message":{"id":302,"chat_id":21,"is_outgoing":false,"reply_markup":{"@type":"replyMarkupInlineKeyboard","rows":[[{"@type":"inlineKeyboardButton","text":"Mystery","style":{"@type":"buttonStyleFuture"},"type":{"@type":"inlineKeyboardButtonTypeQuantum"}}],[{"@type":"inlineKeyboardButton","text":"No type here"}],"not an array",null],"force_reply":true},"content":{"@type":"messageText","text":{"@type":"formattedText","text":"x","entities":[]}}}}"#,
+        ],
+    );
+    use quill::telegram::envelope::{InlineKeyboardButtonStyle, InlineKeyboardButtonType};
+    let keyboard = session.histories.get(&21).unwrap().messages[&302]
+        .reply_markup
+        .clone()
+        .expect("keyboard parsed despite hostile rows");
+    assert!(keyboard.force_reply);
+    // The two non-array rows are skipped, so only two rows survive.
+    assert_eq!(keyboard.rows.len(), 2);
+    let mystery = &keyboard.rows[0][0];
+    // Unknown style falls back to Default; unknown type → Unknown placeholder.
+    assert_eq!(mystery.style, InlineKeyboardButtonStyle::Default);
+    assert_eq!(
+        mystery.kind,
+        InlineKeyboardButtonType::Unknown {
+            type_name: "inlineKeyboardButtonTypeQuantum".to_string()
+        }
+    );
+    // Missing `type` → Unknown placeholder (renders disabled).
+    assert!(matches!(
+        keyboard.rows[1][0].kind,
+        InlineKeyboardButtonType::Unknown { .. }
+    ));
+}
+
+/// Phase 3.2: non-inline markups (`replyMarkupShowKeyboard`) are ignored —
+/// `reply_markup` stays `None`, same as an absent field.
+#[test]
+fn replay_non_inline_markup_ignored() {
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn quill::diagnostics::DiagnosticSink> = sink.clone();
+    let mut session = Session::new(AccountKey::primary(), dyn_sink);
+    let seq = AtomicU64::new(0);
+    apply_all_seq(
+        &mut session,
+        &sink,
+        &seq,
+        &[
+            BOT_USER_JSON,
+            r#"{"@type":"updateNewChat","chat":{"id":21,"title":"Demo Bot","type":{"@type":"chatTypePrivate","user_id":21},"unread_count":0}}"#,
+            r#"{"@type":"updateNewMessage","message":{"id":303,"chat_id":21,"is_outgoing":false,"reply_markup":{"@type":"replyMarkupShowKeyboard","rows":[],"is_persistent":false,"resize_keyboard":false,"one_time":false,"is_personal":false,"force_reply":false,"input_field_placeholder":""},"content":{"@type":"messageText","text":{"@type":"formattedText","text":"x","entities":[]}}}}"#,
+            r#"{"@type":"updateNewMessage","message":{"id":304,"chat_id":21,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"y","entities":[]}}}}"#,
+        ],
+    );
+    let history = session.histories.get(&21).unwrap();
+    assert!(history.messages[&303].reply_markup.is_none());
+    assert!(history.messages[&304].reply_markup.is_none());
+}
+
+/// Phase 3.2: `updateMessageEdited` (schema 1.8.67 line 10431) replaces the
+/// message's inline keyboard — a new keyboard lands, and a null/absent
+/// `reply_markup` removes it.
+#[test]
+fn replay_update_message_edited_replaces_keyboard() {
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn quill::diagnostics::DiagnosticSink> = sink.clone();
+    let mut session = Session::new(AccountKey::primary(), dyn_sink);
+    let seq = AtomicU64::new(0);
+    apply_all_seq(
+        &mut session,
+        &sink,
+        &seq,
+        &[
+            BOT_USER_JSON,
+            r#"{"@type":"updateNewChat","chat":{"id":21,"title":"Demo Bot","type":{"@type":"chatTypePrivate","user_id":21},"unread_count":0}}"#,
+            r#"{"@type":"updateNewMessage","message":{"id":301,"chat_id":21,"is_outgoing":false,"reply_markup":{"@type":"replyMarkupInlineKeyboard","rows":[[{"@type":"inlineKeyboardButton","text":"Old","icon_custom_emoji_id":0,"style":{"@type":"buttonStyleDefault"},"type":{"@type":"inlineKeyboardButtonTypeCallback","data":""}}]],"force_reply":false},"content":{"@type":"messageText","text":{"@type":"formattedText","text":"old","entities":[]}}}}"#,
+        ],
+    );
+    assert!(
+        session.histories.get(&21).unwrap().messages[&301]
+            .reply_markup
+            .is_some()
+    );
+    // The bot edits the message with a new keyboard: it replaces the old one.
+    apply_all_seq(
+        &mut session,
+        &sink,
+        &seq,
+        &[
+            r#"{"@type":"updateMessageEdited","chat_id":21,"message_id":301,"edit_date":1700000001,"reply_markup":{"@type":"replyMarkupInlineKeyboard","rows":[[{"@type":"inlineKeyboardButton","text":"New","icon_custom_emoji_id":0,"style":{"@type":"buttonStyleDanger"},"type":{"@type":"inlineKeyboardButtonTypeCallback","data":"AA=="}}]],"force_reply":false}}"#,
+        ],
+    );
+    use quill::telegram::envelope::InlineKeyboardButtonStyle;
+    let keyboard = session.histories.get(&21).unwrap().messages[&301]
+        .reply_markup
+        .clone()
+        .expect("edited keyboard present");
+    assert_eq!(keyboard.rows.len(), 1);
+    assert_eq!(keyboard.rows[0].len(), 1);
+    assert_eq!(keyboard.rows[0][0].text, "New");
+    assert_eq!(keyboard.rows[0][0].style, InlineKeyboardButtonStyle::Danger);
+    // The bot edits the message with no reply_markup: the keyboard is gone.
+    apply_all_seq(
+        &mut session,
+        &sink,
+        &seq,
+        &[
+            r#"{"@type":"updateMessageEdited","chat_id":21,"message_id":301,"edit_date":1700000002,"reply_markup":null}"#,
+        ],
+    );
+    assert!(
+        session.histories.get(&21).unwrap().messages[&301]
+            .reply_markup
+            .is_none()
+    );
+}
