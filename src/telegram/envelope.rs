@@ -146,6 +146,23 @@ pub enum EnvelopePayload {
         messages: Vec<ParsedMessage>,
         next_from_message_id: MessageId,
     },
+    /// `updateSupergroup` — `supergroup.is_forum` is how Quill learns a
+    /// supergroup is a forum (`chatTypeSupergroup` has no forum flag).
+    UpdateSupergroup {
+        supergroup_id: i64,
+        is_forum: bool,
+    },
+    /// `supergroup` — `getSupergroup` response.
+    Supergroup {
+        supergroup_id: i64,
+        is_forum: bool,
+    },
+    /// `forumTopics` — `getForumTopics` response. Only the first page is
+    /// fetched; `next_offset_*` are dropped (see Phase 5.1 DECISIONS).
+    ForumTopics {
+        total_count: i32,
+        topics: Vec<ForumTopic>,
+    },
     UpdateFile(ParsedFile),
     File(ParsedFile),
     /// `stickerSets` — `getInstalledStickerSets`.
@@ -844,6 +861,69 @@ pub struct ParsedMessage {
     /// Schema `message.reply_markup` (TDLib 1.8.67). Only
     /// `replyMarkupInlineKeyboard` is kept; other markups are `None`.
     pub reply_markup: Option<InlineKeyboard>,
+}
+
+/// One `forumTopic` (TDLib 1.8.67, `schema/td_api.tl:3968` + `forumTopicInfo`
+/// at 3953). Only the fields the topic list / topic view need are kept;
+/// dropped fields are documented in the Phase 5.1 DECISIONS entry:
+/// `icon` (custom-emoji topic icons are not rendered), `creation_date`,
+/// `creator_id`, `is_outgoing`, `is_hidden`, `is_name_implicit`,
+/// `last_read_inbox/outbox_message_id`, `unread_mention_count`,
+/// `unread_reaction_count`, `unread_poll_vote_count`,
+/// `notification_settings`, `draft_message`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ForumTopic {
+    pub forum_topic_id: i32,
+    pub name: String,
+    pub is_general: bool,
+    pub is_closed: bool,
+    pub is_pinned: bool,
+    pub unread_count: i32,
+    /// Schema `forumTopic.order` — topics sort by order descending.
+    pub order: i64,
+    /// Cheap preview of `forumTopic.last_message` via
+    /// `MessageContent::preview`; empty when there is no last message.
+    pub last_message_preview: String,
+}
+
+/// Parse one `forumTopic` object. Returns `None` when `info` is missing or
+/// malformed (the row is skipped, matching the lenient message parsing).
+fn parse_forum_topic(value: &Value) -> Option<ForumTopic> {
+    let info = value.get("info")?;
+    let forum_topic_id = info.get("forum_topic_id")?.as_i64()? as i32;
+    let name = json_field_str(info, "name");
+    let is_general = info
+        .get("is_general")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let is_closed = info
+        .get("is_closed")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let is_pinned = value
+        .get("is_pinned")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let unread_count = value
+        .get("unread_count")
+        .and_then(Value::as_i64)
+        .unwrap_or(0) as i32;
+    let order = int53_or_zero(value.get("order"));
+    let last_message_preview = value
+        .get("last_message")
+        .and_then(|m| parse_message(m).ok())
+        .map(|m| m.content.preview())
+        .unwrap_or_default();
+    Some(ForumTopic {
+        forum_topic_id,
+        name,
+        is_general,
+        is_closed,
+        is_pinned,
+        unread_count,
+        order,
+        last_message_preview,
+    })
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2052,6 +2132,44 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
                     .unwrap_or(0) as i32,
                 messages: parsed,
                 next_from_message_id: MessageId(int53_or_zero(value.get("next_from_message_id"))),
+            })
+        }
+        // Phase 5.1: `updateSupergroup` (schema line 10738) and the
+        // `getSupergroup` response both carry `supergroup.is_forum` (schema
+        // line 2746).
+        "updateSupergroup" => {
+            let supergroup = value.get("supergroup").ok_or(ParseError::MissingField)?;
+            Ok(EnvelopePayload::UpdateSupergroup {
+                supergroup_id: int53(supergroup.get("id"))?,
+                is_forum: supergroup
+                    .get("is_forum")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
+            })
+        }
+        "supergroup" => Ok(EnvelopePayload::Supergroup {
+            supergroup_id: int53(value.get("id"))?,
+            is_forum: value
+                .get("is_forum")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+        }),
+        // Phase 5.1: `forumTopics` (schema line 3976). Topics keep their
+        // response order; the UI sorts by `order` descending per the schema
+        // ("Topics must be sorted by the order in descending order").
+        "forumTopics" => {
+            let topics = value
+                .get("topics")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default();
+            let parsed = topics.iter().filter_map(parse_forum_topic).collect();
+            Ok(EnvelopePayload::ForumTopics {
+                total_count: value
+                    .get("total_count")
+                    .and_then(Value::as_i64)
+                    .unwrap_or(0) as i32,
+                topics: parsed,
             })
         }
         "message" => Ok(EnvelopePayload::Message(parse_message(&value)?)),
@@ -4211,6 +4329,78 @@ mod tests {
             .expect("sendMessage");
         assert!(send.contains("topic_id:MessageTopic"));
         assert!(!send.contains("message_thread_id"));
+    }
+
+    #[test]
+    fn forum_topics_parse_keeps_needed_fields() {
+        let json = r#"{"@type":"forumTopics","@extra":"9","total_count":2,"topics":[{"info":{"@type":"forumTopicInfo","chat_id":16,"forum_topic_id":1,"name":"General","icon":{"@type":"forumTopicIcon","color":7322096,"custom_emoji_id":"0"},"creation_date":1700000000,"creator_id":{"@type":"messageSenderUser","user_id":5},"is_general":true,"is_outgoing":false,"is_closed":false,"is_hidden":false,"is_name_implicit":false},"last_message":{"id":50,"chat_id":16,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"CANARY_TOPIC_welcome","entities":[]}}},"order":"500","is_pinned":true,"unread_count":3,"last_read_inbox_message_id":50,"last_read_outbox_message_id":0,"unread_mention_count":0,"unread_reaction_count":0,"unread_poll_vote_count":0,"notification_settings":{"@type":"chatNotificationSettings","use_default_mute_for":true,"mute_for":0,"use_default_sound":true,"sound_id":"0","use_default_show_preview":true,"show_preview":true,"use_default_disable_pinned_message_notifications":true,"disable_pinned_message_notifications":false,"use_default_disable_mention_notifications":true,"disable_mention_notifications":false},"draft_message":null},{"info":{"@type":"forumTopicInfo","chat_id":16,"forum_topic_id":2,"name":"Random","icon":{"@type":"forumTopicIcon","color":0,"custom_emoji_id":"0"},"creation_date":1700000100,"creator_id":{"@type":"messageSenderUser","user_id":6},"is_general":false,"is_outgoing":false,"is_closed":true,"is_hidden":false,"is_name_implicit":false},"last_message":null,"order":"100","is_pinned":false,"unread_count":0,"last_read_inbox_message_id":0,"last_read_outbox_message_id":0,"unread_mention_count":0,"unread_reaction_count":0,"unread_poll_vote_count":0,"notification_settings":{"@type":"chatNotificationSettings","use_default_mute_for":true,"mute_for":0,"use_default_sound":true,"sound_id":"0","use_default_show_preview":true,"show_preview":true,"use_default_disable_pinned_message_notifications":true,"disable_pinned_message_notifications":false,"use_default_disable_mention_notifications":true,"disable_mention_notifications":false},"draft_message":null}],"next_offset_date":0,"next_offset_message_id":0,"next_offset_forum_topic_id":0}"#;
+        let env = parse_envelope(json).unwrap();
+        match env.payload {
+            EnvelopePayload::ForumTopics {
+                total_count,
+                topics,
+            } => {
+                assert_eq!(total_count, 2);
+                assert_eq!(topics.len(), 2);
+                let general = &topics[0];
+                assert_eq!(general.forum_topic_id, 1);
+                assert_eq!(general.name, "General");
+                assert!(general.is_general);
+                assert!(!general.is_closed);
+                assert!(general.is_pinned);
+                assert_eq!(general.unread_count, 3);
+                assert_eq!(general.order, 500);
+                assert_eq!(general.last_message_preview, "CANARY_TOPIC_welcome");
+                let random = &topics[1];
+                assert_eq!(random.forum_topic_id, 2);
+                assert!(!random.is_general);
+                assert!(random.is_closed);
+                assert_eq!(random.last_message_preview, "");
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+
+    #[test]
+    fn forum_topic_without_info_is_skipped() {
+        let json = r#"{"@type":"forumTopics","total_count":1,"topics":[{"order":"1"}],"next_offset_date":0,"next_offset_message_id":0,"next_offset_forum_topic_id":0}"#;
+        let env = parse_envelope(json).unwrap();
+        match env.payload {
+            EnvelopePayload::ForumTopics { topics, .. } => assert!(topics.is_empty()),
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+
+    #[test]
+    fn update_supergroup_parses_forum_flag() {
+        let json = r#"{"@type":"updateSupergroup","supergroup":{"@type":"supergroup","id":16,"usernames":null,"date":1700000000,"status":{"@type":"chatMemberStatusMember"},"member_count":42,"boost_level":0,"has_automatic_translation":false,"has_linked_chat":false,"has_location":false,"sign_messages":false,"show_message_sender":false,"join_to_send_messages":false,"join_by_request":false,"is_slow_mode_enabled":false,"is_channel":false,"is_broadcast_group":false,"is_forum":true,"is_direct_messages_group":false,"is_administered_direct_messages_group":false,"verification_status":{"@type":"verificationStatus","is_verified":false,"is_scam":false,"is_fake":false},"has_direct_messages_group":false,"has_forum_tabs":false,"restriction_info":null,"paid_message_star_count":0,"active_story_state":null}}"#;
+        let env = parse_envelope(json).unwrap();
+        match env.payload {
+            EnvelopePayload::UpdateSupergroup {
+                supergroup_id,
+                is_forum,
+            } => {
+                assert_eq!(supergroup_id, 16);
+                assert!(is_forum);
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+
+    #[test]
+    fn supergroup_response_parses_forum_flag() {
+        let json = r#"{"@type":"supergroup","@extra":"4","id":17,"is_forum":false}"#;
+        let env = parse_envelope(json).unwrap();
+        match env.payload {
+            EnvelopePayload::Supergroup {
+                supergroup_id,
+                is_forum,
+            } => {
+                assert_eq!(supergroup_id, 17);
+                assert!(!is_forum);
+            }
+            other => panic!("unexpected {other:?}"),
+        }
     }
 
     #[test]

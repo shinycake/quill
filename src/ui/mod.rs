@@ -35,7 +35,7 @@ use quill::state::{
 use quill::telegram::client::copy_and_parse;
 use quill::telegram::envelope::{
     AuthorizationState, BotInfo, CallbackQueryAnswer, ChannelMemberStatus, ChatDraft,
-    ChatNotificationSettings, DEFAULT_EMOJI_REACTIONS, InlineKeyboardButton,
+    ChatNotificationSettings, DEFAULT_EMOJI_REACTIONS, ForumTopic, InlineKeyboardButton,
     InlineKeyboardButtonStyle, InlineKeyboardButtonType, MUTE_FOR_1_HOUR, MUTE_FOR_2_DAYS,
     MUTE_FOR_8_HOURS, MUTE_FOREVER, MessageContent, MessageInteractionInfo, ParsedFile,
     PollContent, PollOption, PollType, SponsoredMessage, toggle_chosen_emoji_reaction,
@@ -380,6 +380,12 @@ pub enum ScreenshotDemo {
     /// showing elapsed/total time labels (Phase 4.6). No subprocess is
     /// spawned — playback state is faked.
     ReadySeekBars,
+    /// Forum-topics demo (injected, no live Telegram): a forum supergroup
+    /// whose `updateSupergroup` marks it a forum and whose `getForumTopics`
+    /// response seeds three topics (General pinned + unread, Announcements
+    /// with a last-message preview, Random closed), shown as the topic
+    /// list (Phase 5.1).
+    ReadyForumTopics,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -971,6 +977,15 @@ impl QuillApp {
                     AuthorizationState::Ready,
                 )
             }
+            Some(ScreenshotDemo::ReadyForumTopics) => {
+                demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
+                (
+                    ConnectUiStatus::DemoReadyChats,
+                    None,
+                    "screenshot demo — forum topics".into(),
+                    AuthorizationState::Ready,
+                )
+            }
             None => bootstrap_connect(credentials),
         };
 
@@ -1282,6 +1297,13 @@ impl QuillApp {
             app.begin_track_playback(PlaybackKind::Voice, MessageId(90), 12.0, 5.0, cx);
             app.playback_positions.insert(MessageId(801), 87.0);
             app.status_note = "screenshot demo — seek bars · voice playing · audio paused".into();
+        }
+        if matches!(demo, Some(ScreenshotDemo::ReadyForumTopics)) {
+            if let Some(session) = app.demo_session.as_mut() {
+                app.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_forum_topics(session, &app.demo_sink, &app.demo_seq);
+            }
+            app.status_note = "screenshot demo — forum topics list".into();
         }
         if matches!(demo, Some(ScreenshotDemo::ReadyVideoSend)) {
             app.composer.update(cx, |input, cx| {
@@ -2480,7 +2502,21 @@ impl QuillApp {
         match self.pane_mode() {
             PaneMode::Ready => {
                 if self.live.is_some() {
-                    let result = self.live.as_mut().expect("live").driver.fetch_history();
+                    // Phase 5.1: a topic view pages its own history.
+                    let topic_open = self
+                        .live
+                        .as_ref()
+                        .and_then(|live| live.driver.session.open_topic)
+                        .is_some();
+                    let result = if topic_open {
+                        self.live
+                            .as_mut()
+                            .expect("live")
+                            .driver
+                            .fetch_topic_history()
+                    } else {
+                        self.live.as_mut().expect("live").driver.fetch_history()
+                    };
                     self.status_note = match result {
                         Ok(Some(_)) => "loading older messages".into(),
                         Ok(None) => "no older messages to load".into(),
@@ -6875,9 +6911,15 @@ impl QuillApp {
             PaneMode::Ready => {
                 let session = self.session();
                 let open = session.and_then(|s| s.open_chat);
-                let can_post = open
-                    .and_then(|id| session.and_then(|s| s.chats.get(&id.0).map(|c| c.can_post())))
-                    .unwrap_or(false);
+                // Phase 5.1: posting into a topic is out of scope — the
+                // topic view is read-only.
+                let in_topic = session.is_some_and(|s| s.open_topic.is_some());
+                let can_post = !in_topic
+                    && open
+                        .and_then(|id| {
+                            session.and_then(|s| s.chats.get(&id.0).map(|c| c.can_post()))
+                        })
+                        .unwrap_or(false);
                 if can_post { Some(true) } else { None }
             }
         };
@@ -6885,6 +6927,7 @@ impl QuillApp {
             PaneMode::Connecting => Some("Sign in to send messages."),
             PaneMode::Ready if composer.is_none() => {
                 let open = self.session().and_then(|s| s.open_chat);
+                let in_topic = self.session().is_some_and(|s| s.open_topic.is_some());
                 let is_channel = open.is_some_and(|id| {
                     self.session()
                         .and_then(|s| s.chats.get(&id.0).map(|c| c.is_channel()))
@@ -6893,6 +6936,11 @@ impl QuillApp {
                 if is_channel {
                     // The join/leave footer replaces the plain note for channels.
                     None
+                } else if in_topic {
+                    // Phase 5.1: topic view is read-only.
+                    Some(
+                        "Topic view is read-only in this phase — posting to a topic is out of scope.",
+                    )
                 } else if open.is_none() {
                     Some("Select a supported cloud chat to send.")
                 } else {
@@ -7352,6 +7400,18 @@ impl QuillApp {
             })
         });
         let peer_typing = chat.is_some_and(|c| c.is_peer_typing());
+        // Phase 5.1: forum supergroups render a topic list instead of the
+        // general history; a selected topic renders its own history.
+        let is_forum = chat.is_some_and(|c| c.is_forum_chat());
+        let open_topic = session.and_then(|s| s.open_topic);
+        let topic_info = open.and_then(|id| session.and_then(|s| s.open_topic_info(id)));
+        let topic_messages: Vec<HistoryMessage> = match (open, open_topic) {
+            (Some(id), Some(topic_id)) => session
+                .and_then(|s| s.topic_histories.get(&(id.0, topic_id)))
+                .map(|h| h.ordered().into_iter().cloned().collect())
+                .unwrap_or_default(),
+            _ => Vec::new(),
+        };
         div()
             .id("conversation-history")
             .flex()
@@ -7360,6 +7420,9 @@ impl QuillApp {
             .min_h_0()
             .min_w_0()
             .child(self.conversation_header(&title, chat_actions, peer_typing, cx))
+            .when_some(topic_info.clone(), |this, info| {
+                this.child(self.forum_topic_strip(&info, cx))
+            })
             .when_some(self.bot_info_panel(cx), |this, panel| this.child(panel))
             .when(self.mute_menu_open, |this| {
                 this.child(self.mute_menu_panel(cx))
@@ -7404,6 +7467,33 @@ impl QuillApp {
                     cx,
                 )
                 .into_any_element()
+            } else if is_forum && open_topic.is_none() {
+                // Phase 5.1: opening a forum supergroup shows its topics.
+                self.forum_topics_pane(open, cx).into_any_element()
+            } else if is_forum {
+                // Phase 5.1: per-topic history — same history component,
+                // fed from the topic history store (`searchChatMessages`
+                // with `topic_id`).
+                if topic_messages.is_empty() {
+                    pane_placeholder(
+                        "No messages in this topic yet",
+                        "Topic history arrives via searchChatMessages with topic_id.",
+                        cx,
+                    )
+                    .into_any_element()
+                } else {
+                    self.history_message_list(
+                        "topic-history",
+                        &topic_messages,
+                        chat,
+                        &sender_name,
+                        highlight_id,
+                        &files,
+                        &downloading,
+                        &media_roots,
+                        cx,
+                    )
+                }
             } else if messages.is_empty() {
                 pane_placeholder(
                     "No messages yet",
@@ -7412,121 +7502,361 @@ impl QuillApp {
                 )
                 .into_any_element()
             } else {
-                let mut list = div()
-                    .id("session-history")
-                    .flex()
-                    .flex_col()
-                    .flex_1()
-                    .min_h_0()
-                    .px_3()
-                    .pt_2()
-                    .gap_1();
-                let groups = quill::album::group_media_albums(
+                self.history_message_list(
+                    "session-history",
                     &messages,
-                    |message| message.media_album_id,
-                    |message| message.is_outgoing,
-                    |message| quill::album::is_album_media(&message.content),
-                );
-                for group in groups {
-                    let quill::album::HistoryGroup::Single(message) = group else {
-                        if let quill::album::HistoryGroup::Album { album_id, messages } = group {
-                            list = list.child(album_history_row(
-                                album_id,
-                                &messages,
-                                &files,
-                                &downloading,
-                                &media_roots,
-                                chat,
-                                &sender_name,
-                                cx,
-                            ));
-                        }
-                        continue;
-                    };
-                    let label = if message.is_outgoing {
-                        let receipt = chat
-                            .map(|summary| summary.outbox_receipt(&message))
-                            .unwrap_or(OutboxReceipt::Sent);
-                        outgoing_status_label(message.pending, receipt).to_string()
-                    } else {
-                        sender_name.clone()
-                    };
-                    let highlighted = highlight_id == Some(message.id);
-                    let selected_forward = self
-                        .pending_forward
-                        .as_ref()
-                        .is_some_and(|draft| draft.contains(message.id));
-                    let quote_preview = session.and_then(|s| s.reply_quote_preview(&message));
-                    let forward_from = message
-                        .forward_info
-                        .as_ref()
-                        .and_then(|info| session.map(|s| s.forward_from_label(info)));
-                    let reaction_open = self
-                        .pending_react
-                        .is_some_and(|(chat, id)| chat == message.chat_id && id == message.id);
-                    // Phase 4.6: audio/voice rows get a seek-bar view model.
-                    let seek_bar = match &message.content {
-                        MessageContent::VoiceNote(note) => {
-                            Some(self.seek_bar_view(message.id, f64::from(note.duration)))
-                        }
-                        MessageContent::Audio(audio) => {
-                            Some(self.seek_bar_view(message.id, f64::from(audio.duration)))
-                        }
-                        _ => None,
-                    };
-                    let animation_playing = self.playing_animation == Some(message.id);
-                    let animation_frame = if animation_playing {
-                        self.animation_frames
-                            .get(self.animation_frame)
-                            .cloned()
-                            .or_else(|| self.animation_frames.first().cloned())
-                    } else {
-                        None
-                    };
-                    let video_playing = self.playing_video == Some(message.id);
-                    let video_frame = if video_playing {
-                        self.video_frames
-                            .get(self.video_frame)
-                            .cloned()
-                            .or_else(|| self.video_frames.first().cloned())
-                    } else {
-                        None
-                    };
-                    let row = session_history_row(
-                        &message,
+                    chat,
+                    &sender_name,
+                    highlight_id,
+                    &files,
+                    &downloading,
+                    &media_roots,
+                    cx,
+                )
+            })
+    }
+
+    /// Phase 5.1: the shared history row list used by both chat history and
+    /// per-topic history (topic view = same component with a `topic_id`
+    /// filter). `messages` are rendered oldest-first.
+    fn history_message_list(
+        &self,
+        id: &'static str,
+        messages: &[HistoryMessage],
+        chat: Option<&ChatSummary>,
+        sender_name: &str,
+        highlight_id: Option<MessageId>,
+        files: &HashMap<i32, ParsedFile>,
+        downloading: &std::collections::HashSet<i32>,
+        media_roots: &[PathBuf],
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let session = self.session();
+        let mut list = div()
+            .id(id)
+            .flex()
+            .flex_col()
+            .flex_1()
+            .min_h_0()
+            .px_3()
+            .pt_2()
+            .gap_1();
+        let groups = quill::album::group_media_albums(
+            messages,
+            |message| message.media_album_id,
+            |message| message.is_outgoing,
+            |message| quill::album::is_album_media(&message.content),
+        );
+        for group in groups {
+            let quill::album::HistoryGroup::Single(message) = group else {
+                if let quill::album::HistoryGroup::Album { album_id, messages } = group {
+                    list = list.child(album_history_row(
+                        album_id,
+                        &messages,
                         &files,
                         &downloading,
                         &media_roots,
-                        label,
-                        quote_preview,
-                        forward_from,
-                        selected_forward,
-                        reaction_open,
-                        seek_bar,
-                        animation_playing,
-                        animation_frame,
-                        video_playing,
-                        video_frame,
-                        &self.spoiler_revealed,
+                        chat,
+                        &sender_name,
                         cx,
-                    );
-                    list = list.child(
-                        div()
-                            .when(highlighted || selected_forward, |this| {
-                                this.rounded_lg()
-                                    .border_2()
-                                    .border_color(if selected_forward {
-                                        rgb(0x3fb950)
-                                    } else {
-                                        rgb(0x58a6ff)
-                                    })
-                                    .px_1()
-                            })
-                            .child(row),
-                    );
+                    ));
                 }
-                list.into_any_element()
+                continue;
+            };
+            let label = if message.is_outgoing {
+                let receipt = chat
+                    .map(|summary| summary.outbox_receipt(&message))
+                    .unwrap_or(OutboxReceipt::Sent);
+                outgoing_status_label(message.pending, receipt).to_string()
+            } else {
+                sender_name.to_string()
+            };
+            let highlighted = highlight_id == Some(message.id);
+            let selected_forward = self
+                .pending_forward
+                .as_ref()
+                .is_some_and(|draft| draft.contains(message.id));
+            let quote_preview = session.and_then(|s| s.reply_quote_preview(&message));
+            let forward_from = message
+                .forward_info
+                .as_ref()
+                .and_then(|info| session.map(|s| s.forward_from_label(info)));
+            let reaction_open = self
+                .pending_react
+                .is_some_and(|(chat, id)| chat == message.chat_id && id == message.id);
+            // Phase 4.6: audio/voice rows get a seek-bar view model.
+            let seek_bar = match &message.content {
+                MessageContent::VoiceNote(note) => {
+                    Some(self.seek_bar_view(message.id, f64::from(note.duration)))
+                }
+                MessageContent::Audio(audio) => {
+                    Some(self.seek_bar_view(message.id, f64::from(audio.duration)))
+                }
+                _ => None,
+            };
+            let animation_playing = self.playing_animation == Some(message.id);
+            let animation_frame = if animation_playing {
+                self.animation_frames
+                    .get(self.animation_frame)
+                    .cloned()
+                    .or_else(|| self.animation_frames.first().cloned())
+            } else {
+                None
+            };
+            let video_playing = self.playing_video == Some(message.id);
+            let video_frame = if video_playing {
+                self.video_frames
+                    .get(self.video_frame)
+                    .cloned()
+                    .or_else(|| self.video_frames.first().cloned())
+            } else {
+                None
+            };
+            let row = session_history_row(
+                &message,
+                &files,
+                &downloading,
+                &media_roots,
+                label,
+                quote_preview,
+                forward_from,
+                selected_forward,
+                reaction_open,
+                seek_bar,
+                animation_playing,
+                animation_frame,
+                video_playing,
+                video_frame,
+                &self.spoiler_revealed,
+                cx,
+            );
+            list = list.child(
+                div()
+                    .when(highlighted || selected_forward, |this| {
+                        this.rounded_lg()
+                            .border_2()
+                            .border_color(if selected_forward {
+                                rgb(0x3fb950)
+                            } else {
+                                rgb(0x58a6ff)
+                            })
+                            .px_1()
+                    })
+                    .child(row),
+            );
+        }
+        list.into_any_element()
+    }
+
+    /// Phase 5.1: strip shown above a topic's history — back to the topic
+    /// list plus the topic name (and its unread count).
+    fn forum_topic_strip(&self, info: &ForumTopic, cx: &mut Context<Self>) -> impl IntoElement {
+        let badge = unread_badge_text(info.unread_count);
+        let topic_name = info.name.clone();
+        div()
+            .id("forum-topic-strip")
+            .flex()
+            .items_center()
+            .gap_2()
+            .px_3()
+            .py_2()
+            .border_b_1()
+            .border_color(cx.theme().border)
+            .bg(cx.theme().sidebar)
+            .child(
+                Button::new("forum-topic-back")
+                    .label("\u{2039} Topics")
+                    .ghost()
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.deselect_topic_ui(cx);
+                    })),
+            )
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .min_w_0()
+                    .child(div().font_semibold().child(topic_name))
+                    .when(
+                        info.is_general && !info.name.eq_ignore_ascii_case("general"),
+                        |this| {
+                            this.child(
+                                div()
+                                    .text_xs()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child("General"),
+                            )
+                        },
+                    )
+                    .when(info.is_pinned, |this| {
+                        this.child(
+                            div()
+                                .text_xs()
+                                .text_color(cx.theme().muted_foreground)
+                                .child("Pinned"),
+                        )
+                    })
+                    .when(info.is_closed, |this| {
+                        this.child(
+                            div()
+                                .text_xs()
+                                .text_color(cx.theme().muted_foreground)
+                                .child("Closed"),
+                        )
+                    }),
+            )
+            .when_some(badge, |this, label| {
+                this.child(unread_badge(label, ChatId(info.forum_topic_id as i64)))
             })
+    }
+
+    /// Phase 5.1: the topic list for a forum supergroup — one row per
+    /// topic with name, unread badge, and a cheap last-message preview.
+    /// Selecting a row opens the per-topic history.
+    fn forum_topics_pane(&self, open: Option<ChatId>, cx: &mut Context<Self>) -> impl IntoElement {
+        let session = self.session();
+        let topics: Vec<ForumTopic> = open
+            .map(|id| {
+                session
+                    .map(|s| s.ordered_forum_topics(id))
+                    .unwrap_or_default()
+            })
+            .unwrap_or_default();
+        let mut list = div()
+            .id("forum-topics")
+            .flex()
+            .flex_col()
+            .flex_1()
+            .min_h_0()
+            .px_3()
+            .pt_2()
+            .gap_1();
+        if topics.is_empty() {
+            return pane_placeholder(
+                "No topics yet",
+                "The topic list arrives via getForumTopics.",
+                cx,
+            )
+            .into_any_element();
+        }
+        list = list.child(
+            div()
+                .id("forum-topics-count")
+                .text_xs()
+                .text_color(cx.theme().muted_foreground)
+                .child(format!("{} topics", topics.len())),
+        );
+        for topic in topics {
+            let topic_id = topic.forum_topic_id;
+            let badge = unread_badge_text(topic.unread_count);
+            let name = if topic.name.is_empty() {
+                format!("Topic {}", topic.forum_topic_id)
+            } else {
+                topic.name.clone()
+            };
+            let preview = topic.last_message_preview.clone();
+            list = list.child(
+                div()
+                    .id(("forum-topic-row", topic_id as u64))
+                    .px_3()
+                    .py_2()
+                    .rounded_md()
+                    .cursor_pointer()
+                    .bg(cx.theme().sidebar)
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.select_topic_ui(topic_id, cx);
+                    }))
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .justify_between()
+                            .gap_2()
+                            .child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap_2()
+                                    .min_w_0()
+                                    .child(div().font_medium().min_w_0().child(name))
+                                    .when(
+                                        topic.is_general
+                                            && !topic.name.eq_ignore_ascii_case("general"),
+                                        |this| {
+                                            this.child(
+                                                div()
+                                                    .text_xs()
+                                                    .text_color(cx.theme().muted_foreground)
+                                                    .child("General"),
+                                            )
+                                        },
+                                    )
+                                    .when(topic.is_pinned, |this| {
+                                        this.child(
+                                            div()
+                                                .text_xs()
+                                                .text_color(cx.theme().muted_foreground)
+                                                .child("Pinned"),
+                                        )
+                                    })
+                                    .when(topic.is_closed, |this| {
+                                        this.child(
+                                            div()
+                                                .text_xs()
+                                                .text_color(cx.theme().muted_foreground)
+                                                .child("Closed"),
+                                        )
+                                    }),
+                            )
+                            .when_some(badge, |this, label| {
+                                this.child(unread_badge(label, ChatId(topic_id as i64)))
+                            }),
+                    )
+                    .when(!preview.is_empty(), |this| {
+                        this.child(
+                            div()
+                                .text_xs()
+                                .text_color(cx.theme().muted_foreground)
+                                .child(preview),
+                        )
+                    }),
+            );
+        }
+        list.into_any_element()
+    }
+
+    /// Phase 5.1: select a forum topic (live: `searchChatMessages` with
+    /// `topic_id`; demo: the seeded session takes it directly).
+    fn select_topic_ui(&mut self, forum_topic_id: i32, cx: &mut Context<Self>) {
+        if self.live.is_some() {
+            let result = self
+                .live
+                .as_mut()
+                .expect("live")
+                .driver
+                .select_topic(forum_topic_id);
+            self.status_note = match result {
+                Ok(_) => "topic selected".into(),
+                Err(_) => "could not open topic".into(),
+            };
+        } else if let Some(session) = self.demo_session.as_mut() {
+            if let Some(chat_id) = session.open_chat {
+                session.select_topic(chat_id, forum_topic_id);
+            }
+        }
+        cx.notify();
+    }
+
+    /// Phase 5.1: leave the topic view, back to the forum's topic list.
+    fn deselect_topic_ui(&mut self, cx: &mut Context<Self>) {
+        if self.live.is_some() {
+            self.live.as_mut().expect("live").driver.deselect_topic();
+        } else if let Some(session) = self.demo_session.as_mut() {
+            session.deselect_topic();
+        }
+        self.status_note = "back to topics".into();
+        cx.notify();
     }
 
     /// Fixture/proof surface for `ReadySponsored`: the demo channel renders
@@ -8253,6 +8583,82 @@ fn apply_ready_sponsored(session: &mut Session, sink: &Arc<MemorySink>, seq: &At
     if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
         session.apply(owned);
     }
+}
+
+/// `ReadyForumTopics` fixture: add a forum supergroup (id 16) through
+/// `updateNewChat` + `updateChatPosition`, mark it a forum via
+/// `updateSupergroup`, then inject a `getForumTopics` response with three
+/// topics through the same reducer the live path uses. The demo opens the
+/// forum with no topic selected, so the topic list shows.
+fn apply_ready_forum_topics(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let topic_json = |id: i32,
+                      name: &str,
+                      general: bool,
+                      closed: bool,
+                      pinned: bool,
+                      unread: i32,
+                      preview: Option<&str>| {
+        let last_message = match preview {
+            Some(text) => format!(
+                r#""last_message":{{"id":{}, "chat_id":16, "is_outgoing":false, "content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"{}","entities":[]}}}}}}"#,
+                9000 + id,
+                text
+            ),
+            None => r#""last_message":null"#.to_string(),
+        };
+        format!(
+            r#"{{"info":{{"@type":"forumTopicInfo","chat_id":16,"forum_topic_id":{id},"name":"{name}","icon":{{"@type":"forumTopicIcon","color":0,"custom_emoji_id":"0"}},"creation_date":1,"creator_id":{{"@type":"messageSenderUser","user_id":6}},"is_general":{general},"is_outgoing":false,"is_closed":{closed},"is_hidden":false,"is_name_implicit":false}},{last_message},"order":"{order}","is_pinned":{pinned},"unread_count":{unread},"last_read_inbox_message_id":0,"last_read_outbox_message_id":0,"unread_mention_count":0,"unread_reaction_count":0,"unread_poll_vote_count":0,"notification_settings":{{"@type":"chatNotificationSettings"}},"draft_message":null}}"#,
+            id = id,
+            name = name,
+            general = general,
+            closed = closed,
+            pinned = pinned,
+            unread = unread,
+            order = 900 - id,
+        )
+    };
+    let jsons = [
+        r#"{"@type":"updateNewChat","chat":{"id":16,"title":"Demo forum","type":{"@type":"chatTypeSupergroup","supergroup_id":16,"is_channel":false},"unread_count":3}}"#.to_string(),
+        r#"{"@type":"updateChatPosition","chat_id":16,"position":{"@type":"chatPosition","list":{"@type":"chatListMain"},"order":"25","is_pinned":false}}"#.to_string(),
+        r#"{"@type":"updateSupergroup","supergroup":{"@type":"supergroup","id":16,"is_forum":true}}"#.to_string(),
+    ];
+    for json in jsons {
+        if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
+            session.apply(owned);
+        }
+    }
+    let extra = session.request(RequestPurpose::GetForumTopics, Some(ChatId(16)));
+    let topics = [
+        topic_json(
+            1,
+            "General",
+            true,
+            false,
+            true,
+            3,
+            Some("Pinned: please read the rules before posting."),
+        ),
+        topic_json(
+            2,
+            "Announcements",
+            false,
+            false,
+            false,
+            0,
+            Some("v2.1 is rolling out this week."),
+        ),
+        topic_json(3, "Random", false, true, false, 0, None),
+    ]
+    .join(",");
+    let json = format!(
+        r#"{{"@type":"forumTopics","@extra":"{}","total_count":3,"topics":[{topics}],"next_offset_date":0,"next_offset_message_id":0,"next_offset_forum_topic_id":0}}"#,
+        extra.0,
+    );
+    if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
+        session.apply(owned);
+    }
+    session.open_chat(ChatId(16));
 }
 
 fn seed_ready_media_session(sink: Arc<MemorySink>) -> Session {
@@ -9231,7 +9637,8 @@ fn session_chat_row(
                         .gap_1()
                         .min_w_0()
                         .child(div().font_medium().min_w_0().child(title))
-                        .when(chat.is_muted(), |this| this.child(muted_badge(id))),
+                        .when(chat.is_muted(), |this| this.child(muted_badge(id)))
+                        .when(chat.is_forum_chat(), |this| this.child(forum_badge(id))),
                 )
                 .when_some(badge, |this, label| this.child(unread_badge(label, id))),
         )
@@ -9399,6 +9806,23 @@ fn muted_badge(chat_id: ChatId) -> impl IntoElement {
         .text_xs()
         .font_semibold()
         .child("Muted")
+}
+
+/// Phase 5.1: forum indicator for forum supergroups in the chat list.
+fn forum_badge(chat_id: ChatId) -> impl IntoElement {
+    div()
+        .id(("forum-badge", chat_id.0 as u64))
+        .h(px(18.))
+        .px_1()
+        .rounded_md()
+        .flex()
+        .items_center()
+        .justify_center()
+        .bg(rgb(0x8250df))
+        .text_color(rgb(0xffffff))
+        .text_xs()
+        .font_semibold()
+        .child("Topics")
 }
 
 fn unread_badge(label: String, chat_id: ChatId) -> impl IntoElement {

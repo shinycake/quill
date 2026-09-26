@@ -7,7 +7,7 @@ use crate::composer::{
 };
 use crate::credentials::TelegramCredentials;
 use crate::diagnostics::DiagnosticSink;
-use crate::ids::{AccountKey, ChatId, FileId, MessageId, RequestId};
+use crate::ids::{AccountKey, ChatId, FileId, MessageId, RequestId, TopicId};
 use crate::lifecycle::{RestoreBlocker, plan_restore};
 use crate::platform::{DatabaseKey, KeyDecision, SecretStore, load_or_create_key};
 use crate::poll::{PollDraft, poll_answer_for_tap};
@@ -28,15 +28,16 @@ use crate::telegram::requests::{
     click_chat_sponsored_message, close_chat, close_request, delete_messages,
     download_file as download_file_request, edit_message_caption, edit_message_text,
     forward_messages, get_authorization_state, get_callback_query_answer, get_chat_history,
-    get_chat_member, get_chat_sponsored_messages, get_commands, get_installed_sticker_sets, get_me,
-    get_saved_animations, get_sticker_set, get_user_full_info, input_message_photo,
-    input_message_video, join_chat, leave_chat, load_chats, open_chat, open_message_content,
-    pin_chat_message, remove_message_reaction, report_chat_sponsored_message, search_chat_messages,
-    search_chats, search_messages, search_recently_found_chats, send_animation, send_chat_action,
-    send_chat_action_kind, send_document, send_message_album, send_photo, send_poll, send_sticker,
-    send_text, send_video, send_video_note, send_voice_note, set_authentication_phone_number,
-    set_chat_draft_message, set_chat_notification_settings, set_poll_answer, unpin_chat_message,
-    view_messages, view_sponsored_chat,
+    get_chat_member, get_chat_sponsored_messages, get_commands, get_forum_topics,
+    get_installed_sticker_sets, get_me, get_saved_animations, get_sticker_set, get_supergroup,
+    get_user_full_info, input_message_photo, input_message_video, join_chat, leave_chat,
+    load_chats, open_chat, open_message_content, pin_chat_message, remove_message_reaction,
+    report_chat_sponsored_message, search_chat_messages, search_chats, search_messages,
+    search_recently_found_chats, send_animation, send_chat_action, send_chat_action_kind,
+    send_document, send_message_album, send_photo, send_poll, send_sticker, send_text, send_video,
+    send_video_note, send_voice_note, set_authentication_phone_number, set_chat_draft_message,
+    set_chat_notification_settings, set_poll_answer, unpin_chat_message, view_messages,
+    view_sponsored_chat,
 };
 use crate::voice::VoiceDraft;
 use std::path::Path;
@@ -69,6 +70,10 @@ pub const DRAFT_SAVE_DEBOUNCE: Duration = Duration::from_millis(1_000);
 pub const CHAT_SEARCH_LIMIT: i32 = 50;
 /// Unigram `LoadMessageSliceImpl`: `GetChatHistory(chatId, maxId, -25, 50)`.
 pub const HISTORY_AROUND_OFFSET: i32 = -25;
+/// Phase 5.1: `getForumTopics.limit` — first page of the topic list.
+pub const FORUM_TOPICS_LIMIT: i32 = 100;
+/// Phase 5.1: `searchChatMessages.limit` for per-topic history pages.
+pub const TOPIC_HISTORY_PAGE_SIZE: i32 = 50;
 /// Unigram `LoadMessageSliceImpl` page size around the jump target.
 pub const HISTORY_AROUND_LIMIT: i32 = 50;
 
@@ -496,6 +501,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.maybe_view_open_messages()?;
             self.maybe_download_open_thumbs()?;
             self.fetch_sponsored_messages(chat_id)?;
+            // Phase 5.1: re-selecting an open forum chat also resolves /
+            // loads topics (the first select may have raced `is_forum`).
+            self.maybe_fetch_supergroup_forum(chat_id)?;
+            self.maybe_fetch_forum_topics(chat_id)?;
             return self.fetch_history();
         }
         self.cancel_outgoing_typing()?;
@@ -512,7 +521,188 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.maybe_view_open_messages()?;
         self.maybe_download_open_thumbs()?;
         self.fetch_sponsored_messages(chat_id)?;
+        // Phase 5.1: forum supergroups resolve `is_forum` from the
+        // `supergroup` object (`chatTypeSupergroup` has no forum flag), then
+        // load their topic list.
+        self.maybe_fetch_supergroup_forum(chat_id)?;
+        self.maybe_fetch_forum_topics(chat_id)?;
         self.fetch_history()
+    }
+
+    /// Phase 5.1: `getSupergroup` for a non-channel supergroup whose forum
+    /// status is still unknown. Fires once (deduped by cache + in-flight
+    /// purpose); the `supergroup` response and `updateSupergroup` both
+    /// populate `ChatSummary::is_forum`. No-op for channels, non-supergroups,
+    /// and already-resolved chats.
+    fn maybe_fetch_supergroup_forum(&mut self, chat_id: ChatId) -> Result<(), ConnectSendError> {
+        if !self.chats_path_active() {
+            return Ok(());
+        }
+        let supergroup_id = match self.session.chats.get(&chat_id.0) {
+            Some(chat)
+                if matches!(
+                    chat.kind,
+                    ChatKind::Supergroup {
+                        is_channel: false,
+                        ..
+                    }
+                ) && chat.is_forum.is_none() =>
+            {
+                match chat.kind {
+                    ChatKind::Supergroup { supergroup_id, .. } => supergroup_id,
+                    _ => return Ok(()),
+                }
+            }
+            _ => return Ok(()),
+        };
+        if self
+            .session
+            .requests
+            .has_purpose_for_chat(RequestPurpose::GetSupergroup, chat_id)
+        {
+            return Ok(());
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::GetSupergroup, Some(chat_id));
+        if let Err(err) = self.sender.send_json(&get_supergroup(extra, supergroup_id)) {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(())
+    }
+
+    /// Phase 5.1: `getForumTopics` (first page) for a known forum supergroup.
+    /// Fires once per chat (deduped by cache + in-flight purpose). No-op
+    /// until `is_forum` resolves true.
+    fn maybe_fetch_forum_topics(&mut self, chat_id: ChatId) -> Result<(), ConnectSendError> {
+        if !self.chats_path_active() {
+            return Ok(());
+        }
+        if !self
+            .session
+            .chats
+            .get(&chat_id.0)
+            .is_some_and(|chat| chat.is_forum_chat())
+        {
+            return Ok(());
+        }
+        if self.session.forum_topics.contains_key(&chat_id.0) {
+            return Ok(());
+        }
+        if self
+            .session
+            .requests
+            .has_purpose_for_chat(RequestPurpose::GetForumTopics, chat_id)
+        {
+            return Ok(());
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::GetForumTopics, Some(chat_id));
+        if let Err(err) = self.sender.send_json(&get_forum_topics(
+            extra,
+            chat_id,
+            "",
+            0,
+            MessageId(0),
+            0,
+            FORUM_TOPICS_LIMIT,
+        )) {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(())
+    }
+
+    /// Phase 5.1: select a forum topic. The topic's history is fetched with
+    /// `searchChatMessages` (`topic_id = messageTopicForum`, empty query)
+    /// and rendered by the same history component as chat history.
+    pub fn select_topic(
+        &mut self,
+        forum_topic_id: i32,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let Some(chat_id) = self.session.open_chat else {
+            return Err(ConnectSendError::InvalidRequest);
+        };
+        if !self
+            .session
+            .chats
+            .get(&chat_id.0)
+            .is_some_and(|chat| chat.is_forum_chat())
+        {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        self.session.select_topic(chat_id, forum_topic_id);
+        self.fetch_topic_history()
+    }
+
+    /// Phase 5.1: leave the topic view, back to the forum's topic list.
+    pub fn deselect_topic(&mut self) {
+        self.session.deselect_topic();
+    }
+
+    /// Phase 5.1: page the open topic's history (`searchChatMessages` with
+    /// `topic_id`). First page starts at `from_message_id` 0; later pages
+    /// continue from the response's `next_from_message_id`.
+    pub fn fetch_topic_history(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let Some(chat_id) = self.session.open_chat else {
+            return Err(ConnectSendError::InvalidRequest);
+        };
+        let Some(forum_topic_id) = self.session.open_topic else {
+            return Err(ConnectSendError::InvalidRequest);
+        };
+        let key = (chat_id.0, forum_topic_id);
+        if self
+            .session
+            .topic_histories
+            .get(&key)
+            .is_some_and(|h| h.loaded_complete)
+        {
+            return Ok(None);
+        }
+        if self
+            .session
+            .requests
+            .has_purpose_for_chat(RequestPurpose::GetTopicHistory, chat_id)
+        {
+            return Ok(None);
+        }
+        let from = self
+            .session
+            .topic_histories
+            .get(&key)
+            .map(|h| h.next_from_message_id)
+            .unwrap_or(MessageId(0));
+        let extra = self.session.request_for_topic(
+            RequestPurpose::GetTopicHistory,
+            Some(chat_id),
+            forum_topic_id,
+        );
+        let topic = TopicId::Forum {
+            forum_topic_id: forum_topic_id as i64,
+        };
+        match self.sender.send_json(&search_chat_messages(
+            extra,
+            chat_id,
+            &topic,
+            "",
+            from,
+            0,
+            TOPIC_HISTORY_PAGE_SIZE,
+        )) {
+            Ok(()) => Ok(Some(extra)),
+            Err(err) => {
+                self.session.requests.take(extra);
+                Err(err)
+            }
+        }
     }
 
     /// Own membership probe for the open broadcast channel: `getMe` once, then
@@ -2692,6 +2882,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         match self.sender.send_json(&search_chat_messages(
             extra,
             chat_id,
+            &TopicId::None,
             trimmed,
             MessageId(0),
             0,
@@ -3923,6 +4114,125 @@ mod tests {
             .unwrap();
         assert_eq!(driver.session.chats.get(&7).unwrap().unread_count, 0);
         assert!(!sink.rendered().contains("Alice"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn forum_flow_topics_then_topic_history() {
+        // Phase 5.1: selecting a forum supergroup resolves `is_forum` via
+        // `getSupergroup`, loads `getForumTopics`, and selecting a topic
+        // fetches its history with `searchChatMessages` + `messageTopicForum`.
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = Arc::new(RecordingSender::new());
+        let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+        let mut driver =
+            ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+        let seq = AtomicU64::new(0);
+        for json in [
+            r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+            r#"{"@type":"updateNewChat","chat":{"id":16,"title":"Forum","type":{"@type":"chatTypeSupergroup","supergroup_id":16,"is_channel":false},"unread_count":0}}"#,
+        ] {
+            driver
+                .ingest(copy_and_parse(json, &seq, &dyn_sink).unwrap())
+                .unwrap();
+        }
+        // Forum status unknown: selecting the chat fires `getSupergroup`.
+        driver.select_chat(ChatId(16)).unwrap();
+        let sent = recorder.snapshot();
+        assert!(sent.iter().any(
+            |j| j.contains("\"@type\":\"getSupergroup\"") && j.contains("\"supergroup_id\":16")
+        ));
+        assert!(
+            !sent
+                .iter()
+                .any(|j| j.contains("\"@type\":\"getForumTopics\""))
+        );
+        // The response resolves `is_forum`; re-selecting loads the topics.
+        let extra = driver
+            .session
+            .requests
+            .pending_extra_for(RequestPurpose::GetSupergroup, Some(ChatId(16)))
+            .expect("getSupergroup in flight");
+        driver
+            .ingest(
+                copy_and_parse(
+                    &format!(
+                        r#"{{"@type":"supergroup","@extra":"{}","id":16,"is_forum":true}}"#,
+                        extra.0
+                    ),
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        assert!(driver.session.chats.get(&16).unwrap().is_forum_chat());
+        driver.select_chat(ChatId(16)).unwrap();
+        let sent = recorder.snapshot();
+        let topics_extra = driver
+            .session
+            .requests
+            .pending_extra_for(RequestPurpose::GetForumTopics, Some(ChatId(16)))
+            .expect("getForumTopics in flight");
+        assert!(
+            sent.iter().any(|j| j.contains("\"@type\":\"getForumTopics\"")
+                && j.contains("\"chat_id\":16"))
+        );
+        driver
+            .ingest(
+                copy_and_parse(
+                    &format!(
+                        r#"{{"@type":"forumTopics","@extra":"{}","total_count":1,"topics":[{{"info":{{"@type":"forumTopicInfo","chat_id":16,"forum_topic_id":2,"name":"Random","icon":{{"@type":"forumTopicIcon","color":0,"custom_emoji_id":"0"}},"creation_date":1,"creator_id":{{"@type":"messageSenderUser","user_id":6}},"is_general":false,"is_outgoing":false,"is_closed":false,"is_hidden":false,"is_name_implicit":false}},"last_message":null,"order":"100","is_pinned":false,"unread_count":0,"last_read_inbox_message_id":0,"last_read_outbox_message_id":0,"unread_mention_count":0,"unread_reaction_count":0,"unread_poll_vote_count":0,"notification_settings":{{"@type":"chatNotificationSettings"}},"draft_message":null}}],"next_offset_date":0,"next_offset_message_id":0,"next_offset_forum_topic_id":0}}"#,
+                        topics_extra.0
+                    ),
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        assert_eq!(driver.session.forum_topics.get(&16).unwrap().len(), 1);
+        // Selecting the topic fetches per-topic history.
+        driver.select_topic(2).unwrap();
+        assert_eq!(driver.session.open_topic, Some(2));
+        let sent = recorder.snapshot();
+        let search_json = sent
+            .iter()
+            .find(|j| {
+                j.contains("\"@type\":\"searchChatMessages\"")
+                    && j.contains("\"query\":\"\"")
+                    && j.contains("\"messageTopicForum\"")
+            })
+            .expect("topic searchChatMessages sent");
+        assert!(search_json.contains("\"forum_topic_id\":2"));
+        // The response populates the topic history.
+        let extra = driver
+            .session
+            .requests
+            .pending_extra_for(RequestPurpose::GetTopicHistory, Some(ChatId(16)))
+            .expect("GetTopicHistory in flight");
+        driver
+            .ingest(
+                copy_and_parse(
+                    &format!(
+                        r#"{{"@type":"foundChatMessages","@extra":"{}","total_count":1,"next_from_message_id":0,"messages":[{{"id":50,"chat_id":16,"is_outgoing":false,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"CANARY_DRV_topic","entities":[]}}}}}}]}}"#,
+                        extra.0
+                    ),
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        let history = driver.session.topic_histories.get(&(16, 2)).unwrap();
+        assert!(history.loaded_complete);
+        assert!(history.messages.contains_key(&50));
+        // Back to the topic list.
+        driver.deselect_topic();
+        assert_eq!(driver.session.open_topic, None);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
