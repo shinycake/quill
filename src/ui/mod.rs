@@ -49,7 +49,8 @@ use quill::telegram::envelope::{
     InlineKeyboardButtonType, MUTE_FOR_1_HOUR, MUTE_FOR_2_DAYS, MUTE_FOR_8_HOURS, MUTE_FOREVER,
     MessageContent, MessageInteractionInfo, NotificationSettingsScope, NotificationSound,
     ParsedFile, ParsedSecretChat, ParsedStory, PollContent, PollOption, PollType,
-    ScopeNotificationSettings, SecretChatState, SponsoredMessage, toggle_chosen_emoji_reaction,
+    ScopeNotificationSettings, SecretChatState, SponsoredMessage, chat_ttl_service_label,
+    format_ttl_setting, toggle_chosen_emoji_reaction,
 };
 use quill::telegram::requests::SelfDestructSend;
 use quill::text::{TextEntity, styled_runs, utf8_to_utf16_offset};
@@ -406,6 +407,9 @@ pub struct QuillApp {
     pending_react: Option<(ChatId, MessageId)>,
     /// tdesktop Mute submenu (1 hour / 8 hours / 2 days / Forever).
     mute_menu_open: bool,
+    /// Phase B4: self-destruct / auto-delete timer picker below the
+    /// conversation header (`setChatMessageAutoDeleteTime`).
+    ttl_picker_open: bool,
     /// Parity slice: the notifications panel's sound picker sub-view is open.
     notif_sound_picker_open: bool,
     /// Parity slice: scope-default notification settings dialog is open.
@@ -763,6 +767,13 @@ pub enum ScreenshotDemo {
     /// ticking). Signaling only: the card carries the honest
     /// no-audio-transport note.
     ReadyCall,
+    /// Phase B4: chat-level auto-delete / self-destruct timer (injected,
+    /// no live Telegram) — the Ready secret chat with Zed (id 41) with
+    /// `message_auto_delete_time` 3600, one message carrying a live
+    /// `auto_delete_in` countdown, a
+    /// `messageChatSetMessageAutoDeleteTime` service row, and the timer
+    /// picker expanded under the header.
+    ReadyChatTtl,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1519,6 +1530,16 @@ impl QuillApp {
                     AuthorizationState::Ready,
                 )
             }
+            Some(ScreenshotDemo::ReadyChatTtl) => {
+                demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
+                (
+                    ConnectUiStatus::DemoReadyChats,
+                    None,
+                    "screenshot demo — chat self-destruct timer (injected, no live Telegram)"
+                        .into(),
+                    AuthorizationState::Ready,
+                )
+            }
             None => bootstrap_connect(credentials),
         };
 
@@ -1617,6 +1638,7 @@ impl QuillApp {
             forward_result: None,
             pending_react: None,
             mute_menu_open: false,
+            ttl_picker_open: false,
             notif_sound_picker_open: false,
             notification_defaults_open: false,
             defaults_sound_picker: None,
@@ -2002,6 +2024,19 @@ impl QuillApp {
             }
             app.status_note =
                 "screenshot demo — incoming call from Zed (injected, no live Telegram)".into();
+        }
+        // Phase B4: chat TTL fixture — the Ready secret chat with a 1h
+        // self-destruct timer, a live `auto_delete_in` countdown on one
+        // message, the timer-change service row, and the picker expanded.
+        if matches!(demo, Some(ScreenshotDemo::ReadyChatTtl)) {
+            if let Some(session) = app.demo_session.as_mut() {
+                app.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_chat_ttl(session, &app.demo_sink, &app.demo_seq);
+            }
+            app.ttl_picker_open = true;
+            app.status_note =
+                "screenshot demo — chat self-destruct timer 1h · picker open (injected, no live Telegram)"
+                    .into();
         }
         if matches!(demo, Some(ScreenshotDemo::ReadyVideoSend)) {
             app.composer.update(cx, |input, cx| {
@@ -3081,6 +3116,7 @@ impl QuillApp {
                         | MessageContent::Venue(_)
                         | MessageContent::Contact(_)
                         | MessageContent::Dice(_)
+                        | MessageContent::ChatTtlChanged { .. }
                         | MessageContent::Unsupported { .. } => {}
                     }
                 }
@@ -3104,6 +3140,8 @@ impl QuillApp {
 
     fn select_listed_chat(&mut self, chat_id: ChatId, window: &mut Window, cx: &mut Context<Self>) {
         self.flush_leaving_draft(cx);
+        // Phase B4: the TTL picker belongs to the previous chat.
+        self.ttl_picker_open = false;
         if self
             .pending_reply
             .as_ref()
@@ -3694,6 +3732,12 @@ impl QuillApp {
         }
         if self.mute_menu_open {
             self.close_mute_menu(cx);
+            return;
+        }
+        // Phase B4: Esc closes the TTL picker too.
+        if self.ttl_picker_open {
+            self.ttl_picker_open = false;
+            cx.notify();
             return;
         }
         if self.pending_react.is_some() {
@@ -8551,6 +8595,42 @@ impl QuillApp {
         }
     }
 
+    /// Phase B4: apply a chat TTL choice (`setChatMessageAutoDeleteTime`,
+    /// schema 1.8.67 line 13454). Live: the driver validates the value
+    /// rule and sends; the new value arrives as
+    /// `updateChatMessageAutoDeleteTime` (no optimistic state change).
+    /// Demo: apply the same update through the reducer so the screenshot
+    /// fixture shows the new timer immediately.
+    fn apply_chat_ttl(&mut self, chat_id: ChatId, secs: i32, cx: &mut Context<Self>) {
+        self.ttl_picker_open = false;
+        if self.live.is_some() {
+            let result = self
+                .live
+                .as_mut()
+                .expect("live")
+                .driver
+                .set_chat_message_auto_delete_time(chat_id, secs);
+            self.status_note = match result {
+                Ok(_) if secs == 0 => "turning off timer…".into(),
+                Ok(_) => "setting timer…".into(),
+                Err(_) => "could not change timer".into(),
+            };
+            cx.notify();
+            return;
+        }
+        if let Some(session) = self.demo_session.as_mut() {
+            if let Some(chat) = session.chats.get_mut(&chat_id.0) {
+                chat.message_auto_delete_time = secs;
+            }
+            self.status_note = if secs == 0 {
+                "timer off".into()
+            } else {
+                format!("timer {}", format_ttl_setting(secs)).into()
+            };
+            cx.notify();
+        }
+    }
+
     /// Parity slice: apply arbitrary notification-settings edits to the demo
     /// session (screenshot demos have no TDLib), via the same
     /// `updateChatNotificationSettings` reducer path live updates take.
@@ -9288,6 +9368,14 @@ impl QuillApp {
         let discuss_chat_id = extras.as_ref().and_then(|ex| ex.discussion_chat_id);
         let title_text = title.to_string();
         let muted_fg = cx.theme().muted_foreground;
+        // Phase B4: chat-level auto-delete / self-destruct timer status
+        // (`chat.message_auto_delete_time`, schema 1.8.67 lines 3616 /
+        // 3627) — shown under the title when a timer is set.
+        let ttl_line: Option<String> = actions.and_then(|(chat_id, _, _, _)| {
+            self.session()
+                .and_then(|s| s.chats.get(&chat_id.0))
+                .and_then(|chat| chat.ttl_status_line())
+        });
         // Status lines kept for every chat kind (typing / muted).
         let identity: AnyElement = match (info_target, extras) {
             (Some(InfoPanelTarget::Supergroup(supergroup_id)), Some(ex)) => {
@@ -9359,6 +9447,17 @@ impl QuillApp {
                                 } else {
                                     "Muted"
                                 }))
+                            })
+                            // Phase B4: chat-level auto-delete / self-destruct timer
+                            // status line (hidden when no timer is set).
+                            .when_some(ttl_line.clone(), |this, line| {
+                                this.child(
+                                    div()
+                                        .id("conversation-ttl")
+                                        .text_xs()
+                                        .text_color(muted_fg)
+                                        .child(line),
+                                )
                             }),
                     )
                     .into_any_element()
@@ -9393,6 +9492,17 @@ impl QuillApp {
                         "Muted"
                     }))
                 })
+                // Phase B4: chat-level auto-delete / self-destruct timer
+                // status line (hidden when no timer is set).
+                .when_some(ttl_line.clone(), |this, line| {
+                    this.child(
+                        div()
+                            .id("conversation-ttl")
+                            .text_xs()
+                            .text_color(muted_fg)
+                            .child(line),
+                    )
+                })
                 .into_any_element(),
             _ => div()
                 .flex()
@@ -9415,6 +9525,17 @@ impl QuillApp {
                         "Muted"
                     }))
                 })
+                // Phase B4: chat-level auto-delete / self-destruct timer
+                // status line (hidden when no timer is set).
+                .when_some(ttl_line.clone(), |this, line| {
+                    this.child(
+                        div()
+                            .id("conversation-ttl")
+                            .text_xs()
+                            .text_color(muted_fg)
+                            .child(line),
+                    )
+                })
                 .into_any_element(),
         };
         div()
@@ -9436,6 +9557,19 @@ impl QuillApp {
                     .session()
                     .and_then(|s| s.chats.get(&chat_id.0))
                     .is_some_and(|c| matches!(c.kind, ChatKind::Secret { .. }));
+                // Phase B4: the self-destruct timer picker is only usable
+                // in Ready secret chats — Pending/Closed chats can't send
+                // (`can_post` is false there), and the driver would
+                // reject the request.
+                let ttl_ready = self
+                    .session()
+                    .and_then(|s| s.chats.get(&chat_id.0))
+                    .is_some_and(|c| matches!(c.kind, ChatKind::Secret { .. }) && c.can_post());
+                let ttl_button_label = self
+                    .session()
+                    .and_then(|s| s.chats.get(&chat_id.0))
+                    .map(|c| format!("⏱ {}", format_ttl_setting(c.message_auto_delete_time)))
+                    .unwrap_or_else(|| "⏱ Off".to_string());
                 this.child(
                     div()
                         .flex()
@@ -9449,6 +9583,20 @@ impl QuillApp {
                                     .ghost()
                                     .on_click(cx.listener(move |this, _, _, cx| {
                                         this.open_close_secret_chat_confirm(chat_id, cx);
+                                    })),
+                            )
+                        })
+                        // Phase B4: self-destruct timer picker for Ready
+                        // secret chats (`setChatMessageAutoDeleteTime`,
+                        // schema 1.8.67 line 13454).
+                        .when(ttl_ready, |this| {
+                            this.child(
+                                Button::new("chat-ttl")
+                                    .label(ttl_button_label.clone())
+                                    .ghost()
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        this.ttl_picker_open = !this.ttl_picker_open;
+                                        cx.notify();
                                     })),
                             )
                         })
@@ -9688,6 +9836,99 @@ impl QuillApp {
                     cx.notify();
                 })),
         )
+    }
+
+    /// Phase B4: self-destruct / auto-delete timer picker below the
+    /// conversation header. Secret chats (Ready only — the header button
+    /// is gated) offer Off / 5s / 30s / 1m / 1h / 1d / 1w; other chats
+    /// offer the schema-valid day multiples Off / 1d / 1w / 30d
+    /// (`setChatMessageAutoDeleteTime`, schema 1.8.67 line 13454).
+    fn ttl_picker_panel(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let session = self.session();
+        let open_chat = session.as_ref().and_then(|s| s.open_chat);
+        let open_chat_summary: Option<&ChatSummary> =
+            open_chat.and_then(|id| session.as_ref()?.chats.get(&id.0));
+        let is_secret =
+            open_chat_summary.is_some_and(|chat| matches!(chat.kind, ChatKind::Secret { .. }));
+        let current = open_chat_summary
+            .and_then(|chat| chat.ttl_status_line())
+            .unwrap_or_else(|| "Off".to_string());
+        let title = if is_secret {
+            "Self-destruct timer"
+        } else {
+            "Auto-delete timer"
+        };
+        // Schema value rule (1.8.67 line 13454): secret chats accept
+        // arbitrary seconds; other chats need day multiples.
+        let presets: &[(&str, i32)] = if is_secret {
+            &[
+                ("Off", 0),
+                ("5s", 5),
+                ("30s", 30),
+                ("1m", 60),
+                ("1h", 3600),
+                ("1d", 86400),
+                ("1w", 604800),
+            ]
+        } else {
+            &[("Off", 0), ("1d", 86400), ("1w", 604800), ("30d", 2592000)]
+        };
+        let mut preset_row = div().id("ttl-presets").flex().flex_wrap().gap_1();
+        for (label, secs) in presets {
+            let secs = *secs;
+            let active =
+                open_chat_summary.is_some_and(|chat| chat.message_auto_delete_time == secs);
+            preset_row = preset_row.child(
+                Button::new(format!("ttl-set-{secs}"))
+                    .label(if active {
+                        format!("● {label}")
+                    } else {
+                        (*label).to_string()
+                    })
+                    .ghost()
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        if let Some(chat_id) = open_chat {
+                            this.apply_chat_ttl(chat_id, secs, cx);
+                        }
+                    })),
+            );
+        }
+        div()
+            .id("ttl-picker")
+            .flex()
+            .flex_col()
+            .gap_2()
+            .px_3()
+            .py_2()
+            .border_b_1()
+            .border_color(cx.theme().border)
+            .bg(cx.theme().sidebar)
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .child(div().font_semibold().child(title))
+                    .child(
+                        Button::new("close-ttl-picker")
+                            .label("Close")
+                            .ghost()
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.ttl_picker_open = false;
+                                cx.notify();
+                            })),
+                    ),
+            )
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(format!(
+                        "Current: {current} — messages auto-delete after the timer; \
+                         in secret chats the countdown starts once the message is viewed."
+                    )),
+            )
+            .child(preset_row)
     }
 
     /// Parity slice: current sound choice for a chat, for the notifications
@@ -13693,6 +13934,11 @@ impl QuillApp {
             .when(self.mute_menu_open, |this| {
                 this.child(self.mute_menu_panel(cx))
             })
+            // Phase B4: self-destruct / auto-delete timer picker below
+            // the header.
+            .when(self.ttl_picker_open, |this| {
+                this.child(self.ttl_picker_panel(cx))
+            })
             // Parity slice: per-chat folder picker below the header.
             .when(self.folder_menu_open, |this| {
                 this.child(self.folder_menu_panel(cx))
@@ -13898,6 +14144,9 @@ impl QuillApp {
                 video_playing,
                 video_frame,
                 &self.spoiler_revealed,
+                // Phase B4: secret chats word the timer-change service
+                // row as "Self-destruct".
+                chat.is_some_and(|c| matches!(c.kind, ChatKind::Secret { .. })),
                 cx,
             );
             list = list.child(
@@ -14725,6 +14974,47 @@ fn apply_ready_self_destruct(session: &mut Session, sink: &Arc<MemorySink>, seq:
             r#"{{"@type":"updateNewMessage","message":{{"id":902,"chat_id":{chat_id},"is_outgoing":true,"content":{{"@type":"messagePhoto","photo":{{"@type":"photo","has_stickers":false,"sizes":[{{"@type":"photoSize","type":"m","photo":{outgoing},"width":240,"height":200,"progressive_sizes":[]}}]}},"caption":{{"@type":"formattedText","text":"one look only","entities":[]}},"show_caption_above_media":false,"has_spoiler":false,"is_secret":false}},"self_destruct_type":{{"@type":"messageSelfDestructTypeImmediately"}},"self_destruct_in":0}}}}"#
         ),
         r#"{"@type":"updateDeleteMessages","chat_id":11,"message_ids":[101,102,103],"is_permanent":true,"from_cache":false}"#.to_string(),
+    ];
+    for json in jsons {
+        if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
+            session.apply(owned);
+        }
+    }
+    session.open_chat(ChatId(chat_id));
+}
+
+/// Phase B4: chat TTL fixture — the Ready secret chat with Zed (id 41)
+/// carrying `message_auto_delete_time` 3600 (1h self-destruct), one
+/// message with a live `auto_delete_in` countdown (3595.5s at fixture
+/// time, so the chip shows a decaying value), and a
+/// `messageChatSetMessageAutoDeleteTime` service row. Injected demo data.
+fn apply_ready_chat_ttl(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let chat_id = 41i64;
+    let user_id = 41i64;
+    let secret_chat_id = 7i32;
+    let jsons = [
+        format!(
+            r#"{{"@type":"updateUser","user":{{"id":{user_id},"first_name":"Zed","last_name":"Hopper","usernames":{{"@type":"usernames","active_usernames":["zedhopper"],"disabled_usernames":[],"editable_username":"zedhopper","collectible_usernames":[]}},"phone_number":"+15550101041","status":{{"@type":"userStatusOnline","expires":9999999999}},"is_contact":false,"type":{{"@type":"userTypeRegular"}}}}}}"#
+        ),
+        format!(
+            r#"{{"@type":"updateSecretChat","secret_chat":{{"@type":"secretChat","id":{secret_chat_id},"user_id":{user_id},"state":{{"@type":"secretChatStateReady"}},"is_outbound":true,"key_hash":"","layer":144}}}}"#
+        ),
+        format!(
+            r#"{{"@type":"updateNewChat","chat":{{"id":{chat_id},"title":"Zed","type":{{"@type":"chatTypeSecret","secret_chat_id":{secret_chat_id},"user_id":{user_id}}},"unread_count":0,"message_auto_delete_time":3600}}}}"#
+        ),
+        format!(
+            r#"{{"@type":"updateChatPosition","chat_id":{chat_id},"position":{{"@type":"chatPosition","list":{{"@type":"chatListMain"}},"order":"85","is_pinned":false}}}}"#
+        ),
+        format!(
+            r#"{{"@type":"updateNewMessage","message":{{"id":601,"chat_id":{chat_id},"sender_id":{{"@type":"messageSenderUser","user_id":{user_id}}},"is_outgoing":false,"date":1700000100,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"This one deletes itself an hour after you read it.","entities":[]}}}},"auto_delete_in":3595.5}}}}"#
+        ),
+        format!(
+            r#"{{"@type":"updateNewMessage","message":{{"id":602,"chat_id":{chat_id},"sender_id":{{"@type":"messageSenderUser","user_id":{user_id}}},"is_outgoing":false,"date":1700000160,"content":{{"@type":"messageChatSetMessageAutoDeleteTime","message_auto_delete_time":3600,"from_user_id":{user_id}}}}}}}"#,
+        ),
+        format!(
+            r#"{{"@type":"updateNewMessage","message":{{"id":603,"chat_id":{chat_id},"sender_id":{{"@type":"messageSenderUser","user_id":999}},"is_outgoing":true,"date":1700000220,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"Got it — timer's on.","entities":[]}}}}}}}}"#
+        ),
     ];
     for json in jsons {
         if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
@@ -17533,8 +17823,28 @@ fn session_history_row(
     video_playing: bool,
     video_frame: Option<PathBuf>,
     revealed: &std::collections::HashSet<(i64, u64, u64, bool)>,
+    // Phase B4: whether the row's chat is a secret chat — selects the
+    // "Self-destruct" vs "Auto-delete" service-row wording.
+    is_secret: bool,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
+    // Phase B4: timer-change service rows (`messageChatSetMessageAutoDeleteTime`,
+    // schema 1.8.67 line 5387) render as a centered neutral notice — no
+    // bubble, no reply/react/edit/delete controls.
+    if let MessageContent::ChatTtlChanged { secs } = &message.content {
+        return div()
+            .id(("ttl-service-row", message.id.0 as u64))
+            .flex()
+            .justify_center()
+            .py_1()
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(chat_ttl_service_label(*secs, is_secret)),
+            )
+            .into_any_element();
+    }
     let quote = message.reply_to.as_ref().and_then(|reply| {
         let preview = quote_preview.clone()?;
         Some(reply_quote_strip(message.id, reply.message_id, preview, cx))
@@ -17799,7 +18109,9 @@ fn session_history_row(
         MessageContent::Venue(venue) => Some(venue_row(message.id.0 as u64, venue, cx)),
         MessageContent::Contact(contact) => Some(contact_row(message.id.0 as u64, contact)),
         MessageContent::Dice(dice) => Some(dice_row(message.id.0 as u64, dice)),
-        MessageContent::Text(_) | MessageContent::Unsupported { .. } => None,
+        MessageContent::Text(_)
+        | MessageContent::ChatTtlChanged { .. }
+        | MessageContent::Unsupported { .. } => None,
     };
     let keyboard = inline_keyboard(message, cx);
     // Phase B3: self-destruct timer badge (`message.self_destruct_type` /
@@ -17816,11 +18128,23 @@ fn session_history_row(
             .text_color(rgb(0xffd479))
             .child(label)
     });
+    // Phase B4: auto-delete countdown chip (`message.auto_delete_in`,
+    // schema 1.8.67 line 3148) — "🗑 59m left", decaying on the same
+    // 1-second tick as the self-destruct badge.
+    let auto_delete_chip = message.auto_delete_chip(unix_ms_now()).map(|label| {
+        div()
+            .id(("auto-delete-chip", message.id.0 as u64))
+            .mt_1()
+            .text_xs()
+            .text_color(rgb(0xffd479))
+            .child(label)
+    });
     let extra = Some(
         div()
             .id(("bubble-extra", message.id.0 as u64))
             .when_some(extra_media, |this, media| this.child(media))
             .when_some(self_destruct_badge, |this, badge| this.child(badge))
+            .when_some(auto_delete_chip, |this, chip| this.child(chip))
             .when_some(keyboard, |this, keyboard| this.child(keyboard))
             .when_some(views_footer, |this, footer| this.child(footer))
             .when_some(chip_row, |this, chips| this.child(chips))

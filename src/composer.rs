@@ -185,6 +185,8 @@ impl ComposerEdit {
             | MessageContent::Venue(_)
             | MessageContent::Contact(_)
             | MessageContent::Dice(_)
+            // Phase B4: timer-change service rows are not editable.
+            | MessageContent::ChatTtlChanged { .. }
             | MessageContent::Unsupported { .. } => return None,
         };
         Some(Self {

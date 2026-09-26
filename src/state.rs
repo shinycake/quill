@@ -12,10 +12,10 @@ use crate::telegram::envelope::{
     ChannelMemberStatus, ChatAction, ChatActiveStoriesView, ChatDraft, ChatFolderInfo,
     ChatFolderSpec, ChatJoinResult, ChatKind, ChatList, ChatNotificationSettings,
     ChatPositionUpdate, ConnectionState, EnvelopePayload, ErrorClass, ForumTopic, InlineKeyboard,
-    MessageContent, MessageForwardInfo, MessageInteractionInfo, MessageOrigin, MessageReaction,
-    MessageReplyTo, MessageSelfDestruct, MessageSender, NotificationSettingsScope,
-    NotificationSound, ParsedCall, ParsedChatMember, ParsedFile, ParsedMessage, ParsedSecretChat,
-    ParsedStory, ParsedUser, Poll, ReportOption, ReportSponsoredResult, ScopeNotificationSettings,
+    MessageAutoDelete, MessageContent, MessageForwardInfo, MessageInteractionInfo, MessageOrigin,
+    MessageReaction, MessageReplyTo, MessageSelfDestruct, MessageSender, NotificationSettingsScope,
+    NotificationSound, ParsedCall, ParsedChatMember, ParsedFile, ParsedMessage, ParsedSecretChat, ParsedStory,
+    ParsedUser, Poll, ReportOption, ReportSponsoredResult, ScopeNotificationSettings,
     SecretChatState, SponsoredMessage, StickerFormat, StickerItem, StickerSetInfo,
     StoryAvailableReactionView, StoryListView, TdError,
 };
@@ -245,6 +245,10 @@ pub enum RequestPurpose {
     /// Phase C1: `sendCallRating`. Response is `ok`; sent from the
     /// call-end rating card when `callStateDiscarded.need_rating`.
     SendCallRating,
+    /// Phase B4: `setChatMessageAutoDeleteTime`. Response is `ok`; the
+    /// new timer arrives as `updateChatMessageAutoDeleteTime` (plus a
+    /// `messageChatSetMessageAutoDeleteTime` service message in history).
+    SetChatMessageAutoDeleteTime,
     Close,
     LogOut,
     Other,
@@ -809,6 +813,11 @@ pub struct ChatSummary {
     /// lines 10741 / 2816). `None` for other chat kinds and until the
     /// state resolves. Only `Ready` chats can send.
     pub secret_state: Option<SecretChatState>,
+    /// Phase B4: `chat.message_auto_delete_time` (schema 1.8.67, lines
+    /// 3616 / 3627) — the chat-level auto-delete or self-destruct
+    /// (secret chats) timer, in seconds; 0 when disabled. Set by
+    /// `updateNewChat`, refreshed by `updateChatMessageAutoDeleteTime`.
+    pub message_auto_delete_time: i32,
 }
 
 impl ChatSummary {
@@ -880,6 +889,23 @@ impl ChatSummary {
 
     pub fn is_muted(&self) -> bool {
         self.notification_settings.is_muted()
+    }
+
+    /// Phase B4: the chat-level timer status line — "Self-destruct: 1h"
+    /// for secret chats, "Auto-delete: 7d" for other chats
+    /// (`chat.message_auto_delete_time`, schema 1.8.67 lines 3616 /
+    /// 3627). `None` when the timer is disabled.
+    pub fn ttl_status_line(&self) -> Option<String> {
+        if self.message_auto_delete_time <= 0 {
+            return None;
+        }
+        let label = crate::telegram::envelope::format_ttl_setting(self.message_auto_delete_time);
+        let noun = if matches!(self.kind, ChatKind::Secret { .. }) {
+            "Self-destruct"
+        } else {
+            "Auto-delete"
+        };
+        Some(format!("{noun}: {label}"))
     }
 
     pub fn is_peer_typing(&self) -> bool {
@@ -982,6 +1008,9 @@ fn placeholder_chat(chat_id: ChatId) -> ChatSummary {
         // Phase B1: unknown until `updateSecretChat` / `getSecretChat`
         // resolves it.
         secret_state: None,
+        // Phase B4: 0 = disabled (`chat.message_auto_delete_time`,
+        // schema 1.8.67, lines 3616 / 3627).
+        message_auto_delete_time: 0,
     }
 }
 
@@ -1011,6 +1040,12 @@ pub struct HistoryMessage {
     /// `None` for ordinary messages. Self-destructed rows leave via
     /// `updateDeleteMessages` (the normal delete path).
     pub self_destruct: Option<MessageSelfDestruct>,
+    /// Phase B4: schema `message.auto_delete_in` (TDLib 1.8.67 lines
+    /// 3148 / 3165) — locally decayed countdown until the chat's
+    /// `message_auto_delete_time` setting deletes this message; `None`
+    /// when never. Renders as a countdown chip on the row; the row
+    /// itself leaves via `updateDeleteMessages`.
+    pub auto_delete: Option<MessageAutoDelete>,
 }
 
 impl HistoryMessage {
@@ -1052,6 +1087,20 @@ impl HistoryMessage {
             .as_ref()
             .and_then(|sd| sd.remaining_secs(now_ms))
             .is_some_and(|left| left > 0)
+    }
+
+    /// Phase B4: countdown chip label for `message.auto_delete_in`
+    /// (schema 1.8.67 line 3148) — "🗑 59m left".
+    pub fn auto_delete_chip(&self, now_ms: u64) -> Option<String> {
+        self.auto_delete.as_ref().map(|ad| ad.chip_label(now_ms))
+    }
+
+    /// Phase B4: whether the row has a live auto-delete countdown —
+    /// joins the same 1-second render tick as the self-destruct badge.
+    pub fn has_live_auto_delete(&self, now_ms: u64) -> bool {
+        self.auto_delete
+            .as_ref()
+            .is_some_and(|ad| ad.remaining_secs(now_ms) > 0)
     }
 }
 
@@ -1187,6 +1236,8 @@ pub struct SearchMessageHit {
     /// Phase B3: carried through from `ParsedMessage` so search hits can
     /// become history rows without losing the timer badge.
     pub self_destruct: Option<MessageSelfDestruct>,
+    /// Phase B4: same carry-through for the auto-delete countdown chip.
+    pub auto_delete: Option<MessageAutoDelete>,
 }
 
 impl SearchMessageHit {
@@ -1204,6 +1255,7 @@ impl SearchMessageHit {
             media_album_id: message.media_album_id,
             reply_markup: message.reply_markup.clone(),
             self_destruct: message.self_destruct,
+            auto_delete: message.auto_delete,
         }
     }
 
@@ -1221,6 +1273,7 @@ impl SearchMessageHit {
             media_album_id: self.media_album_id,
             reply_markup: self.reply_markup,
             self_destruct: self.self_destruct,
+            auto_delete: self.auto_delete,
         }
     }
 }
@@ -2342,10 +2395,11 @@ impl Session {
             return false;
         };
         self.histories.get(&open.0).is_some_and(|history| {
-            history
-                .messages
-                .values()
-                .any(|message| message.has_live_self_destruct(now_ms))
+            history.messages.values().any(|message| {
+                // Phase B4: auto-delete countdowns share the 1-second
+                // render tick with self-destruct badges.
+                message.has_live_self_destruct(now_ms) || message.has_live_auto_delete(now_ms)
+            })
         })
     }
 
@@ -2469,6 +2523,7 @@ impl Session {
                 draft,
                 photo,
                 can_send_basic_messages,
+                message_auto_delete_time,
             } => {
                 // Parity slice: keep the chat photo (`chatPhotoInfo.small`)
                 // file id so the chat list can render avatars. The file
@@ -2490,6 +2545,10 @@ impl Session {
                 chat.notification_settings = notification_settings;
                 chat.photo_file_id = photo_file_id;
                 chat.can_send_basic_messages = can_send_basic_messages;
+                // Phase B4: chat-level auto-delete / self-destruct timer
+                // (`chat.message_auto_delete_time`, schema 1.8.67, lines
+                // 3616 / 3627).
+                chat.message_auto_delete_time = message_auto_delete_time;
                 // Phase B1: secret chats — `updateSecretChat` arrives before
                 // `updateNewChat` (schema 1.8.67, line 10740), so a state
                 // may already be recorded; otherwise the driver fetches it
@@ -2642,6 +2701,19 @@ impl Session {
                     .entry(chat_id.0)
                     .or_insert_with(|| placeholder_chat(chat_id))
                     .notification_settings = notification_settings;
+            }
+            // Phase B4: `updateChatMessageAutoDeleteTime` (schema 1.8.67,
+            // line 10549) — keep the chat-level timer fresh. The same
+            // change also lands in history as a
+            // `messageChatSetMessageAutoDeleteTime` service row.
+            EnvelopePayload::UpdateChatMessageAutoDeleteTime {
+                chat_id,
+                message_auto_delete_time,
+            } => {
+                self.chats
+                    .entry(chat_id.0)
+                    .or_insert_with(|| placeholder_chat(chat_id))
+                    .message_auto_delete_time = message_auto_delete_time;
             }
             EnvelopePayload::UpdateChatAction {
                 chat_id,
@@ -4931,6 +5003,7 @@ impl Session {
                         media_album_id: message.media_album_id,
                         reply_markup: message.reply_markup.clone(),
                         self_destruct: message.self_destruct,
+                        auto_delete: message.auto_delete,
                     })
                     .collect()
             })
@@ -5021,6 +5094,7 @@ fn history_message(message: ParsedMessage, pending: bool) -> HistoryMessage {
         media_album_id: message.media_album_id,
         reply_markup: message.reply_markup,
         self_destruct: message.self_destruct,
+        auto_delete: message.auto_delete,
     }
 }
 
@@ -6895,6 +6969,7 @@ mod tests {
             media_album_id: 0,
             reply_markup: None,
             self_destruct: None,
+            auto_delete: None,
         });
         assert_eq!(
             session.begin_chat_search_jump(MessageId(70)),
@@ -6920,6 +6995,7 @@ mod tests {
             media_album_id: 0,
             reply_markup: None,
             self_destruct: None,
+            auto_delete: None,
         });
         assert_eq!(
             session.begin_chat_search_jump(MessageId(80)),

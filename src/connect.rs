@@ -47,6 +47,7 @@ use crate::telegram::requests::{
     send_call_rating, send_chat_action, send_chat_action_kind, send_document, send_message_album,
     send_photo, send_poll, send_sticker, send_text, send_text_story_reply, send_video,
     send_video_note, send_voice_note, set_authentication_phone_number, set_chat_draft_message,
+    set_chat_message_auto_delete_time,
     set_chat_notification_settings, set_chat_slow_mode_delay, set_poll_answer,
     set_scope_notification_settings, set_story_reaction, toggle_chat_folder_tags,
     unpin_chat_message, view_messages, view_sponsored_chat,
@@ -1552,6 +1553,55 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(err);
         }
         Ok(extra)
+    }
+
+    /// Phase B4: `setChatMessageAutoDeleteTime` (TDLib 1.8.67,
+    /// `schema/td_api.tl:13454`) — the chat-level auto-delete or
+    /// self-destruct (secret chats) timer. Value rule from the schema
+    /// comment, enforced here (defense in depth — TDLib would 400 an
+    /// out-of-rule value): secret chats accept any non-negative second
+    /// value; other chats need 0 or a multiple of 86400 up to
+    /// 365 * 86400. The new value arrives as
+    /// `updateChatMessageAutoDeleteTime` (plus the service message in
+    /// history); there is no optimistic state change.
+    pub fn set_chat_message_auto_delete_time(
+        &mut self,
+        chat_id: ChatId,
+        message_auto_delete_time: i32,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let Some(chat) = self.session.chats.get(&chat_id.0) else {
+            return Err(ConnectSendError::InvalidRequest);
+        };
+        if !chat.supported() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let is_secret = matches!(chat.kind, ChatKind::Secret { .. });
+        let valid = if message_auto_delete_time < 0 {
+            false
+        } else if is_secret {
+            true
+        } else {
+            message_auto_delete_time == 0
+                || (message_auto_delete_time % 86_400 == 0
+                    && message_auto_delete_time <= 365 * 86_400)
+        };
+        if !valid {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::SetChatMessageAutoDeleteTime, Some(chat_id));
+        let json = set_chat_message_auto_delete_time(extra, chat_id.0, message_auto_delete_time);
+        match self.sender.send_json(&json) {
+            Ok(()) => Ok(extra),
+            Err(err) => {
+                self.session.requests.take(extra);
+                Err(err)
+            }
+        }
     }
 
     /// Phase B1: drain `Session::secret_chat_fetch_queue` — one
@@ -4725,6 +4775,67 @@ mod tests {
         assert_eq!(v["@type"], "closeSecretChat");
         assert_eq!(v["@extra"], "13");
         assert_eq!(v["secret_chat_id"], 7);
+    }
+
+    /// Phase B4: `setChatMessageAutoDeleteTime` value rule (schema 1.8.67,
+    /// line 13454) is enforced driver-side: secret chats accept arbitrary
+    /// non-negative seconds; other chats need 0 or day-multiples up to a
+    /// year. Unknown chats are rejected too.
+    #[test]
+    fn driver_validates_auto_delete_time_values() {
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = Arc::new(RecordingSender::new());
+        let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+        let mut driver =
+            ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+        let seq = AtomicU64::new(0);
+        for json in [
+            r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+            r#"{"@type":"updateSecretChat","secret_chat":{"@type":"secretChat","id":31,"user_id":7,"state":{"@type":"secretChatStateReady"},"is_outbound":true,"key_hash":"","layer":144}}"#,
+            r#"{"@type":"updateNewChat","chat":{"id":31,"title":"Secret","type":{"@type":"chatTypeSecret","secret_chat_id":31,"user_id":7},"unread_count":0}}"#,
+            r#"{"@type":"updateNewChat","chat":{"id":11,"title":"Cloud","type":{"@type":"chatTypePrivate","user_id":7},"unread_count":0}}"#,
+        ] {
+            driver
+                .ingest(copy_and_parse(json, &seq, &dyn_sink).unwrap())
+                .unwrap();
+        }
+        // Secret chat: arbitrary seconds are fine; negatives are not.
+        for secs in [0, 5, 90, 3600, 604800] {
+            let extra = driver
+                .set_chat_message_auto_delete_time(ChatId(31), secs)
+                .expect("secret chat accepts arbitrary seconds");
+            let sent = recorder.snapshot();
+            let last = sent.last().unwrap();
+            assert!(last.contains("setChatMessageAutoDeleteTime"));
+            assert!(last.contains(&format!("\"message_auto_delete_time\":{secs}")));
+            assert!(last.contains(&format!("\"@extra\":\"{}\"", extra.0)));
+        }
+        assert_eq!(
+            driver.set_chat_message_auto_delete_time(ChatId(31), -1),
+            Err(ConnectSendError::InvalidRequest)
+        );
+        // Regular chat: 0 or day-multiples up to 365 days.
+        for secs in [0, 86_400, 604_800, 2_592_000, 365 * 86_400] {
+            driver
+                .set_chat_message_auto_delete_time(ChatId(11), secs)
+                .expect("regular chat accepts 0 / day multiples");
+        }
+        for secs in [-1, 5, 3600, 90_000, 365 * 86_400 + 86_400] {
+            assert_eq!(
+                driver.set_chat_message_auto_delete_time(ChatId(11), secs),
+                Err(ConnectSendError::InvalidRequest),
+                "regular chat rejects {secs}"
+            );
+        }
+        // Unknown chat: rejected.
+        assert_eq!(
+            driver.set_chat_message_auto_delete_time(ChatId(999), 3600),
+            Err(ConnectSendError::InvalidRequest)
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// Phase B1: the ordinary `sendMessage` path works for a Ready
