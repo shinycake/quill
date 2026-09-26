@@ -9273,6 +9273,17 @@ mod notification_sound_tests {
             }
             other => panic!("unexpected {other:?}"),
         }
+        // Phase C1b: a video `updateCall` parses `is_video: true` (the
+        // schema's `call` type carries it, 1.8.67 :7287).
+        let video = r#"{"@type":"updateCall","call":{"@type":"call","id":83,"unique_id":"105","user_id":41,"is_outgoing":false,"is_video":true,"state":{"@type":"callStateReady","protocol":{"@type":"callProtocol","udp_p2p":false,"udp_reflector":false,"min_layer":65,"max_layer":92,"library_versions":[]},"servers":[],"config":"{}","encryption_key":"","emojis":[],"allow_p2p":false,"is_group_call_supported":false,"custom_parameters":"{}"}}}"#;
+        match parse_envelope(video).unwrap().payload {
+            EnvelopePayload::UpdateCall { call } => {
+                assert!(call.is_video);
+                assert!(!call.is_outgoing);
+                assert_eq!(call.state, CallState::Ready);
+            }
+            other => panic!("unexpected {other:?}"),
+        }
         for (state_json, terminal) in [
             (r#"{"@type":"callStateExchangingKeys"}"#, false),
             (

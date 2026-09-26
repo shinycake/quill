@@ -477,9 +477,9 @@ pub fn call_protocol() -> Value {
 
 /// Phase C1: `createCall` (TDLib 1.8.67, `schema/td_api.tl:14212`):
 /// `createCall user_id:int53 protocol:callProtocol is_video:Bool =
-/// CallId;` "Creates a new call". This slice is audio-only, so
-/// `is_video` is always false (video needs transport too — C3, after
-/// the C2 audio spike).
+/// CallId;` "Creates a new call". Phase C1b: `is_video: true` is
+/// allowed — it starts video-call *signaling*; media transport is
+/// still Phase C2, so the call carries no audio or video.
 pub fn create_call(extra: RequestId, user_id: i64, is_video: bool) -> String {
     json!({
         "@type": "createCall",
@@ -3336,6 +3336,14 @@ mod channel_requests_tests {
         assert_eq!(v["is_video"], false);
         assert_eq!(v["protocol"]["@type"], "callProtocol");
 
+        // Phase C1b: a video call sends `is_video: true` (signaling
+        // only — no transport yet).
+        let v: serde_json::Value =
+            serde_json::from_str(&create_call(RequestId(5), 41, true)).unwrap();
+        assert_eq!(v["@type"], "createCall");
+        assert_eq!(v["user_id"], 41);
+        assert_eq!(v["is_video"], true);
+
         let v: serde_json::Value = serde_json::from_str(&accept_call(RequestId(2), 77)).unwrap();
         assert_eq!(v["@type"], "acceptCall");
         assert_eq!(v["call_id"], 77);
@@ -3350,6 +3358,15 @@ mod channel_requests_tests {
         assert_eq!(v["duration"], 42);
         assert_eq!(v["is_video"], false);
         assert_eq!(v["connection_id"], 0);
+
+        // Phase C1b: discarding a video call reports `is_video: true`
+        // (schema 1.8.67, :14227).
+        let v: serde_json::Value =
+            serde_json::from_str(&discard_call(RequestId(6), 78, false, 7, true)).unwrap();
+        assert_eq!(v["@type"], "discardCall");
+        assert_eq!(v["call_id"], 78);
+        assert_eq!(v["duration"], 7);
+        assert_eq!(v["is_video"], true);
 
         let v: serde_json::Value =
             serde_json::from_str(&send_call_rating(RequestId(4), 77, 5)).unwrap();

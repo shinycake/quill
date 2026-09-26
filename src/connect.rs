@@ -1403,10 +1403,16 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// Phase C1: `createCall` for a user. Gated on a known non-bot
     /// user (like `createNewSecretChat`) and on no call already being
-    /// active. Audio-only — video needs transport too (C3, after the C2
-    /// audio spike). The `callId` answer starts tracking the outgoing
-    /// call; its states arrive as `updateCall`.
-    pub fn start_call(&mut self, user_id: i64) -> Result<RequestId, ConnectSendError> {
+    /// active. Phase C1b: `is_video: true` starts video-call
+    /// *signaling* — media transport is still Phase C2, so the call
+    /// carries no audio or video; the UI says so. The `callId` answer
+    /// starts tracking the outgoing call; its states arrive as
+    /// `updateCall`.
+    pub fn start_call(
+        &mut self,
+        user_id: i64,
+        is_video: bool,
+    ) -> Result<RequestId, ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
@@ -1421,8 +1427,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         let extra = self
             .session
-            .request_for_user(RequestPurpose::CreateCall, user_id);
-        if let Err(err) = self.sender.send_json(&create_call(extra, user_id, false)) {
+            .request_for_user(RequestPurpose::CreateCall { is_video }, user_id);
+        if let Err(err) = self
+            .sender
+            .send_json(&create_call(extra, user_id, is_video))
+        {
             self.session.requests.take(extra);
             return Err(err);
         }
