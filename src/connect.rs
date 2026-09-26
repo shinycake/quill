@@ -469,6 +469,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         if thumbs_after || self.session.stickers.open || self.session.gifs.open {
             self.maybe_download_open_thumbs()?;
         }
+        // Parity slice: chat-list avatars download on every ingest; each
+        // photo is requested at most once (in-flight / completed dedupe).
+        self.maybe_download_chat_list_photos()?;
         self.maybe_load_selected_sticker_set()?;
         self.maybe_refresh_saved_animations()?;
         if chat_search_hits {
@@ -904,6 +907,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             // Phase 5.1: re-selecting an open forum chat also resolves /
             // loads topics (the first select may have raced `is_forum`).
             self.maybe_fetch_supergroup_forum(chat_id)?;
+            // Parity slice: channel/supergroup header extras.
+            self.maybe_fetch_supergroup_profile(chat_id)?;
+            self.maybe_fetch_supergroup_full_info_for_header(chat_id)?;
             self.maybe_fetch_forum_topics(chat_id)?;
             return self.fetch_history();
         }
@@ -925,6 +931,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         // `supergroup` object (`chatTypeSupergroup` has no forum flag), then
         // load their topic list.
         self.maybe_fetch_supergroup_forum(chat_id)?;
+        // Parity slice: channel/supergroup header extras.
+        self.maybe_fetch_supergroup_profile(chat_id)?;
+        self.maybe_fetch_supergroup_full_info_for_header(chat_id)?;
         self.maybe_fetch_forum_topics(chat_id)?;
         self.fetch_history()
     }
@@ -970,6 +979,68 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(err);
         }
         Ok(())
+    }
+
+    /// Parity slice: `getSupergroup` for the channel/supergroup header's
+    /// @username (and `is_forum` for non-channels). Fires once per
+    /// supergroup — deduped by the `supergroup_usernames` cache (which
+    /// spontaneous `updateSupergroup` updates also fill) and the in-flight
+    /// `GetSupergroup` purpose, so it never doubles
+    /// `maybe_fetch_supergroup_forum`'s request.
+    fn maybe_fetch_supergroup_profile(&mut self, chat_id: ChatId) -> Result<(), ConnectSendError> {
+        if !self.chats_path_active() {
+            return Ok(());
+        }
+        let supergroup_id = match self.session.chats.get(&chat_id.0) {
+            Some(chat) => match chat.kind {
+                ChatKind::Supergroup { supergroup_id, .. }
+                    if !self
+                        .session
+                        .supergroup_usernames
+                        .contains_key(&supergroup_id) =>
+                {
+                    supergroup_id
+                }
+                _ => return Ok(()),
+            },
+            None => return Ok(()),
+        };
+        if self
+            .session
+            .requests
+            .has_purpose_for_chat(RequestPurpose::GetSupergroup, chat_id)
+        {
+            return Ok(());
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::GetSupergroup, Some(chat_id));
+        if let Err(err) = self.sender.send_json(&get_supergroup(extra, supergroup_id)) {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(())
+    }
+
+    /// Parity slice: `getSupergroupFullInfo` for the channel/supergroup
+    /// header (description snippet, subscriber/member count, linked
+    /// discussion group). Deduped by the cache + in-flight purpose inside
+    /// `fetch_supergroup_full_info`.
+    fn maybe_fetch_supergroup_full_info_for_header(
+        &mut self,
+        chat_id: ChatId,
+    ) -> Result<(), ConnectSendError> {
+        if !self.chats_path_active() {
+            return Ok(());
+        }
+        let supergroup_id = match self.session.chats.get(&chat_id.0) {
+            Some(chat) => match chat.kind {
+                ChatKind::Supergroup { supergroup_id, .. } => supergroup_id,
+                _ => return Ok(()),
+            },
+            None => return Ok(()),
+        };
+        self.fetch_supergroup_full_info(supergroup_id).map(|_| ())
     }
 
     /// Phase 5.1: `getForumTopics` (first page) for a known forum supergroup.
@@ -1503,6 +1574,25 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(Vec::new());
         }
         let ids = self.session.thumb_file_ids_to_download();
+        let mut extras = Vec::new();
+        for file_id in ids {
+            if let Some(extra) = self.download_file(file_id, THUMB_DOWNLOAD_PRIORITY)? {
+                extras.push(extra);
+            }
+        }
+        Ok(extras)
+    }
+
+    /// Parity slice: auto-download chat-list avatar photos
+    /// (`chat.photo.small`, the cheap 160px thumbnail, for every chat type).
+    /// Runs on every ingest; `should_download` dedupes in-flight and
+    /// completed files, so each photo is requested at most once until it
+    /// lands, and `updateChatPhoto` re-arms the new file id.
+    pub fn maybe_download_chat_list_photos(&mut self) -> Result<Vec<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Ok(Vec::new());
+        }
+        let ids = self.session.chat_list_photo_file_ids();
         let mut extras = Vec::new();
         for file_id in ids {
             if let Some(extra) = self.download_file(file_id, THUMB_DOWNLOAD_PRIORITY)? {
@@ -6320,6 +6410,139 @@ mod tests {
         );
         assert!(!sink.rendered().contains("CANARY_MEDIA"));
         assert!(!sink.rendered().contains("CANARY_REMOTE"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn chat_list_photo_downloads_on_ingest_and_dedupes() {
+        // Parity slice: `updateNewChat` with `chat.photo.small` triggers a
+        // `downloadFile` (thumb priority) from the ingest hook; a second
+        // ingest does not re-request while the download is in flight.
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = Arc::new(RecordingSender::new());
+        let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+        let mut driver =
+            ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+        let seq = AtomicU64::new(0);
+        driver
+            .ingest(
+                copy_and_parse(
+                    r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        let small = r#"{"@type":"file","id":91,"size":24,"expected_size":24,"local":{"@type":"localFile","path":"","can_be_downloaded":true,"can_be_deleted":false,"is_downloading_active":false,"is_downloading_completed":false,"download_offset":0,"downloaded_prefix_size":0,"downloaded_size":0},"remote":{"@type":"remoteFile","id":"x","unique_id":"u","is_uploading_active":false,"is_uploading_completed":true,"uploaded_size":24}}"#;
+        driver
+            .ingest(
+                copy_and_parse(
+                    &format!(
+                        r#"{{"@type":"updateNewChat","chat":{{"id":7,"title":"Ada","type":{{"@type":"chatTypePrivate","user_id":7}},"unread_count":0,"photo":{{"@type":"chatPhotoInfo","small":{small},"big":null,"minithumbnail":null,"has_animation":false,"is_personal":false}}}}}}"#
+                    ),
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        let sent = recorder.snapshot();
+        let avatar_req = sent
+            .iter()
+            .find(|j| j.contains("downloadFile") && j.contains("\"file_id\":91"))
+            .expect("chat photo downloadFile");
+        let avatar_json: Value = serde_json::from_str(avatar_req).unwrap();
+        assert_eq!(avatar_json["priority"], THUMB_DOWNLOAD_PRIORITY);
+        assert_eq!(avatar_json["synchronous"], false);
+        // A second ingest (any envelope) must not duplicate the in-flight
+        // download.
+        driver
+            .ingest(
+                copy_and_parse(
+                    r#"{"@type":"updateChatTitle","chat_id":7,"title":"Ada"}"#,
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        let after = recorder.snapshot();
+        let avatar_downloads = after
+            .iter()
+            .filter(|j| j.contains("downloadFile") && j.contains("\"file_id\":91"))
+            .count();
+        assert_eq!(avatar_downloads, 1, "in-flight avatar download deduped");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn select_channel_fetches_supergroup_profile_and_full_info() {
+        // Parity slice: opening a channel sends `getSupergroup` (for the
+        // header @username) and `getSupergroupFullInfo` (description,
+        // subscriber count, linked discussion group); private chats send
+        // neither.
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = Arc::new(RecordingSender::new());
+        let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+        let mut driver =
+            ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+        let seq = AtomicU64::new(0);
+        driver
+            .ingest(
+                copy_and_parse(
+                    r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        driver
+            .ingest(
+                copy_and_parse(
+                    r#"{"@type":"updateNewChat","chat":{"id":13,"title":"Demo channel","type":{"@type":"chatTypeSupergroup","supergroup_id":13,"is_channel":true},"unread_count":0}}"#,
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        driver.select_chat(ChatId(13)).unwrap();
+        let sent = recorder.snapshot();
+        assert!(
+            sent.iter()
+                .any(|j| j.contains("getSupergroup") && j.contains("\"supergroup_id\":13")),
+            "getSupergroup for the header username"
+        );
+        assert!(
+            sent.iter()
+                .any(|j| j.contains("getSupergroupFullInfo") && j.contains("\"supergroup_id\":13")),
+            "getSupergroupFullInfo for the header extras"
+        );
+        driver
+            .ingest(
+                copy_and_parse(
+                    r#"{"@type":"updateNewChat","chat":{"id":7,"title":"Ada","type":{"@type":"chatTypePrivate","user_id":7},"unread_count":0}}"#,
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        let before = recorder.snapshot().len();
+        driver.select_chat(ChatId(7)).unwrap();
+        let after = recorder.snapshot();
+        assert!(
+            !after[before..].iter().any(|j| j.contains("getSupergroup")),
+            "private chats must not fetch supergroup info"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 

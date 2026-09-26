@@ -39,6 +39,7 @@ Toolchain: Rust **1.98.1**. UI pin: **gpui-kit 0.6.1**. TDLib schema: **1.8.67**
 - [x] Channels (ungated; broadcast posts with view counts; join/leave; admin posting) / bots (Phase 3)
 - [x] Chat folders: tabs + eager `loadChats(chatListFolder)` paging (injected/replay; live needs tdjson)
 - [x] Folder management: create / edit / delete / reorder / tags toggle (`createChatFolder` / `editChatFolder` / `deleteChatFolder` / `reorderChatFolders` / `toggleChatFolderTags`); add/remove chats via `getChatListsToAddChat` + `addChatToList` / `getChatFolder` + `editChatFolder`; manage dialog + per-chat Folders picker (injected/replay; live needs tdjson)
+- [x] Chat-list avatars (downloaded `chat.photo.small` thumbnails + colored initial fallbacks; `updateChatPhoto` re-arms) and channel/supergroup header (photo, description snippet, @username, subscriber/member count, "Discuss" via `linked_chat_id`) (injected/replay; live needs tdjson)
 
 Decisions, pins, and blockers: [DECISIONS.md](DECISIONS.md).  
 What credentials are needed next: [docs/credentials.md](docs/credentials.md).  

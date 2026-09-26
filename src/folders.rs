@@ -218,6 +218,7 @@ mod tests {
             my_member_status: None,
             my_admin_can_post_messages: None,
             is_forum: None,
+            photo_file_id: None,
         }
     }
 
