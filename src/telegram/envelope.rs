@@ -3636,6 +3636,12 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
         // Phase C3a: group-call signaling updates (schema 1.8.67,
         // lines 10819 / 10824 / 10830 / 10836 / 10576). All
         // signaling-only: no media transport until Phase C2.
+        // `getGroupCall` (schema :14274) answers with a bare `groupCall`
+        // object — route it through the same handling as
+        // `updateGroupCall` so the fetch path can create the tracker.
+        "groupCall" => Ok(EnvelopePayload::UpdateGroupCall {
+            group_call: parse_group_call(Some(&value)).ok_or(ParseError::MissingField)?,
+        }),
         "updateGroupCall" => Ok(EnvelopePayload::UpdateGroupCall {
             group_call: parse_group_call(value.get("group_call"))
                 .ok_or(ParseError::MissingField)?,

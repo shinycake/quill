@@ -3151,3 +3151,50 @@ fn replay_group_call_signaling() {
     session.leave_group_call_local();
     assert!(session.active_group_call.is_none());
 }
+
+/// Phase C3a (reviewer-found regression): `getGroupCall` (schema 1.8.67,
+/// line 14274) answers with a bare `groupCall` object, not wrapped in
+/// `updateGroupCall`. The parse arm must route it through the same
+/// handling so the fetch path creates the tracker. Before the fix the
+/// response died as a parse error, the pending request leaked, and the
+/// tracked call was never created — the header "Voice chat" button led
+/// to a dead "Joining voice chat…" state.
+#[test]
+fn replay_get_group_call_bare_response_populates_tracker() {
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn quill::diagnostics::DiagnosticSink> = sink.clone();
+    let mut session = Session::new(AccountKey::primary(), dyn_sink);
+    let seq = AtomicU64::new(0);
+
+    // Register the in-flight `getGroupCall` exactly like the driver does.
+    let req_id = session.requests.register(
+        quill::ids::AccountGeneration(1),
+        RequestPurpose::GetGroupCall { group_call_id: 555 },
+        None,
+        None,
+    );
+
+    // Bare `groupCall` response with the matching `@extra` (fields per
+    // schema 1.8.67 line 7154, same shape as `updateGroupCall`'s payload).
+    let json = format!(
+        r#"{{"@type":"groupCall","@extra":"{}","id":555,"unique_id":"999","title":"Demo voice","invite_link":"","paid_message_star_count":0,"scheduled_start_date":0,"enabled_start_notification":false,"is_active":true,"is_video_chat":true,"is_live_story":false,"is_rtmp_stream":false,"is_joined":false,"need_rejoin":false,"is_owned":false,"can_be_managed":true,"participant_count":3,"has_hidden_listeners":false,"loaded_all_participants":false,"message_sender_id":null,"recent_speakers":[],"is_my_video_enabled":false,"is_my_video_paused":false,"can_enable_video":true,"mute_new_participants":false,"can_toggle_mute_new_participants":true,"can_send_messages":true,"are_messages_allowed":true,"can_toggle_are_messages_allowed":false,"can_delete_messages":false,"record_duration":0,"is_video_recorded":false,"duration":0}}"#,
+        req_id.0
+    );
+    apply_all_seq(&mut session, &sink, &seq, &[&json]);
+
+    // Tracker populated from the bare response…
+    let call = session
+        .active_group_call
+        .as_ref()
+        .expect("tracker created from bare groupCall");
+    assert_eq!(call.id, 555);
+    assert_eq!(call.title, "Demo voice");
+    assert!(!call.is_joined);
+    // …and the pending request was consumed, not leaked.
+    assert!(
+        session
+            .requests
+            .pending_extra_for(RequestPurpose::GetGroupCall { group_call_id: 555 }, None)
+            .is_none()
+    );
+}
