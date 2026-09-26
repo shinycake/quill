@@ -2647,7 +2647,7 @@ fn replay_call_signaling_lifecycle() {
 
     // A rejected `createCall` surfaces the error (TDLib's message text
     // is never stored — it can contain secrets).
-    let extra = session.request_for_user(RequestPurpose::CreateCall, 41);
+    let extra = session.request_for_user(RequestPurpose::CreateCall { is_video: false }, 41);
     apply_all_seq(
         &mut session,
         &sink,
@@ -2664,7 +2664,7 @@ fn replay_call_signaling_lifecycle() {
     assert!(!error.contains("PHONE_CALL_PROTOCOL_ERROR"));
 
     // The `callId` answer starts tracking the outgoing call.
-    let extra = session.request_for_user(RequestPurpose::CreateCall, 41);
+    let extra = session.request_for_user(RequestPurpose::CreateCall { is_video: false }, 41);
     apply_all_seq(
         &mut session,
         &sink,
@@ -2715,6 +2715,107 @@ fn replay_call_signaling_lifecycle() {
     );
     let summary = session.call_summary.as_ref().expect("error summary");
     assert!(summary.end_line.contains("timed out"));
+}
+
+/// Phase C1b: video-call signaling through the reducer — an outgoing
+/// video `createCall` tracks `is_video: true` from the request args
+/// (the `callId` answer carries no `is_video`, schema 1.8.67 :7034) →
+/// exchanging keys → ready → discard keeps `is_video: true` on the
+/// summary; an incoming video call tracks `is_video` from `updateCall`
+/// itself (the `call` type carries it, schema 1.8.67 :7287); a second
+/// incoming video call while one is active is queued for busy-decline
+/// with `is_video: true` so `discardCall` reports it (schema :14227).
+#[test]
+fn replay_video_call_signaling() {
+    use quill::telegram::envelope::CallState;
+
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn quill::diagnostics::DiagnosticSink> = sink.clone();
+    let mut session = Session::new(AccountKey::primary(), dyn_sink);
+    let seq = AtomicU64::new(0);
+
+    // Outgoing video `createCall`: the `callId` answer starts tracking
+    // with `is_video` derived from the request args.
+    let extra = session.request_for_user(RequestPurpose::CreateCall { is_video: true }, 41);
+    apply_all_seq(
+        &mut session,
+        &sink,
+        &seq,
+        &[&format!(
+            r#"{{"@type":"callId","@extra":"{}","id":90}}"#,
+            extra.0
+        )],
+    );
+    let call = session
+        .active_call
+        .as_ref()
+        .expect("outgoing video tracked");
+    assert_eq!(call.id, 90);
+    assert!(call.is_outgoing);
+    assert!(call.is_video);
+    assert!(!call.muted);
+
+    // Exchanging keys → ready; `is_video` survives state advances.
+    apply_all_seq(
+        &mut session,
+        &sink,
+        &seq,
+        &[
+            r#"{"@type":"updateCall","call":{"@type":"call","id":90,"unique_id":"200","user_id":41,"is_outgoing":true,"is_video":true,"state":{"@type":"callStateExchangingKeys"}}}"#,
+            r#"{"@type":"updateCall","call":{"@type":"call","id":90,"unique_id":"200","user_id":41,"is_outgoing":true,"is_video":true,"state":{"@type":"callStateReady","protocol":{"@type":"callProtocol","udp_p2p":false,"udp_reflector":false,"min_layer":65,"max_layer":92,"library_versions":[]},"servers":[],"config":"{}","encryption_key":"","emojis":[],"allow_p2p":false,"is_group_call_supported":false,"custom_parameters":"{}"}}}"#,
+        ],
+    );
+    let call = session.active_call.as_ref().expect("call 90 ready");
+    assert_eq!(call.state, CallState::Ready);
+    assert!(call.is_video);
+    assert!(call.ready_at.is_some());
+
+    // A second incoming video call while one is active → busy-decline
+    // queue keeps its `is_video`.
+    apply_all_seq(
+        &mut session,
+        &sink,
+        &seq,
+        &[
+            r#"{"@type":"updateCall","call":{"@type":"call","id":91,"unique_id":"201","user_id":42,"is_outgoing":false,"is_video":true,"state":{"@type":"callStatePending","is_created":true,"is_received":false}}}"#,
+        ],
+    );
+    assert_eq!(session.active_call.as_ref().expect("still call 90").id, 90);
+    assert_eq!(session.call_busy_decline_queue, vec![(91, true)]);
+
+    // Remote hangup → the summary keeps `is_video: true` (the driver
+    // sends it back in `discardCall`).
+    apply_all_seq(
+        &mut session,
+        &sink,
+        &seq,
+        &[
+            r#"{"@type":"updateCall","call":{"@type":"call","id":90,"unique_id":"200","user_id":41,"is_outgoing":true,"is_video":true,"state":{"@type":"callStateDiscarded","reason":{"@type":"callDiscardReasonHungUp"},"need_rating":true,"need_debug_information":false,"need_log":false}}}"#,
+        ],
+    );
+    assert!(session.active_call.is_none());
+    let summary = session.call_summary.as_ref().expect("end summary");
+    assert_eq!(summary.call_id, 90);
+    assert!(summary.is_video);
+    assert!(summary.need_rating);
+
+    // Incoming video call: `is_video` comes from `updateCall` itself —
+    // no inference needed.
+    apply_all_seq(
+        &mut session,
+        &sink,
+        &seq,
+        &[
+            r#"{"@type":"updateCall","call":{"@type":"call","id":92,"unique_id":"202","user_id":41,"is_outgoing":false,"is_video":true,"state":{"@type":"callStatePending","is_created":true,"is_received":false}}}"#,
+        ],
+    );
+    let call = session
+        .active_call
+        .as_ref()
+        .expect("incoming video tracked");
+    assert_eq!(call.id, 92);
+    assert!(!call.is_outgoing);
+    assert!(call.is_video);
 }
 
 /// Phase B4: chat-level auto-delete / self-destruct timer

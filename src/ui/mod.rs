@@ -767,6 +767,12 @@ pub enum ScreenshotDemo {
     /// ticking). Signaling only: the card carries the honest
     /// no-audio-transport note.
     ReadyCall,
+    /// Phase C1b: a *connected* (`callStateReady`) incoming video call
+    /// from Zed, so the overlay renders the video-stage placeholder
+    /// grid (remote + local tiles), the 📹 "Video call" kind line, the
+    /// duration clock, Mute / Hang up, and the honest no-video-transport
+    /// note. Signaling only — no live Telegram, no media.
+    ReadyCallVideo,
     /// Phase B4: chat-level auto-delete / self-destruct timer (injected,
     /// no live Telegram) — the Ready secret chat with Zed (id 41) with
     /// `message_auto_delete_time` 3600, one message carrying a live
@@ -1530,6 +1536,15 @@ impl QuillApp {
                     AuthorizationState::Ready,
                 )
             }
+            Some(ScreenshotDemo::ReadyCallVideo) => {
+                demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
+                (
+                    ConnectUiStatus::DemoReadyChats,
+                    None,
+                    "screenshot demo — connected video call (injected, no live Telegram)".into(),
+                    AuthorizationState::Ready,
+                )
+            }
             Some(ScreenshotDemo::ReadyChatTtl) => {
                 demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
                 (
@@ -2024,6 +2039,20 @@ impl QuillApp {
             }
             app.status_note =
                 "screenshot demo — incoming call from Zed (injected, no live Telegram)".into();
+        }
+        // Phase C1b: connected-video-call fixture — Zed's incoming
+        // video call goes pending → exchanging keys → ready, so the
+        // overlay renders the video-stage placeholder grid (remote +
+        // local tiles), the 📹 kind line, duration clock, Mute / Hang
+        // up, and the honest no-video-transport note.
+        if matches!(demo, Some(ScreenshotDemo::ReadyCallVideo)) {
+            if let Some(session) = app.demo_session.as_mut() {
+                app.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_call_video(session, &app.demo_sink, &app.demo_seq);
+            }
+            app.status_note =
+                "screenshot demo — connected video call with Zed (injected, no live Telegram)"
+                    .into();
         }
         // Phase B4: chat TTL fixture — the Ready secret chat with a 1h
         // self-destruct timer, a live `auto_delete_in` countdown on one
@@ -3977,19 +4006,49 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// Phase C1: `createCall` from a user profile. Audio-only
-    /// (`is_video: false`) — video needs transport too (C3). The
-    /// outgoing call is tracked once the `callId` answer arrives; its
-    /// states arrive as `updateCall`.
-    fn start_call_for_user(&mut self, user_id: i64, cx: &mut Context<Self>) {
+    /// Phase C1b: `createCall` from a user profile. `is_video: true`
+    /// starts video-call *signaling* — media transport is still Phase
+    /// C2, so the call carries no audio or video and the UI says so.
+    /// The outgoing call is tracked once the `callId` answer arrives
+    /// (with `is_video` derived from the request args); its states
+    /// arrive as `updateCall`.
+    fn start_call_for_user(&mut self, user_id: i64, is_video: bool, cx: &mut Context<Self>) {
         if self.live.is_some() {
-            let result = self.live.as_mut().expect("live").driver.start_call(user_id);
+            let result = self
+                .live
+                .as_mut()
+                .expect("live")
+                .driver
+                .start_call(user_id, is_video);
             self.status_note = match result {
-                Ok(_) => "calling…".into(),
+                Ok(_) => {
+                    if is_video {
+                        "starting video call…".into()
+                    } else {
+                        "calling…".into()
+                    }
+                }
                 Err(_) => "could not start the call".into(),
             };
         } else if self.demo_session.is_some() {
             self.status_note = "demo: call start (no live Telegram)".into();
+        }
+        cx.notify();
+    }
+
+    /// Phase C1b: local-only mute toggle for the live call card. The
+    /// state is tracked on `ActiveCall.muted` but is a no-op without
+    /// media transport (C2) — the card labels it honestly.
+    fn toggle_call_mute(&mut self, cx: &mut Context<Self>) {
+        if let Some(call) = self
+            .live
+            .as_mut()
+            .map(|live| &mut live.driver.session)
+            .into_iter()
+            .chain(self.demo_session.as_mut())
+            .find_map(|session| session.active_call.as_mut())
+        {
+            call.muted = !call.muted;
         }
         cx.notify();
     }
@@ -7202,16 +7261,29 @@ impl QuillApp {
             );
         }
         // Phase C1: "Call" from a user profile — `createCall`
-        // (audio-only; video needs transport, C3). Same gating as
-        // secret chats: non-bot users, not yourself.
+        // (audio-only). Phase C1b: "🎥 Video call" — `createCall` with
+        // `is_video: true` (signaling only; media transport is C2). Same
+        // gating as secret chats: non-bot users, not yourself.
         let show_call = show_start_secret;
         if show_call {
             body = body.child(
-                Button::new("info-panel-call")
-                    .label("Call")
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.start_call_for_user(user_id, cx);
-                    })),
+                div()
+                    .flex()
+                    .gap_2()
+                    .child(
+                        Button::new("info-panel-call")
+                            .label("Call")
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.start_call_for_user(user_id, false, cx);
+                            })),
+                    )
+                    .child(
+                        Button::new("info-panel-video-call")
+                            .label("🎥 Video call")
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.start_call_for_user(user_id, true, cx);
+                            })),
+                    ),
             );
         }
         // Phase B2: encryption-key section — only when the open chat is a
@@ -7644,7 +7716,54 @@ impl QuillApp {
     }
 
     /// Phase C1: the live-call card (ringing / connecting / connected).
-    /// The backdrop is not clickable — only the call buttons act.
+    /// Phase C1b: video calls show a 📹 indicator on the kind line and
+    /// a video-stage placeholder grid once connected — honest dark
+    /// tiles, never a fake live picture. The backdrop is not clickable
+    /// — only the call buttons act.
+    fn call_video_stage(&self, name: &str) -> Div {
+        // Phase C1b: remote tile + local preview tile for a connected
+        // video call. No camera frames exist without the Phase C2
+        // media transport, so both tiles are placeholders and say so.
+        let tile = |label: String, sub: &str| {
+            div()
+                .flex_1()
+                .h(px(104.))
+                .flex()
+                .flex_col()
+                .items_center()
+                .justify_center()
+                .gap_1()
+                .rounded_md()
+                .bg(rgb(0x161616))
+                .child(div().text_2xl().child("📹"))
+                .child(
+                    div()
+                        .text_xs()
+                        .font_semibold()
+                        .text_color(rgb(0xffffff))
+                        .child(label),
+                )
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(rgb(0x9a9a9a))
+                        .child(sub.to_string()),
+                )
+        };
+        div()
+            .w_full()
+            .flex()
+            .gap_2()
+            .child(tile(
+                name.to_string(),
+                "No video — transport ships in Phase C2",
+            ))
+            .child(tile(
+                "You".to_string(),
+                "No preview — transport ships in Phase C2",
+            ))
+    }
+
     fn call_active_card(
         &self,
         card: Stateful<Div>,
@@ -7654,7 +7773,7 @@ impl QuillApp {
     ) -> Stateful<Div> {
         let name = self.call_peer_name(call.user_id);
         let kind_line = if call.is_video {
-            "Video call"
+            "📹 Video call"
         } else {
             "Voice call"
         };
@@ -7680,8 +7799,16 @@ impl QuillApp {
             // is unreachable — but never crash the overlay on it.
             CallState::Discarded { .. } | CallState::Error { .. } => ("Ending…".to_string(), None),
         };
-        let mut card = card
-            .child(initials_avatar(&name, 72.))
+        let mut card = card;
+        // Phase C1b: a connected video call shows the video-stage
+        // placeholder grid (remote + local preview tiles) instead of
+        // the avatar; every other state keeps the avatar.
+        if call.is_video && matches!(call.state, CallState::Ready) {
+            card = card.child(self.call_video_stage(&name));
+        } else {
+            card = card.child(initials_avatar(&name, 72.));
+        }
+        card = card
             .child(div().text_lg().font_semibold().child(name))
             .child(
                 div()
@@ -7694,24 +7821,40 @@ impl QuillApp {
             card = card.child(div().text_2xl().font_semibold().child(clock));
         }
         // Honest no-transport note: the call can be "Connected" at the
-        // signaling level while carrying no audio. Never fake a live
-        // call. Every pre-connected card carries it — incoming ringing,
-        // outgoing "Calling…", connecting — and the end screen repeats
-        // the note below; accepting/placing starts no audio in this
-        // build.
+        // signaling level while carrying no audio or video. Never fake
+        // a live call. Every pre-connected card carries it — incoming
+        // ringing, outgoing "Calling…", connecting — and the end screen
+        // repeats the note below; accepting/placing starts no media in
+        // this build.
         let no_transport_note = matches!(
             call.state,
             CallState::Ready | CallState::ExchangingKeys | CallState::Pending { .. }
         );
         if no_transport_note {
+            let note = if call.is_video {
+                "Video isn't connected — video transport ships in Phase \
+                 C2. This call carries no video or audio."
+            } else {
+                "Audio isn't connected — Quill's voice transport \
+                 ships in Phase C2. This call carries no sound."
+            };
             card = card.child(
                 div()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
-                    .child(
-                        "Audio isn't connected — Quill's voice transport \
-                         ships in Phase C2. This call carries no sound.",
-                    ),
+                    .child(note),
+            );
+        }
+        // Phase C1b: local-only mute state. Tracked on the call but a
+        // no-op without media transport — labeled honestly.
+        let show_mute_note =
+            call.muted && matches!(call.state, CallState::Ready | CallState::Unknown(_));
+        if show_mute_note {
+            card = card.child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("Muted — no audio to mute; voice transport ships in Phase C2."),
             );
         }
         if let Some(error) = error {
@@ -7752,14 +7895,25 @@ impl QuillApp {
                     ));
             }
             CallState::Ready | CallState::Unknown(_) => {
-                buttons = buttons.child(
-                    Button::new("call-hangup")
-                        .label("Hang up")
-                        .danger()
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.hang_up_call(cx);
-                        })),
-                );
+                // Phase C1b: mute toggle — local-only state, no-op
+                // without media transport (the card says so above).
+                buttons = buttons
+                    .child(
+                        Button::new("call-mute")
+                            .label(if call.muted { "Unmute" } else { "Mute" })
+                            .ghost()
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.toggle_call_mute(cx);
+                            })),
+                    )
+                    .child(
+                        Button::new("call-hangup")
+                            .label("Hang up")
+                            .danger()
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.hang_up_call(cx);
+                            })),
+                    );
             }
             CallState::HangingUp | CallState::Discarded { .. } | CallState::Error { .. } => {}
         }
@@ -14894,6 +15048,28 @@ fn apply_ready_call(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU
             r#"{{"@type":"updateUser","user":{{"id":{user_id},"first_name":"Zed","last_name":"Hopper","usernames":{{"@type":"usernames","active_usernames":["zedhopper"],"disabled_usernames":[],"editable_username":"zedhopper","collectible_usernames":[]}},"phone_number":"+15550101041","status":{{"@type":"userStatusOnline","expires":9999999999}},"is_contact":false,"type":{{"@type":"userTypeRegular"}}}}}}"#
         ),
         r#"{"@type":"updateCall","call":{"@type":"call","id":77,"unique_id":"99","user_id":41,"is_outgoing":false,"is_video":false,"state":{"@type":"callStatePending","is_created":true,"is_received":false}}}"#.to_string(),
+    ];
+    for json in jsons {
+        if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
+            session.apply(owned);
+        }
+    }
+}
+
+/// Phase C1b: connected-video-call fixture — Zed's incoming video
+/// call goes pending → exchanging keys → ready, so the call overlay
+/// renders the video-stage placeholder grid. Injected, no live
+/// Telegram, no media.
+fn apply_ready_call_video(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let user_id = 41i64;
+    let jsons = [
+        format!(
+            r#"{{"@type":"updateUser","user":{{"id":{user_id},"first_name":"Zed","last_name":"Hopper","usernames":{{"@type":"usernames","active_usernames":["zedhopper"],"disabled_usernames":[],"editable_username":"zedhopper","collectible_usernames":[]}},"phone_number":"+15550101041","status":{{"@type":"userStatusOnline","expires":9999999999}},"is_contact":false,"type":{{"@type":"userTypeRegular"}}}}}}"#
+        ),
+        r#"{"@type":"updateCall","call":{"@type":"call","id":77,"unique_id":"99","user_id":41,"is_outgoing":false,"is_video":true,"state":{"@type":"callStatePending","is_created":true,"is_received":false}}}"#.to_string(),
+        r#"{"@type":"updateCall","call":{"@type":"call","id":77,"unique_id":"99","user_id":41,"is_outgoing":false,"is_video":true,"state":{"@type":"callStateExchangingKeys"}}}"#.to_string(),
+        r#"{"@type":"updateCall","call":{"@type":"call","id":77,"unique_id":"99","user_id":41,"is_outgoing":false,"is_video":true,"state":{"@type":"callStateReady","protocol":{"@type":"callProtocol","udp_p2p":false,"udp_reflector":false,"min_layer":65,"max_layer":92,"library_versions":[]},"servers":[],"config":"{}","encryption_key":"","emojis":[],"allow_p2p":false,"is_group_call_supported":false,"custom_parameters":"{}"}}}"#.to_string(),
     ];
     for json in jsons {
         if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {

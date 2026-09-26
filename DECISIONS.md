@@ -2264,9 +2264,73 @@ are rough (S < 1 day, M = days, L = week+).
 - **Out of this slice (→ future):** Phase C2 — libtgvoip audio
   transport (the queued signaling data becomes the transport's input;
   outgoing `sendCallSignalingData` produced by the transport); video
-  calls (`is_video`); group calls / voice chats; `sendCallDebugInformation`
+  calls (`is_video` — shipped signaling-only in Phase C1b, next
+  section); group calls / voice chats; `sendCallDebugInformation`
   / `need_debug_information` / `need_log` upload; richer rating
   (comment + `callProblem` checklist).
+
+## Phase C1b — 1:1 video-call signaling (2026-09-26)
+
+- **Rationale.** C1 shipped 1:1 call signaling audio-only; the pinned
+  schema has always supported video calls via the `is_video` flag on
+  `createCall` / `discardCall` / the `call` type. This slice adds video
+  to the *signaling* layer only — still no media transport (Phase C2),
+  still honest UI that never implies a working video call.
+- **Schema (1.8.67, verified verbatim in `schema/td_api.tl`):**
+  `createCall user_id:int53 protocol:callProtocol is_video:Bool =
+  CallId;` (:14212, "@is_video Pass true to create a video call");
+  `discardCall ... is_video:Bool ...` (:14227, "@is_video Pass true if
+  the call was a video call"); `call ... is_video:Bool ...` (:7287);
+  `callId` (:7034 — the `createCall` answer, carries no `is_video`);
+  `acceptCall` (:14215); `sendCallRating` (:14234). No new
+  constructors; video reuses the exact C1 signaling surface.
+- **Honesty design.** `callProtocol` still advertises no media
+  transport (unchanged from C1). A connected video call shows a
+  video-stage *placeholder* grid — dark remote + local tiles labeled
+  "No video — transport ships in Phase C2" / "No preview — transport
+  ships in Phase C2" — never a fake live picture. The card note reads
+  "Video isn't connected — video transport ships in Phase C2. This
+  call carries no video or audio." The Mute/Unmute toggle tracks
+  local-only state (`ActiveCall.muted`) and is labeled "Muted — no
+  audio to mute; voice transport ships in Phase C2."
+- **State model (`src/state.rs`).** Incoming `updateCall`: `is_video`
+  is taken from the `call` object (authoritative per :7287),
+  including the same-id state-advance branch. Outgoing: the `callId`
+  answer carries no `is_video`, so it is derived from the `createCall`
+  request args stashed in `RequestPurpose::CreateCall { is_video }`
+  (documented inference — the only non-authoritative read in the
+  slice). `ActiveCall` gains `muted: bool` (default false; dies with
+  the call). `call_busy_decline_queue` entries already carried
+  `(call_id, is_video)`, so a second incoming video call is
+  busy-declined with `is_video: true`.
+- **Requests (`src/telegram/requests.rs`).** `create_call` already
+  took `is_video`; the driver (`src/connect.rs`) now threads it
+  through (`start_call(user_id, is_video)`). `discard_call` sends the
+  tracked call's actual `is_video` (C1 already plumbed it; now it can
+  be true). `acceptCall` / `sendCallRating` unchanged — the protocol
+  negotiation is kind-agnostic.
+- **UI (`src/ui/mod.rs`).** User profiles gain a "🎥 Video call"
+  button next to "Call" (same gating: non-bot users, not yourself).
+  Incoming video calls show a "📹 Video call" kind line; Accept flows
+  through `acceptCall` unchanged. The connected video card shows the
+  video-stage grid, duration clock, Mute / Hang up, and the honest
+  notes; the Mute toggle also appears on connected voice calls.
+- **Screenshot:** `docs/screenshots/ready-call-video.png` —
+  `quill --screenshot-demo ready-call-video`: connected incoming
+  video call from Zed (pending → exchanging keys → ready, injected),
+  video-stage grid, 📹 kind line, ticking clock, Mute / Hang up, and
+  the no-video-transport note.
+- **Tests.** Envelope unit tests (new `is_video: true` `updateCall`
+  parse case); request-shape tests (`createCall` / `discardCall`
+  with `is_video: true`); replay test `replay_video_call_signaling`:
+  outgoing video create → exchanging keys → ready → discard keeps
+  `is_video: true` on the summary; incoming video accept; second
+  incoming video call while active queued for busy-decline with
+  `is_video: true`.
+- **Out of this slice (→ future):** Phase C2 — real audio/video
+  transport (libtgvoip spike), camera capture, video rendering,
+  device selection; Phase C3 — group calls / voice chats. The UI must
+  never imply a working video call until C2 lands.
 
 ## Phase B4 — Chat-level auto-delete / self-destruct timer (2026-09-26)
 

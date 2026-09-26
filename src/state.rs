@@ -233,8 +233,12 @@ pub enum RequestPurpose {
     CloseSecretChat,
     /// Phase C1: `createCall`. Response is `callId`; correlated via
     /// `PendingRequest::user_id`. The call's states arrive as
-    /// `updateCall`.
-    CreateCall,
+    /// `updateCall`. Phase C1b: `is_video` rides along so the `callId`
+    /// answer can start tracking with the right call kind — the answer
+    /// itself carries no `is_video` (schema 1.8.67, :7034).
+    CreateCall {
+        is_video: bool,
+    },
     /// Phase C1: `acceptCall`. Response is `ok`; the answered state
     /// arrives as `updateCall`.
     AcceptCall,
@@ -1750,6 +1754,9 @@ pub struct ActiveCall {
     /// `MAX_QUEUED_SIGNALING_CHUNKS`; overflow is counted, not kept.
     pub signaling_queue: Vec<Vec<u8>>,
     pub signaling_dropped: usize,
+    /// Phase C1b: local-only mute toggle state. Tracked but a no-op
+    /// without media transport (C2) — the UI labels it honestly.
+    pub muted: bool,
 }
 
 /// Phase C1: summary of the most recently ended call, driving the
@@ -2747,17 +2754,21 @@ impl Session {
                 self.accept_call_signaling_data(call_id, data);
             }
             EnvelopePayload::CallId { id } => {
-                if pending.map(|p| p.purpose) == Some(RequestPurpose::CreateCall)
-                    && let Some(user_id) = pending.and_then(|p| p.user_id)
+                if let Some(pending) = pending
+                    && let RequestPurpose::CreateCall { is_video } = pending.purpose
+                    && let Some(user_id) = pending.user_id
                     && self.active_call.is_none()
                 {
                     self.active_call = Some(ActiveCall {
                         id,
                         user_id,
                         is_outgoing: true,
-                        // Phase C1 is audio-only; `createCall` always
-                        // sends `is_video: false`.
-                        is_video: false,
+                        // Phase C1b: the `callId` answer carries no
+                        // `is_video` (schema 1.8.67, :7034), so it is
+                        // derived from the `createCall` request args
+                        // stashed in the request purpose.
+                        is_video,
+                        muted: false,
                         state: CallState::Pending {
                             is_created: true,
                             is_received: false,
@@ -3531,7 +3542,7 @@ impl Session {
                 // overlay (shown and cleared by the UI). A failed
                 // `createCall` also drops the half-tracked outgoing call.
                 match pending.map(|p| p.purpose) {
-                    Some(RequestPurpose::CreateCall) => {
+                    Some(RequestPurpose::CreateCall { .. }) => {
                         // Note: the tracked outgoing call is *not*
                         // cleared here — a failed `createCall` never
                         // produced a `callId`, so any tracked call came
@@ -4184,6 +4195,7 @@ impl Session {
             ready_at: None,
             signaling_queue: Vec::new(),
             signaling_dropped: 0,
+            muted: false,
         });
         self.call_summary = None;
         self.call_error = None;
