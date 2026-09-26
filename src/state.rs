@@ -9,10 +9,10 @@ use crate::telegram::envelope::{
     AnimationItem, AuthorizationState, BotCommand, BotInfo, CallbackQueryAnswer,
     ChannelMemberStatus, ChatAction, ChatDraft, ChatJoinResult, ChatKind, ChatList,
     ChatNotificationSettings, ChatPositionUpdate, ConnectionState, EnvelopePayload, ErrorClass,
-    InlineKeyboard, MessageContent, MessageForwardInfo, MessageInteractionInfo, MessageOrigin,
-    MessageReaction, MessageReplyTo, MessageSender, ParsedChatMember, ParsedFile, ParsedMessage,
-    Poll, ReportOption, ReportSponsoredResult, SponsoredMessage, StickerFormat, StickerItem,
-    StickerSetInfo,
+    ForumTopic, InlineKeyboard, MessageContent, MessageForwardInfo, MessageInteractionInfo,
+    MessageOrigin, MessageReaction, MessageReplyTo, MessageSender, ParsedChatMember, ParsedFile,
+    ParsedMessage, Poll, ReportOption, ReportSponsoredResult, SponsoredMessage, StickerFormat,
+    StickerItem, StickerSetInfo,
 };
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
@@ -113,6 +113,16 @@ pub enum RequestPurpose {
     /// `leaveChat`. Response is `ok`; own status also arrives via
     /// `updateChatMember`.
     LeaveChat,
+    /// Phase 5.1: `getSupergroup`. Response is `supergroup`; resolves
+    /// `ChatSummary::is_forum`.
+    GetSupergroup,
+    /// Phase 5.1: `getForumTopics` (first page). Response is `forumTopics`.
+    GetForumTopics,
+    /// Phase 5.1: `searchChatMessages` with `topic_id = messageTopicForum`
+    /// and an empty query — per-topic history. Response is
+    /// `foundChatMessages`; correlated via
+    /// `PendingRequest::forum_topic_id`.
+    GetTopicHistory,
     Close,
     LogOut,
     Other,
@@ -246,6 +256,9 @@ pub struct PendingRequest {
     pub file_id: Option<i32>,
     pub search_generation: Option<u64>,
     pub around_message_id: Option<MessageId>,
+    /// Phase 5.1: `forum_topic_id` for `GetTopicHistory` requests so the
+    /// `foundChatMessages` response lands in the right topic history.
+    pub forum_topic_id: Option<i32>,
 }
 
 #[derive(Debug, Default)]
@@ -275,6 +288,7 @@ impl RequestRegistry {
                 file_id: None,
                 search_generation: None,
                 around_message_id: None,
+                forum_topic_id: None,
             },
         );
         id
@@ -299,6 +313,7 @@ impl RequestRegistry {
                 file_id: None,
                 search_generation: Some(search_generation),
                 around_message_id: None,
+                forum_topic_id: None,
             },
         );
         id
@@ -324,6 +339,7 @@ impl RequestRegistry {
                 file_id: None,
                 search_generation: Some(search_generation),
                 around_message_id: None,
+                forum_topic_id: None,
             },
         );
         id
@@ -349,6 +365,7 @@ impl RequestRegistry {
                 file_id: None,
                 search_generation: None,
                 around_message_id: Some(around_message_id),
+                forum_topic_id: None,
             },
         );
         id
@@ -372,6 +389,7 @@ impl RequestRegistry {
                 file_id: Some(file_id.0),
                 search_generation: None,
                 around_message_id: None,
+                forum_topic_id: None,
             },
         );
         id
@@ -493,6 +511,10 @@ pub struct ChatSummary {
     /// rights block parsed; `None` means "no explicit restriction" — a bare
     /// admin still posts.
     pub my_admin_can_post_messages: Option<bool>,
+    /// Phase 5.1: `supergroup.is_forum` (TDLib 1.8.67). `None` until
+    /// `updateSupergroup` / the `getSupergroup` response resolves it; only
+    /// meaningful for non-channel supergroups.
+    pub is_forum: Option<bool>,
 }
 
 impl ChatSummary {
@@ -543,6 +565,10 @@ impl ChatSummary {
         self.my_member_status = Some(status);
         self.my_admin_can_post_messages = admin_can_post_messages;
         changed
+    }
+
+    pub fn is_forum_chat(&self) -> bool {
+        self.is_forum == Some(true)
     }
 
     pub fn is_muted(&self) -> bool {
@@ -620,6 +646,7 @@ fn placeholder_chat(chat_id: ChatId) -> ChatSummary {
         draft: None,
         my_member_status: None,
         my_admin_can_post_messages: None,
+        is_forum: None,
     }
 }
 
@@ -1011,6 +1038,34 @@ pub enum ChatSearchJumpNeed {
     LoadAround,
 }
 
+/// Phase 5.1: per-topic history for a forum supergroup, fetched with
+/// `searchChatMessages` (`topic_id = messageTopicForum`, empty query).
+/// `next_from_message_id` pages older messages the same way `foundChatMessages`
+/// does for in-chat search; `loaded_complete` once a page returns
+/// `next_from_message_id` 0 (or an empty page).
+#[derive(Debug)]
+pub struct TopicHistory {
+    pub messages: BTreeMap<i64, HistoryMessage>,
+    pub next_from_message_id: MessageId,
+    pub loaded_complete: bool,
+}
+
+impl Default for TopicHistory {
+    fn default() -> Self {
+        Self {
+            messages: BTreeMap::new(),
+            next_from_message_id: MessageId(0),
+            loaded_complete: false,
+        }
+    }
+}
+
+impl TopicHistory {
+    pub fn ordered(&self) -> Vec<&HistoryMessage> {
+        self.messages.values().collect()
+    }
+}
+
 /// In-chat search (tdesktop `searchInChat` / ComposeSearch): `searchChatMessages`.
 #[derive(Debug, Clone)]
 pub struct ChatSearchState {
@@ -1230,6 +1285,13 @@ pub struct Session {
     pub archive_order: Vec<ChatId>,
     pub histories: HashMap<i64, HistoryState>,
     pub open_chat: Option<ChatId>,
+    /// Phase 5.1: selected forum topic (`forum_topic_id`) of the open chat.
+    /// `None` = topic list (or a non-forum chat). Reset by `open_chat`.
+    pub open_topic: Option<i32>,
+    /// Phase 5.1: cached `forumTopics` per forum chat id (first page only).
+    pub forum_topics: HashMap<i64, Vec<ForumTopic>>,
+    /// Phase 5.1: per-topic histories keyed by `(chat_id, forum_topic_id)`.
+    pub topic_histories: HashMap<(i64, i32), TopicHistory>,
     pub view_generation: ViewGeneration,
     pub requests: RequestRegistry,
     pub chats_exhausted: bool,
@@ -1302,6 +1364,9 @@ impl Session {
             archive_order: Vec::new(),
             histories: HashMap::new(),
             open_chat: None,
+            open_topic: None,
+            forum_topics: HashMap::new(),
+            topic_histories: HashMap::new(),
             view_generation: ViewGeneration(1),
             requests: RequestRegistry::default(),
             chats_exhausted: false,
@@ -1731,6 +1796,32 @@ impl Session {
                 total_count,
                 next_from_message_id,
             } => {
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetTopicHistory) {
+                    // Phase 5.1: per-topic history page. Correlated by chat +
+                    // topic; stored separately from the chat's general history.
+                    if let Some(chat_id) = pending.and_then(|p| p.chat_id)
+                        && let Some(forum_topic_id) = pending.and_then(|p| p.forum_topic_id)
+                    {
+                        for message in &messages {
+                            self.remember_files(&message.files);
+                        }
+                        let entry = self
+                            .topic_histories
+                            .entry((chat_id.0, forum_topic_id))
+                            .or_default();
+                        let empty = messages.is_empty();
+                        for message in messages {
+                            entry
+                                .messages
+                                .insert(message.id.0, history_message(message, false));
+                        }
+                        if next_from_message_id.0 == 0 || empty {
+                            entry.loaded_complete = true;
+                        }
+                        entry.next_from_message_id = next_from_message_id;
+                    }
+                    return;
+                }
                 if self.chat_search.matches_generation(pending)
                     && pending.map(|p| p.purpose) == Some(RequestPurpose::SearchChatMessages)
                 {
@@ -1740,6 +1831,35 @@ impl Session {
                     let hits = messages.iter().map(SearchMessageHit::from_parsed).collect();
                     self.chat_search
                         .accept_hits(hits, total_count, next_from_message_id, false);
+                }
+            }
+            // Phase 5.1: `supergroup.is_forum` via `updateSupergroup` (an
+            // update — applies whenever it arrives) or the `getSupergroup`
+            // response (gated on the pending purpose).
+            EnvelopePayload::UpdateSupergroup {
+                supergroup_id,
+                is_forum,
+            } => {
+                self.set_supergroup_forum(supergroup_id, is_forum);
+            }
+            EnvelopePayload::Supergroup {
+                supergroup_id,
+                is_forum,
+            } => {
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetSupergroup) {
+                    self.set_supergroup_forum(supergroup_id, is_forum);
+                }
+            }
+            // Phase 5.1: `getForumTopics` response — cache the first page
+            // against the requesting chat.
+            EnvelopePayload::ForumTopics {
+                total_count: _,
+                topics,
+            } => {
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetForumTopics)
+                    && let Some(chat_id) = pending.and_then(|p| p.chat_id)
+                {
+                    self.forum_topics.insert(chat_id.0, topics);
                 }
             }
             EnvelopePayload::Messages(messages) => {
@@ -2557,11 +2677,70 @@ impl Session {
             self.chat_search.close();
         }
         self.open_chat = Some(chat_id);
+        // Phase 5.1: switching chats leaves the topic view.
+        self.open_topic = None;
         self.view_generation.bump();
         let history = self.histories.entry(chat_id.0).or_default();
         history.view_generation = self.view_generation;
         history.viewed.clear();
         history.viewing.clear();
+    }
+
+    /// Phase 5.1: enter a forum topic's view. Returns the topic's cached
+    /// info, if the chat's topic list is already loaded.
+    pub fn select_topic(&mut self, chat_id: ChatId, forum_topic_id: i32) -> Option<ForumTopic> {
+        self.open_topic = Some(forum_topic_id);
+        self.view_generation.bump();
+        self.open_topic_info(chat_id)
+    }
+
+    /// Phase 5.1: leave the topic view, back to the forum's topic list.
+    pub fn deselect_topic(&mut self) {
+        self.open_topic = None;
+        self.view_generation.bump();
+    }
+
+    /// Phase 5.1: cached info for the open topic, if any.
+    pub fn open_topic_info(&self, chat_id: ChatId) -> Option<ForumTopic> {
+        let topic_id = self.open_topic?;
+        self.forum_topics
+            .get(&chat_id.0)?
+            .iter()
+            .find(|t| t.forum_topic_id == topic_id)
+            .cloned()
+    }
+
+    /// Phase 5.1: topics for a forum chat, sorted by `order` descending
+    /// (schema: "Topics must be sorted by the order in descending order").
+    pub fn ordered_forum_topics(&self, chat_id: ChatId) -> Vec<ForumTopic> {
+        let mut topics: Vec<ForumTopic> = self
+            .forum_topics
+            .get(&chat_id.0)
+            .cloned()
+            .unwrap_or_default();
+        topics.sort_by(|a, b| b.order.cmp(&a.order).then(a.name.cmp(&b.name)));
+        topics
+    }
+
+    /// Phase 5.1: record `supergroup.is_forum` for the chat backed by this
+    /// supergroup (via `updateSupergroup` or the `getSupergroup` response).
+    /// Returns true when a chat was updated.
+    pub fn set_supergroup_forum(&mut self, supergroup_id: i64, is_forum: bool) -> bool {
+        let mut changed = false;
+        for chat in self.chats.values_mut() {
+            if matches!(
+                chat.kind,
+                ChatKind::Supergroup {
+                    supergroup_id: id,
+                    ..
+                } if id == supergroup_id
+            ) && chat.is_forum != Some(is_forum)
+            {
+                chat.is_forum = Some(is_forum);
+                changed = true;
+            }
+        }
+        changed
     }
 
     /// Server message ids in the open history that have not yet been sent to `viewMessages`.
@@ -2633,6 +2812,21 @@ impl Session {
         };
         self.requests
             .register(self.account_generation, purpose, chat_id, view)
+    }
+
+    /// Phase 5.1: like `request`, but also stamps the forum topic id for
+    /// `GetTopicHistory` correlation (`PendingRequest::forum_topic_id`).
+    pub fn request_for_topic(
+        &mut self,
+        purpose: RequestPurpose,
+        chat_id: Option<ChatId>,
+        forum_topic_id: i32,
+    ) -> RequestId {
+        let id = self.request(purpose, chat_id);
+        if let Some(pending) = self.requests.pending.get_mut(&id.0) {
+            pending.forum_topic_id = Some(forum_topic_id);
+        }
+        id
     }
 
     pub fn request_search(&mut self, purpose: RequestPurpose, search_generation: u64) -> RequestId {
@@ -4889,5 +5083,159 @@ mod tests {
             r#"{"@type":"updatePoll","poll":{"@type":"poll","id":9999,"question":{"@type":"formattedText","text":"Ghost","entities":[]},"options":[],"total_voter_count":0,"is_anonymous":true,"allows_multiple_answers":false,"allows_revoting":false,"is_closed":false,"type":{"@type":"pollTypeRegular"}}}"#,
         );
         assert!(session.histories.values().all(|h| h.messages.is_empty()));
+    }
+
+    /// Phase 5.1: `updateSupergroup` / `getSupergroup` responses resolve
+    /// `ChatSummary::is_forum` for the matching supergroup chat.
+    #[test]
+    fn update_supergroup_resolves_forum_flag() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateNewChat","chat":{"id":16,"title":"Forum","type":{"@type":"chatTypeSupergroup","supergroup_id":16,"is_channel":false},"unread_count":0}}"#,
+        );
+        assert_eq!(session.chats.get(&16).unwrap().is_forum, None);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateSupergroup","supergroup":{"@type":"supergroup","id":16,"is_forum":true}}"#,
+        );
+        assert!(session.chats.get(&16).unwrap().is_forum_chat());
+        // The getSupergroup response path is gated on the pending purpose.
+        let extra = session.request(RequestPurpose::GetSupergroup, Some(ChatId(16)));
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"supergroup","@extra":"{}","id":16,"is_forum":false}}"#,
+                extra.0
+            ),
+        );
+        assert!(!session.chats.get(&16).unwrap().is_forum_chat());
+        // Same payload without the pending purpose is ignored (it is not an update).
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"supergroup","id":16,"is_forum":true}"#,
+        );
+        assert!(!session.chats.get(&16).unwrap().is_forum_chat());
+    }
+
+    /// Phase 5.1: `forumTopics` responses land in the requesting chat's
+    /// topic cache; `ordered_forum_topics` sorts by order descending.
+    #[test]
+    fn forum_topics_response_is_cached_per_chat() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateNewChat","chat":{"id":16,"title":"Forum","type":{"@type":"chatTypeSupergroup","supergroup_id":16,"is_channel":false},"unread_count":0}}"#,
+        );
+        let extra = session.request(RequestPurpose::GetForumTopics, Some(ChatId(16)));
+        let json = format!(
+            r#"{{"@type":"forumTopics","@extra":"{}","total_count":2,"topics":[{{"info":{{"@type":"forumTopicInfo","chat_id":16,"forum_topic_id":2,"name":"Random","icon":{{"@type":"forumTopicIcon","color":0,"custom_emoji_id":"0"}},"creation_date":1,"creator_id":{{"@type":"messageSenderUser","user_id":6}},"is_general":false,"is_outgoing":false,"is_closed":false,"is_hidden":false,"is_name_implicit":false}},"last_message":null,"order":"100","is_pinned":false,"unread_count":5,"last_read_inbox_message_id":0,"last_read_outbox_message_id":0,"unread_mention_count":0,"unread_reaction_count":0,"unread_poll_vote_count":0,"notification_settings":{{"@type":"chatNotificationSettings"}},"draft_message":null}},{{"info":{{"@type":"forumTopicInfo","chat_id":16,"forum_topic_id":1,"name":"General","icon":{{"@type":"forumTopicIcon","color":0,"custom_emoji_id":"0"}},"creation_date":1,"creator_id":{{"@type":"messageSenderUser","user_id":5}},"is_general":true,"is_outgoing":false,"is_closed":false,"is_hidden":false,"is_name_implicit":false}},"last_message":null,"order":"900","is_pinned":false,"unread_count":0,"last_read_inbox_message_id":0,"last_read_outbox_message_id":0,"unread_mention_count":0,"unread_reaction_count":0,"unread_poll_vote_count":0,"notification_settings":{{"@type":"chatNotificationSettings"}},"draft_message":null}}],"next_offset_date":0,"next_offset_message_id":0,"next_offset_forum_topic_id":0}}"#,
+            extra.0
+        );
+        apply_json(&mut session, &seq, &sink, &json);
+        let ordered = session.ordered_forum_topics(ChatId(16));
+        assert_eq!(ordered.len(), 2);
+        assert_eq!(ordered[0].forum_topic_id, 1); // order 900 first
+        assert_eq!(ordered[1].forum_topic_id, 2);
+        assert_eq!(ordered[1].unread_count, 5);
+        // A response for a different purpose must not populate the cache.
+        let extra2 = session.request(RequestPurpose::GetHistory, Some(ChatId(16)));
+        let json2 = json.replace(
+            &format!("\"@extra\":\"{}\"", extra.0),
+            &format!("\"@extra\":\"{}\"", extra2.0),
+        );
+        session.forum_topics.clear();
+        apply_json(&mut session, &seq, &sink, &json2);
+        assert!(!session.forum_topics.contains_key(&16));
+    }
+
+    /// Phase 5.1: topic selection state — selecting sets `open_topic`,
+    /// deselecting clears it, switching chats resets it.
+    #[test]
+    fn topic_selection_state() {
+        let (mut session, _sink) = session();
+        session.open_chat(ChatId(16));
+        assert_eq!(session.open_topic, None);
+        session.select_topic(ChatId(16), 2);
+        assert_eq!(session.open_topic, Some(2));
+        session.deselect_topic();
+        assert_eq!(session.open_topic, None);
+        session.select_topic(ChatId(16), 2);
+        session.open_chat(ChatId(17));
+        assert_eq!(session.open_topic, None);
+    }
+
+    /// Phase 5.1: replay — a `foundChatMessages` answer to
+    /// `GetTopicHistory` populates the topic history keyed by
+    /// `(chat_id, forum_topic_id)` and pages via `next_from_message_id`.
+    #[test]
+    fn topic_history_response_is_stored_per_topic() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        let extra = session.request_for_topic(RequestPurpose::GetTopicHistory, Some(ChatId(16)), 2);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"foundChatMessages","@extra":"{}","total_count":2,"next_from_message_id":40,"messages":[{{"id":50,"chat_id":16,"is_outgoing":false,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"CANARY_TOPIC_page1","entities":[]}}}}}},{{"id":40,"chat_id":16,"is_outgoing":false,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"older","entities":[]}}}}}}]}}"#,
+                extra.0
+            ),
+        );
+        let history = session.topic_histories.get(&(16, 2)).unwrap();
+        assert_eq!(history.messages.len(), 2);
+        assert_eq!(history.next_from_message_id, MessageId(40));
+        assert!(!history.loaded_complete);
+        // A response for another topic does not mix in.
+        let extra_other =
+            session.request_for_topic(RequestPurpose::GetTopicHistory, Some(ChatId(16)), 3);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"foundChatMessages","@extra":"{}","total_count":0,"next_from_message_id":0,"messages":[]}}"#,
+                extra_other.0
+            ),
+        );
+        assert_eq!(
+            session
+                .topic_histories
+                .get(&(16, 2))
+                .unwrap()
+                .messages
+                .len(),
+            2
+        );
+        let other = session.topic_histories.get(&(16, 3)).unwrap();
+        assert!(other.loaded_complete);
+        assert!(other.messages.is_empty());
+        // next_from_message_id 0 completes the first topic's history.
+        let extra2 =
+            session.request_for_topic(RequestPurpose::GetTopicHistory, Some(ChatId(16)), 2);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"foundChatMessages","@extra":"{}","total_count":1,"next_from_message_id":0,"messages":[{{"id":30,"chat_id":16,"is_outgoing":false,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"oldest","entities":[]}}}}}}]}}"#,
+                extra2.0
+            ),
+        );
+        let history = session.topic_histories.get(&(16, 2)).unwrap();
+        assert!(history.loaded_complete);
+        assert_eq!(history.messages.len(), 3);
     }
 }

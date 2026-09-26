@@ -1014,3 +1014,75 @@ Research snapshot 2026-09-16, pin recheck **2026-09-17**.
   first, it resumes from the remembered position); per-row volume;
   playback speed; showing the seek bar for `messageVideoNote` round
   videos.
+
+## Phase 5.1 — Forum topics (2026-09-26)
+
+- **Rationale:** forum supergroups (groups with `is_forum`) organize
+  messages into topics. This slice reads the topic list, opens a topic,
+  and reads per-topic history — read-only, matching the app's
+  history-first posture so far.
+- **Schema (1.8.67, verified in `schema/td_api.tl`):**
+  - `messageTopicForum forum_topic_id:int32 = MessageTopic` (line 3004).
+  - `forumTopics … topics:vector<forumTopic> next_offset_date:int32
+    next_offset_message_id:int53 next_offset_forum_topic_id:int32`
+    (line 3976); `forumTopic info:forumTopicInfo last_message:message
+    order:int64 is_pinned:Bool unread_count:int32 …` (line 3968);
+    `forumTopicInfo … forum_topic_id:int32 name:string
+    icon:forumTopicIcon … is_general … is_closed …` (line 3953).
+  - `supergroup … is_forum:Bool …` (line 2746) and
+    `updateSupergroup supergroup:supergroup = Update` (line 10738);
+    `getSupergroup supergroup_id:int53 = Supergroup` (line 11510).
+  - `getForumTopics chat_id:int53 query:string offset_date:int32
+    offset_message_id:int53 offset_forum_topic_id:int32 limit:int32 =
+    ForumTopics` (line 12701).
+  - `searchChatMessages chat_id:int53 topic_id:MessageTopic query:string
+    sender_id:MessageSender from_message_id:int53 offset:int32 limit:int32
+    filter:SearchMessagesFilter = FoundChatMessages` (line 11864).
+- **Discovery decision:** `chatTypeSupergroup` carries no `is_forum`
+  flag, so forum status is learned through `getSupergroup` /
+  `updateSupergroup` only. Selecting a chat fires `getSupergroup`
+  (unless the chat is already known to be non-forum or the request is
+  in flight); a positive `is_forum` triggers `getForumTopics`.
+  Re-selecting an already-open chat also runs the discovery/fetch pair
+  so a race on the first select cannot leave a forum without its
+  topics. `is_forum: None` = unknown, `Some(false)` = checked
+  non-forum.
+- **Per-topic history decision:** `getChatHistory` has no topic
+  parameter, so per-topic history goes through `searchChatMessages`
+  with `topic_id = messageTopicForum{forum_topic_id}` and an empty
+  query — never `getChatHistory`. `RequestPurpose::{GetSupergroup,
+  GetForumTopics, GetTopicHistory}` route responses into
+  `forum_topics: HashMap<i64, Vec<ForumTopic>>` and
+  `topic_histories: HashMap<(i64, i32), TopicHistory>`; topic history
+  pages oldest-first like chat history (page size 50; the message-id
+  cursor works because `searchChatMessages` returns message ids).
+- **First-page tradeoff:** `getForumTopics` fetches the first page
+  (limit 100) with no `query` filter and deliberately drops
+  `next_offset_*` — a forum with more than 100 topics is vanishingly
+  rare and a full paginated list UI is a follow-up, not this slice.
+- **Dropped fields (documented, not forgotten):** from
+  `forumTopic`/`forumTopicInfo` we keep `forum_topic_id`, `name`,
+  `is_general`, `is_closed`, `is_pinned`, `unread_count`, `order`, and
+  a cheap `last_message` preview (parsed message text only). Dropped:
+  icon, creation/creator metadata, outgoing/hidden/implicit flags,
+  read message ids, mention/reaction/poll-vote unread counts,
+  notification settings, and drafts.
+- **UI (`src/ui/mod.rs`):** opening a forum with no selected topic
+  shows the topic list (rows with name, unread badge, General/Closed
+  tags, last-message preview; pinned-first ordering); selecting a row
+  opens the topic's history in the same history component; a strip
+  above the topic view shows the topic name plus a "‹ Topics" back
+  button; `load_older_action` pages the open topic's history; chat
+  rows carry a "Topics" badge for forum chats. The composer is hidden
+  in topic view with a read-only note — posting into a topic is out of
+  scope.
+- **Screenshot:** `docs/screenshots/ready-forum-topics.png` — injected
+  forum supergroup with three topics (General pinned + 3 unread,
+  Announcements with a preview, Random closed); driven by
+  `quill --screenshot-demo ready-forum-topics`.
+- **Out of this slice (→ future):** posting to a topic
+  (`sendMessage` with `messageTopicForum` reply-to/topic input);
+  topic creation/edit/close/pin management; paginated topic lists
+  (>100 topics); General-topic special-casing (e.g. its messages also
+  appearing in the main history); per-topic notification settings and
+  unread-marking; draft messages in topics.

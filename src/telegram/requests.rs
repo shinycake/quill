@@ -1,4 +1,4 @@
-use crate::ids::{ChatId, FileId, MessageId, RequestId};
+use crate::ids::{ChatId, FileId, MessageId, RequestId, TopicId};
 use crate::pins::{TDLIB_CMAKE_VERSION, TDLIB_GIT_COMMIT};
 use serde_json::{Value, json};
 
@@ -158,13 +158,42 @@ pub fn search_recently_found_chats(extra: RequestId, query: &str, limit: i32) ->
     .to_string()
 }
 
+/// Typed `topic_id` JSON for TDLib 1.8.67 requests (schema: `MessageTopic`
+/// constructors at `schema/td_api.tl:3001-3010`). `TopicId::None` encodes as
+/// JSON null ("all topics"), matching the existing null-encoding convention.
+pub fn topic_id_json(topic: &TopicId) -> Value {
+    match topic {
+        TopicId::None => Value::Null,
+        TopicId::Forum { forum_topic_id } => json!({
+            "@type": "messageTopicForum",
+            "forum_topic_id": forum_topic_id,
+        }),
+        TopicId::DirectMessages {
+            direct_messages_chat_topic_id,
+        } => json!({
+            "@type": "messageTopicDirectMessages",
+            "direct_messages_chat_topic_id": direct_messages_chat_topic_id,
+        }),
+        TopicId::SavedMessages {
+            saved_messages_topic_id,
+        } => json!({
+            "@type": "messageTopicSavedMessages",
+            "saved_messages_topic_id": saved_messages_topic_id,
+        }),
+    }
+}
+
 /// `searchChatMessages` (TDLib 1.8.67). In-chat text search; returns
-/// `foundChatMessages`. `topic_id` / `sender_id` / `filter` null = all topics,
-/// any sender, all message types (tdesktop ComposeSearch default).
+/// `foundChatMessages`. `topic` null-equivalent (`TopicId::None`) = all topics,
+/// `sender_id` / `filter` null = any sender, all message types (tdesktop
+/// ComposeSearch default). Passing `TopicId::Forum` with an empty `query`
+/// lists that topic's messages — this is how per-topic history is fetched
+/// (`getChatHistory` has no `topic_id` parameter, schema line 11829).
 /// First page: `from_message_id` 0 (schema: last message), `offset` 0.
 pub fn search_chat_messages(
     extra: RequestId,
     chat_id: ChatId,
+    topic: &TopicId,
     query: &str,
     from_message_id: MessageId,
     offset: i32,
@@ -174,13 +203,52 @@ pub fn search_chat_messages(
         "@type": "searchChatMessages",
         "@extra": extra.as_extra(),
         "chat_id": chat_id.0,
-        "topic_id": Value::Null,
+        "topic_id": topic_id_json(topic),
         "query": query,
         "sender_id": Value::Null,
         "from_message_id": from_message_id.0,
         "offset": offset,
         "limit": limit,
         "filter": Value::Null,
+    })
+    .to_string()
+}
+
+/// `getForumTopics` (TDLib 1.8.67, `schema/td_api.tl:12701`):
+/// `getForumTopics chat_id:int53 query:string offset_date:int32
+/// offset_message_id:int53 offset_forum_topic_id:int32 limit:int32 =
+/// ForumTopics`. First page: empty query, all offsets 0.
+pub fn get_forum_topics(
+    extra: RequestId,
+    chat_id: ChatId,
+    query: &str,
+    offset_date: i32,
+    offset_message_id: MessageId,
+    offset_forum_topic_id: i32,
+    limit: i32,
+) -> String {
+    json!({
+        "@type": "getForumTopics",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0,
+        "query": query,
+        "offset_date": offset_date,
+        "offset_message_id": offset_message_id.0,
+        "offset_forum_topic_id": offset_forum_topic_id,
+        "limit": limit,
+    })
+    .to_string()
+}
+
+/// `getSupergroup` (TDLib 1.8.67, `schema/td_api.tl:11510`):
+/// `getSupergroup supergroup_id:int53 = Supergroup`. Response carries
+/// `supergroup.is_forum` (schema line 2746), which is how Quill learns a
+/// supergroup is a forum (`chatTypeSupergroup` itself has no forum flag).
+pub fn get_supergroup(extra: RequestId, supergroup_id: i64) -> String {
+    json!({
+        "@type": "getSupergroup",
+        "@extra": extra.as_extra(),
+        "supergroup_id": supergroup_id,
     })
     .to_string()
 }
@@ -1892,7 +1960,15 @@ mod tests {
 
     #[test]
     fn search_chat_messages_shape_matches_1_8_67() {
-        let json = search_chat_messages(RequestId(25), ChatId(11), "hello", MessageId(0), 0, 50);
+        let json = search_chat_messages(
+            RequestId(25),
+            ChatId(11),
+            &TopicId::None,
+            "hello",
+            MessageId(0),
+            0,
+            50,
+        );
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(v["@type"], "searchChatMessages");
         assert_eq!(v["@extra"], "25");
@@ -1906,6 +1982,64 @@ mod tests {
         assert_eq!(v["filter"], Value::Null);
         assert!(!json.contains("CANARY"));
         assert!(!json.contains("message_thread_id"));
+    }
+
+    #[test]
+    fn search_chat_messages_forum_topic_uses_message_topic_forum() {
+        let json = search_chat_messages(
+            RequestId(26),
+            ChatId(11),
+            &TopicId::Forum { forum_topic_id: 7 },
+            "",
+            MessageId(0),
+            0,
+            50,
+        );
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "searchChatMessages");
+        assert_eq!(v["topic_id"]["@type"], "messageTopicForum");
+        assert_eq!(v["topic_id"]["forum_topic_id"], 7);
+        assert_eq!(v["query"], "");
+    }
+
+    #[test]
+    fn topic_id_json_variants() {
+        assert_eq!(topic_id_json(&TopicId::None), Value::Null);
+        let dm = topic_id_json(&TopicId::DirectMessages {
+            direct_messages_chat_topic_id: 42,
+        });
+        assert_eq!(dm["@type"], "messageTopicDirectMessages");
+        assert_eq!(dm["direct_messages_chat_topic_id"], 42);
+        let sm = topic_id_json(&TopicId::SavedMessages {
+            saved_messages_topic_id: 9,
+        });
+        assert_eq!(sm["@type"], "messageTopicSavedMessages");
+        assert_eq!(sm["saved_messages_topic_id"], 9);
+    }
+
+    #[test]
+    fn get_forum_topics_shape_matches_1_8_67() {
+        let json = get_forum_topics(RequestId(31), ChatId(12), "", 0, MessageId(0), 0, 100);
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "getForumTopics");
+        assert_eq!(v["@extra"], "31");
+        assert_eq!(v["chat_id"], 12);
+        assert_eq!(v["query"], "");
+        assert_eq!(v["offset_date"], 0);
+        assert_eq!(v["offset_message_id"], 0);
+        assert_eq!(v["offset_forum_topic_id"], 0);
+        assert_eq!(v["limit"], 100);
+        assert!(!json.contains("CANARY"));
+    }
+
+    #[test]
+    fn get_supergroup_shape_matches_1_8_67() {
+        let json = get_supergroup(RequestId(32), 77);
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "getSupergroup");
+        assert_eq!(v["@extra"], "32");
+        assert_eq!(v["supergroup_id"], 77);
+        assert!(!json.contains("CANARY"));
     }
 
     #[test]

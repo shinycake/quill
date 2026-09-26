@@ -111,9 +111,14 @@ handling exists.
 
 ## Phase 5 — Supergroups: forum topics
 
-- **5.1 Topics.** `getForumTopics` list for forum supergroups; per-topic
+- **5.1 Topics.** ✅ 2026-09-26 — `getForumTopics` list for forum supergroups; per-topic
   history via `searchChatMessages` with `topic_id`; topic badges in the
-  chat list.
+  chat list. Forum status via `getSupergroup`/`updateSupergroup`
+  (`chatTypeSupergroup` carries no `is_forum`); topic list replaces the
+  general history for forums, topic rows open per-topic history in the
+  same history component, composer hidden in topic view (read-only).
+  First page only (limit 100, no `next_offset_*` pagination).
+  `docs/screenshots/ready-forum-topics.png`.
 
 ## Phase 6 — Contacts & profiles
 
