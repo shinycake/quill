@@ -42,8 +42,8 @@ use quill::telegram::envelope::{
     ChatFolderInfo, ChatFolderSpec, ChatKind, ChatList, ChatNotificationSettings,
     DEFAULT_EMOJI_REACTIONS, ForumTopic, InlineKeyboardButton, InlineKeyboardButtonStyle,
     InlineKeyboardButtonType, MUTE_FOR_1_HOUR, MUTE_FOR_2_DAYS, MUTE_FOR_8_HOURS, MUTE_FOREVER,
-    MessageContent, MessageInteractionInfo, ParsedFile, PollContent, PollOption, PollType,
-    SponsoredMessage, toggle_chosen_emoji_reaction,
+    MessageContent, MessageInteractionInfo, ParsedFile, ParsedStory, PollContent, PollOption,
+    PollType, SponsoredMessage, toggle_chosen_emoji_reaction,
 };
 use quill::text::{TextEntity, styled_runs, utf8_to_utf16_offset};
 use quill::voice::{self, VoiceCapture, format_voice_duration};
@@ -413,6 +413,12 @@ pub struct QuillApp {
     /// full content was still being fetched; resolved on the next render
     /// once the `story` response lands in the cache.
     pending_story_open: Option<(i64, i32)>,
+    /// Phase 9.2: story reaction picker open above the viewer overlay.
+    story_reaction_picker_open: bool,
+    /// Phase 9.2: story reply input open in the viewer overlay.
+    story_reply_open: bool,
+    /// Phase 9.2: reply-to-story draft (the viewer overlay's reply row).
+    story_reply_input: Entity<TextareaState>,
     /// Phase 6: sidebar tab — `true` shows the contacts list instead of
     /// the chat list.
     contacts_tab_open: bool,
@@ -540,6 +546,14 @@ pub enum ScreenshotDemo {
     /// the chat list for "Demo chat A"/"Demo chat B" plus the story viewer
     /// overlay open on Demo chat A's downloaded photo story (Phase 9.1).
     ReadyStories,
+    /// Story posting slice demo (injected, no live Telegram): same seed as
+    /// `ReadyStories`, but Demo chat A's photo story carries a chosen ❤
+    /// reaction, interaction counts, and deletable/repliable flags; the
+    /// viewer opens with the **reaction picker** and **reply row** visible,
+    /// plus a seeded `availableReactions` response (Phase 9.2). The photo
+    /// composer itself is absent: the pinned TDLib 1.8.67 schema has no
+    /// `sendStory` constructor, so posting cannot be built honestly yet.
+    ReadyStoryPost,
     /// Seek-bar demo (injected, no live Telegram): a voice note playing
     /// with its seek bar mid-track (elapsed advancing via the playback
     /// tick) plus a music track paused with a remembered position, both
@@ -680,6 +694,12 @@ impl QuillApp {
             TextareaState::new(window, cx)
                 .placeholder("Search chats")
                 .auto_grow(1, 1)
+                .submit_on_enter(true)
+        });
+        let story_reply_input = cx.new(|cx| {
+            TextareaState::new(window, cx)
+                .placeholder("Reply to story")
+                .auto_grow(1, 3)
                 .submit_on_enter(true)
         });
         cx.subscribe_in(
@@ -1175,6 +1195,15 @@ impl QuillApp {
                     AuthorizationState::Ready,
                 )
             }
+            Some(ScreenshotDemo::ReadyStoryPost) => {
+                demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
+                (
+                    ConnectUiStatus::DemoReadyChats,
+                    None,
+                    "screenshot demo — story reactions / reply / delete".into(),
+                    AuthorizationState::Ready,
+                )
+            }
             Some(ScreenshotDemo::ReadySeekBars) => {
                 demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
                 (
@@ -1290,6 +1319,7 @@ impl QuillApp {
             search_input,
             chat_search_input,
             forward_search_input,
+            story_reply_input,
             auth_demo,
             focus_sidebar: cx.focus_handle(),
             connect_status,
@@ -1351,6 +1381,8 @@ impl QuillApp {
             media_viewer: MediaViewer::closed(),
             story_viewer: StoryViewer::closed(),
             pending_story_open: None,
+            story_reaction_picker_open: false,
+            story_reply_open: false,
             contacts_tab_open: false,
             folder_tab: None,
             folder_manage_open: false,
@@ -1699,6 +1731,23 @@ impl QuillApp {
             // downloaded photo story.
             app.open_story_viewer(ChatId(11), 5, cx);
             app.status_note = "screenshot demo — story viewer".into();
+        }
+        if matches!(demo, Some(ScreenshotDemo::ReadyStoryPost)) {
+            if let Some(session) = app.demo_session.as_mut() {
+                app.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_story_post(session, &app.demo_sink, &app.demo_seq);
+            }
+            // Phase 9.2: viewer opens on the seeded own photo story with
+            // the reaction picker and the reply row visible, seeded
+            // `availableReactions`, and a chosen ❤ reaction. No composer:
+            // the pinned schema has no `sendStory`.
+            app.open_story_viewer(ChatId(11), 5, cx);
+            app.story_reaction_picker_open = true;
+            app.story_reply_open = true;
+            app.story_reply_input.update(cx, |input, cx| {
+                input.set_value("Great photo!", window, cx);
+            });
+            app.status_note = "screenshot demo — story reactions / reply / delete".into();
         }
         if matches!(demo, Some(ScreenshotDemo::ReadySponsored)) {
             if let Some(session) = app.demo_session.as_mut() {
@@ -3591,6 +3640,151 @@ impl QuillApp {
         true
     }
 
+    /// Phase 9.2: the viewer story's freshest `ParsedStory` (reaction
+    /// state and interaction counts arrive via `updateStory` without the
+    /// viewer items being rebuilt).
+    fn current_story(&self) -> Option<ParsedStory> {
+        let item = self.story_viewer.current()?;
+        self.session()
+            .and_then(|session| session.stories.get(&(item.chat_id.0, item.story_id)))
+            .cloned()
+    }
+
+    /// Phase 9.2: quick-react — toggle the ❤ (`reactionTypeEmoji`,
+    /// `schema/td_api.tl:2915`) reaction on the current story via
+    /// `setStoryReaction` (`schema/td_api.tl:13809`). Removing sends
+    /// `reaction_type: null`.
+    fn quick_react_story(&mut self, cx: &mut Context<Self>) {
+        let Some(item) = self.story_viewer.current().cloned() else {
+            return;
+        };
+        let chosen = self
+            .current_story()
+            .and_then(|story| story.chosen_reaction_emoji);
+        let emoji = if chosen.as_deref() == Some("❤") {
+            None
+        } else {
+            Some("❤")
+        };
+        if let Some(live) = self.live.as_mut() {
+            self.status_note =
+                match live
+                    .driver
+                    .set_story_reaction(item.chat_id, item.story_id, emoji)
+                {
+                    Ok(_) => {
+                        if emoji.is_some() {
+                            "Reacted ❤".into()
+                        } else {
+                            "Reaction removed".into()
+                        }
+                    }
+                    Err(_) => "could not set story reaction".into(),
+                };
+        } else if self.demo_session.is_some() {
+            self.status_note = "demo — setStoryReaction runs with live TDLib".into();
+        }
+        self.story_reaction_picker_open = false;
+        cx.notify();
+    }
+
+    /// Phase 9.2: toggle the reaction picker above the viewer. The first
+    /// open on a live connection fetches `getStoryAvailableReactions`
+    /// (`schema/td_api.tl:13802`).
+    fn toggle_story_reaction_picker(&mut self, cx: &mut Context<Self>) {
+        self.story_reaction_picker_open = !self.story_reaction_picker_open;
+        if self.story_reaction_picker_open {
+            if let Some(live) = self.live.as_mut() {
+                if live.driver.session.story_available_reactions.is_none() {
+                    match live.driver.get_story_available_reactions() {
+                        Ok(_) => {}
+                        Err(_) => self.status_note = "could not load story reactions".into(),
+                    }
+                }
+            } else if self.demo_session.is_some() {
+                self.status_note = "demo — story reactions run with live TDLib".into();
+            }
+        }
+        cx.notify();
+    }
+
+    /// Phase 9.2: set the current story's reaction to a picker emoji.
+    fn pick_story_reaction(&mut self, emoji: &str, cx: &mut Context<Self>) {
+        let Some(item) = self.story_viewer.current().cloned() else {
+            return;
+        };
+        if let Some(live) = self.live.as_mut() {
+            self.status_note =
+                match live
+                    .driver
+                    .set_story_reaction(item.chat_id, item.story_id, Some(emoji))
+                {
+                    Ok(_) => format!("Reacted {emoji}"),
+                    Err(_) => "could not set story reaction".into(),
+                };
+        } else if self.demo_session.is_some() {
+            self.status_note = "demo — story reactions run with live TDLib".into();
+        }
+        self.story_reaction_picker_open = false;
+        cx.notify();
+    }
+
+    /// Phase 9.2: toggle the reply row in the viewer (`story.can_be_replied`
+    /// gates the button).
+    fn toggle_story_reply(&mut self, cx: &mut Context<Self>) {
+        self.story_reply_open = !self.story_reply_open;
+        cx.notify();
+    }
+
+    /// Phase 9.2: send the reply row's text as a message to the story
+    /// poster with `inputMessageReplyToStory` (`schema/td_api.tl:3099`).
+    fn send_story_reply(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(item) = self.story_viewer.current().cloned() else {
+            return;
+        };
+        let text = self.story_reply_input.read(cx).value().to_string();
+        if text.trim().is_empty() {
+            return;
+        }
+        if let Some(live) = self.live.as_mut() {
+            self.status_note =
+                match live
+                    .driver
+                    .send_story_reply(item.chat_id, item.story_id, &text)
+                {
+                    Ok(_) => "Story reply sent".into(),
+                    Err(_) => "could not send story reply".into(),
+                };
+            self.story_reply_input
+                .update(cx, |input, cx| input.set_value("", window, cx));
+        } else if self.demo_session.is_some() {
+            self.status_note = "demo — story replies run with live TDLib".into();
+        }
+        self.story_reply_open = false;
+        cx.notify();
+    }
+
+    /// Phase 9.2: delete the current story (`deleteStory`,
+    /// `schema/td_api.tl:13754`; `story.can_be_deleted` gates the button).
+    /// The deletion lands as `updateStoryDeleted`, which closes the viewer
+    /// at render time.
+    fn delete_story_viewer(&mut self, cx: &mut Context<Self>) {
+        let Some(item) = self.story_viewer.current().cloned() else {
+            return;
+        };
+        if let Some(live) = self.live.as_mut() {
+            self.status_note = match live.driver.delete_story(item.chat_id, item.story_id) {
+                Ok(_) => "Deleting story…".into(),
+                Err(_) => "could not delete story".into(),
+            };
+        } else if self.demo_session.is_some() {
+            self.status_note = "demo — deleteStory runs with live TDLib".into();
+        }
+        self.story_reaction_picker_open = false;
+        self.story_reply_open = false;
+        cx.notify();
+    }
+
     /// Phase 9.1: close the story viewer; `closeStory` marks the current
     /// story as no longer being viewed.
     fn close_story_viewer(&mut self, cx: &mut Context<Self>) {
@@ -3601,6 +3795,8 @@ impl QuillApp {
         }
         self.story_viewer.close();
         self.pending_story_open = None;
+        self.story_reaction_picker_open = false;
+        self.story_reply_open = false;
         cx.notify();
     }
 
@@ -3620,6 +3816,8 @@ impl QuillApp {
                 }
             }
         }
+        self.story_reaction_picker_open = false;
+        self.story_reply_open = false;
         self.ensure_story_download(cx);
         cx.notify();
     }
@@ -8488,6 +8686,159 @@ impl QuillApp {
             )
     }
 
+    /// Phase 9.2: the viewer's own-story interaction counters
+    /// (`storyInteractionInfo`, `schema/td_api.tl:6712`) — only rendered
+    /// when TDLib populated them (`story.can_get_interactions`) and at
+    /// least one counter is nonzero.
+    fn story_viewer_counts(&self) -> Option<String> {
+        let story = self.current_story()?;
+        if !story.can_get_interactions {
+            return None;
+        }
+        let info = story.interaction_info.filter(|info| info.any_nonzero())?;
+        let mut parts = Vec::new();
+        if info.view_count > 0 {
+            parts.push(format!("👁 {}", info.view_count));
+        }
+        if info.reaction_count > 0 {
+            parts.push(format!("❤️ {}", info.reaction_count));
+        }
+        if info.forward_count > 0 {
+            parts.push(format!("↩ {}", info.forward_count));
+        }
+        Some(parts.join(" · "))
+    }
+
+    /// Phase 9.2: the emoji picker popover fed by `getStoryAvailableReactions`
+    /// (`availableReactions`, `schema/td_api.tl:13802`). One tap sets the
+    /// reaction via `setStoryReaction` (`schema/td_api.tl:13809`).
+    fn story_reaction_picker(&self, cx: &mut Context<Self>) -> AnyElement {
+        let reactions = self
+            .session()
+            .and_then(|session| session.story_available_reactions.clone())
+            .unwrap_or_default();
+        let mut picker = div()
+            .id("story-reaction-picker")
+            .flex()
+            .flex_row()
+            .flex_wrap()
+            .justify_center()
+            .gap_1()
+            .max_w(px(360.))
+            .p_2()
+            .rounded_md()
+            .bg(rgb(0x161b22))
+            .border_1()
+            .border_color(rgb(0x30363d));
+        if reactions.is_empty() {
+            picker = picker.child(
+                div()
+                    .text_sm()
+                    .text_color(rgb(0x8b949e))
+                    .child("Loading reactions…"),
+            );
+        }
+        for (index, reaction) in reactions.iter().enumerate() {
+            let emoji = reaction.emoji.clone();
+            picker = picker.child(
+                div()
+                    .id(("story-reaction-option", index))
+                    .cursor_pointer()
+                    .text_2xl()
+                    .p_1()
+                    .child(emoji.clone())
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.pick_story_reaction(&emoji, cx);
+                    })),
+            );
+        }
+        picker.into_any_element()
+    }
+
+    /// Phase 9.2: reaction / reply / delete affordances under the viewer
+    /// visual, plus the reaction picker popover and the reply input row.
+    /// The quick-react toggles ❤; Reply is gated on
+    /// `story.can_be_replied`; Delete on `story.can_be_deleted`.
+    fn story_action_row(&self, cx: &mut Context<Self>) -> AnyElement {
+        let story = self.current_story();
+        let chosen = story
+            .as_ref()
+            .and_then(|story| story.chosen_reaction_emoji.clone());
+        let can_reply = story.as_ref().is_some_and(|story| story.can_be_replied);
+        let can_delete = story.as_ref().is_some_and(|story| story.can_be_deleted);
+        let quick_label = if chosen.as_deref() == Some("❤") {
+            "❤️ ✓"
+        } else {
+            "❤️"
+        };
+        let mut row = div().flex().gap_2().items_center().justify_center();
+        row = row.child(
+            Button::new("story-quick-react")
+                .label(quick_label)
+                .ghost()
+                .text_color(rgb(0xffffff))
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.quick_react_story(cx);
+                })),
+        );
+        row = row.child(
+            Button::new("story-react-picker")
+                .label("React…")
+                .ghost()
+                .text_color(rgb(0xffffff))
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.toggle_story_reaction_picker(cx);
+                })),
+        );
+        if can_reply {
+            row = row.child(
+                Button::new("story-reply")
+                    .label("Reply")
+                    .ghost()
+                    .text_color(rgb(0xffffff))
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.toggle_story_reply(cx);
+                    })),
+            );
+        }
+        if can_delete {
+            row = row.child(
+                Button::new("story-delete")
+                    .label("Delete")
+                    .ghost()
+                    .text_color(rgb(0xffffff))
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.delete_story_viewer(cx);
+                    })),
+            );
+        }
+        let mut column = div().flex().flex_col().gap_2().items_center().child(row);
+        if self.story_reaction_picker_open {
+            column = column.child(self.story_reaction_picker(cx));
+        }
+        if self.story_reply_open {
+            column =
+                column.child(
+                    div()
+                        .flex()
+                        .gap_2()
+                        .items_center()
+                        .w(px(360.))
+                        .child(
+                            div()
+                                .flex_1()
+                                .child(Textarea::new(&self.story_reply_input).h(px(40.))),
+                        )
+                        .child(Button::new("story-reply-send").label("Send").on_click(
+                            cx.listener(|this, _, window, cx| {
+                                this.send_story_reply(window, cx);
+                            }),
+                        )),
+                );
+        }
+        column.into_any_element()
+    }
+
     /// Phase 9.1: fullscreen story overlay, modeled on
     /// `media_viewer_overlay`: poster name + "Story N of M" header, the
     /// photo (video shows its thumbnail; live/unsupported show a
@@ -8596,6 +8947,8 @@ impl QuillApp {
                 cx,
             )
         });
+        // Phase 9.2: own-story interaction counters under the caption.
+        let counts: Option<String> = self.story_viewer_counts();
         div()
             .id("story-viewer-overlay")
             .absolute()
@@ -8659,6 +9012,10 @@ impl QuillApp {
                     .when_some(caption, |this, caption| {
                         this.child(div().text_color(rgb(0xffffff)).child(caption))
                     })
+                    .when_some(counts, |this, counts| {
+                        this.child(div().text_xs().text_color(rgb(0x8b949e)).child(counts))
+                    })
+                    .child(self.story_action_row(cx))
                     .child(
                         div()
                             .flex()
@@ -9497,6 +9854,30 @@ impl Render for QuillApp {
                 self.pending_story_open = None;
                 self.rebuild_story_viewer(ChatId(chat_id), story_id, cx);
             }
+        }
+        // Phase 9.2: the `updateStoryPostSucceeded` reducer queued poster
+        // chats whose active stories should be refreshed (an own story
+        // posted from another client appears in the tray this way).
+        if let Some(live) = self.live.as_mut() {
+            let chats: Vec<i64> = live.driver.session.story_tray_refresh.drain().collect();
+            for chat_id in chats {
+                let _ = live.driver.get_chat_active_stories(ChatId(chat_id));
+            }
+        }
+        // Phase 9.2: a story that vanished from the cache while being
+        // viewed was deleted (`updateStoryDeleted`) — close the viewer.
+        let current_deleted = self.story_viewer.current().is_some_and(|item| {
+            self.session().is_some_and(|session| {
+                !session
+                    .stories
+                    .contains_key(&(item.chat_id.0, item.story_id))
+            })
+        });
+        if current_deleted {
+            self.story_viewer.close();
+            self.story_reaction_picker_open = false;
+            self.story_reply_open = false;
+            self.status_note = "Story deleted".into();
         }
         // Phase 4.6: push the playback clock into the seek slider entity so
         // the thumb follows elapsed time (the tick has no `&mut Window`).
@@ -11411,6 +11792,71 @@ fn apply_ready_stories(session: &mut Session, sink: &Arc<MemorySink>, seq: &Atom
     }
 }
 
+/// `ReadyStoryPost` fixture (Phase 9.2): same seed as `ReadyStories`, but
+/// Demo chat A's photo story (id 5) is an *own* story — chosen ❤ reaction,
+/// interaction counts, `can_be_deleted` / `can_be_replied` — and an
+/// `availableReactions` response is injected through the reducer so the
+/// reaction picker has options. The caption states the honest limitation:
+/// the pinned TDLib 1.8.67 schema has no `sendStory` constructor, so a
+/// photo-story composer cannot be built against it yet.
+fn apply_ready_story_post(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let photo_file = demo_file_json(91, &demo_thumb_png_path(), true);
+    let video_thumb_file = demo_file_json(92, &demo_thumb_png_path(), true);
+    let video_file = demo_file_json(93, &demo_thumb_png_path(), true);
+    let tray = |chat_id: i64, order: i64, max_read: i32, story_ids: &[i32]| -> String {
+        let stories = story_ids
+            .iter()
+            .map(|id| {
+                format!(
+                    r#"{{"@type":"storyInfo","story_id":{id},"date":1700000000,"is_for_close_friends":false,"is_live":false}}"#
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(",");
+        format!(
+            r#"{{"@type":"updateChatActiveStories","active_stories":{{"@type":"chatActiveStories","chat_id":{chat_id},"list":{{"@type":"storyListMain"}},"order":"{order}","can_be_archived":false,"max_read_story_id":{max_read},"stories":[{stories}]}}}}"#
+        )
+    };
+    let caption = |text: &str| -> String {
+        format!(
+            r#"{{"@type":"formattedText","text":{},"entities":[]}}"#,
+            serde_json::to_string(text).unwrap()
+        )
+    };
+    let own_photo_story = format!(
+        r#"{{"@type":"story","id":5,"poster_chat_id":11,"date":1700000000,"content":{{"@type":"storyContentPhoto","photo":{{"@type":"photo","has_stickers":false,"sizes":[{{"@type":"photoSize","type":"y","photo":{photo_file},"width":960,"height":1280,"progressive_sizes":[]}}]}}}},"chosen_reaction_type":{{"@type":"reactionTypeEmoji","emoji":"❤"}},"interaction_info":{{"@type":"storyInteractionInfo","view_count":42,"forward_count":3,"reaction_count":7,"recent_viewer_user_ids":[]}},"can_be_deleted":true,"can_be_replied":true,"can_get_interactions":true,"caption":{}}}"#,
+        caption(
+            "Phase 9.2: ❤ quick-react, reaction picker, reply and delete for own stories. Posting is blocked — pinned TDLib 1.8.67 has no sendStory constructor."
+        ),
+    );
+    let jsons = [
+        tray(11, 30, 4, &[4, 5]),
+        tray(12, 20, 6, &[6]),
+        // Chat 11, story 4: video story with a thumbnail (read).
+        format!(
+            r#"{{"@type":"story","id":4,"poster_chat_id":11,"date":1700000000,"content":{{"@type":"storyContentVideo","video":{{"@type":"storyVideo","duration":9.0,"video":{video_file},"thumbnail":{{"@type":"thumbnail","format":{{"@type":"thumbnailFormatJpeg"}},"width":90,"height":120,"file":{video_thumb_file}}}}},"alternative_video":null}},"caption":{}}}"#,
+            caption("Demo story — the video shows its thumbnail (playback is out of slice)."),
+        ),
+        own_photo_story,
+        // Chat 12, story 6: photo story (read).
+        format!(
+            r#"{{"@type":"story","id":6,"poster_chat_id":12,"date":1700000000,"content":{{"@type":"storyContentPhoto","photo":{{"@type":"photo","has_stickers":false,"sizes":[{{"@type":"photoSize","type":"y","photo":{photo_file},"width":960,"height":1280,"progressive_sizes":[]}}]}}}},"caption":{}}}"#,
+            caption("Demo chat B story."),
+        ),
+        // Seeded picker options (`getStoryAvailableReactions` response).
+        r#"{"@type":"availableReactions","top_reactions":[{"@type":"availableReaction","type":{"@type":"reactionTypeEmoji","emoji":"❤"},"needs_premium":false},{"@type":"availableReaction","type":{"@type":"reactionTypeEmoji","emoji":"👍"},"needs_premium":false},{"@type":"availableReaction","type":{"@type":"reactionTypeEmoji","emoji":"🔥"},"needs_premium":false},{"@type":"availableReaction","type":{"@type":"reactionTypeEmoji","emoji":"🎉"},"needs_premium":false},{"@type":"availableReaction","type":{"@type":"reactionTypeEmoji","emoji":"😮"},"needs_premium":false},{"@type":"availableReaction","type":{"@type":"reactionTypeEmoji","emoji":"😢"},"needs_premium":false},{"@type":"availableReaction","type":{"@type":"reactionTypeEmoji","emoji":"😂"},"needs_premium":false},{"@type":"availableReaction","type":{"@type":"reactionTypeEmoji","emoji":"👏"},"needs_premium":false}],"recent_reactions":[],"popular_reactions":[],"allow_custom_emoji":false,"are_tags":false,"unavailability_reason":null}"#.to_string(),
+    ];
+    for json in jsons {
+        if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
+            session.apply(owned);
+        }
+    }
+}
+
+/// `ReadySponsored` fixture: open the demo channel (id 13, now ungated) and
+/// inject a `sponsoredMessages` response through the same reducer the live
+/// `getChatSponsoredMessages` path uses — one Sponsored row, one Recommended.
 /// The fixture still swaps the history pane for the sponsored rows pane.
 fn apply_ready_sponsored(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
     let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
