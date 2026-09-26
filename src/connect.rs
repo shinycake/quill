@@ -25,8 +25,8 @@ use crate::telegram::envelope::{
 use crate::telegram::ffi::{LibraryOrigin, TdJsonError, resolve_tdjson_path};
 use crate::telegram::requests::{
     AnimationSend, PollSend, SetTdlibParameters, StickerSend, VideoNoteSend,
-    VideoNoteThumbnailSend, VideoSend, add_chat_to_list, add_chat_to_list_value, add_contact,
-    add_message_reaction, add_recently_found_chat, check_authentication_code,
+    VideoNoteThumbnailSend, VideoSend, VoiceNoteSend, add_chat_to_list, add_chat_to_list_value,
+    add_contact, add_message_reaction, add_recently_found_chat, check_authentication_code,
     check_authentication_password, click_chat_sponsored_message, close_chat, close_request,
     close_story, create_chat_folder, delete_chat_folder, delete_messages, delete_story,
     download_file as download_file_request, edit_chat_folder, edit_message_caption,
@@ -2361,6 +2361,30 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
     }
 
+    /// Parity slice 4: the forum topic a send to `chat_id` is addressed to.
+    /// `Some` only when `chat_id` is the open chat and a topic is selected
+    /// there; the `sendMessage` request then carries
+    /// `topic_id = messageTopicForum{forum_topic_id}` (schema 1.8.67, lines
+    /// 12200 and 3004). Story replies keep a null topic — they address the
+    /// poster chat, never a topic.
+    fn send_topic(&self, chat_id: ChatId) -> Option<i32> {
+        if self.session.open_chat == Some(chat_id) {
+            self.session.open_topic
+        } else {
+            None
+        }
+    }
+
+    /// Parity slice 4: rejects sends into a closed forum topic. The
+    /// composer is hidden there; this guards a stale-snapshot race.
+    fn topic_send_is_closed(&self, chat_id: ChatId) -> bool {
+        self.send_topic(chat_id).is_some_and(|_| {
+            self.session
+                .open_topic_info(chat_id)
+                .is_some_and(|topic| topic.is_closed)
+        })
+    }
+
     /// `sendMessage` + `inputMessageAnimation` / `inputAnimation` / `inputFileId`.
     pub fn send_animation(
         &mut self,
@@ -2375,12 +2399,17 @@ impl<S: JsonSender> ConnectDriver<S> {
             .chats
             .get(&chat_id.0)
             .is_some_and(|chat| chat.supported());
-        if !supported || animation.file_id.0 == 0 {
+        if !supported || animation.file_id.0 == 0 || self.topic_send_is_closed(chat_id) {
             return Err(ConnectSendError::InvalidRequest);
         }
         let extra = self
             .session
             .request(RequestPurpose::SendMessage, Some(chat_id));
+        let topic_id = self.send_topic(chat_id);
+        let animation = AnimationSend {
+            topic_id,
+            ..animation
+        };
         let json = send_animation(extra, chat_id, animation);
         match self.sender.send_json(&json) {
             Ok(()) => {
@@ -2408,12 +2437,17 @@ impl<S: JsonSender> ConnectDriver<S> {
             .chats
             .get(&chat_id.0)
             .is_some_and(|chat| chat.supported());
-        if !supported || sticker.file_id.0 == 0 {
+        if !supported || sticker.file_id.0 == 0 || self.topic_send_is_closed(chat_id) {
             return Err(ConnectSendError::InvalidRequest);
         }
         let extra = self
             .session
             .request(RequestPurpose::SendMessage, Some(chat_id));
+        let topic_id = self.send_topic(chat_id);
+        let sticker = StickerSend {
+            topic_id,
+            ..sticker
+        };
         let json = send_sticker(extra, chat_id, sticker);
         match self.sender.send_json(&json) {
             Ok(()) => {
@@ -2462,6 +2496,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !can_post {
             return Err(ConnectSendError::InvalidRequest);
         }
+        // Parity slice 4: never send into a closed forum topic (the
+        // composer is hidden there; this guards a stale-snapshot race).
+        if self.topic_send_is_closed(chat_id) {
+            return Err(ConnectSendError::InvalidRequest);
+        }
         let caption = snapshot.caption();
         if snapshot.attachment.is_none() && caption.is_empty() {
             return Err(ConnectSendError::InvalidRequest);
@@ -2504,11 +2543,17 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request(RequestPurpose::SendMessage, Some(chat_id));
+        // Parity slice 4: sends from a topic view address the open topic.
+        let topic_id = self.send_topic(chat_id);
         // Contains caption / path — do not log `json`.
         let json = match (snapshot.attachment.as_ref(), media_path.as_deref()) {
             (Some(att), Some(path)) => match att.kind {
-                AttachmentKind::Photo => send_photo(extra, chat_id, path, caption, reply_to),
-                AttachmentKind::Document => send_document(extra, chat_id, path, caption, reply_to),
+                AttachmentKind::Photo => {
+                    send_photo(extra, chat_id, topic_id, path, caption, reply_to)
+                }
+                AttachmentKind::Document => {
+                    send_document(extra, chat_id, topic_id, path, caption, reply_to)
+                }
                 AttachmentKind::Video => {
                     let probe = video_probe.ok_or_else(|| {
                         self.session.requests.take(extra);
@@ -2517,6 +2562,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                     send_video(
                         extra,
                         chat_id,
+                        topic_id,
                         path,
                         &VideoSend {
                             duration: probe.duration,
@@ -2533,10 +2579,10 @@ impl<S: JsonSender> ConnectDriver<S> {
                         self.session.requests.take(extra);
                         ConnectSendError::InvalidRequest
                     })?;
-                    send_video_note(extra, chat_id, path, &note, reply_to)
+                    send_video_note(extra, chat_id, topic_id, path, &note, reply_to)
                 }
             },
-            (None, None) => send_text(extra, chat_id, caption, reply_to),
+            (None, None) => send_text(extra, chat_id, topic_id, caption, reply_to),
             _ => {
                 self.session.requests.take(extra);
                 return Err(ConnectSendError::InvalidRequest);
@@ -2565,7 +2611,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .chats
             .get(&chat_id.0)
             .is_some_and(|chat| chat.supported());
-        if !supported || !snapshot.is_media_album() {
+        if !supported || !snapshot.is_media_album() || self.topic_send_is_closed(chat_id) {
             return Err(ConnectSendError::InvalidRequest);
         }
         let caption = snapshot.caption();
@@ -2602,7 +2648,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request(RequestPurpose::SendMessageAlbum, Some(chat_id));
-        let json = send_message_album(extra, chat_id, reply_to, contents);
+        let topic_id = self.send_topic(chat_id);
+        let json = send_message_album(extra, chat_id, topic_id, reply_to, contents);
         match self.sender.send_json(&json) {
             Ok(()) => {
                 let _ = self.cancel_outgoing_typing();
@@ -2633,7 +2680,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .chats
             .get(&chat_id.0)
             .is_some_and(|chat| chat.supported());
-        if !supported {
+        if !supported || self.topic_send_is_closed(chat_id) {
             return Err(ConnectSendError::InvalidRequest);
         }
         let path = crate::local_path::pick_send_path(&draft.path)
@@ -2642,14 +2689,18 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request(RequestPurpose::SendMessage, Some(chat_id));
+        let topic_id = self.send_topic(chat_id);
         let json = send_voice_note(
             extra,
             chat_id,
-            &path,
-            draft.duration_secs,
-            &draft.waveform_b64(),
-            caption,
-            reply_to,
+            VoiceNoteSend {
+                path: &path,
+                duration: draft.duration_secs,
+                waveform_b64: &draft.waveform_b64(),
+                caption,
+                reply_to,
+                topic_id,
+            },
         );
         match self.sender.send_json(&json) {
             Ok(()) => {
@@ -3317,6 +3368,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !can_post {
             return Err(ConnectSendError::InvalidRequest);
         }
+        // Parity slice 4: never send into a closed forum topic (the
+        // composer is hidden there; this guards a stale-snapshot race).
+        if self.topic_send_is_closed(chat_id) {
+            return Err(ConnectSendError::InvalidRequest);
+        }
         let question = draft.question.trim().to_string();
         let options: Vec<String> = draft
             .usable_options()
@@ -3327,6 +3383,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request(RequestPurpose::SendMessage, Some(chat_id));
+        // Parity slice 4: sends from a topic view address the open topic.
+        let topic_id = self.send_topic(chat_id);
         let json = send_poll(
             extra,
             chat_id,
@@ -3336,6 +3394,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 is_anonymous: draft.is_anonymous,
                 allows_multiple_answers: draft.allows_multiple_answers,
                 reply_to,
+                topic_id,
             },
         );
         match self.sender.send_json(&json) {
@@ -4551,6 +4610,100 @@ mod tests {
             Err(ConnectSendError::InvalidRequest)
         );
         assert!(!sink.rendered().contains("CANARY_SEND"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn driver_send_text_snapshot_in_topic_addresses_message_topic_forum() {
+        // Parity slice 4: a send from a topic view carries
+        // `topic_id = messageTopicForum{forum_topic_id}` (schema 1.8.67,
+        // lines 12200 / 3004); a closed topic rejects the send.
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = Arc::new(RecordingSender::new());
+        let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+        let mut driver =
+            ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+        let seq = AtomicU64::new(0);
+        driver
+            .ingest(
+                copy_and_parse(
+                    r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        for json in [
+            r#"{"@type":"updateNewChat","chat":{"id":16,"title":"Demo forum","type":{"@type":"chatTypeSupergroup","supergroup_id":16,"is_channel":false},"unread_count":0}}"#,
+            r#"{"@type":"updateChatPosition","chat_id":16,"position":{"@type":"chatPosition","list":{"@type":"chatListMain"},"order":"25","is_pinned":false}}"#,
+            r#"{"@type":"updateSupergroup","supergroup":{"@type":"supergroup","id":16,"is_forum":true}}"#,
+        ] {
+            driver
+                .ingest(copy_and_parse(json, &seq, &dyn_sink).unwrap())
+                .unwrap();
+        }
+        // Inject the topic list through the reducer; topic 3 is closed.
+        let extra = driver
+            .session
+            .request(RequestPurpose::GetForumTopics, Some(ChatId(16)));
+        let topics = [(2, "General", false), (3, "Random", true)]
+            .iter()
+            .map(|(id, name, closed)| {
+                format!(
+                    "{{\"info\":{{\"@type\":\"forumTopicInfo\",\"chat_id\":16,\"forum_topic_id\":{id},\"name\":\"{name}\",\"is_general\":false,\"is_closed\":{closed}}},\"order\":\"{id}\",\"is_pinned\":false,\"unread_count\":0}}"
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(",");
+        driver
+            .ingest(
+                copy_and_parse(
+                    &format!(
+                        "{{\"@type\":\"forumTopics\",\"@extra\":\"{}\",\"total_count\":2,\"topics\":[{topics}],\"next_offset_date\":0,\"next_offset_message_id\":0,\"next_offset_forum_topic_id\":0}}",
+                        extra.0
+                    ),
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+
+        driver.session.open_chat(ChatId(16));
+        driver.session.select_topic(ChatId(16), 2);
+        let snap = crate::composer::ComposerSnapshot::capture(
+            ChatId(16),
+            driver.session.view_generation,
+            "CANARY_TOPIC_ping",
+        );
+        let send_extra = driver.send_text_snapshot(&snap).unwrap();
+        let sent = recorder.snapshot();
+        let send_json = sent.last().unwrap();
+        let v: Value = serde_json::from_str(send_json).unwrap();
+        assert_eq!(v["@type"], "sendMessage");
+        assert_eq!(v["chat_id"], 16);
+        assert_eq!(v["topic_id"]["@type"], "messageTopicForum");
+        assert_eq!(v["topic_id"]["forum_topic_id"], 2);
+        assert!(send_json.contains("CANARY_TOPIC_ping"));
+        assert!(send_json.contains(&format!("\"@extra\":\"{}\"", send_extra.0)));
+
+        // A closed topic rejects the send (the composer is hidden there;
+        // this guards a stale-snapshot race).
+        driver.session.select_topic(ChatId(16), 3);
+        let closed_snap = crate::composer::ComposerSnapshot::capture(
+            ChatId(16),
+            driver.session.view_generation,
+            "nope",
+        );
+        assert_eq!(
+            driver.send_text_snapshot(&closed_snap),
+            Err(ConnectSendError::InvalidRequest)
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -6232,6 +6385,7 @@ mod tests {
                     height: 512,
                     thumb: Some((FileId(41), 128, 128)),
                     reply_to: None,
+                    topic_id: None,
                 },
             )
             .unwrap();
@@ -6326,6 +6480,7 @@ mod tests {
                     width: 240,
                     height: 140,
                     reply_to: None,
+                    topic_id: None,
                 },
             )
             .unwrap();

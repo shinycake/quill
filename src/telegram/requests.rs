@@ -605,9 +605,23 @@ pub fn input_message_reply_to(message_id: Option<MessageId>) -> Value {
 }
 
 /// `sendMessage` for the pinned 1.8.67 schema: typed `topic_id`, not `message_thread_id`.
+/// Parity slice 4: posting into a forum topic passes
+/// `topic_id = messageTopicForum{forum_topic_id}` (schema 1.8.67, lines
+/// 12200 and 3004); `None` sends null (no topic).
+fn message_topic_value(topic_id: Option<i32>) -> Value {
+    match topic_id {
+        Some(forum_topic_id) => json!({
+            "@type": "messageTopicForum",
+            "forum_topic_id": forum_topic_id,
+        }),
+        None => Value::Null,
+    }
+}
+
 pub fn send_text(
     extra: RequestId,
     chat_id: ChatId,
+    topic_id: Option<i32>,
     text: &str,
     reply_to: Option<MessageId>,
 ) -> String {
@@ -615,7 +629,7 @@ pub fn send_text(
         "@type": "sendMessage",
         "@extra": extra.as_extra(),
         "chat_id": chat_id.0,
-        "topic_id": Value::Null,
+        "topic_id": message_topic_value(topic_id),
         "reply_to": input_message_reply_to(reply_to),
         "options": Value::Null,
         "reply_markup": Value::Null,
@@ -669,6 +683,7 @@ pub fn input_message_photo(path: &str, caption: &str) -> Value {
 pub fn send_photo(
     extra: RequestId,
     chat_id: ChatId,
+    topic_id: Option<i32>,
     path: &str,
     caption: &str,
     reply_to: Option<MessageId>,
@@ -677,7 +692,7 @@ pub fn send_photo(
         "@type": "sendMessage",
         "@extra": extra.as_extra(),
         "chat_id": chat_id.0,
-        "topic_id": Value::Null,
+        "topic_id": message_topic_value(topic_id),
         "reply_to": input_message_reply_to(reply_to),
         "options": Value::Null,
         "reply_markup": Value::Null,
@@ -714,6 +729,8 @@ pub struct StickerSend<'a> {
     pub height: i32,
     pub thumb: Option<(FileId, i32, i32)>,
     pub reply_to: Option<MessageId>,
+    /// Parity slice 4: forum topic the send is addressed to (`None` = no topic).
+    pub topic_id: Option<i32>,
 }
 
 /// `sendMessage` + `inputMessageSticker` / `inputSticker` / `inputFileId` (1.8.67).
@@ -732,7 +749,7 @@ pub fn send_sticker(extra: RequestId, chat_id: ChatId, sticker: StickerSend<'_>)
         "@type": "sendMessage",
         "@extra": extra.as_extra(),
         "chat_id": chat_id.0,
-        "topic_id": Value::Null,
+        "topic_id": message_topic_value(sticker.topic_id),
         "reply_to": input_message_reply_to(sticker.reply_to),
         "options": Value::Null,
         "reply_markup": Value::Null,
@@ -760,6 +777,8 @@ pub struct AnimationSend {
     pub width: i32,
     pub height: i32,
     pub reply_to: Option<MessageId>,
+    /// Parity slice 4: forum topic the send is addressed to (`None` = no topic).
+    pub topic_id: Option<i32>,
 }
 
 /// `getSavedAnimations` — saved GIFs, no query and no third-party key.
@@ -777,7 +796,7 @@ pub fn send_animation(extra: RequestId, chat_id: ChatId, animation: AnimationSen
         "@type": "sendMessage",
         "@extra": extra.as_extra(),
         "chat_id": chat_id.0,
-        "topic_id": Value::Null,
+        "topic_id": message_topic_value(animation.topic_id),
         "reply_to": input_message_reply_to(animation.reply_to),
         "options": Value::Null,
         "reply_markup": Value::Null,
@@ -872,6 +891,7 @@ fn input_video_note_thumbnail(thumb: Option<&VideoNoteThumbnailSend>) -> Value {
 pub fn send_video_note(
     extra: RequestId,
     chat_id: ChatId,
+    topic_id: Option<i32>,
     path: &str,
     note: &VideoNoteSend,
     reply_to: Option<MessageId>,
@@ -880,7 +900,7 @@ pub fn send_video_note(
         "@type": "sendMessage",
         "@extra": extra.as_extra(),
         "chat_id": chat_id.0,
-        "topic_id": Value::Null,
+        "topic_id": message_topic_value(topic_id),
         "reply_to": input_message_reply_to(reply_to),
         "options": Value::Null,
         "reply_markup": Value::Null,
@@ -907,6 +927,7 @@ pub fn send_video_note(
 pub fn send_video(
     extra: RequestId,
     chat_id: ChatId,
+    topic_id: Option<i32>,
     path: &str,
     video: &VideoSend,
     caption: &str,
@@ -916,7 +937,7 @@ pub fn send_video(
         "@type": "sendMessage",
         "@extra": extra.as_extra(),
         "chat_id": chat_id.0,
-        "topic_id": Value::Null,
+        "topic_id": message_topic_value(topic_id),
         "reply_to": input_message_reply_to(reply_to),
         "options": Value::Null,
         "reply_markup": Value::Null,
@@ -930,6 +951,7 @@ pub fn send_video(
 pub fn send_message_album(
     extra: RequestId,
     chat_id: ChatId,
+    topic_id: Option<i32>,
     reply_to: Option<MessageId>,
     input_message_contents: Vec<Value>,
 ) -> String {
@@ -937,7 +959,7 @@ pub fn send_message_album(
         "@type": "sendMessageAlbum",
         "@extra": extra.as_extra(),
         "chat_id": chat_id.0,
-        "topic_id": Value::Null,
+        "topic_id": message_topic_value(topic_id),
         "reply_to": input_message_reply_to(reply_to),
         "options": Value::Null,
         "input_message_contents": input_message_contents
@@ -950,6 +972,7 @@ pub fn send_message_album(
 pub fn send_document(
     extra: RequestId,
     chat_id: ChatId,
+    topic_id: Option<i32>,
     path: &str,
     caption: &str,
     reply_to: Option<MessageId>,
@@ -958,7 +981,7 @@ pub fn send_document(
         "@type": "sendMessage",
         "@extra": extra.as_extra(),
         "chat_id": chat_id.0,
-        "topic_id": Value::Null,
+        "topic_id": message_topic_value(topic_id),
         "reply_to": input_message_reply_to(reply_to),
         "options": Value::Null,
         "reply_markup": Value::Null,
@@ -1011,6 +1034,8 @@ pub struct PollSend<'a> {
     pub is_anonymous: bool,
     pub allows_multiple_answers: bool,
     pub reply_to: Option<MessageId>,
+    /// Parity slice 4: forum topic the send is addressed to (`None` = no topic).
+    pub topic_id: Option<i32>,
 }
 
 /// `sendMessage` + `inputMessagePoll` / `inputPollOption` / `inputPollTypeRegular`
@@ -1040,7 +1065,7 @@ pub fn send_poll(extra: RequestId, chat_id: ChatId, poll: PollSend<'_>) -> Strin
         "@type": "sendMessage",
         "@extra": extra.as_extra(),
         "chat_id": chat_id.0,
-        "topic_id": Value::Null,
+        "topic_id": message_topic_value(poll.topic_id),
         "reply_to": input_message_reply_to(poll.reply_to),
         "options": Value::Null,
         "reply_markup": Value::Null,
@@ -1332,21 +1357,28 @@ pub fn send_chat_action_kind(extra: RequestId, chat_id: ChatId, action: &str) ->
 /// `sendMessage` + `inputMessageVoiceNote` / `inputVoiceNote` / `inputFileLocal`.
 /// `path` must already be an explicitly recorded or picked file.
 /// `waveform_b64` is the 5-bit waveform as TDLib `bytes` (base64); empty if unknown.
-pub fn send_voice_note(
-    extra: RequestId,
-    chat_id: ChatId,
-    path: &str,
-    duration: i32,
-    waveform_b64: &str,
-    caption: &str,
-    reply_to: Option<MessageId>,
-) -> String {
-    let caption_json = if caption.is_empty() {
+/// Voice-note send parameters. Bundled into a struct so the send constructor
+/// stays under clippy's argument limit as topic/reply support grows.
+pub struct VoiceNoteSend<'a> {
+    pub path: &'a str,
+    pub duration: i32,
+    pub waveform_b64: &'a str,
+    pub caption: &'a str,
+    pub reply_to: Option<MessageId>,
+    /// Parity slice 4: forum topic the send is addressed to (`None` = no topic).
+    pub topic_id: Option<i32>,
+}
+
+/// `sendMessage` + `inputMessageVoiceNote` / `inputVoiceNote` / `inputFileLocal`.
+/// `path` must already be an explicitly recorded or picked file.
+/// `waveform_b64` is the 5-bit waveform as TDLib `bytes` (base64); empty if unknown.
+pub fn send_voice_note(extra: RequestId, chat_id: ChatId, voice: VoiceNoteSend<'_>) -> String {
+    let caption_json = if voice.caption.is_empty() {
         Value::Null
     } else {
         json!({
             "@type": "formattedText",
-            "text": caption,
+            "text": voice.caption,
             "entities": []
         })
     };
@@ -1354,8 +1386,8 @@ pub fn send_voice_note(
         "@type": "sendMessage",
         "@extra": extra.as_extra(),
         "chat_id": chat_id.0,
-        "topic_id": Value::Null,
-        "reply_to": input_message_reply_to(reply_to),
+        "topic_id": message_topic_value(voice.topic_id),
+        "reply_to": input_message_reply_to(voice.reply_to),
         "options": Value::Null,
         "reply_markup": Value::Null,
         "input_message_content": {
@@ -1364,10 +1396,10 @@ pub fn send_voice_note(
                 "@type": "inputVoiceNote",
                 "voice_note": {
                     "@type": "inputFileLocal",
-                    "path": path
+                    "path": voice.path
                 },
-                "duration": duration,
-                "waveform": waveform_b64
+                "duration": voice.duration,
+                "waveform": voice.waveform_b64
             },
             "caption": caption_json,
             "self_destruct_type": Value::Null
@@ -1733,7 +1765,7 @@ mod tests {
 
     #[test]
     fn send_text_includes_topic_id_null() {
-        let json = send_text(RequestId(9), ChatId(1), "hi", None);
+        let json = send_text(RequestId(9), ChatId(1), None, "hi", None);
         assert!(json.contains("\"topic_id\":null"));
         assert!(!json.contains("message_thread_id"));
         assert!(json.contains("\"@extra\":\"9\""));
@@ -1741,10 +1773,23 @@ mod tests {
     }
 
     #[test]
+    fn send_text_topic_id_uses_message_topic_forum() {
+        // Parity slice 4: `sendMessage.topic_id` (schema 1.8.67, line 12200)
+        // takes `messageTopicForum{forum_topic_id}` (line 3004).
+        let json = send_text(RequestId(9), ChatId(16), Some(2), "hi", None);
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "sendMessage");
+        assert_eq!(v["chat_id"], 16);
+        assert_eq!(v["topic_id"]["@type"], "messageTopicForum");
+        assert_eq!(v["topic_id"]["forum_topic_id"], 2);
+    }
+
+    #[test]
     fn send_text_reply_uses_input_message_reply_to_message() {
         let json = send_text(
             RequestId(10),
             ChatId(11),
+            None,
             "sounds good",
             Some(MessageId(101)),
         );
@@ -1764,6 +1809,7 @@ mod tests {
         let json = send_photo(
             RequestId(11),
             ChatId(7),
+            None,
             "/tmp/picked.png",
             "CANARY_CAP",
             None,
@@ -1814,6 +1860,7 @@ mod tests {
                 height: 512,
                 thumb: Some((FileId(42), 128, 128)),
                 reply_to: Some(MessageId(101)),
+                topic_id: None,
             },
         );
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
@@ -1846,6 +1893,7 @@ mod tests {
                 height: 512,
                 thumb: None,
                 reply_to: None,
+                topic_id: None,
             },
         );
         let bare: serde_json::Value = serde_json::from_str(&bare).unwrap();
@@ -1866,6 +1914,7 @@ mod tests {
                 width: 240,
                 height: 140,
                 reply_to: Some(MessageId(101)),
+                topic_id: None,
             },
         );
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
@@ -1897,6 +1946,7 @@ mod tests {
         let json = send_video(
             RequestId(17),
             ChatId(7),
+            None,
             "/tmp/picked.mp4",
             &VideoSend {
                 duration: 1,
@@ -1949,6 +1999,7 @@ mod tests {
         let json = send_video_note(
             RequestId(18),
             ChatId(7),
+            None,
             "/tmp/round.mp4",
             &VideoNoteSend {
                 duration: 1,
@@ -1987,6 +2038,7 @@ mod tests {
         let bare = send_video_note(
             RequestId(19),
             ChatId(7),
+            None,
             "/tmp/round.mp4",
             &VideoNoteSend {
                 duration: 0,
@@ -2005,7 +2057,7 @@ mod tests {
 
     #[test]
     fn send_document_shape_matches_1_8_67() {
-        let json = send_document(RequestId(12), ChatId(7), "/tmp/picked.txt", "", None);
+        let json = send_document(RequestId(12), ChatId(7), None, "/tmp/picked.txt", "", None);
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(v["@type"], "sendMessage");
         assert_eq!(v["input_message_content"]["@type"], "inputMessageDocument");
@@ -2653,11 +2705,14 @@ mod tests {
         let json = send_voice_note(
             RequestId(15),
             ChatId(7),
-            "/tmp/picked.ogg",
-            3,
-            "BASE64WAVE",
-            "",
-            Some(MessageId(9)),
+            VoiceNoteSend {
+                path: "/tmp/picked.ogg",
+                duration: 3,
+                waveform_b64: "BASE64WAVE",
+                caption: "",
+                reply_to: Some(MessageId(9)),
+                topic_id: None,
+            },
         );
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(v["@type"], "sendMessage");
@@ -2817,6 +2872,7 @@ mod channel_requests_tests {
                 is_anonymous: true,
                 allows_multiple_answers: false,
                 reply_to: Some(MessageId(101)),
+                topic_id: None,
             },
         );
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();

@@ -105,12 +105,23 @@ pub enum EnvelopePayload {
         /// Parity slice: `chat.photo.small` (`chatPhotoInfo`, schema 1.8.67,
         /// line 762). `None` when the chat has no photo.
         photo: Option<ParsedFile>,
+        /// Parity slice 4: `chat.permissions.can_send_basic_messages`
+        /// (`chatPermissions`, schema 1.8.67, line 1070). Defaults to true
+        /// when the block is absent (the real `chat` object always carries
+        /// it); refreshed by `updateChatPermissions`.
+        can_send_basic_messages: bool,
     },
     /// `updateChatDraftMessage`. Positions are the new chat-list orders.
     UpdateChatDraftMessage {
         chat_id: ChatId,
         draft: Option<ChatDraft>,
         positions: Vec<ChatPositionUpdate>,
+    },
+    /// Parity slice 4: `updateChatPermissions` (schema 1.8.67, line 10500).
+    /// Only `can_send_basic_messages` is kept — the topic-composer gate.
+    UpdateChatPermissions {
+        chat_id: ChatId,
+        can_send_basic_messages: bool,
     },
     /// `updateUser` — Phase 6 keeps the full parsed user (contacts list,
     /// user info panel) in `Session::users`; the bot bit still drives the
@@ -1136,6 +1147,12 @@ pub struct ParsedMessage {
     pub is_outgoing: bool,
     /// Schema `message.is_pinned` (TDLib 1.8.67).
     pub is_pinned: bool,
+    /// Schema `message.topic_id` (TDLib 1.8.67, line 3165): the
+    /// `forum_topic_id` when the topic is `messageTopicForum`, `None` for
+    /// every other `MessageTopic` variant (threads, direct messages, saved
+    /// messages) and when the field is absent. Parity slice 4 routes topic
+    /// messages into the topic's history.
+    pub topic_id: Option<i32>,
     /// Schema `message.media_album_id` (int64). `0` means the message is not in an album.
     pub media_album_id: i64,
     pub content: MessageContent,
@@ -2760,6 +2777,26 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
                 // Parity slice: `chat.photo.small` (`chatPhotoInfo`, schema
                 // 1.8.67, lines 762 and 3627).
                 photo: parse_chat_photo_small(chat.get("photo")),
+                // Parity slice 4: `chat.permissions.can_send_basic_messages`
+                // (schema 1.8.67, line 1070). Lenient default true — the
+                // real `chat` object always carries `permissions`.
+                can_send_basic_messages: chat
+                    .get("permissions")
+                    .and_then(|p| p.get("can_send_basic_messages"))
+                    .and_then(Value::as_bool)
+                    .unwrap_or(true),
+            })
+        }
+        "updateChatPermissions" => {
+            // Parity slice 4: `updateChatPermissions` (schema 1.8.67, line
+            // 10500) — keep the send-permission gate fresh.
+            let permissions = value.get("permissions");
+            Ok(EnvelopePayload::UpdateChatPermissions {
+                chat_id: ChatId(int53(value.get("chat_id"))?),
+                can_send_basic_messages: permissions
+                    .and_then(|p| p.get("can_send_basic_messages"))
+                    .and_then(Value::as_bool)
+                    .unwrap_or(true),
             })
         }
         "ok" => Ok(EnvelopePayload::Ok),
@@ -3666,6 +3703,7 @@ fn parse_message(value: &Value) -> Result<ParsedMessage, ParseError> {
             .and_then(Value::as_bool)
             .unwrap_or(false),
         media_album_id: int64(value.get("media_album_id")).unwrap_or(0),
+        topic_id: parse_message_topic(value.get("topic_id")),
         content,
         files,
         reply_to: parse_reply_to(value.get("reply_to")),
@@ -3673,6 +3711,24 @@ fn parse_message(value: &Value) -> Result<ParsedMessage, ParseError> {
         interaction_info: parse_interaction_info(value.get("interaction_info")),
         reply_markup: parse_reply_markup(value.get("reply_markup")),
     })
+}
+
+/// Parity slice 4: `message.topic_id` (TDLib 1.8.67, lines 3001–3010).
+/// Returns the `forum_topic_id` for `messageTopicForum`; every other
+/// variant (thread, direct messages, saved messages) and a missing/null
+/// field map to `None` — Quill only models forum topics.
+fn parse_message_topic(value: Option<&Value>) -> Option<i32> {
+    let value = value?;
+    if value.is_null() {
+        return None;
+    }
+    match value.get("@type").and_then(Value::as_str) {
+        Some("messageTopicForum") => value
+            .get("forum_topic_id")
+            .and_then(Value::as_i64)
+            .map(|id| id as i32),
+        _ => None,
+    }
 }
 
 fn parse_interaction_info(value: Option<&Value>) -> Option<MessageInteractionInfo> {
@@ -5340,6 +5396,80 @@ mod tests {
             .expect("sendMessage");
         assert!(send.contains("topic_id:MessageTopic"));
         assert!(!send.contains("message_thread_id"));
+    }
+
+    #[test]
+    fn parse_message_topic_forum_yields_forum_topic_id() {
+        // Parity slice 4: `message.topic_id` (schema 1.8.67, lines 3001–3010
+        // and 3165) — only `messageTopicForum` maps to `Some`.
+        let forum = parse_envelope(
+            r#"{"@type":"message","id":7,"chat_id":16,"is_outgoing":false,"topic_id":{"@type":"messageTopicForum","forum_topic_id":2},"content":{"@type":"messageText","text":{"@type":"formattedText","text":"hi","entities":[]}}}"#,
+        )
+        .unwrap();
+        match forum.payload {
+            EnvelopePayload::Message(message) => assert_eq!(message.topic_id, Some(2)),
+            other => panic!("{other:?}"),
+        }
+        let thread = parse_envelope(
+            r#"{"@type":"message","id":8,"chat_id":16,"is_outgoing":false,"topic_id":{"@type":"messageTopicThread","message_thread_id":5},"content":{"@type":"messageText","text":{"@type":"formattedText","text":"hi","entities":[]}}}"#,
+        )
+        .unwrap();
+        match thread.payload {
+            EnvelopePayload::Message(message) => assert_eq!(message.topic_id, None),
+            other => panic!("{other:?}"),
+        }
+        let plain = parse_envelope(
+            r#"{"@type":"message","id":9,"chat_id":16,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"hi","entities":[]}}}"#,
+        )
+        .unwrap();
+        match plain.payload {
+            EnvelopePayload::Message(message) => assert_eq!(message.topic_id, None),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn update_new_chat_parses_send_permission() {
+        // Parity slice 4: `chat.permissions.can_send_basic_messages`
+        // (schema 1.8.67, line 1070).
+        let env = parse_envelope(
+            r#"{"@type":"updateNewChat","chat":{"id":16,"title":"Demo forum","type":{"@type":"chatTypeSupergroup","supergroup_id":16,"is_channel":false},"permissions":{"@type":"chatPermissions","can_send_basic_messages":false},"unread_count":0}}"#,
+        )
+        .unwrap();
+        match env.payload {
+            EnvelopePayload::UpdateNewChat {
+                can_send_basic_messages,
+                ..
+            } => assert!(!can_send_basic_messages),
+            other => panic!("{other:?}"),
+        }
+        // Absent block defaults to true (lenient parsing).
+        let env = parse_envelope(
+            r#"{"@type":"updateNewChat","chat":{"id":16,"title":"Demo forum","type":{"@type":"chatTypeSupergroup","supergroup_id":16,"is_channel":false},"unread_count":0}}"#,
+        )
+        .unwrap();
+        match env.payload {
+            EnvelopePayload::UpdateNewChat {
+                can_send_basic_messages,
+                ..
+            } => assert!(can_send_basic_messages),
+            other => panic!("{other:?}"),
+        }
+        // `updateChatPermissions` (schema 1.8.67, line 10500).
+        let env = parse_envelope(
+            r#"{"@type":"updateChatPermissions","chat_id":16,"permissions":{"@type":"chatPermissions","can_send_basic_messages":true}}"#,
+        )
+        .unwrap();
+        match env.payload {
+            EnvelopePayload::UpdateChatPermissions {
+                chat_id,
+                can_send_basic_messages,
+            } => {
+                assert_eq!(chat_id, ChatId(16));
+                assert!(can_send_basic_messages);
+            }
+            other => panic!("{other:?}"),
+        }
     }
 
     #[test]
