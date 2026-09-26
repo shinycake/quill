@@ -12,10 +12,11 @@ use crate::telegram::envelope::{
     ChatFolderSpec, ChatJoinResult, ChatKind, ChatList, ChatNotificationSettings,
     ChatPositionUpdate, ConnectionState, EnvelopePayload, ErrorClass, ForumTopic, InlineKeyboard,
     MessageContent, MessageForwardInfo, MessageInteractionInfo, MessageOrigin, MessageReaction,
-    MessageReplyTo, MessageSender, NotificationSettingsScope, NotificationSound, ParsedChatMember,
-    ParsedFile, ParsedMessage, ParsedSecretChat, ParsedStory, ParsedUser, Poll, ReportOption,
-    ReportSponsoredResult, ScopeNotificationSettings, SecretChatState, SponsoredMessage,
-    StickerFormat, StickerItem, StickerSetInfo, StoryAvailableReactionView, StoryListView,
+    MessageReplyTo, MessageSelfDestruct, MessageSender, NotificationSettingsScope,
+    NotificationSound, ParsedChatMember, ParsedFile, ParsedMessage, ParsedSecretChat, ParsedStory,
+    ParsedUser, Poll, ReportOption, ReportSponsoredResult, ScopeNotificationSettings,
+    SecretChatState, SponsoredMessage, StickerFormat, StickerItem, StickerSetInfo,
+    StoryAvailableReactionView, StoryListView,
 };
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
@@ -977,6 +978,11 @@ pub struct HistoryMessage {
     /// Schema `message.reply_markup` — `replyMarkupInlineKeyboard` only
     /// (Phase 3.2). Rendered as the button grid under the message.
     pub reply_markup: Option<InlineKeyboard>,
+    /// Phase B3: schema `message.self_destruct_type` /
+    /// `message.self_destruct_in` (TDLib 1.8.67 lines 3146–3147 / 3165).
+    /// `None` for ordinary messages. Self-destructed rows leave via
+    /// `updateDeleteMessages` (the normal delete path).
+    pub self_destruct: Option<MessageSelfDestruct>,
 }
 
 impl HistoryMessage {
@@ -1001,6 +1007,23 @@ impl HistoryMessage {
         self.interaction_info
             .as_ref()
             .is_some_and(|info| info.chosen_emoji(emoji))
+    }
+
+    /// Phase B3: timer badge for self-destructing media rows (`None` for
+    /// ordinary messages). The `self_destruct_in` countdown decays locally
+    /// against `now_ms` (`slow_mode_delay_expires_in` pattern, Phase A1);
+    /// TDLib removes the row via `updateDeleteMessages` when it fires.
+    pub fn self_destruct_badge(&self, now_ms: u64) -> Option<String> {
+        self.self_destruct.as_ref().map(|sd| sd.badge_label(now_ms))
+    }
+
+    /// Phase B3: whether the row still has a live (not yet expired)
+    /// `self_destruct_in` countdown — drives the 1-second render tick.
+    pub fn has_live_self_destruct(&self, now_ms: u64) -> bool {
+        self.self_destruct
+            .as_ref()
+            .and_then(|sd| sd.remaining_secs(now_ms))
+            .is_some_and(|left| left > 0)
     }
 }
 
@@ -1133,6 +1156,9 @@ pub struct SearchMessageHit {
     pub is_pinned: bool,
     pub media_album_id: i64,
     pub reply_markup: Option<InlineKeyboard>,
+    /// Phase B3: carried through from `ParsedMessage` so search hits can
+    /// become history rows without losing the timer badge.
+    pub self_destruct: Option<MessageSelfDestruct>,
 }
 
 impl SearchMessageHit {
@@ -1149,6 +1175,7 @@ impl SearchMessageHit {
             is_pinned: message.is_pinned,
             media_album_id: message.media_album_id,
             reply_markup: message.reply_markup.clone(),
+            self_destruct: message.self_destruct,
         }
     }
 
@@ -1165,6 +1192,7 @@ impl SearchMessageHit {
             is_pinned: self.is_pinned,
             media_album_id: self.media_album_id,
             reply_markup: self.reply_markup,
+            self_destruct: self.self_destruct,
         }
     }
 }
@@ -2150,6 +2178,21 @@ impl Session {
         } else {
             None
         }
+    }
+
+    /// Phase B3: whether the currently open chat's loaded history contains
+    /// any message with a still-live `self_destruct_in` countdown — drives
+    /// the 1-second render tick that keeps the timer badges fresh.
+    pub fn open_chat_has_live_self_destruct(&self, now_ms: u64) -> bool {
+        let Some(open) = self.open_chat else {
+            return false;
+        };
+        self.histories.get(&open.0).is_some_and(|history| {
+            history
+                .messages
+                .values()
+                .any(|message| message.has_live_self_destruct(now_ms))
+        })
     }
 
     /// Phase 6: contacts-list rows in server order with a name/status view
@@ -4563,6 +4606,7 @@ impl Session {
                         is_pinned: message.is_pinned,
                         media_album_id: message.media_album_id,
                         reply_markup: message.reply_markup.clone(),
+                        self_destruct: message.self_destruct,
                     })
                     .collect()
             })
@@ -4652,6 +4696,7 @@ fn history_message(message: ParsedMessage, pending: bool) -> HistoryMessage {
         is_pinned: message.is_pinned,
         media_album_id: message.media_album_id,
         reply_markup: message.reply_markup,
+        self_destruct: message.self_destruct,
     }
 }
 
@@ -4904,6 +4949,52 @@ mod tests {
         );
         assert!(!session.histories.get(&1).unwrap().messages.contains_key(&9));
         assert!(session.histories.get(&1).unwrap().tombstones.contains(&9));
+    }
+
+    /// Phase B3: a self-destructing `messagePhoto` (as it arrives in a
+    /// 1:1 chat — `is_secret` content flag plus the message-level
+    /// `self_destruct_type` / `self_destruct_in`) keeps the timer on the
+    /// history row, and the `updateDeleteMessages` TDLib emits when the
+    /// timer fires removes the row through the normal delete path.
+    #[test]
+    fn self_destructing_photo_disappears_via_delete_update() {
+        use crate::telegram::envelope::SelfDestructKind;
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        session.open_chat(ChatId(41));
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateNewMessage","message":{"id":901,"chat_id":41,"is_outgoing":false,"content":{"@type":"messagePhoto","photo":{"@type":"photo","has_stickers":false,"sizes":[]},"caption":{"@type":"formattedText","text":"","entities":[]},"show_caption_above_media":false,"has_spoiler":false,"is_secret":true},"self_destruct_type":{"@type":"messageSelfDestructTypeTimer","self_destruct_time":60},"self_destruct_in":42.5}}"#,
+        );
+        let history = session.histories.get(&41).unwrap();
+        let row = history.messages.get(&901).unwrap();
+        let sd = row.self_destruct.expect("timer parsed on history row");
+        assert_eq!(sd.kind, SelfDestructKind::Timer { secs: 60 });
+        assert!(row.has_live_self_destruct(unix_ms_now()));
+        assert!(session.open_chat_has_live_self_destruct(unix_ms_now()));
+        // The badge label comes from the latest `self_destruct_in`.
+        let label = row
+            .self_destruct_badge(sd.fetched_at_ms)
+            .expect("badge for timer row");
+        assert_eq!(label, "⏱ 43s left");
+        // Timer fires server-side: the row leaves via `updateDeleteMessages`.
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateDeleteMessages","chat_id":41,"message_ids":[901],"is_permanent":true,"from_cache":false}"#,
+        );
+        assert!(
+            !session
+                .histories
+                .get(&41)
+                .unwrap()
+                .messages
+                .contains_key(&901)
+        );
+        assert!(!session.open_chat_has_live_self_destruct(unix_ms_now()));
     }
 
     #[test]
@@ -6479,6 +6570,7 @@ mod tests {
             is_pinned: false,
             media_album_id: 0,
             reply_markup: None,
+            self_destruct: None,
         });
         assert_eq!(
             session.begin_chat_search_jump(MessageId(70)),
@@ -6503,6 +6595,7 @@ mod tests {
             is_pinned: false,
             media_album_id: 0,
             reply_markup: None,
+            self_destruct: None,
         });
         assert_eq!(
             session.begin_chat_search_jump(MessageId(80)),

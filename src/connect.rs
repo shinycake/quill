@@ -2727,12 +2727,31 @@ impl<S: JsonSender> ConnectDriver<S> {
             .request(RequestPurpose::SendMessage, Some(chat_id));
         // Parity slice 4: sends from a topic view address the open topic.
         let topic_id = self.send_topic(chat_id);
+        // Phase B3: TDLib accepts `inputMessagePhoto`/`inputMessageVideo`
+        // `self_destruct_type` only in `chatTypePrivate` chats (its runtime
+        // check is `dialog_id.get_type() != DialogType::User` → 400, and the
+        // schema says "private chats only"). The choice is stripped for
+        // every other chat kind here (defense in depth — the composer
+        // picker is gated the same way), so a stale snapshot can never
+        // turn a secret-chat send into a 400.
+        let self_destruct = self
+            .session
+            .chats
+            .get(&chat_id.0)
+            .filter(|chat| matches!(chat.kind, ChatKind::Private { .. }))
+            .and(snapshot.self_destruct);
         // Contains caption / path — do not log `json`.
         let json = match (snapshot.attachment.as_ref(), media_path.as_deref()) {
             (Some(att), Some(path)) => match att.kind {
-                AttachmentKind::Photo => {
-                    send_photo(extra, chat_id, topic_id, path, caption, reply_to)
-                }
+                AttachmentKind::Photo => send_photo(
+                    extra,
+                    chat_id,
+                    topic_id,
+                    path,
+                    caption,
+                    reply_to,
+                    self_destruct,
+                ),
                 AttachmentKind::Document => {
                     send_document(extra, chat_id, topic_id, path, caption, reply_to)
                 }
@@ -2751,6 +2770,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                             width: probe.width,
                             height: probe.height,
                             supports_streaming: probe.supports_streaming,
+                            self_destruct,
                         },
                         caption,
                         reply_to,
@@ -2798,6 +2818,15 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         let caption = snapshot.caption();
         let last = snapshot.album.len() - 1;
+        // Phase B3: same private-chat gate as `send_snapshot` — the timer
+        // applies per album item (the schema allows it per
+        // `inputMessagePhoto`/`inputMessageVideo`).
+        let self_destruct = self
+            .session
+            .chats
+            .get(&chat_id.0)
+            .filter(|chat| matches!(chat.kind, ChatKind::Private { .. }))
+            .and(snapshot.self_destruct);
         let mut contents = Vec::with_capacity(snapshot.album.len());
         for (index, att) in snapshot.album.iter().enumerate() {
             let path = att
@@ -2805,7 +2834,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .ok_or(ConnectSendError::InvalidRequest)?;
             let item_caption = if index == last { caption } else { "" };
             let content = match att.kind {
-                AttachmentKind::Photo => input_message_photo(&path, item_caption),
+                AttachmentKind::Photo => input_message_photo(&path, item_caption, self_destruct),
                 AttachmentKind::Video => {
                     let probe = crate::video::probe_local_video(&att.path)
                         .map_err(|_| ConnectSendError::InvalidRequest)?;
@@ -2816,6 +2845,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                             width: probe.width,
                             height: probe.height,
                             supports_streaming: probe.supports_streaming,
+                            self_destruct,
                         },
                         item_caption,
                     )
