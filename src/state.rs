@@ -11,7 +11,7 @@ use crate::telegram::envelope::{
     ChatNotificationSettings, ChatPositionUpdate, ConnectionState, EnvelopePayload, ErrorClass,
     InlineKeyboard, MessageContent, MessageForwardInfo, MessageInteractionInfo, MessageOrigin,
     MessageReaction, MessageReplyTo, MessageSender, ParsedChatMember, ParsedFile, ParsedMessage,
-    ReportOption, ReportSponsoredResult, SponsoredMessage, StickerFormat, StickerItem,
+    Poll, ReportOption, ReportSponsoredResult, SponsoredMessage, StickerFormat, StickerItem,
     StickerSetInfo,
 };
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -53,6 +53,8 @@ pub enum RequestPurpose {
     RemoveMessageReaction,
     /// `pinChatMessage`. Response is `ok`; pin via `updateMessageIsPinned`.
     PinChatMessage,
+    /// `setPollAnswer`. Response is `ok`; counts refresh via `updatePoll`.
+    SetPollAnswer,
     /// `unpinChatMessage`. Response is `ok`; pin via `updateMessageIsPinned`.
     UnpinChatMessage,
     /// `setChatNotificationSettings`. Response is `ok`; mute via
@@ -1644,6 +1646,13 @@ impl Session {
                     history.update_reply_markup(message_id, reply_markup);
                 }
             }
+            EnvelopePayload::UpdatePoll { poll } => {
+                // Phase 4.2: `updatePoll` (schema 1.8.67 line 11179) carries
+                // only the new `poll` — no chat or message id — so every
+                // loaded history is scanned for a `messagePoll` with a
+                // matching poll id and the poll is replaced in place.
+                self.apply_update_poll(poll);
+            }
             EnvelopePayload::UpdateMessageContent {
                 chat_id,
                 message_id,
@@ -2903,6 +2912,26 @@ impl Session {
     pub fn reply_quote_preview(&self, message: &HistoryMessage) -> Option<String> {
         let reply = message.reply_to.as_ref()?;
         Some(self.resolve_reply_preview(reply, message.chat_id))
+    }
+
+    /// Phase 4.2: apply `updatePoll` (schema 1.8.67 line 11179). The update
+    /// carries no chat or message id, so every loaded history is scanned for
+    /// a `messagePoll` whose `poll.id` matches; the poll is replaced in
+    /// place (vote counts, percentages, chosen marks). Returns the number
+    /// of rows updated.
+    pub fn apply_update_poll(&mut self, poll: Poll) -> usize {
+        let mut updated = 0;
+        for history in self.histories.values_mut() {
+            for message in history.messages.values_mut() {
+                if let MessageContent::Poll(poll_content) = &mut message.content
+                    && poll_content.poll.id == poll.id
+                {
+                    poll_content.poll = poll.clone();
+                    updated += 1;
+                }
+            }
+        }
+        updated
     }
 
     pub fn resolve_reply_preview(&self, reply: &MessageReplyTo, fallback_chat: ChatId) -> String {
@@ -4814,5 +4843,51 @@ mod tests {
             r#"{"@type":"updateNewChat","chat":{"id":13,"title":"News","type":{"@type":"chatTypeSupergroup","supergroup_id":13,"is_channel":true},"unread_count":0,"draft_message":{"@type":"draftMessage","reply_to":null,"date":1,"content":{"@type":"draftMessageContentText","text":{"@type":"formattedText","text":"nope","entities":[]},"link_preview_options":null},"effect_id":"0","suggested_post_info":null}}}"#,
         );
         assert!(!session.accepts_composer_draft(ChatId(13)));
+    }
+
+    #[test]
+    fn update_poll_refreshes_counts_and_chosen_marks() {
+        // Phase 4.2: `updatePoll` carries no chat/message id — the reducer
+        // scans loaded histories and replaces the matching `poll.id` in
+        // place (vote counts, percentages, chosen marks).
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateNewMessage","message":{"id":106,"chat_id":15,"is_outgoing":false,"content":{"@type":"messagePoll","poll":{"@type":"poll","id":9001,"question":{"@type":"formattedText","text":"Lunch?","entities":[]},"options":[{"@type":"pollOption","id":"a","text":{"@type":"formattedText","text":"Sushi","entities":[]},"voter_count":12,"vote_percentage":55,"is_chosen":true},{"@type":"pollOption","id":"b","text":{"@type":"formattedText","text":"Pizza","entities":[]},"voter_count":7,"vote_percentage":32,"is_chosen":false}],"total_voter_count":19,"is_anonymous":true,"allows_multiple_answers":false,"allows_revoting":true,"is_closed":false,"type":{"@type":"pollTypeRegular"}},"description":{"@type":"formattedText","text":"","entities":[]},"can_add_option":false}}}"#,
+        );
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updatePoll","poll":{"@type":"poll","id":9001,"question":{"@type":"formattedText","text":"Lunch?","entities":[]},"options":[{"@type":"pollOption","id":"a","text":{"@type":"formattedText","text":"Sushi","entities":[]},"voter_count":13,"vote_percentage":56,"is_chosen":false},{"@type":"pollOption","id":"b","text":{"@type":"formattedText","text":"Pizza","entities":[]},"voter_count":10,"vote_percentage":43,"is_chosen":true}],"total_voter_count":23,"is_anonymous":true,"allows_multiple_answers":false,"allows_revoting":true,"is_closed":true,"type":{"@type":"pollTypeRegular"}}}"#,
+        );
+        let history = session.histories.get(&15).unwrap();
+        let message = history.messages.get(&106).unwrap();
+        let MessageContent::Poll(poll_content) = &message.content else {
+            panic!("{:?}", message.content);
+        };
+        let poll = &poll_content.poll;
+        assert_eq!(poll.total_voter_count, 23);
+        assert_eq!(poll.options[1].voter_count, 10);
+        assert_eq!(poll.options[1].vote_percentage, 43);
+        assert!(!poll.options[0].is_chosen);
+        assert!(poll.options[1].is_chosen);
+        assert!(poll.is_closed);
+    }
+
+    #[test]
+    fn update_poll_with_unknown_id_updates_nothing() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updatePoll","poll":{"@type":"poll","id":9999,"question":{"@type":"formattedText","text":"Ghost","entities":[]},"options":[],"total_voter_count":0,"is_anonymous":true,"allows_multiple_answers":false,"allows_revoting":false,"is_closed":false,"type":{"@type":"pollTypeRegular"}}}"#,
+        );
+        assert!(session.histories.values().all(|h| h.messages.is_empty()));
     }
 }

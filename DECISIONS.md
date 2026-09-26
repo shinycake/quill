@@ -744,3 +744,57 @@ Research snapshot 2026-09-16, pin recheck **2026-09-17**.
   etc. — parsed types outside 4.1 are ignored); syntax highlighting for
   `preCode` languages; entity styling in forward/quote strips (those are
   plain text today).
+
+## Phase 4.2 — Polls (2026-09-26)
+
+- **Rationale:** `messagePoll` is a first-class Telegram message content
+  type. This slice adds poll display (question, per-option bars with
+  percentages and voter counts, chosen/correct marks, open/closed and
+  anonymous state), voting via `setPollAnswer`, live `updatePoll` /
+  `updatePollAnswer` refresh, and regular-poll creation from the
+  composer.
+- **Schema (1.8.67, verified in `schema/td_api.tl`):**
+  - `pollOption` (line 456), `inputPollOption` (462),
+    `pollTypeRegular` (468), `pollTypeQuiz` (475),
+    `inputPollTypeRegular` (481), `inputPollTypeQuiz` (488),
+    `poll` (711), `messagePoll` (5241), `inputMessagePoll` (6193),
+    `updatePoll` (11179), `updatePollAnswer` (11186),
+    `setPollAnswer` (12932)
+  - Critical distinction: `pollOption.id` is a **string**, while
+    `setPollAnswer.option_ids` are **zero-based integer positions**
+    (`vector<int32>`).
+- **Model (`src/telegram/envelope.rs`):** `Poll`, `PollOption`,
+  `PollType::{Regular, Quiz { correct_option_ids }}`,
+  `MessageContent::Poll`; `EnvelopePayload::UpdatePoll`. Replay tests
+  cover regular, quiz, closed, and `updatePoll` JSON.
+- **Voting semantics (verified against TDLib `PollManager.cpp`,
+  `set_poll_answer` ~lines 1233–1281):**
+  - Quiz answers submit immediately on tap (single-tap, even when
+    `allows_multiple_answers` is false); regular polls go through
+    `poll_answer_for_tap` which toggles membership for multiple-answer
+    polls and replaces for single-answer polls.
+  - When `allows_revoting == false`, any tap that changes the current
+    vote is a local no-op (TDLib rejects with "Can't retract vote in
+    the poll" / "Can't revote in a quiz"); only re-tapping the exact
+    current selection is forwarded.
+  - Optimistic local `chosen` state, corrected by `updatePoll`
+    broadcasts (`Session::apply_update_poll` scans loaded histories by
+    `poll.id`).
+- **Creation (`send_poll` / `PollSend`, composer Poll button → dialog):**
+  regular polls only (question 1–255 chars, 2–10 non-empty options,
+  anonymous / multiple-answers toggles); validated client-side before
+  the `sendMessage` + `inputMessagePoll` request. Quiz creation is out
+  of scope.
+- **Rendering (`poll_body`, `poll_option_row`):** question, type/status
+  line ("Poll · N votes · anonymous"), per-option rows with percentage
+  + voter count inline ("55% · 12 votes"), fraction bar (blue fill when
+  chosen), ✓ on the user's choice, green "· correct answer" suffix on
+  the quiz correct option; closed polls show results without a voting
+  affordance. Polls are excluded from edit-message support.
+- **Screenshot:** `docs/screenshots/ready-poll.png` — a dedicated
+  "Demo polls" chat with an open voted regular poll and a closed quiz
+  poll (injected JSON through the real reducer), driven by
+  `quill --screenshot-demo ready-poll`.
+- **Out of this slice (→ future):** quiz creation with correct-option
+  authoring; media polls / scheduled polls; poll editing; quiz
+  explanation display; `updatePollAnswer` voter-list detail.

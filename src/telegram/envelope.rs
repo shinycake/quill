@@ -58,6 +58,12 @@ pub enum EnvelopePayload {
         edit_date: i32,
         reply_markup: Option<InlineKeyboard>,
     },
+    /// `updatePoll` (TDLib 1.8.67, `schema/td_api.tl:11179`): vote counts /
+    /// chosen marks changed. Carries only the new `poll` — no chat or
+    /// message id — so the reducer matches it by `poll.id` (Phase 4.2).
+    UpdatePoll {
+        poll: Poll,
+    },
     UpdateChatPosition(ChatPositionUpdate),
     UpdateChatTitle {
         chat_id: ChatId,
@@ -851,7 +857,11 @@ pub enum MessageContent {
     VideoNote(VideoNoteContent),
     VoiceNote(VoiceNoteContent),
     Audio(AudioContent),
-    Unsupported { type_name: String },
+    /// Phase 4.2: `messagePoll` (TDLib 1.8.67, `schema/td_api.tl:5241`).
+    Poll(PollContent),
+    Unsupported {
+        type_name: String,
+    },
 }
 
 /// `formattedText` plus optional `messageText.link_preview` (TDLib 1.8.67).
@@ -882,6 +892,71 @@ impl From<String> for TextContent {
     fn from(text: String) -> Self {
         Self::plain(text)
     }
+}
+
+/// `pollOption` (TDLib 1.8.67, `schema/td_api.tl:456`). `media`,
+/// `recent_voter_ids`, `is_being_chosen`, `author`, and `addition_date` are
+/// not kept — Quill renders the bar, the count, and the chosen mark only.
+/// Note: `id` is a string identifier for the option, while `setPollAnswer`
+/// takes 0-based **indexes** into `poll.options` (schema line 12932).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PollOption {
+    pub id: String,
+    pub text: String,
+    pub voter_count: i32,
+    pub vote_percentage: i32,
+    pub is_chosen: bool,
+}
+
+/// `pollType` (TDLib 1.8.67, `schema/td_api.tl:468` / `:475`).
+/// `pollTypeQuiz.explanation` and `explanation_media` are not kept.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PollType {
+    Regular,
+    Quiz { correct_option_ids: Vec<i32> },
+}
+
+/// `poll` (TDLib 1.8.67, `schema/td_api.tl:711`). `recent_voter_ids`,
+/// `can_get_voters`, `can_see_results`, `members_only`, `country_codes`,
+/// `option_order`, `open_period`, `close_date`, and `vote_restriction_reason`
+/// are not kept in this slice.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Poll {
+    pub id: i64,
+    pub question: String,
+    pub options: Vec<PollOption>,
+    pub total_voter_count: i32,
+    pub is_anonymous: bool,
+    pub allows_multiple_answers: bool,
+    pub allows_revoting: bool,
+    pub is_closed: bool,
+    pub poll_type: PollType,
+}
+
+impl Poll {
+    /// 0-based indexes of the options currently marked chosen — the values
+    /// `setPollAnswer` expects (schema line 12932).
+    pub fn chosen_indexes(&self) -> Vec<i32> {
+        self.options
+            .iter()
+            .enumerate()
+            .filter(|(_, option)| option.is_chosen)
+            .map(|(index, _)| index as i32)
+            .collect()
+    }
+
+    /// The poll can receive a vote from the user.
+    pub fn can_vote(&self) -> bool {
+        !self.is_closed
+    }
+}
+
+/// `messagePoll` (TDLib 1.8.67, `schema/td_api.tl:5241`). `media` is not
+/// rendered in this slice (photo/document/… attachments on polls stay out).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PollContent {
+    pub poll: Poll,
+    pub description: String,
 }
 
 /// `linkPreview` card. Photo comes from `type` when that constructor carries a `photo`.
@@ -1047,6 +1122,14 @@ impl MessageContent {
                 audio.file_name.chars().take(80).collect()
             }
             MessageContent::Audio(_) => "Audio".into(),
+            MessageContent::Poll(poll) => {
+                let question = poll.poll.question.trim();
+                if question.is_empty() {
+                    "Poll".into()
+                } else {
+                    question.chars().take(80).collect()
+                }
+            }
             MessageContent::Unsupported { type_name } => format!("({type_name})"),
         }
     }
@@ -1549,6 +1632,9 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
             message_id: MessageId(int53(value.get("message_id"))?),
             edit_date: value.get("edit_date").and_then(Value::as_i64).unwrap_or(0) as i32,
             reply_markup: parse_reply_markup(value.get("reply_markup")),
+        }),
+        "updatePoll" => Ok(EnvelopePayload::UpdatePoll {
+            poll: parse_poll(value.get("poll")).ok_or(ParseError::MissingField)?,
         }),
         "updateChatPosition" => Ok(EnvelopePayload::UpdateChatPosition(parse_position(&value)?)),
         "updateChatTitle" => Ok(EnvelopePayload::UpdateChatTitle {
@@ -2503,6 +2589,7 @@ fn parse_content(value: Option<&Value>) -> (MessageContent, Vec<ParsedFile>) {
         Some("messageVideoNote") => parse_message_video_note(value),
         Some("messageVoiceNote") => parse_message_voice_note(value),
         Some("messageAudio") => parse_message_audio(value),
+        Some("messagePoll") => parse_message_poll(value),
         Some(other) => (
             MessageContent::Unsupported {
                 type_name: other.to_string(),
@@ -2548,6 +2635,109 @@ fn parse_caption(value: Option<&Value>) -> (String, Vec<TextEntity>) {
     let text = parse_formatted_text(value);
     let entities = parse_text_entities(&text, value);
     (text, entities)
+}
+
+/// `pollOption` (TDLib 1.8.67, `schema/td_api.tl:456`).
+fn parse_poll_option(value: &Value) -> PollOption {
+    PollOption {
+        id: value
+            .get("id")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string(),
+        text: parse_formatted_text(value.get("text")),
+        voter_count: value
+            .get("voter_count")
+            .and_then(Value::as_i64)
+            .unwrap_or(0) as i32,
+        vote_percentage: value
+            .get("vote_percentage")
+            .and_then(Value::as_i64)
+            .unwrap_or(0) as i32,
+        is_chosen: value
+            .get("is_chosen")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+    }
+}
+
+/// `pollType` (TDLib 1.8.67, `schema/td_api.tl:468` / `:475`).
+fn parse_poll_type(value: Option<&Value>) -> PollType {
+    match value.and_then(|v| v.get("@type")).and_then(Value::as_str) {
+        Some("pollTypeQuiz") => PollType::Quiz {
+            correct_option_ids: value
+                .and_then(|v| v.get("correct_option_ids"))
+                .and_then(Value::as_array)
+                .map(|ids| {
+                    ids.iter()
+                        .filter_map(|id| id.as_i64())
+                        .map(|n| n as i32)
+                        .collect()
+                })
+                .unwrap_or_default(),
+        },
+        _ => PollType::Regular,
+    }
+}
+
+/// `poll` (TDLib 1.8.67, `schema/td_api.tl:711`). `None` when the `poll`
+/// object itself is missing or null.
+fn parse_poll(value: Option<&Value>) -> Option<Poll> {
+    let value = value?;
+    if value.is_null() {
+        return None;
+    }
+    Some(Poll {
+        id: int64(value.get("id")).unwrap_or(0),
+        question: parse_formatted_text(value.get("question")),
+        options: value
+            .get("options")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .map(parse_poll_option)
+            .collect(),
+        total_voter_count: value
+            .get("total_voter_count")
+            .and_then(Value::as_i64)
+            .unwrap_or(0) as i32,
+        is_anonymous: value
+            .get("is_anonymous")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        allows_multiple_answers: value
+            .get("allows_multiple_answers")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        allows_revoting: value
+            .get("allows_revoting")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        is_closed: value
+            .get("is_closed")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        poll_type: parse_poll_type(value.get("type")),
+    })
+}
+
+/// `messagePoll` (TDLib 1.8.67, `schema/td_api.tl:5241`).
+fn parse_message_poll(value: &Value) -> (MessageContent, Vec<ParsedFile>) {
+    match parse_poll(value.get("poll")) {
+        Some(poll) => (
+            MessageContent::Poll(PollContent {
+                poll,
+                description: parse_formatted_text(value.get("description")),
+            }),
+            Vec::new(),
+        ),
+        None => (
+            MessageContent::Unsupported {
+                type_name: "messagePoll".into(),
+            },
+            Vec::new(),
+        ),
+    }
 }
 
 /// Keep the entity types Quill renders (Phase 4.1): links plus the style
@@ -4858,6 +5048,85 @@ mod channel_envelope_tests {
         let env = parse_envelope(r#"{"@type":"user","id":777,"is_bot":false}"#).unwrap();
         match env.payload {
             EnvelopePayload::Me { user_id } => assert_eq!(user_id, 777),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    // Phase 4.2: `messagePoll` (schema 1.8.67 line 5241), `poll` (line 711),
+    // `pollOption` (line 456), `pollTypeRegular` (line 468).
+    fn message_poll_json(closed: bool) -> String {
+        format!(
+            r#"{{"@type":"updateNewMessage","message":{{"id":106,"chat_id":15,"is_outgoing":false,"content":{{"@type":"messagePoll","poll":{{"@type":"poll","id":9001,"question":{{"@type":"formattedText","text":"Lunch?","entities":[]}},"options":[{{"@type":"pollOption","id":"a","text":{{"@type":"formattedText","text":"Sushi","entities":[]}},"voter_count":12,"vote_percentage":55,"is_chosen":true}},{{"@type":"pollOption","id":"b","text":{{"@type":"formattedText","text":"Pizza","entities":[]}},"voter_count":7,"vote_percentage":32,"is_chosen":false}}],"total_voter_count":19,"is_anonymous":true,"allows_multiple_answers":false,"allows_revoting":true,"is_closed":{closed},"type":{{"@type":"pollTypeRegular"}}}},"description":{{"@type":"formattedText","text":"","entities":[]}},"can_add_option":false}}}}}}"#
+        )
+    }
+
+    #[test]
+    fn message_poll_parses_regular_open_with_chosen_option() {
+        let env = parse_envelope(&message_poll_json(false)).unwrap();
+        match env.payload {
+            EnvelopePayload::UpdateNewMessage(message) => {
+                let MessageContent::Poll(poll_content) = &message.content else {
+                    panic!("{:?}", message.content);
+                };
+                let poll = &poll_content.poll;
+                assert_eq!(poll.id, 9001);
+                assert_eq!(poll.question, "Lunch?");
+                assert_eq!(poll.options.len(), 2);
+                assert_eq!(poll.options[0].text, "Sushi");
+                assert_eq!(poll.options[0].voter_count, 12);
+                assert_eq!(poll.options[0].vote_percentage, 55);
+                assert!(poll.options[0].is_chosen);
+                assert!(!poll.options[1].is_chosen);
+                assert_eq!(poll.total_voter_count, 19);
+                assert!(poll.is_anonymous);
+                assert!(!poll.allows_multiple_answers);
+                assert!(poll.allows_revoting);
+                assert!(!poll.is_closed);
+                assert!(matches!(poll.poll_type, PollType::Regular));
+                assert!(poll.can_vote());
+                assert_eq!(message.content.preview(), "Lunch?");
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn message_poll_parses_quiz_closed() {
+        let json = r#"{"@type":"updateNewMessage","message":{"id":107,"chat_id":15,"is_outgoing":false,"content":{"@type":"messagePoll","poll":{"@type":"poll","id":9002,"question":{"@type":"formattedText","text":"Red planet?","entities":[]},"options":[{"@type":"pollOption","id":"a","text":{"@type":"formattedText","text":"Mars","entities":[]},"voter_count":18,"vote_percentage":72,"is_chosen":false}],"total_voter_count":25,"is_anonymous":true,"allows_multiple_answers":false,"allows_revoting":false,"is_closed":true,"type":{"@type":"pollTypeQuiz","correct_option_ids":[0],"explanation":{"@type":"formattedText","text":"","entities":[]}}},"description":{"@type":"formattedText","text":"","entities":[]},"can_add_option":false}}}"#;
+        let env = parse_envelope(json).unwrap();
+        match env.payload {
+            EnvelopePayload::UpdateNewMessage(message) => {
+                let MessageContent::Poll(poll_content) = &message.content else {
+                    panic!("{:?}", message.content);
+                };
+                let poll = &poll_content.poll;
+                assert!(poll.is_closed);
+                assert!(!poll.can_vote());
+                match &poll.poll_type {
+                    PollType::Quiz { correct_option_ids } => {
+                        assert_eq!(correct_option_ids, &[0]);
+                    }
+                    other => panic!("{other:?}"),
+                }
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn update_poll_parses_and_applies_new_counts() {
+        let env = parse_envelope(
+            r#"{"@type":"updatePoll","poll":{"@type":"poll","id":9001,"question":{"@type":"formattedText","text":"Lunch?","entities":[]},"options":[{"@type":"pollOption","id":"a","text":{"@type":"formattedText","text":"Sushi","entities":[]},"voter_count":13,"vote_percentage":56,"is_chosen":true}],"total_voter_count":23,"is_anonymous":true,"allows_multiple_answers":false,"allows_revoting":true,"is_closed":false,"type":{"@type":"pollTypeRegular"}}}"#,
+        )
+        .unwrap();
+        match env.payload {
+            EnvelopePayload::UpdatePoll { poll } => {
+                assert_eq!(poll.id, 9001);
+                assert_eq!(poll.total_voter_count, 23);
+                assert_eq!(poll.options[0].voter_count, 13);
+                assert_eq!(poll.options[0].vote_percentage, 56);
+                assert!(poll.options[0].is_chosen);
+            }
             other => panic!("{other:?}"),
         }
     }

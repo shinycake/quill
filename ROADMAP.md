@@ -67,8 +67,12 @@ handling exists.
   media captions; additive nesting, malformed spans dropped, unknown
   types ignored. (URLs already done.)
   `docs/screenshots/ready-text-entities.png`.
-- **4.2 Polls.** `messagePoll` display with bars and voter counts;
-  `setPollAnswer` voting; `inputMessagePoll` creation from the composer.
+- **4.2 Polls.** ✅ 2026-09-26 — `messagePoll` display with bars and
+  voter counts; `setPollAnswer` voting (single-tap for quizzes,
+  toggle/replace for regular; no-op when revoting is disallowed);
+  `updatePoll` live refresh; `inputMessagePoll` creation from the
+  composer (regular polls: 2–10 options, anonymous/multiple toggles).
+  `docs/screenshots/ready-poll.png`.
 - **4.3 Location / venue / contact.** `messageLocation`, `messageVenue`,
   `messageContact` display rows (map link via OS open for locations).
 - **4.4 Dice.** `messageDice` animated emoji + value display.

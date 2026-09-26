@@ -10,6 +10,7 @@ use crate::diagnostics::DiagnosticSink;
 use crate::ids::{AccountKey, ChatId, FileId, MessageId, RequestId};
 use crate::lifecycle::{RestoreBlocker, plan_restore};
 use crate::platform::{DatabaseKey, KeyDecision, SecretStore, load_or_create_key};
+use crate::poll::{PollDraft, poll_answer_for_tap};
 use crate::settings::{AccountPaths, default_app_root};
 use crate::state::{
     ChatSearchJumpNeed, ForwardFlight, RequestPurpose, SearchStatus, Session, ShutdownPhase,
@@ -17,24 +18,25 @@ use crate::state::{
 use crate::telegram::client::{LiveTdJson, OwnedEnvelope, ReceiveBridge};
 use crate::telegram::envelope::{
     AuthorizationState, ChatDraft, ChatKind, ChatNotificationSettings, EnvelopePayload,
-    MUTE_FOREVER,
+    MUTE_FOREVER, MessageContent,
 };
 use crate::telegram::ffi::{LibraryOrigin, TdJsonError, resolve_tdjson_path};
 use crate::telegram::requests::{
-    AnimationSend, SetTdlibParameters, StickerSend, VideoNoteSend, VideoNoteThumbnailSend,
-    VideoSend, add_chat_to_list, add_message_reaction, add_recently_found_chat,
-    check_authentication_code, check_authentication_password, click_chat_sponsored_message,
-    close_chat, close_request, delete_messages, download_file as download_file_request,
-    edit_message_caption, edit_message_text, forward_messages, get_authorization_state,
-    get_callback_query_answer, get_chat_history, get_chat_member, get_chat_sponsored_messages,
-    get_commands, get_installed_sticker_sets, get_me, get_saved_animations, get_sticker_set,
-    get_user_full_info, input_message_photo, input_message_video, join_chat, leave_chat,
-    load_chats, open_chat, open_message_content, pin_chat_message, remove_message_reaction,
-    report_chat_sponsored_message, search_chat_messages, search_chats, search_messages,
-    search_recently_found_chats, send_animation, send_chat_action, send_chat_action_kind,
-    send_document, send_message_album, send_photo, send_sticker, send_text, send_video,
-    send_video_note, send_voice_note, set_authentication_phone_number, set_chat_draft_message,
-    set_chat_notification_settings, unpin_chat_message, view_messages, view_sponsored_chat,
+    AnimationSend, PollSend, SetTdlibParameters, StickerSend, VideoNoteSend,
+    VideoNoteThumbnailSend, VideoSend, add_chat_to_list, add_message_reaction,
+    add_recently_found_chat, check_authentication_code, check_authentication_password,
+    click_chat_sponsored_message, close_chat, close_request, delete_messages,
+    download_file as download_file_request, edit_message_caption, edit_message_text,
+    forward_messages, get_authorization_state, get_callback_query_answer, get_chat_history,
+    get_chat_member, get_chat_sponsored_messages, get_commands, get_installed_sticker_sets, get_me,
+    get_saved_animations, get_sticker_set, get_user_full_info, input_message_photo,
+    input_message_video, join_chat, leave_chat, load_chats, open_chat, open_message_content,
+    pin_chat_message, remove_message_reaction, report_chat_sponsored_message, search_chat_messages,
+    search_chats, search_messages, search_recently_found_chats, send_animation, send_chat_action,
+    send_chat_action_kind, send_document, send_message_album, send_photo, send_poll, send_sticker,
+    send_text, send_video, send_video_note, send_voice_note, set_authentication_phone_number,
+    set_chat_draft_message, set_chat_notification_settings, set_poll_answer, unpin_chat_message,
+    view_messages, view_sponsored_chat,
 };
 use crate::voice::VoiceDraft;
 use std::path::Path;
@@ -2094,7 +2096,126 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
     }
 
-    /// Mute for `mute_for` seconds (0 = unmute). Copies the chat's other
+    /// Phase 4.2: `setPollAnswer` for a poll-row tap. Guards mirror the other
+    /// send methods: chats path active, supported chat, real non-pending
+    /// message whose content is a votable `messagePoll`. The tap resolves to
+    /// the full answer set via `poll_answer_for_tap` (tdesktop-style
+    /// toggle/retract semantics); `None` there means no-op (closed poll,
+    /// unchanged answer) and no request goes out. On send, the chosen marks
+    /// flip locally right away; the server's `updatePoll` corrects the
+    /// counts/percentages in place.
+    pub fn send_poll_answer(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        option_index: usize,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let supported = self
+            .session
+            .chats
+            .get(&chat_id.0)
+            .is_some_and(|chat| chat.supported());
+        if !supported {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let poll = self
+            .session
+            .histories
+            .get(&chat_id.0)
+            .and_then(|history| history.messages.get(&message_id.0))
+            .filter(|message| !message.pending && message.id.0 > 0)
+            .and_then(|message| match &message.content {
+                MessageContent::Poll(poll) => Some(poll.poll.clone()),
+                _ => None,
+            })
+            .ok_or(ConnectSendError::InvalidRequest)?;
+        if !poll.can_vote() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let option_ids =
+            poll_answer_for_tap(&poll, option_index).ok_or(ConnectSendError::InvalidRequest)?;
+        if let Some(history) = self.session.histories.get_mut(&chat_id.0)
+            && let Some(message) = history.messages.get_mut(&message_id.0)
+            && let MessageContent::Poll(poll_content) = &mut message.content
+        {
+            let chosen: std::collections::HashSet<i32> = option_ids.iter().copied().collect();
+            for (index, option) in poll_content.poll.options.iter_mut().enumerate() {
+                option.is_chosen = chosen.contains(&(index as i32));
+            }
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::SetPollAnswer, Some(chat_id));
+        let json = set_poll_answer(extra, chat_id, message_id, &option_ids);
+        match self.sender.send_json(&json) {
+            Ok(()) => Ok(extra),
+            Err(err) => {
+                self.session.requests.take(extra);
+                Err(err)
+            }
+        }
+    }
+
+    /// Phase 4.2: create a poll from the composer dialog via `sendMessage` +
+    /// `inputMessagePoll` (TDLib 1.8.67). Guards: chats path active, chat can
+    /// post (admin-gated channels, same as `send_snapshot`), valid draft
+    /// (`PollDraft::validate`). Quiz polls are created as regular
+    /// (`inputPollTypeRegular`) — quiz creation stays out of this slice.
+    pub fn send_poll_draft(
+        &mut self,
+        chat_id: ChatId,
+        draft: &PollDraft,
+        reply_to: Option<MessageId>,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if draft.validate().is_some() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let can_post = self
+            .session
+            .chats
+            .get(&chat_id.0)
+            .is_some_and(|chat| chat.can_post());
+        if !can_post {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let question = draft.question.trim().to_string();
+        let options: Vec<String> = draft
+            .usable_options()
+            .into_iter()
+            .map(str::to_string)
+            .collect();
+        let option_refs: Vec<&str> = options.iter().map(String::as_str).collect();
+        let extra = self
+            .session
+            .request(RequestPurpose::SendMessage, Some(chat_id));
+        let json = send_poll(
+            extra,
+            chat_id,
+            PollSend {
+                question: &question,
+                options: &option_refs,
+                is_anonymous: draft.is_anonymous,
+                allows_multiple_answers: draft.allows_multiple_answers,
+                reply_to,
+            },
+        );
+        match self.sender.send_json(&json) {
+            Ok(()) => {
+                let _ = self.cancel_outgoing_typing();
+                Ok(extra)
+            }
+            Err(err) => {
+                self.session.requests.take(extra);
+                Err(err)
+            }
+        }
+    }
     /// notification settings and clears `use_default_mute_for` (Unigram).
     pub fn set_chat_mute_for(
         &mut self,
@@ -6119,6 +6240,163 @@ mod tests {
             .select_search_message(ChatId(8), MessageId(1), "  ", None, 3_100)
             .unwrap();
         assert!(driver.session.chats.get(&7).unwrap().draft.is_none());
+        assert!(!sink.rendered().contains("CANARY"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // Phase 4.2: driver guards around `send_poll_answer` / `send_poll_draft`.
+    type PollDriverHarness = (
+        std::path::PathBuf,
+        ConnectDriver<Arc<RecordingSender>>,
+        Arc<RecordingSender>,
+        Arc<MemorySink>,
+        Arc<dyn DiagnosticSink>,
+        AtomicU64,
+    );
+    const POLL_OPEN_JSON: &str = r#"{"@type":"updateNewMessage","message":{"id":106,"chat_id":7,"is_outgoing":false,"content":{"@type":"messagePoll","poll":{"@type":"poll","id":9001,"question":{"@type":"formattedText","text":"Lunch?","entities":[]},"options":[{"@type":"pollOption","id":"a","text":{"@type":"formattedText","text":"Sushi","entities":[]},"voter_count":12,"vote_percentage":55,"is_chosen":false},{"@type":"pollOption","id":"b","text":{"@type":"formattedText","text":"Pizza","entities":[]},"voter_count":7,"vote_percentage":32,"is_chosen":false}],"total_voter_count":19,"is_anonymous":true,"allows_multiple_answers":false,"allows_revoting":true,"is_closed":false,"type":{"@type":"pollTypeRegular"}},"description":{"@type":"formattedText","text":"","entities":[]},"can_add_option":false}}}"#;
+    const POLL_CLOSED_JSON: &str = r#"{"@type":"updateNewMessage","message":{"id":107,"chat_id":7,"is_outgoing":false,"content":{"@type":"messagePoll","poll":{"@type":"poll","id":9002,"question":{"@type":"formattedText","text":"Red planet?","entities":[]},"options":[{"@type":"pollOption","id":"a","text":{"@type":"formattedText","text":"Mars","entities":[]},"voter_count":18,"vote_percentage":72,"is_chosen":false}],"total_voter_count":25,"is_anonymous":true,"allows_multiple_answers":false,"allows_revoting":false,"is_closed":true,"type":{"@type":"pollTypeQuiz","correct_option_ids":[0],"explanation":{"@type":"formattedText","text":"","entities":[]}}},"description":{"@type":"formattedText","text":"","entities":[]},"can_add_option":false}}}"#;
+
+    fn poll_driver() -> PollDriverHarness {
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = Arc::new(RecordingSender::new());
+        let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+        let mut driver =
+            ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+        let seq = AtomicU64::new(0);
+        seed_ready_alice(&mut driver, &seq, &dyn_sink);
+        driver
+            .ingest(copy_and_parse(POLL_OPEN_JSON, &seq, &dyn_sink).unwrap())
+            .unwrap();
+        driver
+            .ingest(copy_and_parse(POLL_CLOSED_JSON, &seq, &dyn_sink).unwrap())
+            .unwrap();
+        (dir, driver, recorder, sink, dyn_sink, seq)
+    }
+
+    fn assert_invalid<T: std::fmt::Debug>(result: Result<T, ConnectSendError>) {
+        match result {
+            Err(ConnectSendError::InvalidRequest) => {}
+            other => panic!("expected InvalidRequest, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn driver_poll_answer_rejects_when_chats_path_inactive() {
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = Arc::new(RecordingSender::new());
+        let session = Session::new(AccountKey::primary(), dyn_sink);
+        // No auth state seeded: `chats_path_active()` is false.
+        let mut driver = ConnectDriver::new(session, recorder, test_credentials(), prepared);
+        assert_invalid(driver.send_poll_answer(ChatId(7), MessageId(106), 0));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn driver_poll_answer_rejects_unsupported_chat() {
+        let (dir, mut driver, _recorder, sink, dyn_sink, seq) = poll_driver();
+        driver
+            .ingest(
+                copy_and_parse(
+                    r#"{"@type":"updateNewChat","chat":{"id":9,"title":"Secret","type":{"@type":"chatTypeSecret","secret_chat_id":9},"unread_count":0}}"#,
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        assert_invalid(driver.send_poll_answer(ChatId(9), MessageId(106), 0));
+        assert!(!sink.rendered().contains("CANARY"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn driver_poll_answer_guards_message_poll_and_index() {
+        let (dir, mut driver, recorder, sink, _dyn_sink, _seq) = poll_driver();
+        // Missing message.
+        assert_invalid(driver.send_poll_answer(ChatId(7), MessageId(404), 0));
+        // Not a poll (message 50 is Alice's text message).
+        assert_invalid(driver.send_poll_answer(ChatId(7), MessageId(50), 0));
+        // Closed poll (quiz, message 107).
+        assert_invalid(driver.send_poll_answer(ChatId(7), MessageId(107), 0));
+        // Out-of-range option index.
+        assert_invalid(driver.send_poll_answer(ChatId(7), MessageId(106), 9));
+        // Valid single-answer tap: `setPollAnswer` with the 0-based position,
+        // plus an optimistic chosen mark before `updatePoll` arrives.
+        let extra = driver
+            .send_poll_answer(ChatId(7), MessageId(106), 0)
+            .unwrap();
+        let send_json = recorder.snapshot().last().cloned().expect("setPollAnswer");
+        let v: Value = serde_json::from_str(&send_json).unwrap();
+        assert_eq!(v["@type"], "setPollAnswer");
+        assert_eq!(v["@extra"], extra.0.to_string());
+        assert_eq!(v["chat_id"], 7);
+        assert_eq!(v["message_id"], 106);
+        assert_eq!(v["option_ids"], serde_json::json!([0]));
+        let history = driver.session.histories.get(&7).unwrap();
+        let message = history.messages.get(&106).unwrap();
+        match &message.content {
+            MessageContent::Poll(poll) => {
+                assert!(poll.poll.options[0].is_chosen);
+                assert!(!poll.poll.options[1].is_chosen);
+            }
+            other => panic!("{other:?}"),
+        }
+        assert!(!sink.rendered().contains("CANARY"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn driver_poll_draft_guards_and_request_shape() {
+        use crate::poll::PollDraft;
+
+        let (dir, mut driver, recorder, sink, dyn_sink, seq) = poll_driver();
+        let valid = PollDraft {
+            question: "Lunch?".into(),
+            options: vec!["Sushi".into(), "Pizza".into()],
+            is_anonymous: true,
+            allows_multiple_answers: false,
+        };
+        let invalid = PollDraft {
+            question: "  ".into(),
+            options: vec!["Sushi".into(), "Pizza".into()],
+            is_anonymous: true,
+            allows_multiple_answers: false,
+        };
+        // Invalid draft rejected before any request is built.
+        assert_invalid(driver.send_poll_draft(ChatId(7), &invalid, None));
+        // Admin-gated broadcast channel: `can_post()` is false.
+        driver
+            .ingest(
+                copy_and_parse(
+                    r#"{"@type":"updateNewChat","chat":{"id":13,"title":"News","type":{"@type":"chatTypeSupergroup","supergroup_id":13,"is_channel":true},"unread_count":0}}"#,
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        assert_invalid(driver.send_poll_draft(ChatId(13), &valid, None));
+        // Valid draft: `sendMessage` + `inputMessagePoll`.
+        let extra = driver
+            .send_poll_draft(ChatId(7), &valid, Some(MessageId(50)))
+            .unwrap();
+        let send_json = recorder.snapshot().last().cloned().expect("sendMessage");
+        let v: Value = serde_json::from_str(&send_json).unwrap();
+        assert_eq!(v["@type"], "sendMessage");
+        assert_eq!(v["@extra"], extra.0.to_string());
+        assert_eq!(v["chat_id"], 7);
+        assert_eq!(v["reply_to"]["message_id"], 50);
+        let content = &v["input_message_content"];
+        assert_eq!(content["@type"], "inputMessagePoll");
+        assert_eq!(content["question"]["text"], "Lunch?");
+        assert_eq!(content["options"][0]["text"]["text"], "Sushi");
+        assert_eq!(content["type"]["@type"], "inputPollTypeRegular");
         assert!(!sink.rendered().contains("CANARY"));
         let _ = std::fs::remove_dir_all(&dir);
     }
