@@ -53,8 +53,8 @@ handling exists.
 ## Phase 5 — Supergroups: forum topics
 
 - **5.1 Topics.** `getForumTopics` list for forum supergroups; per-topic
-  history (`searchChatMessages`-style topic filter / `getChatHistory` with
-  topic); topic badges in the chat list.
+  history via `searchChatMessages` with `topic_id`; topic badges in the
+  chat list.
 
 ## Phase 6 — Contacts & profiles
 
