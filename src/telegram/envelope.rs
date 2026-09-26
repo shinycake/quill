@@ -237,6 +237,26 @@ pub enum EnvelopePayload {
     UpdateSavedAnimations {
         animation_ids: Vec<i32>,
     },
+    /// `notificationSounds` — `getSavedNotificationSounds` response.
+    NotificationSounds {
+        sounds: Vec<NotificationSound>,
+    },
+    /// `updateSavedNotificationSounds` — the saved-sound list changed;
+    /// the reducer marks the cached list stale (schema line 10947).
+    UpdateSavedNotificationSounds {
+        sound_ids: Vec<i64>,
+    },
+    /// `scopeNotificationSettings` — `getScopeNotificationSettings` response.
+    ScopeNotificationSettings {
+        scope: NotificationSettingsScope,
+        settings: ScopeNotificationSettings,
+    },
+    /// `updateScopeNotificationSettings` — a scope's defaults changed
+    /// (schema line 10668).
+    UpdateScopeNotificationSettings {
+        scope: NotificationSettingsScope,
+        settings: ScopeNotificationSettings,
+    },
     /// `updateMessageInteractionInfo` — views / forwards / `messageReactions`.
     UpdateMessageInteractionInfo {
         chat_id: ChatId,
@@ -950,6 +970,88 @@ impl ChatNotificationSettings {
 
     pub fn is_muted_forever(&self) -> bool {
         self.is_muted() && self.mute_for > MUTE_FOREVER_AFTER_SECONDS
+    }
+}
+
+/// `notificationSound` (TDLib 1.8.67, line 8857): "Describes a notification
+/// sound in MP3 format".
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NotificationSound {
+    pub id: i64,
+    pub duration: i32,
+    pub date: i32,
+    pub title: String,
+    pub data: String,
+    /// `sound:file` — downloaded on demand with `downloadFile` when a
+    /// notification needs it.
+    pub sound: ParsedFile,
+}
+
+/// `NotificationSettingsScope` (TDLib 1.8.67, lines 3337–3343).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum NotificationSettingsScope {
+    PrivateChats,
+    GroupChats,
+    ChannelChats,
+}
+
+impl NotificationSettingsScope {
+    /// The `@type` constructor name for `getScopeNotificationSettings` /
+    /// `setScopeNotificationSettings` requests.
+    pub fn type_name(&self) -> &'static str {
+        match self {
+            NotificationSettingsScope::PrivateChats => "notificationSettingsScopePrivateChats",
+            NotificationSettingsScope::GroupChats => "notificationSettingsScopeGroupChats",
+            NotificationSettingsScope::ChannelChats => "notificationSettingsScopeChannelChats",
+        }
+    }
+
+    /// Human label for the scope-defaults settings UI.
+    pub fn label(&self) -> &'static str {
+        match self {
+            NotificationSettingsScope::PrivateChats => "Private chats",
+            NotificationSettingsScope::GroupChats => "Groups",
+            NotificationSettingsScope::ChannelChats => "Channels",
+        }
+    }
+
+    /// All three scopes, in UI order.
+    pub const ALL: [NotificationSettingsScope; 3] = [
+        NotificationSettingsScope::PrivateChats,
+        NotificationSettingsScope::GroupChats,
+        NotificationSettingsScope::ChannelChats,
+    ];
+}
+
+/// `scopeNotificationSettings` (TDLib 1.8.67, line 3375): defaults applied
+/// when a chat's `chatNotificationSettings` keeps a `use_default_*` flag.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScopeNotificationSettings {
+    pub mute_for: i32,
+    /// 0 = disabled; -1 = app-dependent default sound (schema line 3368).
+    pub sound_id: i64,
+    pub show_preview: bool,
+    pub use_default_mute_stories: bool,
+    pub mute_stories: bool,
+    pub story_sound_id: i64,
+    pub show_story_poster: bool,
+    pub disable_pinned_message_notifications: bool,
+    pub disable_mention_notifications: bool,
+}
+
+impl Default for ScopeNotificationSettings {
+    fn default() -> Self {
+        Self {
+            mute_for: 0,
+            sound_id: -1,
+            show_preview: true,
+            use_default_mute_stories: true,
+            mute_stories: false,
+            story_sound_id: -1,
+            show_story_poster: true,
+            disable_pinned_message_notifications: false,
+            disable_mention_notifications: false,
+        }
     }
 }
 
@@ -2973,6 +3075,46 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
                 })
                 .unwrap_or_default(),
         }),
+        "notificationSounds" => {
+            let sounds = value
+                .get("notification_sounds")
+                .and_then(Value::as_array)
+                .map(|list| list.iter().filter_map(parse_notification_sound).collect())
+                .unwrap_or_default();
+            Ok(EnvelopePayload::NotificationSounds { sounds })
+        }
+        "updateSavedNotificationSounds" => Ok(EnvelopePayload::UpdateSavedNotificationSounds {
+            sound_ids: value
+                .get("notification_sound_ids")
+                .and_then(Value::as_array)
+                .map(|ids| {
+                    ids.iter()
+                        .filter_map(|id| id.as_i64().or_else(|| id.as_str()?.parse().ok()))
+                        .collect()
+                })
+                .unwrap_or_default(),
+        }),
+        "scopeNotificationSettings" => {
+            // The response to `getScopeNotificationSettings` carries no scope
+            // field — the scope is correlated via the pending request.
+            Ok(EnvelopePayload::ScopeNotificationSettings {
+                scope: NotificationSettingsScope::PrivateChats,
+                settings: parse_scope_notification_settings(Some(&value)),
+            })
+        }
+        "updateScopeNotificationSettings" => {
+            let scope = value
+                .get("scope")
+                .and_then(|s| s.get("@type"))
+                .and_then(Value::as_str);
+            match parse_notification_settings_scope(scope) {
+                Some(scope) => Ok(EnvelopePayload::UpdateScopeNotificationSettings {
+                    scope,
+                    settings: parse_scope_notification_settings(value.get("notification_settings")),
+                }),
+                None => Err(ParseError::MissingField),
+            }
+        }
         "updateMessageInteractionInfo" => Ok(EnvelopePayload::UpdateMessageInteractionInfo {
             chat_id: ChatId(int53(value.get("chat_id"))?),
             message_id: MessageId(int53(value.get("message_id"))?),
@@ -3600,6 +3742,75 @@ fn parse_chat_notification_settings(value: Option<&Value>) -> ChatNotificationSe
         use_default_disable_mention_notifications: json_bool(
             value.get("use_default_disable_mention_notifications"),
             defaults.use_default_disable_mention_notifications,
+        ),
+        disable_mention_notifications: json_bool(
+            value.get("disable_mention_notifications"),
+            defaults.disable_mention_notifications,
+        ),
+    }
+}
+
+/// `notificationSound` (TDLib 1.8.67, line 8857). Returns `None` when the
+/// object is missing or its `sound` file does not parse.
+fn parse_notification_sound(value: &Value) -> Option<NotificationSound> {
+    if value.get("@type").and_then(Value::as_str) != Some("notificationSound") {
+        return None;
+    }
+    let sound = parse_file(value.get("sound")).ok()?;
+    Some(NotificationSound {
+        id: json_i64_field(value.get("id"), 0),
+        duration: json_i32(value.get("duration"), 0),
+        date: json_i32(value.get("date"), 0),
+        title: value
+            .get("title")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string(),
+        data: value
+            .get("data")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string(),
+        sound,
+    })
+}
+
+/// `NotificationSettingsScope` from its constructor name (td_api.tl lines
+/// 3337–3343). Unknown names map to `None` so a future scope never
+/// mis-files settings.
+fn parse_notification_settings_scope(type_name: Option<&str>) -> Option<NotificationSettingsScope> {
+    match type_name {
+        Some("notificationSettingsScopePrivateChats") => {
+            Some(NotificationSettingsScope::PrivateChats)
+        }
+        Some("notificationSettingsScopeGroupChats") => Some(NotificationSettingsScope::GroupChats),
+        Some("notificationSettingsScopeChannelChats") => {
+            Some(NotificationSettingsScope::ChannelChats)
+        }
+        _ => None,
+    }
+}
+
+/// `scopeNotificationSettings` (TDLib 1.8.67, line 3375).
+fn parse_scope_notification_settings(value: Option<&Value>) -> ScopeNotificationSettings {
+    let Some(value) = value.filter(|v| !v.is_null()) else {
+        return ScopeNotificationSettings::default();
+    };
+    let defaults = ScopeNotificationSettings::default();
+    ScopeNotificationSettings {
+        mute_for: json_i32(value.get("mute_for"), defaults.mute_for),
+        sound_id: json_i64_field(value.get("sound_id"), defaults.sound_id),
+        show_preview: json_bool(value.get("show_preview"), defaults.show_preview),
+        use_default_mute_stories: json_bool(
+            value.get("use_default_mute_stories"),
+            defaults.use_default_mute_stories,
+        ),
+        mute_stories: json_bool(value.get("mute_stories"), defaults.mute_stories),
+        story_sound_id: json_i64_field(value.get("story_sound_id"), defaults.story_sound_id),
+        show_story_poster: json_bool(value.get("show_story_poster"), defaults.show_story_poster),
+        disable_pinned_message_notifications: json_bool(
+            value.get("disable_pinned_message_notifications"),
+            defaults.disable_pinned_message_notifications,
         ),
         disable_mention_notifications: json_bool(
             value.get("disable_mention_notifications"),
@@ -7763,6 +7974,117 @@ mod channel_envelope_tests {
                 },
                 other => panic!("{other:?}"),
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod notification_sound_tests {
+    use super::*;
+
+    const SOUND_FILE: &str = r#"{"@type":"file","id":77,"size":12,"expected_size":12,"local":{"@type":"localFile","path":"","can_be_downloaded":true,"can_be_deleted":false,"is_downloading_active":false,"is_downloading_completed":false,"download_offset":0,"downloaded_prefix_size":0,"downloaded_size":0},"remote":{"@type":"remoteFile","id":"r","unique_id":"u","is_uploading_active":false,"is_uploading_completed":true,"uploaded_size":12}}"#;
+
+    #[test]
+    fn notification_sounds_parsed() {
+        // `getSavedNotificationSounds` response (schema 1.8.67 lines 8857–8860).
+        let json = format!(
+            r#"{{"@type":"notificationSounds","notification_sounds":[{{"@type":"notificationSound","id":99,"duration":2,"date":1700000000,"title":"Chime","data":"","sound":{}}}]}}"#,
+            SOUND_FILE
+        );
+        let env = parse_envelope(&json).unwrap();
+        match env.payload {
+            EnvelopePayload::NotificationSounds { sounds } => {
+                assert_eq!(sounds.len(), 1);
+                assert_eq!(sounds[0].id, 99);
+                assert_eq!(sounds[0].title, "Chime");
+                assert_eq!(sounds[0].duration, 2);
+                assert_eq!(sounds[0].sound.id.0, 77);
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+
+    #[test]
+    fn update_saved_notification_sounds_parsed() {
+        // Schema 1.8.67 line 10947.
+        let env = parse_envelope(
+            r#"{"@type":"updateSavedNotificationSounds","notification_sound_ids":[7,8]}"#,
+        )
+        .unwrap();
+        match env.payload {
+            EnvelopePayload::UpdateSavedNotificationSounds { sound_ids } => {
+                assert_eq!(sound_ids, vec![7, 8]);
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+
+    #[test]
+    fn scope_notification_settings_parsed() {
+        // Schema 1.8.67 line 3375.
+        let env = parse_envelope(
+            r#"{"@type":"scopeNotificationSettings","mute_for":3600,"sound_id":-1,"show_preview":true,"use_default_mute_stories":true,"mute_stories":false,"story_sound_id":-1,"show_story_poster":true,"disable_pinned_message_notifications":false,"disable_mention_notifications":true}"#,
+        )
+        .unwrap();
+        match env.payload {
+            EnvelopePayload::ScopeNotificationSettings { settings, .. } => {
+                assert_eq!(settings.mute_for, 3600);
+                assert_eq!(settings.sound_id, -1);
+                assert!(settings.show_preview);
+                assert!(settings.disable_mention_notifications);
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+
+    #[test]
+    fn update_scope_notification_settings_parsed() {
+        // Schema 1.8.67 line 10668; scope constructor lines 3337–3343.
+        let env = parse_envelope(
+            r#"{"@type":"updateScopeNotificationSettings","scope":{"@type":"notificationSettingsScopeGroupChats"},"notification_settings":{"@type":"scopeNotificationSettings","mute_for":0,"sound_id":0,"show_preview":false,"use_default_mute_stories":true,"mute_stories":false,"story_sound_id":-1,"show_story_poster":true,"disable_pinned_message_notifications":false,"disable_mention_notifications":false}}"#,
+        )
+        .unwrap();
+        match env.payload {
+            EnvelopePayload::UpdateScopeNotificationSettings { scope, settings } => {
+                assert_eq!(scope, NotificationSettingsScope::GroupChats);
+                assert_eq!(settings.sound_id, 0);
+                assert!(!settings.show_preview);
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+
+    #[test]
+    fn unknown_scope_is_rejected() {
+        assert_eq!(
+            parse_notification_settings_scope(Some("notificationSettingsScopeBots")),
+            None
+        );
+        assert_eq!(
+            parse_notification_settings_scope(Some("notificationSettingsScopePrivateChats")),
+            Some(NotificationSettingsScope::PrivateChats)
+        );
+    }
+
+    #[test]
+    fn schema_pins_notification_sound_constructors() {
+        // Every constructor this slice relies on must exist verbatim in the
+        // pinned schema (1.8.67) — never invent constructors or fields.
+        let schema = include_str!("../../schema/td_api.tl");
+        for line in [
+            "notificationSound id:int64 duration:int32 date:int32 title:string data:string sound:file = NotificationSound;",
+            "notificationSounds notification_sounds:vector<notificationSound> = NotificationSounds;",
+            "updateSavedNotificationSounds notification_sound_ids:vector<int64> = Update;",
+            "getSavedNotificationSound notification_sound_id:int64 = NotificationSound;",
+            "getSavedNotificationSounds = NotificationSounds;",
+            "addSavedNotificationSound sound:InputFile = NotificationSound;",
+            "removeSavedNotificationSound notification_sound_id:int64 = Ok;",
+            "fileTypeNotificationSound = FileType;",
+        ] {
+            assert!(
+                schema.lines().any(|l| l == line),
+                "schema pin missing: {line}"
+            );
         }
     }
 }

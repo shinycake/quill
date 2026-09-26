@@ -1325,6 +1325,57 @@ pub fn set_chat_notification_settings(
     .to_string()
 }
 
+/// `getSavedNotificationSounds` (TDLib 1.8.67, line 13647): the user's saved
+/// notification sounds. "If a sound isn't in the list, then default sound
+/// needs to be used."
+pub fn get_saved_notification_sounds(extra: RequestId) -> String {
+    json!({
+        "@type": "getSavedNotificationSounds",
+        "@extra": extra.as_extra(),
+    })
+    .to_string()
+}
+
+/// `getScopeNotificationSettings` (TDLib 1.8.67, line 13662).
+pub fn get_scope_notification_settings(
+    extra: RequestId,
+    scope: crate::telegram::envelope::NotificationSettingsScope,
+) -> String {
+    json!({
+        "@type": "getScopeNotificationSettings",
+        "@extra": extra.as_extra(),
+        "scope": { "@type": scope.type_name() },
+    })
+    .to_string()
+}
+
+/// `setScopeNotificationSettings` (TDLib 1.8.67, line 13665). Full settings
+/// object; callers copy the scope's current settings and change one field.
+pub fn set_scope_notification_settings(
+    extra: RequestId,
+    scope: crate::telegram::envelope::NotificationSettingsScope,
+    settings: &crate::telegram::envelope::ScopeNotificationSettings,
+) -> String {
+    json!({
+        "@type": "setScopeNotificationSettings",
+        "@extra": extra.as_extra(),
+        "scope": { "@type": scope.type_name() },
+        "notification_settings": {
+            "@type": "scopeNotificationSettings",
+            "mute_for": settings.mute_for,
+            "sound_id": settings.sound_id,
+            "show_preview": settings.show_preview,
+            "use_default_mute_stories": settings.use_default_mute_stories,
+            "mute_stories": settings.mute_stories,
+            "story_sound_id": settings.story_sound_id,
+            "show_story_poster": settings.show_story_poster,
+            "disable_pinned_message_notifications": settings.disable_pinned_message_notifications,
+            "disable_mention_notifications": settings.disable_mention_notifications
+        }
+    })
+    .to_string()
+}
+
 /// `addChatToList` (TDLib 1.8.67). Main and Archive are mutually exclusive.
 /// `sendChatAction` (TDLib 1.8.67). `typing` sends `chatActionTyping`;
 /// otherwise `chatActionCancel` (Unigram `CancelTyping`). `topic_id` null,

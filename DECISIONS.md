@@ -1764,3 +1764,102 @@ Research snapshot 2026-09-16, pin recheck **2026-09-17**.
 - **Out of this slice (→ future):** streaming/HLS; storyboard
   scrubbing; alternative qualities; opening documents/GIFs/stickers/
   audio in the viewer; mpv IPC.
+
+## Parity slice — Notification sounds + notification settings UI (2026-09-26)
+
+- **Rationale:** Phase 8.1 explicitly deferred "notification sounds" and
+  "a settings UI for `hide_notification_previews`". This slice closes
+  both: a sound now plays alongside the existing OS-toast pipeline, and
+  the header Mute panel becomes a full Notifications panel with a
+  scope-defaults dialog.
+- **Schema (1.8.67, verified in `schema/td_api.tl` — no invented
+  constructors/fields):**
+  `notificationSettingsScopePrivateChats` (:3337),
+  `notificationSettingsScopeGroupChats` (:3340),
+  `notificationSettingsScopeChannelChats` (:3343);
+  `chatNotificationSettings … use_default_sound:Bool sound_id:int53 …
+  = ChatNotificationSettings` (:3363; `@sound_id` comment: "Identifier
+  of the notification sound to be played for messages; 0 if sound is
+  disabled");
+  `scopeNotificationSettings … sound_id:int64 … = ScopeNotificationSettings`
+  (:3375; `@sound_id` comment: "0 if sound is disabled; pass -1 to use
+  the app-dependent default sound");
+  `notificationSound id:int64 duration:int32 date:int32 title:string
+  data:string sound:file = NotificationSound` (:8857);
+  `notificationSounds` (:8860; `@description` on
+  `getSavedNotificationSounds`: "If a sound isn't in the list, then
+  default sound needs to be used" — line 13646);
+  `fileTypeNotificationSound` (:9716);
+  `updateChatNotificationSettings` (:10552),
+  `updateScopeNotificationSettings` (:10668),
+  `updateSavedNotificationSounds` (:10947);
+  `setChatNotificationSettings` (:13498),
+  `getSavedNotificationSound` (:13644),
+  `getSavedNotificationSounds` (:13647),
+  `addSavedNotificationSound` (:13650),
+  `removeSavedNotificationSound` (:13653),
+  `getScopeNotificationSettings` (:13662),
+  `setScopeNotificationSettings` (:13665).
+- **Decision — sound resolution (`src/notify.rs::decide_notification_sound`,
+  pure, unit-tested).** An incoming-message notification plays a sound
+  iff: the app/window is not focused (no sound for the open chat in the
+  foreground — same suppression as toasts); the chat is not muted;
+  `sound_id != 0`. Resolution: chat `use_default_sound` (or an unknown
+  scope) → the scope default; scope `sound_id == -1` → the app default;
+  scope `sound_id == 0` → silent; a positive id → that saved sound. A
+  saved id missing from the list falls back to the app default, per the
+  `getSavedNotificationSounds` comment. Coalesced same-chat bursts play
+  the first message's sound once.
+- **App-default tone.** TDLib provides no app-default audio file, so
+  Quill synthesizes one: Linux plays a 660 Hz / 0.35 s lavfi tone via
+  `ffplay -nodisp -autoexit`; macOS uses `osascript -e beep`. Custom
+  saved sounds play their downloaded file (ffplay on Linux, afplay on
+  macOS). All players spawn without a shell; a missing/failed player
+  fails silently. Sounds are capped at 2 concurrent player threads
+  (`quill-sound`); toast threads stay capped at 8.
+- **Model (`src/state.rs`).** The session caches the saved-sound list
+  (`saved_notification_sounds` + loaded/stale flags), the three scope
+  settings (`scope_notification_settings` + loading set), the sound
+  file-id → local-path mapping, and pending custom-sound downloads that
+  queue a playback when `updateFile` completes. `getSavedNotificationSounds`
+  and all three `getScopeNotificationSettings` are fetched once after
+  Ready; `updateSavedNotificationSounds` marks the list stale for
+  refetch on the next ingest. `getScopeNotificationSettings` responses
+  carry no scope field — the scope is correlated through
+  `PendingRequest::scope`, stamped by `Session::request_for_scope`.
+- **Requests (`src/connect.rs`).** `get_saved_notification_sounds`,
+  `get_scope_notification_settings`, `set_scope_notification_settings`,
+  plus per-chat `set_chat_sound` and `set_chat_show_preview`. TDLib has
+  no partial settings setter, so per-chat edits resend the full
+  `chatNotificationSettings`, preserving every untouched field
+  (unit-tested).
+- **UI (`src/ui/mod.rs`).** The header Mute panel is now a
+  "Notifications" panel: a status line (mute · sound · previews), the
+  existing mute presets, a message-preview toggle (writes
+  `use_default_show_preview=false` + explicit `show_preview`), a sound
+  picker (Default / None / each saved sound with title + duration and a
+  ▶ preview button that plays the sound immediately — downloading it
+  first when needed), and a "Defaults for all chats…" link opening the
+  scope-defaults dialog. The dialog shows private chats / groups /
+  channels sections, each with mute presets, a preview toggle, and an
+  expandable default-sound picker (scope `-1` = default, `0` = none,
+  positive id = saved sound). Live edits go through
+  `setScopeNotificationSettings`; screenshot-demo edits apply locally
+  through the same reducer paths.
+- **Screenshot:** `docs/screenshots/ready-notification-sound.png` —
+  `quill --screenshot-demo ready-notification-sound` (taller window via
+  `QUILL_DEMO_WINDOW_SIZE=1200x1150` so the expanded panel, history,
+  and composer all fit without scrolling): Demo chat A on a custom
+  saved sound ("Ding"), the Notifications panel open with the picker
+  expanded (Default / None / ✓ Ding (2s) / Chime (3s), ▶ preview
+  buttons, "Defaults for all chats…" link).
+- **Out of this slice (→ future):** notification exceptions beyond
+  per-chat mute (per-mention unmute, `disable_mention_notifications`,
+  `chat.default_disable_notification`); in-app banner previews; DND
+  scheduling; badge counts; grouping; story-sound configuration /
+  upload / removal (`addSavedNotificationSound` /
+  `removeSavedNotificationSound` / scope `story_sound_id` — schema-clean
+  but not surfaced); per-chat story settings UI
+  (`use_default_mute_stories` etc.); a global
+  `hide_notification_previews` settings UI (the per-chat preview
+  toggle exists).

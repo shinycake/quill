@@ -44,6 +44,11 @@ pub struct QueuedNotification {
     pub title: String,
     pub body: String,
     pub count: u32,
+    /// Sound decided at queue time (parity slice: notification sounds). The
+    /// decision is made when the message arrives — the same moment the toast
+    /// decision is made — so later mute/focus changes don't retroactively
+    /// silence or unsilence it.
+    pub sound: Option<NotificationSoundKind>,
 }
 
 impl QueuedNotification {
@@ -64,8 +69,19 @@ impl QueuedNotification {
 }
 
 /// Merge `notification` into `queue`: an existing pending entry for the same
-/// chat bumps its burst count; otherwise a fresh entry is appended.
+/// chat bumps its burst count; otherwise a fresh entry is appended. The
+/// sound from the first message of a burst wins — a burst plays once.
 pub fn coalesce_notification(queue: &mut Vec<QueuedNotification>, notification: OsNotification) {
+    coalesce_notification_with_sound(queue, notification, None);
+}
+
+/// Like [`coalesce_notification`], carrying the sound decision for the new
+/// message. Burst entries keep the first message's sound (play once).
+pub fn coalesce_notification_with_sound(
+    queue: &mut Vec<QueuedNotification>,
+    notification: OsNotification,
+    sound: Option<NotificationSoundKind>,
+) {
     if let Some(existing) = queue.iter_mut().find(|q| q.chat_id == notification.chat_id) {
         existing.count += 1;
     } else {
@@ -74,6 +90,7 @@ pub fn coalesce_notification(queue: &mut Vec<QueuedNotification>, notification: 
             title: notification.title,
             body: notification.body,
             count: 1,
+            sound,
         });
     }
 }
@@ -148,6 +165,66 @@ pub fn decide_notify(input: &NotifyInput) -> Option<OsNotification> {
         title: title.to_string(),
         body,
     })
+}
+
+/// Which sound to play for a notification (parity slice: notification sounds).
+///
+/// Resolved from `chatNotificationSettings` (`use_default_sound` / `sound_id`)
+/// with the chat-scope default as fallback; `0` means disabled (schema
+/// comment on `sound_id`, td_api.tl line 3350) and `-1` means the
+/// app-dependent default sound (scope comment, line 3368).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NotificationSoundKind {
+    /// App default tone (schema `-1`, or `use_default_sound` with no scope
+    /// override, or a custom id missing from the saved-sound list — TDLib
+    /// says "if a sound isn't in the list, then default sound needs to be
+    /// used", `getSavedNotificationSounds` comment, line 13647).
+    Default,
+    /// A saved notification sound (`notificationSound.id`); its MP3 comes
+    /// from `notificationSound.sound` (`file`, line 8857) via `downloadFile`.
+    Custom(i64),
+}
+
+/// Pure inputs for the play / don't-play decision.
+pub struct SoundInput {
+    /// Whether the OS considers our window focused (`Window::is_window_active`).
+    pub app_active: bool,
+    /// Exception mute (`ChatNotificationSettings::is_muted()`).
+    pub chat_muted: bool,
+    /// `chatNotificationSettings.use_default_sound`.
+    pub use_default_sound: bool,
+    /// `chatNotificationSettings.sound_id`.
+    pub chat_sound_id: i64,
+    /// The chat scope's `scopeNotificationSettings.sound_id`, when loaded.
+    /// `None` (scope settings not yet fetched) falls back to the app default.
+    pub scope_sound_id: Option<i64>,
+}
+
+/// Decide whether an incoming-message notification should play a sound.
+///
+/// Rules (parity slice, matching official behavior):
+/// 1. No sound while the app window is focused — the user is looking at the
+///    app already ("no sound when the chat is open/focused").
+/// 2. Muted chats never make sound (same gate as the toast).
+/// 3. A resolved sound id of `0` means disabled — no sound.
+/// 4. `-1` (or an unknown scope) resolves to the app default tone.
+/// 5. Any other id resolves to the saved notification sound; the playback
+///    layer falls back to the default tone when the id is not in the saved
+///    list (per the `getSavedNotificationSounds` comment).
+pub fn decide_notification_sound(input: &SoundInput) -> Option<NotificationSoundKind> {
+    if input.app_active || input.chat_muted {
+        return None;
+    }
+    let resolved = if input.use_default_sound {
+        input.scope_sound_id.unwrap_or(-1)
+    } else {
+        input.chat_sound_id
+    };
+    match resolved {
+        0 => None,
+        -1 => Some(NotificationSoundKind::Default),
+        id => Some(NotificationSoundKind::Custom(id)),
+    }
 }
 
 /// Platform notification backend available on this build target.
@@ -268,6 +345,80 @@ pub fn run_notification_command(command: &NotificationCommand) -> NotificationOu
         Err(_) => false,
     };
     NotificationOutcome { clicked }
+}
+
+/// A shell-free OS command that plays one notification sound. Arguments are
+/// passed without a shell, so a sound-file path can never inject syntax.
+/// The reducer never spawns processes; dispatch runs on UI-thread-spawned
+/// worker threads, like notifications.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SoundCommand {
+    pub program: String,
+    pub args: Vec<String>,
+}
+
+/// Build the command that plays the app default notification tone.
+///
+/// TDLib ships no default sound file — the "app-dependent default sound"
+/// (schema comment, line 3368) is the client's own resource. We synthesize
+/// a short tone via ffplay's lavfi input (no bundled asset, no shell):
+/// Linux uses the established ffplay dependency; macOS falls back to the
+/// system alert beep (`osascript -e beep`).
+pub fn default_tone_command() -> Option<SoundCommand> {
+    if cfg!(target_os = "linux") {
+        Some(SoundCommand {
+            program: "ffplay".to_string(),
+            args: vec![
+                "-nodisp".to_string(),
+                "-autoexit".to_string(),
+                "-loglevel".to_string(),
+                "quiet".to_string(),
+                "-f".to_string(),
+                "lavfi".to_string(),
+                "sine=frequency=660:duration=0.35".to_string(),
+            ],
+        })
+    } else if cfg!(target_os = "macos") {
+        Some(SoundCommand {
+            program: "osascript".to_string(),
+            args: vec!["-e".to_string(), "beep".to_string()],
+        })
+    } else {
+        None
+    }
+}
+
+/// Build the command that plays a downloaded notification-sound MP3.
+pub fn file_sound_command(path: &str) -> Option<SoundCommand> {
+    if cfg!(target_os = "linux") {
+        Some(SoundCommand {
+            program: "ffplay".to_string(),
+            args: vec![
+                "-nodisp".to_string(),
+                "-autoexit".to_string(),
+                "-loglevel".to_string(),
+                "quiet".to_string(),
+                path.to_string(),
+            ],
+        })
+    } else if cfg!(target_os = "macos") {
+        Some(SoundCommand {
+            program: "afplay".to_string(),
+            args: vec![path.to_string()],
+        })
+    } else {
+        None
+    }
+}
+
+/// Play one notification sound to completion. A missing player binary (or a
+/// vanished sound file) fails silently; never panics.
+pub fn play_sound_command(command: &SoundCommand) {
+    let _ = std::process::Command::new(&command.program)
+        .args(&command.args)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status();
 }
 
 #[cfg(test)]
@@ -493,5 +644,113 @@ mod tests {
             report_click: true,
         };
         assert!(!run_notification_command(&cmd).clicked);
+    }
+
+    fn sound_input(app_active: bool) -> SoundInput {
+        SoundInput {
+            app_active,
+            chat_muted: false,
+            use_default_sound: true,
+            chat_sound_id: 0,
+            scope_sound_id: None,
+        }
+    }
+
+    #[test]
+    fn focused_window_never_plays_sound() {
+        assert!(decide_notification_sound(&sound_input(true)).is_none());
+    }
+
+    #[test]
+    fn muted_chat_never_plays_sound() {
+        let mut input = sound_input(false);
+        input.chat_muted = true;
+        assert!(decide_notification_sound(&input).is_none());
+    }
+
+    #[test]
+    fn unknown_scope_plays_default_tone() {
+        // `use_default_sound` with scope settings not yet fetched → app default.
+        assert_eq!(
+            decide_notification_sound(&sound_input(false)),
+            Some(NotificationSoundKind::Default)
+        );
+    }
+
+    #[test]
+    fn disabled_chat_sound_is_silent() {
+        // Explicit exception sound 0 = disabled (schema line 3350).
+        let mut input = sound_input(false);
+        input.use_default_sound = false;
+        input.chat_sound_id = 0;
+        assert!(decide_notification_sound(&input).is_none());
+    }
+
+    #[test]
+    fn custom_chat_sound_resolves() {
+        let mut input = sound_input(false);
+        input.use_default_sound = false;
+        input.chat_sound_id = 99;
+        assert_eq!(
+            decide_notification_sound(&input),
+            Some(NotificationSoundKind::Custom(99))
+        );
+    }
+
+    #[test]
+    fn scope_sound_minus_one_is_default_tone() {
+        // `-1` = app-dependent default (schema line 3368).
+        let mut input = sound_input(false);
+        input.scope_sound_id = Some(-1);
+        assert_eq!(
+            decide_notification_sound(&input),
+            Some(NotificationSoundKind::Default)
+        );
+    }
+
+    #[test]
+    fn scope_sound_zero_is_silent() {
+        let mut input = sound_input(false);
+        input.scope_sound_id = Some(0);
+        assert!(decide_notification_sound(&input).is_none());
+    }
+
+    #[test]
+    fn scope_custom_sound_resolves() {
+        let mut input = sound_input(false);
+        input.scope_sound_id = Some(42);
+        assert_eq!(
+            decide_notification_sound(&input),
+            Some(NotificationSoundKind::Custom(42))
+        );
+    }
+
+    #[test]
+    fn default_tone_command_is_shell_free() {
+        let Some(cmd) = default_tone_command() else {
+            return; // Unsupported platform: silence is the contract.
+        };
+        assert!(!cmd.program.is_empty());
+        assert!(!cmd.args.is_empty());
+        // No shell metacharacters anywhere: the tone is synthesized, not parsed.
+        for arg in std::iter::once(&cmd.program).chain(cmd.args.iter()) {
+            assert!(!arg.contains(';') && !arg.contains('|') && !arg.contains('$'));
+        }
+    }
+
+    #[test]
+    fn file_sound_command_passes_path_verbatim() {
+        let Some(cmd) = file_sound_command("/tmp/odd;name.mp3") else {
+            return;
+        };
+        assert!(cmd.args.iter().any(|a| a == "/tmp/odd;name.mp3"));
+    }
+
+    #[test]
+    fn missing_player_fails_silently() {
+        play_sound_command(&SoundCommand {
+            program: "quill-definitely-not-a-real-binary".to_string(),
+            args: Vec::new(),
+        });
     }
 }
