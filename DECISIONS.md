@@ -238,3 +238,65 @@ Research snapshot 2026-09-16, pin recheck **2026-09-17**.
   gates (VoiceOver, real IME) stay blocked on a Mac session; secret chats,
   calls, payments, multi-account, telemetry, AI, and App Store distribution
   stay out of scope.
+
+## Phase 2.1 — Sponsored-message handling (2026-09-26)
+
+- **Rationale:** Channels are the README blocker, gated on sponsored-content
+  handling. This slice proves the full sponsored pipeline (fetch → render →
+  report → click tracking) through replay fixtures and a screenshot demo,
+  while keeping the channel gate intact for Phase 2.2.
+- **Official clients first:** tdesktop is the UX reference for sponsored row
+  presentation (Sponsored/Recommended label, sponsor info, action button,
+  report affordance). Unigram guides the TDLib mapping. The label text comes
+  from `sponsoredMessage.is_recommended` (`Recommended` when true, `Sponsored`
+  otherwise) — not invented.
+- **Schema (1.8.67, verified in `schema/td_api.tl`):**
+  - `getChatSponsoredMessages chat_id:int53 = SponsoredMessages;`
+  - `sponsoredMessages messages:vector<sponsoredMessage> messages_between:int32 = SponsoredMessages;`
+  - `sponsoredMessage message_id:int53 is_recommended:Bool can_be_reported:Bool content:MessageContent sponsor:advertisementSponsor title:string button_text:string accent_color_id:int32 background_custom_emoji_id:int64 additional_info:string = SponsoredMessage;`
+  - `advertisementSponsor url:string photo:photo info:string = AdvertisementSponsor;`
+  - `reportChatSponsoredMessage chat_id:int53 message_id:int53 option_id:bytes = ReportSponsoredResult;`
+  - `reportSponsoredResultOk`, `reportSponsoredResultFailed`,
+    `reportSponsoredResultOptionRequired title:string options:vector<reportOption>`,
+    `reportSponsoredResultAdsHidden`, `reportSponsoredResultPremiumRequired`
+  - `reportOption id:bytes text:string = ReportOption;` (`id` is base64 bytes,
+    preserved verbatim through the option picker)
+  - `viewSponsoredChat sponsored_chat_unique_id:int53 = Ok;`
+  - `clickChatSponsoredMessage chat_id:int53 message_id:int53 is_media_click:Bool from_fullscreen:Bool = Ok;`
+- **Semantic boundary:** `viewSponsoredChat` takes `sponsoredChat.unique_id`
+  from sponsored-search results. `sponsoredMessage` carries only `message_id`;
+  no mapping is fabricated. The typed driver supports `viewSponsoredChat`, but
+  row-level integration waits for a real `sponsoredChat.unique_id`.
+- **UX:**
+  - Sponsored rows render below the channel header: label badge (Sponsored /
+    Recommended), title, content (text/photo/animation/video/document via the
+    existing media helpers), sponsor info, additional info, sponsor button
+    (opens `advertisementSponsor.url`), and a Report button only when
+    `can_be_reported` is true.
+  - Report flow: tap Report → `reportChatSponsoredMessage` with empty
+    `option_id` → `OptionRequired` opens the option picker → picking an option
+    re-sends with the base64 `option_id` → outcome banner shows a fixed
+    user-facing message per result (no TDLib text echoed). TDLib errors
+    dismiss the picker silently.
+  - Row order preserves TDLib's response vector order (the schema promises no
+    order; sorting by `message_id` was removed).
+- **Downloads:** Sponsored media follows the existing sandbox: sponsor/content
+  thumbnails join the priority-1 pass for the open chat; clicking a row's media
+  requests the full file at priority 32 via the shared `request_media_download`
+  path.
+- **Click tracking:** `clickChatSponsoredMessage` fires on sponsor button/link
+  opens (`is_media_click=false`) and on media opens/downloads/playback
+  (`is_media_click=true`). `from_fullscreen` is false (no fullscreen viewer in
+  this slice). Fire-and-forget; the `ok` response is ignored.
+- **Channel gate retained:** `ChatKind::gate_reason`,
+  `ChatKind::is_supported_cloud_chat`, and the normal-live UI gate are
+  unchanged. Selecting a gated channel fetches sponsored rows (no
+  `openChat`/`getChatHistory`); re-selecting the open gated channel no longer
+  leaks a history fetch. The `ReadySponsored` screenshot demo (CLI
+  `ready-sponsored`, `docs/screenshots/ready-sponsored.png`) proves the
+  pipeline through injected fixtures.
+- **Out of this slice:** un-gating channels (Phase 2.2); `sponsoredChat`
+  search-result integration for `viewSponsoredChat`; fullscreen media viewer
+  (`from_fullscreen=true` path); sponsored-message inline buttons beyond the
+  single sponsor URL button; premium upsell UI for
+  `reportSponsoredResultPremiumRequired` (a fixed message is shown).

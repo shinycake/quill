@@ -151,6 +151,17 @@ pub enum EnvelopePayload {
         animations: Vec<AnimationItem>,
         files: Vec<ParsedFile>,
     },
+    /// `sponsoredMessages` — `getChatSponsoredMessages`. `messages_between` is
+    /// the minimum number of ordinary messages between shown sponsored rows
+    /// (0 = show after all ordinary messages).
+    SponsoredMessages {
+        messages: Vec<SponsoredMessage>,
+        files: Vec<ParsedFile>,
+        messages_between: i32,
+    },
+    /// `ReportSponsoredResult` — `reportChatSponsoredMessage` /
+    /// `reportSponsoredChat` response.
+    ReportSponsoredResult(ReportSponsoredResult),
     /// `updateSavedAnimations` — file ids of saved GIFs, newest first.
     UpdateSavedAnimations {
         animation_ids: Vec<i32>,
@@ -658,6 +669,107 @@ impl LinkPreview {
             || !self.title.is_empty()
             || !self.description.is_empty()
             || self.photo.is_some()
+    }
+}
+
+/// `advertisementSponsor` (TDLib 1.8.67): who backs a sponsored message.
+/// `photo` is null when the sponsor must not show one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AdvertisementSponsor {
+    pub url: String,
+    pub photo: Option<PhotoContent>,
+    pub info: String,
+}
+
+/// `sponsoredMessage` (TDLib 1.8.67). Content is text, animation, photo, or
+/// video per the schema; `accent_color_id` / `background_custom_emoji_id` are
+/// not rendered in this slice.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SponsoredMessage {
+    /// int53; unique for the chat among both ordinary and sponsored messages.
+    pub message_id: i64,
+    pub is_recommended: bool,
+    pub can_be_reported: bool,
+    pub content: MessageContent,
+    pub sponsor: AdvertisementSponsor,
+    pub title: String,
+    pub button_text: String,
+    pub additional_info: String,
+}
+
+impl SponsoredMessage {
+    /// "Recommended" when `is_recommended`, otherwise "Sponsored" (schema).
+    pub fn kind_label(&self) -> &'static str {
+        if self.is_recommended {
+            "Recommended"
+        } else {
+            "Sponsored"
+        }
+    }
+
+    /// Thumb file ids worth auto-downloading at priority 1 (content + sponsor).
+    pub fn thumb_file_ids(&self) -> Vec<FileId> {
+        let mut ids = Vec::new();
+        match &self.content {
+            MessageContent::Photo(photo) => {
+                if let Some(size) = photo.thumb_size() {
+                    ids.push(size.file_id);
+                }
+            }
+            MessageContent::Animation(animation) => {
+                if let Some(file_id) = animation.thumb_file_id() {
+                    ids.push(file_id);
+                }
+            }
+            MessageContent::Video(video) => {
+                if let Some(file_id) = video.thumb_file_id() {
+                    ids.push(file_id);
+                }
+            }
+            _ => {}
+        }
+        if let Some(photo) = &self.sponsor.photo
+            && let Some(size) = photo.thumb_size()
+        {
+            ids.push(size.file_id);
+        }
+        ids
+    }
+}
+
+/// `reportOption` (TDLib 1.8.67). `id` is `bytes` (base64 in JSON); echoed
+/// back into `reportChatSponsoredMessage`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReportOption {
+    pub id: String,
+    pub text: String,
+}
+
+/// `ReportSponsoredResult` (TDLib 1.8.67): outcome of `reportChatSponsoredMessage`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ReportSponsoredResult {
+    Ok,
+    Failed,
+    OptionRequired {
+        title: String,
+        options: Vec<ReportOption>,
+    },
+    AdsHidden,
+    PremiumRequired,
+}
+
+impl ReportSponsoredResult {
+    /// Short user-facing note (no TDLib text is echoed).
+    pub fn user_message(&self) -> &'static str {
+        match self {
+            ReportSponsoredResult::Ok => "Report sent",
+            ReportSponsoredResult::Failed => "Could not report this message",
+            ReportSponsoredResult::OptionRequired { .. } => "Choose a report reason",
+            ReportSponsoredResult::AdsHidden => "Sponsored messages hidden",
+            ReportSponsoredResult::PremiumRequired => {
+                "Hiding sponsored messages needs Telegram Premium"
+            }
+        }
     }
 }
 
@@ -1363,6 +1475,25 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
         "stickerSets" => Ok(parse_sticker_sets(&value)),
         "stickerSet" => Ok(parse_sticker_set(&value)),
         "animations" => Ok(parse_animations(&value)),
+        "sponsoredMessages" => Ok(parse_sponsored_messages(&value)?),
+        "reportSponsoredResultOk" => Ok(EnvelopePayload::ReportSponsoredResult(
+            ReportSponsoredResult::Ok,
+        )),
+        "reportSponsoredResultFailed" => Ok(EnvelopePayload::ReportSponsoredResult(
+            ReportSponsoredResult::Failed,
+        )),
+        "reportSponsoredResultOptionRequired" => Ok(EnvelopePayload::ReportSponsoredResult(
+            ReportSponsoredResult::OptionRequired {
+                title: json_field_str(&value, "title"),
+                options: parse_report_options(value.get("options")),
+            },
+        )),
+        "reportSponsoredResultAdsHidden" => Ok(EnvelopePayload::ReportSponsoredResult(
+            ReportSponsoredResult::AdsHidden,
+        )),
+        "reportSponsoredResultPremiumRequired" => Ok(EnvelopePayload::ReportSponsoredResult(
+            ReportSponsoredResult::PremiumRequired,
+        )),
         "updateSavedAnimations" => Ok(EnvelopePayload::UpdateSavedAnimations {
             animation_ids: value
                 .get("animation_ids")
@@ -2361,6 +2492,130 @@ fn parse_animations(value: &Value) -> EnvelopePayload {
     }
     files.retain(|file| file.id.0 != 0);
     EnvelopePayload::Animations { animations, files }
+}
+
+/// `sponsoredMessages` (TDLib 1.8.67). Unparseable rows are skipped, like
+/// other vector payloads.
+fn parse_sponsored_messages(value: &Value) -> Result<EnvelopePayload, ParseError> {
+    let mut messages = Vec::new();
+    let mut files = Vec::new();
+    if let Some(entries) = value.get("messages").and_then(Value::as_array) {
+        for entry in entries {
+            let Ok((message, message_files)) = parse_sponsored_message(entry) else {
+                continue;
+            };
+            messages.push(message);
+            files.extend(message_files);
+        }
+    }
+    files.retain(|file| file.id.0 != 0);
+    Ok(EnvelopePayload::SponsoredMessages {
+        messages,
+        files,
+        messages_between: value
+            .get("messages_between")
+            .and_then(Value::as_i64)
+            .unwrap_or(0) as i32,
+    })
+}
+
+fn parse_sponsored_message(
+    entry: &Value,
+) -> Result<(SponsoredMessage, Vec<ParsedFile>), ParseError> {
+    if entry.get("@type").and_then(Value::as_str) != Some("sponsoredMessage") {
+        return Err(ParseError::MissingField);
+    }
+    let (content, mut files) = parse_content(entry.get("content"));
+    let (sponsor, sponsor_files) = parse_advertisement_sponsor(entry.get("sponsor"));
+    files.extend(sponsor_files);
+    Ok((
+        SponsoredMessage {
+            message_id: int53(entry.get("message_id"))?,
+            is_recommended: json_bool(entry.get("is_recommended"), false),
+            can_be_reported: json_bool(entry.get("can_be_reported"), false),
+            content,
+            sponsor,
+            title: json_field_str(entry, "title"),
+            button_text: json_field_str(entry, "button_text"),
+            additional_info: json_field_str(entry, "additional_info"),
+        },
+        files,
+    ))
+}
+
+/// `advertisementSponsor` (TDLib 1.8.67). A null sponsor is an empty sponsor,
+/// not an error.
+fn parse_advertisement_sponsor(value: Option<&Value>) -> (AdvertisementSponsor, Vec<ParsedFile>) {
+    let empty = (
+        AdvertisementSponsor {
+            url: String::new(),
+            photo: None,
+            info: String::new(),
+        },
+        Vec::new(),
+    );
+    let Some(value) = value.filter(|value| !value.is_null()) else {
+        return empty;
+    };
+    if value.get("@type").and_then(Value::as_str) != Some("advertisementSponsor") {
+        return empty;
+    }
+    let (photo, files) = value
+        .get("photo")
+        .filter(|photo| !photo.is_null())
+        .map(parse_sponsored_photo)
+        .unwrap_or((None, Vec::new()));
+    (
+        AdvertisementSponsor {
+            url: json_field_str(value, "url"),
+            photo,
+            info: json_field_str(value, "info"),
+        },
+        files,
+    )
+}
+
+/// Sponsor photo is schema `photo`. Same shape as link-preview photos.
+fn parse_sponsored_photo(photo: &Value) -> (Option<PhotoContent>, Vec<ParsedFile>) {
+    let typed_photo = photo.get("@type").and_then(Value::as_str) == Some("photo");
+    if !typed_photo && photo.get("sizes").and_then(Value::as_array).is_none() {
+        return (None, Vec::new());
+    }
+    let (sizes, files) = parse_photo_sizes(photo);
+    if sizes.is_empty() {
+        return (None, Vec::new());
+    }
+    (
+        Some(PhotoContent {
+            caption: String::new(),
+            sizes,
+            is_secret: false,
+            has_spoiler: false,
+        }),
+        files,
+    )
+}
+
+/// `reportOption` rows (`reportSponsoredResultOptionRequired.options`).
+fn parse_report_options(value: Option<&Value>) -> Vec<ReportOption> {
+    let mut options = Vec::new();
+    let Some(entries) = value.and_then(Value::as_array) else {
+        return options;
+    };
+    for entry in entries {
+        if entry.get("@type").and_then(Value::as_str) != Some("reportOption") {
+            continue;
+        }
+        options.push(ReportOption {
+            id: entry
+                .get("id")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string(),
+            text: json_field_str(entry, "text"),
+        });
+    }
+    options
 }
 
 fn parse_message_audio(value: &Value) -> (MessageContent, Vec<ParsedFile>) {

@@ -1010,3 +1010,171 @@ fn diagnostics_never_include_message_text() {
     });
     assert!(!sink.rendered().contains("hello secret"));
 }
+/// Phase 2.1 sponsored-message fixtures. The channel chat stays gated while the
+/// `getChatSponsoredMessages` / `reportChatSponsoredMessage` pipeline is proven.
+fn sponsored_test_session(sink: &Arc<MemorySink>, seq: &AtomicU64) -> Session {
+    let dyn_sink: Arc<dyn quill::diagnostics::DiagnosticSink> = sink.clone();
+    let mut session = Session::new(AccountKey::primary(), dyn_sink);
+    apply_all_seq(
+        &mut session,
+        sink,
+        seq,
+        &[
+            r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+            r#"{"@type":"updateNewChat","chat":{"id":13,"title":"Demo channel","type":{"@type":"chatTypeSupergroup","supergroup_id":13,"is_channel":true},"unread_count":0}}"#,
+        ],
+    );
+    // Channels stay gated in this slice: the placeholder path is unchanged.
+    let chat = session.chats.get(&13).unwrap();
+    assert!(!chat.supported());
+    assert!(chat.kind.gate_reason().is_some());
+
+    session.open_chat(quill::ids::ChatId(13));
+    let extra = session.request(
+        RequestPurpose::GetChatSponsoredMessages,
+        Some(quill::ids::ChatId(13)),
+    );
+    let thumb = r#"{"@type":"file","id":61,"size":24,"expected_size":24,"local":{"@type":"localFile","path":"","can_be_downloaded":true,"can_be_deleted":false,"is_downloading_active":false,"is_downloading_completed":false,"download_offset":0,"downloaded_prefix_size":0,"downloaded_size":0},"remote":{"@type":"remoteFile","id":"x","unique_id":"u","is_uploading_active":false,"is_uploading_completed":true,"uploaded_size":24}}"#;
+    apply_all_seq(
+        &mut session,
+        sink,
+        seq,
+        &[&format!(
+            r#"{{"@type":"sponsoredMessages","@extra":"{}","messages_between":3,"messages":[{{"@type":"sponsoredMessage","message_id":9001,"is_recommended":false,"can_be_reported":true,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"summer sale","entities":[]}}}},"sponsor":{{"@type":"advertisementSponsor","url":"https://example.com/promo","photo":{{"@type":"photo","has_stickers":false,"sizes":[]}},"info":"Example Ads"}},"title":"Summer sale","button_text":"Shop now","accent_color_id":0,"background_custom_emoji_id":"0","additional_info":"Ad by Example"}},{{"@type":"sponsoredMessage","message_id":9002,"is_recommended":true,"can_be_reported":false,"content":{{"@type":"messagePhoto","photo":{{"@type":"photo","has_stickers":false,"sizes":[{{"@type":"photoSize","type":"m","photo":{thumb},"width":240,"height":160,"progressive_sizes":[]}}]}},"caption":{{"@type":"formattedText","text":"pick","entities":[]}},"has_spoiler":false,"is_secret":false}},"sponsor":{{"@type":"advertisementSponsor","url":"https://example.com/pick","photo":{{"@type":"photo","has_stickers":false,"sizes":[]}},"info":"Curated"}},"title":"Editors' pick","button_text":"Learn more","accent_color_id":0,"background_custom_emoji_id":"0","additional_info":""}}]}}"#,
+            extra.0
+        )],
+    );
+    session
+}
+
+#[test]
+fn replay_sponsored_messages_fetch_and_labels() {
+    let sink = Arc::new(MemorySink::new());
+    let seq = AtomicU64::new(0);
+    let session = sponsored_test_session(&sink, &seq);
+
+    let entry = session.sponsored.get(&13).unwrap();
+    assert_eq!(entry.messages_between, 3);
+    assert_eq!(entry.messages.len(), 2);
+    assert_eq!(entry.messages[0].kind_label(), "Sponsored");
+    assert_eq!(entry.messages[1].kind_label(), "Recommended");
+    assert!(entry.messages[0].can_be_reported);
+    assert!(!entry.messages[1].can_be_reported);
+    assert_eq!(entry.messages[0].title, "Summer sale");
+    assert_eq!(entry.messages[0].sponsor.url, "https://example.com/promo");
+    assert_eq!(entry.messages[0].sponsor.info, "Example Ads");
+    assert_eq!(entry.messages[0].button_text, "Shop now");
+    assert_eq!(entry.messages[0].additional_info, "Ad by Example");
+
+    // Sponsored thumbs join the priority-1 download pass for the open chat.
+    let thumbs = session.thumb_file_ids_to_download();
+    assert!(thumbs.iter().any(|id| id.0 == 61));
+
+    // Rows render oldest-first.
+    let rows = session.open_sponsored_rows();
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0].message_id, 9001);
+    assert_eq!(rows[1].message_id, 9002);
+}
+
+#[test]
+fn replay_sponsored_report_option_required_then_ok() {
+    let sink = Arc::new(MemorySink::new());
+    let seq = AtomicU64::new(0);
+    let mut session = sponsored_test_session(&sink, &seq);
+    let chat_id = quill::ids::ChatId(13);
+
+    // The Recommended row is not reportable.
+    assert!(session.begin_sponsored_report(chat_id, 9002).is_none());
+    assert!(session.sponsored_report.is_none());
+
+    assert!(session.begin_sponsored_report(chat_id, 9001).is_some());
+    let extra = session.request(RequestPurpose::ReportChatSponsoredMessage, Some(chat_id));
+    apply_all_seq(
+        &mut session,
+        &sink,
+        &seq,
+        &[&format!(
+            r#"{{"@type":"reportSponsoredResultOptionRequired","@extra":"{}","title":"Why report?","options":[{{"@type":"reportOption","id":"bWlzLWxlYWQ=","text":"Misleading"}},{{"@type":"reportOption","id":"c3BhbQ==","text":"Spam"}}]}}"#,
+            extra.0
+        )],
+    );
+    let flight = session.sponsored_report.clone().unwrap();
+    assert_eq!(flight.chat_id, chat_id);
+    assert_eq!(flight.message_id, 9001);
+    assert_eq!(flight.title, "Why report?");
+    assert_eq!(flight.options.len(), 2);
+    assert_eq!(flight.options[0].text, "Misleading");
+    assert_eq!(flight.options[1].text, "Spam");
+
+    // Follow-up with the chosen option id.
+    assert!(session.begin_sponsored_report(chat_id, 9001).is_some());
+    let extra = session.request(RequestPurpose::ReportChatSponsoredMessage, Some(chat_id));
+    apply_all_seq(
+        &mut session,
+        &sink,
+        &seq,
+        &[&format!(
+            r#"{{"@type":"reportSponsoredResultOk","@extra":"{}"}}"#,
+            extra.0
+        )],
+    );
+    assert!(session.sponsored_report.is_none());
+    let outcome = session.last_sponsored_report.clone().unwrap();
+    assert_eq!(outcome.chat_id, chat_id);
+    assert_eq!(outcome.message_id, 9001);
+    assert_eq!(outcome.user_message(), "Report sent");
+}
+
+#[test]
+fn replay_sponsored_report_failed() {
+    let sink = Arc::new(MemorySink::new());
+    let seq = AtomicU64::new(0);
+    let mut session = sponsored_test_session(&sink, &seq);
+    let chat_id = quill::ids::ChatId(13);
+
+    assert!(session.begin_sponsored_report(chat_id, 9001).is_some());
+    let extra = session.request(RequestPurpose::ReportChatSponsoredMessage, Some(chat_id));
+    apply_all_seq(
+        &mut session,
+        &sink,
+        &seq,
+        &[&format!(
+            r#"{{"@type":"reportSponsoredResultFailed","@extra":"{}"}}"#,
+            extra.0
+        )],
+    );
+    assert!(session.sponsored_report.is_none());
+    let outcome = session.last_sponsored_report.clone().unwrap();
+    assert_eq!(outcome.user_message(), "Could not report this message");
+}
+
+#[test]
+fn replay_sponsored_report_ads_hidden_and_premium_required() {
+    let sink = Arc::new(MemorySink::new());
+    let seq = AtomicU64::new(0);
+    let mut session = sponsored_test_session(&sink, &seq);
+    let chat_id = quill::ids::ChatId(13);
+
+    for (ctor, message) in [
+        (
+            "reportSponsoredResultAdsHidden",
+            "Sponsored messages hidden",
+        ),
+        (
+            "reportSponsoredResultPremiumRequired",
+            "Hiding sponsored messages needs Telegram Premium",
+        ),
+    ] {
+        assert!(session.begin_sponsored_report(chat_id, 9001).is_some());
+        let extra = session.request(RequestPurpose::ReportChatSponsoredMessage, Some(chat_id));
+        apply_all_seq(
+            &mut session,
+            &sink,
+            &seq,
+            &[&format!(r#"{{"@type":"{}","@extra":"{}"}}"#, ctor, extra.0)],
+        );
+        let outcome = session.last_sponsored_report.clone().unwrap();
+        assert_eq!(outcome.user_message(), message);
+    }
+}

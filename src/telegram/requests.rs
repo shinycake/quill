@@ -235,6 +235,68 @@ pub fn close_chat(extra: RequestId, chat_id: ChatId) -> String {
     .to_string()
 }
 
+/// `getChatSponsoredMessages` (TDLib 1.8.67). For channel chats (and chats
+/// with bots); rows render Sponsored / Recommended per `is_recommended`.
+pub fn get_chat_sponsored_messages(extra: RequestId, chat_id: ChatId) -> String {
+    json!({
+        "@type": "getChatSponsoredMessages",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0,
+    })
+    .to_string()
+}
+
+/// `reportChatSponsoredMessage` (TDLib 1.8.67). `option_id` is the base64
+/// `reportOption.id`; empty for the initial request.
+pub fn report_chat_sponsored_message(
+    extra: RequestId,
+    chat_id: ChatId,
+    message_id: i64,
+    option_id: &str,
+) -> String {
+    json!({
+        "@type": "reportChatSponsoredMessage",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0,
+        "message_id": message_id,
+        "option_id": option_id,
+    })
+    .to_string()
+}
+
+/// `viewSponsoredChat` (TDLib 1.8.67). `unique_id` is the `sponsoredChat`
+/// unique id (from sponsored search results).
+pub fn view_sponsored_chat(extra: RequestId, sponsored_chat_unique_id: i64) -> String {
+    json!({
+        "@type": "viewSponsoredChat",
+        "@extra": extra.as_extra(),
+        "sponsored_chat_unique_id": sponsored_chat_unique_id,
+    })
+    .to_string()
+}
+
+/// `clickChatSponsoredMessage` (TDLib 1.8.67). Sent when the user opens a
+/// sponsored message's sponsor link/button (`is_media_click = false`) or its
+/// media (`is_media_click = true`). `from_fullscreen` is true when the media
+/// was opened from the fullscreen viewer.
+pub fn click_chat_sponsored_message(
+    extra: RequestId,
+    chat_id: ChatId,
+    message_id: i64,
+    is_media_click: bool,
+    from_fullscreen: bool,
+) -> String {
+    json!({
+        "@type": "clickChatSponsoredMessage",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0,
+        "message_id": message_id,
+        "is_media_click": is_media_click,
+        "from_fullscreen": from_fullscreen,
+    })
+    .to_string()
+}
+
 /// `viewMessages` (TDLib 1.8.67). `source` is `messageSourceChatHistory`.
 /// `force_read` marks the ids read even if `openChat` has not completed.
 pub fn view_messages(
@@ -1635,6 +1697,44 @@ mod tests {
         assert!(client_close.contains("\"@type\":\"close\""));
         assert!(!client_close.contains("closeChat"));
         assert_eq!(serde_json::from_str::<Value>(&close).unwrap()["chat_id"], 3);
+    }
+
+    #[test]
+    fn sponsored_message_requests_match_1_8_67() {
+        let fetch = get_chat_sponsored_messages(RequestId(50), ChatId(13));
+        let v: serde_json::Value = serde_json::from_str(&fetch).unwrap();
+        assert_eq!(v["@type"], "getChatSponsoredMessages");
+        assert_eq!(v["@extra"], "50");
+        assert_eq!(v["chat_id"], 13);
+
+        let report = report_chat_sponsored_message(RequestId(51), ChatId(13), 777, "");
+        let v: serde_json::Value = serde_json::from_str(&report).unwrap();
+        assert_eq!(v["@type"], "reportChatSponsoredMessage");
+        assert_eq!(v["chat_id"], 13);
+        assert_eq!(v["message_id"], 777);
+        assert_eq!(v["option_id"], "");
+
+        let with_option = report_chat_sponsored_message(RequestId(52), ChatId(13), 777, "b3B0aW9u");
+        let v: serde_json::Value = serde_json::from_str(&with_option).unwrap();
+        assert_eq!(v["option_id"], "b3B0aW9u");
+
+        let view = view_sponsored_chat(RequestId(53), 4242);
+        let v: serde_json::Value = serde_json::from_str(&view).unwrap();
+        assert_eq!(v["@type"], "viewSponsoredChat");
+        assert_eq!(v["sponsored_chat_unique_id"], 4242);
+
+        let click = click_chat_sponsored_message(RequestId(54), ChatId(13), 9001, false, false);
+        let v: serde_json::Value = serde_json::from_str(&click).unwrap();
+        assert_eq!(v["@type"], "clickChatSponsoredMessage");
+        assert_eq!(v["chat_id"], 13);
+        assert_eq!(v["message_id"], 9001);
+        assert_eq!(v["is_media_click"], false);
+        assert_eq!(v["from_fullscreen"], false);
+
+        let media_click =
+            click_chat_sponsored_message(RequestId(55), ChatId(13), 9002, true, false);
+        let v: serde_json::Value = serde_json::from_str(&media_click).unwrap();
+        assert_eq!(v["is_media_click"], true);
     }
 
     #[test]
