@@ -336,6 +336,9 @@ pub struct QuillApp {
     /// Phase 6: sidebar tab — `true` shows the contacts list instead of
     /// the chat list.
     contacts_tab_open: bool,
+    /// Phase 7.1: selected folder tab (`None` = Main). Folder membership
+    /// comes from chat positions (`chatListFolder`); the tab only filters.
+    folder_tab: Option<i32>,
     /// Phase 6: add-contact dialog (phone + first/last name) opened from
     /// the user info panel.
     add_contact_dialog: Option<AddContactDialog>,
@@ -465,6 +468,10 @@ pub enum ScreenshotDemo {
     /// for Zed (bio from an injected `userFullInfo`) with the **Add
     /// contact** affordance (Phase 6).
     ReadyContacts,
+    /// Phase 7.1: folder tabs (injected `updateChatFolders` + folder
+    /// positions) with the non-default "News" folder selected, so the chat
+    /// list shows only that folder's chats.
+    ReadyFolders,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1074,6 +1081,15 @@ impl QuillApp {
                     AuthorizationState::Ready,
                 )
             }
+            Some(ScreenshotDemo::ReadyFolders) => {
+                demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
+                (
+                    ConnectUiStatus::DemoReadyChats,
+                    None,
+                    "screenshot demo — chat folder tabs (injected, no live Telegram)".into(),
+                    AuthorizationState::Ready,
+                )
+            }
             None => bootstrap_connect(credentials),
         };
 
@@ -1188,6 +1204,7 @@ impl QuillApp {
             poll_dialog: None,
             media_viewer: MediaViewer::closed(),
             contacts_tab_open: false,
+            folder_tab: None,
             add_contact_dialog: None,
         };
         if matches!(demo, Some(ScreenshotDemo::ReadyChatsComposer)) {
@@ -1402,6 +1419,16 @@ impl QuillApp {
             }
             app.contacts_tab_open = true;
             app.status_note = "screenshot demo — contacts tab + user info panel".into();
+        }
+        if matches!(demo, Some(ScreenshotDemo::ReadyFolders)) {
+            if let Some(session) = app.demo_session.as_mut() {
+                app.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_folders(session, &app.demo_sink, &app.demo_seq);
+            }
+            // Select the non-default "News" folder so the screenshot shows
+            // the filtered chat list.
+            app.folder_tab = Some(2);
+            app.status_note = "screenshot demo — folder tabs · News folder".into();
         }
         if matches!(demo, Some(ScreenshotDemo::ReadyVideoSend)) {
             app.composer.update(cx, |input, cx| {
@@ -4525,6 +4552,75 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// Phase 7.1: folder tabs (`Main` + `updateChatFolders` folders) above
+    /// the search field. Selecting a folder filters the chat list to
+    /// `chatListFolder` chats; selecting it live also fires a single-shot
+    /// `loadChats(chatListFolder)` so TDLib delivers the folder's chats.
+    /// Only rendered when the account actually has folders.
+    fn folder_tabs(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let folders: Vec<(i32, String)> = self
+            .session()
+            .map(|s| {
+                s.chat_folders
+                    .iter()
+                    .map(|f| (f.id, f.name.clone()))
+                    .collect()
+            })
+            .unwrap_or_default();
+        if folders.is_empty() {
+            return div().into_any_element();
+        }
+        let selected = self.folder_tab;
+        let mut row = div()
+            .id("folder-tabs")
+            .flex()
+            .flex_row()
+            .flex_wrap()
+            .items_center()
+            .gap_1();
+        let tabs: Vec<(Option<i32>, String)> = std::iter::once((None, "Main".to_string()))
+            .chain(folders.into_iter().map(|(id, name)| (Some(id), name)))
+            .collect();
+        for (folder, name) in tabs {
+            let active = selected == folder;
+            let id = match folder {
+                Some(folder_id) => format!("tab-folder-{folder_id}"),
+                None => "tab-folder-main".to_string(),
+            };
+            row = row.child(
+                div()
+                    .id(id)
+                    .cursor_pointer()
+                    .px_2()
+                    .py_1()
+                    .rounded_md()
+                    .text_xs()
+                    .font_medium()
+                    .bg(if active {
+                        cx.theme().accent.opacity(0.15)
+                    } else {
+                        cx.theme().sidebar
+                    })
+                    .child(name)
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.open_folder_tab(folder, cx);
+                    })),
+            );
+        }
+        row.into_any_element()
+    }
+
+    fn open_folder_tab(&mut self, folder: Option<i32>, cx: &mut Context<Self>) {
+        self.folder_tab = folder;
+        self.contacts_tab_open = false;
+        if let (Some(live), Some(folder_id)) = (self.live.as_mut(), folder)
+            && let Err(err) = live.driver.load_folder_chats(folder_id)
+        {
+            self.status_note = format!("folder load failed: {err:?}");
+        }
+        cx.notify();
+    }
+
     fn retry_contacts(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut()
             && let Err(err) = live.driver.fetch_contacts()
@@ -7388,6 +7484,23 @@ impl QuillApp {
                     .collect()
             })
             .unwrap_or_default();
+        // Phase 7.2: `searchPublicChats` hits (public username/title lookup).
+        // TDLib excludes known chats from these results, so they are shown
+        // as their own section rather than merged into `Chats`.
+        let public_chats: Vec<(ChatId, String, String)> = session
+            .map(|s| {
+                s.search
+                    .public_chat_ids
+                    .iter()
+                    .map(|id| {
+                        s.chats
+                            .get(&id.0)
+                            .map(|chat| (chat.id, chat.title.clone(), chat.sidebar_preview()))
+                            .unwrap_or_else(|| (*id, format!("chat {}", id.0), String::new()))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
         let hint = match status {
             SearchStatus::Idle => "Type to search chats and messages.".to_string(),
             SearchStatus::Searching if recents => "Loading recent chats…".to_string(),
@@ -7422,6 +7535,24 @@ impl QuillApp {
                 for (id, title, preview) in chats {
                     block = block.child(search_result_row(
                         ("search-chat", id.0 as u64),
+                        title,
+                        preview,
+                        cx,
+                        move |this, window, cx| this.select_search_chat(id, window, cx),
+                    ));
+                }
+                this.child(block)
+            })
+            .when(!public_chats.is_empty(), |this| {
+                let mut block = div()
+                    .id("search-public-chats")
+                    .flex()
+                    .flex_col()
+                    .gap_1()
+                    .child(div().text_xs().font_semibold().child("Public chats"));
+                for (id, title, preview) in public_chats {
+                    block = block.child(search_result_row(
+                        ("search-public-chat", id.0 as u64),
                         title,
                         preview,
                         cx,
@@ -8871,7 +9002,7 @@ impl QuillApp {
                     div()
                         .text_sm()
                         .text_color(cx.theme().muted_foreground)
-                        .child(chat_list_caption(mode, self.session())),
+                        .child(chat_list_caption(mode, self.session(), self.folder_tab)),
                 )
             });
         match mode {
@@ -8897,14 +9028,23 @@ impl QuillApp {
                 if self.contacts_tab_open {
                     list = list.child(self.contacts_list(cx));
                 } else {
+                    list = list.child(self.folder_tabs(cx));
                     list = list.child(self.sidebar_search_field(cx));
                     if self.search_is_open() {
                         list = list.child(self.search_results(cx));
                     } else {
                         let open = self.session().and_then(|s| s.open_chat);
+                        let folder = self.folder_tab;
                         let chats: Vec<ChatSummary> = self
                             .session()
-                            .map(|s| s.ordered_chats().into_iter().cloned().collect())
+                            .map(|s| match folder {
+                                Some(folder_id) => s
+                                    .ordered_folder_chats(folder_id)
+                                    .into_iter()
+                                    .cloned()
+                                    .collect(),
+                                None => s.ordered_chats().into_iter().cloned().collect(),
+                            })
                             .unwrap_or_default();
                         if chats.is_empty() {
                             let loading = self.session().is_some_and(|s| !s.chats_exhausted);
@@ -8912,8 +9052,10 @@ impl QuillApp {
                                 div()
                                     .text_xs()
                                     .text_color(cx.theme().muted_foreground)
-                                    .child(if loading {
+                                    .child(if loading && folder.is_none() {
                                         "Loading chats…"
+                                    } else if folder.is_some() {
+                                        "No chats in this folder yet."
                                     } else {
                                         "No chats in the main list."
                                     }),
@@ -8923,23 +9065,27 @@ impl QuillApp {
                             let selected = open == Some(chat.id);
                             list = list.child(session_chat_row(&chat, selected, cx));
                         }
-                        let archived: Vec<ChatSummary> = self
-                            .session()
-                            .map(|s| s.ordered_archived_chats().into_iter().cloned().collect())
-                            .unwrap_or_default();
-                        if !archived.is_empty() {
-                            list = list.child(
-                                div()
-                                    .id("archive-section")
-                                    .mt_2()
-                                    .text_xs()
-                                    .font_semibold()
-                                    .text_color(cx.theme().muted_foreground)
-                                    .child("Archived"),
-                            );
-                            for chat in archived {
-                                let selected = open == Some(chat.id);
-                                list = list.child(session_chat_row(&chat, selected, cx));
+                        // Archive stays as-is under the main list; a folder
+                        // tab shows only that folder's chats.
+                        if folder.is_none() {
+                            let archived: Vec<ChatSummary> = self
+                                .session()
+                                .map(|s| s.ordered_archived_chats().into_iter().cloned().collect())
+                                .unwrap_or_default();
+                            if !archived.is_empty() {
+                                list = list.child(
+                                    div()
+                                        .id("archive-section")
+                                        .mt_2()
+                                        .text_xs()
+                                        .font_semibold()
+                                        .text_color(cx.theme().muted_foreground)
+                                        .child("Archived"),
+                                );
+                                for chat in archived {
+                                    let selected = open == Some(chat.id);
+                                    list = list.child(session_chat_row(&chat, selected, cx));
+                                }
                             }
                         }
                     }
@@ -9510,6 +9656,27 @@ fn apply_ready_contacts(session: &mut Session, sink: &Arc<MemorySink>, seq: &Ato
         session.apply(owned);
     }
     session.open_info_panel = Some(InfoPanelTarget::User(32));
+}
+
+/// `ReadyFolders` fixture (Phase 7.1): inject `updateChatFolders` with two
+/// folders ("Work" id 1, "News" id 2) and `updateChatPosition` folder
+/// positions for the seeded demo chats — chat 11 (Demo chat A) and chat 13
+/// (Demo channel) go to "News", chat 12 (Demo chat B) goes to "Work".
+/// The demo block then selects the "News" folder tab.
+fn apply_ready_folders(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let folders = r#"{"@type":"updateChatFolders","chat_folders":[{"@type":"chatFolderInfo","id":1,"name":{"@type":"chatFolderName","text":{"@type":"formattedText","text":"Work","entities":[]},"animate_custom_emoji":false},"icon":{"@type":"chatFolderIcon","name":"Work"},"color_id":2,"is_shareable":false,"has_my_invite_links":false},{"@type":"chatFolderInfo","id":2,"name":{"@type":"chatFolderName","text":{"@type":"formattedText","text":"News","entities":[]},"animate_custom_emoji":false},"icon":{"@type":"chatFolderIcon","name":"Channels"},"color_id":4,"is_shareable":false,"has_my_invite_links":false}],"main_chat_list_position":0,"are_tags_enabled":false}"#;
+    if let Some(owned) = copy_and_parse(folders, seq, &dyn_sink) {
+        session.apply(owned);
+    }
+    for (chat_id, folder_id, order) in [(11, 2, "70"), (13, 2, "60"), (12, 1, "65")] {
+        let json = format!(
+            r#"{{"@type":"updateChatPosition","chat_id":{chat_id},"position":{{"@type":"chatPosition","list":{{"@type":"chatListFolder","chat_folder_id":{folder_id}}},"order":"{order}","is_pinned":false}}}}"#
+        );
+        if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
+            session.apply(owned);
+        }
+    }
 }
 
 fn seed_ready_media_session(sink: Arc<MemorySink>) -> Session {
@@ -10324,7 +10491,11 @@ fn pane_placeholder(
         )
 }
 
-fn chat_list_caption(mode: PaneMode, session: Option<&Session>) -> SharedString {
+fn chat_list_caption(
+    mode: PaneMode,
+    session: Option<&Session>,
+    folder: Option<i32>,
+) -> SharedString {
     match mode {
         PaneMode::Synthetic => "Synthetic".into(),
         PaneMode::Connecting => "Waiting for Ready".into(),
@@ -10335,6 +10506,11 @@ fn chat_list_caption(mode: PaneMode, session: Option<&Session>) -> SharedString 
                 } else {
                     "Search".into()
                 }
+            } else if let (Some(session), Some(folder_id)) = (session, folder) {
+                // Phase 7.1: a selected folder tab names the caption.
+                let name = session.folder_name(folder_id).unwrap_or("Folder");
+                let n = session.ordered_folder_chats(folder_id).len();
+                format!("{name} · {n}").into()
             } else {
                 let n = session.map(|s| s.ordered_chats().len()).unwrap_or(0);
                 format!("Main list · {n}").into()

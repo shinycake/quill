@@ -423,6 +423,7 @@ fn replay_global_search_happy_empty_and_error() {
     let search_gen = session.search.begin_query("hello");
     let chats_extra = session.request_search(RequestPurpose::SearchChats, search_gen);
     let messages_extra = session.request_search(RequestPurpose::SearchMessages, search_gen);
+    let public_extra = session.request_search(RequestPurpose::SearchPublicChats, search_gen);
     apply_all_seq(
         &mut session,
         &sink,
@@ -436,10 +437,17 @@ fn replay_global_search_happy_empty_and_error() {
                 r#"{{"@type":"foundMessages","@extra":"{}","total_count":1,"next_offset":"","messages":[{{"id":50,"chat_id":7,"is_outgoing":false,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"CANARY_REPLAY_search","entities":[]}}}}}}]}}"#,
                 messages_extra.0
             ),
+            // Phase 7.2 replay: `searchPublicChats` returns an unknown public
+            // channel; status waits for it before resolving to Ready.
+            &format!(
+                r#"{{"@type":"chats","@extra":"{}","total_count":1,"chat_ids":[4242]}}"#,
+                public_extra.0
+            ),
         ],
     );
     assert_eq!(session.search.status, quill::state::SearchStatus::Ready);
     assert_eq!(session.search.chat_ids[0].0, 7);
+    assert_eq!(session.search.public_chat_ids[0].0, 4242);
     session.promote_search_message(quill::ids::ChatId(7), quill::ids::MessageId(50));
     session.open_chat(quill::ids::ChatId(7));
     assert!(
@@ -454,6 +462,7 @@ fn replay_global_search_happy_empty_and_error() {
     let search_gen = session.search.begin_query("zzz");
     let chats_extra = session.request_search(RequestPurpose::SearchChats, search_gen);
     let messages_extra = session.request_search(RequestPurpose::SearchMessages, search_gen);
+    let public_extra = session.request_search(RequestPurpose::SearchPublicChats, search_gen);
     apply_all_seq(
         &mut session,
         &sink,
@@ -467,6 +476,10 @@ fn replay_global_search_happy_empty_and_error() {
                 r#"{{"@type":"foundMessages","@extra":"{}","total_count":0,"next_offset":"","messages":[]}}"#,
                 messages_extra.0
             ),
+            &format!(
+                r#"{{"@type":"chats","@extra":"{}","total_count":0,"chat_ids":[]}}"#,
+                public_extra.0
+            ),
         ],
     );
     assert_eq!(session.search.status, quill::state::SearchStatus::Empty);
@@ -474,6 +487,7 @@ fn replay_global_search_happy_empty_and_error() {
     let search_gen = session.search.begin_query("nope");
     let chats_extra = session.request_search(RequestPurpose::SearchChats, search_gen);
     let messages_extra = session.request_search(RequestPurpose::SearchMessages, search_gen);
+    let public_extra = session.request_search(RequestPurpose::SearchPublicChats, search_gen);
     apply_all_seq(
         &mut session,
         &sink,
@@ -486,6 +500,10 @@ fn replay_global_search_happy_empty_and_error() {
             &format!(
                 r#"{{"@type":"error","code":400,"message":"CANARY_REPLAY_search_err2","@extra":"{}"}}"#,
                 messages_extra.0
+            ),
+            &format!(
+                r#"{{"@type":"error","code":400,"message":"CANARY_REPLAY_search_err3","@extra":"{}"}}"#,
+                public_extra.0
             ),
         ],
     );

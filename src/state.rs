@@ -7,7 +7,7 @@ use crate::ids::{
 use crate::telegram::client::OwnedEnvelope;
 use crate::telegram::envelope::{
     AnimationItem, AuthorizationState, BotCommand, BotInfo, CallbackQueryAnswer,
-    ChannelMemberStatus, ChatAction, ChatDraft, ChatJoinResult, ChatKind, ChatList,
+    ChannelMemberStatus, ChatAction, ChatDraft, ChatFolderInfo, ChatJoinResult, ChatKind, ChatList,
     ChatNotificationSettings, ChatPositionUpdate, ConnectionState, EnvelopePayload, ErrorClass,
     ForumTopic, InlineKeyboard, MessageContent, MessageForwardInfo, MessageInteractionInfo,
     MessageOrigin, MessageReaction, MessageReplyTo, MessageSender, ParsedChatMember, ParsedFile,
@@ -25,6 +25,10 @@ pub enum RequestPurpose {
     CheckAuthenticationCode,
     CheckAuthenticationPassword,
     LoadChats,
+    /// Phase 7.1: single-shot `loadChats(chatListFolder(id))` when a folder
+    /// tab is selected. Separate from `LoadChats` so the ok-response does
+    /// not re-trigger main-list paging.
+    LoadFolderChats,
     GetHistory,
     /// Any `sendMessage` (text / photo / document). Response `message` is pending.
     SendMessage,
@@ -37,6 +41,9 @@ pub enum RequestPurpose {
     SearchChats,
     SearchMessages,
     SearchRecentlyFoundChats,
+    /// Phase 7.2: `searchPublicChats` — public username/title lookup across
+    /// all public chats (not just known ones). Sent alongside `searchChats`.
+    SearchPublicChats,
     AddRecentlyFoundChat,
     SearchChatMessages,
     /// `getChatHistory` around a jump target (Unigram `LoadMessageSliceImpl`).
@@ -536,6 +543,13 @@ pub struct ChatSummary {
     pub in_archive: bool,
     pub archive_order: i64,
     pub archive_is_pinned: bool,
+    /// `chatListFolder` membership: folder id → TDLib order
+    /// (`updateChatPosition` / `updateChatLastMessage` positions /
+    /// add-remove-from-list). Order 0 means membership confirmed but order
+    /// not yet known (from `updateChatAddedToList` before the position
+    /// arrives); sorting treats 0 as last. `is_pinned` is not tracked —
+    /// pinned folder chats already sort first by order.
+    pub folder_positions: BTreeMap<i32, i64>,
     /// `chat.notification_settings` / `updateChatNotificationSettings`.
     pub notification_settings: ChatNotificationSettings,
     /// Sidebar preview from `updateChatLastMessage`. Not logged.
@@ -682,6 +696,7 @@ fn placeholder_chat(chat_id: ChatId) -> ChatSummary {
         in_archive: false,
         archive_order: 0,
         archive_is_pinned: false,
+        folder_positions: BTreeMap::new(),
         notification_settings: ChatNotificationSettings::default(),
         last_preview: String::new(),
         typing_senders: Vec::new(),
@@ -913,12 +928,19 @@ pub struct SearchState {
     pub status: SearchStatus,
     pub chat_ids: Vec<ChatId>,
     pub messages: Vec<SearchMessageHit>,
+    /// Phase 7.2: `searchPublicChats` results (username/title lookup across
+    /// all public chats — not just known ones). Tracked separately from
+    /// `chat_ids` (offline `searchChats`) with its own done/error flags so
+    /// the status waits for all three requests.
+    pub public_chat_ids: Vec<ChatId>,
     /// Empty-query surface: `searchRecentlyFoundChats` (official Recent).
     pub recents: bool,
     chats_done: bool,
     messages_done: bool,
+    public_done: bool,
     chats_error: bool,
     messages_error: bool,
+    public_error: bool,
 }
 
 impl Default for SearchState {
@@ -930,11 +952,14 @@ impl Default for SearchState {
             status: SearchStatus::Closed,
             chat_ids: Vec::new(),
             messages: Vec::new(),
+            public_chat_ids: Vec::new(),
             recents: false,
             chats_done: false,
             messages_done: false,
+            public_done: false,
             chats_error: false,
             messages_error: false,
+            public_error: false,
         }
     }
 }
@@ -981,6 +1006,7 @@ impl SearchState {
         self.clear_results();
         self.recents = true;
         self.messages_done = true;
+        self.public_done = true;
         self.generation
     }
 
@@ -997,10 +1023,13 @@ impl SearchState {
     fn clear_results(&mut self) {
         self.chat_ids.clear();
         self.messages.clear();
+        self.public_chat_ids.clear();
         self.chats_done = false;
         self.messages_done = false;
+        self.public_done = false;
         self.chats_error = false;
         self.messages_error = false;
+        self.public_error = false;
     }
 
     fn matches_generation(&self, pending: Option<&PendingRequest>) -> bool {
@@ -1024,14 +1053,23 @@ impl SearchState {
         self.finish_if_complete();
     }
 
+    pub(crate) fn accept_public_chats(&mut self, chat_ids: Vec<ChatId>, error: bool) {
+        self.public_chat_ids = chat_ids;
+        self.public_done = true;
+        self.public_error = error;
+        self.finish_if_complete();
+    }
+
     fn finish_if_complete(&mut self) {
-        if !(self.chats_done && self.messages_done) {
+        if !(self.chats_done && self.messages_done && self.public_done) {
             return;
         }
-        let any = !self.chat_ids.is_empty() || !self.messages.is_empty();
+        let any = !self.chat_ids.is_empty()
+            || !self.messages.is_empty()
+            || !self.public_chat_ids.is_empty();
         self.status = if any {
             SearchStatus::Ready
-        } else if self.chats_error || self.messages_error {
+        } else if self.chats_error || self.messages_error || self.public_error {
             SearchStatus::Failed
         } else if self.recents {
             SearchStatus::Idle
@@ -1325,6 +1363,9 @@ pub struct Session {
     pub chats: HashMap<i64, ChatSummary>,
     pub main_order: Vec<ChatId>,
     pub archive_order: Vec<ChatId>,
+    /// Phase 7.1: folder list from `updateChatFolders` (schema 1.8.67 line
+    /// 10606). Empty until TDLib pushes the update (after authorization).
+    pub chat_folders: Vec<ChatFolderInfo>,
     pub histories: HashMap<i64, HistoryState>,
     pub open_chat: Option<ChatId>,
     /// Phase 5.1: selected forum topic (`forum_topic_id`) of the open chat.
@@ -1455,6 +1496,7 @@ impl Session {
             chats: HashMap::new(),
             main_order: Vec::new(),
             archive_order: Vec::new(),
+            chat_folders: Vec::new(),
             histories: HashMap::new(),
             open_chat: None,
             open_topic: None,
@@ -1818,6 +1860,11 @@ impl Session {
                 match list {
                     ChatList::Main => chat.in_main_list = true,
                     ChatList::Archive => chat.in_archive = true,
+                    ChatList::Folder(folder_id) => {
+                        // Membership is confirmed; the position (with order)
+                        // arrives separately via `updateChatPosition`.
+                        chat.folder_positions.entry(folder_id).or_insert(0);
+                    }
                     _ => {}
                 }
                 self.rebuild_main_order();
@@ -1827,6 +1874,9 @@ impl Session {
                     match list {
                         ChatList::Main => chat.in_main_list = false,
                         ChatList::Archive => chat.in_archive = false,
+                        ChatList::Folder(folder_id) => {
+                            chat.folder_positions.remove(&folder_id);
+                        }
                         _ => {}
                     }
                     self.rebuild_main_order();
@@ -1855,6 +1905,10 @@ impl Session {
             EnvelopePayload::UpdateChatPosition(pos) => {
                 self.apply_position_fields(pos);
                 self.rebuild_main_order();
+            }
+            EnvelopePayload::UpdateChatFolders { folders } => {
+                // The update carries the full ordered list — replace.
+                self.chat_folders = folders;
             }
             EnvelopePayload::UpdateNewMessage(message) => {
                 self.upsert_message(message, false);
@@ -1978,15 +2032,18 @@ impl Session {
                 }
             }
             EnvelopePayload::Chats { chat_ids, .. } => {
-                if self.search.matches_generation(pending)
-                    && matches!(
-                        pending.map(|p| p.purpose),
+                if self.search.matches_generation(pending) {
+                    match pending.map(|p| p.purpose) {
                         Some(
-                            RequestPurpose::SearchChats | RequestPurpose::SearchRecentlyFoundChats
-                        )
-                    )
-                {
-                    self.search.accept_chats(chat_ids, false);
+                            RequestPurpose::SearchChats | RequestPurpose::SearchRecentlyFoundChats,
+                        ) => {
+                            self.search.accept_chats(chat_ids, false);
+                        }
+                        Some(RequestPurpose::SearchPublicChats) => {
+                            self.search.accept_public_chats(chat_ids, false);
+                        }
+                        _ => {}
+                    }
                 }
             }
             EnvelopePayload::FoundMessages { messages, .. } => {
@@ -2351,6 +2408,9 @@ impl Session {
                         Some(RequestPurpose::SearchMessages) => {
                             self.search.accept_messages(Vec::new(), true);
                         }
+                        Some(RequestPurpose::SearchPublicChats) => {
+                            self.search.accept_public_chats(Vec::new(), true);
+                        }
                         _ => {}
                     }
                 }
@@ -2480,7 +2540,17 @@ impl Session {
                     chat.in_archive = true;
                 }
             }
-            ChatList::Folder(_) | ChatList::Unknown => {}
+            // Phase 7.1: folder membership is positional, like Main/Archive.
+            // `getChatListsToAddChat` is *not* folder membership — it lists
+            // chat lists a chat can be added to for `addChatToList`.
+            ChatList::Folder(folder_id) => {
+                if pos.order == 0 {
+                    chat.folder_positions.remove(&folder_id);
+                } else {
+                    chat.folder_positions.insert(folder_id, pos.order);
+                }
+            }
+            ChatList::Unknown => {}
         }
     }
 
@@ -2511,6 +2581,24 @@ impl Session {
                 if let Some(chat) = self.chats.get_mut(&chat_id.0) {
                     chat.in_archive = false;
                 }
+            }
+        }
+        // Folder positions are a full set too: drop folder ids that are no
+        // longer present, then apply the ones that are.
+        let folder_ids: HashSet<i32> = positions
+            .iter()
+            .filter_map(|pos| match pos.list {
+                ChatList::Folder(id) => Some(id),
+                _ => None,
+            })
+            .collect();
+        if let Some(chat) = self.chats.get_mut(&chat_id.0) {
+            chat.folder_positions
+                .retain(|id, _| folder_ids.contains(id));
+        }
+        for pos in positions {
+            if matches!(pos.list, ChatList::Folder(_)) {
+                self.apply_position_fields(pos.clone());
             }
         }
     }
@@ -3060,6 +3148,31 @@ impl Session {
             .filter_map(|id| self.chats.get(&id.0))
             .filter(|chat| chat.in_archive)
             .collect()
+    }
+
+    /// Phase 7.1: chats in `chatListFolder(folder_id)`, highest TDLib folder
+    /// order first (same convention as main/archive).
+    pub fn ordered_folder_chats(&self, folder_id: i32) -> Vec<&ChatSummary> {
+        let mut rows: Vec<&ChatSummary> = self
+            .chats
+            .values()
+            .filter(|chat| chat.folder_positions.contains_key(&folder_id))
+            .collect();
+        rows.sort_by(|a, b| {
+            b.folder_positions
+                .get(&folder_id)
+                .cmp(&a.folder_positions.get(&folder_id))
+                .then(b.id.0.cmp(&a.id.0))
+        });
+        rows
+    }
+
+    /// Phase 7.1: display name of a folder tab, from `updateChatFolders`.
+    pub fn folder_name(&self, folder_id: i32) -> Option<&str> {
+        self.chat_folders
+            .iter()
+            .find(|f| f.id == folder_id)
+            .map(|f| f.name.as_str())
     }
 
     pub fn request(&mut self, purpose: RequestPurpose, chat_id: Option<ChatId>) -> RequestId {
@@ -4499,6 +4612,7 @@ mod tests {
         let search_gen = session.search.begin_query("hello");
         let chats_extra = session.request_search(RequestPurpose::SearchChats, search_gen);
         let messages_extra = session.request_search(RequestPurpose::SearchMessages, search_gen);
+        let public_extra = session.request_search(RequestPurpose::SearchPublicChats, search_gen);
         apply_json(
             &mut session,
             &seq,
@@ -4514,12 +4628,23 @@ mod tests {
             &seq,
             &sink,
             &format!(
+                r#"{{"@type":"chats","@extra":"{}","total_count":1,"chat_ids":[42]}}"#,
+                public_extra.0
+            ),
+        );
+        assert_eq!(session.search.status, SearchStatus::Searching);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
                 r#"{{"@type":"foundMessages","@extra":"{}","total_count":1,"next_offset":"","messages":[{{"id":101,"chat_id":11,"is_outgoing":false,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"CANARY_SEARCH_hi","entities":[]}}}}}}]}}"#,
                 messages_extra.0
             ),
         );
         assert_eq!(session.search.status, SearchStatus::Ready);
         assert_eq!(session.search.chat_ids, vec![ChatId(11)]);
+        assert_eq!(session.search.public_chat_ids, vec![ChatId(42)]);
         assert_eq!(session.search.messages.len(), 1);
         assert_eq!(session.search.messages[0].preview, "CANARY_SEARCH_hi");
         session.promote_search_message(ChatId(11), MessageId(101));
@@ -4544,6 +4669,7 @@ mod tests {
         let search_gen = session.search.begin_query("zzz");
         let chats_extra = session.request_search(RequestPurpose::SearchChats, search_gen);
         let messages_extra = session.request_search(RequestPurpose::SearchMessages, search_gen);
+        let public_extra = session.request_search(RequestPurpose::SearchPublicChats, search_gen);
         apply_json(
             &mut session,
             &seq,
@@ -4562,6 +4688,17 @@ mod tests {
                 messages_extra.0
             ),
         );
+        // Phase 7.2: still waiting on the public leg.
+        assert_eq!(session.search.status, SearchStatus::Searching);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"chats","@extra":"{}","total_count":0,"chat_ids":[]}}"#,
+                public_extra.0
+            ),
+        );
         assert_eq!(session.search.status, SearchStatus::Empty);
 
         let stale = session.search.begin_query("old");
@@ -4570,6 +4707,8 @@ mod tests {
         let fresh = session.search.begin_query("new");
         let _fresh_chats = session.request_search(RequestPurpose::SearchChats, fresh);
         let fresh_messages = session.request_search(RequestPurpose::SearchMessages, fresh);
+        let fresh_public = session.request_search(RequestPurpose::SearchPublicChats, fresh);
+        let _ = fresh_public;
         apply_json(
             &mut session,
             &seq,
@@ -4601,6 +4740,7 @@ mod tests {
         );
         let search_gen = session.search.generation;
         let chats_extra = session.request_search(RequestPurpose::SearchChats, search_gen);
+        let public_extra = session.request_search(RequestPurpose::SearchPublicChats, search_gen);
         apply_json(
             &mut session,
             &seq,
@@ -4608,6 +4748,16 @@ mod tests {
             &format!(
                 r#"{{"@type":"error","code":400,"message":"CANARY_SEARCH_ERR2","@extra":"{}"}}"#,
                 chats_extra.0
+            ),
+        );
+        assert_eq!(session.search.status, SearchStatus::Searching);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"error","code":400,"message":"CANARY_SEARCH_ERR3","@extra":"{}"}}"#,
+                public_extra.0
             ),
         );
         assert_eq!(session.search.status, SearchStatus::Failed);
@@ -5755,5 +5905,194 @@ mod tests {
         );
         session.open_info_panel = None;
         assert!(session.open_info_panel.is_none());
+    }
+
+    // Phase 7.1: `updateChatFolders` replaces the folder list.
+    #[test]
+    fn chat_folders_update_replaces_list() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateChatFolders","chat_folders":[{"@type":"chatFolderInfo","id":3,"name":{"@type":"chatFolderName","text":{"@type":"formattedText","text":"Work","entities":[]},"animate_custom_emoji":false},"icon":{"@type":"chatFolderIcon","name":"Work"},"color_id":2,"is_shareable":false,"has_my_invite_links":false}],"main_chat_list_position":0,"are_tags_enabled":false}"#,
+        );
+        assert_eq!(session.chat_folders.len(), 1);
+        assert_eq!(session.folder_name(3), Some("Work"));
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateChatFolders","chat_folders":[],"main_chat_list_position":0,"are_tags_enabled":false}"#,
+        );
+        assert!(session.chat_folders.is_empty());
+        assert_eq!(session.folder_name(3), None);
+    }
+
+    // Phase 7.1: folder positions track membership and sort order, and a
+    // full positions set drops stale folder ids.
+    #[test]
+    fn folder_position_membership_and_order() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        for (chat_id, title, order) in [(5, "alpha", "60"), (6, "beta", "50")] {
+            apply_json(
+                &mut session,
+                &seq,
+                &sink,
+                &format!(
+                    r#"{{"@type":"updateNewChat","chat":{{"id":{chat_id},"title":"{title}","type":{{"@type":"chatTypePrivate","user_id":{chat_id}}},"unread_count":0}}}}"#
+                ),
+            );
+            apply_json(
+                &mut session,
+                &seq,
+                &sink,
+                &format!(
+                    r#"{{"@type":"updateChatPosition","chat_id":{chat_id},"position":{{"@type":"chatPosition","list":{{"@type":"chatListFolder","chat_folder_id":3}},"order":"{order}","is_pinned":false}}}}"#
+                ),
+            );
+        }
+        let folders = session.ordered_folder_chats(3);
+        assert_eq!(folders.len(), 2);
+        assert_eq!(folders[0].id.0, 5);
+        assert_eq!(folders[1].id.0, 6);
+        // Full positions set without the folder evicts it.
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateChatLastMessage","chat_id":5,"last_message":null,"positions":[{"@type":"chatPosition","list":{"@type":"chatListMain"},"order":"6","is_pinned":false}]}"#,
+        );
+        assert!(session.ordered_folder_chats(3).iter().all(|c| c.id.0 != 5));
+        assert_eq!(session.ordered_folder_chats(3).len(), 1);
+    }
+
+    // Phase 7.1: order 0 removes folder membership; add/remove-from-list
+    // track membership even before the position arrives.
+    #[test]
+    fn folder_membership_add_remove() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateNewChat","chat":{"id":5,"title":"alpha","type":{"@type":"chatTypePrivate","user_id":5},"unread_count":0}}"#,
+        );
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateChatAddedToList","chat_id":5,"chat_list":{"@type":"chatListFolder","chat_folder_id":3}}"#,
+        );
+        assert!(session.ordered_folder_chats(3).iter().any(|c| c.id.0 == 5));
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateChatPosition","chat_id":5,"position":{"@type":"chatPosition","list":{"@type":"chatListFolder","chat_folder_id":3},"order":"0","is_pinned":false}}"#,
+        );
+        assert!(session.ordered_folder_chats(3).is_empty());
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateChatPosition","chat_id":5,"position":{"@type":"chatPosition","list":{"@type":"chatListFolder","chat_folder_id":3},"order":"9","is_pinned":false}}"#,
+        );
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateChatRemovedFromList","chat_id":5,"chat_list":{"@type":"chatListFolder","chat_folder_id":3}}"#,
+        );
+        assert!(session.ordered_folder_chats(3).is_empty());
+    }
+
+    // Phase 7.2: `searchPublicChats` results land in `public_chat_ids` and
+    // the search status waits for all three requests.
+    #[test]
+    fn public_search_results_accepted() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        session.open_search();
+        let search_gen = session.search.begin_query("quill");
+        let public_extra = session.request_search(RequestPurpose::SearchPublicChats, search_gen);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"chats","@extra":"{}","total_count":1,"chat_ids":[42]}}"#,
+                public_extra.0
+            ),
+        );
+        assert_eq!(session.search.public_chat_ids, vec![ChatId(42)]);
+        // Still waiting on `searchChats` / `searchMessages` → still Searching.
+        assert_eq!(session.search.status, SearchStatus::Searching);
+        let chats_extra = session.request_search(RequestPurpose::SearchChats, search_gen);
+        let messages_extra = session.request_search(RequestPurpose::SearchMessages, search_gen);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"chats","@extra":"{}","total_count":0,"chat_ids":[]}}"#,
+                chats_extra.0
+            ),
+        );
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"foundMessages","@extra":"{}","total_count":0,"messages":[],"next_offset":""}}"#,
+                messages_extra.0
+            ),
+        );
+        assert_eq!(session.search.status, SearchStatus::Ready);
+    }
+
+    // Phase 7.2: an errored public search does not strand the query in
+    // `Searching` — the status resolves once every request settles.
+    #[test]
+    fn public_search_error_resolves_status() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        session.open_search();
+        let search_gen = session.search.begin_query("zzz");
+        let public_extra = session.request_search(RequestPurpose::SearchPublicChats, search_gen);
+        let chats_extra = session.request_search(RequestPurpose::SearchChats, search_gen);
+        let messages_extra = session.request_search(RequestPurpose::SearchMessages, search_gen);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"error","@extra":"{}","code":400,"message":"QUERY_TOO_SHORT"}}"#,
+                public_extra.0
+            ),
+        );
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"chats","@extra":"{}","total_count":0,"chat_ids":[]}}"#,
+                chats_extra.0
+            ),
+        );
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"foundMessages","@extra":"{}","total_count":0,"messages":[],"next_offset":""}}"#,
+                messages_extra.0
+            ),
+        );
+        assert_eq!(session.search.status, SearchStatus::Failed);
+        assert!(session.search.public_chat_ids.is_empty());
     }
 }

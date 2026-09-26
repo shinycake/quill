@@ -287,6 +287,14 @@ pub enum EnvelopePayload {
     /// `callbackQueryAnswer` — response to `getCallbackQueryAnswer` after an
     /// inline keyboard callback-button press (Phase 3.2).
     CallbackQueryAnswer(CallbackQueryAnswer),
+    /// `updateChatFolders` (TDLib 1.8.67, `schema/td_api.tl:10606`) — the
+    /// full ordered folder list. There is no `getChatFolders` function in
+    /// 1.8.67; TDLib pushes this update after authorization and whenever
+    /// folders change. `main_chat_list_position` / `are_tags_enabled` are
+    /// dropped (folder reorder and tags are out of scope).
+    UpdateChatFolders {
+        folders: Vec<ChatFolderInfo>,
+    },
     Unknown(UnknownKind),
 }
 
@@ -417,6 +425,19 @@ pub enum ChatList {
     Archive,
     Folder(i32),
     Unknown,
+}
+
+/// `chatFolderInfo` (TDLib 1.8.67, `schema/td_api.tl:3485`). Only the fields
+/// Quill needs for folder tabs: identifier, display name (plain text — the
+/// schema allows only CustomEmoji entities in folder names, which are
+/// dropped), icon name, and color id. `is_shareable` / `has_my_invite_links`
+/// are dropped (folder create/edit/share is out of scope).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChatFolderInfo {
+    pub id: i32,
+    pub name: String,
+    pub icon_name: String,
+    pub color_id: i32,
 }
 
 /// tdesktop default mute submenu (`SessionSettings::mutePeriods` when unset /
@@ -2130,6 +2151,14 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
             chat_id: ChatId(int53(value.get("chat_id"))?),
             list: parse_chat_list(value.get("chat_list")),
         }),
+        "updateChatFolders" => {
+            let folders = value
+                .get("chat_folders")
+                .and_then(Value::as_array)
+                .map(|arr| arr.iter().filter_map(parse_chat_folder_info).collect())
+                .unwrap_or_default();
+            Ok(EnvelopePayload::UpdateChatFolders { folders })
+        }
         "updateChatReadInbox" => Ok(EnvelopePayload::UpdateChatReadInbox {
             chat_id: ChatId(int53(value.get("chat_id"))?),
             last_read_inbox_message_id: MessageId(int53_or_zero(
@@ -2976,6 +3005,34 @@ fn parse_chat_list(value: Option<&Value>) -> ChatList {
         ),
         _ => ChatList::Unknown,
     }
+}
+
+/// `chatFolderInfo` (TDLib 1.8.67, `schema/td_api.tl:3485`): id from
+/// `chat_folder_id`-style int32, name from `chatFolderName` (`:3458`) →
+/// `formattedText.text` (`:117`), icon from `chatFolderIcon.name` (`:3453`).
+fn parse_chat_folder_info(value: &Value) -> Option<ChatFolderInfo> {
+    if value.get("@type").and_then(Value::as_str) != Some("chatFolderInfo") {
+        return None;
+    }
+    let name = value
+        .get("name")
+        .and_then(|v| v.get("text"))
+        .and_then(|v| v.get("text"))
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    let icon_name = value
+        .get("icon")
+        .and_then(|v| v.get("name"))
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    Some(ChatFolderInfo {
+        id: value.get("id").and_then(Value::as_i64).unwrap_or(0) as i32,
+        name,
+        icon_name,
+        color_id: value.get("color_id").and_then(Value::as_i64).unwrap_or(-1) as i32,
+    })
 }
 
 fn parse_message(value: &Value) -> Result<ParsedMessage, ParseError> {
@@ -6459,6 +6516,58 @@ mod channel_envelope_tests {
                 imported.contains(field),
                 "importedContact missing {field}: {imported}"
             );
+        }
+    }
+
+    #[test]
+    fn update_chat_folders_parsed() {
+        // Phase 7.1: `updateChatFolders` (schema 1.8.67 line 10606) carries
+        // `vector<chatFolderInfo>` (line 3485); there is no `getChatFolders`
+        // function in 1.8.67, so this update is the folder list.
+        let env = parse_envelope(
+            r#"{"@type":"updateChatFolders","chat_folders":[{"@type":"chatFolderInfo","id":3,"name":{"@type":"chatFolderName","text":{"@type":"formattedText","text":"Work","entities":[]},"animate_custom_emoji":false},"icon":{"@type":"chatFolderIcon","name":"Work"},"color_id":2,"is_shareable":false,"has_my_invite_links":false},{"@type":"chatFolderInfo","id":7,"name":{"@type":"chatFolderName","text":{"@type":"formattedText","text":"News","entities":[]},"animate_custom_emoji":false},"icon":null,"color_id":-1,"is_shareable":false,"has_my_invite_links":false}],"main_chat_list_position":0,"are_tags_enabled":false}"#,
+        )
+        .unwrap();
+        match env.payload {
+            EnvelopePayload::UpdateChatFolders { folders } => {
+                assert_eq!(folders.len(), 2);
+                assert_eq!(
+                    folders[0],
+                    ChatFolderInfo {
+                        id: 3,
+                        name: "Work".into(),
+                        icon_name: "Work".into(),
+                        color_id: 2,
+                    }
+                );
+                assert_eq!(
+                    folders[1],
+                    ChatFolderInfo {
+                        id: 7,
+                        name: "News".into(),
+                        icon_name: String::new(),
+                        color_id: -1,
+                    }
+                );
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn chat_list_folder_parsed() {
+        // `chatListFolder` (schema 1.8.67 line 3524) — folder membership
+        // arrives in `chatPosition.list` / added-to / removed-from list.
+        let env = parse_envelope(
+            r#"{"@type":"updateChatPosition","chat_id":11,"position":{"@type":"chatPosition","list":{"@type":"chatListFolder","chat_folder_id":3},"order":"50","is_pinned":false}}"#,
+        )
+        .unwrap();
+        match env.payload {
+            EnvelopePayload::UpdateChatPosition(pos) => {
+                assert_eq!(pos.list, ChatList::Folder(3));
+                assert_eq!(pos.order, 50);
+            }
+            other => panic!("{other:?}"),
         }
     }
 }
