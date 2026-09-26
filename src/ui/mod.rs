@@ -10042,10 +10042,10 @@ impl QuillApp {
                 let in_topic = session.is_some_and(|s| s.open_topic.is_some());
                 let can_post = match (chat, topic) {
                     (Some(c), Some(t)) => c.can_post() && !t.is_closed && c.can_send_basic_messages,
+                    (Some(c), None) if !in_topic => c.can_post(),
                     // In a topic whose info hasn't loaded yet: hide the
                     // composer until it arrives (the note says "Loading
                     // topic…").
-                    (Some(c), None) if !in_topic => c.can_post(),
                     _ => false,
                 };
                 if can_post { Some(true) } else { None }
