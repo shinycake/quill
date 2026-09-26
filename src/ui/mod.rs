@@ -8772,13 +8772,20 @@ impl QuillApp {
     ) {
         self.defaults_sound_picker = None;
         if let Some(live) = self.live.as_mut() {
-            let mut settings = live
+            // Guard: never send schema-defaults as current state — if the
+            // scope's settings haven't arrived yet, wait for the fetch
+            // instead (the dialog already shows "Loading…" per scope).
+            let Some(mut settings) = live
                 .driver
                 .session
                 .scope_notification_settings
                 .get(&scope)
                 .cloned()
-                .unwrap_or_default();
+            else {
+                self.status_note = "defaults still loading…".into();
+                cx.notify();
+                return;
+            };
             settings.sound_id = sound_id;
             let result = live
                 .driver
@@ -8809,13 +8816,20 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if let Some(live) = self.live.as_mut() {
-            let mut settings = live
+            // Guard: never send schema-defaults as current state — if the
+            // scope's settings haven't arrived yet, wait for the fetch
+            // instead (the dialog already shows "Loading…" per scope).
+            let Some(mut settings) = live
                 .driver
                 .session
                 .scope_notification_settings
                 .get(&scope)
                 .cloned()
-                .unwrap_or_default();
+            else {
+                self.status_note = "defaults still loading…".into();
+                cx.notify();
+                return;
+            };
             settings.mute_for = mute_for;
             let result = live
                 .driver
@@ -8846,13 +8860,20 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if let Some(live) = self.live.as_mut() {
-            let mut settings = live
+            // Guard: never send schema-defaults as current state — if the
+            // scope's settings haven't arrived yet, wait for the fetch
+            // instead (the dialog already shows "Loading…" per scope).
+            let Some(mut settings) = live
                 .driver
                 .session
                 .scope_notification_settings
                 .get(&scope)
                 .cloned()
-                .unwrap_or_default();
+            else {
+                self.status_note = "defaults still loading…".into();
+                cx.notify();
+                return;
+            };
             settings.show_preview = show_preview;
             let result = live
                 .driver
@@ -14647,7 +14668,7 @@ fn apply_ready_notification_sound(session: &mut Session, sink: &Arc<MemorySink>,
     for scope in NotificationSettingsScope::ALL {
         let extra = session.request_for_scope(RequestPurpose::GetScopeNotificationSettings, scope);
         jsons.push(format!(
-            r#"{{"@type":"scopeNotificationSettings","mute_for":0,"sound_id":"-1","show_preview":true,"use_default_mute_stories":true,"mute_stories":false,"use_default_story_sound":true,"story_sound_id":"0","use_default_show_story_poster":true,"show_story_poster":true,"use_default_disable_pinned_message_notifications":true,"disable_pinned_message_notifications":false,"use_default_disable_mention_notifications":true,"disable_mention_notifications":false,"@extra":"{extra}"}}"#,
+            r#"{{"@type":"scopeNotificationSettings","mute_for":0,"sound_id":"-1","show_preview":true,"use_default_mute_stories":true,"mute_stories":false,"use_default_story_sound":true,"story_sound_id":"-1","use_default_show_story_poster":true,"show_story_poster":true,"use_default_disable_pinned_message_notifications":true,"disable_pinned_message_notifications":false,"use_default_disable_mention_notifications":true,"disable_mention_notifications":false,"@extra":"{extra}"}}"#,
             extra = extra.0,
         ));
     }

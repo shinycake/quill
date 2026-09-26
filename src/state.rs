@@ -2862,6 +2862,13 @@ impl Session {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetSavedNotificationSounds) {
                     let files: Vec<ParsedFile> = sounds.iter().map(|s| s.sound.clone()).collect();
                     self.remember_files(&files);
+                    // Parity slice: a refetch replaces the saved list, so
+                    // evict `sound_file_ids` entries for sounds that are no
+                    // longer saved — stale file→sound mappings would
+                    // otherwise accumulate forever.
+                    let live_ids: HashSet<i64> = sounds.iter().map(|s| s.id).collect();
+                    self.sound_file_ids
+                        .retain(|_, sound_id| live_ids.contains(sound_id));
                     self.saved_notification_sounds = sounds;
                     self.saved_sounds_loaded = true;
                     self.saved_sounds_stale = false;
@@ -2943,6 +2950,16 @@ impl Session {
                 // contacts tab instead of a stuck spinner.
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetContacts) {
                     self.contacts_error = true;
+                }
+                // Parity slice: a failed `getScopeNotificationSettings` must
+                // not leave the scope in `scope_settings_loading` — otherwise
+                // `maybe_fetch_scope_notification_settings` skips it on every
+                // later ingest and every "Defaults for all chats…" open.
+                // Dropping it here means the next fetch retries.
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetScopeNotificationSettings)
+                    && let Some(scope) = pending.and_then(|p| p.scope)
+                {
+                    self.scope_settings_loading.remove(&scope);
                 }
                 // Phase 3.3: `getCommands` failed — on a user session the
                 // method is annotated "for bots only" (schema 1.8.67 line
@@ -3222,19 +3239,22 @@ impl Session {
         {
             self.unstick_download(file.id.0);
         }
-        let playable = file.usable_path().and_then(|path| {
-            self.sound_file_ids
-                .get(&file.id.0)
-                .copied()
-                .map(|sound_id| (path.to_string(), sound_id))
-        });
-        if let Some((path, sound_id)) = playable
-            && self.pending_sound_downloads.remove(&sound_id)
-        {
-            // Parity slice: a completed notification-sound download with
-            // playback requested → hand the path to the UI for ffplay. The
-            // reducer never spawns processes.
-            self.pending_sound_plays.push(path.into());
+        let sound_id = self.sound_file_ids.get(&file.id.0).copied();
+        if let Some(sound_id) = sound_id {
+            if let Some(path) = file.usable_path() {
+                if self.pending_sound_downloads.remove(&sound_id) {
+                    // Parity slice: a completed notification-sound download
+                    // with playback requested → hand the path to the UI for
+                    // ffplay. The reducer never spawns processes.
+                    self.pending_sound_plays.push(path.into());
+                }
+            } else if from_file_update && file.local.is_idle_incomplete() {
+                // Parity slice: a sound download that errored/cancelled
+                // (active → idle without completing) must not leave the id in
+                // `pending_sound_downloads` — otherwise a stale late
+                // completion could trigger a belated play.
+                self.pending_sound_downloads.remove(&sound_id);
+            }
         }
         self.files.insert(file.id.0, file);
     }
@@ -3644,22 +3664,65 @@ impl Session {
         history.viewing.clear();
     }
 
+    /// Parity slice: scope-defaulted settings for a chat's scope — the fetched
+    /// `ScopeNotificationSettings`, or the schema defaults while the
+    /// `getScopeNotificationSettings` fetch is still in flight. Chats keep
+    /// `use_default_*` flags until the user overrides one (Unigram clones
+    /// settings and clears the default flag), so the scope values are what
+    /// `chatNotificationSettings` means when a flag is set (td_api.tl line
+    /// 3348: "If true, the value for the relevant type of chat ... is used
+    /// instead of mute_for").
+    fn scope_settings_for(&self, scope: NotificationSettingsScope) -> ScopeNotificationSettings {
+        self.scope_notification_settings
+            .get(&scope)
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    /// Effective mute for the toast/sound decisions: the chat's own
+    /// exception mute, or the scope default's `mute_for` when the chat keeps
+    /// `use_default_mute_for` (td_api.tl line 3348).
+    fn effective_muted(&self, chat: &ChatSummary) -> bool {
+        if chat.is_muted() {
+            return true;
+        }
+        let settings = &chat.notification_settings;
+        if !settings.use_default_mute_for {
+            return false;
+        }
+        let scope = scope_for_chat_kind(&chat.kind);
+        self.scope_settings_for(scope).mute_for > 0
+    }
+
+    /// Effective message-preview allowance: the chat's own flag, or the
+    /// scope default's `show_preview` when the chat keeps
+    /// `use_default_show_preview` (td_api.tl line 3350).
+    fn effective_preview_allowed(&self, chat: &ChatSummary) -> bool {
+        let settings = &chat.notification_settings;
+        if !settings.use_default_show_preview {
+            return settings.show_preview;
+        }
+        let scope = scope_for_chat_kind(&chat.kind);
+        self.scope_settings_for(scope).show_preview
+    }
+
     /// Phase 8.1: pure notify / don't-notify decision for an `updateNewMessage`.
     /// Both the UI's `app_active` write and the reducer run on the UI thread,
     /// so no locking is needed. Returns `None` when the chat is unknown (no
     /// title, no verified mute/read state) rather than guessing.
     fn notification_for_new_message(&self, message: &ParsedMessage) -> Option<OsNotification> {
         let chat = self.chats.get(&message.chat_id.0)?;
-        let settings = &chat.notification_settings;
+        let chat_muted = self.effective_muted(chat);
+        let chat_preview_allowed = self.effective_preview_allowed(chat);
         notify::decide_notify(&notify::NotifyInput {
             message,
             chat_title: Some(&chat.title),
-            chat_muted: chat.is_muted(),
+            chat_muted,
             last_read_inbox_message_id: Some(chat.last_read_inbox_message_id),
             open_chat: self.open_chat,
             app_active: self.app_active,
             hide_previews: self.hide_notification_previews,
-            chat_preview_allowed: settings.use_default_show_preview || settings.show_preview,
+            chat_preview_allowed,
         })
     }
 
@@ -3668,13 +3731,14 @@ impl Session {
     /// so the sound reflects the mute/focus state the toast was decided on.
     fn notification_sound_for(&self, chat: &ChatSummary) -> Option<notify::NotificationSoundKind> {
         let settings = &chat.notification_settings;
+        let scope = scope_for_chat_kind(&chat.kind);
         let scope_sound_id = self
             .scope_notification_settings
-            .get(&scope_for_chat_kind(&chat.kind))
+            .get(&scope)
             .map(|s| s.sound_id);
         notify::decide_notification_sound(&notify::SoundInput {
             app_active: self.app_active,
-            chat_muted: chat.is_muted(),
+            chat_muted: self.effective_muted(chat),
             use_default_sound: settings.use_default_sound,
             chat_sound_id: settings.sound_id,
             scope_sound_id,
@@ -4414,6 +4478,7 @@ mod tests {
     use super::*;
     use crate::diagnostics::MemorySink;
     use crate::telegram::client::copy_and_parse;
+    use crate::telegram::envelope::LocalFileState;
     use std::sync::atomic::AtomicU64;
 
     fn session() -> (Session, Arc<MemorySink>) {
@@ -4776,6 +4841,246 @@ mod tests {
             r#"{"@type":"updateChatNotificationSettings","chat_id":7,"notification_settings":{"@type":"chatNotificationSettings","use_default_mute_for":false,"mute_for":0,"use_default_sound":true,"sound_id":"0","use_default_show_preview":true,"show_preview":false,"use_default_mute_stories":true,"mute_stories":false,"use_default_story_sound":true,"story_sound_id":"0","use_default_show_story_poster":true,"show_story_poster":false,"use_default_disable_pinned_message_notifications":true,"disable_pinned_message_notifications":false,"use_default_disable_mention_notifications":true,"disable_mention_notifications":false}}"#,
         );
         assert!(!session.chats.get(&7).unwrap().is_muted());
+    }
+
+    /// Parity slice: `scopeNotificationSettings` answer JSON for a
+    /// `request_for_scope` extra (notification-sounds regression tests).
+    fn scope_settings_json(extra: &str, mute_for: i32, show_preview: bool) -> String {
+        format!(
+            r#"{{"@type":"scopeNotificationSettings","mute_for":{mute_for},"sound_id":"-1","show_preview":{show_preview},"use_default_mute_stories":true,"mute_stories":false,"use_default_story_sound":true,"story_sound_id":"-1","use_default_show_story_poster":true,"show_story_poster":true,"use_default_disable_pinned_message_notifications":true,"disable_pinned_message_notifications":false,"use_default_disable_mention_notifications":true,"disable_mention_notifications":false,"@extra":"{extra}"}}"#,
+        )
+    }
+
+    /// Blocking-issue regression: the scope default mute
+    /// (`use_default_mute_for` + scope `mute_for`) must suppress both the
+    /// toast and the sound — previously only the chat's exception mute
+    /// gated the decisions, so "Forever" under Groups changed server state
+    /// while Quill kept toasting and sounding.
+    #[test]
+    fn scope_mute_default_suppresses_toast_and_sound() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        // A group chat that keeps the default mute setting.
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateNewChat","chat":{"id":14,"title":"Demo group","type":{"@type":"chatTypeSupergroup","supergroup_id":14,"is_channel":false},"unread_count":0}}"#,
+        );
+        assert!(!session.chats.get(&14).unwrap().is_muted());
+        // The GroupChats scope is muted "Forever" (as if set through the
+        // scope-defaults dialog).
+        let extra = session.request_for_scope(
+            RequestPurpose::GetScopeNotificationSettings,
+            NotificationSettingsScope::GroupChats,
+        );
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &scope_settings_json(&extra.0.to_string(), 2147483647, true),
+        );
+        // App in background: the message would normally notify…
+        session.app_active = false;
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateNewMessage","message":{"id":42,"chat_id":14,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"hey","entities":[]}}}}"#,
+        );
+        // …but the scope default mute suppresses both the toast and the sound.
+        assert!(session.pending_notifications.is_empty());
+        assert!(session.pending_sound_plays.is_empty());
+        let chat = session.chats.get(&14).unwrap();
+        assert!(session.effective_muted(chat));
+        assert!(session.notification_sound_for(chat).is_none());
+        // Clearing the scope mute restores the toast and a sound decision.
+        let extra = session.request_for_scope(
+            RequestPurpose::GetScopeNotificationSettings,
+            NotificationSettingsScope::GroupChats,
+        );
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &scope_settings_json(&extra.0.to_string(), 0, true),
+        );
+        let chat = session.chats.get(&14).unwrap();
+        assert!(!session.effective_muted(chat));
+        // App background, unmuted, default sound → the app default tone.
+        assert_eq!(
+            session.notification_sound_for(chat),
+            Some(notify::NotificationSoundKind::Default)
+        );
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateNewMessage","message":{"id":43,"chat_id":14,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"hey again","entities":[]}}}}"#,
+        );
+        assert_eq!(session.pending_notifications.len(), 1);
+        assert_eq!(
+            session.pending_notifications[0].sound,
+            Some(notify::NotificationSoundKind::Default)
+        );
+    }
+
+    /// Blocking-issue regression: the scope default `show_preview` governs
+    /// the preview when the chat keeps `use_default_show_preview` — the old
+    /// `use_default_show_preview || show_preview` always allowed previews.
+    #[test]
+    fn scope_show_preview_default_gates_preview_body() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateNewChat","chat":{"id":14,"title":"Demo group","type":{"@type":"chatTypeSupergroup","supergroup_id":14,"is_channel":false},"unread_count":0}}"#,
+        );
+        // Scope fetched with message previews off.
+        let extra = session.request_for_scope(
+            RequestPurpose::GetScopeNotificationSettings,
+            NotificationSettingsScope::GroupChats,
+        );
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &scope_settings_json(&extra.0.to_string(), 0, false),
+        );
+        session.app_active = false;
+        // Global previews enabled, but the scope default disables them.
+        session.hide_notification_previews = false;
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateNewMessage","message":{"id":42,"chat_id":14,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"secret text","entities":[]}}}}"#,
+        );
+        assert_eq!(session.pending_notifications.len(), 1);
+        assert_eq!(
+            session.pending_notifications[0].for_display().body,
+            "New message"
+        );
+        let chat = session.chats.get(&14).unwrap();
+        assert!(!session.effective_preview_allowed(chat));
+    }
+
+    /// Blocking-issue regression: a failed `getScopeNotificationSettings`
+    /// must not keep the scope in `scope_settings_loading` — otherwise every
+    /// later fetch skips it and the scope stays unfetchable forever.
+    #[test]
+    fn failed_scope_settings_fetch_retries() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        let extra = session.request_for_scope(
+            RequestPurpose::GetScopeNotificationSettings,
+            NotificationSettingsScope::GroupChats,
+        );
+        // `maybe_fetch_scope_notification_settings` marks the scope in-flight
+        // when it sends the request.
+        session
+            .scope_settings_loading
+            .insert(NotificationSettingsScope::GroupChats);
+        // TDLib answers with an error.
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"error","code":500,"message":"CANARY_SCOPE_ERR","@extra":"{}"}}"#,
+                extra.0
+            ),
+        );
+        assert!(
+            !session
+                .scope_settings_loading
+                .contains(&NotificationSettingsScope::GroupChats),
+            "failed fetch must free the scope for retry"
+        );
+        assert!(
+            !session
+                .scope_notification_settings
+                .contains_key(&NotificationSettingsScope::GroupChats)
+        );
+        // A later fetch for the same scope lands normally.
+        let extra = session.request_for_scope(
+            RequestPurpose::GetScopeNotificationSettings,
+            NotificationSettingsScope::GroupChats,
+        );
+        session
+            .scope_settings_loading
+            .insert(NotificationSettingsScope::GroupChats);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &scope_settings_json(&extra.0.to_string(), 0, true),
+        );
+        assert!(
+            session
+                .scope_notification_settings
+                .contains_key(&NotificationSettingsScope::GroupChats)
+        );
+        assert!(
+            !session
+                .scope_settings_loading
+                .contains(&NotificationSettingsScope::GroupChats)
+        );
+    }
+
+    /// Nit regression: a notification-sound download that errors (active →
+    /// idle without completing) must not leave its id in
+    /// `pending_sound_downloads` — a stale late completion could otherwise
+    /// trigger a belated play.
+    #[test]
+    fn sound_download_error_drops_pending_playback() {
+        let (mut session, _sink) = session();
+        session.sound_file_ids.insert(91, 7);
+        session.pending_sound_downloads.insert(7);
+        session.upsert_file(
+            ParsedFile {
+                id: FileId(91),
+                size: 0,
+                expected_size: 100,
+                local: LocalFileState {
+                    path: String::new(),
+                    can_be_downloaded: true,
+                    is_downloading_active: false,
+                    is_downloading_completed: false,
+                },
+            },
+            true,
+        );
+        assert!(!session.pending_sound_downloads.contains(&7));
+        assert!(session.pending_sound_plays.is_empty());
+        // The file→sound mapping itself stays (the list refetch prunes it).
+        assert_eq!(session.sound_file_ids.get(&91), Some(&7));
+    }
+
+    /// Nit regression: a `getSavedNotificationSounds` refetch evicts
+    /// `sound_file_ids` entries for sounds that are no longer saved.
+    #[test]
+    fn sound_list_refetch_prunes_file_ids() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        session.sound_file_ids.insert(91, 7); // dropped from the list
+        session.sound_file_ids.insert(92, 8); // still saved
+        let extra = session.request(RequestPurpose::GetSavedNotificationSounds, None);
+        let sound_file = r#"{"@type":"file","id":92,"size":12,"expected_size":12,"local":{"@type":"localFile","path":"","can_be_downloaded":true,"can_be_deleted":false,"is_downloading_active":false,"is_downloading_completed":false,"download_offset":0,"downloaded_prefix_size":0,"downloaded_size":0},"remote":{"@type":"remoteFile","id":"r","unique_id":"u","is_uploading_active":false,"is_uploading_completed":true,"uploaded_size":12}}"#;
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"notificationSounds","notification_sounds":[{{"@type":"notificationSound","id":8,"duration":2,"date":0,"title":"Chime","data":"","sound":{}}}],"@extra":"{}"}}"#,
+                sound_file, extra.0
+            ),
+        );
+        assert!(session.saved_sounds_loaded);
+        assert!(!session.sound_file_ids.contains_key(&91));
+        assert_eq!(session.sound_file_ids.get(&92), Some(&8));
     }
 
     #[test]

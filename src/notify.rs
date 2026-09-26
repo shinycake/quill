@@ -104,7 +104,9 @@ pub struct NotifyInput<'a> {
     /// Resolved chat title (`ChatSummary::title`); `None` when the chat is
     /// unknown to the reducer.
     pub chat_title: Option<&'a str>,
-    /// `ChatSummary::is_muted()` — exception mute from `chatNotificationSettings`.
+    /// Effective mute for this chat (`Session::effective_muted`): the chat's
+    /// exception mute, plus the scope default's `mute_for` when the chat
+    /// keeps `use_default_mute_for`.
     pub chat_muted: bool,
     /// `ChatSummary::last_read_inbox_message_id` when the chat is known.
     pub last_read_inbox_message_id: Option<MessageId>,
@@ -114,8 +116,9 @@ pub struct NotifyInput<'a> {
     pub app_active: bool,
     /// `settings::Preferences::hide_notification_previews` (default true).
     pub hide_previews: bool,
-    /// Per-chat preview allowance from `chatNotificationSettings`:
-    /// `use_default_show_preview || show_preview`.
+    /// Effective preview allowance (`Session::effective_preview_allowed`):
+    /// the chat's `show_preview`, or the scope default's when the chat keeps
+    /// `use_default_show_preview`.
     pub chat_preview_allowed: bool,
 }
 
@@ -123,7 +126,8 @@ pub struct NotifyInput<'a> {
 ///
 /// Rules (see DECISIONS.md Phase 8.1):
 /// 1. Outgoing messages never notify.
-/// 2. Muted chats (`chatNotificationSettings` exception mute) never notify.
+/// 2. Effectively muted chats (exception mute, or scope default mute via
+///    `use_default_mute_for`) never notify.
 /// 3. Messages at or below `last_read_inbox_message_id` never notify
 ///    (already read — e.g. a server echo of a read message).
 /// 4. The currently open chat does not notify *while the app is active*;
@@ -189,7 +193,9 @@ pub enum NotificationSoundKind {
 pub struct SoundInput {
     /// Whether the OS considers our window focused (`Window::is_window_active`).
     pub app_active: bool,
-    /// Exception mute (`ChatNotificationSettings::is_muted()`).
+    /// Effective mute for this chat (`Session::effective_muted`) — the chat's
+    /// exception mute, or the scope default's `mute_for` when the chat keeps
+    /// `use_default_mute_for`. Same gate as the toast.
     pub chat_muted: bool,
     /// `chatNotificationSettings.use_default_sound`.
     pub use_default_sound: bool,
@@ -389,6 +395,9 @@ pub fn default_tone_command() -> Option<SoundCommand> {
 }
 
 /// Build the command that plays a downloaded notification-sound MP3.
+///
+/// `"--"` separates the flags from the path so a sound file whose path
+/// starts with `-` can't be parsed as a flag.
 pub fn file_sound_command(path: &str) -> Option<SoundCommand> {
     if cfg!(target_os = "linux") {
         Some(SoundCommand {
@@ -398,13 +407,14 @@ pub fn file_sound_command(path: &str) -> Option<SoundCommand> {
                 "-autoexit".to_string(),
                 "-loglevel".to_string(),
                 "quiet".to_string(),
+                "--".to_string(),
                 path.to_string(),
             ],
         })
     } else if cfg!(target_os = "macos") {
         Some(SoundCommand {
             program: "afplay".to_string(),
-            args: vec![path.to_string()],
+            args: vec!["--".to_string(), path.to_string()],
         })
     } else {
         None
@@ -743,7 +753,22 @@ mod tests {
         let Some(cmd) = file_sound_command("/tmp/odd;name.mp3") else {
             return;
         };
-        assert!(cmd.args.iter().any(|a| a == "/tmp/odd;name.mp3"));
+        let path_pos = cmd
+            .args
+            .iter()
+            .position(|a| a == "/tmp/odd;name.mp3")
+            .expect("path present");
+        // A `--` separator precedes the path so a path starting with `-`
+        // can't be parsed as a flag.
+        assert!(path_pos > 0 && cmd.args[path_pos - 1] == "--");
+        // The path is passed as a single verbatim argument.
+        assert_eq!(
+            cmd.args
+                .iter()
+                .filter(|a| *a == "/tmp/odd;name.mp3")
+                .count(),
+            1
+        );
     }
 
     #[test]

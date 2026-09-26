@@ -1777,7 +1777,7 @@ Research snapshot 2026-09-16, pin recheck **2026-09-17**.
   `notificationSettingsScopePrivateChats` (:3337),
   `notificationSettingsScopeGroupChats` (:3340),
   `notificationSettingsScopeChannelChats` (:3343);
-  `chatNotificationSettings … use_default_sound:Bool sound_id:int53 …
+  `chatNotificationSettings … use_default_sound:Bool sound_id:int64 …
   = ChatNotificationSettings` (:3363; `@sound_id` comment: "Identifier
   of the notification sound to be played for messages; 0 if sound is
   disabled");
@@ -1853,6 +1853,23 @@ Research snapshot 2026-09-16, pin recheck **2026-09-17**.
   saved sound ("Ding"), the Notifications panel open with the picker
   expanded (Default / None / ✓ Ding (2s) / Chime (3s), ▶ preview
   buttons, "Defaults for all chats…" link).
+- **Behavior — effective mute and preview (review fix).** The toast and
+  sound decisions no longer gate on the chat's exception mute alone:
+  `Session::effective_muted` also applies the scope's `mute_for` when the
+  chat keeps `use_default_mute_for`, and `Session::effective_preview_allowed`
+  applies the scope's `show_preview` when the chat keeps
+  `use_default_show_preview` (td_api.tl :3348/:3350 — "the value for the
+  relevant type of chat ... is used instead of"). While the scope fetch is
+  still in flight the schema defaults apply. Previously, setting "Forever"
+  under Groups changed server state but Quill kept showing toasts and
+  playing sounds for default-setting chats; now both are suppressed.
+- **Behavior — failed scope fetch retries (review fix).** A TDLib error on
+  `getScopeNotificationSettings` now drops the scope from
+  `scope_settings_loading`, so the next ingest / "Defaults for all chats…"
+  open retries the fetch instead of skipping the scope forever. The
+  scope-defaults apply buttons also refuse to send while a scope's settings
+  are still unfetched (status note "defaults still loading…") instead of
+  sending schema-defaults as current state.
 - **Out of this slice (→ future):** notification exceptions beyond
   per-chat mute (per-mention unmute, `disable_mention_notifications`,
   `chat.default_disable_notification`); in-app banner previews; DND
