@@ -171,6 +171,25 @@ pub enum EnvelopePayload {
     SecretChat {
         secret_chat: ParsedSecretChat,
     },
+    /// Phase C1: `updateCall` (schema 1.8.67, line 10816) — a new call
+    /// was created or information about a call was updated.
+    UpdateCall {
+        call: ParsedCall,
+    },
+    /// Phase C1: `updateNewCallSignalingData` (schema 1.8.67, line
+    /// 10862) — new call signaling data arrived. Quill has no media
+    /// transport yet (C2), so the session queues it honestly; nothing
+    /// consumes it.
+    UpdateNewCallSignalingData {
+        call_id: i32,
+        data: Vec<u8>,
+    },
+    /// Phase C1: `callId` (schema 1.8.67, line 7034) — the `createCall`
+    /// answer. Correlated to the outgoing request via `@extra` /
+    /// `RequestPurpose::CreateCall`.
+    CallId {
+        id: i32,
+    },
     Ok,
     Error(TdError),
     Messages(Vec<ParsedMessage>),
@@ -673,6 +692,196 @@ pub struct ChatPositionUpdate {
     pub list: ChatList,
     pub order: i64,
     pub is_pinned: bool,
+}
+
+/// Phase C1: `CallDiscardReason` (TDLib 1.8.67,
+/// `schema/td_api.tl:6981`): `callDiscardReasonEmpty` (:6984),
+/// `callDiscardReasonMissed` (:6987), `callDiscardReasonDeclined`
+/// (:6990), `callDiscardReasonDisconnected` (:6993),
+/// `callDiscardReasonHungUp` (:6996),
+/// `callDiscardReasonUpgradeToGroupCall` (:6999, carries an invite
+/// link — group calls are C3, the link is kept but unused).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CallDiscardReason {
+    Empty,
+    Missed,
+    Declined,
+    Disconnected,
+    HungUp,
+    UpgradeToGroupCall { invite_link: String },
+    Unknown(String),
+}
+
+impl CallDiscardReason {
+    pub fn from_value(value: Option<&Value>) -> Self {
+        let type_name = value
+            .and_then(|v| v.get("@type"))
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        match type_name {
+            "callDiscardReasonEmpty" => CallDiscardReason::Empty,
+            "callDiscardReasonMissed" => CallDiscardReason::Missed,
+            "callDiscardReasonDeclined" => CallDiscardReason::Declined,
+            "callDiscardReasonDisconnected" => CallDiscardReason::Disconnected,
+            "callDiscardReasonHungUp" => CallDiscardReason::HungUp,
+            "callDiscardReasonUpgradeToGroupCall" => CallDiscardReason::UpgradeToGroupCall {
+                invite_link: value
+                    .and_then(|v| v.get("invite_link"))
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string(),
+            },
+            other => CallDiscardReason::Unknown(other.to_string()),
+        }
+    }
+
+    /// Human-readable ended-call line shown on the call-end screen.
+    /// `is_outgoing` disambiguates "Declined" (they declined ours vs.
+    /// we declined theirs).
+    pub fn summary(&self, is_outgoing: bool) -> String {
+        match self {
+            CallDiscardReason::Empty => "Call ended".to_string(),
+            CallDiscardReason::Missed => {
+                if is_outgoing {
+                    "Call not answered".to_string()
+                } else {
+                    "Missed call".to_string()
+                }
+            }
+            CallDiscardReason::Declined => {
+                if is_outgoing {
+                    "Declined".to_string()
+                } else {
+                    "You declined the call".to_string()
+                }
+            }
+            CallDiscardReason::Disconnected => "Call disconnected".to_string(),
+            CallDiscardReason::HungUp => "Call ended".to_string(),
+            CallDiscardReason::UpgradeToGroupCall { .. } => "Upgraded to a group call".to_string(),
+            CallDiscardReason::Unknown(_) => "Call ended".to_string(),
+        }
+    }
+}
+
+/// Phase C1: `CallState` (TDLib 1.8.67, `schema/td_api.tl:7051`):
+/// `callStatePending` (:7058, `is_created` / `is_received`),
+/// `callStateExchangingKeys` (:7063), `callStateReady` (:7066),
+/// `callStateHangingUp` (:7077), `callStateDiscarded` (:7080 —
+/// `reason` / `need_rating` / `need_debug_information` / `need_log`),
+/// `callStateError` (:7081 — the `error` wrapper; only its numeric
+/// code is kept, never the message text, which can contain
+/// secrets). The `Ready` state's protocol / servers / encryption key
+/// are media-transport material — Quill has no transport yet (C2), so
+/// only the state tag is kept.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CallState {
+    Pending {
+        is_created: bool,
+        is_received: bool,
+    },
+    ExchangingKeys,
+    Ready,
+    HangingUp,
+    Discarded {
+        reason: CallDiscardReason,
+        need_rating: bool,
+        need_debug_information: bool,
+        need_log: bool,
+    },
+    /// TDLib error code only — the `message` text is deliberately not
+    /// stored (it can contain phone numbers or other secrets).
+    Error {
+        code: i32,
+    },
+    Unknown(String),
+}
+
+impl CallState {
+    pub fn from_value(value: Option<&Value>) -> Self {
+        let value = match value {
+            Some(v) => v,
+            None => return CallState::Unknown(String::new()),
+        };
+        let type_name = value.get("@type").and_then(Value::as_str).unwrap_or("");
+        match type_name {
+            "callStatePending" => CallState::Pending {
+                is_created: value
+                    .get("is_created")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
+                is_received: value
+                    .get("is_received")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
+            },
+            "callStateExchangingKeys" => CallState::ExchangingKeys,
+            "callStateReady" => CallState::Ready,
+            "callStateHangingUp" => CallState::HangingUp,
+            "callStateDiscarded" => CallState::Discarded {
+                reason: CallDiscardReason::from_value(value.get("reason")),
+                need_rating: value
+                    .get("need_rating")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
+                need_debug_information: value
+                    .get("need_debug_information")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
+                need_log: value
+                    .get("need_log")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
+            },
+            "callStateError" => {
+                let error = value.get("error");
+                CallState::Error {
+                    code: error
+                        .and_then(|e| e.get("code"))
+                        .and_then(Value::as_i64)
+                        .unwrap_or(0) as i32,
+                }
+            }
+            other => CallState::Unknown(other.to_string()),
+        }
+    }
+
+    /// Terminal states end the tracked call. `Unknown` is deliberately
+    /// *not* terminal — a future state the schema doesn't know yet
+    /// must not silently drop a live call; the UI labels it honestly.
+    pub fn is_terminal(&self) -> bool {
+        matches!(self, CallState::Discarded { .. } | CallState::Error { .. })
+    }
+}
+
+/// Phase C1: `call` subset (TDLib 1.8.67, `schema/td_api.tl:7287`):
+/// `call id:int32 unique_id:int64 user_id:int53 is_outgoing:Bool
+/// is_video:Bool state:CallState = Call;`
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParsedCall {
+    pub id: i32,
+    pub unique_id: i64,
+    pub user_id: i64,
+    pub is_outgoing: bool,
+    pub is_video: bool,
+    pub state: CallState,
+}
+
+fn parse_call(value: Option<&Value>) -> Option<ParsedCall> {
+    let value = value?;
+    Some(ParsedCall {
+        id: value.get("id").and_then(Value::as_i64).unwrap_or(0) as i32,
+        unique_id: int53_or_zero(value.get("unique_id")),
+        user_id: int53(value.get("user_id")).ok()?,
+        is_outgoing: value
+            .get("is_outgoing")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        is_video: value
+            .get("is_video")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        state: CallState::from_value(value.get("state")),
+    })
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -3001,6 +3210,29 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
         }),
         "secretChat" => Ok(EnvelopePayload::SecretChat {
             secret_chat: parse_secret_chat(Some(&value)).ok_or(ParseError::MissingField)?,
+        }),
+        // Phase C1: call signaling updates (schema 1.8.67, lines
+        // 10816 / 10862) and the `createCall` answer (`callId`,
+        // line 7034).
+        "updateCall" => Ok(EnvelopePayload::UpdateCall {
+            call: parse_call(value.get("call")).ok_or(ParseError::MissingField)?,
+        }),
+        "updateNewCallSignalingData" => Ok(EnvelopePayload::UpdateNewCallSignalingData {
+            call_id: value
+                .get("call_id")
+                .and_then(Value::as_i64)
+                .ok_or(ParseError::MissingField)? as i32,
+            data: value
+                .get("data")
+                .and_then(Value::as_str)
+                .and_then(|s| STANDARD.decode(s).ok())
+                .unwrap_or_default(),
+        }),
+        "callId" => Ok(EnvelopePayload::CallId {
+            id: value
+                .get("id")
+                .and_then(Value::as_i64)
+                .ok_or(ParseError::MissingField)? as i32,
         }),
         "updateStoryPostSucceeded" => {
             let story = value.get("story").ok_or(ParseError::MissingField)?;
@@ -8662,6 +8894,146 @@ mod notification_sound_tests {
             parse_notification_settings_scope(Some("notificationSettingsScopePrivateChats")),
             Some(NotificationSettingsScope::PrivateChats)
         );
+    }
+
+    #[test]
+    fn schema_pins_call_constructors() {
+        // Every constructor this slice relies on must exist verbatim in
+        // the pinned schema (1.8.67) — never invent constructors or
+        // fields. Lines: updateCall :10816, updateNewCallSignalingData
+        // :10862, callId :7034, createCall :14212, acceptCall :14215,
+        // sendCallSignalingData :14218, discardCall :14227,
+        // sendCallRating :14234, sendCallDebugInformation :14237,
+        // call :7287, callProtocol :7008, states :7058–7086,
+        // discard reasons :6984–6999, problems :7253–7277.
+        let schema = include_str!("../../schema/td_api.tl");
+        for line in [
+            "updateCall call:call = Update;",
+            "updateNewCallSignalingData call_id:int32 data:bytes = Update;",
+            "callId id:int32 = CallId;",
+            "call id:int32 unique_id:int64 user_id:int53 is_outgoing:Bool is_video:Bool state:CallState = Call;",
+            "callProtocol udp_p2p:Bool udp_reflector:Bool min_layer:int32 max_layer:int32 library_versions:vector<string> = CallProtocol;",
+            "createCall user_id:int53 protocol:callProtocol is_video:Bool = CallId;",
+            "acceptCall call_id:int32 protocol:callProtocol = Ok;",
+            "sendCallSignalingData call_id:int32 data:bytes = Ok;",
+            "discardCall call_id:int32 is_disconnected:Bool invite_link:string duration:int32 is_video:Bool connection_id:int64 = Ok;",
+            "sendCallRating call_id:InputCall rating:int32 comment:string problems:vector<CallProblem> = Ok;",
+            "sendCallDebugInformation call_id:InputCall debug_information:string = Ok;",
+            "callStatePending is_created:Bool is_received:Bool = CallState;",
+            "callStateExchangingKeys = CallState;",
+            "callStateHangingUp = CallState;",
+            "callStateDiscarded reason:CallDiscardReason need_rating:Bool need_debug_information:Bool need_log:Bool = CallState;",
+            "callDiscardReasonMissed = CallDiscardReason;",
+            "callDiscardReasonDeclined = CallDiscardReason;",
+            "callDiscardReasonHungUp = CallDiscardReason;",
+            "inputCallDiscarded call_id:int32 = InputCall;",
+        ] {
+            assert!(
+                schema.lines().any(|l| l == line),
+                "schema pin missing: {line}"
+            );
+        }
+        for prefix in [
+            "callStateReady protocol:callProtocol",
+            "callStateError error:error = CallState;",
+            "callDiscardReasonEmpty = CallDiscardReason;",
+        ] {
+            assert!(
+                schema.lines().any(|l| l.starts_with(prefix)),
+                "schema pin missing: {prefix}"
+            );
+        }
+    }
+
+    /// Phase C1: `updateCall` parses the full `call` record in every
+    /// state; `updateNewCallSignalingData` keeps base64 bytes; `callId`
+    /// is the `createCall` answer.
+    #[test]
+    fn call_updates_parsed_in_every_state() {
+        let pending = r#"{"@type":"updateCall","call":{"@type":"call","id":77,"unique_id":"99","user_id":41,"is_outgoing":false,"is_video":false,"state":{"@type":"callStatePending","is_created":true,"is_received":false}}}"#;
+        match parse_envelope(pending).unwrap().payload {
+            EnvelopePayload::UpdateCall { call } => {
+                assert_eq!(call.id, 77);
+                assert_eq!(call.unique_id, 99);
+                assert_eq!(call.user_id, 41);
+                assert!(!call.is_outgoing);
+                assert!(!call.is_video);
+                assert_eq!(
+                    call.state,
+                    CallState::Pending {
+                        is_created: true,
+                        is_received: false
+                    }
+                );
+                assert!(!call.state.is_terminal());
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+        for (state_json, terminal) in [
+            (r#"{"@type":"callStateExchangingKeys"}"#, false),
+            (
+                r#"{"@type":"callStateReady","protocol":{"@type":"callProtocol","udp_p2p":true,"udp_reflector":true,"min_layer":65,"max_layer":92,"library_versions":[]},"servers":[],"config":"{}","encryption_key":"","emojis":[],"allow_p2p":false,"is_group_call_supported":false,"custom_parameters":"{}"}"#,
+                false,
+            ),
+            (r#"{"@type":"callStateHangingUp"}"#, false),
+            (
+                r#"{"@type":"callStateDiscarded","reason":{"@type":"callDiscardReasonHungUp"},"need_rating":true,"need_debug_information":false,"need_log":false}"#,
+                true,
+            ),
+            (
+                r#"{"@type":"callStateError","error":{"@type":"error","code":4005000,"message":"CALL_TIMEOUT"}}"#,
+                true,
+            ),
+            (r#"{"@type":"callStateFuture"}"#, false),
+        ] {
+            let json = format!(
+                r#"{{"@type":"updateCall","call":{{"@type":"call","id":78,"unique_id":"100","user_id":41,"is_outgoing":true,"is_video":false,"state":{state_json}}}}}"#
+            );
+            match parse_envelope(&json).unwrap().payload {
+                EnvelopePayload::UpdateCall { call } => {
+                    assert!(call.is_outgoing);
+                    assert_eq!(call.state.is_terminal(), terminal, "for {state_json}");
+                }
+                other => panic!("unexpected {other:?}"),
+            }
+        }
+        // `callStateError` keeps the numeric code only — TDLib error
+        // message text is never stored (it can contain secrets). Parse a
+        // message that would leak if retained and assert it is gone.
+        let err = r#"{"@type":"updateCall","call":{"@type":"call","id":82,"unique_id":"104","user_id":41,"is_outgoing":false,"is_video":false,"state":{"@type":"callStateError","error":{"@type":"error","code":500,"message":"SECRET_LEAK_TEXT"}}}}"#;
+        match parse_envelope(err).unwrap().payload {
+            EnvelopePayload::UpdateCall { call } => {
+                assert_eq!(call.state, CallState::Error { code: 500 });
+                assert!(
+                    !format!("{call:?}").contains("SECRET_LEAK_TEXT"),
+                    "TDLib error message text must not be retained"
+                );
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+        // Discard reason summaries.
+        assert_eq!(CallDiscardReason::Missed.summary(false), "Missed call");
+        assert_eq!(CallDiscardReason::Missed.summary(true), "Call not answered");
+        assert_eq!(
+            CallDiscardReason::Declined.summary(false),
+            "You declined the call"
+        );
+        assert_eq!(CallDiscardReason::Declined.summary(true), "Declined");
+        // Signaling data arrives as base64 bytes.
+        let sig = r#"{"@type":"updateNewCallSignalingData","call_id":77,"data":"AAEC"}"#;
+        match parse_envelope(sig).unwrap().payload {
+            EnvelopePayload::UpdateNewCallSignalingData { call_id, data } => {
+                assert_eq!(call_id, 77);
+                assert_eq!(data, vec![0x00, 0x01, 0x02]);
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+        // `callId` is the `createCall` answer.
+        let id = r#"{"@type":"callId","id":77,"@extra":"9"}"#;
+        match parse_envelope(id).unwrap().payload {
+            EnvelopePayload::CallId { id } => assert_eq!(id, 77),
+            other => panic!("unexpected {other:?}"),
+        }
     }
 
     #[test]

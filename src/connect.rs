@@ -20,35 +20,36 @@ use crate::state::{
 };
 use crate::telegram::client::{LiveTdJson, OwnedEnvelope, ReceiveBridge};
 use crate::telegram::envelope::{
-    AuthorizationState, ChatDraft, ChatFolderSpec, ChatKind, ChatNotificationSettings,
+    AuthorizationState, CallState, ChatDraft, ChatFolderSpec, ChatKind, ChatNotificationSettings,
     EnvelopePayload, MUTE_FOREVER, MessageContent, NotificationSettingsScope,
     ScopeNotificationSettings, StoryContentView,
 };
 use crate::telegram::ffi::{LibraryOrigin, TdJsonError, resolve_tdjson_path};
 use crate::telegram::requests::{
     AnimationSend, PollSend, SetTdlibParameters, StickerSend, VideoNoteSend,
-    VideoNoteThumbnailSend, VideoSend, VoiceNoteSend, add_chat_to_list, add_chat_to_list_value,
-    add_contact, add_message_reaction, add_recently_found_chat, check_authentication_code,
-    check_authentication_password, click_chat_sponsored_message, close_chat, close_request,
-    close_secret_chat as close_secret_chat_request, close_story, create_chat_folder,
-    create_new_secret_chat, delete_chat_folder, delete_messages, delete_story,
-    download_file as download_file_request, edit_chat_folder, edit_message_caption,
-    edit_message_text, forward_messages, get_authorization_state, get_callback_query_answer,
-    get_chat_active_stories, get_chat_folder, get_chat_history, get_chat_lists_to_add_chat,
-    get_chat_member, get_chat_sponsored_messages, get_commands, get_contacts, get_forum_topics,
-    get_installed_sticker_sets, get_me, get_saved_animations, get_saved_notification_sounds,
-    get_scope_notification_settings, get_secret_chat, get_sticker_set, get_story,
-    get_story_available_reactions, get_supergroup, get_supergroup_full_info, get_user_full_info,
-    input_message_photo, input_message_video, join_chat, leave_chat, load_active_stories,
-    load_chats, load_chats_list, open_chat, open_message_content, open_story, pin_chat_message,
-    remove_message_reaction, reorder_chat_folders, report_chat_sponsored_message,
-    search_chat_messages, search_chats, search_messages, search_public_chats,
-    search_recently_found_chats, send_animation, send_chat_action, send_chat_action_kind,
-    send_document, send_message_album, send_photo, send_poll, send_sticker, send_text,
-    send_text_story_reply, send_video, send_video_note, send_voice_note,
-    set_authentication_phone_number, set_chat_draft_message, set_chat_notification_settings,
-    set_chat_slow_mode_delay, set_poll_answer, set_scope_notification_settings, set_story_reaction,
-    toggle_chat_folder_tags, unpin_chat_message, view_messages, view_sponsored_chat,
+    VideoNoteThumbnailSend, VideoSend, VoiceNoteSend, accept_call, add_chat_to_list,
+    add_chat_to_list_value, add_contact, add_message_reaction, add_recently_found_chat,
+    check_authentication_code, check_authentication_password, click_chat_sponsored_message,
+    close_chat, close_request, close_secret_chat as close_secret_chat_request, close_story,
+    create_call, create_chat_folder, create_new_secret_chat, delete_chat_folder, delete_messages,
+    delete_story, discard_call as discard_call_request, download_file as download_file_request,
+    edit_chat_folder, edit_message_caption, edit_message_text, forward_messages,
+    get_authorization_state, get_callback_query_answer, get_chat_active_stories, get_chat_folder,
+    get_chat_history, get_chat_lists_to_add_chat, get_chat_member, get_chat_sponsored_messages,
+    get_commands, get_contacts, get_forum_topics, get_installed_sticker_sets, get_me,
+    get_saved_animations, get_saved_notification_sounds, get_scope_notification_settings,
+    get_secret_chat, get_sticker_set, get_story, get_story_available_reactions, get_supergroup,
+    get_supergroup_full_info, get_user_full_info, input_message_photo, input_message_video,
+    join_chat, leave_chat, load_active_stories, load_chats, load_chats_list, open_chat,
+    open_message_content, open_story, pin_chat_message, remove_message_reaction,
+    reorder_chat_folders, report_chat_sponsored_message, search_chat_messages, search_chats,
+    search_messages, search_public_chats, search_recently_found_chats, send_animation,
+    send_call_rating, send_chat_action, send_chat_action_kind, send_document, send_message_album,
+    send_photo, send_poll, send_sticker, send_text, send_text_story_reply, send_video,
+    send_video_note, send_voice_note, set_authentication_phone_number, set_chat_draft_message,
+    set_chat_notification_settings, set_chat_slow_mode_delay, set_poll_answer,
+    set_scope_notification_settings, set_story_reaction, toggle_chat_folder_tags,
+    unpin_chat_message, view_messages, view_sponsored_chat,
 };
 use crate::voice::VoiceDraft;
 use std::path::Path;
@@ -501,6 +502,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         // `updateSecretChat` (e.g. loaded from the local DB) resolve it
         // through the offline `getSecretChat`.
         let _ = self.maybe_fetch_secret_chat_states();
+        // Phase C1: incoming calls that arrived while another call was
+        // active are declined (busy).
+        let _ = self.maybe_decline_busy_calls();
         self.maybe_load_selected_sticker_set()?;
         self.maybe_refresh_saved_animations()?;
         if chat_search_hits {
@@ -1395,6 +1399,131 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(err);
         }
         Ok(extra)
+    }
+
+    /// Phase C1: `createCall` for a user. Gated on a known non-bot
+    /// user (like `createNewSecretChat`) and on no call already being
+    /// active. Audio-only — video needs transport too (C3, after the C2
+    /// audio spike). The `callId` answer starts tracking the outgoing
+    /// call; its states arrive as `updateCall`.
+    pub fn start_call(&mut self, user_id: i64) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if self.session.active_call.is_some() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let user = self.session.user(user_id);
+        let is_bot = user.is_some_and(|u| u.is_bot);
+        let is_self = self.session.my_user_id.is_some_and(|me| me == user_id);
+        if user.is_none() || is_bot || is_self {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self
+            .session
+            .request_for_user(RequestPurpose::CreateCall, user_id);
+        if let Err(err) = self.sender.send_json(&create_call(extra, user_id, false)) {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(extra)
+    }
+
+    /// Phase C1: `acceptCall` for the tracked incoming call. Requires an
+    /// incoming `Pending` call — answering a call that already moved on
+    /// is rejected here, not sent.
+    pub fn accept_call(&mut self) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let call_id = match &self.session.active_call {
+            Some(call) if !call.is_outgoing && matches!(call.state, CallState::Pending { .. }) => {
+                call.id
+            }
+            _ => return Err(ConnectSendError::InvalidRequest),
+        };
+        let extra = self.session.request(RequestPurpose::AcceptCall, None);
+        if let Err(err) = self.sender.send_json(&accept_call(extra, call_id)) {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(extra)
+    }
+
+    /// Phase C1: `discardCall` for the tracked call (decline an
+    /// incoming call / hang up an active one). Marks the call
+    /// `HangingUp` optimistically; the discard states arrive as
+    /// `updateCall`. `duration` is the connected time in seconds.
+    pub fn discard_call(&mut self) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let (call_id, duration_secs, is_video) = match &self.session.active_call {
+            Some(call) => (call.id, call.connected_secs() as i32, call.is_video),
+            None => return Err(ConnectSendError::InvalidRequest),
+        };
+        let extra = self.session.request(RequestPurpose::DiscardCall, None);
+        if let Err(err) = self.sender.send_json(&discard_call_request(
+            extra,
+            call_id,
+            false,
+            duration_secs,
+            is_video,
+        )) {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        if let Some(call) = self.session.active_call.as_mut() {
+            call.state = CallState::HangingUp;
+        }
+        Ok(extra)
+    }
+
+    /// Phase C1: `sendCallRating` for the last ended call (the 1–5
+    /// rating card, `callStateDiscarded.need_rating`). Marks the summary
+    /// so the card can show "Thanks" while the `ok` confirms.
+    pub fn send_call_rating(&mut self, rating: i32) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let call_id = match &self.session.call_summary {
+            Some(summary) if summary.need_rating && !summary.rating_sent => summary.call_id,
+            _ => return Err(ConnectSendError::InvalidRequest),
+        };
+        let rating = rating.clamp(1, 5);
+        let extra = self.session.request(RequestPurpose::SendCallRating, None);
+        if let Err(err) = self
+            .sender
+            .send_json(&send_call_rating(extra, call_id, rating))
+        {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        if let Some(summary) = self.session.call_summary.as_mut() {
+            summary.rating_sent = true;
+        }
+        Ok(extra)
+    }
+
+    /// Phase C1: drain `Session::call_busy_decline_queue` — incoming
+    /// calls that arrived while another call was active are declined
+    /// (busy) with `discardCall`. Called from `ingest`.
+    fn maybe_decline_busy_calls(&mut self) -> Result<(), ConnectSendError> {
+        if !self.chats_path_active() {
+            return Ok(());
+        }
+        let queued: Vec<(i32, bool)> = std::mem::take(&mut self.session.call_busy_decline_queue);
+        for (call_id, is_video) in queued {
+            let extra = self.session.request(RequestPurpose::DiscardCall, None);
+            if let Err(err) = self
+                .sender
+                .send_json(&discard_call_request(extra, call_id, false, 0, is_video))
+            {
+                self.session.requests.take(extra);
+                return Err(err);
+            }
+        }
+        Ok(())
     }
 
     /// Phase B1: `closeSecretChat` for a secret chat. The state change to

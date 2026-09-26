@@ -454,6 +454,103 @@ pub fn close_secret_chat(extra: RequestId, secret_chat_id: i32) -> String {
     .to_string()
 }
 
+/// Phase C1: the `callProtocol` Quill advertises for signaling-only
+/// calls (TDLib 1.8.67, `schema/td_api.tl:7008`):
+/// `callProtocol udp_p2p:Bool udp_reflector:Bool min_layer:int32
+/// max_layer:int32 library_versions:vector<string> = CallProtocol;`
+/// The schema pins `min_layer = 65` / `max_layer = 92`. Quill claims
+/// **no media capability** (`udp_p2p: false`, `udp_reflector: false`,
+/// no tgcalls `library_versions`) — honest, because this slice has no
+/// VoIP transport (TDLib does not move audio/video; official clients
+/// use libtgvoip, the C2 spike). The remote side will see us as
+/// "connecting" until it gives up; the UI says so explicitly.
+pub fn call_protocol() -> Value {
+    json!({
+        "@type": "callProtocol",
+        "udp_p2p": false,
+        "udp_reflector": false,
+        "min_layer": 65,
+        "max_layer": 92,
+        "library_versions": []
+    })
+}
+
+/// Phase C1: `createCall` (TDLib 1.8.67, `schema/td_api.tl:14212`):
+/// `createCall user_id:int53 protocol:callProtocol is_video:Bool =
+/// CallId;` "Creates a new call". This slice is audio-only, so
+/// `is_video` is always false (video needs transport too — C3, after
+/// the C2 audio spike).
+pub fn create_call(extra: RequestId, user_id: i64, is_video: bool) -> String {
+    json!({
+        "@type": "createCall",
+        "@extra": extra.as_extra(),
+        "user_id": user_id,
+        "protocol": call_protocol(),
+        "is_video": is_video,
+    })
+    .to_string()
+}
+
+/// Phase C1: `acceptCall` (TDLib 1.8.67, `schema/td_api.tl:14215`):
+/// `acceptCall call_id:int32 protocol:callProtocol = Ok;`
+/// "Accepts an incoming call".
+pub fn accept_call(extra: RequestId, call_id: i32) -> String {
+    json!({
+        "@type": "acceptCall",
+        "@extra": extra.as_extra(),
+        "call_id": call_id,
+        "protocol": call_protocol(),
+    })
+    .to_string()
+}
+
+/// Phase C1: `discardCall` (TDLib 1.8.67, `schema/td_api.tl:14227`):
+/// `discardCall call_id:int32 is_disconnected:Bool invite_link:string
+/// duration:int32 is_video:Bool connection_id:int64 = Ok;`
+/// `duration` is the connected time in seconds (0 when the call never
+/// reached `callStateReady`); `invite_link` is empty and
+/// `connection_id` is 0 because there is no media connection yet (C2).
+pub fn discard_call(
+    extra: RequestId,
+    call_id: i32,
+    is_disconnected: bool,
+    duration_secs: i32,
+    is_video: bool,
+) -> String {
+    json!({
+        "@type": "discardCall",
+        "@extra": extra.as_extra(),
+        "call_id": call_id,
+        "is_disconnected": is_disconnected,
+        "invite_link": "",
+        "duration": duration_secs,
+        "is_video": is_video,
+        "connection_id": 0,
+    })
+    .to_string()
+}
+
+/// Phase C1: `sendCallRating` (TDLib 1.8.67, `schema/td_api.tl:14234`):
+/// `sendCallRating call_id:InputCall rating:int32 comment:string
+/// problems:vector<CallProblem> = Ok;` "Sends a call rating". The call
+/// has ended, so the call is identified with `inputCallDiscarded`.
+/// The simple rating card sends no comment and no problem list (the
+/// per-problem checklist is a documented follow-up).
+pub fn send_call_rating(extra: RequestId, call_id: i32, rating: i32) -> String {
+    json!({
+        "@type": "sendCallRating",
+        "@extra": extra.as_extra(),
+        "call_id": {
+            "@type": "inputCallDiscarded",
+            "call_id": call_id,
+        },
+        "rating": rating,
+        "comment": "",
+        "problems": [],
+    })
+    .to_string()
+}
+
 /// Phase 3.3: `getCommands` for a bot's global (default) command scope
 /// (TDLib 1.8.67, `schema/td_api.tl:14953`):
 /// `getCommands scope:BotCommandScope language_code:string = BotCommands;`
@@ -3173,5 +3270,51 @@ mod channel_requests_tests {
         assert_eq!(v["@type"], "closeStory");
         assert_eq!(v["story_poster_chat_id"], 11);
         assert_eq!(v["story_id"], 5);
+    }
+
+    /// Phase C1: call request shapes — verified against the pinned
+    /// schema (1.8.67) constructors, never invented.
+    #[test]
+    fn call_request_shapes() {
+        // The advertised protocol is signaling-only: no media
+        // capability claimed (min/max layer pinned by the schema).
+        let p = call_protocol();
+        assert_eq!(p["@type"], "callProtocol");
+        assert_eq!(p["udp_p2p"], false);
+        assert_eq!(p["udp_reflector"], false);
+        assert_eq!(p["min_layer"], 65);
+        assert_eq!(p["max_layer"], 92);
+        assert_eq!(p["library_versions"].as_array().unwrap().len(), 0);
+
+        let v: serde_json::Value =
+            serde_json::from_str(&create_call(RequestId(1), 41, false)).unwrap();
+        assert_eq!(v["@type"], "createCall");
+        assert_eq!(v["user_id"], 41);
+        assert_eq!(v["is_video"], false);
+        assert_eq!(v["protocol"]["@type"], "callProtocol");
+
+        let v: serde_json::Value = serde_json::from_str(&accept_call(RequestId(2), 77)).unwrap();
+        assert_eq!(v["@type"], "acceptCall");
+        assert_eq!(v["call_id"], 77);
+        assert_eq!(v["protocol"]["@type"], "callProtocol");
+
+        let v: serde_json::Value =
+            serde_json::from_str(&discard_call(RequestId(3), 77, false, 42, false)).unwrap();
+        assert_eq!(v["@type"], "discardCall");
+        assert_eq!(v["call_id"], 77);
+        assert_eq!(v["is_disconnected"], false);
+        assert_eq!(v["invite_link"], "");
+        assert_eq!(v["duration"], 42);
+        assert_eq!(v["is_video"], false);
+        assert_eq!(v["connection_id"], 0);
+
+        let v: serde_json::Value =
+            serde_json::from_str(&send_call_rating(RequestId(4), 77, 5)).unwrap();
+        assert_eq!(v["@type"], "sendCallRating");
+        assert_eq!(v["call_id"]["@type"], "inputCallDiscarded");
+        assert_eq!(v["call_id"]["call_id"], 77);
+        assert_eq!(v["rating"], 5);
+        assert_eq!(v["comment"], "");
+        assert_eq!(v["problems"].as_array().unwrap().len(), 0);
     }
 }
