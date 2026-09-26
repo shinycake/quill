@@ -14,11 +14,13 @@ slice" lists are the near-term backlog), this roadmap, the vendored
 Unlocks the README blocker: channels/bots are gated until sponsored-content
 handling exists.
 
-- **2.1 Sponsored-message handling.** Fetch `getChatSponsoredMessages` for the
-  open channel; render sponsored rows with a **Sponsored** / **Recommended**
-  label (`sponsoredMessage.is_recommended`); `reportChatSponsoredMessage`
-  flow; `viewSponsoredChat` on open. Sponsored media follows the existing
-  download sandbox (thumbs at priority 1, click for full at 32).
+- **2.1 Sponsored-message handling.** ✅ Done (2026-09-26). Fetch
+  `getChatSponsoredMessages` for the open channel; render sponsored rows with a
+  **Sponsored** / **Recommended** label (`sponsoredMessage.is_recommended`);
+  `reportChatSponsoredMessage` flow; `viewSponsoredChat` typed driver
+  (integration deferred to 2.2+). Sponsored
+  media follows the existing download sandbox (thumbs at priority 1, click for
+  full at 32). Channel gate retained for 2.2.
 - **2.2 Broadcast channels.** Ungate `chatTypeSupergroup` with `is_channel`;
   channels appear in the chat list; history renders broadcast posts
   (author = channel, `message.interaction_info.view_count`); composer hidden

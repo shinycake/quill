@@ -16,22 +16,24 @@ use crate::state::{
 };
 use crate::telegram::client::{LiveTdJson, OwnedEnvelope, ReceiveBridge};
 use crate::telegram::envelope::{
-    AuthorizationState, ChatDraft, ChatNotificationSettings, EnvelopePayload, MUTE_FOREVER,
+    AuthorizationState, ChatDraft, ChatKind, ChatNotificationSettings, EnvelopePayload,
+    MUTE_FOREVER,
 };
 use crate::telegram::ffi::{LibraryOrigin, TdJsonError, resolve_tdjson_path};
 use crate::telegram::requests::{
     AnimationSend, SetTdlibParameters, StickerSend, VideoNoteSend, VideoNoteThumbnailSend,
     VideoSend, add_chat_to_list, add_message_reaction, add_recently_found_chat,
-    check_authentication_code, check_authentication_password, close_chat, close_request,
-    delete_messages, download_file as download_file_request, edit_message_caption,
-    edit_message_text, forward_messages, get_authorization_state, get_chat_history,
-    get_installed_sticker_sets, get_saved_animations, get_sticker_set, input_message_photo,
-    input_message_video, load_chats, open_chat, open_message_content, pin_chat_message,
-    remove_message_reaction, search_chat_messages, search_chats, search_messages,
+    check_authentication_code, check_authentication_password, click_chat_sponsored_message,
+    close_chat, close_request, delete_messages, download_file as download_file_request,
+    edit_message_caption, edit_message_text, forward_messages, get_authorization_state,
+    get_chat_history, get_chat_sponsored_messages, get_installed_sticker_sets,
+    get_saved_animations, get_sticker_set, input_message_photo, input_message_video, load_chats,
+    open_chat, open_message_content, pin_chat_message, remove_message_reaction,
+    report_chat_sponsored_message, search_chat_messages, search_chats, search_messages,
     search_recently_found_chats, send_animation, send_chat_action, send_chat_action_kind,
     send_document, send_message_album, send_photo, send_sticker, send_text, send_video,
     send_video_note, send_voice_note, set_authentication_phone_number, set_chat_draft_message,
-    set_chat_notification_settings, unpin_chat_message, view_messages,
+    set_chat_notification_settings, unpin_chat_message, view_messages, view_sponsored_chat,
 };
 use crate::voice::VoiceDraft;
 use std::path::Path;
@@ -483,8 +485,18 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         if self.session.open_chat == Some(chat_id) {
+            let gated = !self
+                .session
+                .chats
+                .get(&chat_id.0)
+                .is_some_and(|chat| chat.supported());
             self.maybe_view_open_messages()?;
             self.maybe_download_open_thumbs()?;
+            self.fetch_sponsored_messages(chat_id)?;
+            if gated {
+                // Gated channels fetch sponsored rows only; no history/open.
+                return Ok(None);
+            }
             return self.fetch_history();
         }
         self.cancel_outgoing_typing()?;
@@ -498,6 +510,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             .get(&chat_id.0)
             .is_some_and(|chat| chat.supported())
         {
+            // Channels stay gated until Phase 2.2, but the sponsored-message
+            // pipeline already runs: fetch rows for the open channel.
+            self.fetch_sponsored_messages(chat_id)?;
             return Ok(None);
         }
         self.send_open_chat(chat_id)?;
@@ -817,6 +832,141 @@ impl<S: JsonSender> ConnectDriver<S> {
             false,
         ))?;
         Ok(Some(extra))
+    }
+
+    /// `getChatSponsoredMessages` for a channel chat (TDLib 1.8.67). Called
+    /// when a channel is opened; rows render Sponsored / Recommended.
+    /// Channels stay gated until Phase 2.2 — the fetch already runs so the
+    /// pipeline is proven with replay fixtures. Bot chats can also carry
+    /// sponsored messages per the schema; they are not fetched yet (2.2+).
+    pub fn fetch_sponsored_messages(
+        &mut self,
+        chat_id: ChatId,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let is_channel = self.session.chats.get(&chat_id.0).is_some_and(|chat| {
+            matches!(
+                chat.kind,
+                ChatKind::Supergroup {
+                    is_channel: true,
+                    ..
+                }
+            )
+        });
+        if !is_channel {
+            return Ok(None);
+        }
+        if self
+            .session
+            .requests
+            .has_purpose_for_chat(RequestPurpose::GetChatSponsoredMessages, chat_id)
+        {
+            return Ok(None);
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::GetChatSponsoredMessages, Some(chat_id));
+        match self
+            .sender
+            .send_json(&get_chat_sponsored_messages(extra, chat_id))
+        {
+            Ok(()) => Ok(Some(extra)),
+            Err(err) => {
+                self.session.requests.take(extra);
+                Err(err)
+            }
+        }
+    }
+
+    /// `reportChatSponsoredMessage` (TDLib 1.8.67). Empty `option_id` starts
+    /// the flow; TDLib may answer `reportSponsoredResultOptionRequired`.
+    /// Returns `None` when the row is missing or `can_be_reported` is false.
+    pub fn report_sponsored_message(
+        &mut self,
+        chat_id: ChatId,
+        message_id: i64,
+        option_id: &str,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if self
+            .session
+            .begin_sponsored_report(chat_id, message_id)
+            .is_none()
+        {
+            return Ok(None);
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::ReportChatSponsoredMessage, Some(chat_id));
+        match self.sender.send_json(&report_chat_sponsored_message(
+            extra, chat_id, message_id, option_id,
+        )) {
+            Ok(()) => Ok(Some(extra)),
+            Err(err) => {
+                self.session.requests.take(extra);
+                self.session.dismiss_sponsored_report();
+                Err(err)
+            }
+        }
+    }
+
+    /// `clickChatSponsoredMessage` (TDLib 1.8.67): the user opened a sponsored
+    /// message's sponsor link/button (`is_media_click = false`) or its media
+    /// (`is_media_click = true`). Fire-and-forget; the `ok` response is ignored.
+    pub fn click_chat_sponsored_message(
+        &mut self,
+        chat_id: ChatId,
+        message_id: i64,
+        is_media_click: bool,
+        from_fullscreen: bool,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::ClickChatSponsoredMessage, Some(chat_id));
+        match self.sender.send_json(&click_chat_sponsored_message(
+            extra,
+            chat_id,
+            message_id,
+            is_media_click,
+            from_fullscreen,
+        )) {
+            Ok(()) => Ok(extra),
+            Err(err) => {
+                self.session.requests.take(extra);
+                Err(err)
+            }
+        }
+    }
+
+    /// `viewSponsoredChat` (TDLib 1.8.67): the user fully viewed a sponsored
+    /// chat. The unique id comes from `sponsoredChat` search results.
+    pub fn view_sponsored_chat(
+        &mut self,
+        sponsored_chat_unique_id: i64,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::ViewSponsoredChat, None);
+        match self
+            .sender
+            .send_json(&view_sponsored_chat(extra, sponsored_chat_unique_id))
+        {
+            Ok(()) => Ok(extra),
+            Err(err) => {
+                self.session.requests.take(extra);
+                Err(err)
+            }
+        }
     }
 
     /// Open the sticker panel and load installed regular sets

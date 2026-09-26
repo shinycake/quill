@@ -8,8 +8,8 @@ use crate::telegram::envelope::{
     AnimationItem, AuthorizationState, ChatAction, ChatDraft, ChatKind, ChatList,
     ChatNotificationSettings, ChatPositionUpdate, ConnectionState, EnvelopePayload, ErrorClass,
     MessageContent, MessageForwardInfo, MessageInteractionInfo, MessageOrigin, MessageReaction,
-    MessageReplyTo, MessageSender, ParsedFile, ParsedMessage, StickerFormat, StickerItem,
-    StickerSetInfo,
+    MessageReplyTo, MessageSender, ParsedFile, ParsedMessage, ReportOption, ReportSponsoredResult,
+    SponsoredMessage, StickerFormat, StickerItem, StickerSetInfo,
 };
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
@@ -74,6 +74,16 @@ pub enum RequestPurpose {
     /// `setChatDraftMessage`. Response is `ok`; the draft also arrives as
     /// `updateChatDraftMessage`.
     SetChatDraftMessage,
+    /// `getChatSponsoredMessages` (channel / bot chats). Response is
+    /// `sponsoredMessages`; rows render Sponsored / Recommended.
+    GetChatSponsoredMessages,
+    /// `reportChatSponsoredMessage`. Response is `ReportSponsoredResult`;
+    /// `OptionRequired` opens the report-option picker.
+    ReportChatSponsoredMessage,
+    /// `viewSponsoredChat`. Response is `ok`.
+    ViewSponsoredChat,
+    /// `clickChatSponsoredMessage`. Response is `ok`; fire-and-forget.
+    ClickChatSponsoredMessage,
     Close,
     LogOut,
     Other,
@@ -149,6 +159,51 @@ impl ForwardResult {
         } else {
             format!("Forwarded {n} messages to {}", self.dest_title)
         }
+    }
+}
+
+/// Sponsored messages for one chat (`getChatSponsoredMessages` response).
+/// Rows render with a **Sponsored** / **Recommended** label.
+#[derive(Debug, Clone, Default)]
+pub struct ChatSponsoredMessages {
+    pub messages: Vec<SponsoredMessage>,
+    /// Schema `messages_between`: minimum number of ordinary messages between
+    /// shown sponsored rows (0 = after all ordinary messages).
+    pub messages_between: i32,
+}
+
+impl ChatSponsoredMessages {
+    /// Rows in TDLib's response order. The schema does not promise an order,
+    /// so the vector order is preserved verbatim.
+    pub fn ordered(&self) -> Vec<&SponsoredMessage> {
+        self.messages.iter().collect()
+    }
+}
+
+/// `reportChatSponsoredMessage` waiting on the user's option choice
+/// (`reportSponsoredResultOptionRequired`).
+#[derive(Debug, Clone)]
+pub struct SponsoredReportFlight {
+    pub extra: RequestId,
+    pub chat_id: ChatId,
+    /// int53 sponsored message id.
+    pub message_id: i64,
+    pub title: String,
+    pub options: Vec<ReportOption>,
+}
+
+/// Last `reportChatSponsoredMessage` outcome (no TDLib text is echoed).
+#[derive(Debug, Clone)]
+pub struct SponsoredReportOutcome {
+    pub chat_id: ChatId,
+    /// int53 sponsored message id.
+    pub message_id: i64,
+    pub result: ReportSponsoredResult,
+}
+
+impl SponsoredReportOutcome {
+    pub fn user_message(&self) -> &'static str {
+        self.result.user_message()
     }
 }
 
@@ -1090,6 +1145,15 @@ pub struct Session {
     draft_dirty: HashSet<i64>,
     /// Send succeeded; UI clears the server draft if the composer is still empty.
     pub draft_clears: Vec<ChatId>,
+    /// Sponsored messages per chat (`getChatSponsoredMessages`).
+    pub sponsored: HashMap<i64, ChatSponsoredMessages>,
+    /// In-flight sponsored-message report waiting on an option choice.
+    pub sponsored_report: Option<SponsoredReportFlight>,
+    /// Report target chosen by the user (chat + sponsored message id); cleared
+    /// when the flow resolves.
+    sponsored_report_target: Option<(ChatId, i64)>,
+    /// Last `reportChatSponsoredMessage` outcome note.
+    pub last_sponsored_report: Option<SponsoredReportOutcome>,
     diagnostics: Arc<dyn DiagnosticSink>,
 }
 
@@ -1125,6 +1189,10 @@ impl Session {
             bot_user_ids: HashSet::new(),
             draft_dirty: HashSet::new(),
             draft_clears: Vec::new(),
+            sponsored: HashMap::new(),
+            sponsored_report: None,
+            sponsored_report_target: None,
+            last_sponsored_report: None,
             diagnostics,
         }
     }
@@ -1559,6 +1627,35 @@ impl Session {
                     self.accept_saved_animations(animations);
                 }
             }
+            EnvelopePayload::SponsoredMessages {
+                messages,
+                files,
+                messages_between,
+            } => {
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetChatSponsoredMessages)
+                    && let Some(pending) = pending
+                    && let Some(chat_id) = pending.chat_id
+                {
+                    if self.open_chat != Some(chat_id) {
+                        self.diagnostics.record(Diagnostic {
+                            category: "reducer",
+                            type_name: Some("sponsoredMessages".into()),
+                            extra: Some(pending.id.0),
+                            seq: Some(seq),
+                            note: "stale-chat-sponsored",
+                        });
+                        return;
+                    }
+                    self.accept_sponsored_messages(chat_id, messages, messages_between, &files);
+                }
+            }
+            EnvelopePayload::ReportSponsoredResult(result) => {
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::ReportChatSponsoredMessage)
+                    && let Some(pending) = pending
+                {
+                    self.accept_sponsored_report(pending, result);
+                }
+            }
             EnvelopePayload::UpdateSavedAnimations { .. } => {
                 if self.gifs.open {
                     self.gifs.stale = true;
@@ -1628,6 +1725,11 @@ impl Session {
                     self.gifs.loading = false;
                     self.gifs.failed = true;
                     self.gifs.stale = false;
+                }
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::ReportChatSponsoredMessage) {
+                    // A TDLib error dismisses the option picker; no outcome is shown.
+                    self.sponsored_report = None;
+                    self.sponsored_report_target = None;
                 }
                 let download_id = pending
                     .filter(|p| p.purpose == RequestPurpose::DownloadFile)
@@ -1902,6 +2004,18 @@ impl Session {
                 }
             }
         }
+        // Sponsored rows in the open chat: content + sponsor thumbs at priority 1.
+        if let Some(chat_id) = self.open_chat
+            && let Some(entry) = self.sponsored.get(&chat_id.0)
+        {
+            for message in &entry.messages {
+                for file_id in message.thumb_file_ids() {
+                    if self.should_download(file_id) {
+                        ids.push(file_id);
+                    }
+                }
+            }
+        }
         ids.sort_by_key(|id| id.0);
         ids.dedup();
         ids
@@ -1957,6 +2071,117 @@ impl Session {
         self.stickers.failed = false;
         self.stickers.loaded_set_id = Some(id);
         self.stickers.stickers = stickers;
+    }
+
+    /// Store `sponsoredMessages` for a chat (TDLib display order kept; files
+    /// remembered for the download sandbox).
+    pub fn accept_sponsored_messages(
+        &mut self,
+        chat_id: ChatId,
+        messages: Vec<SponsoredMessage>,
+        messages_between: i32,
+        files: &[ParsedFile],
+    ) {
+        self.remember_files(files);
+        self.sponsored.insert(
+            chat_id.0,
+            ChatSponsoredMessages {
+                messages,
+                messages_between,
+            },
+        );
+    }
+
+    /// Sponsored rows for the open chat in TDLib's response order. Empty for
+    /// gated chats without a fetch and for chats that never had one.
+    pub fn open_sponsored_rows(&self) -> Vec<&SponsoredMessage> {
+        let Some(chat_id) = self.open_chat else {
+            return Vec::new();
+        };
+        self.sponsored
+            .get(&chat_id.0)
+            .map(ChatSponsoredMessages::ordered)
+            .unwrap_or_default()
+    }
+
+    pub fn sponsored_message(&self, chat_id: ChatId, message_id: i64) -> Option<&SponsoredMessage> {
+        self.sponsored
+            .get(&chat_id.0)
+            .and_then(|entry| entry.messages.iter().find(|m| m.message_id == message_id))
+    }
+
+    /// Begin a `reportChatSponsoredMessage` flow. Returns the request
+    /// identifiers when the row exists and `can_be_reported` is set.
+    pub fn begin_sponsored_report(
+        &mut self,
+        chat_id: ChatId,
+        message_id: i64,
+    ) -> Option<(ChatId, i64)> {
+        let reportable = self
+            .sponsored_message(chat_id, message_id)
+            .is_some_and(|message| message.can_be_reported);
+        if !reportable {
+            return None;
+        }
+        self.sponsored_report = None;
+        self.sponsored_report_target = Some((chat_id, message_id));
+        self.last_sponsored_report = None;
+        Some((chat_id, message_id))
+    }
+
+    /// Apply a `ReportSponsoredResult` for a finished `ReportChatSponsoredMessage`.
+    /// `OptionRequired` arms the option picker; any other result closes it.
+    pub fn accept_sponsored_report(
+        &mut self,
+        pending: &PendingRequest,
+        result: ReportSponsoredResult,
+    ) {
+        let Some(chat_id) = pending.chat_id else {
+            return;
+        };
+        let message_id = self
+            .sponsored_report
+            .as_ref()
+            .map(|flight| flight.message_id)
+            // Fallback for a response that arrives after its picker was
+            // dismissed: attribute to the latest report target. If the user
+            // starts a second report before the first responds, the first
+            // response is attributed to the second row — acceptable: reports
+            // are fire-and-forget and the outcome banner is per-chat.
+            .or_else(|| self.sponsored_report_target.map(|(_, id)| id))
+            .unwrap_or(0);
+        match result {
+            ReportSponsoredResult::OptionRequired { title, options } => {
+                self.sponsored_report = Some(SponsoredReportFlight {
+                    extra: pending.id,
+                    chat_id,
+                    message_id,
+                    title,
+                    options,
+                });
+            }
+            result => {
+                self.sponsored_report = None;
+                self.sponsored_report_target = None;
+                self.last_sponsored_report = Some(SponsoredReportOutcome {
+                    chat_id,
+                    message_id,
+                    result,
+                });
+            }
+        }
+    }
+
+    /// Drop the report picker flight and its target. Called when the user
+    /// cancels, when a send fails, or when a result is applied elsewhere —
+    /// a dismissed report must not attribute a late response to a stale row.
+    pub fn dismiss_sponsored_report(&mut self) {
+        self.sponsored_report = None;
+        self.sponsored_report_target = None;
+    }
+
+    pub fn clear_sponsored_report_outcome(&mut self) {
+        self.last_sponsored_report = None;
     }
 
     pub fn request_download(&mut self, file_id: FileId) -> RequestId {
