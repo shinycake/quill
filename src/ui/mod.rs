@@ -48,7 +48,7 @@ use quill::telegram::envelope::{
     InlineKeyboardButtonType, MUTE_FOR_1_HOUR, MUTE_FOR_2_DAYS, MUTE_FOR_8_HOURS, MUTE_FOREVER,
     MessageContent, MessageInteractionInfo, NotificationSettingsScope, NotificationSound,
     ParsedFile, ParsedStory, PollContent, PollOption, PollType, ScopeNotificationSettings,
-    SponsoredMessage, toggle_chosen_emoji_reaction,
+    SecretChatState, SponsoredMessage, toggle_chosen_emoji_reaction,
 };
 use quill::text::{TextEntity, styled_runs, utf8_to_utf16_offset};
 use quill::voice::{self, VoiceCapture, format_voice_duration};
@@ -385,6 +385,9 @@ pub struct QuillApp {
     saved_edit_reply: Option<ComposerReplyTo>,
     /// Delete confirm (tdesktop `DeleteMessagesBox` / Unigram popup).
     pending_delete: Option<DeleteConfirm>,
+    /// Phase B1: pending "Close secret chat" confirm for the open chat
+    /// (`closeSecretChat`, schema 1.8.67 line 15242).
+    pending_close_secret_chat: Option<ChatId>,
     /// tdesktop `Data::ForwardDraft` / history multi-select.
     pending_forward: Option<ForwardDraft>,
     /// ShareBox / `ShowForwardMessagesBox` dest picker overlay.
@@ -715,6 +718,13 @@ pub enum ScreenshotDemo {
     /// bypass), opened with two messages. The composer shows the
     /// "Slow mode · wait Ns" countdown and blocks sends until expiry.
     ReadySlowMode,
+    /// Phase B1: secret chat lifecycle (injected, no live Telegram) — a
+    /// Ready secret chat (id 41) with Zed (user 41): `updateSecretChat`
+    /// (Ready) → `updateNewChat` (`chatTypeSecret`) → history, opened
+    /// with three E2E messages. The chat-list row shows the 🔒 badge and
+    /// the composer is live (a Pending chat would show "Waiting for Zed
+    /// to come online…" and a Closed chat "Secret chat closed" instead).
+    ReadySecretChat,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1430,6 +1440,17 @@ impl QuillApp {
                     AuthorizationState::Ready,
                 )
             }
+            // Phase B1: secret chat lifecycle fixture (injected, no live
+            // Telegram).
+            Some(ScreenshotDemo::ReadySecretChat) => {
+                demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
+                (
+                    ConnectUiStatus::DemoReadyChats,
+                    None,
+                    "screenshot demo — secret chat lifecycle (injected, no live Telegram)".into(),
+                    AuthorizationState::Ready,
+                )
+            }
             None => bootstrap_connect(credentials),
         };
 
@@ -1512,6 +1533,7 @@ impl QuillApp {
             saved_edit_draft: String::new(),
             saved_edit_reply: None,
             pending_delete: None,
+            pending_close_secret_chat: None,
             pending_forward: None,
             forward_picker_open: false,
             forward_result: None,
@@ -1852,6 +1874,18 @@ impl QuillApp {
             });
             app.status_note =
                 "slow-mode enforcement — sends blocked until the timer expires".into();
+        }
+        // Phase B1: secret chat lifecycle fixture — a Ready secret chat
+        // with Zed, opened with E2E history and the composer live.
+        if matches!(demo, Some(ScreenshotDemo::ReadySecretChat)) {
+            if let Some(session) = app.demo_session.as_mut() {
+                app.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_secret_chat(session, &app.demo_sink, &app.demo_seq);
+            }
+            app.composer.update(cx, |input, cx| {
+                input.set_value("this goes through the E2E session…", window, cx);
+            });
+            app.status_note = "secret chat — Ready, 🔒 badge in the chat list".into();
         }
         if matches!(demo, Some(ScreenshotDemo::ReadyVideoSend)) {
             app.composer.update(cx, |input, cx| {
@@ -3637,6 +3671,66 @@ impl QuillApp {
         } else if self.demo_session.is_some() {
             self.apply_demo_delete(confirm.chat_id, confirm.message_id);
             self.status_note = "demo delete applied locally (no live Telegram)".into();
+        }
+        cx.notify();
+    }
+
+    /// Phase B1: open the "Close secret chat" confirm banner for the
+    /// given secret chat.
+    fn open_close_secret_chat_confirm(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
+        self.pending_close_secret_chat = Some(chat_id);
+        self.status_note = "confirm close secret chat".into();
+        cx.notify();
+    }
+
+    /// Phase B1: cancel the "Close secret chat" confirm.
+    fn cancel_close_secret_chat(&mut self, cx: &mut Context<Self>) {
+        self.pending_close_secret_chat = None;
+        self.status_note = "close cancelled".into();
+        cx.notify();
+    }
+
+    /// Phase B1: confirm `closeSecretChat` (schema 1.8.67 line 15242).
+    /// The state change to `secretChatStateClosed` arrives as
+    /// `updateSecretChat`; the composer hides then.
+    fn confirm_close_secret_chat(&mut self, cx: &mut Context<Self>) {
+        let Some(chat_id) = self.pending_close_secret_chat.take() else {
+            return;
+        };
+        if self.live.is_some() {
+            let result = self
+                .live
+                .as_mut()
+                .expect("live")
+                .driver
+                .close_secret_chat(chat_id);
+            self.status_note = match result {
+                Ok(_) => "closing secret chat…".into(),
+                Err(_) => "could not close secret chat".into(),
+            };
+        } else if self.demo_session.is_some() {
+            self.status_note = "demo: secret chat close (no live Telegram)".into();
+        }
+        cx.notify();
+    }
+
+    /// Phase B1: `createNewSecretChat` from a user profile. The new chat
+    /// opens when its `updateNewChat` arrives; the state (Pending →
+    /// Ready) arrives as `updateSecretChat`.
+    fn start_secret_chat_for_user(&mut self, user_id: i64, cx: &mut Context<Self>) {
+        if self.live.is_some() {
+            let result = self
+                .live
+                .as_mut()
+                .expect("live")
+                .driver
+                .start_secret_chat(user_id);
+            self.status_note = match result {
+                Ok(_) => "creating secret chat…".into(),
+                Err(_) => "could not start secret chat".into(),
+            };
+        } else if self.demo_session.is_some() {
+            self.status_note = "demo: secret chat create (no live Telegram)".into();
         }
         cx.notify();
     }
@@ -6579,6 +6673,23 @@ impl QuillApp {
                     })),
             );
         }
+        // Phase B1: "Start secret chat" from a user profile — E2E chat
+        // with a non-bot user (`createNewSecretChat`, schema 1.8.67 line
+        // 13340). Not offered for bots or for yourself.
+        let show_start_secret = user.as_ref().is_some_and(|u| !u.is_bot)
+            && session
+                .as_ref()
+                .and_then(|s| s.my_user_id)
+                .is_none_or(|me| me != user_id);
+        if show_start_secret {
+            body = body.child(
+                Button::new("info-panel-start-secret")
+                    .label("Start secret chat")
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.start_secret_chat_for_user(user_id, cx);
+                    })),
+            );
+        }
         body.into_any_element()
     }
 
@@ -8533,10 +8644,29 @@ impl QuillApp {
             .gap_2()
             .child(identity)
             .when(actions.is_some(), |this| {
+                // Phase B1: secret chats get a "Close secret chat" action
+                // (`closeSecretChat`, schema 1.8.67 line 15242) instead of
+                // the folder picker — closing is permanent.
+                let is_secret = self
+                    .session()
+                    .and_then(|s| s.chats.get(&chat_id.0))
+                    .is_some_and(|c| matches!(c.kind, ChatKind::Secret { .. }));
                 this.child(
                     div()
                         .flex()
                         .gap_1()
+                        // Phase B1: close a secret chat (confirm banner
+                        // below, like delete confirm).
+                        .when(is_secret, |this| {
+                            this.child(
+                                Button::new("chat-close-secret")
+                                    .label("Close secret chat")
+                                    .ghost()
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        this.open_close_secret_chat_confirm(chat_id, cx);
+                                    })),
+                            )
+                        })
                         // Parity slice: jump to the linked discussion group
                         // (`linked_chat_id`) when the channel has one.
                         .when_some(discuss_chat_id, |this, discussion_id| {
@@ -10074,6 +10204,62 @@ impl QuillApp {
                             .label("Delete")
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.confirm_delete(cx);
+                            })),
+                    ),
+            )
+    }
+
+    /// Phase B1: "Close secret chat" confirm banner, styled like the
+    /// delete confirm. Closing is permanent — the chat can never send
+    /// again once `secretChatStateClosed` lands.
+    fn close_secret_chat_confirm_banner(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .id("close-secret-confirm")
+            .flex()
+            .items_center()
+            .justify_between()
+            .gap_2()
+            .px_3()
+            .py_2()
+            .rounded_md()
+            .border_1()
+            .border_color(rgb(0xf85149))
+            .bg(rgb(0x3d1f1f))
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .min_w_0()
+                    .child(
+                        div()
+                            .text_xs()
+                            .font_medium()
+                            .text_color(rgb(0xf85149))
+                            .child("Close this secret chat?"),
+                    )
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_color(rgb(0xc9d1d9))
+                            .child("Closing is permanent — the encrypted session ends and no new messages can be sent."),
+                    ),
+            )
+            .child(
+                div()
+                    .flex()
+                    .gap_2()
+                    .child(
+                        Button::new("cancel-close-secret")
+                            .label("Cancel")
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.cancel_close_secret_chat(cx);
+                            })),
+                    )
+                    .child(
+                        Button::new("confirm-close-secret")
+                            .label("Close chat")
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.confirm_close_secret_chat(cx);
                             })),
                     ),
             )
@@ -11872,7 +12058,7 @@ fn live_status_for(auth: &AuthorizationState) -> String {
         AuthorizationState::WaitPassword { .. } => {
             "enter your two-step verification password".into()
         }
-        AuthorizationState::Ready => "signed in — cloud chats only".into(),
+        AuthorizationState::Ready => "signed in — cloud + secret chats".into(),
         AuthorizationState::WaitOtherDeviceConfirmation => {
             "confirm on another device (QR payload is not logged)".into()
         }
@@ -12112,8 +12298,8 @@ impl QuillApp {
                 if can_post { Some(true) } else { None }
             }
         };
-        let composer_note = match mode {
-            PaneMode::Connecting => Some("Sign in to send messages."),
+        let composer_note: Option<String> = match mode {
+            PaneMode::Connecting => Some("Sign in to send messages.".to_string()),
             PaneMode::Ready if composer.is_none() => {
                 let open = self.session().and_then(|s| s.open_chat);
                 let in_topic = self.session().is_some_and(|s| s.open_topic.is_some());
@@ -12139,26 +12325,32 @@ impl QuillApp {
                             .is_some_and(|c| c.can_post() && c.can_send_basic_messages)
                     });
                     if topic_closed {
-                        Some("This topic is closed — new messages are disabled.")
+                        Some("This topic is closed — new messages are disabled.".to_string())
                     } else if !send_allowed {
-                        Some("You don't have permission to post in this topic.")
+                        Some("You don't have permission to post in this topic.".to_string())
                     } else {
                         // The topic's info hasn't loaded yet; the composer
                         // appears once it arrives.
-                        Some("Loading topic…")
+                        Some("Loading topic…".to_string())
                     }
                 } else if open.is_none() {
-                    Some("Select a supported cloud chat to send.")
+                    Some("Select a supported cloud chat to send.".to_string())
                 } else {
-                    Some(
-                        self.session()
-                            .and_then(|s| {
-                                open.and_then(|id| {
-                                    s.chats.get(&id.0).and_then(|c| c.kind.gate_reason())
+                    // Phase B1: secret chats that can't send yet explain why
+                    // instead of the generic unsupported note.
+                    self.secret_composer_note()
+                        .or_else(|| {
+                            self.session()
+                                .and_then(|s| {
+                                    open.and_then(|id| {
+                                        s.chats.get(&id.0).and_then(|c| c.kind.gate_reason())
+                                    })
                                 })
-                            })
-                            .unwrap_or("This conversation type is not supported yet."),
-                    )
+                                .map(str::to_string)
+                        })
+                        .or(Some(
+                            "This conversation type is not supported yet.".to_string(),
+                        ))
                 }
             }
             _ => None,
@@ -12318,6 +12510,10 @@ impl QuillApp {
                         )
                         .when_some(self.pending_delete.clone(), |this, _| {
                             this.child(self.delete_confirm_banner(cx))
+                        })
+                        // Phase B1: close-secret-chat confirm banner.
+                        .when_some(self.pending_close_secret_chat, |this, _| {
+                            this.child(self.close_secret_chat_confirm_banner(cx))
                         })
                         .when_some(self.pending_edit.clone(), |this, edit| {
                             this.child(self.composer_edit_banner(&edit, cx))
@@ -12589,6 +12785,34 @@ impl QuillApp {
                     ),
             )
             .child(waveform_row(0, &bars))
+    }
+
+    /// Phase B1: the composer note for a secret chat that can't send —
+    /// Pending ("Waiting for X to come online…", schema 1.8.67 line 2797:
+    /// "waiting for the other user to get online"), Closed ("Secret chat
+    /// closed"), or still resolving ("Loading secret chat…"). `None`
+    /// when the open chat is not a secret chat or is Ready (the composer
+    /// shows then).
+    fn secret_composer_note(&self) -> Option<String> {
+        let session = self.session()?;
+        let open = session.open_chat?;
+        let chat = session.chats.get(&open.0)?;
+        let ChatKind::Secret { user_id, .. } = &chat.kind else {
+            return None;
+        };
+        match &chat.secret_state {
+            Some(SecretChatState::Ready) => None,
+            Some(SecretChatState::Pending) => {
+                let name = session
+                    .user(user_id.0)
+                    .map(|u| u.display_name())
+                    .filter(|name| !name.is_empty())
+                    .unwrap_or_else(|| "your contact".to_string());
+                Some(format!("🔒 Waiting for {name} to come online…"))
+            }
+            Some(SecretChatState::Closed) => Some("🔒 Secret chat closed".to_string()),
+            Some(SecretChatState::Unknown(_)) | None => Some("🔒 Loading secret chat…".to_string()),
+        }
     }
 
     fn session_history(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -13558,6 +13782,47 @@ fn seed_ready_unread_session(sink: Arc<MemorySink>) -> Session {
 
 fn seed_ready_unread_read_session(sink: Arc<MemorySink>) -> Session {
     seed_demo_session(sink, DemoSeed::AfterMarkRead)
+}
+
+/// Phase B1: secret chat lifecycle fixture (injected, no live Telegram) —
+/// an `updateSecretChat` (Ready) arrives *before* `updateNewChat`
+/// (`chatTypeSecret`), exactly as the schema guarantees (td_api.tl line
+/// 10740); the chat opens with three E2E messages and the composer live.
+/// The 🔒 badge shows in the chat-list row.
+fn apply_ready_secret_chat(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let chat_id = 41i64;
+    let user_id = 41i64;
+    let secret_chat_id = 7i32;
+    let jsons = [
+        format!(
+            r#"{{"@type":"updateUser","user":{{"id":{user_id},"first_name":"Zed","last_name":"Hopper","usernames":{{"@type":"usernames","active_usernames":["zedhopper"],"disabled_usernames":[],"editable_username":"zedhopper","collectible_usernames":[]}},"phone_number":"+15550101041","status":{{"@type":"userStatusOnline","expires":9999999999}},"is_contact":false,"type":{{"@type":"userTypeRegular"}}}}}}"#
+        ),
+        format!(
+            r#"{{"@type":"updateSecretChat","secret_chat":{{"@type":"secretChat","id":{secret_chat_id},"user_id":{user_id},"state":{{"@type":"secretChatStateReady"}},"is_outbound":true,"key_hash":"","layer":144}}}}"#
+        ),
+        format!(
+            r#"{{"@type":"updateNewChat","chat":{{"id":{chat_id},"title":"Zed","type":{{"@type":"chatTypeSecret","secret_chat_id":{secret_chat_id},"user_id":{user_id}}},"unread_count":0}}}}"#
+        ),
+        format!(
+            r#"{{"@type":"updateChatPosition","chat_id":{chat_id},"position":{{"@type":"chatPosition","list":{{"@type":"chatListMain"}},"order":"85","is_pinned":false}}}}"#
+        ),
+        format!(
+            r#"{{"@type":"updateNewMessage","message":{{"id":401,"chat_id":{chat_id},"sender_id":{{"@type":"messageSenderUser","user_id":{user_id}}},"is_outgoing":false,"date":1700000100,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"This chat is end-to-end encrypted.","entities":[]}}}}}}}}"#
+        ),
+        format!(
+            r#"{{"@type":"updateNewMessage","message":{{"id":402,"chat_id":{chat_id},"sender_id":{{"@type":"messageSenderUser","user_id":{user_id}}},"is_outgoing":false,"date":1700000160,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"Only the two devices in this chat can read it.","entities":[]}}}}}}}}"#
+        ),
+        format!(
+            r#"{{"@type":"updateNewMessage","message":{{"id":403,"chat_id":{chat_id},"sender_id":{{"@type":"messageSenderUser","user_id":999}},"is_outgoing":true,"date":1700000220,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"Exactly — the lock in the chat list marks it.","entities":[]}}}}}}}}"#
+        ),
+    ];
+    for json in jsons {
+        if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
+            session.apply(owned);
+        }
+    }
+    session.open_chat(ChatId(chat_id));
 }
 
 fn apply_ready_drafts(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
@@ -15590,7 +15855,13 @@ fn session_chat_row(
                                         .when(chat.is_muted(), |this| this.child(muted_badge(id)))
                                         .when(chat.is_forum_chat(), |this| {
                                             this.child(forum_badge(id))
-                                        }),
+                                        })
+                                        // Phase B1: lock indicator for
+                                        // secret chats (E2E).
+                                        .when(
+                                            matches!(chat.kind, ChatKind::Secret { .. }),
+                                            |this| this.child(secret_badge(id)),
+                                        ),
                                 )
                                 .when_some(badge, |this, label| {
                                     this.child(unread_badge(label, id))
@@ -15774,6 +16045,23 @@ fn muted_badge(chat_id: ChatId) -> impl IntoElement {
         .text_xs()
         .font_semibold()
         .child("Muted")
+}
+
+/// Phase B1: lock indicator for secret chats in the chat list (E2E).
+fn secret_badge(chat_id: ChatId) -> impl IntoElement {
+    div()
+        .id(("secret-badge", chat_id.0 as u64))
+        .h(px(18.))
+        .px_1()
+        .rounded_md()
+        .flex()
+        .items_center()
+        .justify_center()
+        .bg(rgb(0x1f6feb))
+        .text_color(rgb(0xffffff))
+        .text_xs()
+        .font_semibold()
+        .child("🔒")
 }
 
 /// Phase 5.1: forum indicator for forum supergroups in the chat list.

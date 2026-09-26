@@ -1992,3 +1992,71 @@ are rough (S < 1 day, M = days, L = week+).
   boost-gated send UI hints; `slow_mode_delay_expires_in` refresh while
   the composer just sits open (currently refreshes on blocked sends
   and panel open).
+
+## Phase B1 — Secret chat lifecycle (2026-09-26)
+
+- **Rationale.** Secret chats were gated out as unsupported since Phase 0
+  ("No secret chats" in DECISIONS.md:12). They are the last chat-type
+  gate in the app; enabling them closes a core-chat parity gap. TDLib
+  owns the E2E cryptography — Quill only enables secret chats
+  (`setTdlibParameters.use_secret_chats`, schema 1.8.67 :11298/:11305)
+  and models the lifecycle + UI.
+- **Schema (1.8.67, not invented):** `secretChatStatePending` (:2798 —
+  "waiting for the other user to get online"), `secretChatStateReady`
+  (:2801), `secretChatStateClosed` (:2804); `secretChat` (:2816)
+  `id:int32 user_id:int53 state:SecretChatState is_outbound:Bool
+  key_hash:bytes layer:int32`; `chatTypeSecret` (:3448);
+  `updateSecretChat` (:10741) — the comment at :10740 guarantees it
+  arrives *before* the secret-chat identifier is returned;
+  `createNewSecretChat` (:13340), `getSecretChat` (:11516, "an offline
+  method"), `closeSecretChat` (:15242).
+- **Parse.** `parse_secret_chat` keeps the full record: all three states
+  plus `SecretChatState::Unknown` degradation for future constructors,
+  base64-decoded `key_hash` (36 bytes), `is_outbound`, `layer`. The
+  full `ParsedSecretChat` is cached per `secret_chat_id` at the session
+  level because `updateSecretChat` arrives before `updateNewChat`
+  (:10740) — `updateNewChat` hydrates the chat summary from the cache,
+  or queues an offline `getSecretChat` (driver drains the queue in
+  `ingest`, deduped in-flight) when the state was never seen. `key_hash`
+  is retained for the B2 key-verification UI.
+- **Sending.** Secret chats are ordinary chat ids at the send layer, so
+  the ordinary `sendMessage` path is reused unchanged — no secret-chat
+  branch in `send_snapshot`. `ChatSummary::can_post()` gates on state:
+  only `Ready` posts; Pending/Closed hide the composer, which is
+  replaced by a note: "🔒 Waiting for {name} to come online…" (:2798
+  semantics) or "🔒 Secret chat closed". The driver rejects stale
+  snapshots into non-Ready chats with `InvalidRequest` (defense in
+  depth), same as closed forum topics.
+- **UI.** User profile panel: **Start secret chat** for regular users
+  (not bots, not self) → `createNewSecretChat`; the new chat opens when
+  its `updateNewChat` arrives. Chat list: blue 🔒 badge on secret chats
+  (matches the Muted-badge pattern). Open-chat header: **Close secret
+  chat** → confirm banner (closing is permanent) → `closeSecretChat`;
+  the resulting `secretChatStateClosed` update hides the composer.
+- **Bot note (client decision, not a schema claim).** The "Start secret
+  chat" entry point and `start_secret_chat` driver validation reject
+  bot users — a UX decision, not a verified schema prohibition; the
+  schema line examined for `createNewSecretChat` carries no bot comment.
+- **Forwarding.** No blanket claim: `messageProperties.can_be_copied_to_secret_chat`
+  (:6226) governs forwardability per message; Quill's forward flow does
+  not yet fetch/use that property (future work).
+- **Screenshot:** `docs/screenshots/ready-secret-chat.png` —
+  `quill --screenshot-demo ready-secret-chat`: Ready secret chat (id 41)
+  with Zed open, 🔒 badge in the chat list, **Close secret chat** in
+  the header, three injected E2E messages, composer live with typed
+  text.
+- **Tests.** Request shapes (`createNewSecretChat` / `getSecretChat` /
+  `closeSecretChat` + `use_secret_chats: true` in TDLib parameters);
+  envelope parsing of all three states + full `secretChat` fields +
+  base64 `key_hash` + unknown-state degradation; replay tests for
+  state-before-chat hydration, unknown-state `getSecretChat` queueing
+  (deduped), Pending → Ready → Closed transitions, per-state
+  `can_post()`, and a driver test proving the ordinary `sendMessage`
+  request is emitted into a Ready secret chat while a Pending chat is
+  rejected. The old `replay_non_bot_chat_gating_unchanged` assertion
+  (secret chats unsupported) was replaced with the lifecycle version.
+- **Out of this slice (→ future):** B2 key-verification UI (fingerprint
+  display from retained `key_hash`); B3 self-destructing messages
+  (`messageSelfDestructType`); secret-chat-specific notification
+  behavior; honoring `can_be_copied_to_secret_chat` in the forward
+  flow; secret-chat file-download UI differences.

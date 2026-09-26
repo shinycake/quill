@@ -13,9 +13,9 @@ use crate::telegram::envelope::{
     ChatPositionUpdate, ConnectionState, EnvelopePayload, ErrorClass, ForumTopic, InlineKeyboard,
     MessageContent, MessageForwardInfo, MessageInteractionInfo, MessageOrigin, MessageReaction,
     MessageReplyTo, MessageSender, NotificationSettingsScope, NotificationSound, ParsedChatMember,
-    ParsedFile, ParsedMessage, ParsedStory, ParsedUser, Poll, ReportOption, ReportSponsoredResult,
-    ScopeNotificationSettings, SponsoredMessage, StickerFormat, StickerItem, StickerSetInfo,
-    StoryAvailableReactionView, StoryListView,
+    ParsedFile, ParsedMessage, ParsedSecretChat, ParsedStory, ParsedUser, Poll, ReportOption,
+    ReportSponsoredResult, ScopeNotificationSettings, SecretChatState, SponsoredMessage,
+    StickerFormat, StickerItem, StickerSetInfo, StoryAvailableReactionView, StoryListView,
 };
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
@@ -216,6 +216,18 @@ pub enum RequestPurpose {
     /// cached in `Session::folder_chats_to_leave` (keyed by
     /// `PendingRequest::folder_id`) for the delete-confirm dialog.
     GetChatFolderChatsToLeave,
+    /// Phase B1: `createNewSecretChat`. Response is `chat` (the new
+    /// secret chat); the canonical state arrives as `updateNewChat` /
+    /// `updateSecretChat`.
+    CreateNewSecretChat,
+    /// Phase B1: `getSecretChat`. Response is `secretChat`; resolves the
+    /// initial state of a secret chat whose `updateSecretChat` was never
+    /// seen (e.g. loaded from the local DB). Correlated via
+    /// `PendingRequest::secret_chat_id`.
+    GetSecretChat,
+    /// Phase B1: `closeSecretChat`. Response is `ok`; the state change to
+    /// `secretChatStateClosed` arrives as `updateSecretChat`.
+    CloseSecretChat,
     Close,
     LogOut,
     Other,
@@ -370,6 +382,10 @@ pub struct PendingRequest {
     /// `SetScopeNotificationSettings` so the id-less
     /// `scopeNotificationSettings` response lands on the right scope.
     pub scope: Option<NotificationSettingsScope>,
+    /// Phase B1: `secret_chat_id` for `GetSecretChat` /
+    /// `CloseSecretChat` so the id-less `secretChat` response and
+    /// purpose-gating correlate to the right secret chat.
+    pub secret_chat_id: Option<i32>,
 }
 
 #[derive(Debug, Default)]
@@ -379,6 +395,19 @@ pub struct RequestRegistry {
 }
 
 impl RequestRegistry {
+    /// Phase B1: whether a request with the given purpose is already in
+    /// flight for this secret chat id. Used to avoid duplicate offline
+    /// `getSecretChat` fetches while the state resolves.
+    pub fn has_pending_for_secret_chat(
+        &self,
+        purpose: RequestPurpose,
+        secret_chat_id: i32,
+    ) -> bool {
+        self.pending
+            .values()
+            .any(|p| p.purpose == purpose && p.secret_chat_id == Some(secret_chat_id))
+    }
+
     pub fn register(
         &mut self,
         account_generation: AccountGeneration,
@@ -405,6 +434,7 @@ impl RequestRegistry {
                 story_id: None,
                 folder_id: None,
                 scope: None,
+                secret_chat_id: None,
             },
         );
         id
@@ -435,6 +465,7 @@ impl RequestRegistry {
                 story_id: None,
                 folder_id: None,
                 scope: None,
+                secret_chat_id: None,
             },
         );
         id
@@ -466,6 +497,7 @@ impl RequestRegistry {
                 story_id: None,
                 folder_id: None,
                 scope: None,
+                secret_chat_id: None,
             },
         );
         id
@@ -497,6 +529,7 @@ impl RequestRegistry {
                 story_id: None,
                 folder_id: None,
                 scope: None,
+                secret_chat_id: None,
             },
         );
         id
@@ -526,6 +559,7 @@ impl RequestRegistry {
                 story_id: None,
                 folder_id: None,
                 scope: None,
+                secret_chat_id: None,
             },
         );
         id
@@ -741,11 +775,16 @@ pub struct ChatSummary {
     /// `updateChatPermissions` (line 10500). Gates the topic composer
     /// alongside `ForumTopic.is_closed`.
     pub can_send_basic_messages: bool,
+    /// Phase B1: latest known `SecretChatState` for `ChatKind::Secret`
+    /// chats (from `updateSecretChat` / `getSecretChat`, schema 1.8.67
+    /// lines 10741 / 2816). `None` for other chat kinds and until the
+    /// state resolves. Only `Ready` chats can send.
+    pub secret_state: Option<SecretChatState>,
 }
 
 impl ChatSummary {
     pub fn supported(&self) -> bool {
-        self.kind.is_supported_cloud_chat()
+        self.kind.is_supported_chat()
     }
 
     /// `chatTypeSupergroup` with `is_channel: true`.
@@ -756,12 +795,25 @@ impl ChatSummary {
     /// Whether the composer is shown for this chat. In 2.3 admins get the
     /// composer in broadcast channels (derived from own membership, see
     /// `channel_admin_can_post`); everyone else in a channel keeps it hidden.
-    /// All other supported chats keep the composer.
+    /// Phase B1: secret chats keep the composer only while their state is
+    /// `Ready` — a Pending chat is still handshaking and a Closed chat can
+    /// never send again. All other supported chats keep the composer.
     pub fn can_post(&self) -> bool {
         if self.is_channel() {
             return self.channel_admin_can_post();
         }
+        if matches!(self.kind, ChatKind::Secret { .. }) {
+            return self.secret_state == Some(SecretChatState::Ready);
+        }
         self.supported()
+    }
+
+    /// Phase B1: the secret-chat id behind a secret chat, if any.
+    pub fn secret_chat_id(&self) -> Option<i32> {
+        match self.kind {
+            ChatKind::Secret { secret_chat_id, .. } => Some(secret_chat_id),
+            _ => None,
+        }
     }
 
     /// 2.3: channel posting rights derive from own membership. The creator
@@ -835,6 +887,9 @@ impl ChatSummary {
         if self.unread_count > 0 {
             return format!("{} unread", self.unread_count);
         }
+        if matches!(self.kind, ChatKind::Secret { .. }) {
+            return "Secret chat".into();
+        }
         "cloud chat".into()
     }
 
@@ -895,6 +950,9 @@ fn placeholder_chat(chat_id: ChatId) -> ChatSummary {
         // always carries `permissions`; only `updateNewChat` /
         // `updateChatPermissions` ever set it to false.
         can_send_basic_messages: true,
+        // Phase B1: unknown until `updateSecretChat` / `getSecretChat`
+        // resolves it.
+        secret_state: None,
     }
 }
 
@@ -1633,6 +1691,18 @@ pub struct Session {
     /// Parity slice: local sound-file paths the UI should play, drained by
     /// `flush_notifications`. The reducer never spawns processes.
     pub pending_sound_plays: Vec<std::path::PathBuf>,
+    /// Phase B1: secret-chat records keyed by `secret_chat_id`
+    /// (`updateSecretChat` / `getSecretChat` answers). Kept at the
+    /// session level because `updateSecretChat` is guaranteed to arrive
+    /// *before* the chat identifier is returned (schema 1.8.67, line
+    /// 10740), so a secret chat's chat summary may not exist yet when
+    /// its state does. The full record (including `key_hash`) is kept
+    /// for the B2 key-verification UI.
+    pub secret_chat_states: HashMap<i32, ParsedSecretChat>,
+    /// Phase B1: secret_chat_ids whose state still needs a `getSecretChat`
+    /// fetch (e.g. a secret chat loaded from the local DB with no state
+    /// seen yet). Drained by the driver's `maybe_fetch_secret_chat_states`.
+    pub secret_chat_fetch_queue: Vec<i32>,
     /// Phase 5.1: selected forum topic (`forum_topic_id`) of the open chat.
     /// `None` = topic list (or a non-forum chat). Reset by `open_chat`.
     pub open_topic: Option<i32>,
@@ -1860,6 +1930,8 @@ impl Session {
             sound_file_ids: HashMap::new(),
             pending_sound_downloads: HashSet::new(),
             pending_sound_plays: Vec::new(),
+            secret_chat_states: HashMap::new(),
+            secret_chat_fetch_queue: Vec::new(),
             open_topic: None,
             forum_topics: HashMap::new(),
             topic_histories: HashMap::new(),
@@ -1919,7 +1991,7 @@ impl Session {
     }
 
     /// Phase 3.1: bot chats ride the ordinary private-chat path
-    /// (`is_supported_cloud_chat` / `can_post`) — no special gate. This
+    /// (`is_supported_chat` / `can_post`) — no special gate. This
     /// resolves the peer bot user id for a private chat whose user is a
     /// known `userTypeBot`, feeding the lazy `getUserFullInfo` fetch.
     /// `None` for every other chat kind.
@@ -2190,6 +2262,20 @@ impl Session {
                 chat.notification_settings = notification_settings;
                 chat.photo_file_id = photo_file_id;
                 chat.can_send_basic_messages = can_send_basic_messages;
+                // Phase B1: secret chats — `updateSecretChat` arrives before
+                // `updateNewChat` (schema 1.8.67, line 10740), so a state
+                // may already be recorded; otherwise the driver fetches it
+                // via `getSecretChat` (an offline method).
+                if let ChatKind::Secret { secret_chat_id, .. } = &chat.kind {
+                    let secret_chat_id = *secret_chat_id;
+                    match self.secret_chat_states.get(&secret_chat_id) {
+                        Some(secret_chat) => chat.secret_state = Some(secret_chat.state.clone()),
+                        None if !self.secret_chat_fetch_queue.contains(&secret_chat_id) => {
+                            self.secret_chat_fetch_queue.push(secret_chat_id);
+                        }
+                        None => {}
+                    }
+                }
                 if !self.draft_dirty.contains(&chat_id.0) {
                     chat.draft = draft;
                 }
@@ -2338,6 +2424,16 @@ impl Session {
                     .entry(chat_id.0)
                     .or_insert_with(|| placeholder_chat(chat_id))
                     .set_sender_action(sender, action);
+            }
+            // Phase B1: secret chat lifecycle (schema 1.8.67, lines
+            // 10741 / 2816). `updateSecretChat` may arrive before any
+            // `updateNewChat`; `secretChat` is the `getSecretChat` answer.
+            // Both funnel into `accept_secret_chat`.
+            EnvelopePayload::UpdateSecretChat { secret_chat } => {
+                self.accept_secret_chat(&secret_chat);
+            }
+            EnvelopePayload::SecretChat { secret_chat } => {
+                self.accept_secret_chat(&secret_chat);
             }
             EnvelopePayload::UpdateChatTitle { chat_id, title } => {
                 self.chats
@@ -3642,6 +3738,28 @@ impl Session {
         }
     }
 
+    /// Phase B1: record a secret chat (`updateSecretChat` or a
+    /// `getSecretChat` answer), fanning the state out to the chat
+    /// summary when the chat is already known. `updateSecretChat` is
+    /// guaranteed to arrive *before* the chat identifier is returned
+    /// (schema 1.8.67, line 10740), hence the session-level map that
+    /// `updateNewChat` hydrates from; a satisfied fetch leaves
+    /// `secret_chat_fetch_queue`.
+    fn accept_secret_chat(&mut self, secret_chat: &ParsedSecretChat) {
+        let state = secret_chat.state.clone();
+        self.secret_chat_states
+            .insert(secret_chat.id, secret_chat.clone());
+        self.secret_chat_fetch_queue
+            .retain(|id| *id != secret_chat.id);
+        for chat in self.chats.values_mut() {
+            if let ChatKind::Secret { secret_chat_id, .. } = &chat.kind
+                && *secret_chat_id == secret_chat.id
+            {
+                chat.secret_state = Some(state.clone());
+            }
+        }
+    }
+
     /// Record a `joinChat` outcome. `Success` flips status optimistically;
     /// `updateChatMember` confirms. The other variants keep the old status and
     /// are logged (the UI shows a fixed note).
@@ -4203,6 +4321,22 @@ impl Session {
         let id = self.request(purpose, Some(chat_id));
         if let Some(pending) = self.requests.pending.get_mut(&id.0) {
             pending.story_id = Some(story_id);
+        }
+        id
+    }
+
+    /// Phase B1: like `request`, but stamps the secret chat id for
+    /// `GetSecretChat` / `CloseSecretChat` correlation
+    /// (`PendingRequest::secret_chat_id`) — the `secretChat` response and
+    /// the `ok` carry no chat id of their own.
+    pub fn request_for_secret_chat(
+        &mut self,
+        purpose: RequestPurpose,
+        secret_chat_id: i32,
+    ) -> RequestId {
+        let id = self.request(purpose, None);
+        if let Some(pending) = self.requests.pending.get_mut(&id.0) {
+            pending.secret_chat_id = Some(secret_chat_id);
         }
         id
     }
@@ -4809,7 +4943,7 @@ mod tests {
             supergroup_id: 1,
             is_channel: true,
         };
-        assert!(kind.is_supported_cloud_chat());
+        assert!(kind.is_supported_chat());
         assert!(kind.gate_reason().is_none());
         assert!(kind.is_channel());
         let group = ChatKind::Supergroup {
