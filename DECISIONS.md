@@ -1257,3 +1257,62 @@ Research snapshot 2026-09-16, pin recheck **2026-09-17**.
   "add to folder" (`addChatToList` with `chatListFolder`); folder tags UI;
   paging folder chats beyond one `loadChats` page; `getChatListsToAddChat`
   surfacing in the archive/unarchive menu.
+
+## Phase 8.1 — Desktop notifications (2026-09-26)
+
+- **Rationale:** new incoming messages should surface an OS notification when
+  the user isn't looking at the chat (app in background, or a different chat
+  open); clicking it focuses the chat. No new TDLib constructors are needed.
+- **Schema (1.8.67, verified in `schema/td_api.tl`) — reused, not new:**
+  `updateNewMessage message:message = Update` (line 10400);
+  `chatNotificationSettings … use_default_mute_for:Bool mute_for:int32 …
+  use_default_show_preview:Bool show_preview:Bool … = ChatNotificationSettings`
+  (line 3363; `mute_for` = seconds left before unmute, comment lines
+  3347–3348). Mute evaluation reuses `ChatNotificationSettings::is_muted()`
+  (`!use_default_mute_for && mute_for > 0`); scope defaults are not applied.
+- **Decision (`src/notify.rs::decide_notify`, pure, unit-tested).** An
+  `updateNewMessage` notifies iff: incoming (`!is_outgoing`); chat not
+  exception-muted; chat known to the reducer (unknown chat → skip: no title,
+  no verified mute/read state); `message.id > last_read_inbox_message_id`
+  (already-read echoes never notify); and NOT (app active AND chat currently
+  open). In other words: notify when the app is in the background **or** the
+  chat isn't open. The title is the chat title; the body is
+  `MessageContent::preview()` unless previews are hidden — user setting
+  `hide_notification_previews` (default true) or per-chat
+  `use_default_show_preview || show_preview` — or the preview is empty, in
+  which case the body is the generic "New message".
+- **Plumbing:** the reducer computes the decision in the
+  `UpdateNewMessage` arm and appends to `Session::pending_notifications`
+  with same-chat burst coalescing ("N new messages" once a second message
+  for a chat is still queued). `Session::app_active` (default true, so no
+  notifications fire before the first paint measures it) is written by the
+  UI from `Window::is_window_active()` at the top of every render;
+  `hide_notification_previews` lives on the session (mirrors
+  `settings::Preferences`, default true — no settings UI yet). The UI
+  drains the queue in `render` (the only UI path with a `&mut Window`) and
+  shows each on a worker thread (`quill-notify`), capped at 8 concurrent;
+  excess bursts are dropped, not stacked. Arguments are passed without a
+  shell, so message text can never inject shell syntax. The reducer never
+  spawns processes.
+- **Linux (`notify-send`, libnotify):** `notify-send --app-name=Quill --wait
+  --action=default=Open <title> <body>`; `--wait` blocks until dismissal or
+  click, and a click prints `default` on stdout, which the worker thread
+  maps to focusing the chat via `select_listed_chat` on the next render.
+  Honest limits: `--action` support varies by notification daemon
+  (GNOME/KDE honor it; some daemons ignore clicks — then the notification
+  is display-only); if `notify-send` is missing the spawn fails silently.
+- **macOS:** gpui-kit 0.6.1 exposes **no** NotificationCenter binding
+  (verified in the vendored crate source), and inventing a native
+  `UNUserNotificationCenter` binding is out of scope, so macOS uses an
+  `osascript` `display notification … with title …` fallback
+  (AppleScript-escaped, no shell). It is display-only: `display
+  notification` offers no click callback, so click-to-focus does not work
+  on macOS in this slice.
+- **Out of this slice (→ future):** native macOS NotificationCenter binding
+  with click-to-focus; per-mention unmute (`disable_mention_notifications`)
+  and `chat.default_disable_notification`; fetching global default
+  notification settings for `use_default_*` fallback; notification sounds;
+  replacing an existing notification on edit; a settings UI for
+  `hide_notification_previews`; notifying for unknown chats (first message
+  of a chat TDLib hasn't announced yet); screenshots (OS chrome, not app
+  UI — no `--screenshot-demo` marker for this slice).

@@ -155,9 +155,21 @@ handling exists.
 
 ## Phase 8 — OS notifications
 
-- **8.1 Desktop notifications.** `updateNewMessage` → OS notification for
-  unread incoming in background; click focuses the chat. (Linux: `notify-send`
-  path; macOS: native center via gpui-kit.)
+- **8.1 Desktop notifications.** ✅ Done (2026-09-26). Pure
+  notify/don't-notify decision in `src/notify.rs::decide_notify` from
+  `updateNewMessage`: incoming, unmuted (`chatNotificationSettings`
+  exception mute), newer than `last_read_inbox_message_id`, and the app is
+  in the background or the chat isn't open; currently-open chat in the
+  foreground never notifies. Title = chat title; body =
+  `MessageContent::preview()` unless `hide_notification_previews` (default
+  true) or the per-chat `show_preview` hides it ("New message" generic).
+  Reducer queues with same-chat burst coalescing ("N new messages"); the UI
+  drains in `render` (feeds `Window::is_window_active()` into the decision)
+  and dispatches on capped worker threads. Linux: `notify-send
+  --app-name=Quill --wait --action=default=Open`, click focuses the chat
+  (daemon-dependent — documented in DECISIONS). macOS: gpui-kit 0.6.1 has
+  no NotificationCenter binding, so an `osascript` `display notification`
+  fallback, display-only (no click-to-focus).
 
 ## Phase 9 — Stories (stretch)
 
