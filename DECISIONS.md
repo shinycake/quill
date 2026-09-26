@@ -2415,3 +2415,112 @@ are rough (S < 1 day, M = days, L = week+).
 - **Out of this slice (→ future):** regular-chat picker UI with
   `change_info` rights gating; screenshot-detection notices;
   secret-chat-specific notification behavior.
+
+## Phase E — RTL / bidi support (planned 2026-09-26, queued after Phases A–D)
+
+**Why a new phase.** Idan's zapfast repo (`~/workspace/zapfast`, egui/epaint-based)
+needed a ~1500-line `src/bidi.rs` post-layout pass (`unicode-bidi` 0.3.18 +
+`icu_properties` 2.3) because egui had no bidi: visual reordering of glyph
+rows, logical↔visual caret mapping, bracket mirroring, multi-line cluster
+rebasing, ligature-continuation handling, RTL-first message right-alignment,
+plus an `rtl-self` demo page and row-by-row painted-bubble tests. Key zapfast
+commits: `ee08279` (original Hebrew fix), `2e7813e` (carets/bubble alignment),
+`eac9c1f` (Arabic ligatures), `9f7c93f` (numbers in RTL), `53d8b09` (Arabic
+sizing), `9e73b65`+`fb77503` (font fallback). Mine, don't copy blindly.
+
+**Quill's situation is different.** GPUI on Linux lays out text via
+cosmic-text 0.19.0 (pinned in Cargo.lock), which implements the Unicode
+bidi algorithm's visual reordering itself. So we almost certainly do NOT
+need zapfast's giant reorder pass — we need an empirical audit plus
+targeted fixes. Portable zapfast logic worth reusing directly:
+`message_rtl(text)` (first strong character via `unicode_bidi::get_base_direction_full`
+→ alignment side, `src/bidi.rs:105`) and `base_rtl(text)` (first paragraph
+level, `:95`); both are small, pure, and testable against `unicode-bidi`.
+
+**Slices (audit first; pull forward only if a slice turns out to be a quick win):**
+- **E1 — Empirical RTL audit.** New `rtl` screenshot-demo mode mirroring
+  zapfast's `rtl-self` page: Hebrew, Arabic, mixed Hebrew+Latin, numbers
+  inside RTL, mirrored brackets, niqqud, Arabic-Indic digits, wrapped
+  multi-line RTL. Screenshot on Linux and verify visual order empirically.
+  Deliverable is the demo + a findings list driving E2–E4.
+- **E2 — Bubble alignment.** Right-align messages whose first strong
+  character is RTL (port zapfast's `message_rtl` logic), matching official
+  Telegram. Pure function + unit tests against `unicode-bidi`.
+- **E3 — Composer caret/selection/hit-testing.** Verify GPUI's input maps
+  logical↔visual caret positions correctly with RTL text; fix if broken
+  (this is where zapfast spent `2e7813e` — do not assume GPUI is correct,
+  verify empirically).
+- **E4 — Font fallback.** Hebrew/Arabic glyph coverage on Linux (port
+  zapfast's font lessons: search distro font folders, Arabic sizing parity
+  with Latin — `53d8b09`); macOS/Windows coverage as follow-ups.
+- **E5 — Regression tests.** Unit tests for direction/alignment logic
+  against `unicode-bidi` + RTL screenshot goldens from the E1 demo.
+
+**Out of phase:** full UI mirroring (RTL layout direction for the whole
+chrome — official Telegram desktop does not mirror the full UI either;
+revisit only if evidence shows otherwise), vertical text, complex-script
+shaping beyond what cosmic-text/harfbuzz already do.
+
+## Phase C — expanded call parity plan (2026-09-26, per Idan: calls = 1:1 AND group, audio AND video)
+
+**Schema audit of TDLib 1.8.67 (all lines verified verbatim):**
+- 1:1: `createCall user_id protocol is_video` (L14212) — video flag is
+  signaling-supported; C1 shipped audio-only, so 1:1 video signaling is a
+  schema-supported gap. `acceptCall`/`discardCall`/`sendCallSignalingData`/
+  `sendCallRating` all present. `discardCall` takes `is_video` + `invite_link`
+  (upgrade to group call).
+- Group: `createGroupCall` (L14259), `joinGroupCall` (L14285),
+  `leaveGroupCall`/`endGroupCall` (L14458/14461), `discardGroupCall` implied
+  via `endGroupCall`; participants: `getGroupCallParticipants` (L14449),
+  `loadGroupCallParticipants` (L14455), `updateGroupCallParticipant` (L10824),
+  `updateGroupCallParticipants` (L10830); speaking: `is_speaking` on
+  `groupCallParticipant`, `recent_speakers` on `groupCall`; mute:
+  `toggleGroupCallParticipantIsMuted` (L14431), hand raise (L14444); video:
+  `toggleGroupCallIsMyVideoPaused`/`IsMyVideoEnabled` (L14411/14414),
+  `groupCallParticipantVideoInfo` (source_groups, endpoint_id, is_paused);
+  screen sharing signaling: `startGroupCallScreenSharing` (L14303),
+  `toggleGroupCallScreenSharingIsPaused`, `endGroupCallScreenSharing`;
+  recording: `startGroupCallRecording`/`endGroupCallRecording` (L14405/14408);
+  RTMP: `getVideoChatRtmpUrl` (L14262); invite links (L14395); titles (L14312);
+  verification: `updateGroupCallVerificationState` (L10836, E2E emoji check);
+  reconnection: `need_rejoin` on `groupCall`, `updateGroupCall` (L10819).
+- **Genuinely unsupported by TDLib (not a schema gap — needs building):**
+  media transport itself. `joinGroupCall` needs `groupCallJoinParameters`
+  (`audio_source_id`, `payload`, `is_muted`, `is_my_video_enabled`, L7089)
+  and returns `GroupCallInfo` (`group_call_id`, `join_payload`, L14244ff) —
+  those payloads are SDP-like blobs the app's media engine produces/consumes
+  (libtgvoip or equivalent). Device enumeration/selection has NO TDLib API
+  at all — microphones/cameras/speakers come from the platform media stack
+  (PipeWire/PulseAudio on Linux, CoreAudio/AVFoundation on macOS), so device
+  selection is part of the transport work, not a TDLib-driven feature.
+  Screen sharing signaling exists but capture/encoding is app work.
+
+**Expanded slices:**
+- C1 (done, PR #59): 1:1 audio signaling + call UI, honest no-transport.
+- C1b: 1:1 video-call signaling (`is_video` on create/accept/discard),
+  video-call UI states (camera-on placeholder grid, still no transport).
+- C2: media transport spike + real 1:1 audio (libtgvoip or equivalent):
+  produce/consume signaling payloads, platform device enumeration +
+  selection UI, mute/speaker routing. This unblocks real sound for C1/C1b.
+- C3: group calls — signaling surface first (create/join/leave/end,
+  participant grid with `is_speaking`/`recent_speakers` indicators,
+  mute/unmute self + admin, hand raise, invite links, titles, `need_rejoin`
+  handling, verification emojis), then real group audio on the C2 transport,
+  then group video + screen-sharing rendering.
+- C4: call recording UI state, RTMP display, `discardCall` invite-link
+  upgrade path (1:1 → group call), rating comments/problems.
+- Out: nothing dropped — the original "honest no-media" stance stands until
+  C2 lands; no UI may imply working audio/video before its transport exists.
+
+## Phase E — emoji × all languages (folded in 2026-09-26, per Idan)
+
+Emoji must play nice with every language, not just RTL. The E1 audit
+corpus is extended with: emoji adjacent to Hebrew/Arabic (both sides),
+emoji inside RTL paragraphs, ZWJ sequences and skin-tone modifiers in
+mixed-direction text, emoji at paragraph boundaries, emoji + numbers in
+RTL. zapfast's `bidi.rs` kept emoji in the text so character offsets match
+the buffer — Quill must verify the same invariant in its own text
+pipeline: formatted-text entity offsets, composer caret mapping,
+selection/hit-testing with emoji present (emoji are multi-code-unit in
+UTF-16 and multi-scalar in general — a classic offset-corruption source).
+Failing cases become regression tests/screenshots in E5.
