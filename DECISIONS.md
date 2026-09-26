@@ -219,3 +219,22 @@ Research snapshot 2026-09-16, pin recheck **2026-09-17**.
 - **Downloads:** open-chat photo thumbs auto-download at priority 1 (skip secret/spoiler). User click on a placeholder or document chip sends priority 32. `synchronous: false` — the immediate `file@extra` consumes the pending extra; progress continues on `updateFile`. `downloading` unsticks on completed, `!can_be_downloaded`, idle-incomplete `file`/`updateFile` (`!is_downloading_active && !is_downloading_completed`), or error (including after extra already resolved). Nested message files that are still idle do not unstick an in-flight download.
 - **UI:** image thumb when `local.is_downloading_completed` and the path is a real file under the account `tdlib_files` (demo allowlist: `docs/screenshots/fixtures`). Bare JSON paths are not shown. Documents are chips (`file_name` · mime · size · state). Secret photos never click-download; spoiler/secret placeholder text follows file state.
 - **Out of this slice:** video/voice, sending a local file, fullscreen viewer, App Store, vendoring tdjson.
+
+## Roadmap — Phase 2+ toward Telegram parity (2026-09-25)
+
+- **Rationale:** Phase 0–1 shipped the private-chat core. The README blocker
+  (channels/bots gated on sponsored-content handling) plus every per-slice
+  "Out of this slice" list now form a sequenced Phase 2+ plan in
+  `ROADMAP.md`: sponsored content + channels first (the keystone), then bots,
+  message richness, forum topics, contacts/profiles, folders, notifications,
+  and stories as a stretch.
+- **Official clients first:** tdesktop remains the UX reference for each
+  phase; Unigram for the TDLib mapping. Each slice keeps one shippable unit
+  with replay tests and a DECISIONS.md entry in the existing format.
+- **Schema (1.8.67, not invented):** every future slice verifies constructors
+  against `schema/td_api.tl` (e.g. `getChatSponsoredMessages`,
+  `reportChatSponsoredMessage`, `sponsoredMessage` for Phase 2.1).
+- **Out of this slice:** the implementation slices themselves; macOS-only
+  gates (VoiceOver, real IME) stay blocked on a Mac session; secret chats,
+  calls, payments, multi-account, telemetry, AI, and App Store distribution
+  stay out of scope.
