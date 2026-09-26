@@ -476,7 +476,11 @@ pub fn viewer_playback_frames(
 /// Like `viewer_playback_frames`, but the running ffmpeg child is published
 /// into `child_slot` while it runs (cleared when it exits), so the UI can
 /// kill an extraction the user abandoned (viewer closed/stepped) instead of
-/// letting it run to completion on a discarded cache dir.
+/// letting it run to completion on a discarded cache dir. `cancelled` is a
+/// shared flag the UI sets when the run is abandoned: it is checked before
+/// spawning and right after publishing the child, closing the race where
+/// the UI kills between extraction start and the child being published —
+/// in that window the worker kills its own freshly spawned child.
 pub fn viewer_playback_frames_cancelable(
     src: &Path,
     mime: &str,
@@ -484,6 +488,7 @@ pub fn viewer_playback_frames_cancelable(
     start_timestamp: i32,
     duration_secs: i32,
     child_slot: &std::sync::Arc<std::sync::Mutex<Option<std::process::Child>>>,
+    cancelled: &std::sync::atomic::AtomicBool,
 ) -> Result<ViewerFrames, String> {
     if !is_playable_video(mime, src) {
         return Err("unsupported video".into());
@@ -496,7 +501,7 @@ pub fn viewer_playback_frames_cancelable(
         fps,
         VIEWER_FRAME_WIDTH,
         VIEWER_MAX_FRAMES,
-        Some(child_slot),
+        Some((child_slot, cancelled)),
     )?;
     if frames.is_empty() {
         return Err("ffmpeg produced no frames".into());
@@ -522,7 +527,10 @@ fn extract_frames(
     fps: f64,
     width: i32,
     max_frames: i32,
-    child_slot: Option<&std::sync::Arc<std::sync::Mutex<Option<std::process::Child>>>>,
+    child_slot: Option<(
+        &std::sync::Arc<std::sync::Mutex<Option<std::process::Child>>>,
+        &std::sync::atomic::AtomicBool,
+    )>,
 ) -> Result<Vec<PathBuf>, String> {
     std::fs::create_dir_all(cache_dir).map_err(|err| err.to_string())?;
     let pattern = cache_dir.join("frame-%03d.png");
@@ -545,7 +553,11 @@ fn extract_frames(
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null());
     let status = match child_slot {
-        Some(slot) => {
+        Some((slot, cancelled)) => {
+            use std::sync::atomic::Ordering;
+            if cancelled.load(Ordering::SeqCst) {
+                return Err("ffmpeg extraction was cancelled".to_string());
+            }
             let child = command
                 .spawn()
                 .map_err(|err| format!("video playback needs ffmpeg ({err})"))?;
@@ -555,6 +567,18 @@ fn extract_frames(
             // the slot lock while the UI killer needs it.
             if let Ok(mut guard) = slot.lock() {
                 *guard = Some(child);
+            }
+            if cancelled.load(Ordering::SeqCst) {
+                // The UI abandoned the run between spawn and publish and
+                // already took the (empty) slot: kill our own child instead
+                // of orphaning it.
+                if let Ok(mut guard) = slot.lock()
+                    && let Some(mut child) = guard.take()
+                {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                }
+                return Err("ffmpeg extraction was cancelled".to_string());
             }
             loop {
                 let mut guard = slot
@@ -724,6 +748,35 @@ mod tests {
     }
 
     #[test]
+    fn cancelable_extraction_cancel_before_publish_aborts_without_orphan() {
+        // The UI can abandon the run before ffmpeg publishes its child
+        // (viewer closed between extraction start and spawn): the worker
+        // must report cancellation and must not leave a running ffmpeg
+        // behind.
+        let clip = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("docs/screenshots/fixtures/demo-clip-12s.mp4");
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time")
+            .as_nanos();
+        let cache = std::env::temp_dir().join(format!("quill-viewer-prepub-test-{nanos}"));
+        let slot = std::sync::Arc::new(std::sync::Mutex::new(None));
+        let cancel = std::sync::atomic::AtomicBool::new(true);
+        let err =
+            viewer_playback_frames_cancelable(&clip, "video/mp4", &cache, 0, 12, &slot, &cancel)
+                .unwrap_err();
+        assert!(
+            err.contains("cancelled"),
+            "expected a cancellation error, got: {err}"
+        );
+        assert!(
+            slot.lock().map(|guard| guard.is_none()).unwrap_or(true),
+            "no orphaned ffmpeg child may remain in the slot"
+        );
+        let _ = std::fs::remove_dir_all(&cache);
+    }
+
+    #[test]
     fn viewer_frame_cache_is_separate_from_row_preview_cache() {
         assert_ne!(video_frame_cache_dir(96), viewer_frame_cache_dir(96));
         assert!(viewer_frame_cache_dir(96).starts_with(viewer_frame_cache_root()));
@@ -739,7 +792,9 @@ mod tests {
             .as_nanos();
         let cache = std::env::temp_dir().join(format!("quill-viewer-cancel-test-{nanos}"));
         let slot = std::sync::Arc::new(std::sync::Mutex::new(None));
+        let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let worker_slot = slot.clone();
+        let worker_cancel = cancel.clone();
         let worker_cache = cache.clone();
         let handle = std::thread::spawn(move || {
             viewer_playback_frames_cancelable(
@@ -749,6 +804,7 @@ mod tests {
                 0,
                 12,
                 &worker_slot,
+                &worker_cancel,
             )
         });
         // Wait for ffmpeg to be published, then kill it the way the UI

@@ -56,7 +56,7 @@ use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::Arc;
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::time::Duration;
 use synthetic::{SyntheticChat, session_bubble_quoted, session_bubble_rich};
 use zeroize::Zeroize;
@@ -461,6 +461,10 @@ pub struct QuillApp {
     /// task. Taken and killed when the viewer closes or steps; stale
     /// completions are dropped by `viewer_extract_epoch`.
     viewer_extract_child: Option<Arc<Mutex<Option<Child>>>>,
+    /// Shared cancellation flag for the in-flight extraction: set by
+    /// `kill_viewer_extraction` so the worker can abort even if the UI
+    /// kills before ffmpeg publishes its child into `viewer_extract_child`.
+    viewer_extract_cancel: Option<Arc<AtomicBool>>,
     /// Generation counter for viewer frame extraction: bumped on every new
     /// extraction and on cancel, so a late completion from an abandoned run
     /// is dropped silently (no error note, no playback).
@@ -1489,6 +1493,7 @@ impl QuillApp {
             viewer_frame_cache_file: None,
             viewer_extracting: false,
             viewer_extract_child: None,
+            viewer_extract_cancel: None,
             viewer_extract_epoch: 0,
             viewer_demo_sync_frames: false,
             story_viewer: StoryViewer::closed(),
@@ -3857,6 +3862,12 @@ impl QuillApp {
     /// fresh extraction starts, so an abandoned extraction can't run to
     /// completion on a discarded cache dir.
     fn kill_viewer_extraction(&mut self) {
+        // Signal cancellation first: the worker checks this before spawning
+        // and right after publishing the child, so a kill that lands before
+        // ffmpeg publishes still aborts the run instead of orphaning it.
+        if let Some(cancel) = self.viewer_extract_cancel.take() {
+            cancel.store(true, Ordering::SeqCst);
+        }
         if let Some(slot) = self.viewer_extract_child.take() {
             // Take the child out of the lock before kill/wait: the worker
             // only holds the lock briefly around `try_wait`.
@@ -3899,6 +3910,8 @@ impl QuillApp {
         let epoch = self.viewer_extract_epoch;
         let slot: Arc<Mutex<Option<Child>>> = Arc::new(Mutex::new(None));
         self.viewer_extract_child = Some(slot.clone());
+        let cancel: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
+        self.viewer_extract_cancel = Some(cancel.clone());
         cx.notify();
 
         let cache = quill::video::viewer_frame_cache_dir(file_id);
@@ -3910,6 +3923,7 @@ impl QuillApp {
         let item = item.clone();
         let extract_path = path.clone();
         let task_slot = slot.clone();
+        let task_cancel = cancel.clone();
         cx.spawn(async move |this, cx| {
             let extracted = cx
                 .background_executor()
@@ -3921,6 +3935,7 @@ impl QuillApp {
                         start_timestamp,
                         duration,
                         &task_slot,
+                        &task_cancel,
                     )?;
                     // Decode on the background thread: the render path needs
                     // pre-loaded handles, and decoding up to 600 PNGs must

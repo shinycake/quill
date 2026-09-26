@@ -1711,8 +1711,12 @@ Research snapshot 2026-09-16, pin recheck **2026-09-17**.
     (`sweep_stale_viewer_frame_caches`).
   - Closing or stepping the viewer stops audio, kills the running
     ffmpeg extraction (published child handle), clears frames, and
-    removes the cache. Completions from killed or superseded runs are
-    dropped by an extraction epoch — silently, with no error note.
+    removes the cache. A shared `AtomicBool` cancellation flag closes
+    the race where the viewer closes before ffmpeg publishes its child:
+    the worker checks it before spawning and after publishing, killing
+    its own just-spawned child instead of orphaning it. Completions from
+    killed or superseded runs are dropped by an extraction epoch —
+    silently, with no error note.
   - Every start path (`maybe_autoplay_viewer_video`, the
     download-resume in `resume_pending_viewer_video`, and the
     never-started Play toggle) routes through the pure
