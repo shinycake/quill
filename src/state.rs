@@ -1720,7 +1720,7 @@ pub struct Session {
     pub supergroup_member_status: HashMap<i64, ChannelMemberStatus>,
     /// Phase A1: the viewer's `rights.can_restrict_members` per supergroup
     /// from own `chatMemberStatusAdministrator` (schema 1.8.67, lines
-    /// 2500/1092). `setChatSlowModeDelay` requires this right (line
+    /// 2500/`chatAdministratorRights` 1092). `setChatSlowModeDelay` requires
     /// 13551). Absent = unknown, treated as lacking the right.
     pub supergroup_restrict_right: HashMap<i64, bool>,
     /// Phase 6: the open user / supergroup info panel, if any.
