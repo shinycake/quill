@@ -6,6 +6,7 @@ use crate::ids::{
 };
 use crate::notify::{self, OsNotification, QueuedNotification};
 use crate::telegram::client::OwnedEnvelope;
+use crate::telegram::envelope::CallState;
 use crate::telegram::envelope::{
     AnimationItem, AuthorizationState, BotCommand, BotInfo, CallbackQueryAnswer,
     ChannelMemberStatus, ChatAction, ChatActiveStoriesView, ChatDraft, ChatFolderInfo,
@@ -13,13 +14,14 @@ use crate::telegram::envelope::{
     ChatPositionUpdate, ConnectionState, EnvelopePayload, ErrorClass, ForumTopic, InlineKeyboard,
     MessageContent, MessageForwardInfo, MessageInteractionInfo, MessageOrigin, MessageReaction,
     MessageReplyTo, MessageSelfDestruct, MessageSender, NotificationSettingsScope,
-    NotificationSound, ParsedChatMember, ParsedFile, ParsedMessage, ParsedSecretChat, ParsedStory,
-    ParsedUser, Poll, ReportOption, ReportSponsoredResult, ScopeNotificationSettings,
+    NotificationSound, ParsedCall, ParsedChatMember, ParsedFile, ParsedMessage, ParsedSecretChat,
+    ParsedStory, ParsedUser, Poll, ReportOption, ReportSponsoredResult, ScopeNotificationSettings,
     SecretChatState, SponsoredMessage, StickerFormat, StickerItem, StickerSetInfo,
-    StoryAvailableReactionView, StoryListView,
+    StoryAvailableReactionView, StoryListView, TdError,
 };
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
+use std::time::Instant;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RequestPurpose {
@@ -229,6 +231,20 @@ pub enum RequestPurpose {
     /// Phase B1: `closeSecretChat`. Response is `ok`; the state change to
     /// `secretChatStateClosed` arrives as `updateSecretChat`.
     CloseSecretChat,
+    /// Phase C1: `createCall`. Response is `callId`; correlated via
+    /// `PendingRequest::user_id`. The call's states arrive as
+    /// `updateCall`.
+    CreateCall,
+    /// Phase C1: `acceptCall`. Response is `ok`; the answered state
+    /// arrives as `updateCall`.
+    AcceptCall,
+    /// Phase C1: `discardCall`. Response is `ok`; the hangup states
+    /// (`callStateHangingUp` → `callStateDiscarded`) arrive as
+    /// `updateCall`.
+    DiscardCall,
+    /// Phase C1: `sendCallRating`. Response is `ok`; sent from the
+    /// call-end rating card when `callStateDiscarded.need_rating`.
+    SendCallRating,
     Close,
     LogOut,
     Other,
@@ -241,6 +257,17 @@ fn is_auth_submit(purpose: RequestPurpose) -> bool {
             | RequestPurpose::CheckAuthenticationCode
             | RequestPurpose::CheckAuthenticationPassword
     )
+}
+
+/// Phase C1: classified error line for a failed call request. Only the
+/// numeric code is shown — TDLib's `message` is never stored (it can
+/// contain secrets), except the 4005000 timeout the schema documents.
+fn call_request_error_line(err: &TdError, action: &str) -> String {
+    if err.code == 4005000 {
+        format!("{action}: no answer — the call timed out")
+    } else {
+        format!("{action} (error {})", err.code)
+    }
 }
 
 /// Classified TDLib error for an auth submit. Never includes the native message
@@ -1646,6 +1673,111 @@ impl StickerPanel {
     }
 }
 
+/// Phase C1: the tracked live call (signaling only — no media
+/// transport; real audio/video is the C2 libtgvoip spike). States
+/// follow TDLib's `CallState` (schema 1.8.67, lines 7054–7086):
+/// Pending → ExchangingKeys → Ready → HangingUp →
+/// Discarded / Error.
+#[derive(Debug, Clone)]
+pub struct ActiveCall {
+    pub id: i32,
+    pub user_id: i64,
+    pub is_outgoing: bool,
+    pub is_video: bool,
+    pub state: CallState,
+    /// When the call was created (outgoing) or first rang (incoming) —
+    /// drives the "ringing" time on the overlay.
+    pub started_at: Instant,
+    /// When `callStateReady` arrived — the call-duration clock starts
+    /// here.
+    pub ready_at: Option<Instant>,
+    /// Chunks from `updateNewCallSignalingData` — queued honestly;
+    /// nothing consumes them yet (C2). Capped at
+    /// `MAX_QUEUED_SIGNALING_CHUNKS`; overflow is counted, not kept.
+    pub signaling_queue: Vec<Vec<u8>>,
+    pub signaling_dropped: usize,
+}
+
+/// Phase C1: summary of the most recently ended call, driving the
+/// call-end screen and the optional 1–5 rating card
+/// (`callStateDiscarded.need_rating`, schema 1.8.67, line 7081).
+#[derive(Debug, Clone)]
+pub struct CallSummary {
+    pub call_id: i32,
+    pub user_id: i64,
+    pub is_outgoing: bool,
+    pub is_video: bool,
+    /// Seconds between `callStateReady` and the end (0 when the call
+    /// never connected).
+    pub duration_secs: i64,
+    /// Human-readable end line (reason-aware).
+    pub end_line: String,
+    pub need_rating: bool,
+    /// `need_debug_information` / `need_log` are out of this slice
+    /// (no media log exists; debug-info upload is C2) — kept so the
+    /// end screen can say so honestly.
+    pub need_debug_information: bool,
+    pub need_log: bool,
+    pub rating_sent: bool,
+}
+
+impl ActiveCall {
+    /// Seconds since `callStateReady` (the billable call duration).
+    pub fn connected_secs(&self) -> i64 {
+        self.ready_at
+            .map(|t| t.elapsed().as_secs() as i64)
+            .unwrap_or(0)
+    }
+}
+
+impl CallSummary {
+    /// Build the end screen from a terminal `updateCall`. `duration_secs`
+    /// is the connected time (0 when the call never reached `Ready`).
+    fn from_terminal(call: &ParsedCall, duration_secs: i64) -> Self {
+        let (end_line, need_rating, need_debug_information, need_log) = match &call.state {
+            CallState::Discarded {
+                reason,
+                need_rating,
+                need_debug_information,
+                need_log,
+            } => (
+                reason.summary(call.is_outgoing),
+                *need_rating,
+                *need_debug_information,
+                *need_log,
+            ),
+            CallState::Error { code, message } => {
+                // Schema 1.8.67, line 7086: code 4005000 means the
+                // outgoing call was missed because the timeout expired.
+                let line = if *code == 4005000 {
+                    "No answer — the call timed out".to_string()
+                } else if message.is_empty() {
+                    format!("Call failed (error {code})")
+                } else {
+                    format!("Call failed (error {code}): {message}")
+                };
+                (line, false, false, false)
+            }
+            _ => ("Call ended".to_string(), false, false, false),
+        };
+        CallSummary {
+            call_id: call.id,
+            user_id: call.user_id,
+            is_outgoing: call.is_outgoing,
+            is_video: call.is_video,
+            duration_secs,
+            end_line,
+            need_rating,
+            need_debug_information,
+            need_log,
+            rating_sent: false,
+        }
+    }
+}
+
+/// Cap for the honest signaling queue (C1: no consumer yet).
+const MAX_QUEUED_SIGNALING_CHUNKS: usize = 32;
+
 pub struct Session {
     pub account: AccountKey,
     pub account_generation: AccountGeneration,
@@ -1731,6 +1863,22 @@ pub struct Session {
     /// fetch (e.g. a secret chat loaded from the local DB with no state
     /// seen yet). Drained by the driver's `maybe_fetch_secret_chat_states`.
     pub secret_chat_fetch_queue: Vec<i32>,
+    /// Phase C1: the tracked live call, if any. **Signaling only** —
+    /// TDLib transports no audio/video (official clients use
+    /// libtgvoip); real media transport is the C2 spike.
+    pub active_call: Option<ActiveCall>,
+    /// Phase C1: summary of the most recently ended call, driving the
+    /// call-end screen and the optional 1–5 rating card
+    /// (`callStateDiscarded.need_rating`).
+    pub call_summary: Option<CallSummary>,
+    /// Phase C1: last async call-request error (e.g. `createCall`
+    /// rejected), shown on the call overlay and cleared when
+    /// dismissed. Never a secret.
+    pub call_error: Option<String>,
+    /// Phase C1: call ids of incoming calls that arrived while another
+    /// call was active — the driver discards them (busy) via
+    /// `discardCall`.
+    pub call_busy_decline_queue: Vec<i32>,
     /// Phase 5.1: selected forum topic (`forum_topic_id`) of the open chat.
     /// `None` = topic list (or a non-forum chat). Reset by `open_chat`.
     pub open_topic: Option<i32>,
@@ -1960,6 +2108,10 @@ impl Session {
             pending_sound_plays: Vec::new(),
             secret_chat_states: HashMap::new(),
             secret_chat_fetch_queue: Vec::new(),
+            active_call: None,
+            call_summary: None,
+            call_error: None,
+            call_busy_decline_queue: Vec::new(),
             open_topic: None,
             forum_topics: HashMap::new(),
             topic_histories: HashMap::new(),
@@ -2508,6 +2660,42 @@ impl Session {
             }
             EnvelopePayload::SecretChat { secret_chat } => {
                 self.accept_secret_chat(&secret_chat);
+            }
+            // Phase C1: call signaling (schema 1.8.67, lines 10816 /
+            // 10862). `updateCall` drives the single-call state machine;
+            // signaling data is queued honestly (no transport consumes it
+            // yet — C2); `callId` is the `createCall` answer that starts
+            // tracking the outgoing call.
+            EnvelopePayload::UpdateCall { call } => {
+                self.accept_call_update(&call);
+            }
+            EnvelopePayload::UpdateNewCallSignalingData { call_id, data } => {
+                self.accept_call_signaling_data(call_id, data);
+            }
+            EnvelopePayload::CallId { id } => {
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::CreateCall)
+                    && let Some(user_id) = pending.and_then(|p| p.user_id)
+                    && self.active_call.is_none()
+                {
+                    self.active_call = Some(ActiveCall {
+                        id,
+                        user_id,
+                        is_outgoing: true,
+                        // Phase C1 is audio-only; `createCall` always
+                        // sends `is_video: false`.
+                        is_video: false,
+                        state: CallState::Pending {
+                            is_created: true,
+                            is_received: false,
+                        },
+                        started_at: Instant::now(),
+                        ready_at: None,
+                        signaling_queue: Vec::new(),
+                        signaling_dropped: 0,
+                    });
+                    self.call_summary = None;
+                    self.call_error = None;
+                }
             }
             EnvelopePayload::UpdateChatTitle { chat_id, title } => {
                 self.chats
@@ -3265,6 +3453,34 @@ impl Session {
                 }
             }
             EnvelopePayload::Error(err) => {
+                // Phase C1: a failed call request surfaces on the call
+                // overlay (shown and cleared by the UI). A failed
+                // `createCall` also drops the half-tracked outgoing call.
+                match pending.map(|p| p.purpose) {
+                    Some(RequestPurpose::CreateCall) => {
+                        // Note: the tracked outgoing call is *not*
+                        // cleared here — a failed `createCall` never
+                        // produced a `callId`, so any tracked call came
+                        // from elsewhere and must survive. The driver
+                        // also refuses a second `createCall` while one
+                        // is active.
+                        self.call_error =
+                            Some(call_request_error_line(&err, "Could not start the call"));
+                    }
+                    Some(RequestPurpose::AcceptCall) => {
+                        self.call_error =
+                            Some(call_request_error_line(&err, "Could not answer the call"));
+                    }
+                    Some(RequestPurpose::DiscardCall) => {
+                        self.call_error =
+                            Some(call_request_error_line(&err, "Could not hang up the call"));
+                    }
+                    Some(RequestPurpose::SendCallRating) => {
+                        self.call_error =
+                            Some(call_request_error_line(&err, "Could not send the rating"));
+                    }
+                    _ => {}
+                }
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::LoadChats) && err.code == 404
                 {
                     self.chats_exhausted = true;
@@ -3832,6 +4048,108 @@ impl Session {
                 chat.secret_state = Some(state.clone());
             }
         }
+    }
+
+    /// Phase C1: `updateCall` state machine. Quill tracks at most one
+    /// call at a time (TDLib / official clients allow a single active
+    /// 1:1 call):
+    /// - same call id → advance the state; terminal states
+    ///   (`callStateDiscarded` / `callStateError`) end the call and
+    ///   record a summary for the end screen / rating card;
+    /// - a *different*, non-terminal, incoming `Pending` call while one
+    ///   is active → queued in `call_busy_decline_queue` for the driver
+    ///   to `discardCall` (busy);
+    /// - a terminal update for an untracked call id (e.g. a missed call
+    ///   we never saw pending) still records a summary so the end
+    ///   screen can show "Missed call".
+    fn accept_call_update(&mut self, call: &ParsedCall) {
+        if let Some(active) = self.active_call.as_mut()
+            && active.id == call.id
+        {
+            if call.state.is_terminal() {
+                self.end_active_call(call);
+            } else {
+                if matches!(call.state, CallState::Ready) && active.ready_at.is_none() {
+                    active.ready_at = Some(Instant::now());
+                }
+                active.state = call.state.clone();
+                active.is_video = call.is_video;
+            }
+            return;
+        }
+        if self.active_call.is_some() {
+            if !call.is_outgoing
+                && matches!(call.state, CallState::Pending { .. })
+                && !self.call_busy_decline_queue.contains(&call.id)
+            {
+                self.call_busy_decline_queue.push(call.id);
+                self.diagnostics.record(Diagnostic {
+                    category: "call",
+                    type_name: Some("updateCall".to_string()),
+                    extra: None,
+                    seq: Some(self.last_seq),
+                    note: "incoming-while-active-busy-decline",
+                });
+            }
+            return;
+        }
+        if call.state.is_terminal() {
+            self.call_summary = Some(CallSummary::from_terminal(call, 0));
+            return;
+        }
+        self.active_call = Some(ActiveCall {
+            id: call.id,
+            user_id: call.user_id,
+            is_outgoing: call.is_outgoing,
+            is_video: call.is_video,
+            state: call.state.clone(),
+            started_at: Instant::now(),
+            ready_at: None,
+            signaling_queue: Vec::new(),
+            signaling_dropped: 0,
+        });
+        self.call_summary = None;
+        self.call_error = None;
+    }
+
+    /// Phase C1: `updateNewCallSignalingData`. Queued honestly — there
+    /// is no media transport to feed it to yet (C2 libtgvoip spike).
+    /// Data for an unknown call id is dropped (never buffered without
+    /// a tracked call).
+    fn accept_call_signaling_data(&mut self, call_id: i32, data: Vec<u8>) {
+        let Some(active) = self.active_call.as_mut() else {
+            return;
+        };
+        if active.id != call_id {
+            return;
+        }
+        if active.signaling_queue.len() >= MAX_QUEUED_SIGNALING_CHUNKS {
+            active.signaling_dropped += 1;
+            self.diagnostics.record(Diagnostic {
+                category: "call",
+                type_name: Some("updateNewCallSignalingData".to_string()),
+                extra: None,
+                seq: Some(self.last_seq),
+                note: "signaling-queue-overflow-dropped",
+            });
+            return;
+        }
+        active.signaling_queue.push(data);
+    }
+
+    /// Phase C1: end the tracked call on a terminal `updateCall` and
+    /// record the summary shown on the call-end screen. Any queued
+    /// signaling data is dropped with the call (no consumer exists).
+    fn end_active_call(&mut self, call: &ParsedCall) {
+        let Some(active) = self.active_call.take() else {
+            return;
+        };
+        let duration_secs = active
+            .ready_at
+            .map(|t| t.elapsed().as_secs() as i64)
+            .unwrap_or(0);
+        self.call_summary = Some(CallSummary::from_terminal(call, duration_secs));
+        self.call_busy_decline_queue.retain(|id| *id != call.id);
     }
 
     /// Record a `joinChat` outcome. `Success` flips status optimistically;

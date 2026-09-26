@@ -36,14 +36,14 @@ use quill::poll::{
     POLL_OPTIONS_MAX, POLL_OPTIONS_MIN, PollDraft, poll_bar_fraction, voter_count_label,
 };
 use quill::state::{
-    ChatSearchJump, ChatSummary, ContactRow, ForwardResult, HistoryMessage, InfoPanelTarget,
-    OutboxReceipt, RequestPurpose, SearchStatus, Session, SponsoredReportFlight,
-    outgoing_status_label, unix_ms_now, unread_badge_text,
+    ActiveCall, CallSummary, ChatSearchJump, ChatSummary, ContactRow, ForwardResult,
+    HistoryMessage, InfoPanelTarget, OutboxReceipt, RequestPurpose, SearchStatus, Session,
+    SponsoredReportFlight, outgoing_status_label, unix_ms_now, unread_badge_text,
 };
 use quill::story_viewer::{StoryViewer, StoryViewerItem, StoryViewerKind, collect_story_items};
 use quill::telegram::client::copy_and_parse;
 use quill::telegram::envelope::{
-    AuthorizationState, BotInfo, CallbackQueryAnswer, ChannelMemberStatus, ChatDraft,
+    AuthorizationState, BotInfo, CallState, CallbackQueryAnswer, ChannelMemberStatus, ChatDraft,
     ChatFolderInfo, ChatFolderSpec, ChatKind, ChatList, ChatNotificationSettings,
     DEFAULT_EMOJI_REACTIONS, ForumTopic, InlineKeyboardButton, InlineKeyboardButtonStyle,
     InlineKeyboardButtonType, MUTE_FOR_1_HOUR, MUTE_FOR_2_DAYS, MUTE_FOR_8_HOURS, MUTE_FOREVER,
@@ -426,6 +426,10 @@ pub struct QuillApp {
     /// ticking (`Some` exactly while the 1s tick task runs). Mirrors
     /// `slow_mode_tick_chat`.
     self_destruct_tick_chat: Option<ChatId>,
+    /// Phase C1: whether the call-duration 1s tick task is running
+    /// (keeps the overlay's ringing/connected clock fresh). Mirrors
+    /// `voice_tick`.
+    call_tick_active: bool,
     /// History row whose voice note is playing.
     playing_voice: Option<MessageId>,
     /// History row whose music file (`messageAudio`) is playing. Shares `voice_player`.
@@ -753,6 +757,12 @@ pub enum ScreenshotDemo {
     /// `chatTypePrivate` chats (schema 1.8.67 lines 6117/6128,
     /// "private chats only").
     ReadySelfDestruct,
+    /// Phase C1: call signaling UI (injected, no live Telegram) — an
+    /// incoming `callStatePending` voice call from Zed, so the overlay
+    /// renders the ringing incoming-call card (Accept / Decline, clock
+    /// ticking). Signaling only: the card carries the honest
+    /// no-audio-transport note.
+    ReadyCall,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1500,6 +1510,15 @@ impl QuillApp {
                     AuthorizationState::Ready,
                 )
             }
+            Some(ScreenshotDemo::ReadyCall) => {
+                demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
+                (
+                    ConnectUiStatus::DemoReadyChats,
+                    None,
+                    "screenshot demo — incoming call (injected, no live Telegram)".into(),
+                    AuthorizationState::Ready,
+                )
+            }
             None => bootstrap_connect(credentials),
         };
 
@@ -1606,6 +1625,7 @@ impl QuillApp {
             voice_tick: false,
             slow_mode_tick_chat: None,
             self_destruct_tick_chat: None,
+            call_tick_active: false,
             playing_voice: None,
             playing_audio: None,
             pending_audio_play: None,
@@ -1971,6 +1991,17 @@ impl QuillApp {
             app.status_note =
                 "screenshot demo — self-destructing media · picker on 30s (injected, no live Telegram)"
                     .into();
+        }
+        // Phase C1: incoming-call fixture — Zed rings with a pending
+        // voice call, so the overlay renders the incoming-call card
+        // (Accept / Decline + ticking clock).
+        if matches!(demo, Some(ScreenshotDemo::ReadyCall)) {
+            if let Some(session) = app.demo_session.as_mut() {
+                app.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_call(session, &app.demo_sink, &app.demo_seq);
+            }
+            app.status_note =
+                "screenshot demo — incoming call from Zed (injected, no live Telegram)".into();
         }
         if matches!(demo, Some(ScreenshotDemo::ReadyVideoSend)) {
             app.composer.update(cx, |input, cx| {
@@ -3902,6 +3933,105 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// Phase C1: `createCall` from a user profile. Audio-only
+    /// (`is_video: false`) — video needs transport too (C3). The
+    /// outgoing call is tracked once the `callId` answer arrives; its
+    /// states arrive as `updateCall`.
+    fn start_call_for_user(&mut self, user_id: i64, cx: &mut Context<Self>) {
+        if self.live.is_some() {
+            let result = self.live.as_mut().expect("live").driver.start_call(user_id);
+            self.status_note = match result {
+                Ok(_) => "calling…".into(),
+                Err(_) => "could not start the call".into(),
+            };
+        } else if self.demo_session.is_some() {
+            self.status_note = "demo: call start (no live Telegram)".into();
+        }
+        cx.notify();
+    }
+
+    /// Phase C1: `acceptCall` for the ringing incoming call.
+    fn accept_incoming_call(&mut self, cx: &mut Context<Self>) {
+        if self.live.is_some() {
+            let result = self.live.as_mut().expect("live").driver.accept_call();
+            self.status_note = match result {
+                Ok(_) => "answering…".into(),
+                Err(_) => "could not answer the call".into(),
+            };
+        } else if self.demo_session.is_some() {
+            self.status_note = "demo: call accept (no live Telegram)".into();
+        }
+        cx.notify();
+    }
+
+    /// Phase C1: `discardCall` for the tracked call (decline an
+    /// incoming call, or hang up an active one).
+    fn hang_up_call(&mut self, cx: &mut Context<Self>) {
+        if self.live.is_some() {
+            let result = self.live.as_mut().expect("live").driver.discard_call();
+            self.status_note = match result {
+                Ok(_) => "hanging up…".into(),
+                Err(_) => "could not hang up the call".into(),
+            };
+        } else if self.demo_session.is_some() {
+            self.status_note = "demo: call hang up (no live Telegram)".into();
+        }
+        cx.notify();
+    }
+
+    /// Phase C1: `sendCallRating` from the call-end rating card.
+    fn rate_last_call(&mut self, rating: i32, cx: &mut Context<Self>) {
+        if self.live.is_some() {
+            let result = self
+                .live
+                .as_mut()
+                .expect("live")
+                .driver
+                .send_call_rating(rating);
+            self.status_note = match result {
+                Ok(_) => "thanks for your feedback".into(),
+                Err(_) => "could not send the rating".into(),
+            };
+        } else if self.demo_session.is_some() {
+            self.status_note = "demo: call rating (no live Telegram)".into();
+            if let Some(session) = self.demo_session.as_mut()
+                && let Some(summary) = session.call_summary.as_mut()
+            {
+                summary.rating_sent = true;
+            }
+        }
+        cx.notify();
+    }
+
+    /// Phase C1: dismiss the call-end screen (rating skipped or
+    /// acknowledged).
+    fn dismiss_call_summary(&mut self, cx: &mut Context<Self>) {
+        for session in self
+            .live
+            .as_mut()
+            .map(|live| &mut live.driver.session)
+            .into_iter()
+            .chain(self.demo_session.as_mut())
+        {
+            session.call_summary = None;
+        }
+        cx.notify();
+    }
+
+    /// Phase C1: dismiss a shown call-request error.
+    fn dismiss_call_error(&mut self, cx: &mut Context<Self>) {
+        for session in self
+            .live
+            .as_mut()
+            .map(|live| &mut live.driver.session)
+            .into_iter()
+            .chain(self.demo_session.as_mut())
+        {
+            session.call_error = None;
+        }
+        cx.notify();
+    }
+
     fn clear_reply(&mut self, cx: &mut Context<Self>) {
         // tdesktop FieldHeader Escape / replyCancelled: header only — keep typed text.
         self.pending_reply = cancel_reply_draft(self.pending_reply.take(), String::new()).0;
@@ -5507,6 +5637,41 @@ impl QuillApp {
         .detach();
     }
 
+    /// Phase C1: 1s tick while a call is tracked, keeping the overlay's
+    /// ringing / connected clock fresh. Mirrors the Phase A1 slow-mode
+    /// tick (at most one task; exits when no call is active).
+    fn ensure_call_tick(&mut self, cx: &mut Context<Self>) {
+        let call_active = self.session().is_some_and(|s| s.active_call.is_some());
+        if !call_active || self.call_tick_active {
+            return;
+        }
+        self.call_tick_active = true;
+        cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor().timer(Duration::from_secs(1)).await;
+                let cont = this
+                    .update(cx, |this, cx| {
+                        let still_active = this.session().is_some_and(|s| s.active_call.is_some());
+                        if still_active {
+                            cx.notify();
+                            true
+                        } else {
+                            this.call_tick_active = false;
+                            false
+                        }
+                    })
+                    .unwrap_or(false);
+                if !cont {
+                    break;
+                }
+            }
+            let _ = this.update(cx, |this, _| {
+                this.call_tick_active = false;
+            });
+        })
+        .detach();
+    }
+
     /// Phase A1: whether the viewer may change slow mode in a supergroup:
     /// creator, or administrator with the explicit `can_restrict_members`
     /// right (`setChatSlowModeDelay` requirement, schema 1.8.67 line
@@ -6992,6 +7157,19 @@ impl QuillApp {
                     })),
             );
         }
+        // Phase C1: "Call" from a user profile — `createCall`
+        // (audio-only; video needs transport, C3). Same gating as
+        // secret chats: non-bot users, not yourself.
+        let show_call = show_start_secret;
+        if show_call {
+            body = body.child(
+                Button::new("info-panel-call")
+                    .label("Call")
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.start_call_for_user(user_id, cx);
+                    })),
+            );
+        }
         // Phase B2: encryption-key section — only when the open chat is a
         // Ready secret chat with this user (the key is meaningful once
         // the session is established). Missing/short hashes render the
@@ -7330,6 +7508,296 @@ impl QuillApp {
                 )
                 .into_any_element(),
         )
+    }
+
+    /// Phase C1: call overlay — incoming / outgoing / active / ended
+    /// call UI above everything else. **Signaling only**: when a call
+    /// would need media, the card says so honestly (audio transport is
+    /// the C2 libtgvoip spike, not faked here).
+    fn call_overlay(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let session = self.session()?;
+        if session.active_call.is_none()
+            && session.call_summary.is_none()
+            && session.call_error.is_none()
+        {
+            return None;
+        }
+        Some(self.call_card(cx).into_any_element())
+    }
+
+    /// Phase C1: format a call clock as `m:ss`.
+    fn call_clock(secs: u64) -> String {
+        format!("{}:{:02}", secs / 60, secs % 60)
+    }
+
+    fn call_peer_name(&self, user_id: i64) -> String {
+        self.session()
+            .and_then(|s| s.user(user_id))
+            .map(|u| u.display_name())
+            .unwrap_or_else(|| format!("User {user_id}"))
+    }
+
+    fn call_card(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let session = self.session();
+        let active = session.and_then(|s| s.active_call.clone());
+        let summary = session.and_then(|s| s.call_summary.clone());
+        let error = session.and_then(|s| s.call_error.clone());
+
+        let mut card = div()
+            .id("call-card")
+            .flex()
+            .flex_col()
+            .items_center()
+            .gap_3()
+            .p_6()
+            .w(px(360.))
+            .rounded_lg()
+            .border_1()
+            .border_color(cx.theme().border)
+            .bg(cx.theme().sidebar);
+
+        if let Some(call) = active {
+            card = self.call_active_card(card, &call, error.as_deref(), cx);
+        } else if let Some(summary) = summary {
+            card = self.call_summary_card(card, &summary, cx);
+        } else if let Some(error) = error {
+            card =
+                card.child(div().text_sm().font_semibold().child("Call failed"))
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(error),
+                    )
+                    .child(Button::new("call-error-dismiss").label("Dismiss").on_click(
+                        cx.listener(|this, _, _, cx| {
+                            this.dismiss_call_error(cx);
+                        }),
+                    ));
+        }
+
+        div()
+            .id("call-overlay")
+            .absolute()
+            .top_0()
+            .left_0()
+            .right_0()
+            .bottom_0()
+            .flex()
+            .items_center()
+            .justify_center()
+            .child(
+                div()
+                    .id("call-backdrop")
+                    .absolute()
+                    .top_0()
+                    .left_0()
+                    .right_0()
+                    .bottom_0()
+                    .bg(rgba(0x000000e6)),
+            )
+            .child(card)
+    }
+
+    /// Phase C1: the live-call card (ringing / connecting / connected).
+    /// The backdrop is not clickable — only the call buttons act.
+    fn call_active_card(
+        &self,
+        card: Stateful<Div>,
+        call: &ActiveCall,
+        error: Option<&str>,
+        cx: &mut Context<Self>,
+    ) -> Stateful<Div> {
+        let name = self.call_peer_name(call.user_id);
+        let kind_line = if call.is_video {
+            "Video call"
+        } else {
+            "Voice call"
+        };
+        let (status, clock): (String, Option<String>) = match &call.state {
+            CallState::Pending { .. } => {
+                let elapsed = call.started_at.elapsed().as_secs();
+                if call.is_outgoing {
+                    ("Calling…".to_string(), Some(Self::call_clock(elapsed)))
+                } else {
+                    ("Incoming call".to_string(), Some(Self::call_clock(elapsed)))
+                }
+            }
+            CallState::ExchangingKeys => ("Connecting…".to_string(), None),
+            CallState::Ready => (
+                "Connected".to_string(),
+                Some(Self::call_clock(call.connected_secs().max(0) as u64)),
+            ),
+            CallState::HangingUp => ("Hanging up…".to_string(), None),
+            // A future state the pinned schema doesn't know: label it
+            // honestly instead of pretending it means something else.
+            CallState::Unknown(type_name) => (format!("Call state: {type_name}"), None),
+            // Terminal states end the call in the reducer, so this arm
+            // is unreachable — but never crash the overlay on it.
+            CallState::Discarded { .. } | CallState::Error { .. } => ("Ending…".to_string(), None),
+        };
+        let mut card = card
+            .child(initials_avatar(&name, 72.))
+            .child(div().text_lg().font_semibold().child(name))
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(kind_line),
+            )
+            .child(div().text_sm().child(status));
+        if let Some(clock) = clock {
+            card = card.child(div().text_2xl().font_semibold().child(clock));
+        }
+        // Honest no-transport note: the call can be "Connected" at the
+        // signaling level while carrying no audio. Never fake a live
+        // call. The incoming card carries it too — accepting starts
+        // no audio in this build.
+        let no_transport_note = matches!(call.state, CallState::Ready | CallState::ExchangingKeys)
+            || (matches!(call.state, CallState::Pending { .. }) && !call.is_outgoing);
+        if no_transport_note {
+            card = card.child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(
+                        "Audio isn't connected — Quill's voice transport \
+                         ships in Phase C2. This call carries no sound.",
+                    ),
+            );
+        }
+        if let Some(error) = error {
+            card = card.child(
+                div()
+                    .text_xs()
+                    .text_color(rgb(0xe17076))
+                    .child(error.to_string()),
+            );
+        }
+        let mut buttons = div().flex().gap_2();
+        match &call.state {
+            CallState::Pending { .. } if !call.is_outgoing => {
+                buttons = buttons
+                    .child(
+                        Button::new("call-accept")
+                            .label("Accept")
+                            .success()
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.accept_incoming_call(cx);
+                            })),
+                    )
+                    .child(
+                        Button::new("call-decline")
+                            .label("Decline")
+                            .danger()
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.hang_up_call(cx);
+                            })),
+                    );
+            }
+            CallState::Pending { .. } | CallState::ExchangingKeys => {
+                buttons =
+                    buttons.child(Button::new("call-cancel").label("Cancel").ghost().on_click(
+                        cx.listener(|this, _, _, cx| {
+                            this.hang_up_call(cx);
+                        }),
+                    ));
+            }
+            CallState::Ready | CallState::Unknown(_) => {
+                buttons = buttons.child(
+                    Button::new("call-hangup")
+                        .label("Hang up")
+                        .danger()
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.hang_up_call(cx);
+                        })),
+                );
+            }
+            CallState::HangingUp | CallState::Discarded { .. } | CallState::Error { .. } => {}
+        }
+        card.child(buttons)
+    }
+
+    /// Phase C1: the call-end screen — reason line, duration, and the
+    /// optional 1–5 rating card (`callStateDiscarded.need_rating`,
+    /// schema 1.8.67, line 7081). `need_debug_information` /
+    /// `need_log` are out of this slice, stated honestly.
+    fn call_summary_card(
+        &self,
+        card: Stateful<Div>,
+        summary: &CallSummary,
+        cx: &mut Context<Self>,
+    ) -> Stateful<Div> {
+        let name = self.call_peer_name(summary.user_id);
+        let mut card = card
+            .child(initials_avatar(&name, 72.))
+            .child(div().text_lg().font_semibold().child(name))
+            .child(div().text_sm().child(summary.end_line.clone()));
+        if summary.duration_secs > 0 {
+            card = card
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(format!(
+                            "Connected for {}",
+                            Self::call_clock(summary.duration_secs.max(0) as u64)
+                        )),
+                )
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(
+                            "No audio was carried — voice transport isn't \
+                             implemented yet (Phase C2).",
+                        ),
+                );
+        }
+        if summary.need_debug_information || summary.need_log {
+            card = card.child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("Call diagnostics upload isn't implemented yet."),
+            );
+        }
+        if summary.need_rating && !summary.rating_sent {
+            card = card.child(div().text_sm().child("How was the call quality?"));
+            let mut stars = div().flex().gap_2();
+            for star in 1..=5 {
+                stars = stars.child(
+                    Button::new(format!("call-rate-{star}"))
+                        .label(format!("{star} ★"))
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.rate_last_call(star, cx);
+                        })),
+                );
+            }
+            card = card.child(stars).child(
+                Button::new("call-rate-skip")
+                    .label("Skip")
+                    .ghost()
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.dismiss_call_summary(cx);
+                    })),
+            );
+        } else {
+            if summary.rating_sent {
+                card = card.child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child("Thanks for your feedback"),
+                );
+            }
+            card = card.child(Button::new("call-summary-close").label("Close").on_click(
+                cx.listener(|this, _, _, cx| {
+                    this.dismiss_call_summary(cx);
+                }),
+            ));
+        }
+        card
     }
 
     /// Parity slice: folder manage / editor / delete-confirm overlays.
@@ -12396,6 +12864,9 @@ impl Render for QuillApp {
         // open chat has a live `self_destruct_in` timer (same 1s task
         // pattern as slow mode).
         self.ensure_self_destruct_tick(cx);
+        // Phase C1: keep the call overlay's ringing / connected clock
+        // fresh while a call is tracked (same 1s task pattern).
+        self.ensure_call_tick(cx);
         // Phase 9.1: resolve a tapped story whose `story` response landed
         // since the click (`getStory` prefetch finished).
         // Parity slice: prefill the folder editor once its `getChatFolder`
@@ -12566,6 +13037,8 @@ impl Render for QuillApp {
             .when(self.notification_defaults_open, |this| {
                 this.child(self.notification_defaults_overlay(cx))
             })
+            // Phase C1: call overlay above everything else.
+            .when_some(self.call_overlay(cx), |this, overlay| this.child(overlay))
     }
 }
 
@@ -14153,6 +14626,25 @@ fn apply_ready_secret_chat(session: &mut Session, sink: &Arc<MemorySink>, seq: &
         }
     }
     session.open_chat(ChatId(chat_id));
+}
+
+/// Phase C1: incoming-call fixture — a pending incoming voice call
+/// from Zed (user 41), so the call overlay renders its incoming-call
+/// card. Injected, no live Telegram.
+fn apply_ready_call(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let user_id = 41i64;
+    let jsons = [
+        format!(
+            r#"{{"@type":"updateUser","user":{{"id":{user_id},"first_name":"Zed","last_name":"Hopper","usernames":{{"@type":"usernames","active_usernames":["zedhopper"],"disabled_usernames":[],"editable_username":"zedhopper","collectible_usernames":[]}},"phone_number":"+15550101041","status":{{"@type":"userStatusOnline","expires":9999999999}},"is_contact":false,"type":{{"@type":"userTypeRegular"}}}}}}"#
+        ),
+        r#"{"@type":"updateCall","call":{"@type":"call","id":77,"unique_id":"99","user_id":41,"is_outgoing":false,"is_video":false,"state":{"@type":"callStatePending","is_created":true,"is_received":false}}}"#.to_string(),
+    ];
+    for json in jsons {
+        if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
+            session.apply(owned);
+        }
+    }
 }
 
 /// Phase B2: key verification UI fixture — the Ready secret chat (id 41)

@@ -2184,3 +2184,79 @@ are rough (S < 1 day, M = days, L = week+).
   secret-chat-specific notification behavior; secret-chat TTL UI
   (likely a per-chat timer mechanism distinct from this slice's
   per-media type — unverified, no constructor in the pinned schema).
+
+## Phase C1 — 1-on-1 call signaling + call UI (2026-09-26)
+
+- **Rationale.** TDLib carries call *signaling* but no audio/video
+  transport; this slice implements the signaling state machine and the
+  full call UI, and states the missing transport honestly everywhere —
+  never faking a working call. Audio-only `createCall`; video, group
+  calls/voice chats, transport, and debug/log upload are out of slice.
+- **Schema (1.8.67, verified verbatim in `schema/td_api.tl`):**
+  `callProtocol` (:7008); `callId` (:7034);
+  `callStatePending` (:7058) / `callStateExchangingKeys` (:7063) /
+  `callStateReady` (:7066) / `callStateHangingUp` (:7077) /
+  `callStateDiscarded` (:7080, `need_rating` documented :7081) /
+  `callStateError` (:7086); `call` (:7287); `updateCall` (:10816);
+  `updateNewCallSignalingData` (:10862); `createCall` (:14212);
+  `acceptCall` (:14215); `sendCallSignalingData` (:14218);
+  `discardCall` (:14227); `sendCallRating` (:14233);
+  `sendCallDebugInformation` (:14237); discard reasons :6984–6999;
+  call problems :7253–7277.
+- **Honesty design.** `callProtocol` claims no media transport
+  (`udp_p2p: false`, `udp_reflector: false`, layer 65–92, empty
+  `library_versions`) — an honest capability advertisement, not a
+  fake. `updateNewCallSignalingData` chunks are queued (32-chunk cap,
+  diagnostic-only overflow) and never consumed: there is no transport
+  in this slice to feed them to. `sendCallSignalingData` has no request
+  builder for the same reason (documented as C2). Every live-call card
+  (incoming / connecting / connected) and the end screen carry the
+  explicit note "Audio isn't connected — Quill's voice transport ships
+  in Phase C2. This call carries no sound."
+- **State model (`src/state.rs`).** `ActiveCall` (id, peer, direction,
+  state, started/ready instants, signaling queue) + `CallSummary`
+  (terminal reason line, duration, `need_rating`, rating state) on the
+  session; `call_error` for surfaced request failures;
+  `call_busy_decline_queue` for a second incoming call while one is
+  active (declined with `callDiscardReasonBusy` once the active call
+  ends — the driver drains it during ingest). `accept_call_update`
+  starts tracking from `updateCall` or the `callId` answer, advances
+  same-id states, starts the duration at `Ready`, and produces the
+  summary on `Discarded`/`Error` (unknown future states stay
+  nonterminal rather than dropping a possibly live call). Discard
+  reasons map to human lines ("Missed call", "Call declined",
+  "You were busy", "The call timed out" for the documented 4005000
+  code); TDLib error *message text* is never stored (it can contain
+  secrets) — only code/class.
+- **Requests (`src/telegram/requests.rs`).** `create_call` (audio-only,
+  `is_video: false`), `accept_call`, `discard_call` (connected duration
+  when known), `send_call_rating` (1–5 + optional comment, problems
+  list left empty for C1). Request purposes `CreateCall` / `AcceptCall`
+  / `DiscardCall` / `SendCallRating`; the driver (`src/connect.rs`)
+  gates `start_call` on known user, non-bot, non-self, no active call.
+- **UI (`src/ui/mod.rs`).** "Call" button on user profiles; a modal
+  overlay above everything: incoming ringing (avatar, name, ticking
+  clock, Accept / Decline), outgoing ringing (Cancel), connecting
+  ("Connecting…", Cancel), connected (state, live duration, Hang up),
+  unknown-state honest label, end screen (reason line, duration, 1–5
+  rating prompt when `need_rating` — `need_debug_information` /
+  `need_log` are out of slice, stated on the card), and a request-error
+  banner with dismiss. A 1-second tick (`call_tick_active`, guarded by
+  `call_tick_active_id`) keeps clocks/durations fresh while a call is
+  live.
+- **Screenshot:** `docs/screenshots/ready-call-ui.png` —
+  `quill --screenshot-demo ready-call`: incoming voice call from Zed,
+  Accept / Decline, ticking clock, and the no-audio-transport note.
+- **Tests.** Envelope unit tests (all call states, signaling bytes,
+  `callId`, constructor pins); request-shape tests; replay test
+  `replay_call_signaling_lifecycle`: incoming pending → busy-decline
+  queue → exchanging keys → signaling queued → ready → remote hangup
+  with `need_rating` → summary; rejected `createCall` surfaces
+  `call_error` without TDLib message text; missed untracked call still
+  records a summary; 4005000 error maps to "timed out".
+- **Out of this slice (→ future):** Phase C2 — libtgvoip audio
+  transport (the queued signaling data becomes the transport's input;
+  outgoing `sendCallSignalingData` produced by the transport); video
+  calls (`is_video`); group calls / voice chats; `sendCallDebugInformation`
+  / `need_debug_information` / `need_log` upload; richer rating
+  (comment + `callProblem` checklist).
