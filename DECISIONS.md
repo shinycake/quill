@@ -859,3 +859,46 @@ Research snapshot 2026-09-16, pin recheck **2026-09-17**.
   add-to-address-book; profile deep-links for `user_id`; venue deep
   links (Foursquare / Google Places URLs are not opened — provider
   `id`/`type` are dropped).
+
+## Phase 4.4 — Dice (2026-09-26)
+
+- **Rationale:** `messageDice` is a first-class Telegram content type —
+  the 🎲 / 🎯 / 🏀 / ⚽ / 🎰 / 🎳 emoji that roll into an animated
+  sticker with a value. This slice adds typed parsing and a static
+  display row (large emoji glyph + rolled value); the roll animation
+  itself is out of scope.
+- **Schema (1.8.67, verified in `schema/td_api.tl`):**
+  - `messageDice` (line 5231): `initial_state:DiceStickers`
+    `final_state:DiceStickers` `emoji:string` `value:int32`
+    `success_animation_frame_number:int32`
+  - `DiceStickers` (line 7362): animated stickers that "must be used for
+    dice animation rendering"; `diceStickersRegular` (line 7365) and
+    `diceStickersSlotMachine` (line 7373) are the two shapes
+  - `messageStakeDice` (line 5249) is a **separate** constructor (casino
+    stake dice with gram amounts) — not parsed in this slice; it
+    renders `Unsupported`
+- **Model (`src/telegram/envelope.rs`):** `DiceContent { emoji, value }`
+  (`value` int32; its range depends on the emoji, e.g. 1–6 for 🎲,
+  1–64 for 🎰 — the model keeps whatever TDLib sends), `face()` (empty
+  emoji falls back to 🎲 so a malformed payload still renders a die),
+  `label()` → `🎲 4` for previews, `MessageContent::Dice`. **Dropped
+  fields (documented on the struct):** `initial_state` / `final_state`
+  (`DiceStickers` roll-animation stickers) and
+  `success_animation_frame_number` (only meaningful to the animated
+  rendering). **Safe rule (documented on `parse_message_dice`):**
+  `value` is required — a missing or non-integer `value` can't be
+  displayed honestly, so the message becomes `Unsupported`
+  (`messageDice`) instead of inventing a number. Composer edit excludes
+  the new variant (not text-editable).
+- **Rendering (`dice_row` in `src/ui/mod.rs`):** a centered card (same
+  border/background as the 4.3 rows) with the emoji at 64 px and
+  `Rolled {value}` underneath — the glyph stands in for the final
+  animation frame, tdesktop-style.
+- **Screenshot:** `docs/screenshots/ready-dice.png` — a dedicated
+  "Demo dice" chat with three injected rolls (incoming 🎲 = 4, outgoing
+  🎲 = 6, incoming 🎯 = 5) through the real reducer, driven by
+  `quill --screenshot-demo ready-dice`.
+- **Out of this slice (→ future):** the animated roll (playing the
+  `DiceStickers` initial → final animation); rendering
+  `messageStakeDice`; sending dice from the composer (the animated
+  🎲 emoji); `updateMessageContent` live-update of a roll.

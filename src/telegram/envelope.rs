@@ -867,6 +867,8 @@ pub enum MessageContent {
     Venue(VenueContent),
     /// Phase 4.3: `messageContact` (TDLib 1.8.67, `schema/td_api.tl:5220`).
     Contact(ContactContent),
+    /// Phase 4.4: `messageDice` (TDLib 1.8.67, `schema/td_api.tl:5231`).
+    Dice(DiceContent),
     Unsupported {
         type_name: String,
     },
@@ -1143,6 +1145,38 @@ impl ContactContent {
     }
 }
 
+/// `messageDice` (TDLib 1.8.67, `schema/td_api.tl:5231`). `emoji` is the
+/// dice glyph sent (🎲, 🎯, 🏀, ⚽, 🎰, 🎳) and `value` is the rolled
+/// number (its range depends on the emoji, e.g. 1–6 for 🎲, 1–64 for 🎰).
+/// Dropped fields (documented): `initial_state` / `final_state`
+/// (`DiceStickers` animated stickers — the roll animation is out of scope
+/// in this slice) and `success_animation_frame_number` (the frame where a
+/// "success" animation starts; only used by the animated rendering).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DiceContent {
+    pub emoji: String,
+    pub value: i32,
+}
+
+impl DiceContent {
+    /// The glyph to render. An empty `emoji` (TDLib should always send
+    /// one, but malformed payloads happen) falls back to the plain die
+    /// rather than rendering nothing.
+    pub fn face(&self) -> &str {
+        if self.emoji.is_empty() {
+            "🎲"
+        } else {
+            &self.emoji
+        }
+    }
+
+    /// Short line for chat-list previews and the composer reply target,
+    /// e.g. `🎲 4`.
+    pub fn label(&self) -> String {
+        format!("{} {}", self.face(), self.value)
+    }
+}
+
 /// `linkPreview` card. Photo comes from `type` when that constructor carries a `photo`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LinkPreview {
@@ -1337,6 +1371,7 @@ impl MessageContent {
                     format!("👤 {}", name.chars().take(76).collect::<String>())
                 }
             }
+            MessageContent::Dice(dice) => dice.label(),
             MessageContent::Unsupported { type_name } => format!("({type_name})"),
         }
     }
@@ -2801,6 +2836,7 @@ fn parse_content(value: Option<&Value>) -> (MessageContent, Vec<ParsedFile>) {
         Some("messageLiveLocation") => parse_message_live_location(value),
         Some("messageVenue") => parse_message_venue(value),
         Some("messageContact") => parse_message_contact(value),
+        Some("messageDice") => parse_message_dice(value),
         Some(other) => (
             MessageContent::Unsupported {
                 type_name: other.to_string(),
@@ -3099,6 +3135,38 @@ fn parse_message_contact(value: &Value) -> (MessageContent, Vec<ParsedFile>) {
                 .and_then(|v| int53(v.get("user_id")).ok())
                 .unwrap_or(0),
         }),
+        Vec::new(),
+    )
+}
+
+/// `messageDice` (TDLib 1.8.67, `schema/td_api.tl:5231`). `initial_state` /
+/// `final_state` (`DiceStickers`) and `success_animation_frame_number` are
+/// dropped (see `DiceContent`); `emoji` falls back to 🎲 when empty.
+///
+/// **Safe rule:** `value` is the rolled number and is required — a missing,
+/// non-integer, or out-of-`i32`-range `value` can't be displayed honestly,
+/// so the whole message becomes `Unsupported` (`messageDice`) instead of
+/// inventing (or wrapping) a number.
+fn parse_message_dice(value: &Value) -> (MessageContent, Vec<ParsedFile>) {
+    let emoji = value
+        .get("emoji")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    let unsupported = (
+        MessageContent::Unsupported {
+            type_name: "messageDice".into(),
+        },
+        Vec::new(),
+    );
+    let Some(number) = value.get("value").and_then(Value::as_i64) else {
+        return unsupported;
+    };
+    let Ok(value) = i32::try_from(number) else {
+        return unsupported;
+    };
+    (
+        MessageContent::Dice(DiceContent { emoji, value }),
         Vec::new(),
     )
 }
@@ -5604,6 +5672,66 @@ mod channel_envelope_tests {
                 }
                 other => panic!("{other:?}"),
             },
+            other => panic!("{other:?}"),
+        }
+    }
+
+    // Phase 4.4: `messageDice` (schema 1.8.67 line 5231). `initial_state`
+    // / `final_state` / `success_animation_frame_number` parse without
+    // breaking and are dropped; `emoji` + `value` are kept.
+    #[test]
+    fn message_dice_parses_emoji_and_value() {
+        let json = r#"{"@type":"updateNewMessage","message":{"id":115,"chat_id":17,"is_outgoing":false,"content":{"@type":"messageDice","initial_state":{"@type":"diceStickersRegular","sticker":{"@type":"sticker"}},"final_state":{"@type":"diceStickersRegular","sticker":{"@type":"sticker"}},"emoji":"🎲","value":4,"success_animation_frame_number":12}}}"#;
+        let env = parse_envelope(json).unwrap();
+        match env.payload {
+            EnvelopePayload::UpdateNewMessage(message) => {
+                let MessageContent::Dice(dice) = &message.content else {
+                    panic!("{:?}", message.content);
+                };
+                assert_eq!(dice.emoji, "🎲");
+                assert_eq!(dice.value, 4);
+                assert_eq!(dice.face(), "🎲");
+                assert_eq!(dice.label(), "🎲 4");
+                assert_eq!(message.content.preview(), "🎲 4");
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    // Phase 4.4 safe rule: `value` is required — a missing (or
+    // non-integer) value can't be displayed honestly, so the message
+    // becomes `Unsupported` instead of inventing a number.
+    #[test]
+    fn message_dice_without_value_is_unsupported() {
+        let json = r#"{"@type":"updateNewMessage","message":{"id":116,"chat_id":17,"is_outgoing":false,"content":{"@type":"messageDice","emoji":"🎲"}}}"#;
+        let env = parse_envelope(json).unwrap();
+        match env.payload {
+            EnvelopePayload::UpdateNewMessage(message) => match &message.content {
+                MessageContent::Unsupported { type_name } => {
+                    assert_eq!(type_name, "messageDice")
+                }
+                other => panic!("{other:?}"),
+            },
+            other => panic!("{other:?}"),
+        }
+    }
+
+    // Phase 4.4: an empty `emoji` falls back to the plain die rather than
+    // rendering nothing (the value still parses).
+    #[test]
+    fn message_dice_empty_emoji_falls_back_to_die() {
+        // Parser-level: emoji present but empty in the JSON (not constructed
+        // directly) — the row falls back to 🎲.
+        let json = r#"{"@type":"updateNewMessage","message":{"id":116,"chat_id":17,"is_outgoing":false,"content":{"@type":"messageDice","emoji":"","value":3}}}"#;
+        let env = parse_envelope(json).unwrap();
+        match env.payload {
+            EnvelopePayload::UpdateNewMessage(message) => {
+                let MessageContent::Dice(dice) = &message.content else {
+                    panic!("{message:?}");
+                };
+                assert_eq!(dice.face(), "🎲");
+                assert_eq!(dice.label(), "🎲 3");
+            }
             other => panic!("{other:?}"),
         }
     }

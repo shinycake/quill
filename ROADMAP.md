@@ -81,7 +81,12 @@ handling exists.
   |lat|≤90, |lon|≤180, else dropped). No map tiles, no live-location
   re-rendering, no contact add-to-address-book.
   `docs/screenshots/ready-location.png`.
-- **4.4 Dice.** `messageDice` animated emoji + value display.
+- **4.4 Dice.** ✅ 2026-09-26 — `messageDice` display rows: large
+  static emoji face + rolled value (`🎲 4` preview); animation stickers
+  (`initial_state` / `final_state`) and `success_animation_frame_number`
+  dropped; missing `value` → `Unsupported`. No roll animation, no
+  `messageStakeDice`, no dice sending from the composer.
+  `docs/screenshots/ready-dice.png`.
 - **4.5 Fullscreen media viewer.** Click a photo/video opens a viewer overlay
   (from the photo/document "Out of this slice" backlog).
 - **4.6 Seek bars.** Audio and voice-note rows get scrubbing (backlog).

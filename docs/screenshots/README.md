@@ -87,6 +87,7 @@ bash scripts/capture-connect-screenshots.sh
 #   cargo run --features ui -- --screenshot-demo ready-text-entities docs/screenshots
 #   cargo run --features ui -- --screenshot-demo ready-poll docs/screenshots
 #   QUILL_DEMO_WINDOW_SIZE=1200x1100 cargo run --features ui -- --screenshot-demo ready-location docs/screenshots
+#   QUILL_DEMO_WINDOW_SIZE=1200x1000 cargo run --features ui -- --screenshot-demo ready-dice docs/screenshots
 ```
 
 Environment used by the script: `DISPLAY`, `LIBGL_ALWAYS_SOFTWARE=1`, `WGPU_BACKEND=vulkan`, `VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json`.
@@ -100,3 +101,4 @@ VoiceOver was **not** recorded here (no macOS GUI runner). Keyboard shortcuts ar
 | `ready-text-entities.png` | **Phase 4.1** Dedicated **Demo entities** chat: a `messageText` with mixed nested entities (bold, italic, bold-italic, underline, strikethrough, spoiler chip, inline `code`, URL, `rust` pre block) plus a `messagePhoto` whose caption carries bold + link entities. Injected `updateNewChat` / `updateNewMessage` JSON through the real reducer, no live Telegram. Driven by `quill --screenshot-demo ready-text-entities`. |
 | `ready-poll.png` | **Phase 4.2** Dedicated **Demo polls** chat: an open regular poll ("Where should we eat lunch?", voted for "Sushi place" — blue bar, ✓ mark, 55% · 12 votes) and a closed quiz poll ("Which planet is known as the Red Planet?" — green "· correct answer" on Mars, ✓ on the user's Venus answer, results only). Injected `updateNewChat` / `updateNewMessage` JSON through the real reducer, no live Telegram. Driven by `quill --screenshot-demo ready-poll`. |
 | `ready-location.png` | **Phase 4.3** Dedicated **Demo places** chat: a `messageLocation` (San Francisco coordinates + accuracy, "🗺 Open map" link), a `messageLiveLocation` (live status line — "Live · expires in 10:00 · heading 90° · proximity alert ≤ 500 m"), a `messageVenue` (Ferry Building title + address + "via foursquare" + map link), and a `messageContact` (Ada Lovelace, phone, "Telegram user" note). Injected `updateNewChat` / `updateNewMessage` JSON through the real reducer, no live Telegram. Driven by `quill --screenshot-demo ready-location`. |
+| `ready-dice.png` | **Phase 4.4** Dedicated **Demo dice** chat: three `messageDice` rows — an incoming 🎲 ("Rolled 4"), an outgoing 🎲 ("Rolled 6"), and an incoming 🎯 ("Rolled 5") — each showing the large static emoji face plus the rolled value. Injected `updateNewChat` / `updateNewMessage` JSON through the real reducer, no live Telegram. Driven by `quill --screenshot-demo ready-dice`. |
