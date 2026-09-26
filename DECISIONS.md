@@ -2691,6 +2691,25 @@ cross-platform story (Linux x86_64 only in this slice).
   static link, attribution + source-offer wording in `THIRD_PARTY.md`
   (source: https://github.com/pytgcalls/ntgcalls, tag v3.0.0,
   unmodified).
+- **License chain verified 2026-09-26 (Codex, primary sources).**
+  ntgcalls repo = LGPL-3.0
+  (https://github.com/pytgcalls/ntgcalls/blob/master/LICENSE); tgcalls =
+  LGPL-3.0 (https://github.com/TelegramMessenger/tgcalls/blob/master/LICENSE).
+  Dynamic loading (dlopen, no static linking) from a closed-source app
+  is LGPL-compliant — this confirms the C2 spike's dlopen-sidecar
+  decision. Distribution obligations to keep: ship the LGPL
+  notices/license text with Quill, make the library's corresponding
+  source available, and allow users to swap in a modified
+  `libntgcalls.so` (the sidecar design already permits this: Quill
+  loads it at runtime from a path the user can replace).
+- **Future: building tgcalls from source.** If we ever want an
+  in-house build instead of the prebuilt `libntgcalls.so`, the path is:
+  clang toolchain + WebRTC sources via `depot_tools`/`gclient` (20–40GB
+  checkout), tgcalls itself (LGPLv3), reference build = tdesktop's
+  CMake/GN setup driving tgcalls. This sandbox cannot do it (7.5GB
+  disk / 2.4GB RAM / 2 cores — verified 2026-09-26). Revisit only if a
+  beefier builder is available and we have a reason to diverge from
+  the prebuilt releases.
 
 **Out of this slice (→ C2b/C2c).** Wiring signaling to TDLib
 (`sendCallSignalingData` ← `signalingDataEmitted`,
