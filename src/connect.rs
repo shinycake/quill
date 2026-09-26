@@ -26,14 +26,15 @@ use crate::telegram::requests::{
     check_authentication_code, check_authentication_password, click_chat_sponsored_message,
     close_chat, close_request, delete_messages, download_file as download_file_request,
     edit_message_caption, edit_message_text, forward_messages, get_authorization_state,
-    get_chat_history, get_chat_sponsored_messages, get_installed_sticker_sets,
-    get_saved_animations, get_sticker_set, input_message_photo, input_message_video, load_chats,
-    open_chat, open_message_content, pin_chat_message, remove_message_reaction,
-    report_chat_sponsored_message, search_chat_messages, search_chats, search_messages,
-    search_recently_found_chats, send_animation, send_chat_action, send_chat_action_kind,
-    send_document, send_message_album, send_photo, send_sticker, send_text, send_video,
-    send_video_note, send_voice_note, set_authentication_phone_number, set_chat_draft_message,
-    set_chat_notification_settings, unpin_chat_message, view_messages, view_sponsored_chat,
+    get_chat_history, get_chat_member, get_chat_sponsored_messages, get_installed_sticker_sets,
+    get_me, get_saved_animations, get_sticker_set, input_message_photo, input_message_video,
+    join_chat, leave_chat, load_chats, open_chat, open_message_content, pin_chat_message,
+    remove_message_reaction, report_chat_sponsored_message, search_chat_messages, search_chats,
+    search_messages, search_recently_found_chats, send_animation, send_chat_action,
+    send_chat_action_kind, send_document, send_message_album, send_photo, send_sticker, send_text,
+    send_video, send_video_note, send_voice_note, set_authentication_phone_number,
+    set_chat_draft_message, set_chat_notification_settings, unpin_chat_message, view_messages,
+    view_sponsored_chat,
 };
 use crate::voice::VoiceDraft;
 use std::path::Path;
@@ -421,6 +422,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         );
         self.session.apply(owned);
         self.maybe_send_parameters()?;
+        self.maybe_probe_channel_membership()?;
         let became_ready = !was_ready && matches!(self.session.auth, AuthorizationState::Ready);
         if became_ready || load_chats_ok {
             self.maybe_load_main_chats()?;
@@ -479,24 +481,17 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     /// Select a chat, inform TDLib it is open, and request history.
-    /// Returns `None` if history is already complete or the chat is gated.
+    /// Returns `None` if history is already complete or a history request
+    /// is already in flight.
     pub fn select_chat(&mut self, chat_id: ChatId) -> Result<Option<RequestId>, ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
         if self.session.open_chat == Some(chat_id) {
-            let gated = !self
-                .session
-                .chats
-                .get(&chat_id.0)
-                .is_some_and(|chat| chat.supported());
+            self.maybe_probe_channel_membership()?;
             self.maybe_view_open_messages()?;
             self.maybe_download_open_thumbs()?;
             self.fetch_sponsored_messages(chat_id)?;
-            if gated {
-                // Gated channels fetch sponsored rows only; no history/open.
-                return Ok(None);
-            }
             return self.fetch_history();
         }
         self.cancel_outgoing_typing()?;
@@ -504,21 +499,105 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.draft_clock = DraftSaveClock::idle();
         self.pending_draft = None;
         self.session.open_chat(chat_id);
+        // Channels are ungated since Phase 2.2: they follow the normal
+        // openChat / history path; sponsored rows fetch for every channel.
+        self.send_open_chat(chat_id)?;
+        self.maybe_probe_channel_membership()?;
+        self.maybe_view_open_messages()?;
+        self.maybe_download_open_thumbs()?;
+        self.fetch_sponsored_messages(chat_id)?;
+        self.fetch_history()
+    }
+
+    /// Own membership probe for the open broadcast channel: `getMe` once, then
+    /// `getChatMember`. Drives the composer gate and the join/leave affordance
+    /// (`ChannelMemberStatus`). No-op for non-channels.
+    fn maybe_probe_channel_membership(&mut self) -> Result<(), ConnectSendError> {
+        if !self.chats_path_active() {
+            return Ok(());
+        }
+        let Some(chat_id) = self.session.open_chat else {
+            return Ok(());
+        };
         if !self
             .session
             .chats
             .get(&chat_id.0)
-            .is_some_and(|chat| chat.supported())
+            .is_some_and(|chat| chat.is_channel())
         {
-            // Channels stay gated until Phase 2.2, but the sponsored-message
-            // pipeline already runs: fetch rows for the open channel.
-            self.fetch_sponsored_messages(chat_id)?;
-            return Ok(None);
+            return Ok(());
         }
-        self.send_open_chat(chat_id)?;
-        self.maybe_view_open_messages()?;
-        self.maybe_download_open_thumbs()?;
-        self.fetch_history()
+        let Some(my_id) = self.session.my_user_id else {
+            if self.session.requests.has_purpose(RequestPurpose::GetMe) {
+                return Ok(());
+            }
+            let extra = self.session.request(RequestPurpose::GetMe, None);
+            return self
+                .sender
+                .send_json(&get_me(extra))
+                .map(|_| ())
+                .inspect_err(|_| {
+                    self.session.requests.take(extra);
+                });
+        };
+        if self
+            .session
+            .chats
+            .get(&chat_id.0)
+            .is_some_and(|chat| chat.my_member_status.is_some())
+        {
+            return Ok(());
+        }
+        if self
+            .session
+            .requests
+            .has_purpose_for_chat(RequestPurpose::GetChatMember, chat_id)
+        {
+            return Ok(());
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::GetChatMember, Some(chat_id));
+        if let Err(err) = self
+            .sender
+            .send_json(&get_chat_member(extra, chat_id, my_id))
+        {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(())
+    }
+
+    /// `joinChat` for a public channel. Own membership updates arrive via
+    /// `updateChatMember`; the response also flips status optimistically.
+    pub fn join_channel(&mut self, chat_id: ChatId) -> Result<(), ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::JoinChat, Some(chat_id));
+        if let Err(err) = self.sender.send_json(&join_chat(extra, chat_id)) {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(())
+    }
+
+    /// `leaveChat` for a channel. Own membership updates arrive via
+    /// `updateChatMember`; the `ok` response flips status optimistically.
+    pub fn leave_channel(&mut self, chat_id: ChatId) -> Result<(), ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::LeaveChat, Some(chat_id));
+        if let Err(err) = self.sender.send_json(&leave_chat(extra, chat_id)) {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(())
     }
 
     /// Composer edit in a private chat. `delayed` follows tdesktop `saveDraft(true)`
@@ -836,9 +915,9 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// `getChatSponsoredMessages` for a channel chat (TDLib 1.8.67). Called
     /// when a channel is opened; rows render Sponsored / Recommended.
-    /// Channels stay gated until Phase 2.2 — the fetch already runs so the
-    /// pipeline is proven with replay fixtures. Bot chats can also carry
-    /// sponsored messages per the schema; they are not fetched yet (2.2+).
+    /// The fetch already runs so the pipeline is proven with replay
+    /// fixtures. Bot chats can also carry sponsored messages per the
+    /// schema; they are not fetched yet (Phase 3).
     pub fn fetch_sponsored_messages(
         &mut self,
         chat_id: ChatId,
@@ -1176,12 +1255,14 @@ impl<S: JsonSender> ConnectDriver<S> {
             return self.send_album_snapshot(snapshot);
         }
         let chat_id = snapshot.chat_id();
-        let supported = self
+        // Phase 2.2: the composer stays hidden in channels (`can_post`); the
+        // driver rejects channel sends too. Admin posting lands in 2.3.
+        let can_post = self
             .session
             .chats
             .get(&chat_id.0)
-            .is_some_and(|chat| chat.supported());
-        if !supported {
+            .is_some_and(|chat| chat.can_post());
+        if !can_post {
             return Err(ConnectSendError::InvalidRequest);
         }
         let caption = snapshot.caption();
@@ -3035,20 +3116,20 @@ mod tests {
         assert!(send_json.contains(&format!("\"@extra\":\"{}\"", send_extra.0)));
         assert!(!sink.rendered().contains("CANARY_SEND"));
 
-        let gated = copy_and_parse(
+        let channel_no_post = copy_and_parse(
             r#"{"@type":"updateNewChat","chat":{"id":8,"title":"News","type":{"@type":"chatTypeSupergroup","supergroup_id":8,"is_channel":true},"unread_count":0}}"#,
             &seq,
             &dyn_sink,
         )
         .unwrap();
-        driver.ingest(gated).unwrap();
-        let gated_snap = crate::composer::ComposerSnapshot::capture(
+        driver.ingest(channel_no_post).unwrap();
+        let channel_snap = crate::composer::ComposerSnapshot::capture(
             ChatId(8),
             driver.session.view_generation,
             "nope",
         );
         assert_eq!(
-            driver.send_text_snapshot(&gated_snap),
+            driver.send_text_snapshot(&channel_snap),
             Err(ConnectSendError::InvalidRequest)
         );
         assert!(!sink.rendered().contains("CANARY_SEND"));

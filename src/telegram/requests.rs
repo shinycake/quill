@@ -235,6 +235,49 @@ pub fn close_chat(extra: RequestId, chat_id: ChatId) -> String {
     .to_string()
 }
 
+/// `getMe` (TDLib 1.8.67). Sent once so `getChatMember` can resolve the
+/// current user; only the response id is kept.
+pub fn get_me(extra: RequestId) -> String {
+    json!({
+        "@type": "getMe",
+        "@extra": extra.as_extra(),
+    })
+    .to_string()
+}
+
+/// `getChatMember` for the current user in a channel (TDLib 1.8.67). Response
+/// is `chatMember`.
+pub fn get_chat_member(extra: RequestId, chat_id: ChatId, user_id: i64) -> String {
+    json!({
+        "@type": "getChatMember",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0,
+        "member_id": { "@type": "messageSenderUser", "user_id": user_id },
+    })
+    .to_string()
+}
+
+/// `joinChat` for a public channel (TDLib 1.8.67). Response is
+/// `ChatJoinResult`.
+pub fn join_chat(extra: RequestId, chat_id: ChatId) -> String {
+    json!({
+        "@type": "joinChat",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0,
+    })
+    .to_string()
+}
+
+/// `leaveChat` for a channel (TDLib 1.8.67). Response is `ok`.
+pub fn leave_chat(extra: RequestId, chat_id: ChatId) -> String {
+    json!({
+        "@type": "leaveChat",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0,
+    })
+    .to_string()
+}
+
 /// `getChatSponsoredMessages` (TDLib 1.8.67). For channel chats (and chats
 /// with bots); rows render Sponsored / Recommended per `is_recommended`.
 pub fn get_chat_sponsored_messages(extra: RequestId, chat_id: ChatId) -> String {
@@ -1804,5 +1847,38 @@ mod tests {
         assert_eq!(v["reply_to"]["message_id"], 9);
         assert!(!json.contains("inputMessageVideoNote"));
         assert!(!json.contains("CANARY"));
+    }
+}
+
+#[cfg(test)]
+mod channel_requests_tests {
+    use super::*;
+
+    #[test]
+    fn channel_request_shapes_match_1_8_67() {
+        let me = get_me(RequestId(60));
+        let v: serde_json::Value = serde_json::from_str(&me).unwrap();
+        assert_eq!(v["@type"], "getMe");
+        assert_eq!(v["@extra"], "60");
+
+        let member = get_chat_member(RequestId(61), ChatId(13), 777);
+        let v: serde_json::Value = serde_json::from_str(&member).unwrap();
+        assert_eq!(v["@type"], "getChatMember");
+        assert_eq!(v["@extra"], "61");
+        assert_eq!(v["chat_id"], 13);
+        assert_eq!(v["member_id"]["@type"], "messageSenderUser");
+        assert_eq!(v["member_id"]["user_id"], 777);
+
+        let join = join_chat(RequestId(62), ChatId(13));
+        let v: serde_json::Value = serde_json::from_str(&join).unwrap();
+        assert_eq!(v["@type"], "joinChat");
+        assert_eq!(v["@extra"], "62");
+        assert_eq!(v["chat_id"], 13);
+
+        let leave = leave_chat(RequestId(63), ChatId(13));
+        let v: serde_json::Value = serde_json::from_str(&leave).unwrap();
+        assert_eq!(v["@type"], "leaveChat");
+        assert_eq!(v["@extra"], "63");
+        assert_eq!(v["chat_id"], 13);
     }
 }

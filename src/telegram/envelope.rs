@@ -178,6 +178,22 @@ pub enum EnvelopePayload {
         message_id: MessageId,
         is_pinned: bool,
     },
+    /// `chatMember` — `getChatMember` response for a channel.
+    ChatMember {
+        member: ParsedChatMember,
+    },
+    /// `updateChatMember` — own or peer membership changed; only the
+    /// `new_chat_member` is kept.
+    UpdateChatMember {
+        chat_id: ChatId,
+        member: ParsedChatMember,
+    },
+    /// `user` — `getMe` response; only the id is kept.
+    Me {
+        user_id: i64,
+    },
+    /// `ChatJoinResult` — `joinChat` response.
+    JoinChatResult(ChatJoinResult),
     Unknown(UnknownKind),
 }
 
@@ -267,20 +283,30 @@ impl ChatKind {
     pub fn is_supported_cloud_chat(&self) -> bool {
         match self {
             ChatKind::Private { .. } | ChatKind::BasicGroup { .. } => true,
-            ChatKind::Supergroup { is_channel, .. } => !is_channel,
+            // Phase 2.2: broadcast channels are ungated (sponsored-content
+            // handling landed in 2.1).
+            ChatKind::Supergroup { .. } => true,
             ChatKind::Secret { .. } | ChatKind::Unknown => false,
         }
     }
 
     pub fn gate_reason(&self) -> Option<&'static str> {
         match self {
-            ChatKind::Supergroup {
-                is_channel: true, ..
-            } => Some("Channels are unavailable until sponsored-content handling exists."),
             ChatKind::Secret { .. } => Some("Secret chats are out of scope for this client."),
             ChatKind::Unknown => Some("This conversation type is not supported yet."),
             _ => None,
         }
+    }
+
+    /// `chatTypeSupergroup` with `is_channel: true` (TDLib 1.8.67).
+    pub fn is_channel(&self) -> bool {
+        matches!(
+            self,
+            ChatKind::Supergroup {
+                is_channel: true,
+                ..
+            }
+        )
     }
 }
 
@@ -316,6 +342,56 @@ pub const MUTE_FOREVER_AFTER_SECONDS: i32 = 366 * 86400;
 pub enum MessageSender {
     User { user_id: i64 },
     Chat { chat_id: i64 },
+}
+
+/// Own `chatMemberStatus*` for a broadcast channel (TDLib 1.8.67).
+/// Drives the composer gate (admins post in 2.3) and the join/leave affordance.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChannelMemberStatus {
+    Creator,
+    Administrator,
+    Member,
+    Restricted,
+    Left,
+    Banned,
+    Unknown,
+}
+
+impl ChannelMemberStatus {
+    pub fn is_admin(self) -> bool {
+        matches!(
+            self,
+            ChannelMemberStatus::Creator | ChannelMemberStatus::Administrator
+        )
+    }
+
+    pub fn is_joined(self) -> bool {
+        matches!(
+            self,
+            ChannelMemberStatus::Creator
+                | ChannelMemberStatus::Administrator
+                | ChannelMemberStatus::Member
+        )
+    }
+}
+
+/// Typed `chatMember` (TDLib 1.8.67). Only `member_id` and `status` are kept;
+/// `tag` / `inviter_user_id` / `joined_chat_date` stay out of this slice.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ParsedChatMember {
+    pub member_id: MessageSender,
+    pub status: ChannelMemberStatus,
+}
+
+/// Typed `ChatJoinResult` — `joinChat` response (TDLib 1.8.67: no
+/// invite-link variant exists in this schema). The other variants surface as
+/// a fixed note (no TDLib text).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ChatJoinResult {
+    Success { chat_id: ChatId },
+    RequestSent,
+    GuardBotApprovalRequired,
+    Declined,
 }
 
 /// `draftMessage` text this slice restores. Voice/video/rich drafts are ignored.
@@ -1512,6 +1588,33 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
             message_id: MessageId(int53(value.get("message_id"))?),
             interaction_info: parse_interaction_info(value.get("interaction_info")),
         }),
+        "updateChatMember" => {
+            let member = value
+                .get("new_chat_member")
+                .and_then(|m| parse_chat_member(Some(m)))
+                .ok_or(ParseError::MissingField)?;
+            Ok(EnvelopePayload::UpdateChatMember {
+                chat_id: ChatId(int53(value.get("chat_id"))?),
+                member,
+            })
+        }
+        "chatMember" => {
+            let member = parse_chat_member(Some(&value)).ok_or(ParseError::MissingField)?;
+            Ok(EnvelopePayload::ChatMember { member })
+        }
+        "user" => Ok(EnvelopePayload::Me {
+            user_id: int53(value.get("id"))?,
+        }),
+        "chatJoinResultSuccess" => Ok(EnvelopePayload::JoinChatResult(ChatJoinResult::Success {
+            chat_id: ChatId(int53(value.get("chat_id"))?),
+        })),
+        "chatJoinResultRequestSent" => {
+            Ok(EnvelopePayload::JoinChatResult(ChatJoinResult::RequestSent))
+        }
+        "chatJoinResultGuardBotApprovalRequired" => Ok(EnvelopePayload::JoinChatResult(
+            ChatJoinResult::GuardBotApprovalRequired,
+        )),
+        "chatJoinResultDeclined" => Ok(EnvelopePayload::JoinChatResult(ChatJoinResult::Declined)),
         "updateMessageIsPinned" => Ok(EnvelopePayload::UpdateMessageIsPinned {
             chat_id: ChatId(int53(value.get("chat_id"))?),
             message_id: MessageId(int53(value.get("message_id"))?),
@@ -1660,6 +1763,30 @@ fn parse_message_sender(value: Option<&Value>) -> Result<MessageSender, ParseErr
         }),
         _ => Err(ParseError::MissingField),
     }
+}
+
+/// `chatMemberStatus*` (TDLib 1.8.67). Unknown constructors map to `Unknown`;
+/// the field itself stays required.
+fn parse_channel_member_status(value: Option<&Value>) -> Option<ChannelMemberStatus> {
+    let value = value?;
+    match value.get("@type").and_then(Value::as_str) {
+        Some("chatMemberStatusCreator") => Some(ChannelMemberStatus::Creator),
+        Some("chatMemberStatusAdministrator") => Some(ChannelMemberStatus::Administrator),
+        Some("chatMemberStatusMember") => Some(ChannelMemberStatus::Member),
+        Some("chatMemberStatusRestricted") => Some(ChannelMemberStatus::Restricted),
+        Some("chatMemberStatusLeft") => Some(ChannelMemberStatus::Left),
+        Some("chatMemberStatusBanned") => Some(ChannelMemberStatus::Banned),
+        _ => Some(ChannelMemberStatus::Unknown),
+    }
+}
+
+/// `chatMember` (TDLib 1.8.67). Returns `None` when `member_id` or `status`
+/// is missing or unparseable.
+fn parse_chat_member(value: Option<&Value>) -> Option<ParsedChatMember> {
+    let value = value.filter(|v| !v.is_null())?;
+    let member_id = parse_message_sender(value.get("member_id")).ok()?;
+    let status = parse_channel_member_status(value.get("status"))?;
+    Some(ParsedChatMember { member_id, status })
 }
 
 /// `draftMessage` / `draftMessageContentText`. Other content constructors are
@@ -3950,5 +4077,93 @@ mod tests {
         assert!(message.files.iter().any(|file| file.id == FileId(7)));
         assert!(message.files.iter().any(|file| file.id == FileId(8)));
         assert!(message.files.iter().any(|file| file.id == FileId(9)));
+    }
+}
+
+#[cfg(test)]
+mod channel_envelope_tests {
+    use super::*;
+
+    #[test]
+    fn chat_member_status_constructors_parse() {
+        for (ctor, expected) in [
+            ("chatMemberStatusCreator", ChannelMemberStatus::Creator),
+            (
+                "chatMemberStatusAdministrator",
+                ChannelMemberStatus::Administrator,
+            ),
+            ("chatMemberStatusMember", ChannelMemberStatus::Member),
+            (
+                "chatMemberStatusRestricted",
+                ChannelMemberStatus::Restricted,
+            ),
+            ("chatMemberStatusLeft", ChannelMemberStatus::Left),
+            ("chatMemberStatusBanned", ChannelMemberStatus::Banned),
+        ] {
+            let json = format!(
+                r#"{{"@type":"chatMember","member_id":{{"@type":"messageSenderUser","user_id":777}},"status":{{"@type":"{ctor}"}}}}"#,
+            );
+            let env = parse_envelope(&json).unwrap();
+            match env.payload {
+                EnvelopePayload::ChatMember { member } => {
+                    assert_eq!(member.member_id, MessageSender::User { user_id: 777 });
+                    assert_eq!(member.status, expected);
+                }
+                other => panic!("{other:?}"),
+            }
+        }
+        assert!(ChannelMemberStatus::Creator.is_admin());
+        assert!(ChannelMemberStatus::Administrator.is_admin());
+        assert!(!ChannelMemberStatus::Member.is_admin());
+        assert!(ChannelMemberStatus::Member.is_joined());
+        assert!(!ChannelMemberStatus::Left.is_joined());
+    }
+
+    #[test]
+    fn update_chat_member_keeps_new_member() {
+        let json = r#"{"@type":"updateChatMember","chat_id":13,"actor_user_id":1,"date":1,"invite_link":null,"via_join_request":false,"via_chat_folder_invite_link":false,"old_chat_member":{"@type":"chatMember","member_id":{"@type":"messageSenderUser","user_id":777},"status":{"@type":"chatMemberStatusLeft"}},"new_chat_member":{"@type":"chatMember","member_id":{"@type":"messageSenderUser","user_id":777},"status":{"@type":"chatMemberStatusMember"}}}"#;
+        let env = parse_envelope(json).unwrap();
+        match env.payload {
+            EnvelopePayload::UpdateChatMember { chat_id, member } => {
+                assert_eq!(chat_id, ChatId(13));
+                assert_eq!(member.status, ChannelMemberStatus::Member);
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn join_chat_results_parse_without_invented_variants() {
+        let success = parse_envelope(r#"{"@type":"chatJoinResultSuccess","chat_id":13}"#).unwrap();
+        match success.payload {
+            EnvelopePayload::JoinChatResult(ChatJoinResult::Success { chat_id }) => {
+                assert_eq!(chat_id, ChatId(13));
+            }
+            other => panic!("{other:?}"),
+        }
+        for (ctor, expected) in [
+            ("chatJoinResultRequestSent", ChatJoinResult::RequestSent),
+            (
+                "chatJoinResultGuardBotApprovalRequired",
+                ChatJoinResult::GuardBotApprovalRequired,
+            ),
+            ("chatJoinResultDeclined", ChatJoinResult::Declined),
+        ] {
+            let json = format!(r#"{{"@type":"{ctor}"}}"#);
+            let env = parse_envelope(&json).unwrap();
+            match env.payload {
+                EnvelopePayload::JoinChatResult(result) => assert_eq!(result, expected),
+                other => panic!("{other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn me_response_keeps_id_only() {
+        let env = parse_envelope(r#"{"@type":"user","id":777,"is_bot":false}"#).unwrap();
+        match env.payload {
+            EnvelopePayload::Me { user_id } => assert_eq!(user_id, 777),
+            other => panic!("{other:?}"),
+        }
     }
 }
