@@ -697,8 +697,8 @@ fn formatted_caption(caption: &str) -> Value {
 }
 
 /// Phase B3: self-destruct choice for `inputMessagePhoto` /
-/// `inputMessageVideo` (TDLib 1.8.67, `schema/td_api.tl:6115` /
-/// `:6126` — "private chats only"). TDLib validates the choice at runtime
+/// `inputMessageVideo` (TDLib 1.8.67, `schema/td_api.tl:6117` /
+/// `:6128` — "private chats only"). TDLib validates the choice at runtime
 /// (`MessageSelfDestructType::get_message_self_destruct_type`): the timer
 /// must be 1–60 seconds (`MAX_PRIVATE_MESSAGE_TTL = 60`), and any non-empty
 /// choice in a non-`DialogType::User` chat fails with 400 "Messages can
@@ -906,7 +906,7 @@ pub struct VideoSend {
     pub height: i32,
     pub supports_streaming: bool,
     /// Phase B3: `inputMessageVideo.self_destruct_type` (schema 1.8.67
-    /// line 6126 — private chats only).
+    /// line 6128 — private chats only).
     pub self_destruct: Option<SelfDestructSend>,
 }
 
@@ -1998,7 +1998,7 @@ mod tests {
     }
 
     /// Phase B3: `self_destruct_type` shapes on `inputMessagePhoto` /
-    /// `inputMessageVideo` (schema 1.8.67, lines 5915/5918/6115/6126).
+    /// `inputMessageVideo` (schema 1.8.67, lines 5915/5918/6117/6128).
     #[test]
     fn send_photo_self_destruct_shapes() {
         for (choice, type_name) in [

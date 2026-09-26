@@ -4952,7 +4952,7 @@ mod tests {
     }
 
     /// Phase B3: a self-destructing `messagePhoto` (as it arrives in a
-    /// secret chat — `is_secret` content flag plus the message-level
+    /// 1:1 chat — `is_secret` content flag plus the message-level
     /// `self_destruct_type` / `self_destruct_in`) keeps the timer on the
     /// history row, and the `updateDeleteMessages` TDLib emits when the
     /// timer fires removes the row through the normal delete path.

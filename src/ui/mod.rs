@@ -376,7 +376,7 @@ pub struct QuillApp {
     pending_attachments: Vec<ComposerAttachment>,
     /// Phase B3: the composer's self-destruct choice for photo/video
     /// sends (`inputMessagePhoto`/`inputMessageVideo`
-    /// `self_destruct_type`, schema 1.8.67 lines 6115/6126 — private
+    /// `self_destruct_type`, schema 1.8.67 lines 6117/6128 — private
     /// chats only). Cycles Off → 5s → 30s → 1m → View once via the
     /// picker button; captured into `ComposerSnapshot` at submit time.
     composer_self_destruct: Option<SelfDestructSend>,
@@ -750,7 +750,7 @@ pub enum ScreenshotDemo {
     /// photo, and a pending photo attachment with the composer's timer
     /// picker on 30s. Private chat — not a secret chat — because TDLib
     /// only accepts per-media `self_destruct_type` in
-    /// `chatTypePrivate` chats (schema 1.8.67 lines 6115/6126,
+    /// `chatTypePrivate` chats (schema 1.8.67 lines 6117/6128,
     /// "private chats only").
     ReadySelfDestruct,
 }
@@ -2711,7 +2711,7 @@ impl QuillApp {
     /// Phase B3: whether the self-destruct picker may appear — a private
     /// (1:1 cloud) chat with a photo/video attachment pending, the only
     /// combination TDLib accepts `self_destruct_type` for (schema 1.8.67
-    /// lines 6115/6126 "private chats only"; the driver also strips the
+    /// lines 6117/6128 "private chats only"; the driver also strips the
     /// choice for any other chat kind as defense in depth).
     fn self_destruct_picker_visible(&self) -> bool {
         let session = match self.session() {
@@ -14204,7 +14204,7 @@ fn apply_ready_key_verification(session: &mut Session, sink: &Arc<MemorySink>, s
 /// `messageSelfDestructTypeImmediately` ("view once") photo. Private —
 /// not secret — because TDLib only accepts per-media
 /// `self_destruct_type` in `chatTypePrivate` chats (schema 1.8.67
-/// lines 6115/6126, "private chats only"). Injected demo data.
+/// lines 6117/6128, "private chats only"). Injected demo data.
 fn apply_ready_self_destruct(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
     let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
     let chat_id = 11i64;
@@ -17310,7 +17310,7 @@ fn session_history_row(
     // countdown decays locally against `unix_ms_now()` (same pattern as
     // the Phase A1 slow-mode countdown); TDLib removes the row via
     // `updateDeleteMessages` when the timer fires. The 1-second render
-    // tick (see `maybe_begin_self_destruct_tick`) keeps this fresh.
+    // tick (see `ensure_self_destruct_tick`) keeps this fresh.
     let self_destruct_badge = message.self_destruct_badge(unix_ms_now()).map(|label| {
         div()
             .id(("self-destruct-badge", message.id.0 as u64))

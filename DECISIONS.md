@@ -2121,8 +2121,8 @@ are rough (S < 1 day, M = days, L = week+).
 - **Schema (1.8.67, verified verbatim in `schema/td_api.tl`):**
   `messageSelfDestructTypeTimer self_destruct_time:int32` (:5915) /
   `messageSelfDestructTypeImmediately` (:5918); `inputMessagePhoto` /
-  `inputMessageVideo` carry `self_destruct_type` (:6117/:6128) with the
-  comment "private chats only" (:6115/:6126); `message` carries
+  `inputMessageVideo` carry `self_destruct_type` (:6117/:6128 —
+  "private chats only" per the field comments); `message` carries
   `self_destruct_type` (:3146) and `self_destruct_in` (:3147) in its
   constructor (:3165). `inputMessageText` has **no** self-destruct
   field (:6081) — plain text cannot carry per-message self-destruction,
@@ -2133,8 +2133,10 @@ are rough (S < 1 day, M = days, L = week+).
   only in private chats" unless `dialog_id.get_type() ==
   DialogType::User`; `DialogId.h` lists `User` and `SecretChat` as
   distinct `DialogType` values — so "private chats" means 1:1 **cloud**
-  chats, **not** secret chats (secret chats use their own per-chat TTL
-  mechanism server-side). `MessageSelfDestructType.cpp` validates the
+  chats, **not** secret chats (secret chats likely handle
+  self-destruction through a different mechanism — unverified, no
+  corresponding constructor in the pinned schema — and are out of
+  this slice). `MessageSelfDestructType.cpp` validates the
   timer as 1..=60 (`MAX_PRIVATE_MESSAGE_TTL = 60`, "server-side
   limit"). Consequence: this slice ships for **private chats only**;
   the original "secret chats" assumption in the task brief was wrong
@@ -2180,5 +2182,5 @@ are rough (S < 1 day, M = days, L = week+).
 - **Out of this slice (→ future):** auto-delete timers for regular
   chats (`messageAutoDeleteTime`); screenshot-detection notices;
   secret-chat-specific notification behavior; secret-chat TTL UI
-  (the server-side per-chat timer, a different mechanism from this
-  slice's per-media type).
+  (likely a per-chat timer mechanism distinct from this slice's
+  per-media type — unverified, no constructor in the pinned schema).

@@ -502,7 +502,7 @@ pub struct ComposerSnapshot {
     pub reply_to: Option<ComposerReplyTo>,
     /// Phase B3: self-destruct choice for photo/video sends
     /// (`inputMessagePhoto`/`inputMessageVideo` `self_destruct_type`,
-    /// TDLib 1.8.67 lines 6115/6126 — "private chats only"). Set from the
+    /// TDLib 1.8.67 lines 6117/6128 — "private chats only"). Set from the
     /// composer's timer picker; the driver strips it for non-private chats.
     pub self_destruct: Option<SelfDestructSend>,
 }
