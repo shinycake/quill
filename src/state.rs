@@ -8,12 +8,13 @@ use crate::notify::{self, OsNotification, QueuedNotification};
 use crate::telegram::client::OwnedEnvelope;
 use crate::telegram::envelope::{
     AnimationItem, AuthorizationState, BotCommand, BotInfo, CallbackQueryAnswer,
-    ChannelMemberStatus, ChatAction, ChatDraft, ChatFolderInfo, ChatJoinResult, ChatKind, ChatList,
-    ChatNotificationSettings, ChatPositionUpdate, ConnectionState, EnvelopePayload, ErrorClass,
-    ForumTopic, InlineKeyboard, MessageContent, MessageForwardInfo, MessageInteractionInfo,
-    MessageOrigin, MessageReaction, MessageReplyTo, MessageSender, ParsedChatMember, ParsedFile,
-    ParsedMessage, ParsedUser, Poll, ReportOption, ReportSponsoredResult, SponsoredMessage,
-    StickerFormat, StickerItem, StickerSetInfo,
+    ChannelMemberStatus, ChatAction, ChatActiveStoriesView, ChatDraft, ChatFolderInfo,
+    ChatJoinResult, ChatKind, ChatList, ChatNotificationSettings, ChatPositionUpdate,
+    ConnectionState, EnvelopePayload, ErrorClass, ForumTopic, InlineKeyboard, MessageContent,
+    MessageForwardInfo, MessageInteractionInfo, MessageOrigin, MessageReaction, MessageReplyTo,
+    MessageSender, ParsedChatMember, ParsedFile, ParsedMessage, ParsedStory, ParsedUser, Poll,
+    ReportOption, ReportSponsoredResult, SponsoredMessage, StickerFormat, StickerItem,
+    StickerSetInfo, StoryListView,
 };
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
@@ -140,6 +141,18 @@ pub enum RequestPurpose {
     /// Phase 6: `getSupergroupFullInfo`. Response is `supergroupFullInfo`;
     /// correlated via `PendingRequest::supergroup_id`.
     GetSupergroupFullInfo,
+    /// Phase 9.1: `loadActiveStories` (`storyListMain`). The stories
+    /// arrive as `updateChatActiveStories` updates; feed the story tray.
+    LoadActiveStories,
+    /// Phase 9.1: `getChatActiveStories`. Response is `chatActiveStories`;
+    /// handled like `updateChatActiveStories`.
+    GetChatActiveStories,
+    /// Phase 9.1: `getStory`. Response is `story`; the viewer prefetches
+    /// every story in the tray entry before opening. `Ok` answers of
+    /// `openStory` / `closeStory` need no handling (fire-and-forget).
+    GetStory,
+    OpenStory,
+    CloseStory,
     Close,
     LogOut,
     Other,
@@ -283,6 +296,9 @@ pub struct PendingRequest {
     /// Phase 6: `supergroup_id` for `GetSupergroupFullInfo` requests so the
     /// id-less `supergroupFullInfo` response lands on the right group.
     pub supergroup_id: Option<i64>,
+    /// Phase 9.1: `story_id` for `GetStory` requests so in-flight
+    /// per-story dedupe distinguishes stories of the same chat.
+    pub story_id: Option<i32>,
 }
 
 #[derive(Debug, Default)]
@@ -315,6 +331,7 @@ impl RequestRegistry {
                 forum_topic_id: None,
                 user_id: None,
                 supergroup_id: None,
+                story_id: None,
             },
         );
         id
@@ -342,6 +359,7 @@ impl RequestRegistry {
                 forum_topic_id: None,
                 user_id: None,
                 supergroup_id: None,
+                story_id: None,
             },
         );
         id
@@ -370,6 +388,7 @@ impl RequestRegistry {
                 forum_topic_id: None,
                 user_id: None,
                 supergroup_id: None,
+                story_id: None,
             },
         );
         id
@@ -398,6 +417,7 @@ impl RequestRegistry {
                 forum_topic_id: None,
                 user_id: None,
                 supergroup_id: None,
+                story_id: None,
             },
         );
         id
@@ -424,6 +444,7 @@ impl RequestRegistry {
                 forum_topic_id: None,
                 user_id: None,
                 supergroup_id: None,
+                story_id: None,
             },
         );
         id
@@ -473,6 +494,19 @@ impl RequestRegistry {
         self.pending
             .values()
             .any(|p| p.purpose == purpose && p.supergroup_id == Some(supergroup_id))
+    }
+
+    /// Phase 9.1: an in-flight request for a purpose/chat/story triple
+    /// (`GetStory` prefetch of a chat's stories).
+    pub fn has_purpose_for_story(
+        &self,
+        purpose: RequestPurpose,
+        chat_id: ChatId,
+        story_id: i32,
+    ) -> bool {
+        self.pending.values().any(|p| {
+            p.purpose == purpose && p.chat_id == Some(chat_id) && p.story_id == Some(story_id)
+        })
     }
 
     /// The in-flight request id for a purpose/chat pair (test hook; the live
@@ -1458,6 +1492,18 @@ pub struct Session {
     pub supergroup_full_infos: HashMap<i64, SupergroupFullInfoData>,
     /// Phase 6: the open user / supergroup info panel, if any.
     pub open_info_panel: Option<InfoPanelTarget>,
+    /// Phase 9.1: active stories per chat from `updateChatActiveStories` /
+    /// `getChatActiveStories` (TDLib 1.8.67, `schema/td_api.tl:6776-6783`),
+    /// keyed by chat id. Entries whose `list` is not `Main` (archived or
+    /// not shown in any story list) are dropped on insert.
+    pub story_tray: HashMap<i64, ChatActiveStoriesView>,
+    /// Phase 9.1: full story objects from `getStory` (and `updateStory`
+    /// updates), keyed by `(poster_chat_id, story_id)`. The viewer
+    /// prefetches every story in a tray entry before opening.
+    pub stories: HashMap<(i64, i32), ParsedStory>,
+    /// Phase 9.1: `loadActiveStories(storyListMain)` was issued. A retry is
+    /// allowed (the flag is reset) if the attempt failed.
+    pub stories_active_loaded: bool,
     diagnostics: Arc<dyn DiagnosticSink>,
 }
 
@@ -1549,6 +1595,9 @@ impl Session {
             user_full_infos: HashMap::new(),
             supergroup_full_infos: HashMap::new(),
             open_info_panel: None,
+            story_tray: HashMap::new(),
+            stories: HashMap::new(),
+            stories_active_loaded: false,
             diagnostics,
         }
     }
@@ -1924,6 +1973,22 @@ impl Session {
             EnvelopePayload::UpdateChatFolders { folders } => {
                 // The update carries the full ordered list — replace.
                 self.chat_folders = folders;
+            }
+            EnvelopePayload::UpdateChatActiveStories { active_stories } => {
+                // Phase 9.1: keep the tray entry only for the main story
+                // list; archived / hidden chats drop out of the tray.
+                self.upsert_story_tray_entry(active_stories);
+            }
+            EnvelopePayload::ChatActiveStories { active_stories } => {
+                // Phase 9.1: `getChatActiveStories` answer — refresh the
+                // tray entry (matched by `@extra` in the UI's fetch guard,
+                // but the object itself is authoritative).
+                self.upsert_story_tray_entry(active_stories);
+            }
+            EnvelopePayload::Story { story, files } => {
+                // Phase 9.1: `getStory` response or `updateStory` update.
+                self.remember_files(&files);
+                self.stories.insert((story.poster_chat_id, story.id), story);
             }
             EnvelopePayload::UpdateNewMessage(message) => {
                 // Phase 8.1: decide before upserting; the queue is drained by
@@ -2637,6 +2702,30 @@ impl Session {
         }
     }
 
+    /// Phase 9.1: insert or drop a story-tray entry. Only the main story
+    /// list shows in the tray; archived (`list == Archive`) and hidden
+    /// (`list == None`) chats are removed.
+    fn upsert_story_tray_entry(&mut self, entry: ChatActiveStoriesView) {
+        if entry.list == Some(StoryListView::Main) {
+            self.story_tray.insert(entry.chat_id, entry);
+        } else {
+            self.story_tray.remove(&entry.chat_id);
+        }
+    }
+
+    /// Phase 9.1: tray entries for the story row above the chat list:
+    /// main-list entries only, sorted by `(order, chat_id)` descending
+    /// (schema `chatActiveStories` comment, line 6781).
+    pub fn ordered_story_tray(&self) -> Vec<&ChatActiveStoriesView> {
+        let mut entries: Vec<&ChatActiveStoriesView> = self
+            .story_tray
+            .values()
+            .filter(|entry| entry.list == Some(StoryListView::Main))
+            .collect();
+        entries.sort_by_key(|entry| std::cmp::Reverse((entry.order, entry.chat_id)));
+        entries
+    }
+
     fn upsert_file(&mut self, file: ParsedFile, from_file_update: bool) {
         let idle_incomplete = file.local.is_idle_incomplete();
         if file.local.is_downloading_completed
@@ -3267,6 +3356,22 @@ impl Session {
         let id = self.request(purpose, None);
         if let Some(pending) = self.requests.pending.get_mut(&id.0) {
             pending.supergroup_id = Some(supergroup_id);
+        }
+        id
+    }
+
+    /// Phase 9.1: like `request`, but stamps the chat id and story id for
+    /// `GetStory` correlation and per-story in-flight dedupe
+    /// (`PendingRequest::story_id`).
+    pub fn request_for_story(
+        &mut self,
+        purpose: RequestPurpose,
+        chat_id: ChatId,
+        story_id: i32,
+    ) -> RequestId {
+        let id = self.request(purpose, Some(chat_id));
+        if let Some(pending) = self.requests.pending.get_mut(&id.0) {
+            pending.story_id = Some(story_id);
         }
         id
     }
@@ -6257,5 +6362,119 @@ mod tests {
         );
         assert_eq!(session.search.status, SearchStatus::Failed);
         assert!(session.search.public_chat_ids.is_empty());
+    }
+
+    fn tray_json(chat_id: i64, list: &str, order: i64, max_read: i32, story_ids: &[i32]) -> String {
+        let stories = story_ids
+            .iter()
+            .map(|id| {
+                format!(
+                    r#"{{"@type":"storyInfo","story_id":{id},"date":1,"is_for_close_friends":false,"is_live":false}}"#
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(",");
+        format!(
+            r#"{{"@type":"updateChatActiveStories","active_stories":{{"@type":"chatActiveStories","chat_id":{chat_id},"list":{list},"order":"{order}","can_be_archived":false,"max_read_story_id":{max_read},"stories":[{stories}]}}}}"#
+        )
+    }
+
+    #[test]
+    fn story_tray_keeps_main_entries_sorted_by_order() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &tray_json(11, r#"{"@type":"storyListMain"}"#, 10, 0, &[5]),
+        );
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &tray_json(12, r#"{"@type":"storyListMain"}"#, 30, 5, &[6]),
+        );
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &tray_json(13, r#"{"@type":"storyListArchive"}"#, 50, 0, &[7]),
+        );
+        let tray = session.ordered_story_tray();
+        // Archived entries drop out of the tray.
+        assert_eq!(tray.len(), 2);
+        // Sorted by (order, chat_id) descending (schema line 6781).
+        assert_eq!(tray[0].chat_id, 12);
+        assert_eq!(tray[1].chat_id, 11);
+        assert!(tray[0].has_unread());
+        assert!(tray[1].has_unread());
+    }
+
+    #[test]
+    fn story_tray_update_replaces_and_hides_entries() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &tray_json(11, r#"{"@type":"storyListMain"}"#, 10, 0, &[5]),
+        );
+        assert_eq!(session.ordered_story_tray().len(), 1);
+        // Later update moves the chat to the archive list → tray hides it.
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &tray_json(11, r#"{"@type":"storyListArchive"}"#, 10, 5, &[]),
+        );
+        assert!(session.ordered_story_tray().is_empty());
+        assert!(!session.story_tray.contains_key(&11));
+    }
+
+    #[test]
+    fn get_story_response_lands_in_story_cache() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        let extra = session.request_for_story(RequestPurpose::GetStory, ChatId(11), 5);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"story","@extra":"{}","id":5,"poster_chat_id":11,"date":1,"content":{{"@type":"storyContentUnsupported"}},"caption":{{"@type":"formattedText","text":"CANARY_STORY","entities":[]}}}}"#,
+                extra.0
+            ),
+        );
+        let story = session.stories.get(&(11, 5)).expect("story cached");
+        assert_eq!(story.caption, "CANARY_STORY");
+        assert!(matches!(
+            story.content,
+            crate::telegram::envelope::StoryContentView::Unsupported
+        ));
+    }
+
+    #[test]
+    fn get_story_dedupes_in_flight_per_story() {
+        let (mut session, _sink) = session();
+        let extra1 = session.request_for_story(RequestPurpose::GetStory, ChatId(11), 5);
+        assert!(
+            session
+                .requests
+                .has_purpose_for_story(RequestPurpose::GetStory, ChatId(11), 5)
+        );
+        // Same chat, different story → not suppressed.
+        assert!(
+            !session
+                .requests
+                .has_purpose_for_story(RequestPurpose::GetStory, ChatId(11), 6)
+        );
+        session.requests.take(extra1);
+        assert!(
+            !session
+                .requests
+                .has_purpose_for_story(RequestPurpose::GetStory, ChatId(11), 5)
+        );
     }
 }

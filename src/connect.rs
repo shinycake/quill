@@ -26,19 +26,20 @@ use crate::telegram::requests::{
     AnimationSend, PollSend, SetTdlibParameters, StickerSend, VideoNoteSend,
     VideoNoteThumbnailSend, VideoSend, add_chat_to_list, add_contact, add_message_reaction,
     add_recently_found_chat, check_authentication_code, check_authentication_password,
-    click_chat_sponsored_message, close_chat, close_request, delete_messages,
+    click_chat_sponsored_message, close_chat, close_request, close_story, delete_messages,
     download_file as download_file_request, edit_message_caption, edit_message_text,
-    forward_messages, get_authorization_state, get_callback_query_answer, get_chat_history,
-    get_chat_member, get_chat_sponsored_messages, get_commands, get_contacts, get_forum_topics,
-    get_installed_sticker_sets, get_me, get_saved_animations, get_sticker_set, get_supergroup,
-    get_supergroup_full_info, get_user_full_info, input_message_photo, input_message_video,
-    join_chat, leave_chat, load_chats, load_chats_list, open_chat, open_message_content,
-    pin_chat_message, remove_message_reaction, report_chat_sponsored_message, search_chat_messages,
-    search_chats, search_messages, search_public_chats, search_recently_found_chats,
-    send_animation, send_chat_action, send_chat_action_kind, send_document, send_message_album,
-    send_photo, send_poll, send_sticker, send_text, send_video, send_video_note, send_voice_note,
-    set_authentication_phone_number, set_chat_draft_message, set_chat_notification_settings,
-    set_poll_answer, unpin_chat_message, view_messages, view_sponsored_chat,
+    forward_messages, get_authorization_state, get_callback_query_answer, get_chat_active_stories,
+    get_chat_history, get_chat_member, get_chat_sponsored_messages, get_commands, get_contacts,
+    get_forum_topics, get_installed_sticker_sets, get_me, get_saved_animations, get_sticker_set,
+    get_story, get_supergroup, get_supergroup_full_info, get_user_full_info, input_message_photo,
+    input_message_video, join_chat, leave_chat, load_active_stories, load_chats, load_chats_list,
+    open_chat, open_message_content, open_story, pin_chat_message, remove_message_reaction,
+    report_chat_sponsored_message, search_chat_messages, search_chats, search_messages,
+    search_public_chats, search_recently_found_chats, send_animation, send_chat_action,
+    send_chat_action_kind, send_document, send_message_album, send_photo, send_poll, send_sticker,
+    send_text, send_video, send_video_note, send_voice_note, set_authentication_phone_number,
+    set_chat_draft_message, set_chat_notification_settings, set_poll_answer, unpin_chat_message,
+    view_messages, view_sponsored_chat,
 };
 use crate::voice::VoiceDraft;
 use std::path::Path;
@@ -435,6 +436,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         let became_ready = !was_ready && matches!(self.session.auth, AuthorizationState::Ready);
         if became_ready || load_chats_ok {
             self.maybe_load_main_chats()?;
+        }
+        if became_ready {
+            // Phase 9.1: the story tray needs `updateChatActiveStories`
+            // updates; one `loadActiveStories(storyListMain)` per Ready.
+            self.maybe_load_active_stories()?;
         }
         if view_after {
             self.maybe_view_open_messages()?;
@@ -1597,6 +1603,144 @@ impl<S: JsonSender> ConnectDriver<S> {
             Err(err) => {
                 self.session.requests.take(extra);
                 self.session.gifs.loading = false;
+                Err(err)
+            }
+        }
+    }
+
+    /// Phase 9.1: `loadActiveStories(storyListMain)` once per Ready. The
+    /// loaded stories arrive as `updateChatActiveStories` updates and feed
+    /// the story tray above the chat list.
+    pub fn maybe_load_active_stories(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() || self.session.stories_active_loaded {
+            return Ok(None);
+        }
+        if self
+            .session
+            .requests
+            .has_purpose(RequestPurpose::LoadActiveStories)
+        {
+            return Ok(None);
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::LoadActiveStories, None);
+        match self.sender.send_json(&load_active_stories(extra)) {
+            Ok(()) => {
+                self.session.stories_active_loaded = true;
+                Ok(Some(extra))
+            }
+            Err(err) => {
+                self.session.requests.take(extra);
+                Err(err)
+            }
+        }
+    }
+
+    /// Phase 9.1: refresh one chat's active stories (`getChatActiveStories`).
+    /// The response is `chatActiveStories`, handled like the update.
+    pub fn get_chat_active_stories(
+        &mut self,
+        chat_id: ChatId,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if self
+            .session
+            .requests
+            .has_purpose_for_chat(RequestPurpose::GetChatActiveStories, chat_id)
+        {
+            return Ok(None);
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::GetChatActiveStories, Some(chat_id));
+        match self
+            .sender
+            .send_json(&get_chat_active_stories(extra, chat_id))
+        {
+            Ok(()) => Ok(Some(extra)),
+            Err(err) => {
+                self.session.requests.take(extra);
+                Err(err)
+            }
+        }
+    }
+
+    /// Phase 9.1: fetch one story's full content (`getStory`). Deduped by
+    /// the story cache + in-flight per-story requests; the `story` response
+    /// is authoritative on `(poster_chat_id, id)`.
+    pub fn get_story(
+        &mut self,
+        chat_id: ChatId,
+        story_id: i32,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if self.session.stories.contains_key(&(chat_id.0, story_id))
+            || self.session.requests.has_purpose_for_story(
+                RequestPurpose::GetStory,
+                chat_id,
+                story_id,
+            )
+        {
+            return Ok(None);
+        }
+        let extra = self
+            .session
+            .request_for_story(RequestPurpose::GetStory, chat_id, story_id);
+        match self.sender.send_json(&get_story(extra, chat_id, story_id)) {
+            Ok(()) => Ok(Some(extra)),
+            Err(err) => {
+                self.session.requests.take(extra);
+                Err(err)
+            }
+        }
+    }
+
+    /// Phase 9.1: `openStory` — the user opened a story for viewing.
+    /// Fire-and-forget; the `ok` answer needs no handling.
+    pub fn open_story(
+        &mut self,
+        chat_id: ChatId,
+        story_id: i32,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::OpenStory, Some(chat_id));
+        match self.sender.send_json(&open_story(extra, chat_id, story_id)) {
+            Ok(()) => Ok(Some(extra)),
+            Err(err) => {
+                self.session.requests.take(extra);
+                Err(err)
+            }
+        }
+    }
+
+    /// Phase 9.1: `closeStory` — the user closed a story. Fire-and-forget.
+    pub fn close_story(
+        &mut self,
+        chat_id: ChatId,
+        story_id: i32,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::CloseStory, Some(chat_id));
+        match self
+            .sender
+            .send_json(&close_story(extra, chat_id, story_id))
+        {
+            Ok(()) => Ok(Some(extra)),
+            Err(err) => {
+                self.session.requests.take(extra);
                 Err(err)
             }
         }
@@ -3590,8 +3734,22 @@ mod tests {
         assert!(matches!(driver.session.auth, AuthorizationState::Ready));
 
         let sent = recorder.snapshot();
-        let load = sent.last().expect("loadChats after Ready");
-        assert!(load.contains("\"@type\":\"loadChats\""));
+        // Phase 9.1: `loadActiveStories(storyListMain)` follows `loadChats`
+        // after Ready (feeds the story tray).
+        let types: Vec<&str> = sent
+            .iter()
+            .map(|json| {
+                if json.contains(r#""@type":"loadChats""#) {
+                    "loadChats"
+                } else if json.contains(r#""@type":"loadActiveStories""#) {
+                    "loadActiveStories"
+                } else {
+                    "other"
+                }
+            })
+            .collect();
+        assert_eq!(types, vec!["loadChats", "loadActiveStories"]);
+        let load = &sent[0];
         assert!(load.contains("chatListMain"));
         assert!(load.contains(&format!("\"limit\":{MAIN_CHAT_LOAD_LIMIT}")));
         let load_extra = driver

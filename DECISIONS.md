@@ -1316,3 +1316,70 @@ Research snapshot 2026-09-16, pin recheck **2026-09-17**.
   `hide_notification_previews`; notifying for unknown chats (first message
   of a chat TDLib hasn't announced yet); screenshots (OS chrome, not app
   UI — no `--screenshot-demo` marker for this slice).
+
+## Phase 9.1 — Story viewing (2026-09-26)
+
+- **Rationale:** Telegram's tdesktop shows an active-stories tray above the
+  chat list and opens a fullscreen story viewer on tap. This slice brings
+  that to Quill: tray, fullscreen viewer, read state — all read-only
+  viewing. Posting stays out (per the roadmap).
+- **Schema (1.8.67, verified in `schema/td_api.tl` — no invented
+  constructors/fields):** `storyVideo … thumbnail:thumbnail … video:file
+  = StoryVideo` (line 6633); `storyContentPhoto photo:photo = StoryContent`
+  (line 6654); `storyContentVideo video:storyVideo
+  alternative_video:storyVideo = StoryContent` (line 6657);
+  `storyContentLive … = StoryContent` (line 6662);
+  `storyContentUnsupported = StoryContent` (line 6665);
+  `storyListMain = StoryList` / `storyListArchive = StoryList` (lines
+  6687/6690); `story … content:StoryContent … caption:formattedText …
+  = Story` (line 6742); `storyInfo story_id:int32 date:int32
+  is_for_close_friends:Bool is_live:Bool = StoryInfo` (line 6773);
+  `chatActiveStories chat_id:int53 list:StoryList order:int53
+  can_be_archived:Bool max_read_story_id:int32 stories:vector<storyInfo>
+  = ChatActiveStories` (line 6783); `updateStory story:story = Update`
+  (line 10895); `updateChatActiveStories active_stories:chatActiveStories
+  = Update` (line 10911); `getStory story_poster_chat_id:int53
+  story_id:int32 only_local:Bool = Story` (line 13695);
+  `loadActiveStories story_list:StoryList = Ok` (line 13762);
+  `getChatActiveStories chat_id:int53 = ChatActiveStories` (line 13768);
+  `openStory story_poster_chat_id:int53 story_id:int32 = Ok` (line 13794);
+  `closeStory story_poster_chat_id:int53 story_id:int32 = Ok` (line 13799).
+  There is **no** `viewStories` in this schema — viewing is
+  `openStory`/`closeStory` pairs, and TDLib derives read state from
+  `chatActiveStories.max_read_story_id`.
+- **Kept / dropped (parser, `src/telegram/envelope.rs`).** Kept: ids, date,
+  media files, caption/entities, tray order and read state. Dropped:
+  `alternative_video`; story flags, privacy, reactions/interactions, repost
+  info, clickable areas, and albums. Photo stories keep all `photoSize`
+  files; video keeps the primary `storyVideo`, its thumbnail, duration, and
+  video file; live and unknown content degrade to a placeholder.
+- **Tray (`Session::story_tray`, `ordered_story_tray`).** `updateChatActiveStories`
+  / `chatActiveStories` responses upsert main-list entries; archive-list or
+  null-list entries remove the tray row (no archive tray UI this slice).
+  Sorted by `(order, chat_id)` descending (schema comment, line 6781).
+  Unread = any `story_id > max_read_story_id` (accent ring); else a muted
+  ring. The tray shows all main-list posters (primarily contacts).
+- **Driver (`src/connect.rs`).** `loadActiveStories(storyListMain)` once per
+  Ready (feeds `updateChatActiveStories`); `getChatActiveStories(chat_id)`
+  for a refresh; `getStory` with `only_local: false` for missing story
+  details, deduped per `(chat_id, story_id)` in-flight
+  (`PendingRequest::story_id`); `openStory`/`closeStory` are fire-and-forget
+  (`ok` answers need no handling).
+- **Viewer (`src/story_viewer.rs` + UI overlay).** Pure state machine
+  modeled on the Phase 4.5 media viewer (`StoryViewer::open/close/prev/next`,
+  clamped index, `position()`). Items are collected in
+  `chatActiveStories.stories` chronological order. Photo shows the largest
+  size; video shows the `storyVideo` thumbnail (the full clip is not
+  renderable by the `img` element — same call as Phase 4.5; if no thumbnail
+  exists, the clip downloads but the item shows a placeholder); live and
+  unsupported stories stay placeholders. Tapping a tray entry prefetches
+  missing `getStory` details and opens on the latest story; a click while
+  the `story` response is in flight defers to `pending_story_open`,
+  resolved on the next render. The fullscreen overlay is modeled on
+  `media_viewer_overlay`: dark backdrop, poster name + "Story N of M",
+  caption, Prev/Next/Close; Escape closes the story viewer before other
+  overlays (`cancel_search`).
+- **Out of this slice (→ future):** posting stories; story reactions and
+  replies; joining/playing live stories; actual video playback (thumbnail
+  only); story albums; story privacy/close-friends management; story
+  interaction/view-count UI; the archive-list tray.

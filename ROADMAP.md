@@ -173,8 +173,11 @@ handling exists.
 
 ## Phase 9 — Stories (stretch)
 
-- **9.1 Story viewing.** `getStory` / story list for contacts; viewer overlay.
-  Posting stays out.
+- **9.1 Story viewing.** ✅ Done (2026-09-26) — `getStory` / story tray for
+  contacts (accent/muted read ring), fullscreen viewer overlay with photo
+  and video-thumbnail rendering, `openStory`/`closeStory` view tracking.
+  Screenshot: `docs/screenshots/ready-stories.png`. Posting, reactions, and
+  replies stay out (→ future).
 
 ## Folded-in backlog (from per-slice "Out of this slice" lists)
 

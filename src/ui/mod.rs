@@ -34,6 +34,7 @@ use quill::state::{
     OutboxReceipt, RequestPurpose, SearchStatus, Session, SponsoredReportFlight,
     outgoing_status_label, unread_badge_text,
 };
+use quill::story_viewer::{StoryViewer, StoryViewerItem, StoryViewerKind, collect_story_items};
 use quill::telegram::client::copy_and_parse;
 use quill::telegram::envelope::{
     AuthorizationState, BotInfo, CallbackQueryAnswer, ChannelMemberStatus, ChatDraft, ChatKind,
@@ -345,6 +346,12 @@ pub struct QuillApp {
     poll_dialog: Option<PollDialog>,
     /// Phase 4.5: fullscreen media viewer (photo/video overlay).
     media_viewer: MediaViewer,
+    /// Phase 9.1: fullscreen story viewer (active-story tray → overlay).
+    story_viewer: StoryViewer,
+    /// Phase 9.1: `(chat_id, story_id)` the user tapped while the story's
+    /// full content was still being fetched; resolved on the next render
+    /// once the `story` response lands in the cache.
+    pending_story_open: Option<(i64, i32)>,
     /// Phase 6: sidebar tab — `true` shows the contacts list instead of
     /// the chat list.
     contacts_tab_open: bool,
@@ -462,6 +469,10 @@ pub enum ScreenshotDemo {
     /// photo chat with the viewer overlay open on the downloaded photo
     /// (Phase 4.5).
     ReadyMediaViewer,
+    /// Story viewer demo (injected, no live Telegram): the story tray above
+    /// the chat list for "Demo chat A"/"Demo chat B" plus the story viewer
+    /// overlay open on Demo chat A's downloaded photo story (Phase 9.1).
+    ReadyStories,
     /// Seek-bar demo (injected, no live Telegram): a voice note playing
     /// with its seek bar mid-track (elapsed advancing via the playback
     /// tick) plus a music track paused with a remembered position, both
@@ -1066,6 +1077,15 @@ impl QuillApp {
                     AuthorizationState::Ready,
                 )
             }
+            Some(ScreenshotDemo::ReadyStories) => {
+                demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
+                (
+                    ConnectUiStatus::DemoReadyChats,
+                    None,
+                    "screenshot demo — story viewer".into(),
+                    AuthorizationState::Ready,
+                )
+            }
             Some(ScreenshotDemo::ReadySeekBars) => {
                 demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
                 (
@@ -1217,6 +1237,8 @@ impl QuillApp {
             spoiler_revealed: HashSet::new(),
             poll_dialog: None,
             media_viewer: MediaViewer::closed(),
+            story_viewer: StoryViewer::closed(),
+            pending_story_open: None,
             contacts_tab_open: false,
             folder_tab: None,
             add_contact_dialog: None,
@@ -1532,6 +1554,17 @@ impl QuillApp {
             // state); the document (203) is not viewer-openable.
             app.open_media_viewer(ChatId(11), MessageId(201), cx);
             app.status_note = "screenshot demo — fullscreen media viewer".into();
+        }
+        if matches!(demo, Some(ScreenshotDemo::ReadyStories)) {
+            if let Some(session) = app.demo_session.as_mut() {
+                app.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_stories(session, &app.demo_sink, &app.demo_seq);
+            }
+            // Phase 9.1: the tray above the chat list shows the seeded
+            // active stories for chats 11/12; the viewer opens on chat 11's
+            // downloaded photo story.
+            app.open_story_viewer(ChatId(11), 5, cx);
+            app.status_note = "screenshot demo — story viewer".into();
         }
         if matches!(demo, Some(ScreenshotDemo::ReadySponsored)) {
             if let Some(session) = app.demo_session.as_mut() {
@@ -2860,6 +2893,12 @@ impl QuillApp {
     }
 
     fn cancel_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // Phase 9.1: the story viewer is the topmost overlay — Escape
+        // closes it before the media viewer.
+        if self.story_viewer.is_open() {
+            self.close_story_viewer(cx);
+            return;
+        }
         if self.media_viewer.is_open() {
             self.close_media_viewer(cx);
             return;
@@ -3340,6 +3379,124 @@ impl QuillApp {
             })
         });
         if !local {
+            self.request_media_download(item.download_file_id, None, cx);
+        }
+    }
+
+    /// Phase 9.1: open the fullscreen story viewer on `(chat_id, story_id)`.
+    /// Missing story details for the chat's active stories are fetched with
+    /// `getStory` first; the clicked story opens once its `story` response
+    /// lands in the cache (`pending_story_open`, resolved on the next
+    /// render). `openStory` marks the current story as viewed.
+    fn open_story_viewer(&mut self, chat_id: ChatId, story_id: i32, cx: &mut Context<Self>) {
+        let missing: Vec<i32> = self
+            .session()
+            .and_then(|session| session.story_tray.get(&chat_id.0))
+            .map(|tray| {
+                tray.stories
+                    .iter()
+                    .map(|info| info.story_id)
+                    .filter(|id| {
+                        !self
+                            .session()
+                            .is_some_and(|s| s.stories.contains_key(&(chat_id.0, *id)))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        if let Some(live) = self.live.as_mut() {
+            for id in missing {
+                let _ = live.driver.get_story(chat_id, id);
+            }
+        } else if !missing.is_empty() {
+            self.status_note = "demo — getStory runs with live TDLib".into();
+        }
+        if !self.rebuild_story_viewer(chat_id, story_id, cx) {
+            self.pending_story_open = Some((chat_id.0, story_id));
+        }
+        cx.notify();
+    }
+
+    /// Build the viewer items for `chat_id`'s cached stories and open on
+    /// `story_id`. Returns `false` when the clicked story is not cached yet.
+    fn rebuild_story_viewer(
+        &mut self,
+        chat_id: ChatId,
+        story_id: i32,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let items: Vec<StoryViewerItem> = self
+            .session()
+            .and_then(|session| {
+                session
+                    .story_tray
+                    .get(&chat_id.0)
+                    .map(|tray| collect_story_items(chat_id, tray, &session.stories))
+            })
+            .unwrap_or_default();
+        let Some(index) = items.iter().position(|item| item.story_id == story_id) else {
+            return false;
+        };
+        self.story_viewer = StoryViewer::open(items, index);
+        if let Some(live) = self.live.as_mut() {
+            let _ = live.driver.open_story(chat_id, story_id);
+        }
+        self.ensure_story_download(cx);
+        true
+    }
+
+    /// Phase 9.1: close the story viewer; `closeStory` marks the current
+    /// story as no longer being viewed.
+    fn close_story_viewer(&mut self, cx: &mut Context<Self>) {
+        if let Some(item) = self.story_viewer.current().cloned() {
+            if let Some(live) = self.live.as_mut() {
+                let _ = live.driver.close_story(item.chat_id, item.story_id);
+            }
+        }
+        self.story_viewer.close();
+        self.pending_story_open = None;
+        cx.notify();
+    }
+
+    fn step_story_viewer(&mut self, delta: i32, cx: &mut Context<Self>) {
+        let prev = self.story_viewer.current().cloned();
+        if delta < 0 {
+            self.story_viewer.prev();
+        } else {
+            self.story_viewer.next();
+        }
+        let next = self.story_viewer.current().cloned();
+        if let (Some(prev), Some(next)) = (prev, next) {
+            if (prev.chat_id, prev.story_id) != (next.chat_id, next.story_id) {
+                if let Some(live) = self.live.as_mut() {
+                    let _ = live.driver.close_story(prev.chat_id, prev.story_id);
+                    let _ = live.driver.open_story(next.chat_id, next.story_id);
+                }
+            }
+        }
+        self.ensure_story_download(cx);
+        cx.notify();
+    }
+
+    /// Trigger `downloadFile` for the current story when no display
+    /// candidate is local yet (photo: largest size; video: thumbnail, else
+    /// the clip itself). Live-only, like `ensure_viewer_download`.
+    fn ensure_story_download(&mut self, cx: &mut Context<Self>) {
+        let Some(item) = self.story_viewer.current().cloned() else {
+            return;
+        };
+        let roots = self.media_display_roots();
+        let local = self.session().is_some_and(|session| {
+            item.display_file_ids.iter().any(|id| {
+                session
+                    .files
+                    .get(&id.0)
+                    .and_then(|file| file.usable_path())
+                    .and_then(|path| sandboxed_display_path(path, &roots))
+                    .is_some()
+            })
+        });
+        if !local && item.download_file_id.0 != 0 {
             self.request_media_download(item.download_file_id, None, cx);
         }
     }
@@ -4602,6 +4759,71 @@ impl QuillApp {
                     })),
             )
             .into_any_element()
+    }
+
+    /// Phase 9.1: tdesktop-style active-stories tray above the chat list.
+    /// Each entry shows the poster's avatar with an unread (accent) or read
+    /// (muted) ring; tapping opens the story viewer on that chat's latest
+    /// story (`getStory` prefetches any missing story details first).
+    fn story_tray(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let entries: Vec<quill::telegram::envelope::ChatActiveStoriesView> = self
+            .session()
+            .map(|s| s.ordered_story_tray().into_iter().cloned().collect())
+            .unwrap_or_default();
+        if entries.is_empty() {
+            return None;
+        }
+        let mut row = div()
+            .id("story-tray")
+            .flex()
+            .flex_row()
+            .flex_wrap()
+            .items_start()
+            .gap_2()
+            .px_3()
+            .py_2();
+        for entry in entries {
+            let unread = entry.has_unread();
+            let chat_id = entry.chat_id;
+            let title = self
+                .session()
+                .and_then(|s| s.chats.get(&chat_id))
+                .map(|chat| chat.title.clone())
+                .unwrap_or_else(|| format!("Chat {chat_id}"));
+            let latest_story = entry
+                .stories
+                .iter()
+                .map(|info| info.story_id)
+                .max()
+                .unwrap_or(0);
+            row = row.child(
+                div()
+                    .id(("story-tray-item", chat_id as u64))
+                    .cursor_pointer()
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .w(px(60.))
+                    .gap_1()
+                    .child(
+                        div()
+                            .rounded_full()
+                            .p(px(2.))
+                            .border_2()
+                            .border_color(if unread {
+                                cx.theme().accent
+                            } else {
+                                cx.theme().border
+                            })
+                            .child(initials_avatar(&title, 40.0)),
+                    )
+                    .child(div().text_xs().max_w(px(60.)).child(title))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.open_story_viewer(ChatId(chat_id), latest_story, cx);
+                    })),
+            );
+        }
+        Some(row.into_any_element())
     }
 
     fn open_chats_tab(&mut self, cx: &mut Context<Self>) {
@@ -6968,6 +7190,203 @@ impl QuillApp {
             )
     }
 
+    /// Phase 9.1: fullscreen story overlay, modeled on
+    /// `media_viewer_overlay`: poster name + "Story N of M" header, the
+    /// photo (video shows its thumbnail; live/unsupported show a
+    /// placeholder), the caption, and Prev / Next / Close controls. The
+    /// backdrop click and Escape (see `cancel_search`) close it.
+    fn story_viewer_overlay(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let item = self
+            .story_viewer
+            .current()
+            .cloned()
+            .unwrap_or_else(|| StoryViewerItem {
+                chat_id: ChatId(0),
+                story_id: 0,
+                kind: StoryViewerKind::Unsupported,
+                display_file_ids: Vec::new(),
+                download_file_id: FileId(0),
+                caption: String::new(),
+                caption_entities: Vec::new(),
+                duration_label: None,
+                is_live: false,
+            });
+        let (position, total) = self.story_viewer.position().unwrap_or((0, 0));
+        let poster = self
+            .session()
+            .and_then(|s| s.chats.get(&item.chat_id.0))
+            .map(|chat| chat.title.clone())
+            .unwrap_or_else(|| format!("Chat {}", item.chat_id.0));
+        let files: HashMap<i32, ParsedFile> =
+            self.session().map(|s| s.files.clone()).unwrap_or_default();
+        let downloading: HashSet<i32> = self
+            .session()
+            .map(|s| s.downloading.clone())
+            .unwrap_or_default();
+        let roots = self.media_display_roots();
+        let path = story_viewer_display_path(&item, &files, &roots);
+        let downloading_now = item
+            .display_file_ids
+            .iter()
+            .chain(std::iter::once(&item.download_file_id))
+            .any(|id| file_is_downloading(*id, &files, &downloading));
+        let kind_label = item.kind.label();
+        let header_label = if total > 1 {
+            format!("{poster} · {kind_label} {position} of {total}")
+        } else {
+            format!("{poster} · {kind_label}")
+        };
+        let visual: AnyElement = if let Some(path) = path {
+            img(path)
+                .id(("story-viewer-img", item.story_id as u64))
+                .w(px(360.))
+                .h(px(640.))
+                .rounded_md()
+                .object_fit(ObjectFit::Contain)
+                .bg(rgb(0x0d1117))
+                .with_fallback(move || {
+                    div()
+                        .w(px(360.))
+                        .h(px(640.))
+                        .rounded_md()
+                        .bg(rgb(0x0d1117))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .text_color(rgb(0xffffff))
+                        .child(format!("{kind_label} — could not render"))
+                        .into_any_element()
+                })
+                .into_any_element()
+        } else {
+            let status = if downloading_now {
+                format!("{kind_label} — downloading…")
+            } else {
+                format!("{kind_label} — not downloaded")
+            };
+            let status = match (&item.duration_label, downloading_now) {
+                (Some(duration), _) => format!("Video · {duration} — {status}"),
+                _ => status,
+            };
+            let status = if matches!(
+                item.kind,
+                StoryViewerKind::Live | StoryViewerKind::Unsupported
+            ) {
+                format!("{kind_label} — not supported in this slice")
+            } else {
+                status
+            };
+            div()
+                .id(("story-viewer-loading", item.story_id as u64))
+                .w(px(360.))
+                .h(px(640.))
+                .rounded_md()
+                .bg(rgb(0x0d1117))
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(div().text_sm().text_color(rgb(0xffffff)).child(status))
+                .into_any_element()
+        };
+        let caption: Option<AnyElement> = (!item.caption.is_empty()).then(|| {
+            rich_text_line(
+                &item.caption,
+                &item.caption_entities,
+                (item.chat_id.0, item.story_id as u64),
+                true,
+                &self.spoiler_revealed,
+                cx,
+            )
+        });
+        div()
+            .id("story-viewer-overlay")
+            .absolute()
+            .top_0()
+            .left_0()
+            .right_0()
+            .bottom_0()
+            .flex()
+            .items_center()
+            .justify_center()
+            .child(
+                div()
+                    .id("story-viewer-backdrop")
+                    .absolute()
+                    .top_0()
+                    .left_0()
+                    .right_0()
+                    .bottom_0()
+                    .bg(rgba(0x000000e6))
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.close_story_viewer(cx);
+                    })),
+            )
+            .child(
+                div()
+                    .id("story-viewer-panel")
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .gap_2()
+                    .p_4()
+                    .max_w(px(480.))
+                    .max_h_full()
+                    .child(
+                        div()
+                            .flex()
+                            .w(px(360.))
+                            .items_center()
+                            .justify_between()
+                            .child(
+                                div()
+                                    .font_semibold()
+                                    .text_color(rgb(0xffffff))
+                                    .child(header_label),
+                            )
+                            .child(
+                                div()
+                                    .id("story-viewer-close")
+                                    .cursor_pointer()
+                                    .px_2()
+                                    .py_1()
+                                    .rounded_md()
+                                    .text_color(rgb(0xffffff))
+                                    .child("Close")
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.close_story_viewer(cx);
+                                    })),
+                            ),
+                    )
+                    .child(visual)
+                    .when_some(caption, |this, caption| {
+                        this.child(div().text_color(rgb(0xffffff)).child(caption))
+                    })
+                    .child(
+                        div()
+                            .flex()
+                            .gap_2()
+                            .child(
+                                Button::new("story-viewer-prev")
+                                    .label("‹ Prev")
+                                    .ghost()
+                                    .disabled(position <= 1)
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.step_story_viewer(-1, cx);
+                                    })),
+                            )
+                            .child(
+                                Button::new("story-viewer-next")
+                                    .label("Next ›")
+                                    .ghost()
+                                    .disabled(position >= total)
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.step_story_viewer(1, cx);
+                                    })),
+                            ),
+                    ),
+            )
+    }
+
     fn forward_picker_panel(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let query = self.forward_search_input.read(cx).value().to_string();
         let draft = self.pending_forward.clone();
@@ -7767,6 +8186,17 @@ impl Render for QuillApp {
             live.driver.session.app_active = window.is_window_active();
         }
         self.flush_notifications(window, cx);
+        // Phase 9.1: resolve a tapped story whose `story` response landed
+        // since the click (`getStory` prefetch finished).
+        if let Some((chat_id, story_id)) = self.pending_story_open {
+            let ready = self
+                .session()
+                .is_some_and(|s| s.stories.contains_key(&(chat_id, story_id)));
+            if ready {
+                self.pending_story_open = None;
+                self.rebuild_story_viewer(ChatId(chat_id), story_id, cx);
+            }
+        }
         // Phase 4.6: push the playback clock into the seek slider entity so
         // the thumb follows elapsed time (the tick has no `&mut Window`).
         self.sync_seek_slider(window, cx);
@@ -7847,6 +8277,10 @@ impl Render for QuillApp {
             ))
             .when(self.media_viewer.is_open(), |this| {
                 this.child(self.media_viewer_overlay(cx))
+            })
+            // Phase 9.1: story viewer overlay above the media viewer.
+            .when(self.story_viewer.is_open(), |this| {
+                this.child(self.story_viewer_overlay(cx))
             })
             // Phase 6: add-contact dialog above everything else.
             .when_some(self.add_contact_dialog_overlay(cx), |this, overlay| {
@@ -9103,6 +9537,11 @@ impl QuillApp {
                 } else {
                     list = list.child(self.folder_tabs(cx));
                     list = list.child(self.sidebar_search_field(cx));
+                    // Phase 9.1: tdesktop-style active-stories tray above the
+                    // chat rows; omitted for the contacts tab.
+                    if let Some(tray) = self.story_tray(cx) {
+                        list = list.child(tray);
+                    }
                     if self.search_is_open() {
                         list = list.child(self.search_results(cx));
                     } else {
@@ -9561,6 +10000,64 @@ fn apply_ready_dice(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU
 /// `ReadySponsored` fixture: open the demo channel (id 13, now ungated) and
 /// inject a `sponsoredMessages` response through the same reducer the live
 /// `getChatSponsoredMessages` path uses — one Sponsored row, one Recommended.
+/// `ReadyStories` fixture (Phase 9.1): active-story tray entries for the two
+/// seeded demo chats plus full story details, all through the normal
+/// reducer — chat 11 "Demo chat A": order 30, `max_read_story_id` 4, stories
+/// 4 (video, read) and 5 (photo, unread); chat 12 "Demo chat B": order 20,
+/// all read (muted ring in the tray). Story media points at the existing
+/// `demo-thumb.png` fixture as completed downloads, so the viewer renders
+/// immediately. The demo opens on chat 11's story 5 ("Photo 2 of 2").
+fn apply_ready_stories(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let photo_file = demo_file_json(91, &demo_thumb_png_path(), true);
+    let video_thumb_file = demo_file_json(92, &demo_thumb_png_path(), true);
+    let video_file = demo_file_json(93, &demo_thumb_png_path(), true);
+    let tray = |chat_id: i64, order: i64, max_read: i32, story_ids: &[i32]| -> String {
+        let stories = story_ids
+            .iter()
+            .map(|id| {
+                format!(
+                    r#"{{"@type":"storyInfo","story_id":{id},"date":1700000000,"is_for_close_friends":false,"is_live":false}}"#
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(",");
+        format!(
+            r#"{{"@type":"updateChatActiveStories","active_stories":{{"@type":"chatActiveStories","chat_id":{chat_id},"list":{{"@type":"storyListMain"}},"order":"{order}","can_be_archived":false,"max_read_story_id":{max_read},"stories":[{stories}]}}}}"#
+        )
+    };
+    let caption = |text: &str| -> String {
+        format!(
+            r#"{{"@type":"formattedText","text":{},"entities":[]}}"#,
+            serde_json::to_string(text).unwrap()
+        )
+    };
+    let photo_story = |id: i32, chat_id: i64, text: &str, file: &str| -> String {
+        format!(
+            r#"{{"@type":"story","id":{id},"poster_chat_id":{chat_id},"date":1700000000,"content":{{"@type":"storyContentPhoto","photo":{{"@type":"photo","has_stickers":false,"sizes":[{{"@type":"photoSize","type":"y","photo":{file},"width":960,"height":1280,"progressive_sizes":[]}}]}}}},"caption":{}}}"#,
+            caption(text),
+        )
+    };
+    let jsons = [
+        tray(11, 30, 4, &[4, 5]),
+        tray(12, 20, 6, &[6]),
+        // Chat 11, story 4: video story with a thumbnail (read).
+        format!(
+            r#"{{"@type":"story","id":4,"poster_chat_id":11,"date":1700000000,"content":{{"@type":"storyContentVideo","video":{{"@type":"storyVideo","duration":9.0,"video":{video_file},"thumbnail":{{"@type":"thumbnail","format":{{"@type":"thumbnailFormatJpeg"}},"width":90,"height":120,"file":{video_thumb_file}}}}},"alternative_video":null}},"caption":{}}}"#,
+            caption("Demo story — the video shows its thumbnail (playback is out of slice)."),
+        ),
+        // Chat 11, story 5: photo story (unread).
+        photo_story(5, 11, "Demo story — full-size photo render.", &photo_file),
+        // Chat 12, story 6: photo story (read).
+        photo_story(6, 12, "Demo chat B story.", &photo_file),
+    ];
+    for json in jsons {
+        if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
+            session.apply(owned);
+        }
+    }
+}
+
 /// The fixture still swaps the history pane for the sponsored rows pane.
 fn apply_ready_sponsored(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
     let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
@@ -12221,6 +12718,19 @@ fn photo_display_path(
 /// history rows (`sandboxed_display_path`).
 fn viewer_display_path(
     item: &MediaViewerItem,
+    files: &HashMap<i32, ParsedFile>,
+    roots: &[PathBuf],
+) -> Option<PathBuf> {
+    item.display_file_ids.iter().find_map(|id| {
+        files
+            .get(&id.0)
+            .and_then(|file| file.usable_path())
+            .and_then(|path| sandboxed_display_path(path, roots))
+    })
+}
+
+fn story_viewer_display_path(
+    item: &StoryViewerItem,
     files: &HashMap<i32, ParsedFile>,
     roots: &[PathBuf],
 ) -> Option<PathBuf> {
