@@ -102,6 +102,9 @@ pub enum EnvelopePayload {
         notification_settings: ChatNotificationSettings,
         /// `chat.draft_message`. Null when the chat has no draft.
         draft: Option<ChatDraft>,
+        /// Parity slice: `chat.photo.small` (`chatPhotoInfo`, schema 1.8.67,
+        /// line 762). `None` when the chat has no photo.
+        photo: Option<ParsedFile>,
     },
     /// `updateChatDraftMessage`. Positions are the new chat-list orders.
     UpdateChatDraftMessage {
@@ -133,6 +136,13 @@ pub enum EnvelopePayload {
         chat_id: ChatId,
         notification_settings: ChatNotificationSettings,
     },
+    /// Parity slice: `updateChatPhoto` (schema 1.8.67, line 10488) — the
+    /// chat's photo changed. `photo` is the new `chatPhotoInfo.small`
+    /// file (`None` when the photo was removed).
+    UpdateChatPhoto {
+        chat_id: ChatId,
+        photo: Option<ParsedFile>,
+    },
     /// `updateChatAction` — peer activity (`chatActionTyping` / `chatActionCancel`).
     UpdateChatAction {
         chat_id: ChatId,
@@ -162,14 +172,18 @@ pub enum EnvelopePayload {
     },
     /// `updateSupergroup` — `supergroup.is_forum` is how Quill learns a
     /// supergroup is a forum (`chatTypeSupergroup` has no forum flag).
+    /// Parity slice: the first active username (`supergroup.usernames`,
+    /// schema 1.8.67 lines 2746/2372) feeds the channel/supergroup header.
     UpdateSupergroup {
         supergroup_id: i64,
         is_forum: bool,
+        username: String,
     },
     /// `supergroup` — `getSupergroup` response.
     Supergroup {
         supergroup_id: i64,
         is_forum: bool,
+        username: String,
     },
     /// `forumTopics` — `getForumTopics` response. Only the first page is
     /// fetched; `next_offset_*` are dropped (see Phase 5.1 DECISIONS).
@@ -262,14 +276,25 @@ pub enum EnvelopePayload {
     },
     /// `supergroupFullInfo` — `getSupergroupFullInfo` response (schema
     /// 1.8.67, line 11513). The response carries no supergroup id; it is
-    /// resolved from the pending request in `Session::apply`. Only what
-    /// the group panel renders is kept — `description` and `member_count`
-    /// (schema 1.8.67, line 2792). Dropped: admin/restricted/banned
+    /// resolved from the pending request in `Session::apply`. Kept:
+    /// `description`, `member_count`, `linked_chat_id` (schema 1.8.67,
+    /// line 2792; the discussion-group chat id for the channel header's
+    /// "Discuss" affordance). Dropped: admin/restricted/banned
     /// counts, slow mode, invite link, sticker sets, boost/gift fields,
-    /// paid-message and statistics flags, linked chats, location.
+    /// paid-message and statistics flags, location.
     SupergroupFullInfo {
         description: String,
         member_count: i32,
+        linked_chat_id: i64,
+    },
+    /// Parity slice: `updateSupergroupFullInfo` (schema 1.8.67, line 10750)
+    /// — the update carries its own `supergroup_id`, so it applies
+    /// whenever it arrives (no pending-request correlation).
+    UpdateSupergroupFullInfo {
+        supergroup_id: i64,
+        description: String,
+        member_count: i32,
+        linked_chat_id: i64,
     },
     /// `botCommands` — `getCommands` response (TDLib 1.8.67,
     /// `schema/td_api.tl:829`): the bot's commands for the requested scope
@@ -2489,6 +2514,11 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
             sender: parse_message_sender(value.get("sender_id"))?,
             action: parse_chat_action(value.get("action")),
         }),
+        // Parity slice: `updateChatPhoto` (schema 1.8.67, line 10488).
+        "updateChatPhoto" => Ok(EnvelopePayload::UpdateChatPhoto {
+            chat_id: ChatId(int53(value.get("chat_id"))?),
+            photo: parse_chat_photo_small(value.get("photo")),
+        }),
         "updateChatDraftMessage" => {
             let chat_id = ChatId(int53(value.get("chat_id"))?);
             Ok(EnvelopePayload::UpdateChatDraftMessage {
@@ -2543,6 +2573,9 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
                     chat.get("notification_settings"),
                 ),
                 draft: parse_chat_draft(chat.get("draft_message")),
+                // Parity slice: `chat.photo.small` (`chatPhotoInfo`, schema
+                // 1.8.67, lines 762 and 3627).
+                photo: parse_chat_photo_small(chat.get("photo")),
             })
         }
         "ok" => Ok(EnvelopePayload::Ok),
@@ -2641,7 +2674,9 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
         }
         // Phase 5.1: `updateSupergroup` (schema line 10738) and the
         // `getSupergroup` response both carry `supergroup.is_forum` (schema
-        // line 2746).
+        // line 2746). Parity slice: also keep the first active username
+        // (`supergroup.usernames`, schema lines 2746/2372) for the
+        // channel/supergroup header.
         "updateSupergroup" => {
             let supergroup = value.get("supergroup").ok_or(ParseError::MissingField)?;
             Ok(EnvelopePayload::UpdateSupergroup {
@@ -2650,6 +2685,7 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
                     .get("is_forum")
                     .and_then(Value::as_bool)
                     .unwrap_or(false),
+                username: parse_first_active_username(supergroup.get("usernames")),
             })
         }
         "supergroup" => Ok(EnvelopePayload::Supergroup {
@@ -2658,6 +2694,7 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
                 .get("is_forum")
                 .and_then(Value::as_bool)
                 .unwrap_or(false),
+            username: parse_first_active_username(value.get("usernames")),
         }),
         // Phase 5.1: `forumTopics` (schema line 3976). Topics keep their
         // response order; the UI sorts by `order` descending per the schema
@@ -2764,6 +2801,32 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
                 .get("member_count")
                 .and_then(Value::as_i64)
                 .unwrap_or(0) as i32,
+            // Parity slice: `linked_chat_id` (schema 1.8.67, line 2792) —
+            // the discussion-group chat id (0 = none).
+            linked_chat_id: int53_or_zero(value.get("linked_chat_id")),
+        }),
+        // Parity slice: `updateSupergroupFullInfo` (schema 1.8.67, line
+        // 10750) — same fields as the `supergroupFullInfo` response, with
+        // an explicit `supergroup_id` so no pending-request correlation
+        // is needed.
+        "updateSupergroupFullInfo" => Ok(EnvelopePayload::UpdateSupergroupFullInfo {
+            supergroup_id: int53(value.get("supergroup_id"))?,
+            description: value
+                .get("supergroup_full_info")
+                .and_then(|info| info.get("description"))
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string(),
+            member_count: value
+                .get("supergroup_full_info")
+                .and_then(|info| info.get("member_count"))
+                .and_then(Value::as_i64)
+                .unwrap_or(0) as i32,
+            linked_chat_id: int53_or_zero(
+                value
+                    .get("supergroup_full_info")
+                    .and_then(|info| info.get("linked_chat_id")),
+            ),
         }),
         "botCommands" => Ok(EnvelopePayload::BotCommands {
             bot_user_id: UserId(int53(value.get("bot_user_id"))?),
@@ -3039,6 +3102,20 @@ fn parse_user_status(value: Option<&Value>) -> UserStatusKind {
     }
 }
 
+/// Parity slice: first entry of `usernames.active_usernames` (schema
+/// 1.8.67, line 2372 — "the first one must be shown as the primary
+/// username"). Null/absent/empty → empty string.
+fn parse_first_active_username(value: Option<&Value>) -> String {
+    value
+        .filter(|v| !v.is_null())
+        .and_then(|u| u.get("active_usernames"))
+        .and_then(Value::as_array)
+        .and_then(|names| names.first())
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string()
+}
+
 /// Phase 6: full `user` parser (schema 1.8.67, line 2403). `None` when the
 /// object carries no id.
 fn parse_user(value: &Value) -> Option<ParsedUser> {
@@ -3053,14 +3130,7 @@ fn parse_user(value: &Value) -> Option<ParsedUser> {
         .and_then(Value::as_str)
         .unwrap_or("")
         .to_string();
-    let username = value
-        .get("usernames")
-        .and_then(|u| u.get("active_usernames"))
-        .and_then(Value::as_array)
-        .and_then(|names| names.first())
-        .and_then(Value::as_str)
-        .unwrap_or("")
-        .to_string();
+    let username = parse_first_active_username(value.get("usernames"));
     let phone_number = value
         .get("phone_number")
         .and_then(Value::as_str)
@@ -4875,6 +4945,15 @@ fn parse_user_full_info_photo(value: &Value) -> Option<ParsedFile> {
     files.into_iter().find(|file| file.id == pick.file_id)
 }
 
+/// Parity slice: the `small` file from a `chatPhotoInfo` (`chat.photo` /
+/// `updateChatPhoto.photo`, schema 1.8.67, lines 762 and 10488). The small
+/// variant is the cheap thumbnail the chat list renders; `big` is not
+/// kept. Null/absent/malformed → `None`.
+fn parse_chat_photo_small(value: Option<&Value>) -> Option<ParsedFile> {
+    let photo = value.filter(|v| !v.is_null())?;
+    parse_file(photo.get("small")).ok()
+}
+
 fn parse_photo_sizes(photo: &Value) -> (Vec<PhotoSizeView>, Vec<ParsedFile>) {
     let mut files = Vec::new();
     let mut sizes = Vec::new();
@@ -5127,9 +5206,32 @@ mod tests {
             EnvelopePayload::UpdateSupergroup {
                 supergroup_id,
                 is_forum,
+                username,
             } => {
                 assert_eq!(supergroup_id, 16);
                 assert!(is_forum);
+                // Parity slice: null `usernames` → empty username.
+                assert_eq!(username, "");
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+
+    #[test]
+    fn update_supergroup_parses_username() {
+        // Parity slice: first active username is kept for the
+        // channel/supergroup header (schema 1.8.67 lines 2746/2372).
+        let json = r#"{"@type":"updateSupergroup","supergroup":{"@type":"supergroup","id":18,"usernames":{"@type":"usernames","active_usernames":["demochannel","backupname"],"disabled_usernames":[],"editable_username":"demochannel","collectible_usernames":[]},"is_forum":false}}"#;
+        let env = parse_envelope(json).unwrap();
+        match env.payload {
+            EnvelopePayload::UpdateSupergroup {
+                supergroup_id,
+                is_forum,
+                username,
+            } => {
+                assert_eq!(supergroup_id, 18);
+                assert!(!is_forum);
+                assert_eq!(username, "demochannel");
             }
             other => panic!("unexpected {other:?}"),
         }
@@ -5143,9 +5245,11 @@ mod tests {
             EnvelopePayload::Supergroup {
                 supergroup_id,
                 is_forum,
+                username,
             } => {
                 assert_eq!(supergroup_id, 17);
                 assert!(!is_forum);
+                assert_eq!(username, "");
             }
             other => panic!("unexpected {other:?}"),
         }
@@ -6901,9 +7005,92 @@ mod channel_envelope_tests {
             EnvelopePayload::SupergroupFullInfo {
                 description,
                 member_count,
+                linked_chat_id,
             } => {
                 assert_eq!(description, "CANARY group description");
                 assert_eq!(member_count, 1234);
+                // Parity slice: no `linked_chat_id` → 0 (no discussion group).
+                assert_eq!(linked_chat_id, 0);
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn supergroup_full_info_parses_linked_chat_id() {
+        // Parity slice: `linked_chat_id` (schema 1.8.67 line 2792) feeds the
+        // channel header's "Discuss" affordance.
+        let env = parse_envelope(
+            r#"{"@type":"supergroupFullInfo","@extra":"5","description":"d","member_count":10,"linked_chat_id":77,"direct_messages_chat_id":0}"#,
+        )
+        .unwrap();
+        match env.payload {
+            EnvelopePayload::SupergroupFullInfo { linked_chat_id, .. } => {
+                assert_eq!(linked_chat_id, 77)
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn update_supergroup_full_info_parsed() {
+        // Parity slice: `updateSupergroupFullInfo` (schema 1.8.67 line
+        // 10750) carries its own `supergroup_id`.
+        let env = parse_envelope(
+            r#"{"@type":"updateSupergroupFullInfo","supergroup_id":13,"supergroup_full_info":{"@type":"supergroupFullInfo","description":"CANARY channel","member_count":12345,"linked_chat_id":14}}"#,
+        )
+        .unwrap();
+        match env.payload {
+            EnvelopePayload::UpdateSupergroupFullInfo {
+                supergroup_id,
+                description,
+                member_count,
+                linked_chat_id,
+            } => {
+                assert_eq!(supergroup_id, 13);
+                assert_eq!(description, "CANARY channel");
+                assert_eq!(member_count, 12345);
+                assert_eq!(linked_chat_id, 14);
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn update_new_chat_parses_photo_small() {
+        // Parity slice: `chat.photo.small` (`chatPhotoInfo`, schema 1.8.67
+        // lines 762/3627) is kept for the chat-list avatar.
+        let json = r#"{"@type":"updateNewChat","chat":{"id":11,"title":"Demo","type":{"@type":"chatTypePrivate","user_id":11},"unread_count":0,"photo":{"@type":"chatPhotoInfo","small":{"@type":"file","id":91,"size":24,"expected_size":24,"local":{"@type":"localFile","path":"","can_be_downloaded":true,"can_be_deleted":false,"is_downloading_active":false,"is_downloading_completed":false,"download_offset":0,"downloaded_prefix_size":0,"downloaded_size":0},"remote":{"@type":"remoteFile","id":"x","unique_id":"u","is_uploading_active":false,"is_uploading_completed":false,"uploaded_size":0}},"big":{"@type":"file","id":92,"size":0,"expected_size":0,"local":{"@type":"localFile","path":"","can_be_downloaded":true,"can_be_deleted":false,"is_downloading_active":false,"is_downloading_completed":false,"download_offset":0,"downloaded_prefix_size":0,"downloaded_size":0},"remote":{"@type":"remoteFile","id":"x","unique_id":"u","is_uploading_active":false,"is_uploading_completed":false,"uploaded_size":0}},"minithumbnail":null,"has_animation":false,"is_personal":false}}}"#;
+        let env = parse_envelope(json).unwrap();
+        match env.payload {
+            EnvelopePayload::UpdateNewChat { chat_id, photo, .. } => {
+                assert_eq!(chat_id.0, 11);
+                let file = photo.expect("chat photo");
+                assert_eq!(file.id.0, 91);
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn update_new_chat_without_photo_has_none() {
+        let json = r#"{"@type":"updateNewChat","chat":{"id":11,"title":"Demo","type":{"@type":"chatTypePrivate","user_id":11},"unread_count":0,"photo":null}}"#;
+        let env = parse_envelope(json).unwrap();
+        match env.payload {
+            EnvelopePayload::UpdateNewChat { photo, .. } => assert!(photo.is_none()),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn update_chat_photo_parsed() {
+        // Parity slice: `updateChatPhoto` (schema 1.8.67 line 10488).
+        let json = r#"{"@type":"updateChatPhoto","chat_id":11,"photo":{"@type":"chatPhotoInfo","small":{"@type":"file","id":93,"size":24,"expected_size":24,"local":{"@type":"localFile","path":"","can_be_downloaded":true,"can_be_deleted":false,"is_downloading_active":false,"is_downloading_completed":false,"download_offset":0,"downloaded_prefix_size":0,"downloaded_size":0},"remote":{"@type":"remoteFile","id":"x","unique_id":"u","is_uploading_active":false,"is_uploading_completed":false,"uploaded_size":0}},"big":{"@type":"file","id":94,"size":0,"expected_size":0,"local":{"@type":"localFile","path":"","can_be_downloaded":true,"can_be_deleted":false,"is_downloading_active":false,"is_downloading_completed":false,"download_offset":0,"downloaded_prefix_size":0,"downloaded_size":0},"remote":{"@type":"remoteFile","id":"x","unique_id":"u","is_uploading_active":false,"is_uploading_completed":false,"uploaded_size":0}},"minithumbnail":null,"has_animation":false,"is_personal":false}}"#;
+        let env = parse_envelope(json).unwrap();
+        match env.payload {
+            EnvelopePayload::UpdateChatPhoto { chat_id, photo } => {
+                assert_eq!(chat_id.0, 11);
+                assert_eq!(photo.map(|f| f.id.0), Some(93));
             }
             other => panic!("{other:?}"),
         }

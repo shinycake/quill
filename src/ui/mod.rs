@@ -565,6 +565,13 @@ pub enum ScreenshotDemo {
     /// Parity slice: folder manage dialog over the ReadyFolders fixture
     /// (injected, no live Telegram).
     ReadyFoldersManage,
+    /// Parity slice: chat-list avatars (injected, no live Telegram) — the
+    /// chat list mixes photo avatars (private chat A, the demo channel)
+    /// and colored-initial fallbacks (private chat B, a basic group, the
+    /// discussion supergroup); the demo channel (id 13) is open with its
+    /// header photo, @username, subscriber count, description snippet, and
+    /// a "Discuss" link to the injected discussion group (id 16).
+    ReadyChatAvatars,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -594,6 +601,18 @@ struct SeekBarView {
     duration_secs: f64,
     /// True while the active row's player is actually running (vs paused).
     is_playing: bool,
+}
+
+/// Parity slice: data for the channel/supergroup conversation header —
+/// photo, description snippet, primary @username, subscriber/member count,
+/// and the linked discussion chat id (`linked_chat_id`, 0 = none).
+struct SupergroupHeaderExtras {
+    is_channel: bool,
+    photo: Option<PathBuf>,
+    username: Option<String>,
+    member_count: Option<i32>,
+    description_snippet: Option<String>,
+    discussion_chat_id: Option<i64>,
 }
 
 impl SeekBarView {
@@ -1203,6 +1222,18 @@ impl QuillApp {
                     AuthorizationState::Ready,
                 )
             }
+            // Parity slice: chat-list avatars + channel header extras
+            // (injected, no live Telegram).
+            Some(ScreenshotDemo::ReadyChatAvatars) => {
+                demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
+                (
+                    ConnectUiStatus::DemoReadyChats,
+                    None,
+                    "screenshot demo — chat avatars & channel header (injected, no live Telegram)"
+                        .into(),
+                    AuthorizationState::Ready,
+                )
+            }
             None => bootstrap_connect(credentials),
         };
 
@@ -1560,6 +1591,14 @@ impl QuillApp {
             // Open the manage dialog over the folder fixture.
             app.folder_manage_open = true;
             app.status_note = "screenshot demo — folder management dialog".into();
+        }
+        // Parity slice: chat-list avatars + channel header extras fixture.
+        if matches!(demo, Some(ScreenshotDemo::ReadyChatAvatars)) {
+            if let Some(session) = app.demo_session.as_mut() {
+                app.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_chat_avatars(session, &app.demo_sink, &app.demo_seq);
+            }
+            app.status_note = "chat avatars & channel header".into();
         }
         if matches!(demo, Some(ScreenshotDemo::ReadyVideoSend)) {
             app.composer.update(cx, |input, cx| {
@@ -5347,16 +5386,23 @@ impl QuillApp {
     /// Supergroup/channel panel: title, member count, description.
     fn supergroup_info_panel(&self, supergroup_id: i64, cx: &mut Context<Self>) -> AnyElement {
         let session = self.session();
-        let title = session
+        let (title, chat_id, is_channel) = session
             .and_then(|s| {
                 s.chats.values().find_map(|chat| match chat.kind {
                     ChatKind::Supergroup {
-                        supergroup_id: id, ..
-                    } if id == supergroup_id => Some(chat.title.clone()),
+                        supergroup_id: id,
+                        is_channel,
+                    } if id == supergroup_id => Some((chat.title.clone(), chat.id, is_channel)),
                     _ => None,
                 })
             })
-            .unwrap_or_else(|| format!("Group {supergroup_id}"));
+            .unwrap_or_else(|| {
+                (
+                    format!("Group {supergroup_id}"),
+                    ChatId(supergroup_id),
+                    false,
+                )
+            });
         let info = session
             .and_then(|s| s.supergroup_full_infos.get(&supergroup_id))
             .cloned();
@@ -5364,14 +5410,25 @@ impl QuillApp {
             .as_ref()
             .map(|i| i.description.clone())
             .unwrap_or_default();
-        let members = info.map(|i| i.member_count).unwrap_or(0);
+        let members = info.as_ref().map(|i| i.member_count).unwrap_or(0);
+        let username = session
+            .and_then(|s| s.supergroup_username(supergroup_id))
+            .filter(|name| !name.is_empty())
+            .map(|name| name.to_string());
+        // Parity slice: the panel avatar reuses the chat-list avatar (photo
+        // or colored initials).
+        let roots = self.media_display_roots();
+        let photo = session
+            .and_then(|s| s.chat_photo_path(chat_id))
+            .and_then(|path| sandboxed_display_path(path, &roots));
+        let noun = if is_channel { "subscribers" } else { "members" };
         let mut body = div()
             .flex()
             .flex_col()
             .items_center()
             .gap_3()
             .p_4()
-            .child(initials_avatar(&title, 96.))
+            .child(chat_avatar(&title, chat_id.0, photo.as_deref(), 96.))
             .child(
                 div()
                     .flex()
@@ -5384,11 +5441,19 @@ impl QuillApp {
                             .text_sm()
                             .text_color(cx.theme().muted_foreground)
                             .child(if members > 0 {
-                                format!("{members} members")
+                                format!("{} {noun}", compact_count(members))
                             } else {
-                                "members unknown".to_string()
+                                format!("{noun} unknown")
                             }),
-                    ),
+                    )
+                    .when_some(username, |this, name| {
+                        this.child(
+                            div()
+                                .text_sm()
+                                .text_color(cx.theme().muted_foreground)
+                                .child(format!("@{name}")),
+                        )
+                    }),
             );
         if !description.is_empty() {
             body = body.child(
@@ -7016,23 +7081,171 @@ impl QuillApp {
             self.session()
                 .and_then(|s| s.info_panel_target_for_chat(chat_id))
         });
-        let title_div = div().font_semibold().child(title.to_string());
-        let title_div = match info_target {
-            Some(InfoPanelTarget::User(user_id)) => title_div
-                .id("conversation-title")
-                .cursor_pointer()
-                .on_click(cx.listener(move |this, _, window, cx| {
-                    this.open_user_panel(user_id, window, cx);
-                }))
+        // Parity slice: channel/supergroup header extras — photo,
+        // description snippet, primary @username, subscriber/member count,
+        // and the linked discussion chat ("Discuss").
+        let extras: Option<SupergroupHeaderExtras> = actions.and_then(|(chat_id, _, _, _)| {
+            let session = self.session()?;
+            let chat = session.chats.get(&chat_id.0)?;
+            let (supergroup_id, is_channel) = match chat.kind {
+                ChatKind::Supergroup {
+                    supergroup_id,
+                    is_channel,
+                } => (supergroup_id, is_channel),
+                _ => return None,
+            };
+            let full = session.supergroup_full_infos.get(&supergroup_id).cloned();
+            let roots = self.media_display_roots();
+            let photo = session
+                .chat_photo_path(chat_id)
+                .and_then(|path| sandboxed_display_path(path, &roots));
+            let username = session
+                .supergroup_username(supergroup_id)
+                .filter(|name| !name.is_empty())
+                .map(|name| name.to_string());
+            Some(SupergroupHeaderExtras {
+                is_channel,
+                photo,
+                username,
+                member_count: full.as_ref().map(|info| info.member_count),
+                description_snippet: full.as_ref().and_then(|info| {
+                    let snippet = description_snippet(&info.description, 120);
+                    (!snippet.is_empty()).then_some(snippet)
+                }),
+                discussion_chat_id: session.discussion_chat_id(chat_id),
+            })
+        });
+        let discuss_chat_id = extras.as_ref().and_then(|ex| ex.discussion_chat_id);
+        let title_text = title.to_string();
+        let muted_fg = cx.theme().muted_foreground;
+        // Status lines kept for every chat kind (typing / muted).
+        let identity: AnyElement = match (info_target, extras) {
+            (Some(InfoPanelTarget::Supergroup(supergroup_id)), Some(ex)) => {
+                let mut meta: Vec<String> = Vec::new();
+                if let Some(username) = &ex.username {
+                    meta.push(format!("@{username}"));
+                }
+                if let Some(count) = ex.member_count.filter(|count| *count > 0) {
+                    let noun = if ex.is_channel {
+                        "subscribers"
+                    } else {
+                        "members"
+                    };
+                    meta.push(format!("{} {noun}", compact_count(count)));
+                }
+                let meta_line = meta.join(" · ");
+                div()
+                    .id("conversation-identity")
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .min_w_0()
+                    .cursor_pointer()
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.open_supergroup_panel(supergroup_id, window, cx);
+                    }))
+                    .child(chat_avatar(
+                        &title_text,
+                        chat_id.0,
+                        ex.photo.as_deref(),
+                        40.,
+                    ))
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .min_w_0()
+                            .child(div().font_semibold().child(title_text))
+                            .when(!meta_line.is_empty(), |this| {
+                                this.child(
+                                    div()
+                                        .id("conversation-meta")
+                                        .text_xs()
+                                        .text_color(muted_fg)
+                                        .child(meta_line),
+                                )
+                            })
+                            .when_some(ex.description_snippet, |this, snippet| {
+                                this.child(
+                                    div()
+                                        .id("conversation-description")
+                                        .text_xs()
+                                        .text_color(muted_fg)
+                                        .child(snippet),
+                                )
+                            })
+                            .when(typing, |this| {
+                                this.child(
+                                    div()
+                                        .id("peer-typing")
+                                        .text_sm()
+                                        .text_color(cx.theme().accent)
+                                        .child("typing…"),
+                                )
+                            })
+                            .when(muted && !typing, |this| {
+                                this.child(div().text_xs().text_color(muted_fg).child(if forever {
+                                    "Muted forever"
+                                } else {
+                                    "Muted"
+                                }))
+                            }),
+                    )
+                    .into_any_element()
+            }
+            (Some(InfoPanelTarget::User(user_id)), _) => div()
+                .flex()
+                .flex_col()
+                .min_w_0()
+                .child(
+                    div()
+                        .id("conversation-title")
+                        .font_semibold()
+                        .cursor_pointer()
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            this.open_user_panel(user_id, window, cx);
+                        }))
+                        .child(title_text),
+                )
+                .when(typing, |this| {
+                    this.child(
+                        div()
+                            .id("peer-typing")
+                            .text_sm()
+                            .text_color(cx.theme().accent)
+                            .child("typing…"),
+                    )
+                })
+                .when(muted && !typing, |this| {
+                    this.child(div().text_xs().text_color(muted_fg).child(if forever {
+                        "Muted forever"
+                    } else {
+                        "Muted"
+                    }))
+                })
                 .into_any_element(),
-            Some(InfoPanelTarget::Supergroup(supergroup_id)) => title_div
-                .id("conversation-title")
-                .cursor_pointer()
-                .on_click(cx.listener(move |this, _, window, cx| {
-                    this.open_supergroup_panel(supergroup_id, window, cx);
-                }))
+            _ => div()
+                .flex()
+                .flex_col()
+                .min_w_0()
+                .child(div().font_semibold().child(title_text))
+                .when(typing, |this| {
+                    this.child(
+                        div()
+                            .id("peer-typing")
+                            .text_sm()
+                            .text_color(cx.theme().accent)
+                            .child("typing…"),
+                    )
+                })
+                .when(muted && !typing, |this| {
+                    this.child(div().text_xs().text_color(muted_fg).child(if forever {
+                        "Muted forever"
+                    } else {
+                        "Muted"
+                    }))
+                })
                 .into_any_element(),
-            None => title_div.into_any_element(),
         };
         div()
             .id("conversation-header")
@@ -7044,35 +7257,24 @@ impl QuillApp {
             .items_center()
             .justify_between()
             .gap_2()
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .min_w_0()
-                    .child(title_div)
-                    .when(typing, |this| {
-                        this.child(
-                            div()
-                                .id("peer-typing")
-                                .text_sm()
-                                .text_color(cx.theme().accent)
-                                .child("typing…"),
-                        )
-                    })
-                    .when(muted && !typing, |this| {
-                        this.child(
-                            div()
-                                .text_xs()
-                                .text_color(cx.theme().muted_foreground)
-                                .child(if forever { "Muted forever" } else { "Muted" }),
-                        )
-                    }),
-            )
+            .child(identity)
             .when(actions.is_some(), |this| {
                 this.child(
                     div()
                         .flex()
                         .gap_1()
+                        // Parity slice: jump to the linked discussion group
+                        // (`linked_chat_id`) when the channel has one.
+                        .when_some(discuss_chat_id, |this, discussion_id| {
+                            this.child(
+                                Button::new("chat-discuss")
+                                    .label("Discuss")
+                                    .ghost()
+                                    .on_click(cx.listener(move |this, _, window, cx| {
+                                        this.select_listed_chat(ChatId(discussion_id), window, cx);
+                                    })),
+                            )
+                        })
                         .child(
                             Button::new("chat-mute")
                                 .label(if muted { "Unmute" } else { "Mute" })
@@ -10695,13 +10897,23 @@ impl QuillApp {
                                     }),
                             );
                         }
+                        // Parity slice: chat photos resolve here (once per
+                        // render) and are sandboxed before display.
+                        let media_roots = self.media_display_roots();
+                        let photo_for = |chat: &ChatSummary| {
+                            self.session()
+                                .and_then(|s| s.chat_photo_path(chat.id))
+                                .and_then(|path| sandboxed_display_path(path, &media_roots))
+                        };
                         for chat in chats {
                             let selected = open == Some(chat.id);
+                            let photo = photo_for(&chat);
                             list = list.child(session_chat_row(
                                 &chat,
                                 selected,
                                 &folder_names,
                                 show_folder_tags,
+                                photo.as_deref(),
                                 cx,
                             ));
                         }
@@ -10729,11 +10941,13 @@ impl QuillApp {
                                 );
                                 for chat in archived {
                                     let selected = open == Some(chat.id);
+                                    let photo = photo_for(&chat);
                                     list = list.child(session_chat_row(
                                         &chat,
                                         selected,
                                         &folder_names,
                                         show_folder_tags,
+                                        photo.as_deref(),
                                         cx,
                                     ));
                                 }
@@ -11386,6 +11600,105 @@ fn apply_ready_folders(session: &mut Session, sink: &Arc<MemorySink>, seq: &Atom
             session.apply(owned);
         }
     }
+}
+
+/// `ReadyChatAvatars` fixture (parity slice): chat-list avatars and the
+/// channel/supergroup header — all injected through the normal reducer, no
+/// live Telegram.
+///
+/// - `updateChatPhoto` gives "Demo chat A" (private, id 11) and the demo
+///   channel (id 13) downloaded `chatPhotoInfo.small` thumbnails (the
+///   shared demo-thumb fixture, marked completed).
+/// - "Demo chat B" (private, id 12), "Demo basic group" (id 14) and "Demo
+///   discussion" (supergroup, id 16) keep no photo → colored-initial
+///   fallbacks.
+/// - `updateSupergroup` caches the channel's primary `@username`
+///   (`demochannel`).
+/// - A `getSupergroupFullInfo` round-trip seeds the channel description,
+///   12,345 subscribers and `linked_chat_id: 16`, so the header shows the
+///   description snippet, the count, and the "Discuss" affordance.
+/// - The channel is opened with two broadcast posts.
+fn apply_ready_chat_avatars(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let thumb_path = demo_thumb_png_path();
+    let chat_photo = |file_id: i32| {
+        let small = demo_file_json(file_id, &thumb_path, true);
+        format!(
+            r#"{{"@type":"chatPhotoInfo","small":{small},"big":null,"minithumbnail":null,"has_animation":false,"is_personal":false}}"#
+        )
+    };
+    let position = |chat_id: i64, order: &str| {
+        format!(
+            r#"{{"@type":"updateChatPosition","chat_id":{chat_id},"position":{{"@type":"chatPosition","list":{{"@type":"chatListMain"}},"order":"{order}","is_pinned":false}}}}"#
+        )
+    };
+    let usernames = |names: &[&str]| {
+        let active = names
+            .iter()
+            .map(|n| serde_json::to_string(n).unwrap())
+            .collect::<Vec<_>>()
+            .join(",");
+        format!(
+            r#"{{"@type":"usernames","active_usernames":[{active}],"disabled_usernames":[],"editable_username":{first},"collectible_usernames":[]}}"#,
+            first = serde_json::to_string(names.first().copied().unwrap_or("")).unwrap(),
+        )
+    };
+    let full_info_extra = session.request_for_supergroup(RequestPurpose::GetSupergroupFullInfo, 13);
+    let group_full_info_extra =
+        session.request_for_supergroup(RequestPurpose::GetSupergroupFullInfo, 16);
+    let description = "Demo channel — product updates, release notes, and the occasional meme. New posts every weekday morning.";
+    let description_json = serde_json::to_string(description).unwrap();
+    let group_description_json =
+        serde_json::to_string("The discussion group for the Demo channel.").unwrap();
+    let views = |count: i32| {
+        format!(
+            r#""interaction_info":{{"@type":"messageInteractionInfo","view_count":{count},"forward_count":7,"reply_info":null,"reactions":null}}"#
+        )
+    };
+    let post = |id: i64, text: &str, view_count: i32| {
+        format!(
+            r#"{{"@type":"updateNewMessage","message":{{"id":{id},"chat_id":13,"sender_id":{{"@type":"messageSenderChat","chat_id":13}},"is_outgoing":false,"is_channel_post":true,{},"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"{text}","entities":[]}}}}}}}}"#,
+            views(view_count),
+        )
+    };
+    let jsons = [
+        // Photos for the private chat and the channel.
+        format!(
+            r#"{{"@type":"updateChatPhoto","chat_id":11,"photo":{}}}"#,
+            chat_photo(91)
+        ),
+        format!(
+            r#"{{"@type":"updateChatPhoto","chat_id":13,"photo":{}}}"#,
+            chat_photo(93)
+        ),
+        // A basic group (initials fallback) and the discussion supergroup.
+        r#"{"@type":"updateNewChat","chat":{"id":14,"title":"Demo basic group","type":{"@type":"chatTypeBasicGroup","basic_group_id":14},"unread_count":0}}"#.to_string(),
+        r#"{"@type":"updateNewChat","chat":{"id":16,"title":"Demo discussion","type":{"@type":"chatTypeSupergroup","supergroup_id":16,"is_channel":false},"unread_count":0}}"#.to_string(),
+        position(14, "25"),
+        position(16, "5"),
+        // Channel + discussion-group metadata.
+        format!(
+            r#"{{"@type":"updateSupergroup","supergroup":{{"@type":"supergroup","id":13,"usernames":{},"is_forum":false,"is_channel":true}}}}"#,
+            usernames(&["demochannel"])
+        ),
+        r#"{"@type":"updateSupergroup","supergroup":{"@type":"supergroup","id":16,"usernames":null,"is_forum":false,"is_channel":false}}"#.to_string(),
+        format!(
+            r#"{{"@type":"supergroupFullInfo","@extra":"{}","description":{description_json},"member_count":12345,"linked_chat_id":16}}"#,
+            full_info_extra.0,
+        ),
+        format!(
+            r#"{{"@type":"supergroupFullInfo","@extra":"{}","description":{group_description_json},"member_count":42,"linked_chat_id":0}}"#,
+            group_full_info_extra.0,
+        ),
+        post(201, "Broadcast one — channel post from the channel itself.", 12345),
+        post(202, "Broadcast two — a second post with fewer views.", 987),
+    ];
+    for json in jsons {
+        if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
+            session.apply(owned);
+        }
+    }
+    session.open_chat(ChatId(13));
 }
 
 fn seed_ready_media_session(sink: Arc<MemorySink>) -> Session {
@@ -12365,6 +12678,113 @@ fn initials_avatar(name: &str, size: f32) -> impl IntoElement {
         .child(initials)
 }
 
+/// Parity slice: deterministic fallback color for chat avatars, so every
+/// chat type has a stable, recognizable circle before (or without) a
+/// downloaded photo. Telegram's own palette, keyed on the chat id.
+fn chat_avatar_color(chat_id: i64) -> Rgba {
+    const PALETTE: [u32; 8] = [
+        0xe17076, // red
+        0xfaa774, // orange
+        0xa695e7, // violet
+        0x7bc862, // green
+        0x6ec9cb, // teal
+        0x65aadd, // blue
+        0xcc6cbf, // pink
+        0xee7aa2, // rose
+    ];
+    let index = (chat_id.unsigned_abs() % PALETTE.len() as u64) as usize;
+    rgb(PALETTE[index])
+}
+
+/// Parity slice: circular chat avatar — the downloaded `chat.photo.small`
+/// thumbnail when available, otherwise colored initials keyed on the chat
+/// id. Used by chat-list rows, the conversation header, and info panels.
+fn chat_avatar(
+    name: &str,
+    chat_id: i64,
+    photo_path: Option<&std::path::Path>,
+    size: f32,
+) -> impl IntoElement {
+    match photo_path {
+        Some(path) => img(path)
+            .id(("chat-avatar-photo", chat_id as u64))
+            .w(px(size))
+            .h(px(size))
+            .rounded_full()
+            .flex_shrink_0()
+            .object_fit(ObjectFit::Cover)
+            .into_any_element(),
+        None => {
+            let initials: String = name
+                .split_whitespace()
+                .filter_map(|word| word.chars().next())
+                .take(2)
+                .collect();
+            let initials = if initials.is_empty() {
+                "?".to_string()
+            } else {
+                initials
+            };
+            div()
+                .id(("chat-avatar-initials", chat_id as u64))
+                .w(px(size))
+                .h(px(size))
+                .rounded_full()
+                .flex_shrink_0()
+                .flex()
+                .items_center()
+                .justify_center()
+                .bg(chat_avatar_color(chat_id))
+                .text_color(rgb(0xffffff))
+                .text_sm()
+                .font_semibold()
+                .child(initials)
+                .into_any_element()
+        }
+    }
+}
+
+/// Parity slice: compact subscriber/member counts for the header
+/// ("12.3K", "1.2M").
+fn compact_count(count: i32) -> String {
+    if count >= 1_000_000 {
+        let value = count as f64 / 1_000_000.0;
+        return format!(
+            "{}{}",
+            if value >= 100.0 {
+                format!("{}", value as i64)
+            } else {
+                format!("{value:.1}")
+            },
+            "M"
+        );
+    }
+    if count >= 1_000 {
+        let value = count as f64 / 1_000.0;
+        return format!(
+            "{}{}",
+            if value >= 100.0 {
+                format!("{}", value as i64)
+            } else {
+                format!("{value:.1}")
+            },
+            "K"
+        );
+    }
+    count.to_string()
+}
+
+/// Parity slice: one-line description snippet for the channel/supergroup
+/// header.
+fn description_snippet(description: &str, max_chars: usize) -> String {
+    let one_line: String = description.split_whitespace().collect::<Vec<_>>().join(" ");
+    if one_line.chars().count() <= max_chars {
+        return one_line;
+    }
+    let truncated: String = one_line.chars().take(max_chars).collect();
+    format!("{truncated}…")
+}
+
 fn session_chat_row(
     chat: &ChatSummary,
     selected: bool,
@@ -12372,6 +12792,10 @@ fn session_chat_row(
     folders: &[(i32, String)],
     // Parity slice: show folder-tag chips (`are_folder_tags_enabled`).
     show_tags: bool,
+    // Parity slice: sandboxed display path for the downloaded chat photo
+    // (`chat.photo.small`), if any; the avatar falls back to colored
+    // initials otherwise.
+    photo_path: Option<&std::path::Path>,
     cx: &mut Context<QuillApp>,
 ) -> impl IntoElement {
     let id = chat.id;
@@ -12405,25 +12829,45 @@ fn session_chat_row(
             div()
                 .flex()
                 .items_center()
-                .justify_between()
                 .gap_2()
+                // Parity slice: circular chat photo or colored initials for
+                // every chat-list row / chat type.
+                .child(chat_avatar(&title, id.0, photo_path, 40.))
                 .child(
                     div()
                         .flex()
-                        .items_center()
-                        .gap_1()
+                        .flex_col()
                         .min_w_0()
-                        .child(div().font_medium().min_w_0().child(title))
-                        .when(chat.is_muted(), |this| this.child(muted_badge(id)))
-                        .when(chat.is_forum_chat(), |this| this.child(forum_badge(id))),
-                )
-                .when_some(badge, |this, label| this.child(unread_badge(label, id))),
-        )
-        .child(
-            div()
-                .text_xs()
-                .text_color(cx.theme().muted_foreground)
-                .child(preview),
+                        .flex_1()
+                        .child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .justify_between()
+                                .gap_2()
+                                .child(
+                                    div()
+                                        .flex()
+                                        .items_center()
+                                        .gap_1()
+                                        .min_w_0()
+                                        .child(div().font_medium().min_w_0().child(title))
+                                        .when(chat.is_muted(), |this| this.child(muted_badge(id)))
+                                        .when(chat.is_forum_chat(), |this| {
+                                            this.child(forum_badge(id))
+                                        }),
+                                )
+                                .when_some(badge, |this, label| {
+                                    this.child(unread_badge(label, id))
+                                }),
+                        )
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(cx.theme().muted_foreground)
+                                .child(preview),
+                        ),
+                ),
         )
         .when(!tags.is_empty(), |this| {
             this.child(div().flex().flex_row().flex_wrap().gap_1().pt_1().children(

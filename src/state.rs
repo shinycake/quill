@@ -674,6 +674,10 @@ pub struct ChatSummary {
     /// `updateSupergroup` / the `getSupergroup` response resolves it; only
     /// meaningful for non-channel supergroups.
     pub is_forum: Option<bool>,
+    /// Parity slice: `chat.photo.small` file id (`chatPhotoInfo`, schema
+    /// 1.8.67 line 762). `None` when the chat has no photo. Updated by
+    /// `updateChatPhoto`; the file itself lives in `Session::files`.
+    pub photo_file_id: Option<i32>,
 }
 
 impl ChatSummary {
@@ -807,6 +811,7 @@ fn placeholder_chat(chat_id: ChatId) -> ChatSummary {
         my_member_status: None,
         my_admin_can_post_messages: None,
         is_forum: None,
+        photo_file_id: None,
     }
 }
 
@@ -1582,6 +1587,10 @@ pub struct Session {
     /// Phase 6: cached `getSupergroupFullInfo`, keyed by supergroup id.
     /// Presence records "fetched".
     pub supergroup_full_infos: HashMap<i64, SupergroupFullInfoData>,
+    /// Parity slice: first active username per supergroup (`supergroup`
+    /// object / `updateSupergroup`, schema 1.8.67 line 2746), keyed by
+    /// supergroup id. Feeds the channel/supergroup header's @username.
+    pub supergroup_usernames: HashMap<i64, String>,
     /// Phase 6: the open user / supergroup info panel, if any.
     pub open_info_panel: Option<InfoPanelTarget>,
     /// Phase 9.1: active stories per chat from `updateChatActiveStories` /
@@ -1622,6 +1631,9 @@ pub struct UserFullInfoData {
 pub struct SupergroupFullInfoData {
     pub description: String,
     pub member_count: i32,
+    /// Parity slice: `linked_chat_id` (schema 1.8.67, line 2792) — the
+    /// discussion-group chat id for a channel; 0 when none.
+    pub linked_chat_id: i64,
 }
 
 /// Phase 6: one rendered contacts-list row.
@@ -1692,6 +1704,7 @@ impl Session {
             contacts_error: false,
             user_full_infos: HashMap::new(),
             supergroup_full_infos: HashMap::new(),
+            supergroup_usernames: HashMap::new(),
             open_info_panel: None,
             story_tray: HashMap::new(),
             stories: HashMap::new(),
@@ -1890,7 +1903,16 @@ impl Session {
                 last_read_outbox_message_id,
                 notification_settings,
                 draft,
+                photo,
             } => {
+                // Parity slice: keep the chat photo (`chatPhotoInfo.small`)
+                // file id so the chat list can render avatars. The file
+                // object is remembered first (separate borrow) so the
+                // driver can download it.
+                let photo_file_id = photo.as_ref().map(|file| file.id.0);
+                if let Some(file) = &photo {
+                    self.remember_files(std::slice::from_ref(file));
+                }
                 let chat = self
                     .chats
                     .entry(chat_id.0)
@@ -1901,9 +1923,22 @@ impl Session {
                 chat.last_read_inbox_message_id = last_read_inbox_message_id;
                 chat.last_read_outbox_message_id = last_read_outbox_message_id;
                 chat.notification_settings = notification_settings;
+                chat.photo_file_id = photo_file_id;
                 if !self.draft_dirty.contains(&chat_id.0) {
                     chat.draft = draft;
                 }
+            }
+            // Parity slice: `updateChatPhoto` — swap the cached small
+            // photo file id (the chat list re-renders avatars from it).
+            EnvelopePayload::UpdateChatPhoto { chat_id, photo } => {
+                let photo_file_id = photo.as_ref().map(|file| file.id.0);
+                if let Some(file) = &photo {
+                    self.remember_files(std::slice::from_ref(file));
+                }
+                self.chats
+                    .entry(chat_id.0)
+                    .or_insert_with(|| placeholder_chat(chat_id))
+                    .photo_file_id = photo_file_id;
             }
             EnvelopePayload::UpdateChatDraftMessage {
                 chat_id,
@@ -1951,6 +1986,7 @@ impl Session {
             EnvelopePayload::SupergroupFullInfo {
                 description,
                 member_count,
+                linked_chat_id,
             } => {
                 // Phase 6: `getSupergroupFullInfo` answer — the response
                 // carries no id, so it is correlated via the pending
@@ -1964,9 +2000,28 @@ impl Session {
                         SupergroupFullInfoData {
                             description,
                             member_count,
+                            linked_chat_id,
                         },
                     );
                 }
+            }
+            // Parity slice: `updateSupergroupFullInfo` — the update carries
+            // its own id, so it applies whenever it arrives (no pending
+            // correlation).
+            EnvelopePayload::UpdateSupergroupFullInfo {
+                supergroup_id,
+                description,
+                member_count,
+                linked_chat_id,
+            } => {
+                self.supergroup_full_infos.insert(
+                    supergroup_id,
+                    SupergroupFullInfoData {
+                        description,
+                        member_count,
+                        linked_chat_id,
+                    },
+                );
             }
             EnvelopePayload::UpdateChatNotificationSettings {
                 chat_id,
@@ -2324,19 +2379,25 @@ impl Session {
             }
             // Phase 5.1: `supergroup.is_forum` via `updateSupergroup` (an
             // update — applies whenever it arrives) or the `getSupergroup`
-            // response (gated on the pending purpose).
+            // response (gated on the pending purpose). Parity slice: the
+            // first active username is cached alongside, for the
+            // channel/supergroup header.
             EnvelopePayload::UpdateSupergroup {
                 supergroup_id,
                 is_forum,
+                username,
             } => {
                 self.set_supergroup_forum(supergroup_id, is_forum);
+                self.set_supergroup_username(supergroup_id, username);
             }
             EnvelopePayload::Supergroup {
                 supergroup_id,
                 is_forum,
+                username,
             } => {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetSupergroup) {
                     self.set_supergroup_forum(supergroup_id, is_forum);
+                    self.set_supergroup_username(supergroup_id, username);
                 }
             }
             // Phase 5.1: `getForumTopics` response — cache the first page
@@ -3376,6 +3437,67 @@ impl Session {
             }
         }
         changed
+    }
+
+    /// Parity slice: cache the first active username for a supergroup
+    /// (`updateSupergroup` / `getSupergroup` response). An empty username is
+    /// stored as an empty sentinel (not removed) so `maybe_fetch_supergroup_profile`
+    /// doesn't re-send `getSupergroup` on every re-open of a username-less
+    /// supergroup; server-pushed `updateSupergroup` still refreshes it.
+    /// Render sites must filter empty before display.
+    pub fn set_supergroup_username(&mut self, supergroup_id: i64, username: String) {
+        self.supergroup_usernames.insert(supergroup_id, username);
+    }
+
+    /// Parity slice: cached first active username for a supergroup, if any.
+    /// May be an empty sentinel when the supergroup has no username —
+    /// callers should filter empty before rendering.
+    pub fn supergroup_username(&self, supergroup_id: i64) -> Option<&str> {
+        self.supergroup_usernames
+            .get(&supergroup_id)
+            .map(String::as_str)
+    }
+
+    /// Parity slice: the cached `chat.photo.small` file for a chat, if it
+    /// has been marked downloaded (its `local.path` usable). `None` when
+    /// the chat has no photo or the file is not local yet.
+    pub fn chat_photo_path(&self, chat_id: ChatId) -> Option<&str> {
+        let file_id = self.chats.get(&chat_id.0)?.photo_file_id?;
+        self.files.get(&file_id)?.usable_path()
+    }
+
+    /// Parity slice: `chat.photo.small` file ids for every known chat that
+    /// still needs a download — the driver's chat-list avatar hook. Like
+    /// the history-thumb hook, this is deduped by `should_download`
+    /// (in-flight + local), and the `small` variant is the cheap 160px
+    /// thumbnail, so one pass over all chats stays cheap.
+    pub fn chat_list_photo_file_ids(&self) -> Vec<FileId> {
+        self.chats
+            .values()
+            .filter_map(|chat| chat.photo_file_id)
+            .filter(|id| self.should_download(FileId(*id)))
+            .map(FileId)
+            .collect()
+    }
+
+    /// Parity slice: the discussion-group chat id for a channel's
+    /// "Discuss" affordance — `supergroupFullInfo.linked_chat_id` (0 =
+    /// none). Only meaningful for channels.
+    pub fn discussion_chat_id(&self, chat_id: ChatId) -> Option<i64> {
+        let supergroup_id = match self.chats.get(&chat_id.0)?.kind {
+            ChatKind::Supergroup {
+                supergroup_id,
+                is_channel: true,
+            } => supergroup_id,
+            _ => return None,
+        };
+        let linked = self
+            .supergroup_full_infos
+            .get(&supergroup_id)?
+            .linked_chat_id;
+        // Only offer Discuss when the linked chat is actually known —
+        // unknown ids degrade poorly (no history, no title), so hide it.
+        (linked != 0 && self.chats.contains_key(&linked)).then_some(linked)
     }
 
     /// Server message ids in the open history that have not yet been sent to `viewMessages`.
@@ -5994,6 +6116,169 @@ mod tests {
             r#"{"@type":"supergroup","id":16,"is_forum":true}"#,
         );
         assert!(!session.chats.get(&16).unwrap().is_forum_chat());
+    }
+
+    /// Parity slice: `updateNewChat` keeps `chat.photo.small` (`chatPhotoInfo`,
+    /// schema 1.8.67 lines 762/3627) on `ChatSummary::photo_file_id` and
+    /// remembers the file so the driver can download it.
+    #[test]
+    fn chat_photo_remembered_from_update_new_chat() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateNewChat","chat":{"id":11,"title":"Demo","type":{"@type":"chatTypePrivate","user_id":11},"unread_count":0,"photo":{"@type":"chatPhotoInfo","small":{"@type":"file","id":91,"size":24,"expected_size":24,"local":{"@type":"localFile","path":"","can_be_downloaded":true,"can_be_deleted":false,"is_downloading_active":false,"is_downloading_completed":false,"download_offset":0,"downloaded_prefix_size":0,"downloaded_size":0},"remote":{"@type":"remoteFile","id":"x","unique_id":"u","is_uploading_active":false,"is_uploading_completed":false,"uploaded_size":0}},"big":{"@type":"file","id":92,"size":0,"expected_size":0,"local":{"@type":"localFile","path":"","can_be_downloaded":true,"can_be_deleted":false,"is_downloading_active":false,"is_downloading_completed":false,"download_offset":0,"downloaded_prefix_size":0,"downloaded_size":0},"remote":{"@type":"remoteFile","id":"x","unique_id":"u","is_uploading_active":false,"is_uploading_completed":false,"uploaded_size":0}},"minithumbnail":null,"has_animation":false,"is_personal":false}}}"#,
+        );
+        assert_eq!(session.chats.get(&11).unwrap().photo_file_id, Some(91));
+        assert!(session.files.contains_key(&91));
+        // `updateNewChat` without a photo leaves no avatar.
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateNewChat","chat":{"id":12,"title":"No photo","type":{"@type":"chatTypePrivate","user_id":12},"unread_count":0}}"#,
+        );
+        assert_eq!(session.chats.get(&12).unwrap().photo_file_id, None);
+    }
+
+    /// Parity slice: `updateChatPhoto` (schema 1.8.67 line 10488) swaps the
+    /// cached photo; a null photo clears it.
+    #[test]
+    fn update_chat_photo_swaps_and_clears() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        let photo = |id: i32| {
+            format!(
+                r#""photo":{{"@type":"chatPhotoInfo","small":{{"@type":"file","id":{id},"size":24,"expected_size":24,"local":{{"@type":"localFile","path":"","can_be_downloaded":true,"can_be_deleted":false,"is_downloading_active":false,"is_downloading_completed":false,"download_offset":0,"downloaded_prefix_size":0,"downloaded_size":0}},"remote":{{"@type":"remoteFile","id":"x","unique_id":"u","is_uploading_active":false,"is_uploading_completed":false,"uploaded_size":0}}}},"big":null,"minithumbnail":null,"has_animation":false,"is_personal":false}}"#
+            )
+        };
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateNewChat","chat":{"id":11,"title":"Demo","type":{"@type":"chatTypePrivate","user_id":11},"unread_count":0}}"#,
+        );
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                "{{\"@type\":\"updateChatPhoto\",\"chat_id\":11,{}}}",
+                photo(91)
+            ),
+        );
+        assert_eq!(session.chats.get(&11).unwrap().photo_file_id, Some(91));
+        assert!(session.files.contains_key(&91));
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                "{{\"@type\":\"updateChatPhoto\",\"chat_id\":11,{}}}",
+                photo(95)
+            ),
+        );
+        assert_eq!(session.chats.get(&11).unwrap().photo_file_id, Some(95));
+        // Photo removed → fallback avatar.
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateChatPhoto","chat_id":11,"photo":null}"#,
+        );
+        assert_eq!(session.chats.get(&11).unwrap().photo_file_id, None);
+    }
+
+    /// Parity slice: `updateSupergroup` caches the first active username and
+    /// `updateSupergroupFullInfo` lands the description/count/linked chat
+    /// without a pending request; `discussion_chat_id` resolves the
+    /// channel's discussion group.
+    #[test]
+    fn supergroup_username_and_linked_chat_cached() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateNewChat","chat":{"id":13,"title":"Demo channel","type":{"@type":"chatTypeSupergroup","supergroup_id":13,"is_channel":true},"unread_count":0}}"#,
+        );
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateNewChat","chat":{"id":14,"title":"Demo group","type":{"@type":"chatTypeSupergroup","supergroup_id":14,"is_channel":false},"unread_count":0}}"#,
+        );
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateSupergroup","supergroup":{"@type":"supergroup","id":13,"usernames":{"@type":"usernames","active_usernames":["demochannel"],"disabled_usernames":[],"editable_username":"demochannel","collectible_usernames":[]},"is_forum":false,"is_channel":true}}"#,
+        );
+        assert_eq!(session.supergroup_username(13), Some("demochannel"));
+        assert_eq!(session.discussion_chat_id(ChatId(13)), None);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateSupergroupFullInfo","supergroup_id":13,"supergroup_full_info":{"@type":"supergroupFullInfo","description":"CANARY channel","member_count":12345,"linked_chat_id":14}}"#,
+        );
+        let info = session.supergroup_full_info(13).unwrap();
+        assert_eq!(info.description, "CANARY channel");
+        assert_eq!(info.member_count, 12345);
+        assert_eq!(info.linked_chat_id, 14);
+        // The linked discussion group resolves to its chat id.
+        assert_eq!(session.discussion_chat_id(ChatId(13)), Some(14));
+        // Non-channels never get a "Discuss" affordance, even with a link.
+        assert_eq!(session.discussion_chat_id(ChatId(14)), None);
+        // Empty username stores an empty sentinel (renders as no username,
+        // keeps the dedupe cache filled so re-opens don't refetch).
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateSupergroup","supergroup":{"@type":"supergroup","id":13,"usernames":null,"is_forum":false,"is_channel":true}}"#,
+        );
+        assert_eq!(session.supergroup_username(13), Some(""));
+        assert!(session.supergroup_usernames.contains_key(&13));
+    }
+
+    /// Parity slice: `chat_list_photo_file_ids` only returns photos that
+    /// still need a download (dedupes in-flight and completed files).
+    #[test]
+    fn chat_list_photo_file_ids_dedupes() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        for (chat_id, file_id) in [(11, 91), (12, 92), (13, 93)] {
+            apply_json(
+                &mut session,
+                &seq,
+                &sink,
+                &format!(
+                    "{{\"@type\":\"updateNewChat\",\"chat\":{{\"id\":{chat_id},\"title\":\"c{chat_id}\",\"type\":{{\"@type\":\"chatTypePrivate\",\"user_id\":{chat_id}}},\"unread_count\":0,\"photo\":{{\"@type\":\"chatPhotoInfo\",\"small\":{{\"@type\":\"file\",\"id\":{file_id},\"size\":24,\"expected_size\":24,\"local\":{{\"@type\":\"localFile\",\"path\":\"\",\"can_be_downloaded\":true,\"can_be_deleted\":false,\"is_downloading_active\":false,\"is_downloading_completed\":false,\"download_offset\":0,\"downloaded_prefix_size\":0,\"downloaded_size\":0}},\"remote\":{{\"@type\":\"remoteFile\",\"id\":\"x\",\"unique_id\":\"u\",\"is_uploading_active\":false,\"is_uploading_completed\":false,\"uploaded_size\":0}}}},\"big\":null,\"minithumbnail\":null,\"has_animation\":false,\"is_personal\":false}}}}}}",
+                ),
+            );
+        }
+        // 92 completes locally; 93 is already in flight.
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateFile","file":{"@type":"file","id":92,"size":24,"expected_size":24,"local":{"@type":"localFile","path":"/tmp/x.png","can_be_downloaded":true,"can_be_deleted":false,"is_downloading_active":false,"is_downloading_completed":true,"download_offset":0,"downloaded_prefix_size":24,"downloaded_size":24},"remote":{"@type":"remoteFile","id":"x","unique_id":"u","is_uploading_active":false,"is_uploading_completed":true,"uploaded_size":24}}}"#,
+        );
+        session.begin_download(FileId(93));
+        let ids: Vec<i32> = session
+            .chat_list_photo_file_ids()
+            .into_iter()
+            .map(|id| id.0)
+            .collect();
+        assert_eq!(ids, vec![91]);
+        // A completed file resolves its display path.
+        session.open_chat(ChatId(12));
+        assert_eq!(session.chat_photo_path(ChatId(12)), Some("/tmp/x.png"));
+        assert_eq!(session.chat_photo_path(ChatId(11)), None);
     }
 
     /// Phase 5.1: `forumTopics` responses land in the requesting chat's

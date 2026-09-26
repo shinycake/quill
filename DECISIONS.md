@@ -1325,6 +1325,60 @@ Research snapshot 2026-09-16, pin recheck **2026-09-17**.
   `getChatFolderNewChats` and friends); richer create/edit parity
   (per-chat include/exclude search, drag reorder).
 
+## Parity slice — Chat-list avatars & channel/supergroup header (2026-09-26)
+
+- **Rationale:** toward Telegram parity for the two most-seen surfaces —
+  the chat list (every row gets a recognizable avatar) and the
+  channel/supergroup conversation header (photo, description snippet,
+  @username, subscriber/member count, discussion-group link), while the
+  heavier channel surfaces stay out of scope.
+- **Schema (1.8.67, verified in `schema/td_api.tl`):**
+  - `chatPhotoInfo small:file big:file ...` (line 762); `chat ...
+    photo:chatPhotoInfo ...` (line 3627) — only `small` is kept and
+    downloaded (the cheap 160px thumbnail; `big` is fetched on demand
+    later, out of this slice).
+  - `updateChatPhoto chat_id:int53 photo:chatPhotoInfo` (line 10488).
+  - `usernames active_usernames:vector<string> ...` (line 2372) — the
+    first active username is treated as the primary one; empty when the
+    object is null.
+  - `supergroup ... usernames:usernames ... member_count ...` (line
+    2746); `updateSupergroupFullInfo supergroup_id:int53
+    supergroup_full_info:supergroupFullInfo` (line 10750);
+    `supergroupFullInfo photo:chatPhoto description:string
+    member_count:int32 linked_chat_id:int53 ...` (line 2792);
+    `getSupergroupFullInfo supergroup_id:int53 = SupergroupFullInfo`
+    (line 11513). `linked_chat_id` is 0 when there is no / unknown
+    linked discussion group (line 2756).
+- **Behavior:**
+  - Envelope parsing keeps `chat.photo.small` on `updateNewChat` and
+    parses `updateChatPhoto`; the session stores
+    `ChatSummary::photo_file_id` and remembers the file for download.
+  - The driver auto-downloads chat-list photos on every ingest at thumb
+    priority; `should_download` dedupes in-flight and completed files,
+    so each photo is requested at most once and `updateChatPhoto`
+    re-arms the new id.
+  - Opening a supergroup/channel fires `getSupergroup` (header
+    @username, deduped by the username cache + in-flight purpose) and
+    `getSupergroupFullInfo` (description, subscriber/member count,
+    `linked_chat_id`; deduped by the full-info cache).
+  - The header identity (avatar + title + meta) stays clickable and
+    opens the existing info panel; a **Discuss** button selects the
+    linked discussion chat when `linked_chat_id` resolves to a known
+    chat. Non-channels never show it.
+  - Fallback avatar: deterministic colored circle (Telegram-ish palette
+    keyed on chat id) with 1–2 initials. Photo removal (`photo: null`)
+    falls back to initials.
+  - Counts render compact ("12.3K", "1.2M"); channels say
+    "subscribers", groups say "members".
+- **UI proof:** `docs/screenshots/ready-chat-avatars.png` — mixed photo
+  and initial avatars across private / basic-group / supergroup /
+  channel rows; open channel header with photo, @username, subscriber
+  count, description snippet, and the Discuss button; driven by
+  `quill --screenshot-demo ready-chat-avatars`.
+- **Out of this slice (→ future):** invite links / join requests, admin
+  log, boosts / statistics, suggested / scheduled posts, channel comment
+  threading, on-demand `big` photo fetch.
+
 ## Phase 8.1 — Desktop notifications (2026-09-26)
 
 - **Rationale:** new incoming messages should surface an OS notification when
