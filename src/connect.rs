@@ -30,24 +30,25 @@ use crate::telegram::requests::{
     VideoNoteThumbnailSend, VideoSend, VoiceNoteSend, add_chat_to_list, add_chat_to_list_value,
     add_contact, add_message_reaction, add_recently_found_chat, check_authentication_code,
     check_authentication_password, click_chat_sponsored_message, close_chat, close_request,
-    close_story, create_chat_folder, delete_chat_folder, delete_messages, delete_story,
+    close_secret_chat as close_secret_chat_request, close_story, create_chat_folder,
+    create_new_secret_chat, delete_chat_folder, delete_messages, delete_story,
     download_file as download_file_request, edit_chat_folder, edit_message_caption,
     edit_message_text, forward_messages, get_authorization_state, get_callback_query_answer,
     get_chat_active_stories, get_chat_folder, get_chat_history, get_chat_lists_to_add_chat,
     get_chat_member, get_chat_sponsored_messages, get_commands, get_contacts, get_forum_topics,
     get_installed_sticker_sets, get_me, get_saved_animations, get_saved_notification_sounds,
-    get_scope_notification_settings, get_sticker_set, get_story, get_story_available_reactions,
-    get_supergroup, get_supergroup_full_info, get_user_full_info, input_message_photo,
-    input_message_video, join_chat, leave_chat, load_active_stories, load_chats, load_chats_list,
-    open_chat, open_message_content, open_story, pin_chat_message, remove_message_reaction,
-    reorder_chat_folders, report_chat_sponsored_message, search_chat_messages, search_chats,
-    search_messages, search_public_chats, search_recently_found_chats, send_animation,
-    send_chat_action, send_chat_action_kind, send_document, send_message_album, send_photo,
-    send_poll, send_sticker, send_text, send_text_story_reply, send_video, send_video_note,
-    send_voice_note, set_authentication_phone_number, set_chat_draft_message,
-    set_chat_notification_settings, set_chat_slow_mode_delay, set_poll_answer,
-    set_scope_notification_settings, set_story_reaction, toggle_chat_folder_tags,
-    unpin_chat_message, view_messages, view_sponsored_chat,
+    get_scope_notification_settings, get_secret_chat, get_sticker_set, get_story,
+    get_story_available_reactions, get_supergroup, get_supergroup_full_info, get_user_full_info,
+    input_message_photo, input_message_video, join_chat, leave_chat, load_active_stories,
+    load_chats, load_chats_list, open_chat, open_message_content, open_story, pin_chat_message,
+    remove_message_reaction, reorder_chat_folders, report_chat_sponsored_message,
+    search_chat_messages, search_chats, search_messages, search_public_chats,
+    search_recently_found_chats, send_animation, send_chat_action, send_chat_action_kind,
+    send_document, send_message_album, send_photo, send_poll, send_sticker, send_text,
+    send_text_story_reply, send_video, send_video_note, send_voice_note,
+    set_authentication_phone_number, set_chat_draft_message, set_chat_notification_settings,
+    set_chat_slow_mode_delay, set_poll_answer, set_scope_notification_settings, set_story_reaction,
+    toggle_chat_folder_tags, unpin_chat_message, view_messages, view_sponsored_chat,
 };
 use crate::voice::VoiceDraft;
 use std::path::Path;
@@ -496,6 +497,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         // Parity slice: chat-list avatars download on every ingest; each
         // photo is requested at most once (in-flight / completed dedupe).
         self.maybe_download_chat_list_photos()?;
+        // Phase B1: secret chats whose state never arrived via
+        // `updateSecretChat` (e.g. loaded from the local DB) resolve it
+        // through the offline `getSecretChat`.
+        let _ = self.maybe_fetch_secret_chat_states();
         self.maybe_load_selected_sticker_set()?;
         self.maybe_refresh_saved_animations()?;
         if chat_search_hits {
@@ -1360,6 +1365,100 @@ impl<S: JsonSender> ConnectDriver<S> {
         if let Err(err) = self.sender.send_json(&leave_chat(extra, chat_id)) {
             self.session.requests.take(extra);
             return Err(err);
+        }
+        Ok(())
+    }
+
+    /// Phase B1: `createNewSecretChat` for a user. Gated on a known
+    /// non-bot user — the affordance lives on the user profile panel, and
+    /// secret chats are 1:1 E2E sessions (bots are cloud-side actors).
+    /// The new chat arrives as `updateNewChat` (chatTypeSecret); its state
+    /// arrives as `updateSecretChat`.
+    pub fn start_secret_chat(&mut self, user_id: i64) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let user = self.session.user(user_id);
+        let is_bot = user.is_some_and(|u| u.is_bot);
+        if user.is_none() || is_bot {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::CreateNewSecretChat, None);
+        if let Err(err) = self
+            .sender
+            .send_json(&create_new_secret_chat(extra, user_id))
+        {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(extra)
+    }
+
+    /// Phase B1: `closeSecretChat` for a secret chat. The state change to
+    /// `secretChatStateClosed` arrives as `updateSecretChat`; the composer
+    /// hides then (the chat can never send again).
+    pub fn close_secret_chat(&mut self, chat_id: ChatId) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let secret_chat_id = self
+            .session
+            .chats
+            .get(&chat_id.0)
+            .and_then(|chat| chat.secret_chat_id());
+        let Some(secret_chat_id) = secret_chat_id else {
+            return Err(ConnectSendError::InvalidRequest);
+        };
+        let extra = self
+            .session
+            .request_for_secret_chat(RequestPurpose::CloseSecretChat, secret_chat_id);
+        if let Err(err) = self
+            .sender
+            .send_json(&close_secret_chat_request(extra, secret_chat_id))
+        {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(extra)
+    }
+
+    /// Phase B1: drain `Session::secret_chat_fetch_queue` — one
+    /// `getSecretChat` (an offline method) per unknown secret-chat state,
+    /// deduped against in-flight fetches. Called from `ingest`.
+    fn maybe_fetch_secret_chat_states(&mut self) -> Result<(), ConnectSendError> {
+        if !self.chats_path_active() {
+            return Ok(());
+        }
+        let queued: Vec<i32> = std::mem::take(&mut self.session.secret_chat_fetch_queue);
+        for secret_chat_id in queued {
+            if self
+                .session
+                .secret_chat_states
+                .contains_key(&secret_chat_id)
+            {
+                continue;
+            }
+            let in_flight = self
+                .session
+                .requests
+                .has_pending_for_secret_chat(RequestPurpose::GetSecretChat, secret_chat_id);
+            if in_flight {
+                self.session.secret_chat_fetch_queue.push(secret_chat_id);
+                continue;
+            }
+            let extra = self
+                .session
+                .request_for_secret_chat(RequestPurpose::GetSecretChat, secret_chat_id);
+            if let Err(err) = self
+                .sender
+                .send_json(&get_secret_chat(extra, secret_chat_id))
+            {
+                self.session.requests.take(extra);
+                self.session.secret_chat_fetch_queue.push(secret_chat_id);
+                return Err(err);
+            }
         }
         Ok(())
     }
@@ -4434,13 +4533,90 @@ mod tests {
         assert_eq!(v["@extra"], "7");
         assert_eq!(v["api_id"], 99);
         assert_eq!(v["api_hash"], "unit-test-hash-not-for-network");
-        assert_eq!(v["use_secret_chats"], false);
+        assert_eq!(v["use_secret_chats"], true);
         assert_eq!(v["use_file_database"], true);
         assert!(v["database_directory"].as_str().unwrap().contains("tdlib"));
         assert!(!v["database_encryption_key"].as_str().unwrap().is_empty());
         let debug = format!("{creds:?}");
         assert!(debug.contains("<redacted>"));
         assert!(!debug.contains("unit-test-hash"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Phase B1: the three secret-chat request shapes
+    /// (`createNewSecretChat`, `getSecretChat`, `closeSecretChat`;
+    /// schema 1.8.67 lines 13340, 11516, 15242).
+    #[test]
+    fn secret_chat_request_shapes() {
+        let create = create_new_secret_chat(RequestId(11), 41);
+        let v: Value = serde_json::from_str(&create).unwrap();
+        assert_eq!(v["@type"], "createNewSecretChat");
+        assert_eq!(v["@extra"], "11");
+        assert_eq!(v["user_id"], 41);
+
+        let get = get_secret_chat(RequestId(12), 7);
+        let v: Value = serde_json::from_str(&get).unwrap();
+        assert_eq!(v["@type"], "getSecretChat");
+        assert_eq!(v["@extra"], "12");
+        assert_eq!(v["secret_chat_id"], 7);
+
+        let close = close_secret_chat_request(RequestId(13), 7);
+        let v: Value = serde_json::from_str(&close).unwrap();
+        assert_eq!(v["@type"], "closeSecretChat");
+        assert_eq!(v["@extra"], "13");
+        assert_eq!(v["secret_chat_id"], 7);
+    }
+
+    /// Phase B1: the ordinary `sendMessage` path works for a Ready
+    /// secret chat (secret chats are plain chat ids at the send layer);
+    /// Pending chats are rejected by the same `can_post` gate as
+    /// everything else.
+    #[test]
+    fn driver_sends_into_ready_secret_chat_only() {
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = Arc::new(RecordingSender::new());
+        let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+        let mut driver =
+            ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+        let seq = AtomicU64::new(0);
+        for json in [
+            r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+            r#"{"@type":"updateSecretChat","secret_chat":{"@type":"secretChat","id":31,"user_id":7,"state":{"@type":"secretChatStateReady"},"is_outbound":true,"key_hash":"","layer":144}}"#,
+            r#"{"@type":"updateSecretChat","secret_chat":{"@type":"secretChat","id":33,"user_id":7,"state":{"@type":"secretChatStatePending"},"is_outbound":true,"key_hash":"","layer":144}}"#,
+            r#"{"@type":"updateNewChat","chat":{"id":31,"title":"Secret","type":{"@type":"chatTypeSecret","secret_chat_id":31,"user_id":7},"unread_count":0}}"#,
+            r#"{"@type":"updateNewChat","chat":{"id":33,"title":"Pending secret","type":{"@type":"chatTypeSecret","secret_chat_id":33,"user_id":7},"unread_count":0}}"#,
+        ] {
+            driver
+                .ingest(copy_and_parse(json, &seq, &dyn_sink).unwrap())
+                .unwrap();
+        }
+        driver.select_chat(ChatId(31)).unwrap();
+        let snap = crate::composer::ComposerSnapshot::capture(
+            ChatId(31),
+            driver.session.view_generation,
+            "CANARY_SECRET_SEND",
+        );
+        let extra = driver.send_text_snapshot(&snap).unwrap();
+        let sent = recorder.snapshot();
+        let send_json = sent.last().unwrap();
+        assert!(send_json.contains("sendMessage"));
+        assert!(send_json.contains("\"chat_id\":31"));
+        assert!(send_json.contains("CANARY_SECRET_SEND"));
+        assert!(send_json.contains(&format!("\"@extra\":\"{}\"", extra.0)));
+
+        driver.select_chat(ChatId(33)).unwrap();
+        let pending_snap = crate::composer::ComposerSnapshot::capture(
+            ChatId(33),
+            driver.session.view_generation,
+            "nope",
+        );
+        assert_eq!(
+            driver.send_text_snapshot(&pending_snap),
+            Err(ConnectSendError::InvalidRequest)
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 

@@ -130,9 +130,10 @@ fn parse_screenshot_demo(args: &[String]) -> Option<(ui::ScreenshotDemo, std::pa
                 "ready-chat-avatars" => ScreenshotDemo::ReadyChatAvatars,
                 "ready-notification-sound" => ScreenshotDemo::ReadyNotificationSound,
                 "ready-slow-mode" => ScreenshotDemo::ReadySlowMode,
+                "ready-secret-chat" => ScreenshotDemo::ReadySecretChat,
                 _ => {
                     eprintln!(
-                        "unknown screenshot demo '{kind}' (expected need-tdjson|wait-phone|wait-code|wait-password|ready-chats|ready-chats-composer|ready-unread|ready-unread-read|ready-media|ready-send-media|ready-search|ready-search-in-chat|ready-reply|ready-edit-delete|ready-forward|ready-reactions|ready-pin|ready-mute-archive|ready-typing|ready-stickers|ready-voice|ready-link-preview|ready-gifs|ready-video|ready-video-note|ready-video-send|ready-video-note-send|ready-drafts|ready-albums|ready-audio|ready-sponsored|ready-channels|ready-channels-admin|ready-bot-chat|ready-bot-keyboard|ready-bot-command-menu|ready-text-entities|ready-poll|ready-location|ready-dice|ready-media-viewer|ready-video-playback|ready-stories|ready-story-post|ready-seek-bars|ready-forum-topics|ready-topic-post|ready-contacts|ready-folders|ready-folders-manage|ready-chat-avatars|ready-notification-sound|ready-slow-mode)"
+                        "unknown screenshot demo '{kind}' (expected need-tdjson|wait-phone|wait-code|wait-password|ready-chats|ready-chats-composer|ready-unread|ready-unread-read|ready-media|ready-send-media|ready-search|ready-search-in-chat|ready-reply|ready-edit-delete|ready-forward|ready-reactions|ready-pin|ready-mute-archive|ready-typing|ready-stickers|ready-voice|ready-link-preview|ready-gifs|ready-video|ready-video-note|ready-video-send|ready-video-note-send|ready-drafts|ready-albums|ready-audio|ready-sponsored|ready-channels|ready-channels-admin|ready-bot-chat|ready-bot-keyboard|ready-bot-command-menu|ready-text-entities|ready-poll|ready-location|ready-dice|ready-media-viewer|ready-video-playback|ready-stories|ready-story-post|ready-seek-bars|ready-forum-topics|ready-topic-post|ready-contacts|ready-folders|ready-folders-manage|ready-chat-avatars|ready-notification-sound|ready-slow-mode|ready-secret-chat)"
                     );
                     std::process::exit(2);
                 }
@@ -207,6 +208,7 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
         ScreenshotDemo::ReadyChatAvatars => ".quill-ready-ready-chat-avatars",
         ScreenshotDemo::ReadyNotificationSound => ".quill-ready-ready-notification-sound",
         ScreenshotDemo::ReadySlowMode => ".quill-ready-ready-slow-mode",
+        ScreenshotDemo::ReadySecretChat => ".quill-ready-ready-secret-chat",
     });
     let _ = std::fs::remove_file(&marker);
     let marker_for_spawn = marker.clone();

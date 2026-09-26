@@ -160,6 +160,17 @@ pub enum EnvelopePayload {
         sender: MessageSender,
         action: ChatAction,
     },
+    /// Phase B1: `updateSecretChat` (schema 1.8.67, line 10741) — the
+    /// secret chat's state changed. Guaranteed to arrive before the
+    /// chat identifier is returned (i.e. before `updateNewChat`).
+    UpdateSecretChat {
+        secret_chat: ParsedSecretChat,
+    },
+    /// Phase B1: `secretChat` (schema 1.8.67, line 2816) — the
+    /// `getSecretChat` answer.
+    SecretChat {
+        secret_chat: ParsedSecretChat,
+    },
     Ok,
     Error(TdError),
     Messages(Vec<ParsedMessage>),
@@ -541,19 +552,24 @@ pub enum ChatKind {
 }
 
 impl ChatKind {
-    pub fn is_supported_cloud_chat(&self) -> bool {
+    /// Phase B1: secret chats are now supported — they render, open,
+    /// and send through the same chat pipeline as cloud chats (TDLib
+    /// handles the E2E crypto internally). The old name said "cloud";
+    /// kept short since it gates general chat support now.
+    pub fn is_supported_chat(&self) -> bool {
         match self {
             ChatKind::Private { .. } | ChatKind::BasicGroup { .. } => true,
             // Phase 2.2: broadcast channels are ungated (sponsored-content
             // handling landed in 2.1).
             ChatKind::Supergroup { .. } => true,
-            ChatKind::Secret { .. } | ChatKind::Unknown => false,
+            // Phase B1: secret chats ungated.
+            ChatKind::Secret { .. } => true,
+            ChatKind::Unknown => false,
         }
     }
 
     pub fn gate_reason(&self) -> Option<&'static str> {
         match self {
-            ChatKind::Secret { .. } => Some("Secret chats are out of scope for this client."),
             ChatKind::Unknown => Some("This conversation type is not supported yet."),
             _ => None,
         }
@@ -569,6 +585,69 @@ impl ChatKind {
             }
         )
     }
+}
+
+/// Phase B1: `SecretChatState` (TDLib 1.8.67, `schema/td_api.tl:2795`):
+/// `secretChatStatePending` (:2798, "waiting for the other user to get
+/// online"), `secretChatStateReady` (:2801), `secretChatStateClosed`
+/// (:2804).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SecretChatState {
+    Pending,
+    Ready,
+    Closed,
+    Unknown(String),
+}
+
+impl SecretChatState {
+    pub fn from_type_name(type_name: &str) -> Self {
+        match type_name {
+            "secretChatStatePending" => SecretChatState::Pending,
+            "secretChatStateReady" => SecretChatState::Ready,
+            "secretChatStateClosed" => SecretChatState::Closed,
+            other => SecretChatState::Unknown(other.to_string()),
+        }
+    }
+}
+
+/// Phase B1: `secretChat` subset (TDLib 1.8.67, `schema/td_api.tl:2816`):
+/// `secretChat id:int32 user_id:int53 state:SecretChatState
+/// is_outbound:Bool key_hash:bytes layer:int32 = SecretChat;`
+/// `key_hash` (36 little-endian bytes) is kept raw for the B2 key
+/// verification UI; the layer is kept for future capability gating.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParsedSecretChat {
+    pub id: i32,
+    pub user_id: i64,
+    pub state: SecretChatState,
+    pub is_outbound: bool,
+    pub key_hash: Vec<u8>,
+    pub layer: i32,
+}
+
+fn parse_secret_chat(value: Option<&Value>) -> Option<ParsedSecretChat> {
+    let value = value?;
+    Some(ParsedSecretChat {
+        id: value.get("id").and_then(Value::as_i64).unwrap_or(0) as i32,
+        user_id: int53(value.get("user_id")).ok()?,
+        state: SecretChatState::from_type_name(
+            value
+                .get("state")
+                .and_then(|s| s.get("@type"))
+                .and_then(Value::as_str)
+                .unwrap_or(""),
+        ),
+        is_outbound: value
+            .get("is_outbound")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        key_hash: value
+            .get("key_hash")
+            .and_then(Value::as_str)
+            .and_then(|s| STANDARD.decode(s).ok())
+            .unwrap_or_default(),
+        layer: value.get("layer").and_then(Value::as_i64).unwrap_or(0) as i32,
+    })
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2788,6 +2867,17 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
                 .get("story_id")
                 .and_then(Value::as_i64)
                 .ok_or(ParseError::MissingField)? as i32,
+        }),
+        // Phase B1: secret chat lifecycle (schema 1.8.67, lines 10741 /
+        // 2816). `updateSecretChat` carries the full `secretChat` object in
+        // its `secret_chat` field; the bare `secretChat` object is the
+        // `getSecretChat` answer.
+        "updateSecretChat" => Ok(EnvelopePayload::UpdateSecretChat {
+            secret_chat: parse_secret_chat(value.get("secret_chat"))
+                .ok_or(ParseError::MissingField)?,
+        }),
+        "secretChat" => Ok(EnvelopePayload::SecretChat {
+            secret_chat: parse_secret_chat(Some(&value)).ok_or(ParseError::MissingField)?,
         }),
         "updateStoryPostSucceeded" => {
             let story = value.get("story").ok_or(ParseError::MissingField)?;
@@ -5624,6 +5714,57 @@ mod tests {
         let debug = format!("{env:?}");
         assert!(!debug.contains("CANARY_PHONE"));
         assert!(!debug.contains("+1555"));
+    }
+
+    /// Phase B1: `updateSecretChat` parses the full `secretChat` record —
+    /// all three states plus the base64 `key_hash` bytes, `is_outbound`,
+    /// and `layer`.
+    #[test]
+    fn secret_chat_states_parsed_with_key_hash() {
+        let key_hash_b64 = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8gISIj";
+        for (state_type, expected) in [
+            ("secretChatStatePending", SecretChatState::Pending),
+            ("secretChatStateReady", SecretChatState::Ready),
+            ("secretChatStateClosed", SecretChatState::Closed),
+        ] {
+            let json = format!(
+                r#"{{"@type":"updateSecretChat","secret_chat":{{"@type":"secretChat","id":7,"user_id":41,"state":{{"@type":"{state_type}"}},"is_outbound":true,"key_hash":"{key_hash_b64}","layer":144}}}}"#
+            );
+            let env = parse_envelope(&json).unwrap();
+            match env.payload {
+                EnvelopePayload::UpdateSecretChat { secret_chat } => {
+                    assert_eq!(secret_chat.id, 7);
+                    assert_eq!(secret_chat.user_id, 41);
+                    assert_eq!(secret_chat.state, expected);
+                    assert!(secret_chat.is_outbound);
+                    assert_eq!(secret_chat.key_hash.len(), 36);
+                    assert_eq!(secret_chat.key_hash[0], 0x00);
+                    assert_eq!(secret_chat.key_hash[35], 0x23);
+                    assert_eq!(secret_chat.layer, 144);
+                }
+                other => panic!("unexpected {other:?}"),
+            }
+        }
+    }
+
+    /// Phase B1: an unknown `SecretChatState` constructor degrades to
+    /// `SecretChatState::Unknown` instead of failing the envelope parse.
+    #[test]
+    fn secret_chat_unknown_state_degrades() {
+        let env = parse_envelope(
+            r#"{"@type":"updateSecretChat","secret_chat":{"@type":"secretChat","id":7,"user_id":41,"state":{"@type":"secretChatStateFuture"},"is_outbound":false,"key_hash":"","layer":144}}"#,
+        )
+        .unwrap();
+        match env.payload {
+            EnvelopePayload::UpdateSecretChat { secret_chat } => {
+                assert_eq!(
+                    secret_chat.state,
+                    SecretChatState::Unknown("secretChatStateFuture".to_string())
+                );
+                assert!(secret_chat.key_hash.is_empty());
+            }
+            other => panic!("unexpected {other:?}"),
+        }
     }
 
     #[test]

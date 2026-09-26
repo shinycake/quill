@@ -220,6 +220,7 @@ mod tests {
             is_forum: None,
             photo_file_id: None,
             can_send_basic_messages: true,
+            secret_state: None,
         }
     }
 

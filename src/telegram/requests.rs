@@ -27,7 +27,7 @@ impl SetTdlibParameters {
             "use_file_database": true,
             "use_chat_info_database": true,
             "use_message_database": true,
-            "use_secret_chats": false,
+            "use_secret_chats": true,
             "api_id": self.api_id,
             "api_hash": self.api_hash,
             "system_language_code": self.system_language_code,
@@ -409,6 +409,47 @@ pub fn get_supergroup_full_info(extra: RequestId, supergroup_id: i64) -> String 
         "@type": "getSupergroupFullInfo",
         "@extra": extra.as_extra(),
         "supergroup_id": supergroup_id,
+    })
+    .to_string()
+}
+
+/// Phase B1: `createNewSecretChat` (TDLib 1.8.67, `schema/td_api.tl:13340`):
+/// `createNewSecretChat user_id:int53 = Chat;`
+/// "Creates a new secret chat. Returns the newly created chat". The new
+/// chat also arrives as `updateNewChat` with `chatTypeSecret`.
+pub fn create_new_secret_chat(extra: RequestId, user_id: i64) -> String {
+    json!({
+        "@type": "createNewSecretChat",
+        "@extra": extra.as_extra(),
+        "user_id": user_id,
+    })
+    .to_string()
+}
+
+/// Phase B1: `getSecretChat` (TDLib 1.8.67, `schema/td_api.tl:11516`):
+/// `getSecretChat secret_chat_id:int32 = SecretChat;`
+/// "Returns information about a secret chat by its identifier. This is an
+/// offline method" — used to learn the initial state of a secret chat
+/// whose `updateSecretChat` was never seen (e.g. loaded from the local DB).
+pub fn get_secret_chat(extra: RequestId, secret_chat_id: i32) -> String {
+    json!({
+        "@type": "getSecretChat",
+        "@extra": extra.as_extra(),
+        "secret_chat_id": secret_chat_id,
+    })
+    .to_string()
+}
+
+/// Phase B1: `closeSecretChat` (TDLib 1.8.67, `schema/td_api.tl:15242`):
+/// `closeSecretChat secret_chat_id:int32 = Ok;`
+/// "Closes a secret chat, effectively transferring its state to
+/// secretChatStateClosed". The state change itself arrives as
+/// `updateSecretChat`.
+pub fn close_secret_chat(extra: RequestId, secret_chat_id: i32) -> String {
+    json!({
+        "@type": "closeSecretChat",
+        "@extra": extra.as_extra(),
+        "secret_chat_id": secret_chat_id,
     })
     .to_string()
 }
