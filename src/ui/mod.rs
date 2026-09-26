@@ -23,6 +23,7 @@ use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::{AccountKey, ChatId, FileId, MessageId};
 use quill::local_path::sandboxed_display_path;
 use quill::media_viewer::{MediaViewer, MediaViewerItem, MediaViewerKind, collect_media_items};
+use quill::notify::QueuedNotification;
 use quill::platform::live_secret_store;
 use quill::playback::PlaybackClock;
 use quill::poll::{
@@ -47,7 +48,8 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::time::Duration;
 use synthetic::{SyntheticChat, session_bubble_quoted, session_bubble_rich};
 use zeroize::Zeroize;
@@ -69,6 +71,10 @@ actions!(
         SubmitPassword
     ]
 );
+
+/// Phase 8.1: cap on concurrent OS-notification worker threads (`notify-send
+/// --wait` blocks until dismissal). Excess bursts are dropped, not stacked.
+const MAX_OS_NOTIFICATION_THREADS: usize = 8;
 
 pub fn bind_keys(cx: &mut App) {
     cx.bind_keys([
@@ -251,6 +257,12 @@ pub struct QuillApp {
     demo_session: Option<Session>,
     demo_seq: AtomicU64,
     demo_sink: Arc<MemorySink>,
+    /// Phase 8.1: chat ids whose OS notification was clicked (set by the
+    /// notification worker threads); the next render focuses the chat.
+    notify_clicks: Arc<Mutex<Vec<ChatId>>>,
+    /// Phase 8.1: in-flight OS notification workers; capped so a message
+    /// burst cannot stack threads.
+    notify_inflight: Arc<AtomicUsize>,
     /// Local files the user explicitly attached (canonical paths via `pick`).
     /// One item sends with `sendMessage`. Two or more photos/videos send with
     /// `sendMessageAlbum`.
@@ -1162,6 +1174,8 @@ impl QuillApp {
             demo_session,
             demo_seq: AtomicU64::new(0),
             demo_sink,
+            notify_clicks: Arc::new(Mutex::new(Vec::new())),
+            notify_inflight: Arc::new(AtomicUsize::new(0)),
             pending_attachments,
             pending_reply: None,
             clear_draft_on_success: None,
@@ -1676,6 +1690,59 @@ impl QuillApp {
         self.resume_pending_gif(cx);
         self.resume_pending_video(cx);
         self.resume_pending_audio(cx);
+    }
+
+    /// Phase 8.1: drain notification click callbacks (focus the chat) and
+    /// dispatch newly queued notifications on worker threads. Runs from
+    /// `render`, which is the only UI path with a `&mut Window`.
+    fn flush_notifications(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let clicks: Vec<ChatId> = self
+            .notify_clicks
+            .lock()
+            .map(|mut guard| std::mem::take(&mut *guard))
+            .unwrap_or_default();
+        for chat_id in clicks {
+            self.select_listed_chat(chat_id, window, cx);
+        }
+        let queued: Vec<QueuedNotification> = self
+            .live
+            .as_mut()
+            .map(|live| std::mem::take(&mut live.driver.session.pending_notifications))
+            .unwrap_or_default();
+        for queued in queued {
+            self.spawn_os_notification(queued);
+        }
+    }
+
+    /// Phase 8.1: show one queued notification via the platform backend on a
+    /// worker thread. A click (Linux `notify-send --wait --action`) records
+    /// the chat id; the next render focuses it. Concurrent workers are
+    /// capped; excess bursts are dropped rather than stacking threads.
+    fn spawn_os_notification(&mut self, queued: QueuedNotification) {
+        let notification = queued.for_display();
+        let Some(command) = quill::notify::build_notification_command(&notification) else {
+            return;
+        };
+        if self.notify_inflight.fetch_add(1, Ordering::SeqCst) >= MAX_OS_NOTIFICATION_THREADS {
+            self.notify_inflight.fetch_sub(1, Ordering::SeqCst);
+            return;
+        }
+        let clicks = self.notify_clicks.clone();
+        let inflight = self.notify_inflight.clone();
+        let spawn = std::thread::Builder::new()
+            .name("quill-notify".to_string())
+            .spawn(move || {
+                let outcome = quill::notify::run_notification_command(&command);
+                inflight.fetch_sub(1, Ordering::SeqCst);
+                if outcome.clicked
+                    && let Ok(mut guard) = clicks.lock()
+                {
+                    guard.push(notification.chat_id);
+                }
+            });
+        if spawn.is_err() {
+            self.notify_inflight.fetch_sub(1, Ordering::SeqCst);
+        }
     }
 
     fn finish_successful_sends(&mut self, cx: &mut Context<Self>) {
@@ -7694,6 +7761,12 @@ fn live_status_for(auth: &AuthorizationState) -> String {
 
 impl Render for QuillApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // Phase 8.1: feed OS window focus into the notification decision, then
+        // dispatch any notifications the reducer queued since the last frame.
+        if let Some(live) = self.live.as_mut() {
+            live.driver.session.app_active = window.is_window_active();
+        }
+        self.flush_notifications(window, cx);
         // Phase 4.6: push the playback clock into the seek slider entity so
         // the thumb follows elapsed time (the tick has no `&mut Window`).
         self.sync_seek_slider(window, cx);

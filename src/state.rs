@@ -4,6 +4,7 @@ use crate::diagnostics::{Diagnostic, DiagnosticSink};
 use crate::ids::{
     AccountGeneration, AccountKey, ChatId, FileId, MessageId, RequestId, ViewGeneration,
 };
+use crate::notify::{self, OsNotification, QueuedNotification};
 use crate::telegram::client::OwnedEnvelope;
 use crate::telegram::envelope::{
     AnimationItem, AuthorizationState, BotCommand, BotInfo, CallbackQueryAnswer,
@@ -1368,6 +1369,17 @@ pub struct Session {
     pub chat_folders: Vec<ChatFolderInfo>,
     pub histories: HashMap<i64, HistoryState>,
     pub open_chat: Option<ChatId>,
+    /// Phase 8.1: whether the OS considers our window focused. The UI sets
+    /// this from `Window::is_window_active` on every render; it defaults to
+    /// true so the reducer never notifies before the first paint measures it.
+    pub app_active: bool,
+    /// Phase 8.1: mirror of `settings::Preferences::hide_notification_previews`
+    /// (default true). There is no settings UI yet, so the value lives on the
+    /// session for the reducer to apply.
+    pub hide_notification_previews: bool,
+    /// Phase 8.1: notifications decided by the reducer, drained by the UI for
+    /// OS dispatch. Same-chat bursts coalesce into one entry ("N new messages").
+    pub pending_notifications: Vec<QueuedNotification>,
     /// Phase 5.1: selected forum topic (`forum_topic_id`) of the open chat.
     /// `None` = topic list (or a non-forum chat). Reset by `open_chat`.
     pub open_topic: Option<i32>,
@@ -1499,6 +1511,9 @@ impl Session {
             chat_folders: Vec::new(),
             histories: HashMap::new(),
             open_chat: None,
+            app_active: true,
+            hide_notification_previews: true,
+            pending_notifications: Vec::new(),
             open_topic: None,
             forum_topics: HashMap::new(),
             topic_histories: HashMap::new(),
@@ -1911,7 +1926,13 @@ impl Session {
                 self.chat_folders = folders;
             }
             EnvelopePayload::UpdateNewMessage(message) => {
+                // Phase 8.1: decide before upserting; the queue is drained by
+                // the UI for OS dispatch.
+                let notification = self.notification_for_new_message(&message);
                 self.upsert_message(message, false);
+                if let Some(notification) = notification {
+                    self.queue_notification(notification);
+                }
             }
             EnvelopePayload::UpdateMessageSendSucceeded {
                 message,
@@ -3032,6 +3053,30 @@ impl Session {
         history.viewing.clear();
     }
 
+    /// Phase 8.1: pure notify / don't-notify decision for an `updateNewMessage`.
+    /// Both the UI's `app_active` write and the reducer run on the UI thread,
+    /// so no locking is needed. Returns `None` when the chat is unknown (no
+    /// title, no verified mute/read state) rather than guessing.
+    fn notification_for_new_message(&self, message: &ParsedMessage) -> Option<OsNotification> {
+        let chat = self.chats.get(&message.chat_id.0)?;
+        let settings = &chat.notification_settings;
+        notify::decide_notify(&notify::NotifyInput {
+            message,
+            chat_title: Some(&chat.title),
+            chat_muted: chat.is_muted(),
+            last_read_inbox_message_id: Some(chat.last_read_inbox_message_id),
+            open_chat: self.open_chat,
+            app_active: self.app_active,
+            hide_previews: self.hide_notification_previews,
+            chat_preview_allowed: settings.use_default_show_preview || settings.show_preview,
+        })
+    }
+
+    /// Phase 8.1: append with same-chat burst coalescing.
+    fn queue_notification(&mut self, notification: OsNotification) {
+        notify::coalesce_notification(&mut self.pending_notifications, notification);
+    }
+
     /// Phase 5.1: enter a forum topic's view. Returns the topic's cached
     /// info, if the chat's topic list is already loaded.
     pub fn select_topic(&mut self, chat_id: ChatId, forum_topic_id: i32) -> Option<ForumTopic> {
@@ -4009,6 +4054,124 @@ mod tests {
             r#"{"@type":"updateChatNotificationSettings","chat_id":7,"notification_settings":{"@type":"chatNotificationSettings","use_default_mute_for":false,"mute_for":0,"use_default_sound":true,"sound_id":"0","use_default_show_preview":true,"show_preview":false,"use_default_mute_stories":true,"mute_stories":false,"use_default_story_sound":true,"story_sound_id":"0","use_default_show_story_poster":true,"show_story_poster":false,"use_default_disable_pinned_message_notifications":true,"disable_pinned_message_notifications":false,"use_default_disable_mention_notifications":true,"disable_mention_notifications":false}}"#,
         );
         assert!(!session.chats.get(&7).unwrap().is_muted());
+    }
+
+    #[test]
+    fn phase81_desktop_notification_replay() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        // Unmuted private chat, nothing read yet.
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateNewChat","chat":{"id":7,"title":"Ada","type":{"@type":"chatTypePrivate","user_id":7},"unread_count":0}}"#,
+        );
+        // App in background: incoming unread message queues a notification.
+        // `hide_notification_previews` defaults to true → generic body.
+        session.app_active = false;
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateNewMessage","message":{"id":42,"chat_id":7,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"hey you","entities":[]}}}}"#,
+        );
+        assert_eq!(session.pending_notifications.len(), 1);
+        let queued = &session.pending_notifications[0];
+        assert_eq!(queued.chat_id, ChatId(7));
+        assert_eq!(queued.title, "Ada");
+        assert_eq!(queued.count, 1);
+        assert_eq!(queued.for_display().body, "New message");
+        session.pending_notifications.clear();
+
+        // Previews enabled → body is the message preview.
+        session.hide_notification_previews = false;
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateNewMessage","message":{"id":43,"chat_id":7,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"hey you","entities":[]}}}}"#,
+        );
+        assert_eq!(session.pending_notifications.len(), 1);
+        assert_eq!(
+            session.pending_notifications[0].for_display().body,
+            "hey you"
+        );
+
+        // Second message for the same chat coalesces into a burst summary.
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateNewMessage","message":{"id":44,"chat_id":7,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"and more","entities":[]}}}}"#,
+        );
+        assert_eq!(session.pending_notifications.len(), 1);
+        assert_eq!(session.pending_notifications[0].count, 2);
+        assert_eq!(
+            session.pending_notifications[0].for_display().body,
+            "2 new messages"
+        );
+        session.pending_notifications.clear();
+    }
+
+    #[test]
+    fn phase81_desktop_notification_suppressed_cases() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        // Muted chat.
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateNewChat","chat":{"id":7,"title":"Ada","type":{"@type":"chatTypePrivate","user_id":7},"unread_count":0,"notification_settings":{"@type":"chatNotificationSettings","use_default_mute_for":false,"mute_for":2147483647,"use_default_sound":true,"sound_id":"0","use_default_show_preview":true,"show_preview":true,"use_default_mute_stories":true,"mute_stories":false,"use_default_show_story_sound":true,"story_sound_id":"0","use_default_show_story_poster":true,"show_story_poster":false,"use_default_disable_pinned_message_notifications":true,"disable_pinned_message_notifications":false,"use_default_disable_mention_notifications":true,"disable_mention_notifications":false}}}"#,
+        );
+        // Unmuted chat.
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateNewChat","chat":{"id":8,"title":"Noor","type":{"@type":"chatTypePrivate","user_id":8},"unread_count":0}}"#,
+        );
+        session.app_active = false;
+        session.hide_notification_previews = false;
+        let incoming = |id: i64, chat_id: i64| {
+            format!(
+                r#"{{"@type":"updateNewMessage","message":{{"id":{id},"chat_id":{chat_id},"is_outgoing":false,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"hi","entities":[]}}}}}}}}"#
+            )
+        };
+        // Muted → nothing.
+        apply_json(&mut session, &seq, &sink, &incoming(1, 7));
+        assert!(session.pending_notifications.is_empty());
+        // Outgoing → nothing.
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateNewMessage","message":{"id":2,"chat_id":8,"is_outgoing":true,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"hi","entities":[]}}}}"#,
+        );
+        assert!(session.pending_notifications.is_empty());
+        // Unknown chat → nothing.
+        apply_json(&mut session, &seq, &sink, &incoming(3, 99));
+        assert!(session.pending_notifications.is_empty());
+        // Currently open chat while the app is active → nothing.
+        session.app_active = true;
+        session.open_chat(ChatId(8));
+        apply_json(&mut session, &seq, &sink, &incoming(4, 8));
+        assert!(session.pending_notifications.is_empty());
+        // Same chat, app in background → notifies.
+        session.app_active = false;
+        apply_json(&mut session, &seq, &sink, &incoming(5, 8));
+        assert_eq!(session.pending_notifications.len(), 1);
+        session.pending_notifications.clear();
+        // Already-read message (at/below the inbox read marker) → nothing.
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateChatReadInbox","chat_id":8,"last_read_inbox_message_id":6,"unread_count":0}"#,
+        );
+        apply_json(&mut session, &seq, &sink, &incoming(6, 8));
+        assert!(session.pending_notifications.is_empty());
     }
 
     #[test]
