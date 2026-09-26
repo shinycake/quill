@@ -2880,7 +2880,7 @@ Failing cases become regression tests/screenshots in E5.
   updates. All actions are gated on the viewer actually holding the
   `can_invite_users` admin right (or creator status).
 - **Schema (1.8.67, verified verbatim in `schema/td_api.tl`):**
-  `chatAdministratorRights.can_invite_users` (:2500);
+  `chatAdministratorRights.can_invite_users` (:1092);
   `chatInviteLink` (:2627, all 14 fields incl. `subscription_pricing`,
   `member_limit`, `pending_join_request_count`, `creates_join_request`,
   `is_primary`, `is_revoked`); `chatInviteLinks` (:2630);

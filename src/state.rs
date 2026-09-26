@@ -886,7 +886,7 @@ pub struct ChatSummary {
     pub my_admin_can_post_messages: Option<bool>,
     /// Phase D3a: `rights.can_invite_users` from
     /// `chatMemberStatusAdministrator` (TDLib 1.8.67,
-    /// `chatAdministratorRights`, schema line 2500). `Some` only when the
+    /// `chatAdministratorRights`, schema line 1092). `Some` only when the
     /// status is Administrator and the rights block parsed; `None` for
     /// every other status or an absent rights block. Gates the invite-link
     /// / join-request management UI.
@@ -2293,7 +2293,7 @@ pub struct Session {
     pub supergroup_restrict_right: HashMap<i64, bool>,
     /// Phase D3a: the viewer's `rights.can_invite_users` per supergroup
     /// from own `chatMemberStatusAdministrator` (schema 1.8.67, line
-    /// 2500). Invite-link management requires this right (or creator
+    /// 1092). Invite-link management requires this right (or creator
     /// status). Absent = unknown, treated as lacking the right.
     pub supergroup_invite_right: HashMap<i64, bool>,
     /// Phase 6: the open user / supergroup info panel, if any.
@@ -2673,7 +2673,7 @@ impl Session {
     }
 
     /// Phase D3a: whether the viewer's own administrator rights in a
-    /// supergroup include `can_invite_users` (schema 1.8.67, line 2500),
+    /// supergroup include `can_invite_users` (schema 1.8.67, line 1092),
     /// which invite-link management requires. Creators hold all rights
     /// implicitly — check `supergroup_own_status` for that. Absent =
     /// unknown, treated as lacking the right.

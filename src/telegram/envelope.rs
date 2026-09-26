@@ -291,7 +291,7 @@ pub enum EnvelopePayload {
         /// `setChatSlowModeDelay` requires this right (line 13551).
         can_restrict_members: Option<bool>,
         /// Phase D3a: `rights.can_invite_users` from own
-        /// `chatMemberStatusAdministrator` (schema 1.8.67, line 2500);
+        /// `chatMemberStatusAdministrator` (schema 1.8.67, line 1092);
         /// `None` for any other status or a missing rights block.
         /// Invite-link management requires this right (or creator status).
         can_invite_users: Option<bool>,
@@ -309,7 +309,7 @@ pub enum EnvelopePayload {
         /// `None` for any other status or a missing rights block.
         can_restrict_members: Option<bool>,
         /// Phase D3a: `rights.can_invite_users` from own
-        /// `chatMemberStatusAdministrator` (schema 1.8.67, line 2500);
+        /// `chatMemberStatusAdministrator` (schema 1.8.67, line 1092);
         /// `None` for any other status or a missing rights block.
         /// Invite-link management requires this right (or creator status).
         can_invite_users: Option<bool>,
@@ -1310,7 +1310,7 @@ impl ChannelMemberStatus {
 /// `chatAdministratorRights ... can_post_messages:Bool ...`), driving the
 /// channel-admin composer gate; `None` for every other status or when the
 /// rights block is absent. `admin_can_invite_users` carries
-/// `rights.can_invite_users` (schema 1.8.67, line 2500), driving the
+/// `rights.can_invite_users` (schema 1.8.67, line 1092), driving the
 /// Phase D3a invite-link / join-request management gate; `None` for every
 /// other status or when the rights block is absent.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -5105,7 +5105,7 @@ fn parse_restrict_members_right(value: Option<&Value>) -> Option<bool> {
 
 /// Phase D3a: `rights.can_invite_users` from a
 /// `chatMemberStatusAdministrator` block (TDLib 1.8.67,
-/// `chatAdministratorRights`, schema line 2500); `None` for any other
+/// `chatAdministratorRights`, schema line 1092); `None` for any other
 /// status or a missing/absent rights block. Managing invite links and
 /// processing join requests requires this right (or creator status).
 fn parse_invite_users_right(value: Option<&Value>) -> Option<bool> {
@@ -7613,7 +7613,7 @@ mod tests {
     #[test]
     fn update_supergroup_parses_admin_restrict_right() {
         // Phase A1: `chatMemberStatusAdministrator` carries `rights`
-        // (schema 1.8.67 line 2500); `can_restrict_members` (line 1092) is
+        // (schema 1.8.67 line 1092); `can_restrict_members` (line 1092) is
         // what `setChatSlowModeDelay` requires (line 13551).
         let json = r#"{"@type":"updateSupergroup","supergroup":{"@type":"supergroup","id":25,"is_forum":false,"status":{"@type":"chatMemberStatusAdministrator","can_be_edited":false,"rights":{"@type":"chatAdministratorRights","can_manage_chat":false,"can_change_info":false,"can_post_messages":false,"can_edit_messages":false,"can_delete_messages":false,"can_invite_users":false,"can_restrict_members":true,"can_pin_messages":false,"can_promote_members":false,"can_manage_video_chats":false,"can_post_stories":false,"can_edit_stories":false,"can_delete_stories":false,"can_manage_direct_messages":false,"can_manage_tags":false,"can_send_welcome_messages":false,"is_anonymous":false}}}}"#;
         let env = parse_envelope(json).unwrap();
@@ -8962,7 +8962,7 @@ mod channel_envelope_tests {
     }
 
     /// Phase D3a: `rights.can_invite_users` rides on
-    /// `chatMemberStatusAdministrator` (schema 1.8.67, line 2500),
+    /// `chatMemberStatusAdministrator` (schema 1.8.67, line 1092),
     /// mirroring the `can_post_messages` pattern above.
     #[test]
     fn chat_member_administrator_rights_can_invite_users() {
