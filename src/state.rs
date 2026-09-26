@@ -3682,7 +3682,7 @@ impl Session {
     /// Effective mute for the toast/sound decisions: the chat's own
     /// exception mute, or the scope default's `mute_for` when the chat keeps
     /// `use_default_mute_for` (td_api.tl line 3348).
-    fn effective_muted(&self, chat: &ChatSummary) -> bool {
+    pub(crate) fn effective_muted(&self, chat: &ChatSummary) -> bool {
         if chat.is_muted() {
             return true;
         }
@@ -3697,7 +3697,7 @@ impl Session {
     /// Effective message-preview allowance: the chat's own flag, or the
     /// scope default's `show_preview` when the chat keeps
     /// `use_default_show_preview` (td_api.tl line 3350).
-    fn effective_preview_allowed(&self, chat: &ChatSummary) -> bool {
+    pub(crate) fn effective_preview_allowed(&self, chat: &ChatSummary) -> bool {
         let settings = &chat.notification_settings;
         if !settings.use_default_show_preview {
             return settings.show_preview;

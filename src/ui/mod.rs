@@ -8334,12 +8334,17 @@ impl QuillApp {
     fn mute_menu_panel(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let session = self.session();
         let open_chat = session.as_ref().and_then(|s| s.open_chat);
-        let chat_settings: ChatNotificationSettings = open_chat
-            .and_then(|id| session.as_ref()?.chats.get(&id.0))
+        let open_chat_summary: Option<&ChatSummary> =
+            open_chat.and_then(|id| session.as_ref()?.chats.get(&id.0));
+        let chat_settings: ChatNotificationSettings = open_chat_summary
             .map(|chat| chat.notification_settings.clone())
             .unwrap_or_default();
-        let muted = chat_settings.is_muted();
-        let preview_on = chat_settings.use_default_show_preview || chat_settings.show_preview;
+        let muted = open_chat_summary
+            .and_then(|chat| session.as_ref().map(|s| s.effective_muted(chat)))
+            .unwrap_or_else(|| chat_settings.is_muted());
+        let preview_on = open_chat_summary
+            .and_then(|chat| session.as_ref().map(|s| s.effective_preview_allowed(chat)))
+            .unwrap_or(chat_settings.use_default_show_preview || chat_settings.show_preview);
         let sound_label = self.notification_sound_label(&chat_settings);
         let saved_sounds: Vec<NotificationSound> = session
             .as_ref()
