@@ -345,6 +345,10 @@ pub enum ScreenshotDemo {
     /// provider), and a `messageContact` (name + phone + vCard +
     /// `user_id`), each with a tappable "Open map" link (Phase 4.3).
     ReadyLocation,
+    /// Dice demo (injected, no live Telegram): a few `messageDice` rows —
+    /// 🎲 with values 4 / 6 and a 🎯 — showing the large static emoji
+    /// face plus the rolled value (Phase 4.4). No roll animation.
+    ReadyDice,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -878,6 +882,15 @@ impl QuillApp {
                     AuthorizationState::Ready,
                 )
             }
+            Some(ScreenshotDemo::ReadyDice) => {
+                demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
+                (
+                    ConnectUiStatus::DemoReadyChats,
+                    None,
+                    "screenshot demo — dice rolls".into(),
+                    AuthorizationState::Ready,
+                )
+            }
             None => bootstrap_connect(credentials),
         };
 
@@ -1242,6 +1255,13 @@ impl QuillApp {
                 apply_ready_location(session, &app.demo_sink, &app.demo_seq);
             }
             app.status_note = "screenshot demo — location / venue / contact".into();
+        }
+        if matches!(demo, Some(ScreenshotDemo::ReadyDice)) {
+            if let Some(session) = app.demo_session.as_mut() {
+                app.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_dice(session, &app.demo_sink, &app.demo_seq);
+            }
+            app.status_note = "screenshot demo — dice rolls".into();
         }
         if matches!(demo, Some(ScreenshotDemo::ReadySponsored)) {
             if let Some(session) = app.demo_session.as_mut() {
@@ -1937,6 +1957,7 @@ impl QuillApp {
                         | MessageContent::Location(_)
                         | MessageContent::Venue(_)
                         | MessageContent::Contact(_)
+                        | MessageContent::Dice(_)
                         | MessageContent::Unsupported { .. } => {}
                     }
                 }
@@ -7478,6 +7499,57 @@ fn apply_ready_location(session: &mut Session, sink: &Arc<MemorySink>, seq: &Ato
     }
 }
 
+/// Phase 4.4: inject a "Demo dice" chat with three `messageDice` rolls —
+/// an incoming 🎲 = 4, an outgoing 🎲 = 6, and an incoming 🎯 = 5.
+/// All data is synthetic; no live Telegram.
+fn apply_ready_dice(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let chat_id = 17;
+    let chat_json = format!(
+        r#"{{"@type":"updateNewChat","chat":{{"id":{chat_id},"title":"Demo dice","type":{{"@type":"chatTypePrivate","user_id":{chat_id}}},"unread_count":0}}}}"#
+    );
+    let position_json = format!(
+        r#"{{"@type":"updateChatPosition","chat_id":{chat_id},"position":{{"@type":"chatPosition","list":{{"@type":"chatListMain"}},"order":"50","is_pinned":false}}}}"#
+    );
+    for json in [chat_json, position_json] {
+        if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
+            session.apply(owned);
+        }
+    }
+    session.open_chat(ChatId(chat_id));
+
+    let message = |message_id: i32, outgoing: bool, content: &str| {
+        format!(
+            r#"{{"@type":"updateNewMessage","message":{{"id":{message_id},"chat_id":{chat_id},"is_outgoing":{outgoing},"content":{content}}}}}"#
+        )
+    };
+
+    // Incoming 🎲 = 4.
+    let roll_one = message(
+        112,
+        false,
+        r#"{"@type":"messageDice","emoji":"🎲","value":4,"success_animation_frame_number":0}"#,
+    );
+    // Outgoing 🎲 = 6.
+    let roll_two = message(
+        113,
+        true,
+        r#"{"@type":"messageDice","emoji":"🎲","value":6,"success_animation_frame_number":0}"#,
+    );
+    // Incoming 🎯 = 5.
+    let roll_three = message(
+        114,
+        false,
+        r#"{"@type":"messageDice","emoji":"🎯","value":5,"success_animation_frame_number":0}"#,
+    );
+
+    for json in [roll_one, roll_two, roll_three] {
+        if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
+            session.apply(owned);
+        }
+    }
+}
+
 /// `ReadySponsored` fixture: open the demo channel (id 13, now ungated) and
 /// inject a `sponsoredMessages` response through the same reducer the live
 /// `getChatSponsoredMessages` path uses — one Sponsored row, one Recommended.
@@ -9436,6 +9508,7 @@ fn session_history_row(
         )),
         MessageContent::Venue(venue) => Some(venue_row(message.id.0 as u64, venue, cx)),
         MessageContent::Contact(contact) => Some(contact_row(message.id.0 as u64, contact)),
+        MessageContent::Dice(dice) => Some(dice_row(message.id.0 as u64, dice)),
         MessageContent::Text(_) | MessageContent::Unsupported { .. } => None,
     };
     let keyboard = inline_keyboard(message, cx);
@@ -10926,6 +10999,34 @@ fn contact_row(row_id: u64, contact: &quill::telegram::envelope::ContactContent)
         );
     }
     body.into_any_element()
+}
+
+/// Phase 4.4: `messageDice` row — the dice emoji rendered large plus the
+/// rolled value, tdesktop-style. Static only: the `DiceStickers` roll
+/// animation (and `success_animation_frame_number`) is out of scope for
+/// this slice; the face glyph stands in for the final animation frame.
+fn dice_row(row_id: u64, dice: &quill::telegram::envelope::DiceContent) -> AnyElement {
+    div()
+        .id(("dice-row", row_id))
+        .flex()
+        .flex_col()
+        .items_center()
+        .gap_1()
+        .mt_2()
+        .px_3()
+        .py_3()
+        .rounded_md()
+        .border_1()
+        .border_color(rgb(0x8b949e))
+        .bg(rgb(0x21262d))
+        .child(div().text_size(px(64.0)).child(dice.face().to_string()))
+        .child(
+            div()
+                .text_sm()
+                .font_medium()
+                .child(format!("Rolled {}", dice.value)),
+        )
+        .into_any_element()
 }
 
 fn auth_action_note(auth: &AuthView, connect_status: &ConnectUiStatus) -> impl IntoElement {

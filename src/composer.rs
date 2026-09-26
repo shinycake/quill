@@ -183,6 +183,7 @@ impl ComposerEdit {
             | MessageContent::Location(_)
             | MessageContent::Venue(_)
             | MessageContent::Contact(_)
+            | MessageContent::Dice(_)
             | MessageContent::Unsupported { .. } => return None,
         };
         Some(Self {
