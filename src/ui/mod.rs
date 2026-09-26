@@ -37,7 +37,7 @@ use quill::poll::{
 use quill::state::{
     ChatSearchJump, ChatSummary, ContactRow, ForwardResult, HistoryMessage, InfoPanelTarget,
     OutboxReceipt, RequestPurpose, SearchStatus, Session, SponsoredReportFlight,
-    outgoing_status_label, unread_badge_text,
+    outgoing_status_label, unix_ms_now, unread_badge_text,
 };
 use quill::story_viewer::{StoryViewer, StoryViewerItem, StoryViewerKind, collect_story_items};
 use quill::telegram::client::copy_and_parse;
@@ -408,6 +408,9 @@ pub struct QuillApp {
     /// tdesktop `VoiceRecordBar` (click mic to record; Esc / Cancel discards).
     voice_capture: Option<VoiceCapture>,
     voice_tick: bool,
+    /// Phase A1: the open chat whose slow-mode countdown is ticking
+    /// (`Some` exactly while the 1s tick task runs). Mirrors `voice_tick`.
+    slow_mode_tick_chat: Option<ChatId>,
     /// History row whose voice note is playing.
     playing_voice: Option<MessageId>,
     /// History row whose music file (`messageAudio`) is playing. Shares `voice_player`.
@@ -706,6 +709,12 @@ pub enum ScreenshotDemo {
     /// fixture) and the per-chat notifications panel is open with the sound
     /// picker expanded (parity slice: notification sounds).
     ReadyNotificationSound,
+    /// Phase A1: slow-mode enforcement (injected, no live Telegram) — a
+    /// dedicated supergroup (id 17) with `slow_mode_delay: 30` and
+    /// `slow_mode_delay_expires_in: 25.0`, the viewer a plain member (no
+    /// bypass), opened with two messages. The composer shows the
+    /// "Slow mode · wait Ns" countdown and blocks sends until expiry.
+    ReadySlowMode,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1411,6 +1420,16 @@ impl QuillApp {
                     AuthorizationState::Ready,
                 )
             }
+            // Phase A1: slow-mode enforcement fixture.
+            Some(ScreenshotDemo::ReadySlowMode) => {
+                demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
+                (
+                    ConnectUiStatus::DemoReadyChats,
+                    None,
+                    "screenshot demo — slow-mode enforcement (injected, no live Telegram)".into(),
+                    AuthorizationState::Ready,
+                )
+            }
             None => bootstrap_connect(credentials),
         };
 
@@ -1504,6 +1523,7 @@ impl QuillApp {
             notify_sound_inflight: Arc::new(AtomicUsize::new(0)),
             voice_capture: None,
             voice_tick: false,
+            slow_mode_tick_chat: None,
             playing_voice: None,
             playing_audio: None,
             pending_audio_play: None,
@@ -1819,6 +1839,19 @@ impl QuillApp {
                 apply_ready_chat_avatars(session, &app.demo_sink, &app.demo_seq);
             }
             app.status_note = "chat avatars & channel header".into();
+        }
+        // Phase A1: slow-mode enforcement fixture — the composer shows the
+        // countdown and blocks sends until it expires.
+        if matches!(demo, Some(ScreenshotDemo::ReadySlowMode)) {
+            if let Some(session) = app.demo_session.as_mut() {
+                app.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_slow_mode(session, &app.demo_sink, &app.demo_seq);
+            }
+            app.composer.update(cx, |input, cx| {
+                input.set_value("this send will be blocked by slow mode…", window, cx);
+            });
+            app.status_note =
+                "slow-mode enforcement — sends blocked until the timer expires".into();
         }
         if matches!(demo, Some(ScreenshotDemo::ReadyVideoSend)) {
             app.composer.update(cx, |input, cx| {
@@ -2394,6 +2427,11 @@ impl QuillApp {
                         cx.notify();
                         return;
                     }
+                    // Phase A1: slow-mode gate (centralized in
+                    // `slow_mode_blocked`).
+                    if self.slow_mode_blocked(chat_id, cx) {
+                        return;
+                    }
                     let result = self
                         .live
                         .as_mut()
@@ -2433,6 +2471,13 @@ impl QuillApp {
                     return;
                 }
                 if self.demo_session.is_some() {
+                    // Phase A1: the slow-mode gate applies to the demo
+                    // session too (fixture-driven countdown, no live
+                    // Telegram).
+                    let demo_chat = self.demo_session.as_ref().and_then(|s| s.open_chat);
+                    if demo_chat.is_some_and(|chat_id| self.slow_mode_blocked(chat_id, cx)) {
+                        return;
+                    }
                     let attachments = self.pending_attachments.clone();
                     if attachments.iter().any(|att| {
                         att.kind == AttachmentKind::VideoNote
@@ -3703,6 +3748,11 @@ impl QuillApp {
         let Some(draft) = self.pending_forward.clone() else {
             return;
         };
+        // Phase A1: slow-mode gate applies to forwards — forwarding sends
+        // messages to the destination chat.
+        if self.slow_mode_blocked(dest, cx) {
+            return;
+        }
         if self.live.is_some() {
             let result = self
                 .live
@@ -4665,6 +4715,15 @@ impl QuillApp {
     }
 
     fn send_voice_recording(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // Phase A1: slow-mode gate applies to voice notes too — checked
+        // before consuming the capture so a blocked recording survives
+        // until the timer expires.
+        if self
+            .open_chat_id()
+            .is_some_and(|chat_id| self.slow_mode_blocked(chat_id, cx))
+        {
+            return;
+        }
         let Some(capture) = self.voice_capture.take() else {
             return;
         };
@@ -5048,6 +5107,145 @@ impl QuillApp {
             });
         })
         .detach();
+    }
+
+    /// Phase A1: slow-mode wait (whole seconds) for a chat, via the
+    /// session gate (`Session::slow_mode_wait_secs`).
+    fn slow_mode_wait_secs_for(&self, chat_id: ChatId) -> Option<u64> {
+        let session = self.session()?;
+        session.slow_mode_wait_secs(chat_id, unix_ms_now())
+    }
+
+    /// Phase A1: slow-mode wait for the currently open chat, if any.
+    fn slow_mode_wait_secs(&self) -> Option<u64> {
+        let chat_id = self.session()?.open_chat?;
+        self.slow_mode_wait_secs_for(chat_id)
+    }
+
+    /// Phase A1: centralized slow-mode send gate. When the gate is active
+    /// for `chat_id`, sets the status note and returns `true` — callers
+    /// must not send. On live sessions a blocked send also re-reads the
+    /// server value via `refresh_supergroup_full_info`, because the schema
+    /// (1.8.67, line 2759) warns no `updateSupergroupFullInfo` fires when
+    /// only the expiry changes while old and new are non-zero.
+    fn slow_mode_blocked(&mut self, chat_id: ChatId, cx: &mut Context<Self>) -> bool {
+        let Some(wait) = self.slow_mode_wait_secs_for(chat_id) else {
+            return false;
+        };
+        self.status_note = format!("Slow mode: wait {wait}s before sending");
+        if self.live.is_some() {
+            let supergroup_id = self.live.as_ref().and_then(|live| {
+                let session = &live.driver.session;
+                match session.chats.get(&chat_id.0)?.kind {
+                    ChatKind::Supergroup {
+                        supergroup_id,
+                        is_channel: false,
+                    } => Some(supergroup_id),
+                    _ => None,
+                }
+            });
+            if let (Some(live), Some(supergroup_id)) = (self.live.as_mut(), supergroup_id) {
+                let _ = live.driver.refresh_supergroup_full_info(supergroup_id);
+            }
+        }
+        cx.notify();
+        true
+    }
+
+    /// Phase A1: keep the slow-mode countdown re-rendering while the open
+    /// chat is gated. At most one task per open chat (guarded by
+    /// `slow_mode_tick_chat`, mirroring `spawn_voice_tick`); it exits
+    /// when the gate lifts or the open chat changes. Called from
+    /// `render`, which has the `&mut self` the tick needs.
+    fn ensure_slow_mode_tick(&mut self, cx: &mut Context<Self>) {
+        let Some(chat_id) = self
+            .session()
+            .and_then(|session| session.open_chat)
+            .filter(|id| self.slow_mode_wait_secs_for(*id).is_some())
+        else {
+            return;
+        };
+        if self.slow_mode_tick_chat == Some(chat_id) {
+            return;
+        }
+        self.slow_mode_tick_chat = Some(chat_id);
+        cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor().timer(Duration::from_secs(1)).await;
+                let cont = this
+                    .update(cx, |this, cx| {
+                        let still_open = this.session().and_then(|s| s.open_chat) == Some(chat_id);
+                        let still_gated = this.slow_mode_wait_secs_for(chat_id).is_some();
+                        if still_open && still_gated {
+                            cx.notify();
+                            true
+                        } else {
+                            if this.slow_mode_tick_chat == Some(chat_id) {
+                                this.slow_mode_tick_chat = None;
+                            }
+                            false
+                        }
+                    })
+                    .unwrap_or(false);
+                if !cont {
+                    break;
+                }
+            }
+        })
+        .detach();
+    }
+
+    /// Phase A1: whether the viewer may change slow mode in a supergroup:
+    /// creator, or administrator with the explicit `can_restrict_members`
+    /// right (`setChatSlowModeDelay` requirement, schema 1.8.67 line
+    /// 13551). Shared by the info-panel selector and `set_slow_mode_delay`
+    /// (defense in depth — the request must never fire unauthorized).
+    fn can_change_slow_mode(&self, supergroup_id: i64) -> bool {
+        let session = match self.session() {
+            Some(session) => session,
+            None => return false,
+        };
+        let status = session.supergroup_own_status(supergroup_id);
+        status == Some(ChannelMemberStatus::Creator)
+            || (status == Some(ChannelMemberStatus::Administrator)
+                && session.supergroup_can_restrict_members(supergroup_id))
+    }
+
+    /// Phase A1: admin slow-mode control (`setChatSlowModeDelay`, TDLib
+    /// 1.8.67 line 13551) from the group info panel. The new delay
+    /// arrives via `updateSupergroupFullInfo`; the panel re-renders then.
+    fn set_slow_mode_delay(
+        &mut self,
+        chat_id: ChatId,
+        slow_mode_delay: i32,
+        cx: &mut Context<Self>,
+    ) {
+        let supergroup_id = self
+            .session()
+            .and_then(|s| match s.chats.get(&chat_id.0)?.kind {
+                ChatKind::Supergroup {
+                    supergroup_id,
+                    is_channel: false,
+                } => Some(supergroup_id),
+                _ => None,
+            });
+        if supergroup_id.is_none_or(|id| !self.can_change_slow_mode(id)) {
+            self.status_note = "slow mode needs the restrict-members admin right".into();
+            cx.notify();
+            return;
+        }
+        if let Some(live) = self.live.as_mut() {
+            match live
+                .driver
+                .set_chat_slow_mode_delay(chat_id, slow_mode_delay)
+            {
+                Ok(_) => self.status_note = "slow mode updated".into(),
+                Err(_) => self.status_note = "could not change slow mode".into(),
+            }
+        } else {
+            self.status_note = "slow mode needs a live connection (demo)".into();
+        }
+        cx.notify();
     }
 
     fn kill_shared_player(&mut self) {
@@ -5571,6 +5769,10 @@ impl QuillApp {
         let Some(chat_id) = chat_id else {
             return;
         };
+        // Phase A1: slow-mode gate applies to GIF sends too.
+        if self.slow_mode_blocked(chat_id, cx) {
+            return;
+        }
         let reply = self
             .pending_reply
             .as_ref()
@@ -5670,6 +5872,10 @@ impl QuillApp {
         let Some(chat_id) = chat_id else {
             return;
         };
+        // Phase A1: slow-mode gate applies to sticker sends too.
+        if self.slow_mode_blocked(chat_id, cx) {
+            return;
+        }
         let reply = self
             .pending_reply
             .as_ref()
@@ -6465,6 +6671,61 @@ impl QuillApp {
                     .child(div().text_sm().child(description)),
             );
         }
+        // Phase A1: slow-mode admin control (`setChatSlowModeDelay`,
+        // schema 1.8.67 line 13551 — allowed values 0/5/10/30/60/300/900/
+        // 3600, supergroups only, requires `can_restrict_members`).
+        // Creators hold all rights implicitly; administrators need the
+        // explicit `can_restrict_members` right (lines 2500/1092). The new
+        // delay arrives via `updateSupergroupFullInfo`.
+        if !is_channel && self.can_change_slow_mode(supergroup_id) {
+            let current_delay = info.as_ref().map(|i| i.slow_mode_delay).unwrap_or(0);
+            let mut value_row = div().id("slow-mode-values").flex().flex_wrap().gap_1();
+            for (label, value) in [
+                ("Off", 0),
+                ("5s", 5),
+                ("10s", 10),
+                ("30s", 30),
+                ("1m", 60),
+                ("5m", 300),
+                ("15m", 900),
+                ("1h", 3600),
+            ] {
+                let label = if value == current_delay {
+                    format!("✓ {label}")
+                } else {
+                    label.to_string()
+                };
+                value_row = value_row.child(
+                    Button::new(format!("slow-mode-set-{value}"))
+                        .label(label)
+                        .ghost()
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.set_slow_mode_delay(chat_id, value, cx);
+                        })),
+                );
+            }
+            body = body.child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .w_full()
+                    .gap_1()
+                    .child(
+                        div()
+                            .text_xs()
+                            .font_semibold()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("Slow mode"),
+                    )
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("Delay between messages for members"),
+                    )
+                    .child(value_row),
+            );
+        }
         body.into_any_element()
     }
 
@@ -7226,6 +7487,10 @@ impl QuillApp {
             cx.notify();
             return;
         };
+        // Phase A1: slow-mode gate applies to polls too.
+        if self.slow_mode_blocked(chat_id, cx) {
+            return;
+        }
         let reply_to = self.pending_reply.as_ref().map(|reply| reply.message_id);
         if let Some(live) = self.live.as_mut() {
             let result = live.driver.send_poll_draft(chat_id, &draft, reply_to);
@@ -11626,6 +11891,9 @@ impl Render for QuillApp {
             live.driver.session.app_active = window.is_window_active();
         }
         self.flush_notifications(window, cx);
+        // Phase A1: keep the slow-mode countdown ticking while the open
+        // chat is gated (spawns at most one 1s task per open chat).
+        self.ensure_slow_mode_tick(cx);
         // Phase 9.1: resolve a tapped story whose `story` response landed
         // since the click (`getStory` prefetch finished).
         // Parity slice: prefill the folder editor once its `getChatFolder`
@@ -12062,6 +12330,34 @@ impl QuillApp {
                         // Phase 3.3: `/` command menu above the composer.
                         .when_some(self.command_menu_dropdown(cx), |this, panel| {
                             this.child(panel)
+                        })
+                        // Phase A1: slow-mode countdown. The composer stays
+                        // usable (typing is fine) but sends are blocked
+                        // until the wait expires; `ensure_slow_mode_tick`
+                        // re-renders every second so the number counts down.
+                        .when_some(self.slow_mode_wait_secs(), |this, wait| {
+                            this.child(
+                                div()
+                                    .id("slow-mode-banner")
+                                    .px_3()
+                                    .py_2()
+                                    .rounded_md()
+                                    .border_1()
+                                    .border_color(rgb(0x8b949e))
+                                    .bg(rgb(0x21262d))
+                                    .child(
+                                        div()
+                                            .text_sm()
+                                            .font_medium()
+                                            .child(format!("Slow mode · wait {wait}s")),
+                                    )
+                                    .child(
+                                        div()
+                                            .text_xs()
+                                            .text_color(rgb(0xc9d1d9))
+                                            .child("sending is paused until the timer expires"),
+                                    ),
+                            )
                         })
                         .child(Textarea::new(&self.composer).h(px(88.))),
                 )
@@ -14627,6 +14923,50 @@ fn apply_ready_mute_archive(session: &mut Session, sink: &Arc<MemorySink>, seq: 
             session.apply(owned);
         }
     }
+}
+
+/// `ReadySlowMode` fixture (Phase A1): a dedicated supergroup
+/// ("Slow-mode demo group", chat id 17) with slow mode enabled
+/// (`slow_mode_delay: 30`, `slow_mode_delay_expires_in: 25.0`) and the
+/// viewer as a plain member (no bypass), opened with two messages — all
+/// through the normal reducer, no live Telegram. The composer shows the
+/// "Slow mode · wait Ns" countdown and blocks sends until it expires.
+fn apply_ready_slow_mode(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let chat_id = 17i64;
+    let extra = session.request_for_supergroup(RequestPurpose::GetSupergroupFullInfo, chat_id);
+    let description_json = serde_json::to_string(
+        "Demo group with slow mode on: members wait 30 seconds between messages.",
+    )
+    .unwrap();
+    let jsons = [
+        format!(
+            r#"{{"@type":"updateNewChat","chat":{{"id":{chat_id},"title":"Slow-mode demo group","type":{{"@type":"chatTypeSupergroup","supergroup_id":{chat_id},"is_channel":false}},"unread_count":0}}}}"#
+        ),
+        format!(
+            r#"{{"@type":"updateChatPosition","chat_id":{chat_id},"position":{{"@type":"chatPosition","list":{{"@type":"chatListMain"}},"order":"80","is_pinned":false}}}}"#
+        ),
+        // The viewer is a plain member — no slow-mode bypass.
+        format!(
+            r#"{{"@type":"updateSupergroup","supergroup":{{"@type":"supergroup","id":{chat_id},"is_forum":false,"status":{{"@type":"chatMemberStatusMember"}}}}}}"#
+        ),
+        format!(
+            r#"{{"@type":"supergroupFullInfo","@extra":"{}","description":{description_json},"member_count":128,"slow_mode_delay":30,"slow_mode_delay_expires_in":25.0,"my_boost_count":0,"unrestrict_boost_count":0}}"#,
+            extra.0,
+        ),
+        format!(
+            r#"{{"@type":"updateNewMessage","message":{{"id":301,"chat_id":{chat_id},"sender_id":{{"@type":"messageSenderUser","user_id":501}},"is_outgoing":false,"date":1700000000,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"Slow mode is on in this group: 30 seconds between messages.","entities":[]}}}}}}}}"#
+        ),
+        format!(
+            r#"{{"@type":"updateNewMessage","message":{{"id":302,"chat_id":{chat_id},"sender_id":{{"@type":"messageSenderUser","user_id":502}},"is_outgoing":false,"date":1700000060,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"Type below and hit Enter: Quill blocks the send until the timer expires.","entities":[]}}}}}}}}"#
+        ),
+    ];
+    for json in jsons {
+        if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
+            session.apply(owned);
+        }
+    }
+    session.open_chat(ChatId(chat_id));
 }
 
 /// Parity slice: notification-sounds screenshot fixture — saved sounds

@@ -6,7 +6,7 @@ use serde::Deserialize;
 use serde_json::Value;
 use std::str::FromStr;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Envelope {
     pub type_name: String,
     pub extra: Option<RequestId>,
@@ -14,7 +14,7 @@ pub struct Envelope {
     pub payload: EnvelopePayload,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum EnvelopePayload {
     UpdateAuthorizationState(AuthorizationState),
     UpdateNewMessage(ParsedMessage),
@@ -189,12 +189,28 @@ pub enum EnvelopePayload {
         supergroup_id: i64,
         is_forum: bool,
         username: String,
+        /// Phase A1: own `chatMemberStatus*` (`supergroup.status`, schema
+        /// 1.8.67 line 2746 — "Current user status in the supergroup or
+        /// channel"). Drives slow-mode bypass (admins/creators are exempt).
+        status: ChannelMemberStatus,
+        /// Phase A1: `rights.can_restrict_members` from own
+        /// `chatMemberStatusAdministrator` (schema 1.8.67, lines 2500/1092);
+        /// `None` for any other status or a missing rights block.
+        /// `setChatSlowModeDelay` requires this right (line 13551).
+        can_restrict_members: Option<bool>,
     },
-    /// `supergroup` — `getSupergroup` response.
+    /// `supergroup` — `getSupergroup` response. Phase A1: also keeps own
+    /// `status` (`supergroup.status`, schema 1.8.67 line 2746) for the
+    /// slow-mode bypass check.
     Supergroup {
         supergroup_id: i64,
         is_forum: bool,
         username: String,
+        status: ChannelMemberStatus,
+        /// Phase A1: `rights.can_restrict_members` from own
+        /// `chatMemberStatusAdministrator` (schema 1.8.67, lines 2500/1092);
+        /// `None` for any other status or a missing rights block.
+        can_restrict_members: Option<bool>,
     },
     /// `forumTopics` — `getForumTopics` response. Only the first page is
     /// fetched; `next_offset_*` are dropped (see Phase 5.1 DECISIONS).
@@ -310,22 +326,38 @@ pub enum EnvelopePayload {
     /// resolved from the pending request in `Session::apply`. Kept:
     /// `description`, `member_count`, `linked_chat_id` (schema 1.8.67,
     /// line 2792; the discussion-group chat id for the channel header's
-    /// "Discuss" affordance). Dropped: admin/restricted/banned
-    /// counts, slow mode, invite link, sticker sets, boost/gift fields,
-    /// paid-message and statistics flags, location.
+    /// "Discuss" affordance), plus the slow-mode fields and boost counts
+    /// (Phase A1: `slow_mode_delay` / `slow_mode_delay_expires_in`, schema
+    /// 1.8.67 lines 2758–2759; `my_boost_count` / `unrestrict_boost_count`,
+    /// lines 2779–2780) that drive composer slow-mode enforcement. Dropped:
+    /// admin/restricted/banned counts, invite link, sticker sets, gift
+    /// fields, paid-message and statistics flags, location.
     SupergroupFullInfo {
         description: String,
         member_count: i32,
         linked_chat_id: i64,
+        slow_mode_delay: i32,
+        slow_mode_delay_expires_in: f64,
+        my_boost_count: i32,
+        unrestrict_boost_count: i32,
     },
     /// Parity slice: `updateSupergroupFullInfo` (schema 1.8.67, line 10750)
     /// — the update carries its own `supergroup_id`, so it applies
-    /// whenever it arrives (no pending-request correlation).
+    /// whenever it arrives (no pending-request correlation). Phase A1:
+    /// also carries the slow-mode fields (schema lines 2758–2759) and
+    /// boost counts (lines 2779–2780); note the schema warns no update
+    /// fires when only `slow_mode_delay_expires_in` changes while both
+    /// old and new values are non-zero, so the reducer timestamps every
+    /// arrival and the gate decays locally.
     UpdateSupergroupFullInfo {
         supergroup_id: i64,
         description: String,
         member_count: i32,
         linked_chat_id: i64,
+        slow_mode_delay: i32,
+        slow_mode_delay_expires_in: f64,
+        my_boost_count: i32,
+        unrestrict_boost_count: i32,
     },
     /// `botCommands` — `getCommands` response (TDLib 1.8.67,
     /// `schema/td_api.tl:829`): the bot's commands for the requested scope
@@ -3009,6 +3041,14 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
                     .and_then(Value::as_bool)
                     .unwrap_or(false),
                 username: parse_first_active_username(supergroup.get("usernames")),
+                // Phase A1: own `chatMemberStatus*` (schema 1.8.67 line
+                // 2746); unknown/missing → `Unknown` (gated, no bypass).
+                // `can_restrict_members` gates the slow-mode admin control
+                // (schema line 13551).
+                status: parse_channel_member_status(supergroup.get("status"))
+                    .map(|(status, _)| status)
+                    .unwrap_or(ChannelMemberStatus::Unknown),
+                can_restrict_members: parse_restrict_members_right(supergroup.get("status")),
             })
         }
         "supergroup" => Ok(EnvelopePayload::Supergroup {
@@ -3018,6 +3058,11 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
                 .and_then(Value::as_bool)
                 .unwrap_or(false),
             username: parse_first_active_username(value.get("usernames")),
+            // Phase A1: own `chatMemberStatus*` (schema 1.8.67 line 2746).
+            status: parse_channel_member_status(value.get("status"))
+                .map(|(status, _)| status)
+                .unwrap_or(ChannelMemberStatus::Unknown),
+            can_restrict_members: parse_restrict_members_right(value.get("status")),
         }),
         // Phase 5.1: `forumTopics` (schema line 3976). Topics keep their
         // response order; the UI sorts by `order` descending per the schema
@@ -3167,6 +3212,25 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
             // Parity slice: `linked_chat_id` (schema 1.8.67, line 2792) —
             // the discussion-group chat id (0 = none).
             linked_chat_id: int53_or_zero(value.get("linked_chat_id")),
+            // Phase A1: slow-mode fields (schema 1.8.67, lines 2758–2759)
+            // plus the boost bypass counts (lines 2779–2780). The expiry is
+            // `double` in the schema; `as_f64` accepts integer JSON too.
+            slow_mode_delay: value
+                .get("slow_mode_delay")
+                .and_then(Value::as_i64)
+                .unwrap_or(0) as i32,
+            slow_mode_delay_expires_in: value
+                .get("slow_mode_delay_expires_in")
+                .and_then(Value::as_f64)
+                .unwrap_or(0.0),
+            my_boost_count: value
+                .get("my_boost_count")
+                .and_then(Value::as_i64)
+                .unwrap_or(0) as i32,
+            unrestrict_boost_count: value
+                .get("unrestrict_boost_count")
+                .and_then(Value::as_i64)
+                .unwrap_or(0) as i32,
         }),
         // Parity slice: `updateSupergroupFullInfo` (schema 1.8.67, line
         // 10750) — same fields as the `supergroupFullInfo` response, with
@@ -3190,6 +3254,28 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
                     .get("supergroup_full_info")
                     .and_then(|info| info.get("linked_chat_id")),
             ),
+            // Phase A1: slow-mode + boost fields (schema 1.8.67,
+            // lines 2758–2759 / 2779–2780), nested like the other fields.
+            slow_mode_delay: value
+                .get("supergroup_full_info")
+                .and_then(|info| info.get("slow_mode_delay"))
+                .and_then(Value::as_i64)
+                .unwrap_or(0) as i32,
+            slow_mode_delay_expires_in: value
+                .get("supergroup_full_info")
+                .and_then(|info| info.get("slow_mode_delay_expires_in"))
+                .and_then(Value::as_f64)
+                .unwrap_or(0.0),
+            my_boost_count: value
+                .get("supergroup_full_info")
+                .and_then(|info| info.get("my_boost_count"))
+                .and_then(Value::as_i64)
+                .unwrap_or(0) as i32,
+            unrestrict_boost_count: value
+                .get("supergroup_full_info")
+                .and_then(|info| info.get("unrestrict_boost_count"))
+                .and_then(Value::as_i64)
+                .unwrap_or(0) as i32,
         }),
         "botCommands" => Ok(EnvelopePayload::BotCommands {
             bot_user_id: UserId(int53(value.get("bot_user_id"))?),
@@ -3390,6 +3476,21 @@ fn parse_channel_member_status(
         None
     };
     Some((status, admin_can_post_messages))
+}
+
+/// `rights.can_restrict_members` from a `chatMemberStatusAdministrator`
+/// block (TDLib 1.8.67, lines 2500/1092); `None` for any other status or a
+/// missing/absent rights block. `setChatSlowModeDelay` requires this
+/// right (schema line 13551).
+fn parse_restrict_members_right(value: Option<&Value>) -> Option<bool> {
+    let value = value?;
+    if value.get("@type").and_then(Value::as_str) != Some("chatMemberStatusAdministrator") {
+        return None;
+    }
+    value
+        .get("rights")
+        .and_then(|rights| rights.get("can_restrict_members"))
+        .and_then(Value::as_bool)
 }
 
 /// `chatMember` (TDLib 1.8.67). Returns `None` when `member_id` or `status`
@@ -5724,6 +5825,46 @@ mod tests {
     }
 
     #[test]
+    fn update_supergroup_parses_admin_restrict_right() {
+        // Phase A1: `chatMemberStatusAdministrator` carries `rights`
+        // (schema 1.8.67 line 2500); `can_restrict_members` (line 1092) is
+        // what `setChatSlowModeDelay` requires (line 13551).
+        let json = r#"{"@type":"updateSupergroup","supergroup":{"@type":"supergroup","id":25,"is_forum":false,"status":{"@type":"chatMemberStatusAdministrator","can_be_edited":false,"rights":{"@type":"chatAdministratorRights","can_manage_chat":false,"can_change_info":false,"can_post_messages":false,"can_edit_messages":false,"can_delete_messages":false,"can_invite_users":false,"can_restrict_members":true,"can_pin_messages":false,"can_promote_members":false,"can_manage_video_chats":false,"can_post_stories":false,"can_edit_stories":false,"can_delete_stories":false,"can_manage_direct_messages":false,"can_manage_tags":false,"can_send_welcome_messages":false,"is_anonymous":false}}}}"#;
+        let env = parse_envelope(json).unwrap();
+        match env.payload {
+            EnvelopePayload::UpdateSupergroup {
+                status,
+                can_restrict_members,
+                ..
+            } => {
+                assert_eq!(status, ChannelMemberStatus::Administrator);
+                assert_eq!(can_restrict_members, Some(true));
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+        // Admin without the right → `Some(false)`.
+        let json = r#"{"@type":"updateSupergroup","supergroup":{"@type":"supergroup","id":25,"is_forum":false,"status":{"@type":"chatMemberStatusAdministrator","can_be_edited":false,"rights":{"@type":"chatAdministratorRights","can_restrict_members":false}}}}"#;
+        let env = parse_envelope(json).unwrap();
+        match env.payload {
+            EnvelopePayload::UpdateSupergroup {
+                can_restrict_members,
+                ..
+            } => assert_eq!(can_restrict_members, Some(false)),
+            other => panic!("unexpected {other:?}"),
+        }
+        // Admin with no rights block → `None` (treated as lacking the right).
+        let json = r#"{"@type":"updateSupergroup","supergroup":{"@type":"supergroup","id":25,"is_forum":false,"status":{"@type":"chatMemberStatusAdministrator"}}}"#;
+        let env = parse_envelope(json).unwrap();
+        match env.payload {
+            EnvelopePayload::UpdateSupergroup {
+                can_restrict_members,
+                ..
+            } => assert_eq!(can_restrict_members, None),
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+
+    #[test]
     fn update_supergroup_parses_forum_flag() {
         let json = r#"{"@type":"updateSupergroup","supergroup":{"@type":"supergroup","id":16,"usernames":null,"date":1700000000,"status":{"@type":"chatMemberStatusMember"},"member_count":42,"boost_level":0,"has_automatic_translation":false,"has_linked_chat":false,"has_location":false,"sign_messages":false,"show_message_sender":false,"join_to_send_messages":false,"join_by_request":false,"is_slow_mode_enabled":false,"is_channel":false,"is_broadcast_group":false,"is_forum":true,"is_direct_messages_group":false,"is_administered_direct_messages_group":false,"verification_status":{"@type":"verificationStatus","is_verified":false,"is_scam":false,"is_fake":false},"has_direct_messages_group":false,"has_forum_tabs":false,"restriction_info":null,"paid_message_star_count":0,"active_story_state":null}}"#;
         let env = parse_envelope(json).unwrap();
@@ -5732,11 +5873,17 @@ mod tests {
                 supergroup_id,
                 is_forum,
                 username,
+                status,
+                can_restrict_members,
             } => {
                 assert_eq!(supergroup_id, 16);
                 assert!(is_forum);
                 // Parity slice: null `usernames` → empty username.
                 assert_eq!(username, "");
+                // Phase A1: own status parsed (`chatMemberStatusMember`).
+                assert_eq!(status, ChannelMemberStatus::Member);
+                // Members carry no admin rights.
+                assert_eq!(can_restrict_members, None);
             }
             other => panic!("unexpected {other:?}"),
         }
@@ -5753,10 +5900,14 @@ mod tests {
                 supergroup_id,
                 is_forum,
                 username,
+                status,
+                can_restrict_members,
             } => {
                 assert_eq!(supergroup_id, 18);
                 assert!(!is_forum);
                 assert_eq!(username, "demochannel");
+                assert_eq!(status, ChannelMemberStatus::Unknown);
+                assert_eq!(can_restrict_members, None);
             }
             other => panic!("unexpected {other:?}"),
         }
@@ -5771,10 +5922,14 @@ mod tests {
                 supergroup_id,
                 is_forum,
                 username,
+                status,
+                can_restrict_members,
             } => {
                 assert_eq!(supergroup_id, 17);
                 assert!(!is_forum);
                 assert_eq!(username, "");
+                assert_eq!(status, ChannelMemberStatus::Unknown);
+                assert_eq!(can_restrict_members, None);
             }
             other => panic!("unexpected {other:?}"),
         }
@@ -7531,11 +7686,46 @@ mod channel_envelope_tests {
                 description,
                 member_count,
                 linked_chat_id,
+                slow_mode_delay,
+                slow_mode_delay_expires_in,
+                my_boost_count,
+                unrestrict_boost_count,
             } => {
                 assert_eq!(description, "CANARY group description");
                 assert_eq!(member_count, 1234);
                 // Parity slice: no `linked_chat_id` → 0 (no discussion group).
                 assert_eq!(linked_chat_id, 0);
+                // Phase A1: slow-mode fields default to 0 when absent.
+                assert_eq!(slow_mode_delay, 0);
+                assert_eq!(slow_mode_delay_expires_in, 0.0);
+                assert_eq!(my_boost_count, 0);
+                assert_eq!(unrestrict_boost_count, 0);
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn supergroup_full_info_parses_slow_mode_fields() {
+        // Phase A1: `slow_mode_delay` / `slow_mode_delay_expires_in`
+        // (schema 1.8.67, lines 2758–2759) and the boost bypass counts
+        // (lines 2779–2780) are parsed from `supergroupFullInfo`.
+        let env = parse_envelope(
+            r#"{"@type":"supergroupFullInfo","@extra":"5","description":"d","member_count":10,"slow_mode_delay":30,"slow_mode_delay_expires_in":12.5,"my_boost_count":2,"unrestrict_boost_count":5}"#,
+        )
+        .unwrap();
+        match env.payload {
+            EnvelopePayload::SupergroupFullInfo {
+                slow_mode_delay,
+                slow_mode_delay_expires_in,
+                my_boost_count,
+                unrestrict_boost_count,
+                ..
+            } => {
+                assert_eq!(slow_mode_delay, 30);
+                assert_eq!(slow_mode_delay_expires_in, 12.5);
+                assert_eq!(my_boost_count, 2);
+                assert_eq!(unrestrict_boost_count, 5);
             }
             other => panic!("{other:?}"),
         }
@@ -7571,11 +7761,68 @@ mod channel_envelope_tests {
                 description,
                 member_count,
                 linked_chat_id,
+                slow_mode_delay,
+                ..
             } => {
                 assert_eq!(supergroup_id, 13);
                 assert_eq!(description, "CANARY channel");
                 assert_eq!(member_count, 12345);
                 assert_eq!(linked_chat_id, 14);
+                // Absent slow-mode fields default to 0.
+                assert_eq!(slow_mode_delay, 0);
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn update_supergroup_full_info_parses_slow_mode_fields() {
+        // Phase A1: the nested `supergroup_full_info` also carries the
+        // slow-mode fields (schema 1.8.67, lines 2758–2759).
+        let env = parse_envelope(
+            r#"{"@type":"updateSupergroupFullInfo","supergroup_id":13,"supergroup_full_info":{"@type":"supergroupFullInfo","description":"d","member_count":1,"slow_mode_delay":60,"slow_mode_delay_expires_in":44.0}}"#,
+        )
+        .unwrap();
+        match env.payload {
+            EnvelopePayload::UpdateSupergroupFullInfo {
+                slow_mode_delay,
+                slow_mode_delay_expires_in,
+                ..
+            } => {
+                assert_eq!(slow_mode_delay, 60);
+                assert_eq!(slow_mode_delay_expires_in, 44.0);
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn update_supergroup_parses_own_status() {
+        // Phase A1: `supergroup.status` (schema 1.8.67 line 2746) is the
+        // viewer's own `chatMemberStatus*` — the slow-mode bypass signal.
+        let env = parse_envelope(
+            r#"{"@type":"updateSupergroup","supergroup":{"@type":"supergroup","id":16,"is_forum":false,"status":{"@type":"chatMemberStatusAdministrator"}}}"#,
+        )
+        .unwrap();
+        match env.payload {
+            EnvelopePayload::UpdateSupergroup {
+                supergroup_id,
+                status,
+                ..
+            } => {
+                assert_eq!(supergroup_id, 16);
+                assert_eq!(status, ChannelMemberStatus::Administrator);
+            }
+            other => panic!("{other:?}"),
+        }
+        // Missing status → Unknown (gated, no bypass).
+        let env = parse_envelope(
+            r#"{"@type":"updateSupergroup","supergroup":{"@type":"supergroup","id":17,"is_forum":false}}"#,
+        )
+        .unwrap();
+        match env.payload {
+            EnvelopePayload::UpdateSupergroup { status, .. } => {
+                assert_eq!(status, ChannelMemberStatus::Unknown);
             }
             other => panic!("{other:?}"),
         }

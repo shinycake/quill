@@ -1880,3 +1880,115 @@ Research snapshot 2026-09-16, pin recheck **2026-09-17**.
   (`use_default_mute_stories` etc.); a global
   `hide_notification_previews` settings UI (the per-chat preview
   toggle exists).
+
+## Phase A — core-chat gap audit + slow mode (A1, 2026-09-26)
+
+### Phase A audit: top-10 core-chat gaps, ranked by impact
+
+Ranked against what official clients expose for everyday 1:1 / group
+messaging. Schema citations are TDLib 1.8.67 (`schema/td_api.tl`); sizes
+are rough (S < 1 day, M = days, L = week+).
+
+1. **Search filtering / pagination (M).** `searchChatMessages`
+   (:11864) takes a sender and `SearchMessagesFilter`, but no date range;
+   `searchMessages` (:11877) adds media + chat-type filters and
+   `min_date`/`max_date`. Media/filter constructors :6275–6329. Quill
+   sends null sender/filter and has no date/media/sender UI and no
+   complete pagination.
+2. **Scheduled messages (M).** `messageSchedulingState*` (:5902–5909);
+   `message.scheduling_state` (:3165); `messageSendOptions.scheduling_state`
+   (:5934); `getChatScheduledMessages` (:12000). Quill has no
+   scheduled-message handling or UI at all.
+3. **Draft sync fidelity (S/M).** `draftMessage` (:3433),
+   `draftMessageContentText` (:3404), plus rich / input-rich / video-note /
+   voice-note draft forms (:3407–3424). Quill stores only plain text +
+   reply message id — no rich text, voice, effects, link-preview, or
+   suggested-post fidelity.
+4. **Pinned-message navigation / list (S).** `getChatPinnedMessage`
+   (:11545), `unpinAllChatMessages` (:13565). Quill has a single pinned
+   banner plus pin/unpin, but no multi-pin navigation/list and no
+   unpin-all or pin options.
+5. **Edit/delete edge cases (S/M).** `editMessageCaption` (:12338) —
+   Quill already edits text/captions; `deleteMessages` (:12282) — Quill
+   always sends `revoke: true`. Missing: richer media editing/options,
+   live property gating, and a nuanced delete-for-me vs delete-for-
+   everyone UI.
+6. **Auto-delete timers (S).** `messageAutoDeleteTime` (:9057);
+   `chat.message_auto_delete_time` (:3627); `setChatMessageAutoDeleteTime`
+   (:13454). No Quill support.
+7. **Slow mode (S — this slice).** See below.
+8. **Themes / wallpaper (M).** `chat.background` / `chat.theme` (:3627);
+   `chatThemeEmoji` / `chatThemeGift` (:8502/:8505); `setChatTheme`
+   (:13487). No Quill support.
+9. **Message effects (S).** Effect constructors (:3016–3028);
+   `message.effect_id` (:3165); `messageSendOptions.effect_id` (:5934);
+   `getMessageEffect` (:12862). No Quill support.
+10. **Chat export (M/L).** No dedicated chat-export constructor was found
+    in schema 1.8.67 (grep 2026-09-26). Telegram Desktop's export is a
+    client-side feature (render history to files), not a TDLib call — so
+    this is implementable but entirely client work; Quill has none.
+
+### A1 implementation: slow-mode enforcement
+
+- **Parse.** `supergroupFullInfo.slow_mode_delay` (:2758) and
+  `slow_mode_delay_expires_in` (:2759), plus `my_boost_count` /
+  `unrestrict_boost_count` (:2779–2780), are kept in
+  `SupergroupFullInfoData` (with `fetched_at_ms`). Own
+  `chatMemberStatus*` from `supergroup.status` (:2746) is kept per
+  supergroup for the bypass check; `rights.can_restrict_members` from
+  own `chatMemberStatusAdministrator` (:2500/:1092) gates the admin
+  control — `setChatSlowModeDelay` requires it (:13551).
+- **Gate.** `Session::slow_mode_wait_secs(chat_id, now_ms)` is pure in
+  the clock: non-channel supergroup + positive delay + member (or
+  unknown) status without boost exemption + positive locally-decayed
+  `slow_mode_delay_expires_in`. Creators/administrators bypass (tdesktop
+  behavior; :2758 comment); `my_boost_count >= unrestrict_boost_count >
+  0` bypasses (:2780 comment); `unrestrict_boost_count` 0 = unspecified.
+  Unknown own status is conservatively gated. Ceil rounding for the
+  countdown.
+- **Why local decay.** The schema (:2759) warns no
+  `updateSupergroupFullInfo` fires when only the expiry changes while
+  old and new are non-zero — so the countdown decays locally against
+  `fetched_at_ms`, and every *blocked* send re-fetches
+  `getSupergroupFullInfo` for a fresh server value
+  (`refresh_supergroup_full_info`, deduped in-flight like the existing
+  header fetch).
+- **Surfaces gated (all through one `slow_mode_blocked` helper):**
+  composer text/attachment/album submit (live + demo), GIF picks,
+  sticker picks, voice-note sends, poll dialog submits, and forwards
+  (forwarding sends messages). Voice-note gate runs before the capture
+  is consumed so a blocked recording survives. Story replies are not
+  gated (different TDLib mechanism, not chat messages). Edits are not
+  gated (slow mode restricts new sends).
+- **UI.** Composer banner "Slow mode · wait Ns" (ticking task mirrors
+  the voice-tick pattern, exits when the gate lifts); blocked sends set
+  the status note "Slow mode: wait Ns before sending". Group info panel
+  shows a Slow mode row (Off/5s/10s/30s/1m/5m/15m/1h — exactly the
+  allowed values :13551) to creators / admins with
+  `can_restrict_members`; `set_slow_mode_delay` re-checks the right
+  before firing (defense in depth).
+- **Screenshot:** `docs/screenshots/ready-slow-mode.png` —
+  `quill --screenshot-demo ready-slow-mode`: "Slow-mode demo group" (id
+  17) open as a plain member, 30s delay with ~25s countdown, composer
+  banner visible.
+- **Tests.** Envelope parsing (slow-mode + boost fields on
+  `supergroupFullInfo` / `updateSupergroupFullInfo`; own status +
+  `can_restrict_members` on `updateSupergroup` / `supergroup`,
+  incl. true/false/absent rights); `setChatSlowModeDelay` request shape;
+  reducer replay tests for wait/countdown rounding/expiry,
+  creator+admin bypass, boost bypass (incl. `unrestrict_boost_count` 0),
+  channel / zero-delay / missing-full-info ungated, unknown status
+  gated, restrict-right tracking.
+- **Drive-by fix (pre-existing, required to build the UI).** Main
+  (469bb6b) does not compile with `--features ui --bins`:
+  `Session::effective_muted` / `effective_preview_allowed` are
+  `pub(crate)` in the lib but called from the `ui` binary crate
+  (broken by PR #54). Widened to `pub`. (Note: default-feature clippy
+  `-D warnings` was already dirty on main — dead code and
+  `unnecessary_unwrap` lints in `ui/` — so the enforced gates stay the
+  `--no-default-features` ones.)
+- **Out of this slice (→ future):** gaps 1–6, 8–10 above; slow-mode in
+  basic groups (schema limits `setChatSlowModeDelay` to supergroups);
+  boost-gated send UI hints; `slow_mode_delay_expires_in` refresh while
+  the composer just sits open (currently refreshes on blocked sends
+  and panel open).

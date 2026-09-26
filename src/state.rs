@@ -153,6 +153,9 @@ pub enum RequestPurpose {
     /// Phase 6: `getSupergroupFullInfo`. Response is `supergroupFullInfo`;
     /// correlated via `PendingRequest::supergroup_id`.
     GetSupergroupFullInfo,
+    /// Phase A1: `setChatSlowModeDelay`. Response is `ok`; the new delay
+    /// arrives via `updateSupergroupFullInfo`.
+    SetChatSlowModeDelay,
     /// Phase 9.1: `loadActiveStories` (`storyListMain`). The stories
     /// arrive as `updateChatActiveStories` updates; feed the story tray.
     LoadActiveStories,
@@ -1710,6 +1713,16 @@ pub struct Session {
     /// object / `updateSupergroup`, schema 1.8.67 line 2746), keyed by
     /// supergroup id. Feeds the channel/supergroup header's @username.
     pub supergroup_usernames: HashMap<i64, String>,
+    /// Phase A1: the viewer's own `chatMemberStatus*` per supergroup
+    /// (`supergroup.status` / `updateSupergroup`, schema 1.8.67 line 2746).
+    /// Drives the slow-mode bypass (admins/creators are exempt) and gates
+    /// the admin slow-mode control. Absent = unknown (gated, no bypass).
+    pub supergroup_member_status: HashMap<i64, ChannelMemberStatus>,
+    /// Phase A1: the viewer's `rights.can_restrict_members` per supergroup
+    /// from own `chatMemberStatusAdministrator` (schema 1.8.67, lines
+    /// 2500/1092). `setChatSlowModeDelay` requires this right (line
+    /// 13551). Absent = unknown, treated as lacking the right.
+    pub supergroup_restrict_right: HashMap<i64, bool>,
     /// Phase 6: the open user / supergroup info panel, if any.
     pub open_info_panel: Option<InfoPanelTarget>,
     /// Phase 9.1: active stories per chat from `updateChatActiveStories` /
@@ -1756,13 +1769,53 @@ pub struct UserFullInfoData {
 }
 
 /// Phase 6: cached `supergroupFullInfo` subset (schema 1.8.67, line 2792).
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct SupergroupFullInfoData {
     pub description: String,
     pub member_count: i32,
     /// Parity slice: `linked_chat_id` (schema 1.8.67, line 2792) — the
     /// discussion-group chat id for a channel; 0 when none.
     pub linked_chat_id: i64,
+    /// Phase A1: `slow_mode_delay` (schema 1.8.67, line 2758) — seconds
+    /// between messages for non-administrator members; 0 = disabled.
+    pub slow_mode_delay: i32,
+    /// Phase A1: `slow_mode_delay_expires_in` (schema 1.8.67, line 2759)
+    /// — seconds left at fetch time. Decays against `fetched_at_ms`: the
+    /// schema warns no `updateSupergroupFullInfo` fires when only this
+    /// changes while both old and new values are non-zero.
+    pub slow_mode_delay_expires_in: f64,
+    /// Phase A1: `my_boost_count` (schema 1.8.67, line 2779).
+    pub my_boost_count: i32,
+    /// Phase A1: `unrestrict_boost_count` (schema 1.8.67, line 2780) — the
+    /// boosts needed to ignore slow mode; 0 if unspecified.
+    pub unrestrict_boost_count: i32,
+    /// Phase A1: wall-clock ms when this full info arrived (reducer
+    /// stamp). `slow_mode_delay_expires_in` decays against it.
+    pub fetched_at_ms: u64,
+}
+
+impl Default for SupergroupFullInfoData {
+    fn default() -> Self {
+        Self {
+            description: String::new(),
+            member_count: 0,
+            linked_chat_id: 0,
+            slow_mode_delay: 0,
+            slow_mode_delay_expires_in: 0.0,
+            my_boost_count: 0,
+            unrestrict_boost_count: 0,
+            fetched_at_ms: 0,
+        }
+    }
+}
+
+/// Phase A1: wall-clock milliseconds. Used to timestamp
+/// `supergroupFullInfo` arrivals so the slow-mode expiry decays locally.
+pub fn unix_ms_now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
 }
 
 /// Phase 6: one rendered contacts-list row.
@@ -1842,6 +1895,8 @@ impl Session {
             user_full_infos: HashMap::new(),
             supergroup_full_infos: HashMap::new(),
             supergroup_usernames: HashMap::new(),
+            supergroup_member_status: HashMap::new(),
+            supergroup_restrict_right: HashMap::new(),
             open_info_panel: None,
             story_tray: HashMap::new(),
             stories: HashMap::new(),
@@ -1922,6 +1977,76 @@ impl Session {
     /// Phase 6: cached `supergroupFullInfo`, if fetched.
     pub fn supergroup_full_info(&self, supergroup_id: i64) -> Option<&SupergroupFullInfoData> {
         self.supergroup_full_infos.get(&supergroup_id)
+    }
+
+    /// Phase A1: the viewer's own `chatMemberStatus*` in a supergroup
+    /// (`supergroup.status`, schema 1.8.67 line 2746), if seen yet.
+    pub fn supergroup_own_status(&self, supergroup_id: i64) -> Option<ChannelMemberStatus> {
+        self.supergroup_member_status.get(&supergroup_id).copied()
+    }
+
+    /// Phase A1: whether the viewer's own administrator rights in a
+    /// supergroup include `can_restrict_members` (schema 1.8.67, lines
+    /// 2500/1092), which `setChatSlowModeDelay` requires (line 13551).
+    /// Creators hold all rights implicitly — check
+    /// `supergroup_own_status` for that. Absent = unknown, treated as
+    /// lacking the right (the admin control stays hidden).
+    pub fn supergroup_can_restrict_members(&self, supergroup_id: i64) -> bool {
+        self.supergroup_restrict_right
+            .get(&supergroup_id)
+            .copied()
+            .unwrap_or(false)
+    }
+
+    /// Phase A1: slow-mode gate for a chat. Returns the remaining wait in
+    /// whole seconds when all of these hold:
+    /// - `chat_id` is a non-channel supergroup with cached full info whose
+    ///   `slow_mode_delay` (schema 1.8.67, line 2758) is positive;
+    /// - the viewer lacks bypass rights: not an administrator/creator
+    ///   (`supergroup.status`, schema line 2746) and not boost-exempt
+    ///   (`my_boost_count >= unrestrict_boost_count > 0`, schema lines
+    ///   2779–2780);
+    /// - the server-reported `slow_mode_delay_expires_in` (schema line
+    ///   2759), decayed against `fetched_at_ms`, is still positive. The
+    ///   schema warns no `updateSupergroupFullInfo` fires when only the
+    ///   expiry changes (both old and new non-zero), so local decay is the
+    ///   countdown; callers re-fetch on blocked sends for a fresh value.
+    ///
+    /// `None` = no gate (send freely). Pure in `now_ms` for replay tests.
+    pub fn slow_mode_wait_secs(&self, chat_id: ChatId, now_ms: u64) -> Option<u64> {
+        let chat = self.chats.get(&chat_id.0)?;
+        let supergroup_id = match chat.kind {
+            ChatKind::Supergroup {
+                supergroup_id,
+                is_channel: false,
+            } => supergroup_id,
+            _ => return None,
+        };
+        let info = self.supergroup_full_infos.get(&supergroup_id)?;
+        if info.slow_mode_delay <= 0 {
+            return None;
+        }
+        // Bypass: administrators and the creator are exempt (tdesktop
+        // slow-mode applies to non-administrator members, schema line
+        // 2758 comment). Unknown status = no bypass.
+        if self
+            .supergroup_own_status(supergroup_id)
+            .is_some_and(ChannelMemberStatus::is_admin)
+        {
+            return None;
+        }
+        // Bypass: enough boosts ignore slow mode (schema 1.8.67, line 2780
+        // comment); `unrestrict_boost_count` 0 = unspecified.
+        if info.unrestrict_boost_count > 0 && info.my_boost_count >= info.unrestrict_boost_count {
+            return None;
+        }
+        let elapsed_s = now_ms.saturating_sub(info.fetched_at_ms) as f64 / 1000.0;
+        let remaining = info.slow_mode_delay_expires_in - elapsed_s;
+        if remaining > 0.0 {
+            Some(remaining.ceil() as u64)
+        } else {
+            None
+        }
     }
 
     /// Phase 6: contacts-list rows in server order with a name/status view
@@ -2137,6 +2262,10 @@ impl Session {
                 description,
                 member_count,
                 linked_chat_id,
+                slow_mode_delay,
+                slow_mode_delay_expires_in,
+                my_boost_count,
+                unrestrict_boost_count,
             } => {
                 // Phase 6: `getSupergroupFullInfo` answer — the response
                 // carries no id, so it is correlated via the pending
@@ -2151,6 +2280,15 @@ impl Session {
                             description,
                             member_count,
                             linked_chat_id,
+                            slow_mode_delay,
+                            slow_mode_delay_expires_in,
+                            my_boost_count,
+                            unrestrict_boost_count,
+                            // Phase A1: timestamp the arrival — the schema
+                            // (1.8.67, line 2759) warns no update fires
+                            // when only the expiry changes, so the gate
+                            // decays it locally against this stamp.
+                            fetched_at_ms: unix_ms_now(),
                         },
                     );
                 }
@@ -2163,6 +2301,10 @@ impl Session {
                 description,
                 member_count,
                 linked_chat_id,
+                slow_mode_delay,
+                slow_mode_delay_expires_in,
+                my_boost_count,
+                unrestrict_boost_count,
             } => {
                 self.supergroup_full_infos.insert(
                     supergroup_id,
@@ -2170,6 +2312,11 @@ impl Session {
                         description,
                         member_count,
                         linked_chat_id,
+                        slow_mode_delay,
+                        slow_mode_delay_expires_in,
+                        my_boost_count,
+                        unrestrict_boost_count,
+                        fetched_at_ms: unix_ms_now(),
                     },
                 );
             }
@@ -2615,18 +2762,32 @@ impl Session {
                 supergroup_id,
                 is_forum,
                 username,
+                status,
+                can_restrict_members,
             } => {
                 self.set_supergroup_forum(supergroup_id, is_forum);
                 self.set_supergroup_username(supergroup_id, username);
+                // Phase A1: own member status drives the slow-mode bypass.
+                self.supergroup_member_status.insert(supergroup_id, status);
+                // Phase A1: `can_restrict_members` gates the slow-mode
+                // admin control; absent = unknown → treated as lacking.
+                self.supergroup_restrict_right
+                    .insert(supergroup_id, can_restrict_members.unwrap_or(false));
             }
             EnvelopePayload::Supergroup {
                 supergroup_id,
                 is_forum,
                 username,
+                status,
+                can_restrict_members,
             } => {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetSupergroup) {
                     self.set_supergroup_forum(supergroup_id, is_forum);
                     self.set_supergroup_username(supergroup_id, username);
+                    // Phase A1: own member status drives the slow-mode bypass.
+                    self.supergroup_member_status.insert(supergroup_id, status);
+                    self.supergroup_restrict_right
+                        .insert(supergroup_id, can_restrict_members.unwrap_or(false));
                 }
             }
             // Phase 5.1: `getForumTopics` response — cache the first page
@@ -3682,7 +3843,8 @@ impl Session {
     /// Effective mute for the toast/sound decisions: the chat's own
     /// exception mute, or the scope default's `mute_for` when the chat keeps
     /// `use_default_mute_for` (td_api.tl line 3348).
-    pub(crate) fn effective_muted(&self, chat: &ChatSummary) -> bool {
+    // Public (not just crate-visible): the `ui` binary crate calls these.
+    pub fn effective_muted(&self, chat: &ChatSummary) -> bool {
         if chat.is_muted() {
             return true;
         }
@@ -3697,7 +3859,7 @@ impl Session {
     /// Effective message-preview allowance: the chat's own flag, or the
     /// scope default's `show_preview` when the chat keeps
     /// `use_default_show_preview` (td_api.tl line 3350).
-    pub(crate) fn effective_preview_allowed(&self, chat: &ChatSummary) -> bool {
+    pub fn effective_preview_allowed(&self, chat: &ChatSummary) -> bool {
         let settings = &chat.notification_settings;
         if !settings.use_default_show_preview {
             return settings.show_preview;
@@ -7776,5 +7938,245 @@ mod tests {
                 .requests
                 .has_purpose_for_story(RequestPurpose::GetStory, ChatId(11), 5)
         );
+    }
+
+    // Phase A1: slow-mode gate (`Session::slow_mode_wait_secs`).
+    // `fetched_at_ms` is stamped from the real clock at apply time, so the
+    // helper reads it back and tests pass explicit `now_ms` — fully
+    // deterministic, no sleeps.
+    #[allow(clippy::too_many_arguments)]
+    fn seed_slow_mode_group(
+        session: &mut Session,
+        seq: &AtomicU64,
+        sink: &Arc<MemorySink>,
+        chat_id: i64,
+        status_json: Option<&str>,
+        full_info_fields: &str,
+        is_channel: bool,
+    ) -> u64 {
+        apply_json(
+            session,
+            seq,
+            sink,
+            &format!(
+                r#"{{"@type":"updateNewChat","chat":{{"id":{chat_id},"title":"Slow group","type":{{"@type":"chatTypeSupergroup","supergroup_id":{chat_id},"is_channel":{is_channel}}},"unread_count":0}}}}"#
+            ),
+        );
+        if let Some(status) = status_json {
+            apply_json(
+                session,
+                seq,
+                sink,
+                &format!(
+                    r#"{{"@type":"updateSupergroup","supergroup":{{"@type":"supergroup","id":{chat_id},"is_forum":false,"status":{status}}}}}"#
+                ),
+            );
+        }
+        let extra = session.request_for_supergroup(RequestPurpose::GetSupergroupFullInfo, chat_id);
+        apply_json(
+            session,
+            seq,
+            sink,
+            &format!(
+                r#"{{"@type":"supergroupFullInfo","@extra":"{}","description":"d","member_count":10,{}}}"#,
+                extra.0, full_info_fields
+            ),
+        );
+        session.supergroup_full_infos[&chat_id].fetched_at_ms
+    }
+
+    const SLOW_MODE_FIELDS: &str = r#""slow_mode_delay":30,"slow_mode_delay_expires_in":25.0,"my_boost_count":0,"unrestrict_boost_count":0"#;
+    const MEMBER_STATUS: &str = r#"{"@type":"chatMemberStatusMember"}"#;
+
+    #[test]
+    fn slow_mode_member_wait_countdown_and_expiry() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        let fetched = seed_slow_mode_group(
+            &mut session,
+            &seq,
+            &sink,
+            17,
+            Some(MEMBER_STATUS),
+            SLOW_MODE_FIELDS,
+            false,
+        );
+        let chat = ChatId(17);
+        // 3s elapsed → ceil(22.0) = 22.
+        assert_eq!(session.slow_mode_wait_secs(chat, fetched + 3_000), Some(22));
+        // Countdown rounds up: 24.4s remaining → 25.
+        assert_eq!(session.slow_mode_wait_secs(chat, fetched + 600), Some(25));
+        // Expiry boundary: 25.0s elapsed → remaining 0 → free to send.
+        assert_eq!(session.slow_mode_wait_secs(chat, fetched + 25_000), None);
+        assert_eq!(session.slow_mode_wait_secs(chat, fetched + 60_000), None);
+    }
+
+    #[test]
+    fn slow_mode_creator_and_admin_bypass() {
+        for (status, label) in [
+            (r#"{"@type":"chatMemberStatusCreator"}"#, "creator"),
+            (
+                r#"{"@type":"chatMemberStatusAdministrator"}"#,
+                "administrator",
+            ),
+        ] {
+            let (mut session, sink) = session();
+            let seq = AtomicU64::new(0);
+            let fetched = seed_slow_mode_group(
+                &mut session,
+                &seq,
+                &sink,
+                18,
+                Some(status),
+                SLOW_MODE_FIELDS,
+                false,
+            );
+            assert_eq!(
+                session.slow_mode_wait_secs(ChatId(18), fetched + 1_000),
+                None,
+                "{label} bypasses slow mode"
+            );
+        }
+    }
+
+    #[test]
+    fn slow_mode_boost_bypass() {
+        // `my_boost_count >= unrestrict_boost_count > 0` → exempt.
+        let (mut session_a, sink_a) = session();
+        let seq_a = AtomicU64::new(0);
+        let fetched = seed_slow_mode_group(
+            &mut session_a,
+            &seq_a,
+            &sink_a,
+            19,
+            Some(MEMBER_STATUS),
+            r#""slow_mode_delay":30,"slow_mode_delay_expires_in":25.0,"my_boost_count":5,"unrestrict_boost_count":5"#,
+            false,
+        );
+        assert_eq!(
+            session_a.slow_mode_wait_secs(ChatId(19), fetched + 1_000),
+            None
+        );
+
+        // `unrestrict_boost_count` 0 = unspecified → still gated even with boosts.
+        let (mut session2, sink2) = session();
+        let seq2 = AtomicU64::new(0);
+        let fetched = seed_slow_mode_group(
+            &mut session2,
+            &seq2,
+            &sink2,
+            20,
+            Some(MEMBER_STATUS),
+            r#""slow_mode_delay":30,"slow_mode_delay_expires_in":25.0,"my_boost_count":5,"unrestrict_boost_count":0"#,
+            false,
+        );
+        assert_eq!(
+            session2.slow_mode_wait_secs(ChatId(20), fetched + 1_000),
+            Some(24)
+        );
+    }
+
+    #[test]
+    fn slow_mode_channel_and_zero_delay_are_ungated() {
+        // Broadcast channels ignore slow mode even when the fields are set.
+        let (mut session_a, sink_a) = session();
+        let seq_a = AtomicU64::new(0);
+        let fetched = seed_slow_mode_group(
+            &mut session_a,
+            &seq_a,
+            &sink_a,
+            21,
+            Some(MEMBER_STATUS),
+            SLOW_MODE_FIELDS,
+            true,
+        );
+        assert_eq!(
+            session_a.slow_mode_wait_secs(ChatId(21), fetched + 1_000),
+            None
+        );
+
+        // `slow_mode_delay` 0 = slow mode off.
+        let (mut session2, sink2) = session();
+        let seq2 = AtomicU64::new(0);
+        let fetched = seed_slow_mode_group(
+            &mut session2,
+            &seq2,
+            &sink2,
+            22,
+            Some(MEMBER_STATUS),
+            r#""slow_mode_delay":0,"slow_mode_delay_expires_in":0.0,"my_boost_count":0,"unrestrict_boost_count":0"#,
+            false,
+        );
+        assert_eq!(
+            session2.slow_mode_wait_secs(ChatId(22), fetched + 1_000),
+            None
+        );
+    }
+
+    #[test]
+    fn slow_mode_unknown_status_is_conservatively_gated() {
+        // No `updateSupergroup` seen yet → no bypass, the gate applies.
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        let fetched =
+            seed_slow_mode_group(&mut session, &seq, &sink, 23, None, SLOW_MODE_FIELDS, false);
+        assert_eq!(
+            session.slow_mode_wait_secs(ChatId(23), fetched + 1_000),
+            Some(24)
+        );
+    }
+
+    #[test]
+    fn slow_mode_restrict_right_tracks_admin_rights() {
+        // Phase A1: `setChatSlowModeDelay` requires `can_restrict_members`
+        // (schema 1.8.67, line 13551); the reducer records it per
+        // supergroup from own `chatMemberStatusAdministrator.rights`.
+        let (mut session_a, sink_a) = session();
+        let seq_a = AtomicU64::new(0);
+        let with_right = r#"{"@type":"chatMemberStatusAdministrator","rights":{"@type":"chatAdministratorRights","can_restrict_members":true}}"#;
+        seed_slow_mode_group(
+            &mut session_a,
+            &seq_a,
+            &sink_a,
+            30,
+            Some(with_right),
+            SLOW_MODE_FIELDS,
+            false,
+        );
+        assert_eq!(
+            session_a.supergroup_own_status(30),
+            Some(ChannelMemberStatus::Administrator)
+        );
+        assert!(session_a.supergroup_can_restrict_members(30));
+
+        let (mut session_b, sink_b) = session();
+        let seq_b = AtomicU64::new(0);
+        let without_right = r#"{"@type":"chatMemberStatusAdministrator","rights":{"@type":"chatAdministratorRights","can_restrict_members":false}}"#;
+        seed_slow_mode_group(
+            &mut session_b,
+            &seq_b,
+            &sink_b,
+            31,
+            Some(without_right),
+            SLOW_MODE_FIELDS,
+            false,
+        );
+        assert!(!session_b.supergroup_can_restrict_members(31));
+        // Unknown supergroup → treated as lacking the right.
+        assert!(!session_b.supergroup_can_restrict_members(999));
+    }
+
+    #[test]
+    fn slow_mode_ungated_without_full_info() {
+        // No cached full info → no gate (can't know the delay).
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateNewChat","chat":{"id":24,"title":"Slow group","type":{"@type":"chatTypeSupergroup","supergroup_id":24,"is_channel":false},"unread_count":0}}"#,
+        );
+        assert_eq!(session.slow_mode_wait_secs(ChatId(24), unix_ms_now()), None);
     }
 }

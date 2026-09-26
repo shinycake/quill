@@ -45,9 +45,9 @@ use crate::telegram::requests::{
     send_chat_action, send_chat_action_kind, send_document, send_message_album, send_photo,
     send_poll, send_sticker, send_text, send_text_story_reply, send_video, send_video_note,
     send_voice_note, set_authentication_phone_number, set_chat_draft_message,
-    set_chat_notification_settings, set_poll_answer, set_scope_notification_settings,
-    set_story_reaction, toggle_chat_folder_tags, unpin_chat_message, view_messages,
-    view_sponsored_chat,
+    set_chat_notification_settings, set_chat_slow_mode_delay, set_poll_answer,
+    set_scope_notification_settings, set_story_reaction, toggle_chat_folder_tags,
+    unpin_chat_message, view_messages, view_sponsored_chat,
 };
 use crate::voice::VoiceDraft;
 use std::path::Path;
@@ -1746,6 +1746,65 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(err);
         }
         Ok(Some(extra))
+    }
+
+    /// Phase A1: forced `getSupergroupFullInfo` refresh for the slow-mode
+    /// gate. Unlike `fetch_supergroup_full_info` it ignores the "already
+    /// fetched" cache: the schema (1.8.67, line 2759) warns no
+    /// `updateSupergroupFullInfo` fires when only
+    /// `slow_mode_delay_expires_in` changes, so a blocked send attempt
+    /// re-reads the server value. In-flight requests are still deduped.
+    pub fn refresh_supergroup_full_info(
+        &mut self,
+        supergroup_id: i64,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if self
+            .session
+            .requests
+            .has_purpose_for_supergroup(RequestPurpose::GetSupergroupFullInfo, supergroup_id)
+        {
+            return Ok(None);
+        }
+        let extra = self
+            .session
+            .request_for_supergroup(RequestPurpose::GetSupergroupFullInfo, supergroup_id);
+        if let Err(err) = self
+            .sender
+            .send_json(&get_supergroup_full_info(extra, supergroup_id))
+        {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(Some(extra))
+    }
+
+    /// Phase A1: `setChatSlowModeDelay` (TDLib 1.8.67, line 13551) — the
+    /// admin slow-mode control. `slow_mode_delay` must be one of 0, 5, 10,
+    /// 30, 60, 300, 900, 3600. The new delay arrives via
+    /// `updateSupergroupFullInfo`; `ok`/errors resolve through the pending
+    /// request like other fire-and-forget setters.
+    pub fn set_chat_slow_mode_delay(
+        &mut self,
+        chat_id: ChatId,
+        slow_mode_delay: i32,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::SetChatSlowModeDelay, Some(chat_id));
+        if let Err(err) =
+            self.sender
+                .send_json(&set_chat_slow_mode_delay(extra, chat_id, slow_mode_delay))
+        {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(extra)
     }
 
     /// Phase 6: `addContact` from the add-contact dialog. The reducer
