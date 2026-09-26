@@ -837,7 +837,8 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// `getChatSponsoredMessages` for a channel chat (TDLib 1.8.67). Called
     /// when a channel is opened; rows render Sponsored / Recommended.
     /// Channels stay gated until Phase 2.2 — the fetch already runs so the
-    /// pipeline is proven with replay fixtures.
+    /// pipeline is proven with replay fixtures. Bot chats can also carry
+    /// sponsored messages per the schema; they are not fetched yet (2.2+).
     pub fn fetch_sponsored_messages(
         &mut self,
         chat_id: ChatId,

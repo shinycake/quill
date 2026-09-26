@@ -17,7 +17,8 @@ handling exists.
 - **2.1 Sponsored-message handling.** ✅ Done (2026-09-26). Fetch
   `getChatSponsoredMessages` for the open channel; render sponsored rows with a
   **Sponsored** / **Recommended** label (`sponsoredMessage.is_recommended`);
-  `reportChatSponsoredMessage` flow; `viewSponsoredChat` on open. Sponsored
+  `reportChatSponsoredMessage` flow; `viewSponsoredChat` typed driver
+  (integration deferred to 2.2+). Sponsored
   media follows the existing download sandbox (thumbs at priority 1, click for
   full at 32). Channel gate retained for 2.2.
 - **2.2 Broadcast channels.** Ungate `chatTypeSupergroup` with `is_channel`;

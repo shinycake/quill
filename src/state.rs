@@ -2143,6 +2143,11 @@ impl Session {
             .sponsored_report
             .as_ref()
             .map(|flight| flight.message_id)
+            // Fallback for a response that arrives after its picker was
+            // dismissed: attribute to the latest report target. If the user
+            // starts a second report before the first responds, the first
+            // response is attributed to the second row — acceptable: reports
+            // are fire-and-forget and the outcome banner is per-chat.
             .or_else(|| self.sponsored_report_target.map(|(_, id)| id))
             .unwrap_or(0);
         match result {
@@ -2167,8 +2172,12 @@ impl Session {
         }
     }
 
+    /// Drop the report picker flight and its target. Called when the user
+    /// cancels, when a send fails, or when a result is applied elsewhere —
+    /// a dismissed report must not attribute a late response to a stale row.
     pub fn dismiss_sponsored_report(&mut self) {
         self.sponsored_report = None;
+        self.sponsored_report_target = None;
     }
 
     pub fn clear_sponsored_report_outcome(&mut self) {

@@ -1070,7 +1070,7 @@ fn replay_sponsored_messages_fetch_and_labels() {
     let thumbs = session.thumb_file_ids_to_download();
     assert!(thumbs.iter().any(|id| id.0 == 61));
 
-    // Rows render oldest-first.
+    // Rows preserve the TDLib response vector order (no sort applied).
     let rows = session.open_sponsored_rows();
     assert_eq!(rows.len(), 2);
     assert_eq!(rows[0].message_id, 9001);
