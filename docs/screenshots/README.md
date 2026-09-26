@@ -86,10 +86,14 @@ bash scripts/capture-connect-screenshots.sh
 #   cargo run --features ui -- --screenshot-demo ready-sponsored docs/screenshots
 #   cargo run --features ui -- --screenshot-demo ready-text-entities docs/screenshots
 #   cargo run --features ui -- --screenshot-demo ready-poll docs/screenshots
-#   cargo run --features ui -- --screenshot-demo ready-location docs/screenshots
+#   QUILL_DEMO_WINDOW_SIZE=1200x1100 cargo run --features ui -- --screenshot-demo ready-location docs/screenshots
 ```
 
 Environment used by the script: `DISPLAY`, `LIBGL_ALWAYS_SOFTWARE=1`, `WGPU_BACKEND=vulkan`, `VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json`.
+
+`QUILL_DEMO_WINDOW_SIZE` (e.g. `1200x1100`, default `1200x740`) overrides the
+screenshot-demo window size for fixtures that need more vertical room
+(`ready-location` uses it so all four rows fit in one frame).
 
 VoiceOver was **not** recorded here (no macOS GUI runner). Keyboard shortcuts are listed in the status bar.
 | `ready-bot-command-menu.png` | **Phase 3.3** Same bot chat with the composer `/` menu open above the composer: bot-specific commands (`/start`, `/help`, `/ping` from `botInfo`) plus a **Global** section (`/settings` from an injected `botCommands` response through the real `getCommands` reducer path), first row highlighted. Injected data, no live Telegram. Driven by `quill --screenshot-demo ready-bot-command-menu`. |

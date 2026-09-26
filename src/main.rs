@@ -181,6 +181,20 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
 
     eprintln!("quill screenshot-demo: {kind:?} → {}", out_dir.display());
 
+    // Demo-only window size override (`QUILL_DEMO_WINDOW_SIZE=1200x1100`)
+    // for slices whose fixture needs more vertical room than the default
+    // 1200x740 (e.g. ready-location's four rows). Unset = unchanged, so
+    // existing captures are unaffected.
+    let (demo_w, demo_h) = std::env::var("QUILL_DEMO_WINDOW_SIZE")
+        .ok()
+        .and_then(|value| {
+            let (w, h) = value.split_once('x')?;
+            let w: f32 = w.parse().ok()?;
+            let h: f32 = h.parse().ok()?;
+            (w > 0.0 && h > 0.0).then_some((w, h))
+        })
+        .unwrap_or((1200.0, 740.0));
+
     gpui_kit::application()
         .with_assets(gpui_kit::assets::Assets)
         .run(move |cx| {
@@ -191,7 +205,7 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
                     WindowOptions {
                         window_bounds: Some(WindowBounds::Windowed(Bounds {
                             origin: point(px(20.), px(20.)),
-                            size: size(px(1200.), px(740.)),
+                            size: size(px(demo_w), px(demo_h)),
                         })),
                         app_id: Some("org.shinycake.quill".into()),
                         titlebar: Some(TitlebarOptions {

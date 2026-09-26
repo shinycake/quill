@@ -7463,7 +7463,7 @@ fn apply_ready_location(session: &mut Session, sink: &Arc<MemorySink>, seq: &Ato
     // Venue: Ferry Building, via foursquare.
     let venue = message(
         110,
-        r#"{"@type":"messageVenue","venue":{"@type":"venue","location":{"@type":"location","latitude":37.7955,"longitude":-122.3937,"horizontal_accuracy":0},"title":"Ferry Building","address":"1 Ferry Building, San Francisco","provider":"foursquare","id":"4a1a2b3c","type":"Food"}}}"#,
+        r#"{"@type":"messageVenue","venue":{"@type":"venue","location":{"@type":"location","latitude":37.7955,"longitude":-122.3937,"horizontal_accuracy":0},"title":"Ferry Building","address":"1 Ferry Building, San Francisco","provider":"foursquare","id":"4a1a2b3c","type":"Food"}}"#,
     );
     // Contact: Ada Lovelace with a vCard and a known Telegram user id.
     let contact = message(

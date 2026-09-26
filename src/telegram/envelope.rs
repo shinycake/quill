@@ -5616,10 +5616,10 @@ mod channel_envelope_tests {
     // still fails the `|lat| <= 90` range check below.
     #[test]
     fn location_rejects_non_finite_coordinates() {
-        assert!(serde_json::from_str::<serde_json::Value>(
-            r#"{"latitude":1e999,"longitude":0.0}"#
-        )
-        .is_err());
+        assert!(
+            serde_json::from_str::<serde_json::Value>(r#"{"latitude":1e999,"longitude":0.0}"#)
+                .is_err()
+        );
         let value: serde_json::Value =
             serde_json::from_str(r#"{"latitude":1e308,"longitude":0.0}"#).unwrap();
         assert!(geo_location(Some(&value)).is_none());
