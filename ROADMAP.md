@@ -96,7 +96,18 @@ handling exists.
   and spoiler media are excluded; documents, animations/GIFs, stickers,
   audio/voice remain unopened.
   `docs/screenshots/ready-media-viewer.png`.
-- **4.6 Seek bars.** Audio and voice-note rows get scrubbing (backlog).
+- **4.6 Seek bars.** ✅ 2026-09-26 — `messageAudio` and
+  `messageVoiceNote` rows get tdesktop-style seek bars: elapsed/total
+  time label, bar advancing while playing (250 ms tick), click-to-seek
+  and drag on the active row via the gpui-component `Slider`
+  (`Change` previews, `Release` seeks). ffplay takes no stdin seek
+  commands, so seeking restarts the player with `-ss <seconds>`
+  (documented tradeoffs in DECISIONS); seeking while paused just moves
+  the frozen position. Pause freezes instead of stopping; per-message
+  remembered positions resume on Play; auto-stop at track end. Pure
+  `PlaybackClock` state machine in `src/playback.rs` (unit-tested).
+  Waveform stays as the real decoded TDLib 5-bit bars.
+  `docs/screenshots/ready-seek-bars.png`.
 
 ## Phase 5 — Supergroups: forum topics
 

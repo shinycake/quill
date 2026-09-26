@@ -16,6 +16,7 @@ pub mod local_path;
 pub mod media_viewer;
 pub mod pins;
 pub mod platform;
+pub mod playback;
 pub mod poll;
 pub mod settings;
 pub mod state;

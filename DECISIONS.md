@@ -946,3 +946,71 @@ Research snapshot 2026-09-16, pin recheck **2026-09-17**.
   frame rendering); zoom/pan; opening documents, GIFs, stickers, or
   audio from the viewer; keyboard left/right navigation; opening the
   viewer from album mosaics.
+
+## Phase 4.6 — Audio/voice seek bars (2026-09-26)
+
+- **Rationale:** the audio/voice slice's "Out of this slice" backlog
+  promised a seek bar. This slice gives `messageAudio` and
+  `messageVoiceNote` rows tdesktop-style scrubbing: an elapsed/total
+  time label and a seek bar that advances while playing, with
+  click-to-seek and drag support.
+- **Schema (1.8.67, verified in `schema/td_api.tl`):** no new
+  constructors or fields. Durations come from the already-parsed
+  `audio.duration` (line 564) and `voiceNote.duration` (line 624);
+  the rows reuse `messageAudio` (line 5154) / `messageVoiceNote`
+  (line 5194) parsing from the audio/voice slice.
+- **Model (`src/playback.rs`, pure, no GPUI):** `PlaybackClock` is the
+  seek-state machine — `base_secs` frozen offset + optional
+  `started_at` while running; `elapsed_secs()` clamped to
+  `[0, duration]`; `pause()` / `resume()`; `seek()` clamped to
+  `[0, duration]` and keeping the playing/paused state (seek-while-
+  paused just moves the frozen offset); `finished()` true only when a
+  running clock reaches the duration. Unit-tested: elapsed advance,
+  seek clamping, play/pause/seek transitions, finish semantics.
+- **Seek mechanism:** ffplay accepts no seek commands on stdin, so a
+  finished seek restarts the player with `-ss <seconds>` placed before
+  the input file (input seeking — fast on local files, no re-encode).
+  Tradeoffs, documented honestly: (1) seeking is not gapless — each
+  seek kills and respawns ffplay, with a brief (~100–300 ms) audio gap
+  on local files; (2) only the *released* position restarts the
+  player — dragging fires `Change` previews (time label follows the
+  thumb) and a single `-ss` restart happens on `Release`, so a drag
+  never spams subprocesses; (3) seeking while paused moves the frozen
+  clock position with no player restart; Play then resumes from there
+  via `-ss`. The alternative (a long-lived player with IPC seeking,
+  e.g. mpv `--input-ipc-server`) was rejected: it would add a new
+  runtime dependency and an IPC protocol for a gap we can already hear
+  is small.
+- **UI (`src/ui/mod.rs`):** the active row (playing or paused) renders
+  the gpui-component `Slider` bound to one `Entity<SliderState>` owned
+  by `QuillApp` (min 0, max = duration, step 0.1 s); `Change` sets a
+  scrub preview, `Release` applies the seek. A 250 ms GPUI timer task
+  (`spawn_playback_tick`, same pattern as `spawn_voice_tick`) advances
+  the clock, re-renders the bar, and auto-stops state when the clock
+  reaches the duration (ffplay `-autoexit` exits on its own; the tick
+  clears our side to match). The clock is pushed into the slider entity
+  at the top of `render` (`sync_seek_slider`; the tick has no
+  `&mut Window`, which `SliderState::set_value` requires) and skipped
+  while scrubbing so a drag is never fought. Inactive rows render a
+  static track + fill at their remembered position;
+  `playback_positions` remembers the last position per message so a
+  paused/stopped row keeps its bar and Play resumes from it. Pause now
+  freezes instead of fully stopping (the old toggle-off behavior);
+  full state clears when another track starts, the track finishes, or
+  the chat changes.
+- **Waveform:** kept as-is — it is *not* a mock. `voiceNote.waveform`
+  is decoded from TDLib's real 5-bit packed bytes
+  (`voice::decode_waveform_5bit`, matching tdesktop's
+  `documentWaveformDecode`). True waveform decode from audio *samples*
+  (for `messageAudio`, which has no waveform field) is out of scope.
+- **Screenshot:** `docs/screenshots/ready-seek-bars.png` — injected
+  voice note (12 s) playing from 0:05 with the seek bar advancing, plus
+  the "Night Drive" track paused with a remembered 1:27 position and a
+  static bar, both showing elapsed/total labels; driven by
+  `quill --screenshot-demo ready-seek-bars` (playback state faked, no
+  ffplay subprocess in the demo).
+- **Out of this slice (→ future):** gapless seeking (mpv IPC or a
+  persistent player); click-to-seek on inactive rows (today: press Play
+  first, it resumes from the remembered position); per-row volume;
+  playback speed; showing the seek bar for `messageVideoNote` round
+  videos.

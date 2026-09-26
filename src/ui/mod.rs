@@ -2,6 +2,7 @@ mod synthetic;
 
 use gpui_kit::component::button::*;
 use gpui_kit::component::input::{InputEvent, Textarea, TextareaState};
+use gpui_kit::component::slider::{Slider, SliderEvent, SliderState};
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
@@ -23,6 +24,7 @@ use quill::ids::{AccountKey, ChatId, FileId, MessageId};
 use quill::local_path::sandboxed_display_path;
 use quill::media_viewer::{MediaViewer, MediaViewerItem, MediaViewerKind, collect_media_items};
 use quill::platform::live_secret_store;
+use quill::playback::PlaybackClock;
 use quill::poll::{
     POLL_OPTIONS_MAX, POLL_OPTIONS_MIN, PollDraft, poll_bar_fraction, voter_count_label,
 };
@@ -217,8 +219,24 @@ pub struct QuillApp {
     /// History row whose music file (`messageAudio`) is playing. Shares `voice_player`.
     playing_audio: Option<MessageId>,
     /// Play was tapped before the track was local. Resume when `downloadFile` finishes.
-    pending_audio_play: Option<(MessageId, FileId)>,
+    pending_audio_play: Option<(MessageId, FileId, f64)>,
     voice_player: Option<Child>,
+    /// Active audio/voice track's playback clock (playing or paused-with-offset).
+    /// `Some` exactly when `playing_voice` or `playing_audio` is `Some` (Phase 4.6).
+    playback_clock: Option<PlaybackClock>,
+    /// Sandbox-checked local path of the active track, for ffplay restarts on seek.
+    playback_path: Option<PathBuf>,
+    /// Interactive seek slider bound to the active row (Phase 4.6).
+    seek_slider: Option<Entity<SliderState>>,
+    /// True while the user is dragging the seek slider (Change without Release yet).
+    seek_scrubbing: bool,
+    /// Drag preview position in seconds, shown in the time label while scrubbing.
+    seek_preview_secs: Option<f64>,
+    /// Guard for the playback progress tick task.
+    playback_tick: bool,
+    /// Last known position per message, so rows keep their seek bar fill (and
+    /// resume from it) after pause/stop.
+    playback_positions: HashMap<MessageId, f64>,
     /// History row whose GIF is looping (tdesktop clip / Unigram player).
     playing_animation: Option<MessageId>,
     animation_frames: Vec<PathBuf>,
@@ -356,6 +374,12 @@ pub enum ScreenshotDemo {
     /// photo chat with the viewer overlay open on the downloaded photo
     /// (Phase 4.5).
     ReadyMediaViewer,
+    /// Seek-bar demo (injected, no live Telegram): a voice note playing
+    /// with its seek bar mid-track (elapsed advancing via the playback
+    /// tick) plus a music track paused with a remembered position, both
+    /// showing elapsed/total time labels (Phase 4.6). No subprocess is
+    /// spawned — playback state is faked.
+    ReadySeekBars,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -363,6 +387,37 @@ enum PaneMode {
     Synthetic,
     Connecting,
     Ready,
+}
+
+/// Which kind of track the shared ffplay child is playing (Phase 4.6).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PlaybackKind {
+    Voice,
+    Audio,
+}
+
+/// Seek-bar view model for one audio/voice history row (Phase 4.6).
+#[derive(Clone)]
+struct SeekBarView {
+    /// Interactive slider entity — `Some` only on the active (playing or
+    /// paused) row. Inactive rows render a static bar instead.
+    slider: Option<Entity<SliderState>>,
+    /// Seconds shown in the time label and as bar fill: live elapsed, scrub
+    /// preview, paused offset, or the remembered position for inactive rows.
+    display_secs: f64,
+    /// Total track length in seconds (TDLib `duration`).
+    duration_secs: f64,
+    /// True while the active row's player is actually running (vs paused).
+    is_playing: bool,
+}
+
+impl SeekBarView {
+    fn fraction(&self) -> f64 {
+        if self.duration_secs <= 0.0 {
+            return 0.0;
+        }
+        (self.display_secs / self.duration_secs).clamp(0.0, 1.0)
+    }
 }
 
 impl QuillApp {
@@ -907,6 +962,15 @@ impl QuillApp {
                     AuthorizationState::Ready,
                 )
             }
+            Some(ScreenshotDemo::ReadySeekBars) => {
+                demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
+                (
+                    ConnectUiStatus::DemoReadyChats,
+                    None,
+                    "screenshot demo — audio/voice seek bars".into(),
+                    AuthorizationState::Ready,
+                )
+            }
             None => bootstrap_connect(credentials),
         };
 
@@ -997,6 +1061,13 @@ impl QuillApp {
             playing_audio: None,
             pending_audio_play: None,
             voice_player: None,
+            playback_clock: None,
+            playback_path: None,
+            seek_slider: None,
+            seek_scrubbing: false,
+            seek_preview_secs: None,
+            playback_tick: false,
+            playback_positions: HashMap::new(),
             playing_animation: None,
             animation_frames: Vec::new(),
             animation_frame: 0,
@@ -1197,6 +1268,20 @@ impl QuillApp {
             }
             app.playing_audio = Some(MessageId(801));
             app.status_note = "screenshot demo — audio · playing".into();
+        }
+        if matches!(demo, Some(ScreenshotDemo::ReadySeekBars)) {
+            if let Some(session) = app.demo_session.as_mut() {
+                app.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_voice(session, &app.demo_sink, &app.demo_seq);
+                apply_ready_audio(session, &app.demo_sink, &app.demo_seq);
+            }
+            // Fake an in-progress playback without spawning ffplay: voice
+            // note 90 (12 s) playing from 5.0 s — the tick advances it —
+            // and the music track 801 (214 s) paused with a remembered
+            // 1:27 position, so both rows show seek bars.
+            app.begin_track_playback(PlaybackKind::Voice, MessageId(90), 12.0, 5.0, cx);
+            app.playback_positions.insert(MessageId(801), 87.0);
+            app.status_note = "screenshot demo — seek bars · voice playing · audio paused".into();
         }
         if matches!(demo, Some(ScreenshotDemo::ReadyVideoSend)) {
             app.composer.update(cx, |input, cx| {
@@ -3460,6 +3545,7 @@ impl QuillApp {
             self.kill_shared_player();
         }
         self.playing_voice = None;
+        self.clear_playback_state();
     }
 
     fn stop_audio_playback(&mut self) {
@@ -3468,6 +3554,284 @@ impl QuillApp {
         }
         self.playing_audio = None;
         self.pending_audio_play = None;
+        self.clear_playback_state();
+    }
+
+    /// Drop the seek-bar state for the active track (clock, slider entity,
+    /// scrub preview). Idempotent: both stop functions call it. The
+    /// remembered per-message position in `playback_positions` is kept so a
+    /// stopped row still shows where it got to.
+    fn clear_playback_state(&mut self) {
+        if let (Some(message_id), Some(clock)) =
+            (self.active_playback_id(), self.playback_clock.as_ref())
+        {
+            self.playback_positions
+                .insert(message_id, clock.elapsed_secs());
+        }
+        self.playback_clock = None;
+        self.playback_path = None;
+        self.seek_slider = None;
+        self.seek_scrubbing = false;
+        self.seek_preview_secs = None;
+    }
+
+    /// Message id of the active (playing or paused) track, if any.
+    fn active_playback_id(&self) -> Option<MessageId> {
+        self.playing_voice.or(self.playing_audio)
+    }
+
+    /// Kind of the active track, for status notes.
+    fn active_playback_kind(&self) -> PlaybackKind {
+        if self.playing_voice.is_some() {
+            PlaybackKind::Voice
+        } else {
+            PlaybackKind::Audio
+        }
+    }
+
+    /// Mark the given row as the active track: sets `playing_voice` /
+    /// `playing_audio`, starts the playback clock at `offset_secs`, builds
+    /// the seek slider entity, and starts the progress tick. Does not spawn
+    /// ffplay — the caller does that (the screenshot demo fakes playback
+    /// without a subprocess).
+    fn begin_track_playback(
+        &mut self,
+        kind: PlaybackKind,
+        message_id: MessageId,
+        duration_secs: f64,
+        offset_secs: f64,
+        cx: &mut Context<Self>,
+    ) {
+        self.stop_voice_playback();
+        self.stop_audio_playback();
+        match kind {
+            PlaybackKind::Voice => self.playing_voice = Some(message_id),
+            PlaybackKind::Audio => self.playing_audio = Some(message_id),
+        }
+        let mut clock = PlaybackClock::new(duration_secs);
+        clock.seek(offset_secs);
+        clock.resume();
+        self.playback_clock = Some(clock);
+        let slider = cx.new(|_| {
+            SliderState::new()
+                .min(0.0)
+                .max(duration_secs.max(0.1) as f32)
+                .step(0.1)
+                .default_value(offset_secs.clamp(0.0, duration_secs.max(0.0)) as f32)
+        });
+        cx.subscribe(&slider, |this, _entity, event: &SliderEvent, cx| {
+            this.on_seek_event(event, cx);
+        })
+        .detach();
+        self.seek_slider = Some(slider);
+        self.seek_scrubbing = false;
+        self.seek_preview_secs = None;
+        self.spawn_playback_tick(cx);
+    }
+
+    /// Spawn ffplay for `path`, seeking to `offset_secs` first when positive.
+    /// ffplay takes no seek commands on stdin, so seeking restarts the player
+    /// with `-ss` (input seeking — fast on local files; see DECISIONS.md).
+    /// Returns true when the child spawned.
+    fn spawn_ffplay(&mut self, path: &std::path::Path, offset_secs: f64) -> bool {
+        self.kill_shared_player();
+        let mut command = Command::new("ffplay");
+        command.args(["-nodisp", "-autoexit", "-loglevel", "quiet"]);
+        if offset_secs > 0.05 {
+            command.arg("-ss").arg(format!("{offset_secs:.1}"));
+        }
+        match command
+            .arg(path)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+        {
+            Ok(child) => {
+                self.voice_player = Some(child);
+                true
+            }
+            Err(_) => false,
+        }
+    }
+
+    /// Restart the active track's player at `offset_secs` (seek while playing).
+    fn restart_player_at(&mut self, offset_secs: f64) {
+        if let Some(path) = self.playback_path.clone() {
+            self.spawn_ffplay(&path, offset_secs);
+        }
+    }
+
+    /// Pause the active track: freeze the clock, kill ffplay, keep the row
+    /// active so the seek bar stays interactive and Play resumes from here.
+    fn pause_active_playback(&mut self) {
+        let id = self.active_playback_id();
+        if let Some(clock) = self.playback_clock.as_mut() {
+            clock.pause();
+            if let Some(id) = id {
+                self.playback_positions.insert(id, clock.elapsed_secs());
+            }
+        }
+        self.kill_shared_player();
+    }
+
+    /// Resume the active track from the frozen clock position.
+    fn resume_active_playback(&mut self) {
+        let offset = self.playback_clock.as_ref().map(|c| c.elapsed_secs());
+        let path = self.playback_path.clone();
+        match (offset, path) {
+            (Some(offset), Some(path)) => {
+                self.spawn_ffplay(&path, offset);
+                if let Some(clock) = self.playback_clock.as_mut() {
+                    clock.resume();
+                }
+            }
+            _ => {
+                self.stop_voice_playback();
+                self.stop_audio_playback();
+            }
+        }
+    }
+
+    /// `SliderEvent` sink for the active row's seek slider.
+    fn on_seek_event(&mut self, event: &SliderEvent, cx: &mut Context<Self>) {
+        match event {
+            SliderEvent::Change(value) => {
+                // Drag (or track click) in progress: show the preview in the
+                // time label, but don't touch the player until Release.
+                self.seek_scrubbing = true;
+                self.seek_preview_secs = Some(f64::from(value.end()));
+                cx.notify();
+            }
+            SliderEvent::Release(value) => {
+                self.seek_scrubbing = false;
+                self.seek_preview_secs = None;
+                self.seek_active_to(f64::from(value.end()), cx);
+            }
+        }
+    }
+
+    /// Apply a finished seek: clamp, move the clock, and restart ffplay at
+    /// the new offset when the track is playing. Seeking while paused just
+    /// moves the frozen position (no player restart).
+    fn seek_active_to(&mut self, secs: f64, cx: &mut Context<Self>) {
+        let Some(clock) = self.playback_clock.as_mut() else {
+            return;
+        };
+        clock.seek(secs);
+        let offset = clock.elapsed_secs();
+        let was_playing = clock.is_playing();
+        if let Some(id) = self.active_playback_id() {
+            self.playback_positions.insert(id, offset);
+        }
+        if was_playing {
+            self.restart_player_at(offset);
+            self.status_note = format!(
+                "{} — seek {}",
+                match self.active_playback_kind() {
+                    PlaybackKind::Voice => "playing voice note",
+                    PlaybackKind::Audio => "playing audio",
+                },
+                format_voice_duration(offset as i32)
+            );
+        }
+        cx.notify();
+    }
+
+    /// 250 ms progress tick while a track is active: re-renders so the seek
+    /// bar advances, and auto-stops when the clock reaches the duration
+    /// (ffplay `-autoexit` exits on its own; this clears our state to match).
+    fn spawn_playback_tick(&mut self, cx: &mut Context<Self>) {
+        if self.playback_tick {
+            return;
+        }
+        self.playback_tick = true;
+        cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor()
+                    .timer(Duration::from_millis(250))
+                    .await;
+                let cont = this
+                    .update(cx, |this, cx| {
+                        let active = this.active_playback_id().is_some();
+                        if !active {
+                            return false;
+                        }
+                        let finished = this
+                            .playback_clock
+                            .as_ref()
+                            .is_some_and(|clock| clock.is_playing() && clock.finished());
+                        if finished && !this.seek_scrubbing {
+                            if let Some(id) = this.active_playback_id() {
+                                this.playback_positions.insert(id, 0.0);
+                            }
+                            this.stop_voice_playback();
+                            this.stop_audio_playback();
+                            this.status_note = "playback finished".into();
+                        }
+                        cx.notify();
+                        true
+                    })
+                    .unwrap_or(false);
+                if !cont {
+                    break;
+                }
+            }
+            let _ = this.update(cx, |this, _| {
+                this.playback_tick = false;
+            });
+        })
+        .detach();
+    }
+
+    /// Push the playback clock into the seek slider entity so the thumb
+    /// follows elapsed time. Called at the top of `render` (the tick has no
+    /// `&mut Window`, which `SliderState::set_value` needs). Skipped while
+    /// scrubbing so the user's drag is never fought.
+    fn sync_seek_slider(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.seek_scrubbing {
+            return;
+        }
+        if let (Some(slider), Some(clock)) =
+            (self.seek_slider.as_ref(), self.playback_clock.as_ref())
+        {
+            let value = clock.elapsed_secs().clamp(0.0, clock.duration_secs()) as f32;
+            slider.update(cx, |state, cx| {
+                state.set_value(value, window, cx);
+            });
+        }
+    }
+
+    /// View model for one audio/voice row's seek bar.
+    fn seek_bar_view(&self, message_id: MessageId, duration_secs: f64) -> SeekBarView {
+        let active = self.active_playback_id() == Some(message_id);
+        if active {
+            let display = self.seek_preview_secs.or_else(|| {
+                self.playback_clock
+                    .as_ref()
+                    .map(|clock| clock.elapsed_secs())
+            });
+            SeekBarView {
+                slider: self.seek_slider.clone(),
+                display_secs: display.unwrap_or(0.0),
+                duration_secs,
+                is_playing: self
+                    .playback_clock
+                    .as_ref()
+                    .is_some_and(PlaybackClock::is_playing),
+            }
+        } else {
+            SeekBarView {
+                slider: None,
+                display_secs: self
+                    .playback_positions
+                    .get(&message_id)
+                    .copied()
+                    .unwrap_or(0.0),
+                duration_secs,
+                is_playing: false,
+            }
+        }
     }
 
     fn toggle_voice_playback(
@@ -3476,11 +3840,23 @@ impl QuillApp {
         message_id: MessageId,
         file_id: FileId,
         listened: bool,
+        duration_secs: f64,
         cx: &mut Context<Self>,
     ) {
         if self.playing_voice == Some(message_id) {
-            self.stop_voice_playback();
-            self.status_note = "voice note paused".into();
+            // Active row: pause ↔ resume (the row stays active so the seek
+            // bar keeps working and Play resumes from the frozen position).
+            let playing = self
+                .playback_clock
+                .as_ref()
+                .is_some_and(PlaybackClock::is_playing);
+            if playing {
+                self.pause_active_playback();
+                self.status_note = "voice note paused".into();
+            } else {
+                self.resume_active_playback();
+                self.status_note = "playing voice note".into();
+            }
             cx.notify();
             return;
         }
@@ -3496,33 +3872,28 @@ impl QuillApp {
             return;
         };
         let roots = self.media_display_roots();
-        if sandboxed_display_path(&path, &roots).is_none() {
+        let Some(safe) = sandboxed_display_path(&path, &roots) else {
             self.status_note = "voice file is outside the account files".into();
             cx.notify();
             return;
-        }
-        self.stop_voice_playback();
-        self.stop_audio_playback();
+        };
         self.stop_video_playback();
-        self.playing_voice = Some(message_id);
+        let offset = self
+            .playback_positions
+            .get(&message_id)
+            .copied()
+            .unwrap_or(0.0);
+        self.begin_track_playback(PlaybackKind::Voice, message_id, duration_secs, offset, cx);
+        self.playback_path = Some(safe.clone().into());
         if !listened {
             self.mark_voice_opened(chat_id, message_id);
         }
-        match Command::new("ffplay")
-            .args(["-nodisp", "-autoexit", "-loglevel", "quiet", &path])
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-        {
-            Ok(child) => {
-                self.voice_player = Some(child);
-                self.status_note = "playing voice note".into();
-            }
-            Err(_) => {
-                self.status_note = "playing voice note (no audio player)".into();
-            }
-        }
+        self.spawn_ffplay(&safe, offset);
+        self.status_note = if self.voice_player.is_some() {
+            "playing voice note".into()
+        } else {
+            "playing voice note (no audio player)".into()
+        };
         cx.notify();
     }
 
@@ -3530,11 +3901,22 @@ impl QuillApp {
         &mut self,
         message_id: MessageId,
         file_id: FileId,
+        duration_secs: f64,
         cx: &mut Context<Self>,
     ) {
         if self.playing_audio == Some(message_id) {
-            self.stop_audio_playback();
-            self.status_note = "audio paused".into();
+            // Active row: pause ↔ resume (see voice toggle).
+            let playing = self
+                .playback_clock
+                .as_ref()
+                .is_some_and(PlaybackClock::is_playing);
+            if playing {
+                self.pause_active_playback();
+                self.status_note = "audio paused".into();
+            } else {
+                self.resume_active_playback();
+                self.status_note = "playing audio".into();
+            }
             cx.notify();
             return;
         }
@@ -3546,43 +3928,38 @@ impl QuillApp {
                 .map(str::to_string)
         });
         let Some(path) = path else {
-            self.pending_audio_play = Some((message_id, file_id));
+            self.pending_audio_play = Some((message_id, file_id, duration_secs));
             self.request_media_download(file_id, None, cx);
             self.status_note = "downloading audio".into();
             return;
         };
         self.pending_audio_play = None;
         let roots = self.media_display_roots();
-        if sandboxed_display_path(&path, &roots).is_none() {
+        let Some(safe) = sandboxed_display_path(&path, &roots) else {
             self.status_note = "audio file is outside the account files".into();
             cx.notify();
             return;
-        }
-        self.stop_voice_playback();
-        self.stop_audio_playback();
+        };
         self.stop_video_playback();
         self.stop_animation_playback();
-        self.playing_audio = Some(message_id);
-        match Command::new("ffplay")
-            .args(["-nodisp", "-autoexit", "-loglevel", "quiet", &path])
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-        {
-            Ok(child) => {
-                self.voice_player = Some(child);
-                self.status_note = "playing audio".into();
-            }
-            Err(_) => {
-                self.status_note = "playing audio (no audio player)".into();
-            }
-        }
+        let offset = self
+            .playback_positions
+            .get(&message_id)
+            .copied()
+            .unwrap_or(0.0);
+        self.begin_track_playback(PlaybackKind::Audio, message_id, duration_secs, offset, cx);
+        self.playback_path = Some(safe.clone().into());
+        self.spawn_ffplay(&safe, offset);
+        self.status_note = if self.voice_player.is_some() {
+            "playing audio".into()
+        } else {
+            "playing audio (no audio player)".into()
+        };
         cx.notify();
     }
 
     fn resume_pending_audio(&mut self, cx: &mut Context<Self>) {
-        let Some((message_id, file_id)) = self.pending_audio_play else {
+        let Some((message_id, file_id, duration_secs)) = self.pending_audio_play else {
             return;
         };
         let ready = self.session().is_some_and(|session| {
@@ -3593,7 +3970,7 @@ impl QuillApp {
                 .is_some()
         });
         if ready {
-            self.toggle_audio_playback(message_id, file_id, cx);
+            self.toggle_audio_playback(message_id, file_id, duration_secs, cx);
         }
     }
 
@@ -6377,7 +6754,10 @@ fn live_status_for(auth: &AuthorizationState) -> String {
 }
 
 impl Render for QuillApp {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // Phase 4.6: push the playback clock into the seek slider entity so
+        // the thumb follows elapsed time (the tick has no `&mut Window`).
+        self.sync_seek_slider(window, cx);
         let auth_state = self.current_auth();
         let auth = view_for(&auth_state);
         let inputs_live = self.live.is_some() || self.demo_auth_inputs;
@@ -7072,8 +7452,16 @@ impl QuillApp {
                     let reaction_open = self
                         .pending_react
                         .is_some_and(|(chat, id)| chat == message.chat_id && id == message.id);
-                    let voice_playing = self.playing_voice == Some(message.id);
-                    let audio_playing = self.playing_audio == Some(message.id);
+                    // Phase 4.6: audio/voice rows get a seek-bar view model.
+                    let seek_bar = match &message.content {
+                        MessageContent::VoiceNote(note) => {
+                            Some(self.seek_bar_view(message.id, f64::from(note.duration)))
+                        }
+                        MessageContent::Audio(audio) => {
+                            Some(self.seek_bar_view(message.id, f64::from(audio.duration)))
+                        }
+                        _ => None,
+                    };
                     let animation_playing = self.playing_animation == Some(message.id);
                     let animation_frame = if animation_playing {
                         self.animation_frames
@@ -7102,8 +7490,7 @@ impl QuillApp {
                         forward_from,
                         selected_forward,
                         reaction_open,
-                        voice_playing,
-                        audio_playing,
+                        seek_bar,
                         animation_playing,
                         animation_frame,
                         video_playing,
@@ -9528,8 +9915,8 @@ fn session_history_row(
     forward_from: Option<String>,
     selected_forward: bool,
     reaction_open: bool,
-    voice_playing: bool,
-    audio_playing: bool,
+    // Seek-bar view for audio/voice rows (`None` for other content).
+    seek_bar: Option<SeekBarView>,
     animation_playing: bool,
     animation_frame: Option<PathBuf>,
     video_playing: bool,
@@ -9744,7 +10131,7 @@ fn session_history_row(
             note,
             files,
             downloading,
-            voice_playing,
+            seek_bar.as_ref().expect("voice row always has a seek view"),
             cx,
         )),
         MessageContent::Audio(audio) => Some(audio_row(
@@ -9753,7 +10140,7 @@ fn session_history_row(
             files,
             downloading,
             media_roots,
-            audio_playing,
+            seek_bar.as_ref().expect("audio row always has a seek view"),
             cx,
         )),
         MessageContent::Animation(animation) => Some(animation_attachment(
@@ -10919,6 +11306,36 @@ fn waveform_row(row_key: u64, bars: &[u8]) -> impl IntoElement {
     row
 }
 
+/// Phase 4.6 seek bar (tdesktop-style): the interactive gpui-component
+/// `Slider` on the active row — click-to-seek and drag, with the UI layer
+/// restarting ffplay at the released offset via `-ss` — and a static
+/// track + fill on every other audio/voice row.
+fn seek_bar_element(row_key: u64, seek: &SeekBarView) -> AnyElement {
+    const BAR: u32 = 0x58a6ff;
+    if let Some(slider) = &seek.slider {
+        div()
+            .id(("seek-bar", row_key))
+            .w_full()
+            .child(Slider::new(slider).bg(rgb(BAR)).text_color(rgb(0xffffff)))
+            .into_any_element()
+    } else {
+        div()
+            .id(("seek-bar", row_key))
+            .w_full()
+            .h(px(6.))
+            .rounded_full()
+            .bg(rgb(0x30363d))
+            .child(
+                div()
+                    .h_full()
+                    .w(relative(seek.fraction() as f32))
+                    .rounded_full()
+                    .bg(rgb(BAR)),
+            )
+            .into_any_element()
+    }
+}
+
 fn voice_note_row(
     chat_id: ChatId,
     message_id: MessageId,
@@ -10926,7 +11343,7 @@ fn voice_note_row(
     note: &quill::telegram::envelope::VoiceNoteContent,
     files: &HashMap<i32, ParsedFile>,
     downloading: &std::collections::HashSet<i32>,
-    playing: bool,
+    seek: &SeekBarView,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
     let file_id = note.file_id;
@@ -10937,25 +11354,36 @@ fn voice_note_row(
     let downloading_now = file_is_downloading(file_id, files, downloading);
     let bars = voice::waveform_bars_from_bytes(&note.waveform);
     let listened = note.is_listened;
-    let play_label = if playing {
+    let note_duration = f64::from(note.duration);
+    let active = seek.slider.is_some();
+    let play_label = if seek.is_playing {
         "Pause"
     } else if downloading_now {
         "Downloading"
-    } else if ready {
-        "Play"
     } else {
         "Play"
     };
-    let mut meta = format_voice_duration(note.duration);
-    if !outgoing && !note.is_listened && !playing {
+    // Phase 4.6: the active row shows elapsed / total (tdesktop-style).
+    let total = format_voice_duration(note.duration);
+    let mut meta = if active {
+        format!(
+            "{} / {total}",
+            format_voice_duration(seek.display_secs as i32)
+        )
+    } else {
+        total
+    };
+    if !outgoing && !note.is_listened && !active {
         meta = format!("New · {meta}");
     }
     if !ready && !downloading_now {
         meta = format!("{meta} · not downloaded");
     } else if downloading_now {
         meta = format!("{meta} · downloading…");
-    } else if playing {
+    } else if seek.is_playing {
         meta = format!("Playing · {meta}");
+    } else if active {
+        meta = format!("{meta} · paused");
     }
     div()
         .id(("voice-note", message_id.0 as u64))
@@ -10964,11 +11392,7 @@ fn voice_note_row(
         .py_2()
         .rounded_md()
         .border_1()
-        .border_color(if playing {
-            rgb(0x3fb950)
-        } else {
-            rgb(0x8b949e)
-        })
+        .border_color(if active { rgb(0x3fb950) } else { rgb(0x8b949e) })
         .bg(rgb(0x21262d))
         .flex()
         .flex_col()
@@ -10982,7 +11406,14 @@ fn voice_note_row(
                     Button::new(format!("voice-play-{}", message_id.0))
                         .label(play_label)
                         .on_click(cx.listener(move |this, _, _, cx| {
-                            this.toggle_voice_playback(chat_id, message_id, file_id, listened, cx);
+                            this.toggle_voice_playback(
+                                chat_id,
+                                message_id,
+                                file_id,
+                                listened,
+                                note_duration,
+                                cx,
+                            );
                         })),
                 )
                 .child(
@@ -10995,6 +11426,7 @@ fn voice_note_row(
                 .child(div().text_xs().text_color(rgb(0xffffff)).child(meta)),
         )
         .child(waveform_row(message_id.0 as u64, &bars))
+        .child(seek_bar_element(message_id.0 as u64, seek))
         .into_any_element()
 }
 
@@ -11004,7 +11436,7 @@ fn audio_row(
     files: &HashMap<i32, ParsedFile>,
     downloading: &std::collections::HashSet<i32>,
     media_roots: &[PathBuf],
-    playing: bool,
+    seek: &SeekBarView,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
     let file_id = audio.file_id;
@@ -11013,7 +11445,9 @@ fn audio_row(
         .and_then(|file| file.usable_path())
         .is_some();
     let downloading_now = file_is_downloading(file_id, files, downloading);
-    let play_label = if playing {
+    let audio_duration = f64::from(audio.duration);
+    let active = seek.slider.is_some();
+    let play_label = if seek.is_playing {
         "Pause"
     } else if downloading_now {
         "Downloading"
@@ -11027,16 +11461,28 @@ fn audio_row(
     } else {
         "Audio".to_string()
     };
-    let mut meta = voice::format_voice_duration(audio.duration);
+    // Phase 4.6: the active row shows elapsed / total (tdesktop-style).
+    let total = voice::format_voice_duration(audio.duration);
+    let duration_label = if active {
+        format!(
+            "{} / {total}",
+            voice::format_voice_duration(seek.display_secs as i32)
+        )
+    } else {
+        total
+    };
+    let mut meta = duration_label;
     if !audio.performer.is_empty() {
         meta = format!("{} · {meta}", audio.performer);
     }
-    if playing {
+    if seek.is_playing {
         meta = format!("Playing · {meta}");
     } else if downloading_now {
         meta = format!("{meta} · downloading…");
     } else if !ready {
         meta = format!("{meta} · not downloaded");
+    } else if active {
+        meta = format!("{meta} · paused");
     }
     let cover_id = audio.cover_file_id().unwrap_or(FileId(0));
     let cover = files
@@ -11083,11 +11529,7 @@ fn audio_row(
         .py_2()
         .rounded_md()
         .border_1()
-        .border_color(if playing {
-            rgb(0x3fb950)
-        } else {
-            rgb(0x8b949e)
-        })
+        .border_color(if active { rgb(0x3fb950) } else { rgb(0x8b949e) })
         .bg(rgb(0x21262d))
         .flex()
         .items_center()
@@ -11097,6 +11539,7 @@ fn audio_row(
             div()
                 .flex()
                 .flex_col()
+                .flex_1()
                 .gap_1()
                 .child(
                     div()
@@ -11106,11 +11549,12 @@ fn audio_row(
                         .child(title),
                 )
                 .child(div().text_xs().text_color(rgb(0xc9d1d9)).child(meta))
+                .child(seek_bar_element(message_id.0 as u64, seek))
                 .child(
                     Button::new(format!("audio-play-{}", message_id.0))
                         .label(play_label)
                         .on_click(cx.listener(move |this, _, _, cx| {
-                            this.toggle_audio_playback(message_id, file_id, cx);
+                            this.toggle_audio_playback(message_id, file_id, audio_duration, cx);
                         })),
                 ),
         )
