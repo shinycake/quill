@@ -14,11 +14,12 @@ use crate::telegram::envelope::{
     ChatPositionUpdate, ChatStatistics, ConnectionState, EnvelopePayload, ErrorClass, ForumTopic,
     InlineKeyboard, MessageAutoDelete, MessageContent, MessageForwardInfo, MessageInteractionInfo,
     MessageOrigin, MessageReaction, MessageReplyTo, MessageSelfDestruct, MessageSender,
-    NotificationSettingsScope, NotificationSound, ParsedCall, ParsedChatMember, ParsedFile,
-    ParsedGroupCall, ParsedGroupCallParticipant, ParsedMessage, ParsedSecretChat, ParsedStory,
-    ParsedUser, ParsedVideoChat, Poll, ReportOption, ReportSponsoredResult,
-    ScopeNotificationSettings, SecretChatState, SponsoredMessage, StickerFormat, StickerItem,
-    StickerSetInfo, StoryAvailableReactionView, StoryListView, TdError,
+    NotificationSettingsScope, NotificationSound, ParsedCall, ParsedChatInviteLink,
+    ParsedChatJoinRequest, ParsedChatMember, ParsedFile, ParsedGroupCall,
+    ParsedGroupCallParticipant, ParsedMessage, ParsedSecretChat, ParsedStory, ParsedUser,
+    ParsedVideoChat, Poll, ReportOption, ReportSponsoredResult, ScopeNotificationSettings,
+    SecretChatState, SponsoredMessage, StickerFormat, StickerItem, StickerSetInfo,
+    StoryAvailableReactionView, StoryListView, TdError,
 };
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
@@ -161,6 +162,26 @@ pub enum RequestPurpose {
     /// `chatStatisticsChannel` / `chatStatisticsSupergroup`; correlated
     /// via `PendingRequest::chat_id` (the response carries no chat id).
     GetChatStatistics,
+    /// Phase D3a: `getChatInviteLinks`. Response is `chatInviteLinks`;
+    /// correlated via `PendingRequest::chat_id`.
+    GetChatInviteLinks,
+    /// Phase D3a: `createChatInviteLink`. Response is the created
+    /// `chatInviteLink`; correlated via `PendingRequest::chat_id`.
+    CreateChatInviteLink,
+    /// Phase D3a: `editChatInviteLink`. Response is the updated
+    /// `chatInviteLink`; correlated via `PendingRequest::chat_id`.
+    EditChatInviteLink,
+    /// Phase D3a: `revokeChatInviteLink`. Response is the updated
+    /// `chatInviteLinks` list; correlated via `PendingRequest::chat_id`.
+    RevokeChatInviteLink,
+    /// Phase D3a: `getChatJoinRequests`. Response is `chatJoinRequests`;
+    /// correlated via `PendingRequest::chat_id`.
+    GetChatJoinRequests,
+    /// Phase D3a: `processChatJoinRequest`. Response is `ok`; `user_id`
+    /// identifies the join request that was approved/declined.
+    ProcessChatJoinRequest {
+        user_id: i64,
+    },
     /// Phase A1: `setChatSlowModeDelay`. Response is `ok`; the new delay
     /// arrives via `updateSupergroupFullInfo`.
     SetChatSlowModeDelay,
@@ -863,6 +884,13 @@ pub struct ChatSummary {
     /// rights block parsed; `None` means "no explicit restriction" — a bare
     /// admin still posts.
     pub my_admin_can_post_messages: Option<bool>,
+    /// Phase D3a: `rights.can_invite_users` from
+    /// `chatMemberStatusAdministrator` (TDLib 1.8.67,
+    /// `chatAdministratorRights`, schema line 1092). `Some` only when the
+    /// status is Administrator and the rights block parsed; `None` for
+    /// every other status or an absent rights block. Gates the invite-link
+    /// / join-request management UI.
+    pub my_admin_can_invite_users: Option<bool>,
     /// Phase 5.1: `supergroup.is_forum` (TDLib 1.8.67). `None` until
     /// `updateSupergroup` / the `getSupergroup` response resolves it; only
     /// meaningful for non-channel supergroups.
@@ -961,6 +989,26 @@ impl ChatSummary {
         self.my_member_status = Some(status);
         self.my_admin_can_post_messages = admin_can_post_messages;
         changed
+    }
+
+    /// Phase D3a: whether the current user may manage this chat's invite
+    /// links and join requests. The creator always can; an administrator
+    /// needs the explicit `can_invite_users` right. An absent rights block
+    /// keeps the gate closed rather than fabricating a right.
+    pub fn can_invite_users(&self) -> bool {
+        match self.my_member_status {
+            Some(ChannelMemberStatus::Creator) => true,
+            Some(ChannelMemberStatus::Administrator) => {
+                self.my_admin_can_invite_users.unwrap_or(false)
+            }
+            _ => false,
+        }
+    }
+
+    /// Phase D3a: record `rights.can_invite_users` (`None` for non-admin
+    /// statuses or an absent rights block).
+    pub fn set_admin_can_invite_users(&mut self, can_invite_users: Option<bool>) {
+        self.my_admin_can_invite_users = can_invite_users;
     }
 
     pub fn is_forum_chat(&self) -> bool {
@@ -1079,6 +1127,7 @@ fn placeholder_chat(chat_id: ChatId) -> ChatSummary {
         draft: None,
         my_member_status: None,
         my_admin_can_post_messages: None,
+        my_admin_can_invite_users: None,
         is_forum: None,
         photo_file_id: None,
         // Parity slice 4: lenient default true — the real `chat` object
@@ -2220,6 +2269,14 @@ pub struct Session {
     pub supergroup_full_infos: HashMap<i64, SupergroupFullInfoData>,
     /// Phase D2: `getChatStatistics` fetch state, keyed by chat id.
     pub chat_statistics: HashMap<i64, ChatStatisticsFetch>,
+    /// Phase D3a: `getChatInviteLinks` fetch state, keyed by chat id.
+    pub invite_links: HashMap<i64, InviteLinkFetch>,
+    /// Phase D3a: `getChatJoinRequests` fetch state, keyed by chat id.
+    pub join_requests: HashMap<i64, JoinRequestFetch>,
+    /// Phase D3a: latest `updateChatPendingJoinRequests` total per chat
+    /// (schema 1.8.67, line 10555). The full request list still needs
+    /// `getChatJoinRequests`; this is only the badge count.
+    pub pending_join_request_counts: HashMap<i64, i32>,
     /// Parity slice: first active username per supergroup (`supergroup`
     /// object / `updateSupergroup`, schema 1.8.67 line 2746), keyed by
     /// supergroup id. Feeds the channel/supergroup header's @username.
@@ -2234,6 +2291,11 @@ pub struct Session {
     /// 2500/`chatAdministratorRights` 1092). `setChatSlowModeDelay` requires
     /// 13551). Absent = unknown, treated as lacking the right.
     pub supergroup_restrict_right: HashMap<i64, bool>,
+    /// Phase D3a: the viewer's `rights.can_invite_users` per supergroup
+    /// from own `chatMemberStatusAdministrator` (schema 1.8.67, line
+    /// 1092). Invite-link management requires this right (or creator
+    /// status). Absent = unknown, treated as lacking the right.
+    pub supergroup_invite_right: HashMap<i64, bool>,
     /// Phase 6: the open user / supergroup info panel, if any.
     pub open_info_panel: Option<InfoPanelTarget>,
     /// Phase 9.1: active stories per chat from `updateChatActiveStories` /
@@ -2340,6 +2402,42 @@ pub enum ChatStatisticsFetch {
     Failed(String),
 }
 
+/// Phase D3a: fetch state for one chat's `getChatInviteLinks` result
+/// (schema 1.8.67, line 14138). Keyed by chat id. `Loading` is the
+/// in-flight guard — the driver never sends a second request while one
+/// is outstanding.
+#[derive(Debug, Clone, PartialEq)]
+pub enum InviteLinkFetch {
+    Loading,
+    Loaded(InviteLinkList),
+    Failed(String),
+}
+
+/// Phase D3a: one chat's invite-link list (`chatInviteLinks`, schema
+/// 1.8.67, line 2630).
+#[derive(Debug, Clone, PartialEq)]
+pub struct InviteLinkList {
+    pub total_count: i32,
+    pub links: Vec<ParsedChatInviteLink>,
+}
+
+/// Phase D3a: fetch state for one chat's `getChatJoinRequests` result
+/// (schema 1.8.67, line 14174). Same Loading-guard convention.
+#[derive(Debug, Clone, PartialEq)]
+pub enum JoinRequestFetch {
+    Loading,
+    Loaded(JoinRequestList),
+    Failed(String),
+}
+
+/// Phase D3a: one chat's join-request list (`chatJoinRequests`, schema
+/// 1.8.67, line 2691).
+#[derive(Debug, Clone, PartialEq)]
+pub struct JoinRequestList {
+    pub total_count: i32,
+    pub requests: Vec<ParsedChatJoinRequest>,
+}
+
 /// Phase A1: wall-clock milliseconds. Used to timestamp
 /// `supergroupFullInfo` arrivals so the slow-mode expiry decays locally.
 pub fn unix_ms_now() -> u64 {
@@ -2435,9 +2533,13 @@ impl Session {
             user_full_infos: HashMap::new(),
             supergroup_full_infos: HashMap::new(),
             chat_statistics: HashMap::new(),
+            invite_links: HashMap::new(),
+            join_requests: HashMap::new(),
+            pending_join_request_counts: HashMap::new(),
             supergroup_usernames: HashMap::new(),
             supergroup_member_status: HashMap::new(),
             supergroup_restrict_right: HashMap::new(),
+            supergroup_invite_right: HashMap::new(),
             open_info_panel: None,
             story_tray: HashMap::new(),
             stories: HashMap::new(),
@@ -2568,6 +2670,41 @@ impl Session {
             .get(&supergroup_id)
             .copied()
             .unwrap_or(false)
+    }
+
+    /// Phase D3a: whether the viewer's own administrator rights in a
+    /// supergroup include `can_invite_users` (schema 1.8.67, line 1092),
+    /// which invite-link management requires. Creators hold all rights
+    /// implicitly — check `supergroup_own_status` for that. Absent =
+    /// unknown, treated as lacking the right.
+    pub fn supergroup_can_invite_users(&self, supergroup_id: i64) -> bool {
+        self.supergroup_invite_right
+            .get(&supergroup_id)
+            .copied()
+            .unwrap_or(false)
+    }
+
+    /// Phase D3a: invite-link / join-request gate for a chat. The
+    /// `ChatSummary` path covers channels (own membership probed via
+    /// `getChatMember`); non-channel supergroups carry own admin rights
+    /// on the `updateSupergroup` / `getSupergroup` status block instead.
+    pub fn chat_can_invite_users(&self, chat_id: ChatId) -> bool {
+        let Some(chat) = self.chats.get(&chat_id.0) else {
+            return false;
+        };
+        if chat.can_invite_users() {
+            return true;
+        }
+        match chat.kind {
+            ChatKind::Supergroup {
+                supergroup_id,
+                is_channel: false,
+            } => {
+                self.supergroup_own_status(supergroup_id) == Some(ChannelMemberStatus::Creator)
+                    || self.supergroup_can_invite_users(supergroup_id)
+            }
+            _ => false,
+        }
     }
 
     /// Phase A1: slow-mode gate for a chat. Returns the remaining wait in
@@ -2949,6 +3086,118 @@ impl Session {
                     self.chat_statistics
                         .insert(chat_id.0, ChatStatisticsFetch::Loaded(Box::new(statistics)));
                 }
+            }
+            // Phase D3a: `createChatInviteLink` / `editChatInviteLink`
+            // answer — the created/updated link, correlated via the
+            // pending request's `chat_id`. Upserts into the cached list;
+            // a genuinely new link (create purpose, not already present)
+            // also bumps `total_count`.
+            EnvelopePayload::ChatInviteLink { link } => {
+                if matches!(
+                    pending.map(|p| p.purpose),
+                    Some(RequestPurpose::CreateChatInviteLink | RequestPurpose::EditChatInviteLink)
+                ) && let Some(pending) = pending
+                    && let Some(chat_id) = pending.chat_id
+                {
+                    let is_create = pending.purpose == RequestPurpose::CreateChatInviteLink;
+                    match self.invite_links.entry(chat_id.0) {
+                        std::collections::hash_map::Entry::Occupied(mut entry) => {
+                            match entry.get_mut() {
+                                InviteLinkFetch::Loaded(list) => {
+                                    if let Some(existing) = list
+                                        .links
+                                        .iter_mut()
+                                        .find(|e| e.invite_link == link.invite_link)
+                                    {
+                                        *existing = link;
+                                    } else {
+                                        list.links.push(link);
+                                        if is_create {
+                                            list.total_count = list.total_count.saturating_add(1);
+                                        }
+                                    }
+                                }
+                                fetch => {
+                                    *fetch = InviteLinkFetch::Loaded(InviteLinkList {
+                                        total_count: 1,
+                                        links: vec![link],
+                                    });
+                                }
+                            }
+                        }
+                        std::collections::hash_map::Entry::Vacant(entry) => {
+                            entry.insert(InviteLinkFetch::Loaded(InviteLinkList {
+                                total_count: 1,
+                                links: vec![link],
+                            }));
+                        }
+                    }
+                }
+            }
+            // Phase D3a: `getChatInviteLinks` / `revokeChatInviteLink`
+            // answer — replaces the cached list.
+            EnvelopePayload::ChatInviteLinks { total_count, links } => {
+                if matches!(
+                    pending.map(|p| p.purpose),
+                    Some(RequestPurpose::GetChatInviteLinks | RequestPurpose::RevokeChatInviteLink)
+                ) && let Some(pending) = pending
+                    && let Some(chat_id) = pending.chat_id
+                {
+                    self.invite_links.insert(
+                        chat_id.0,
+                        InviteLinkFetch::Loaded(InviteLinkList { total_count, links }),
+                    );
+                }
+            }
+            // Phase D3a: `getChatJoinRequests` answer.
+            EnvelopePayload::ChatJoinRequests {
+                total_count,
+                requests,
+            } => {
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetChatJoinRequests)
+                    && let Some(pending) = pending
+                    && let Some(chat_id) = pending.chat_id
+                {
+                    self.join_requests.insert(
+                        chat_id.0,
+                        JoinRequestFetch::Loaded(JoinRequestList {
+                            total_count,
+                            requests,
+                        }),
+                    );
+                }
+            }
+            // Phase D3a: `updateNewChatJoinRequest` (schema 1.8.67, line
+            // 11210) — a new join request arrived. Prepend it to the cached
+            // list when one is loaded; otherwise the next fetch picks it up.
+            // The total is bumped: the update announces a genuinely new
+            // pending request.
+            EnvelopePayload::UpdateNewChatJoinRequest {
+                chat_id, request, ..
+            } => {
+                if let Some(JoinRequestFetch::Loaded(mut list)) =
+                    self.join_requests.get(&chat_id).cloned()
+                    && !list
+                        .requests
+                        .iter()
+                        .any(|existing| existing.user_id == request.user_id)
+                {
+                    list.requests.insert(0, request);
+                    list.total_count = list.total_count.saturating_add(1);
+                    self.join_requests
+                        .insert(chat_id, JoinRequestFetch::Loaded(list));
+                }
+            }
+            // Phase D3a: `updateChatPendingJoinRequests` (schema 1.8.67,
+            // line 10555) — the badge count. The full list still needs
+            // `getChatJoinRequests`.
+            EnvelopePayload::UpdateChatPendingJoinRequests {
+                chat_id,
+                total_count,
+                ..
+            } => {
+                self.pending_join_request_counts
+                    .insert(chat_id, total_count);
             }
             EnvelopePayload::UpdateChatNotificationSettings {
                 chat_id,
@@ -3503,6 +3752,7 @@ impl Session {
                 username,
                 status,
                 can_restrict_members,
+                can_invite_users,
             } => {
                 self.set_supergroup_forum(supergroup_id, is_forum);
                 self.set_supergroup_username(supergroup_id, username);
@@ -3512,6 +3762,10 @@ impl Session {
                 // admin control; absent = unknown → treated as lacking.
                 self.supergroup_restrict_right
                     .insert(supergroup_id, can_restrict_members.unwrap_or(false));
+                // Phase D3a: `can_invite_users` gates invite-link /
+                // join-request management; absent = unknown → lacking.
+                self.supergroup_invite_right
+                    .insert(supergroup_id, can_invite_users.unwrap_or(false));
             }
             EnvelopePayload::Supergroup {
                 supergroup_id,
@@ -3519,6 +3773,7 @@ impl Session {
                 username,
                 status,
                 can_restrict_members,
+                can_invite_users,
             } => {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetSupergroup) {
                     self.set_supergroup_forum(supergroup_id, is_forum);
@@ -3527,6 +3782,10 @@ impl Session {
                     self.supergroup_member_status.insert(supergroup_id, status);
                     self.supergroup_restrict_right
                         .insert(supergroup_id, can_restrict_members.unwrap_or(false));
+                    // Phase D3a: `can_invite_users` gates invite-link /
+                    // join-request management.
+                    self.supergroup_invite_right
+                        .insert(supergroup_id, can_invite_users.unwrap_or(false));
                 }
             }
             // Phase 5.1: `getForumTopics` response — cache the first page
@@ -3857,6 +4116,29 @@ impl Session {
                     // keep the old status (Error arm below does not touch it).
                     chat.set_member_status(ChannelMemberStatus::Left, None);
                 }
+                // Phase D3a: `processChatJoinRequest` confirmed — drop the
+                // processed request from the cached list. The count is
+                // approximate per the schema; `updateChatPendingJoinRequests`
+                // is the authoritative badge source.
+                if let Some(RequestPurpose::ProcessChatJoinRequest { user_id }) =
+                    pending.map(|p| p.purpose)
+                    && let Some(chat_id) = pending.and_then(|p| p.chat_id)
+                    && let Some(JoinRequestFetch::Loaded(list)) =
+                        self.join_requests.get(&chat_id.0).cloned()
+                {
+                    let requests: Vec<ParsedChatJoinRequest> = list
+                        .requests
+                        .into_iter()
+                        .filter(|r| r.user_id != user_id)
+                        .collect();
+                    self.join_requests.insert(
+                        chat_id.0,
+                        JoinRequestFetch::Loaded(JoinRequestList {
+                            total_count: list.total_count.saturating_sub(1),
+                            requests,
+                        }),
+                    );
+                }
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::AddContact) {
                     // Phase 6: the new contact arrives via `updateUser`
                     // (`is_contact` flips); invalidate the list so the
@@ -3937,6 +4219,75 @@ impl Session {
                                 ChatStatisticsFetch::Failed(call_request_error_line(
                                     &err,
                                     "Could not load statistics",
+                                )),
+                            );
+                        }
+                    }
+                    // Phase D3a: failed invite-link / join-request requests
+                    // land in the fetch state so the panel shows an honest
+                    // error instead of spinning forever.
+                    Some(RequestPurpose::GetChatInviteLinks) => {
+                        if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
+                            self.invite_links.insert(
+                                chat_id.0,
+                                InviteLinkFetch::Failed(call_request_error_line(
+                                    &err,
+                                    "Could not load invite links",
+                                )),
+                            );
+                        }
+                    }
+                    Some(RequestPurpose::CreateChatInviteLink) => {
+                        if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
+                            self.invite_links.insert(
+                                chat_id.0,
+                                InviteLinkFetch::Failed(call_request_error_line(
+                                    &err,
+                                    "Could not create invite link",
+                                )),
+                            );
+                        }
+                    }
+                    Some(RequestPurpose::EditChatInviteLink) => {
+                        if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
+                            self.invite_links.insert(
+                                chat_id.0,
+                                InviteLinkFetch::Failed(call_request_error_line(
+                                    &err,
+                                    "Could not edit invite link",
+                                )),
+                            );
+                        }
+                    }
+                    Some(RequestPurpose::RevokeChatInviteLink) => {
+                        if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
+                            self.invite_links.insert(
+                                chat_id.0,
+                                InviteLinkFetch::Failed(call_request_error_line(
+                                    &err,
+                                    "Could not revoke invite link",
+                                )),
+                            );
+                        }
+                    }
+                    Some(RequestPurpose::GetChatJoinRequests) => {
+                        if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
+                            self.join_requests.insert(
+                                chat_id.0,
+                                JoinRequestFetch::Failed(call_request_error_line(
+                                    &err,
+                                    "Could not load join requests",
+                                )),
+                            );
+                        }
+                    }
+                    Some(RequestPurpose::ProcessChatJoinRequest { .. }) => {
+                        if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
+                            self.join_requests.insert(
+                                chat_id.0,
+                                JoinRequestFetch::Failed(call_request_error_line(
+                                    &err,
+                                    "Could not process join request",
                                 )),
                             );
                         }
@@ -4487,6 +4838,7 @@ impl Session {
         }
         if let Some(chat) = self.chats.get_mut(&chat_id.0) {
             chat.set_member_status(member.status, member.admin_can_post_messages);
+            chat.set_admin_can_invite_users(member.admin_can_invite_users);
         }
     }
 
@@ -9546,5 +9898,379 @@ mod tests {
         // Pending chat → no record for the key UI.
         session.open_chat(ChatId(42));
         assert!(session.open_ready_secret_chat_for_user(43).is_none());
+    }
+    #[test]
+    fn invite_link_fetch_flow_loads_and_caches() {
+        // Phase D3a: Fetching invite links loads and caches the result.
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        let extra = session.request(RequestPurpose::GetChatInviteLinks, Some(ChatId(13)));
+
+        let link1 = r#"{"@type":"chatInviteLink","invite_link":"https://t.me/+mods","name":"Mods","creator_user_id":777,"date":1788000000,"edit_date":0,"expiration_date":0,"subscription_pricing":null,"member_limit":25,"member_count":8,"expired_member_count":0,"pending_join_request_count":0,"creates_join_request":false,"is_primary":false,"is_revoked":false}"#;
+        let link2 = r#"{"@type":"chatInviteLink","invite_link":"https://t.me/+mods2","name":"Mods 2","creator_user_id":777,"date":1788000000,"edit_date":0,"expiration_date":0,"subscription_pricing":null,"member_limit":25,"member_count":4,"expired_member_count":0,"pending_join_request_count":0,"creates_join_request":false,"is_primary":false,"is_revoked":false}"#;
+
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"chatInviteLinks","@extra":"{}","total_count":2,"invite_links":[{},{}]}}"#,
+                extra.0, link1, link2
+            ),
+        );
+
+        let InviteLinkFetch::Loaded(list) = session.invite_links.get(&13).unwrap() else {
+            panic!("invite links were not loaded");
+        };
+        assert_eq!(list.total_count, 2);
+        assert_eq!(list.links.len(), 2);
+        assert_eq!(list.links[0].name, "Mods");
+
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"chatInviteLinks","@extra":"99999","total_count":1,"invite_links":[{}]}}"#,
+                link1
+            ),
+        );
+
+        let InviteLinkFetch::Loaded(list) = session.invite_links.get(&13).unwrap() else {
+            panic!("invite links were not loaded");
+        };
+        assert_eq!(list.total_count, 2);
+        assert_eq!(list.links.len(), 2);
+    }
+
+    #[test]
+    fn invite_link_create_upsert_bumps_total() {
+        // Phase D3a: A created invite link is appended and increments the total.
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        let fetch_extra = session.request(RequestPurpose::GetChatInviteLinks, Some(ChatId(13)));
+
+        let link1 = r#"{"@type":"chatInviteLink","invite_link":"https://t.me/+mods","name":"Mods","creator_user_id":777,"date":1788000000,"edit_date":0,"expiration_date":0,"subscription_pricing":null,"member_limit":25,"member_count":8,"expired_member_count":0,"pending_join_request_count":0,"creates_join_request":false,"is_primary":false,"is_revoked":false}"#;
+        let link2 = r#"{"@type":"chatInviteLink","invite_link":"https://t.me/+mods2","name":"Mods 2","creator_user_id":777,"date":1788000000,"edit_date":0,"expiration_date":0,"subscription_pricing":null,"member_limit":25,"member_count":4,"expired_member_count":0,"pending_join_request_count":0,"creates_join_request":false,"is_primary":false,"is_revoked":false}"#;
+
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"chatInviteLinks","@extra":"{}","total_count":2,"invite_links":[{},{}]}}"#,
+                fetch_extra.0, link1, link2
+            ),
+        );
+
+        let create_extra = session.request(RequestPurpose::CreateChatInviteLink, Some(ChatId(13)));
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"chatInviteLink","@extra":"{}","invite_link":"https://t.me/+new","name":"New","creator_user_id":777,"date":1788000000,"edit_date":0,"expiration_date":0,"subscription_pricing":null,"member_limit":25,"member_count":0,"expired_member_count":0,"pending_join_request_count":0,"creates_join_request":false,"is_primary":false,"is_revoked":false}}"#,
+                create_extra.0
+            ),
+        );
+
+        let InviteLinkFetch::Loaded(list) = session.invite_links.get(&13).unwrap() else {
+            panic!("invite links were not loaded");
+        };
+        assert_eq!(list.total_count, 3);
+        assert_eq!(list.links.len(), 3);
+        assert_eq!(list.links.last().unwrap().name, "New");
+    }
+
+    #[test]
+    fn invite_link_edit_replaces_in_place() {
+        // Phase D3a: Editing an invite link replaces the matching cached entry.
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        let fetch_extra = session.request(RequestPurpose::GetChatInviteLinks, Some(ChatId(13)));
+
+        let link1 = r#"{"@type":"chatInviteLink","invite_link":"https://t.me/+mods","name":"Mods","creator_user_id":777,"date":1788000000,"edit_date":0,"expiration_date":0,"subscription_pricing":null,"member_limit":25,"member_count":8,"expired_member_count":0,"pending_join_request_count":0,"creates_join_request":false,"is_primary":false,"is_revoked":false}"#;
+        let link2 = r#"{"@type":"chatInviteLink","invite_link":"https://t.me/+mods2","name":"Mods 2","creator_user_id":777,"date":1788000000,"edit_date":0,"expiration_date":0,"subscription_pricing":null,"member_limit":25,"member_count":4,"expired_member_count":0,"pending_join_request_count":0,"creates_join_request":false,"is_primary":false,"is_revoked":false}"#;
+
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"chatInviteLinks","@extra":"{}","total_count":2,"invite_links":[{},{}]}}"#,
+                fetch_extra.0, link1, link2
+            ),
+        );
+
+        let edit_extra = session.request(RequestPurpose::EditChatInviteLink, Some(ChatId(13)));
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"chatInviteLink","@extra":"{}","invite_link":"https://t.me/+mods","name":"Mods!","creator_user_id":777,"date":1788000000,"edit_date":1788100000,"expiration_date":0,"subscription_pricing":null,"member_limit":25,"member_count":9,"expired_member_count":0,"pending_join_request_count":0,"creates_join_request":false,"is_primary":false,"is_revoked":false}}"#,
+                edit_extra.0
+            ),
+        );
+
+        let InviteLinkFetch::Loaded(list) = session.invite_links.get(&13).unwrap() else {
+            panic!("invite links were not loaded");
+        };
+        assert_eq!(list.total_count, 2);
+        assert_eq!(list.links.len(), 2);
+        assert_eq!(list.links[0].name, "Mods!");
+        assert_eq!(list.links[0].member_count, 9);
+    }
+
+    #[test]
+    fn invite_link_revoke_replaces_list() {
+        // Phase D3a: Revoking an invite link replaces the cached list response.
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        let fetch_extra = session.request(RequestPurpose::GetChatInviteLinks, Some(ChatId(13)));
+
+        let link1 = r#"{"@type":"chatInviteLink","invite_link":"https://t.me/+mods","name":"Mods","creator_user_id":777,"date":1788000000,"edit_date":0,"expiration_date":0,"subscription_pricing":null,"member_limit":25,"member_count":8,"expired_member_count":0,"pending_join_request_count":0,"creates_join_request":false,"is_primary":false,"is_revoked":false}"#;
+        let link2 = r#"{"@type":"chatInviteLink","invite_link":"https://t.me/+mods2","name":"Mods 2","creator_user_id":777,"date":1788000000,"edit_date":0,"expiration_date":0,"subscription_pricing":null,"member_limit":25,"member_count":4,"expired_member_count":0,"pending_join_request_count":0,"creates_join_request":false,"is_primary":false,"is_revoked":false}"#;
+
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"chatInviteLinks","@extra":"{}","total_count":2,"invite_links":[{},{}]}}"#,
+                fetch_extra.0, link1, link2
+            ),
+        );
+
+        let revoke_extra = session.request(RequestPurpose::RevokeChatInviteLink, Some(ChatId(13)));
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"chatInviteLinks","@extra":"{}","total_count":1,"invite_links":[{}]}}"#,
+                revoke_extra.0, link2
+            ),
+        );
+
+        let InviteLinkFetch::Loaded(list) = session.invite_links.get(&13).unwrap() else {
+            panic!("invite links were not loaded");
+        };
+        assert_eq!(list.total_count, 1);
+        assert_eq!(list.links.len(), 1);
+        assert_eq!(list.links[0].invite_link, "https://t.me/+mods2");
+    }
+
+    #[test]
+    fn join_request_fetch_flow_loads_and_caches() {
+        // Phase D3a: Fetching join requests loads and caches the result.
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        let extra = session.request(RequestPurpose::GetChatJoinRequests, Some(ChatId(13)));
+
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"chatJoinRequests","@extra":"{}","total_count":2,"requests":[{{"@type":"chatJoinRequest","user_id":7001,"date":1788500000,"bio":"Hi"}},{{"@type":"chatJoinRequest","user_id":7002,"date":1788550000,"bio":"Yo"}}]}}"#,
+                extra.0
+            ),
+        );
+
+        let JoinRequestFetch::Loaded(list) = session.join_requests.get(&13).unwrap() else {
+            panic!("join requests were not loaded");
+        };
+        assert_eq!(list.total_count, 2);
+        assert_eq!(list.requests.len(), 2);
+        assert_eq!(list.requests[0].user_id, 7001);
+        assert_eq!(list.requests[0].bio, "Hi");
+    }
+
+    #[test]
+    fn join_request_update_prepends_and_dedupes() {
+        // Phase D3a: New join-request updates prepend and deduplicate by user ID.
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        let extra = session.request(RequestPurpose::GetChatJoinRequests, Some(ChatId(13)));
+
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"chatJoinRequests","@extra":"{}","total_count":2,"requests":[{{"@type":"chatJoinRequest","user_id":7001,"date":1788500000,"bio":"Hi"}},{{"@type":"chatJoinRequest","user_id":7002,"date":1788550000,"bio":"Yo"}}]}}"#,
+                extra.0
+            ),
+        );
+
+        let link = r#"{"@type":"chatInviteLink","invite_link":"https://t.me/+join","name":"Join","creator_user_id":777,"date":1788000000,"edit_date":0,"expiration_date":0,"subscription_pricing":null,"member_limit":25,"member_count":8,"expired_member_count":0,"pending_join_request_count":0,"creates_join_request":false,"is_primary":false,"is_revoked":false}"#;
+        let update = format!(
+            r#"{{"@type":"updateNewChatJoinRequest","chat_id":13,"request":{{"@type":"chatJoinRequest","user_id":7003,"date":1788600000,"bio":"New"}},"user_chat_id":0,"invite_link":{},"query_id":"42"}}"#,
+            link
+        );
+
+        apply_json(&mut session, &seq, &sink, &update);
+
+        let JoinRequestFetch::Loaded(list) = session.join_requests.get(&13).unwrap() else {
+            panic!("join requests were not loaded");
+        };
+        assert_eq!(list.total_count, 3);
+        assert_eq!(list.requests.len(), 3);
+        assert_eq!(list.requests[0].user_id, 7003);
+
+        apply_json(&mut session, &seq, &sink, &update);
+
+        let JoinRequestFetch::Loaded(list) = session.join_requests.get(&13).unwrap() else {
+            panic!("join requests were not loaded");
+        };
+        assert_eq!(list.total_count, 3);
+        assert_eq!(list.requests.len(), 3);
+        assert_eq!(list.requests[0].user_id, 7003);
+
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"updateNewChatJoinRequest","chat_id":14,"request":{{"@type":"chatJoinRequest","user_id":7004,"date":1788650000,"bio":"Unloaded"}},"user_chat_id":0,"invite_link":{},"query_id":"43"}}"#,
+                link
+            ),
+        );
+
+        assert!(!session.join_requests.contains_key(&14));
+    }
+
+    #[test]
+    fn update_chat_pending_join_requests_sets_count() {
+        // Phase D3a: Pending join-request updates cache the reported count.
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateChatPendingJoinRequests","chat_id":13,"pending_join_requests":{"@type":"chatJoinRequestsInfo","total_count":5,"user_ids":[7001]}}"#,
+        );
+
+        assert_eq!(session.pending_join_request_counts.get(&13), Some(&5));
+    }
+
+    #[test]
+    fn process_join_request_ok_drops_from_list() {
+        // Phase D3a: Successfully processing a join request removes it from the cache.
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        let fetch_extra = session.request(RequestPurpose::GetChatJoinRequests, Some(ChatId(13)));
+
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"chatJoinRequests","@extra":"{}","total_count":2,"requests":[{{"@type":"chatJoinRequest","user_id":7001,"date":1788500000,"bio":"Hi"}},{{"@type":"chatJoinRequest","user_id":7002,"date":1788550000,"bio":"Yo"}}]}}"#,
+                fetch_extra.0
+            ),
+        );
+
+        let process_extra = session.request(
+            RequestPurpose::ProcessChatJoinRequest { user_id: 7001 },
+            Some(ChatId(13)),
+        );
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, process_extra.0),
+        );
+
+        let JoinRequestFetch::Loaded(list) = session.join_requests.get(&13).unwrap() else {
+            panic!("join requests were not loaded");
+        };
+        assert_eq!(list.total_count, 1);
+        assert_eq!(list.requests.len(), 1);
+        assert_eq!(list.requests[0].user_id, 7002);
+    }
+
+    #[test]
+    fn chat_can_invite_users_gate() {
+        // Phase D3a: Invite permissions follow channel and supergroup membership rights.
+        let (mut session, _) = session();
+
+        assert!(!session.chat_can_invite_users(ChatId(999)));
+
+        let mut channel = placeholder_chat(ChatId(13));
+        channel.kind = ChatKind::Supergroup {
+            supergroup_id: 13,
+            is_channel: true,
+        };
+        session.chats.insert(13, channel);
+        assert!(!session.chat_can_invite_users(ChatId(13)));
+
+        session
+            .chats
+            .get_mut(&13)
+            .unwrap()
+            .set_member_status(ChannelMemberStatus::Creator, None);
+        assert!(session.chat_can_invite_users(ChatId(13)));
+
+        {
+            let channel = session.chats.get_mut(&13).unwrap();
+            channel.set_member_status(ChannelMemberStatus::Administrator, None);
+            channel.set_admin_can_invite_users(Some(true));
+        }
+        assert!(session.chat_can_invite_users(ChatId(13)));
+
+        session
+            .chats
+            .get_mut(&13)
+            .unwrap()
+            .set_admin_can_invite_users(Some(false));
+        assert!(!session.chat_can_invite_users(ChatId(13)));
+
+        session
+            .chats
+            .get_mut(&13)
+            .unwrap()
+            .set_admin_can_invite_users(None);
+        assert!(!session.chat_can_invite_users(ChatId(13)));
+
+        let mut creator_group = placeholder_chat(ChatId(14));
+        creator_group.kind = ChatKind::Supergroup {
+            supergroup_id: 14,
+            is_channel: false,
+        };
+        session.chats.insert(14, creator_group);
+        session
+            .supergroup_member_status
+            .insert(14, ChannelMemberStatus::Creator);
+        assert!(session.chat_can_invite_users(ChatId(14)));
+
+        let mut admin_group = placeholder_chat(ChatId(15));
+        admin_group.kind = ChatKind::Supergroup {
+            supergroup_id: 15,
+            is_channel: false,
+        };
+        session.chats.insert(15, admin_group);
+        session
+            .supergroup_member_status
+            .insert(15, ChannelMemberStatus::Administrator);
+        session.supergroup_invite_right.insert(15, true);
+        assert!(session.chat_can_invite_users(ChatId(15)));
+
+        session.supergroup_invite_right.insert(15, false);
+        assert!(!session.chat_can_invite_users(ChatId(15)));
+
+        let mut member_group = placeholder_chat(ChatId(16));
+        member_group.kind = ChatKind::Supergroup {
+            supergroup_id: 16,
+            is_channel: false,
+        };
+        session.chats.insert(16, member_group);
+        session
+            .supergroup_member_status
+            .insert(16, ChannelMemberStatus::Member);
+        assert!(!session.chat_can_invite_users(ChatId(16)));
     }
 }

@@ -290,6 +290,11 @@ pub enum EnvelopePayload {
         /// `None` for any other status or a missing rights block.
         /// `setChatSlowModeDelay` requires this right (line 13551).
         can_restrict_members: Option<bool>,
+        /// Phase D3a: `rights.can_invite_users` from own
+        /// `chatMemberStatusAdministrator` (schema 1.8.67, line 1092);
+        /// `None` for any other status or a missing rights block.
+        /// Invite-link management requires this right (or creator status).
+        can_invite_users: Option<bool>,
     },
     /// `supergroup` — `getSupergroup` response. Phase A1: also keeps own
     /// `status` (`supergroup.status`, schema 1.8.67 line 2746) for the
@@ -303,6 +308,11 @@ pub enum EnvelopePayload {
         /// `chatMemberStatusAdministrator` (schema 1.8.67, lines 2500/1092);
         /// `None` for any other status or a missing rights block.
         can_restrict_members: Option<bool>,
+        /// Phase D3a: `rights.can_invite_users` from own
+        /// `chatMemberStatusAdministrator` (schema 1.8.67, line 1092);
+        /// `None` for any other status or a missing rights block.
+        /// Invite-link management requires this right (or creator status).
+        can_invite_users: Option<bool>,
     },
     /// `forumTopics` — `getForumTopics` response. Only the first page is
     /// fetched; `next_offset_*` are dropped (see Phase 5.1 DECISIONS).
@@ -445,6 +455,44 @@ pub enum EnvelopePayload {
     /// request in `Session::apply`.
     ChatStatistics {
         statistics: ChatStatistics,
+    },
+    /// Phase D3a: `chatInviteLink` response (TDLib 1.8.67, line 2627) —
+    /// the created/edited link from `createChatInviteLink` /
+    /// `editChatInviteLink`. Correlated to the chat by the request's
+    /// `PendingRequest::chat_id`.
+    ChatInviteLink {
+        link: ParsedChatInviteLink,
+    },
+    /// Phase D3a: `chatInviteLinks` (TDLib 1.8.67, line 2630) — the
+    /// response of `getChatInviteLinks` / `revokeChatInviteLink`.
+    /// Correlated to the chat by the request's `PendingRequest::chat_id`.
+    ChatInviteLinks {
+        total_count: i32,
+        links: Vec<ParsedChatInviteLink>,
+    },
+    /// Phase D3a: `chatJoinRequests` (TDLib 1.8.67, line 2691) — the
+    /// response of `getChatJoinRequests`. Correlated to the chat by the
+    /// request's `PendingRequest::chat_id`.
+    ChatJoinRequests {
+        total_count: i32,
+        requests: Vec<ParsedChatJoinRequest>,
+    },
+    /// Phase D3a: `updateNewChatJoinRequest` (TDLib 1.8.67, line 11210) —
+    /// a user requested to join the chat. Carries its own `chat_id`.
+    UpdateNewChatJoinRequest {
+        chat_id: i64,
+        request: ParsedChatJoinRequest,
+        user_chat_id: i64,
+        invite_link: ParsedChatInviteLink,
+        query_id: i64,
+    },
+    /// Phase D3a: `updateChatPendingJoinRequests` (TDLib 1.8.67, line
+    /// 10555) — the pending-join-request summary changed. Carries its own
+    /// `chat_id`; the full request list still needs `getChatJoinRequests`.
+    UpdateChatPendingJoinRequests {
+        chat_id: i64,
+        total_count: i32,
+        user_ids: Vec<i64>,
     },
     /// Parity slice: `updateSupergroupFullInfo` (schema 1.8.67, line 10750)
     /// — the update carries its own `supergroup_id`, so it applies
@@ -1261,12 +1309,16 @@ impl ChannelMemberStatus {
 /// `chatMemberStatusAdministrator` (schema 1.8.67:
 /// `chatAdministratorRights ... can_post_messages:Bool ...`), driving the
 /// channel-admin composer gate; `None` for every other status or when the
-/// rights block is absent.
+/// rights block is absent. `admin_can_invite_users` carries
+/// `rights.can_invite_users` (schema 1.8.67, line 1092), driving the
+/// Phase D3a invite-link / join-request management gate; `None` for every
+/// other status or when the rights block is absent.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ParsedChatMember {
     pub member_id: MessageSender,
     pub status: ChannelMemberStatus,
     pub admin_can_post_messages: Option<bool>,
+    pub admin_can_invite_users: Option<bool>,
 }
 
 /// `botCommand` (TDLib 1.8.67, `schema/td_api.tl:826`):
@@ -1883,6 +1935,110 @@ pub struct SupergroupStatistics {
 pub enum ChatStatistics {
     Channel(Box<ChannelStatistics>),
     Supergroup(Box<SupergroupStatistics>),
+}
+
+/// Phase D3a: `starSubscriptionPricing` (TDLib 1.8.67,
+/// `schema/td_api.tl:1252`): `starSubscriptionPricing period:int32
+/// star_count:int53 = StarSubscriptionPricing;`
+#[derive(Debug, Clone, PartialEq)]
+pub struct StarSubscriptionPricing {
+    pub period: i32,
+    pub star_count: i64,
+}
+
+/// Phase D3a: `chatInviteLink` (TDLib 1.8.67, `schema/td_api.tl:2627`).
+/// `subscription_pricing` is `Option` because TDLib only attaches it to
+/// subscription-priced links; everything else is required by the schema.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ParsedChatInviteLink {
+    pub invite_link: String,
+    pub name: String,
+    pub creator_user_id: i64,
+    pub date: i32,
+    pub edit_date: i32,
+    pub expiration_date: i32,
+    pub subscription_pricing: Option<StarSubscriptionPricing>,
+    pub member_limit: i32,
+    pub member_count: i32,
+    pub expired_member_count: i32,
+    pub pending_join_request_count: i32,
+    pub creates_join_request: bool,
+    pub is_primary: bool,
+    pub is_revoked: bool,
+}
+
+/// Phase D3a: `chatJoinRequest` (TDLib 1.8.67, `schema/td_api.tl:2688`):
+/// `chatJoinRequest user_id:int53 date:int32 bio:string = ChatJoinRequest;`
+#[derive(Debug, Clone, PartialEq)]
+pub struct ParsedChatJoinRequest {
+    pub user_id: i64,
+    pub date: i32,
+    pub bio: String,
+}
+
+fn parse_star_subscription_pricing(value: Option<&Value>) -> Option<StarSubscriptionPricing> {
+    let value = value?;
+    if value.get("@type").and_then(Value::as_str) != Some("starSubscriptionPricing") {
+        return None;
+    }
+    Some(StarSubscriptionPricing {
+        period: int53(value.get("period")).ok()? as i32,
+        star_count: int53(value.get("star_count")).ok()?,
+    })
+}
+
+fn parse_chat_invite_link(value: Option<&Value>) -> Option<ParsedChatInviteLink> {
+    let value = value?;
+    if value.get("@type").and_then(Value::as_str) != Some("chatInviteLink") {
+        return None;
+    }
+    Some(ParsedChatInviteLink {
+        invite_link: value.get("invite_link").and_then(Value::as_str)?.to_owned(),
+        name: value
+            .get("name")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned(),
+        creator_user_id: int53(value.get("creator_user_id")).ok()?,
+        date: int53(value.get("date")).ok()? as i32,
+        edit_date: int53(value.get("edit_date")).ok().unwrap_or(0) as i32,
+        expiration_date: int53(value.get("expiration_date")).ok().unwrap_or(0) as i32,
+        subscription_pricing: parse_star_subscription_pricing(value.get("subscription_pricing")),
+        member_limit: int53(value.get("member_limit")).ok().unwrap_or(0) as i32,
+        member_count: int53(value.get("member_count")).ok().unwrap_or(0) as i32,
+        expired_member_count: int53(value.get("expired_member_count")).ok().unwrap_or(0) as i32,
+        pending_join_request_count: int53(value.get("pending_join_request_count"))
+            .ok()
+            .unwrap_or(0) as i32,
+        creates_join_request: value
+            .get("creates_join_request")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        is_primary: value
+            .get("is_primary")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        is_revoked: value
+            .get("is_revoked")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+    })
+}
+
+fn parse_chat_join_request(value: Option<&Value>) -> Option<ParsedChatJoinRequest> {
+    let value = value?;
+    if value.get("@type").and_then(Value::as_str) != Some("chatJoinRequest") {
+        return None;
+    }
+    Some(ParsedChatJoinRequest {
+        user_id: int53(value.get("user_id")).ok()?,
+        date: int53(value.get("date")).ok()? as i32,
+        bio: value
+            .get("bio")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned(),
+    })
 }
 
 fn parse_statistical_value(value: Option<&Value>) -> Result<StatisticalValue, ParseError> {
@@ -4414,6 +4570,7 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
                     .map(|(status, _)| status)
                     .unwrap_or(ChannelMemberStatus::Unknown),
                 can_restrict_members: parse_restrict_members_right(supergroup.get("status")),
+                can_invite_users: parse_invite_users_right(supergroup.get("status")),
             })
         }
         "supergroup" => Ok(EnvelopePayload::Supergroup {
@@ -4428,6 +4585,7 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
                 .map(|(status, _)| status)
                 .unwrap_or(ChannelMemberStatus::Unknown),
             can_restrict_members: parse_restrict_members_right(value.get("status")),
+            can_invite_users: parse_invite_users_right(value.get("status")),
         }),
         // Phase 5.1: `forumTopics` (schema line 3976). Topics keep their
         // response order; the UI sorts by `order` descending per the schema
@@ -4664,6 +4822,62 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
                 statistics: parse_chat_statistics(&value)?,
             })
         }
+        // Phase D3a: invite-link / join-request responses and updates
+        // (schema 1.8.67, lines 2627/2630/2688/2691/10555/11210). The
+        // responses carry no chat id; `Session::apply` correlates them via
+        // the pending request. The updates carry their own `chat_id`.
+        "chatInviteLink" => Ok(EnvelopePayload::ChatInviteLink {
+            link: parse_chat_invite_link(Some(&value)).ok_or(ParseError::MissingField)?,
+        }),
+        "chatInviteLinks" => Ok(EnvelopePayload::ChatInviteLinks {
+            total_count: int53(value.get("total_count")).map(|v| v as i32)?,
+            links: value
+                .get("invite_links")
+                .and_then(Value::as_array)
+                .map(|links| {
+                    links
+                        .iter()
+                        .filter_map(|link| parse_chat_invite_link(Some(link)))
+                        .collect()
+                })
+                .unwrap_or_default(),
+        }),
+        "chatJoinRequests" => Ok(EnvelopePayload::ChatJoinRequests {
+            total_count: int53(value.get("total_count")).map(|v| v as i32)?,
+            requests: value
+                .get("requests")
+                .and_then(Value::as_array)
+                .map(|requests| {
+                    requests
+                        .iter()
+                        .filter_map(|request| parse_chat_join_request(Some(request)))
+                        .collect()
+                })
+                .unwrap_or_default(),
+        }),
+        "updateNewChatJoinRequest" => Ok(EnvelopePayload::UpdateNewChatJoinRequest {
+            chat_id: int53(value.get("chat_id"))?,
+            request: parse_chat_join_request(value.get("request"))
+                .ok_or(ParseError::MissingField)?,
+            user_chat_id: int53(value.get("user_chat_id"))?,
+            invite_link: parse_chat_invite_link(value.get("invite_link"))
+                .ok_or(ParseError::MissingField)?,
+            query_id: int53(value.get("query_id"))?,
+        }),
+        "updateChatPendingJoinRequests" => {
+            let pending = value
+                .get("pending_join_requests")
+                .filter(|v| v.get("@type").and_then(Value::as_str) == Some("chatJoinRequestsInfo"));
+            Ok(EnvelopePayload::UpdateChatPendingJoinRequests {
+                chat_id: int53(value.get("chat_id"))?,
+                total_count: int53(pending.and_then(|v| v.get("total_count"))).map(|v| v as i32)?,
+                user_ids: pending
+                    .and_then(|v| v.get("user_ids"))
+                    .and_then(Value::as_array)
+                    .map(|ids| ids.iter().filter_map(|id| int53(Some(id)).ok()).collect())
+                    .unwrap_or_default(),
+            })
+        }
         "botCommands" => Ok(EnvelopePayload::BotCommands {
             bot_user_id: UserId(int53(value.get("bot_user_id"))?),
             commands: value
@@ -4889,6 +5103,22 @@ fn parse_restrict_members_right(value: Option<&Value>) -> Option<bool> {
         .and_then(Value::as_bool)
 }
 
+/// Phase D3a: `rights.can_invite_users` from a
+/// `chatMemberStatusAdministrator` block (TDLib 1.8.67,
+/// `chatAdministratorRights`, schema line 1092); `None` for any other
+/// status or a missing/absent rights block. Managing invite links and
+/// processing join requests requires this right (or creator status).
+fn parse_invite_users_right(value: Option<&Value>) -> Option<bool> {
+    let value = value?;
+    if value.get("@type").and_then(Value::as_str) != Some("chatMemberStatusAdministrator") {
+        return None;
+    }
+    value
+        .get("rights")
+        .and_then(|rights| rights.get("can_invite_users"))
+        .and_then(Value::as_bool)
+}
+
 /// `chatMember` (TDLib 1.8.67). Returns `None` when `member_id` or `status`
 /// is missing or unparseable.
 fn parse_chat_member(value: Option<&Value>) -> Option<ParsedChatMember> {
@@ -4899,6 +5129,7 @@ fn parse_chat_member(value: Option<&Value>) -> Option<ParsedChatMember> {
         member_id,
         status,
         admin_can_post_messages,
+        admin_can_invite_users: parse_invite_users_right(value.get("status")),
     })
 }
 
@@ -7382,7 +7613,7 @@ mod tests {
     #[test]
     fn update_supergroup_parses_admin_restrict_right() {
         // Phase A1: `chatMemberStatusAdministrator` carries `rights`
-        // (schema 1.8.67 line 2500); `can_restrict_members` (line 1092) is
+        // (schema 1.8.67 line 1092); `can_restrict_members` (line 1092) is
         // what `setChatSlowModeDelay` requires (line 13551).
         let json = r#"{"@type":"updateSupergroup","supergroup":{"@type":"supergroup","id":25,"is_forum":false,"status":{"@type":"chatMemberStatusAdministrator","can_be_edited":false,"rights":{"@type":"chatAdministratorRights","can_manage_chat":false,"can_change_info":false,"can_post_messages":false,"can_edit_messages":false,"can_delete_messages":false,"can_invite_users":false,"can_restrict_members":true,"can_pin_messages":false,"can_promote_members":false,"can_manage_video_chats":false,"can_post_stories":false,"can_edit_stories":false,"can_delete_stories":false,"can_manage_direct_messages":false,"can_manage_tags":false,"can_send_welcome_messages":false,"is_anonymous":false}}}}"#;
         let env = parse_envelope(json).unwrap();
@@ -7430,6 +7661,7 @@ mod tests {
                 username,
                 status,
                 can_restrict_members,
+                can_invite_users,
             } => {
                 assert_eq!(supergroup_id, 16);
                 assert!(is_forum);
@@ -7439,6 +7671,8 @@ mod tests {
                 assert_eq!(status, ChannelMemberStatus::Member);
                 // Members carry no admin rights.
                 assert_eq!(can_restrict_members, None);
+                // Phase D3a: no invite right either.
+                assert_eq!(can_invite_users, None);
             }
             other => panic!("unexpected {other:?}"),
         }
@@ -7457,12 +7691,15 @@ mod tests {
                 username,
                 status,
                 can_restrict_members,
+                can_invite_users,
             } => {
                 assert_eq!(supergroup_id, 18);
                 assert!(!is_forum);
                 assert_eq!(username, "demochannel");
                 assert_eq!(status, ChannelMemberStatus::Unknown);
                 assert_eq!(can_restrict_members, None);
+                // Phase D3a: no `status` block → no invite right either.
+                assert_eq!(can_invite_users, None);
             }
             other => panic!("unexpected {other:?}"),
         }
@@ -7479,12 +7716,15 @@ mod tests {
                 username,
                 status,
                 can_restrict_members,
+                can_invite_users,
             } => {
                 assert_eq!(supergroup_id, 17);
                 assert!(!is_forum);
                 assert_eq!(username, "");
                 assert_eq!(status, ChannelMemberStatus::Unknown);
                 assert_eq!(can_restrict_members, None);
+                // No `status` block → no admin rights for either gate.
+                assert_eq!(can_invite_users, None);
             }
             other => panic!("unexpected {other:?}"),
         }
@@ -8716,6 +8956,46 @@ mod channel_envelope_tests {
             EnvelopePayload::ChatMember { member } => {
                 assert_eq!(member.status, ChannelMemberStatus::Member);
                 assert_eq!(member.admin_can_post_messages, None);
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    /// Phase D3a: `rights.can_invite_users` rides on
+    /// `chatMemberStatusAdministrator` (schema 1.8.67, line 1092),
+    /// mirroring the `can_post_messages` pattern above.
+    #[test]
+    fn chat_member_administrator_rights_can_invite_users() {
+        for (can_invite, expected) in [(true, Some(true)), (false, Some(false))] {
+            let json = format!(
+                r#"{{"@type":"chatMember","member_id":{{"@type":"messageSenderUser","user_id":777}},"status":{{"@type":"chatMemberStatusAdministrator","can_be_edited":true,"rights":{{"@type":"chatAdministratorRights","can_invite_users":{can_invite}}}}}}}"#,
+            );
+            let env = parse_envelope(&json).unwrap();
+            match env.payload {
+                EnvelopePayload::ChatMember { member } => {
+                    assert_eq!(member.status, ChannelMemberStatus::Administrator);
+                    assert_eq!(member.admin_can_invite_users, expected);
+                }
+                other => panic!("{other:?}"),
+            }
+        }
+        // Missing rights block: no invite-right claim either way.
+        let json = r#"{"@type":"chatMember","member_id":{"@type":"messageSenderUser","user_id":777},"status":{"@type":"chatMemberStatusAdministrator"}}"#;
+        let env = parse_envelope(json).unwrap();
+        match env.payload {
+            EnvelopePayload::ChatMember { member } => {
+                assert_eq!(member.status, ChannelMemberStatus::Administrator);
+                assert_eq!(member.admin_can_invite_users, None);
+            }
+            other => panic!("{other:?}"),
+        }
+        // Non-admin statuses never carry the right, even with a rights block.
+        let json = r#"{"@type":"chatMember","member_id":{"@type":"messageSenderUser","user_id":777},"status":{"@type":"chatMemberStatusMember","rights":{"@type":"chatAdministratorRights","can_invite_users":true}}}"#;
+        let env = parse_envelope(json).unwrap();
+        match env.payload {
+            EnvelopePayload::ChatMember { member } => {
+                assert_eq!(member.status, ChannelMemberStatus::Member);
+                assert_eq!(member.admin_can_invite_users, None);
             }
             other => panic!("{other:?}"),
         }
@@ -10487,5 +10767,167 @@ mod notification_sound_tests {
                 "schema pin missing: {line}"
             );
         }
+    }
+
+    /// Phase D3a: `chatInviteLink` parses every schema field (TDLib 1.8.67,
+    /// `schema/td_api.tl:2627`), including `starSubscriptionPricing`
+    /// (line 1252) when present.
+    #[test]
+    fn invite_link_parses_all_fields() {
+        let json = r#"{"@type":"chatInviteLink","invite_link":"https://t.me/+paid","name":"Quill","creator_user_id":101,"date":1700000000,"edit_date":1700000001,"expiration_date":1800000000,"subscription_pricing":{"@type":"starSubscriptionPricing","period":2592000,"star_count":250},"member_limit":50,"member_count":12,"expired_member_count":3,"pending_join_request_count":4,"creates_join_request":true,"is_primary":false,"is_revoked":false}"#;
+        let env = parse_envelope(json).unwrap();
+        match env.payload {
+            EnvelopePayload::ChatInviteLink { link } => {
+                assert_eq!(link.invite_link, "https://t.me/+paid");
+                assert_eq!(link.name, "Quill");
+                assert_eq!(link.creator_user_id, 101);
+                assert_eq!(link.date, 1_700_000_000);
+                assert_eq!(link.edit_date, 1_700_000_001);
+                assert_eq!(link.expiration_date, 1_800_000_000);
+                assert_eq!(
+                    link.subscription_pricing,
+                    Some(StarSubscriptionPricing {
+                        period: 2_592_000,
+                        star_count: 250,
+                    })
+                );
+                assert_eq!(link.member_limit, 50);
+                assert_eq!(link.member_count, 12);
+                assert_eq!(link.expired_member_count, 3);
+                assert_eq!(link.pending_join_request_count, 4);
+                assert!(link.creates_join_request);
+                assert!(!link.is_primary);
+                assert!(!link.is_revoked);
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+
+    /// Phase D3a: links without `subscription_pricing` parse to `None`.
+    #[test]
+    fn invite_link_without_subscription_pricing() {
+        let json = r#"{"@type":"chatInviteLink","invite_link":"https://t.me/+free","name":"","creator_user_id":101,"date":1700000000,"edit_date":0,"expiration_date":0,"member_limit":0,"member_count":12,"expired_member_count":0,"pending_join_request_count":0,"creates_join_request":false,"is_primary":true,"is_revoked":false}"#;
+        let env = parse_envelope(json).unwrap();
+        match env.payload {
+            EnvelopePayload::ChatInviteLink { link } => {
+                assert_eq!(link.invite_link, "https://t.me/+free");
+                assert_eq!(link.subscription_pricing, None);
+                assert!(link.is_primary);
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+
+    /// Phase D3a: `chatInviteLinks` list (line 2630) and `chatJoinRequests`
+    /// list (line 2691).
+    #[test]
+    fn invite_links_and_join_requests_lists_parse() {
+        let json = r#"{"@type":"chatInviteLinks","total_count":2,"invite_links":[{"@type":"chatInviteLink","invite_link":"https://t.me/+one","name":"One","creator_user_id":101,"date":1700000000,"edit_date":0,"expiration_date":0,"member_limit":0,"member_count":5,"expired_member_count":0,"pending_join_request_count":1,"creates_join_request":false,"is_primary":false,"is_revoked":false},{"@type":"chatInviteLink","invite_link":"https://t.me/+two","name":"Two","creator_user_id":101,"date":1700000000,"edit_date":0,"expiration_date":0,"member_limit":10,"member_count":0,"expired_member_count":0,"pending_join_request_count":0,"creates_join_request":true,"is_primary":false,"is_revoked":true}]}"#;
+        let env = parse_envelope(json).unwrap();
+        match env.payload {
+            EnvelopePayload::ChatInviteLinks { total_count, links } => {
+                assert_eq!(total_count, 2);
+                assert_eq!(links.len(), 2);
+                assert_eq!(links[0].invite_link, "https://t.me/+one");
+                assert_eq!(links[0].pending_join_request_count, 1);
+                assert!(links[1].is_revoked);
+                assert!(links[1].creates_join_request);
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+        let json = r#"{"@type":"chatJoinRequests","total_count":1,"requests":[{"@type":"chatJoinRequest","user_id":7001,"date":1700000100,"bio":"Hello from Quill"}]}"#;
+        let env = parse_envelope(json).unwrap();
+        match env.payload {
+            EnvelopePayload::ChatJoinRequests {
+                total_count,
+                requests,
+            } => {
+                assert_eq!(total_count, 1);
+                assert_eq!(
+                    requests,
+                    vec![ParsedChatJoinRequest {
+                        user_id: 7001,
+                        date: 1_700_000_100,
+                        bio: "Hello from Quill".to_owned(),
+                    }]
+                );
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+
+    /// Phase D3a: `updateNewChatJoinRequest` (line 11210) and
+    /// `updateChatPendingJoinRequests` (line 10555).
+    #[test]
+    fn join_request_updates_parse() {
+        let json = r#"{"@type":"updateNewChatJoinRequest","chat_id":-1001234567890,"request":{"@type":"chatJoinRequest","user_id":7002,"date":1700000200,"bio":"Please let me in"},"user_chat_id":9002,"invite_link":{"@type":"chatInviteLink","invite_link":"https://t.me/+request","name":"","creator_user_id":101,"date":1700000000,"edit_date":0,"expiration_date":0,"member_limit":0,"member_count":0,"expired_member_count":0,"pending_join_request_count":0,"creates_join_request":true,"is_primary":false,"is_revoked":false},"query_id":8000000000}"#;
+        let env = parse_envelope(json).unwrap();
+        match env.payload {
+            EnvelopePayload::UpdateNewChatJoinRequest {
+                chat_id,
+                request,
+                user_chat_id,
+                invite_link,
+                query_id,
+            } => {
+                assert_eq!(chat_id, -1001234567890);
+                assert_eq!(request.user_id, 7002);
+                assert_eq!(request.bio, "Please let me in");
+                assert_eq!(user_chat_id, 9002);
+                assert_eq!(invite_link.invite_link, "https://t.me/+request");
+                assert_eq!(query_id, 8_000_000_000);
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+        let json = r#"{"@type":"updateChatPendingJoinRequests","chat_id":-1001234567890,"pending_join_requests":{"@type":"chatJoinRequestsInfo","total_count":3,"user_ids":[7001,7003]}}"#;
+        let env = parse_envelope(json).unwrap();
+        match env.payload {
+            EnvelopePayload::UpdateChatPendingJoinRequests {
+                chat_id,
+                total_count,
+                user_ids,
+            } => {
+                assert_eq!(chat_id, -1001234567890);
+                assert_eq!(total_count, 3);
+                assert_eq!(user_ids, vec![7001, 7003]);
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+
+    /// Phase D3a: every constructor this slice relies on must exist verbatim
+    /// in the pinned schema (1.8.67) — never invent constructors or fields.
+    /// (`deleteChatInviteLink` is deliberately absent: revocation is the
+    /// only delete path in this schema version.)
+    #[test]
+    fn d3a_schema_pins_exist_verbatim() {
+        let schema = include_str!("../../schema/td_api.tl");
+        for line in [
+            "chatInviteLink invite_link:string name:string creator_user_id:int53 date:int32 edit_date:int32 expiration_date:int32 subscription_pricing:starSubscriptionPricing member_limit:int32 member_count:int32 expired_member_count:int32 pending_join_request_count:int32 creates_join_request:Bool is_primary:Bool is_revoked:Bool = ChatInviteLink;",
+            "chatInviteLinks total_count:int32 invite_links:vector<chatInviteLink> = ChatInviteLinks;",
+            "chatJoinRequest user_id:int53 date:int32 bio:string = ChatJoinRequest;",
+            "chatJoinRequests total_count:int32 requests:vector<chatJoinRequest> = ChatJoinRequests;",
+            "chatJoinRequestsInfo total_count:int32 user_ids:vector<int53> = ChatJoinRequestsInfo;",
+            "starSubscriptionPricing period:int32 star_count:int53 = StarSubscriptionPricing;",
+            "getChatInviteLinks chat_id:int53 creator_user_id:int53 is_revoked:Bool offset_date:int32 offset_invite_link:string limit:int32 = ChatInviteLinks;",
+            "createChatInviteLink chat_id:int53 name:string expiration_date:int32 member_limit:int32 creates_join_request:Bool = ChatInviteLink;",
+            "editChatInviteLink chat_id:int53 invite_link:string name:string expiration_date:int32 member_limit:int32 creates_join_request:Bool = ChatInviteLink;",
+            "revokeChatInviteLink chat_id:int53 invite_link:string = ChatInviteLinks;",
+            "getChatJoinRequests chat_id:int53 invite_link:string query:string offset_request:chatJoinRequest limit:int32 = ChatJoinRequests;",
+            "processChatJoinRequest chat_id:int53 user_id:int53 approve:Bool = Ok;",
+            "updateChatPendingJoinRequests chat_id:int53 pending_join_requests:chatJoinRequestsInfo = Update;",
+            "updateNewChatJoinRequest chat_id:int53 request:chatJoinRequest user_chat_id:int53 invite_link:chatInviteLink query_id:int64 = Update;",
+        ] {
+            assert!(
+                schema.lines().any(|l| l == line),
+                "schema pin missing: {line}"
+            );
+        }
+        assert!(
+            !schema
+                .lines()
+                .any(|l| l.starts_with("deleteChatInviteLink ")),
+            "deleteChatInviteLink must not exist in 1.8.67"
+        );
     }
 }

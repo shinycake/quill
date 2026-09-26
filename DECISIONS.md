@@ -2691,6 +2691,25 @@ cross-platform story (Linux x86_64 only in this slice).
   static link, attribution + source-offer wording in `THIRD_PARTY.md`
   (source: https://github.com/pytgcalls/ntgcalls, tag v3.0.0,
   unmodified).
+- **License chain verified 2026-09-26 (Codex, primary sources).**
+  ntgcalls repo = LGPL-3.0
+  (https://github.com/pytgcalls/ntgcalls/blob/master/LICENSE); tgcalls =
+  LGPL-3.0 (https://github.com/TelegramMessenger/tgcalls/blob/master/LICENSE).
+  Dynamic loading (dlopen, no static linking) from a closed-source app
+  is LGPL-compliant — this confirms the C2 spike's dlopen-sidecar
+  decision. Distribution obligations to keep: ship the LGPL
+  notices/license text with Quill, make the library's corresponding
+  source available, and allow users to swap in a modified
+  `libntgcalls.so` (the sidecar design already permits this: Quill
+  loads it at runtime from a path the user can replace).
+- **Future: building tgcalls from source.** If we ever want an
+  in-house build instead of the prebuilt `libntgcalls.so`, the path is:
+  clang toolchain + WebRTC sources via `depot_tools`/`gclient` (20–40GB
+  checkout), tgcalls itself (LGPLv3), reference build = tdesktop's
+  CMake/GN setup driving tgcalls. This sandbox cannot do it (7.5GB
+  disk / 2.4GB RAM / 2 cores — verified 2026-09-26). Revisit only if a
+  beefier builder is available and we have a reason to diverge from
+  the prebuilt releases.
 
 **Out of this slice (→ C2b/C2c).** Wiring signaling to TDLib
 (`sendCallSignalingData` ← `signalingDataEmitted`,
@@ -2849,3 +2868,85 @@ Failing cases become regression tests/screenshots in E5.
   admin-management gaps; server-rendered graph images (`zoom_token`
   drill-down); dark-theme reporting for `is_dark` if the app ever
   gains a dark mode.
+
+## Phase D3a — channel/supergroup invite links + join-request approval (2026-09-26)
+
+- **Rationale.** Invite-link management and join-request approval are
+  core admin workflows in official clients (D2 explicitly deferred
+  them: "invite-link and admin-management gaps"). This slice
+  implements the full loop for channels and supergroups: list / create
+  / revoke invite links, list / approve / decline join requests, with
+  live `updateNewChatJoinRequest` / `updateChatPendingJoinRequests`
+  updates. All actions are gated on the viewer actually holding the
+  `can_invite_users` admin right (or creator status).
+- **Schema (1.8.67, verified verbatim in `schema/td_api.tl`):**
+  `chatAdministratorRights.can_invite_users` (:1092);
+  `chatInviteLink` (:2627, all 14 fields incl. `subscription_pricing`,
+  `member_limit`, `pending_join_request_count`, `creates_join_request`,
+  `is_primary`, `is_revoked`); `chatInviteLinks` (:2630);
+  `chatJoinRequest` (:2688); `chatJoinRequests` (:2691);
+  `chatJoinRequestsInfo` (:2694);
+  `updateChatPendingJoinRequests` (:10555);
+  `updateNewChatJoinRequest` (:11210, incl. `query_id:int64`);
+  `createChatInviteLink` (:14097); `editChatInviteLink` (:14115);
+  `getChatInviteLinks` (:14138); `revokeChatInviteLink` (:14152);
+  `getChatJoinRequests` (:14174); `processChatJoinRequest` (:14177).
+  `checkChatInviteLink` (:14163) verified but unused.
+- **Revocation is the only removal path.** Pinned TDLib 1.8.67 has **no
+  `deleteChatInviteLink` constructor** (verified by a schema-pin test
+  asserting its absence), so the UI offers Revoke, not Delete, and the
+  docs say so. There is also no separate edit dialog in this slice:
+  `editChatInviteLink` is implemented in requests/state (upsert path)
+  but the UI create dialog is create-only; editing stays out of the
+  slice.
+- **Rights gating, two paths.** Channels: own membership probed via
+  `getChatMember` → `ChatSummary.my_member_status` +
+  `my_admin_can_invite_users` (parsed from
+  `rights.can_invite_users`). Non-channel supergroups: own admin
+  rights arrive on the `updateSupergroup` / `getSupergroup` status
+  block → new `Session.supergroup_invite_right` map, mirroring the
+  Phase A1 `supergroup_restrict_right` pattern. The single gate is
+  `Session::chat_can_invite_users(chat_id)`: creator → always allowed;
+  administrator → requires the explicit right; absent rights → denied
+  (never fabricated). Driver fetch/create/revoke/process methods and
+  both info-panel sections gate on it; the driver returns `Ok(None)`
+  (no request sent) when the gate is closed.
+- **Fetch / cache / dedupe.** Invite links: first page, limit 100, all
+  creators, active links only (`getChatInviteLinks` defaults).
+  Join requests: all invite links, empty search query, limit 50.
+  In-flight dedupe by `RequestPurpose` per chat plus a `Loading` cache
+  state; Refresh buttons bypass via `refresh_*` driver methods. List
+  responses replace the cache; create/edit responses upsert (create
+  bumps `total_count` only for a genuinely new link);
+  `processChatJoinRequest` success drops the request from the cached
+  list (count decremented); `updateNewChatJoinRequest` prepends +
+  bumps (deduped by `user_id`); `updateChatPendingJoinRequests` is the
+  authoritative pending-count badge source.
+- **Honest UI.** Info-panel sections render loading / failed-with-retry
+  / loaded / empty states — never placeholder numbers. Expiry shows
+  "Never expires" / relative text from the real `expiration_date`.
+  Join-request rows show the requester's name when known, otherwise
+  "User \<id\>"; bios shown when present. The create dialog validates
+  expiration-days and member-limit as non-negative numbers with
+  `status_note` errors. Element ids are namespaced
+  (`invite-link-*`, `join-request-*`, `invite-link-dialog-*`).
+- **Screenshot.** `quill --screenshot-demo ready-invite-links`:
+  demo channel 13 (viewer 777 admin with `can_invite_users`), a
+  `chatInviteLinks` response (primary + named expiring limited +
+  join-request link with 2 pending) and a `chatJoinRequests` response
+  (2 requests with `updateUser` names) through the real reducer paths,
+  info panel open → `docs/screenshots/ready-invite-links.png`.
+- **Tests.** Request JSON shapes vs schema; envelope: link/list/
+  request/updates parse, `deleteChatInviteLink` absence pin,
+  administrator-rights parse; supergroup `can_invite_users` parse on
+  both `updateSupergroup` and `supergroup`; replay (9): fetch →
+  `Loaded` via `@extra` correlation, wrong-`@extra` ignored, create
+  upsert bumps total, edit replaces in place, revoke replaces list,
+  join-request fetch, update prepend + dedupe + total bump,
+  pending-count update, process-ok drops request; gate unit test
+  (channel creator/admin-with/without right, group creator/admin/member).
+- **Out of this slice (→ D3b/future):** `getChatEventLog` (admin
+  activity log); promote/demote admins and other admin-right
+  management; message statistics (`getMessageStatistics`,
+  `getStoryStatistics`); invite-link editing UI; subscription-pricing
+  (Stars) link display beyond parsing; `checkChatInviteLink` usage.

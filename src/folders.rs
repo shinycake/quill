@@ -217,6 +217,7 @@ mod tests {
             draft: None,
             my_member_status: None,
             my_admin_can_post_messages: None,
+            my_admin_can_invite_users: None,
             is_forum: None,
             photo_file_id: None,
             can_send_basic_messages: true,

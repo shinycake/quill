@@ -428,6 +428,141 @@ pub fn get_chat_statistics(extra: RequestId, chat_id: i64, is_dark: bool) -> Str
     .to_string()
 }
 
+/// Phase D3a: `getChatInviteLinks` (TDLib 1.8.67, `schema/td_api.tl:14138`):
+/// `getChatInviteLinks chat_id:int53 creator_user_id:int53 is_revoked:Bool offset_date:int32 offset_invite_link:string limit:int32 = ChatInviteLinks;`
+/// Returns the chat's invite links, filterable by creator and revocation
+/// state; pagination goes through offset_date/offset_invite_link.
+pub fn get_chat_invite_links(
+    extra: RequestId,
+    chat_id: i64,
+    creator_user_id: i64,
+    is_revoked: bool,
+    offset_date: i32,
+    offset_invite_link: &str,
+    limit: i32,
+) -> String {
+    json!({
+        "@type": "getChatInviteLinks",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id,
+        "creator_user_id": creator_user_id,
+        "is_revoked": is_revoked,
+        "offset_date": offset_date,
+        "offset_invite_link": offset_invite_link,
+        "limit": limit,
+    })
+    .to_string()
+}
+
+/// Phase D3a: `createChatInviteLink` (TDLib 1.8.67, `schema/td_api.tl:14097`):
+/// `createChatInviteLink chat_id:int53 name:string expiration_date:int32 member_limit:int32 creates_join_request:Bool = ChatInviteLink;`
+/// Creates a new invite link for the chat with optional name, expiration
+/// date (0 = none), member limit (0 = unlimited), and join-request mode.
+pub fn create_chat_invite_link(
+    extra: RequestId,
+    chat_id: i64,
+    name: &str,
+    expiration_date: i32,
+    member_limit: i32,
+    creates_join_request: bool,
+) -> String {
+    json!({
+        "@type": "createChatInviteLink",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id,
+        "name": name,
+        "expiration_date": expiration_date,
+        "member_limit": member_limit,
+        "creates_join_request": creates_join_request,
+    })
+    .to_string()
+}
+
+/// Phase D3a: `editChatInviteLink` (TDLib 1.8.67, `schema/td_api.tl:14115`):
+/// `editChatInviteLink chat_id:int53 invite_link:string name:string expiration_date:int32 member_limit:int32 creates_join_request:Bool = ChatInviteLink;`
+/// Edits an existing invite link's name, expiration, member limit, and
+/// join-request mode. Returns the updated link.
+pub fn edit_chat_invite_link(
+    extra: RequestId,
+    chat_id: i64,
+    invite_link: &str,
+    name: &str,
+    expiration_date: i32,
+    member_limit: i32,
+    creates_join_request: bool,
+) -> String {
+    json!({
+        "@type": "editChatInviteLink",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id,
+        "invite_link": invite_link,
+        "name": name,
+        "expiration_date": expiration_date,
+        "member_limit": member_limit,
+        "creates_join_request": creates_join_request,
+    })
+    .to_string()
+}
+
+/// Phase D3a: `revokeChatInviteLink` (TDLib 1.8.67, `schema/td_api.tl:14152`):
+/// `revokeChatInviteLink chat_id:int53 invite_link:string = ChatInviteLinks;`
+/// Revokes an invite link; this is the only delete path — 1.8.67 has no
+/// `deleteChatInviteLink`. Returns the updated link list.
+pub fn revoke_chat_invite_link(extra: RequestId, chat_id: i64, invite_link: &str) -> String {
+    json!({
+        "@type": "revokeChatInviteLink",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id,
+        "invite_link": invite_link,
+    })
+    .to_string()
+}
+
+/// Phase D3a: `getChatJoinRequests` (TDLib 1.8.67, `schema/td_api.tl:14174`):
+/// `getChatJoinRequests chat_id:int53 invite_link:string query:string offset_request:chatJoinRequest limit:int32 = ChatJoinRequests;`
+/// Returns pending join requests for a chat (optionally filtered by
+/// invite link and a search query). First page uses an empty
+/// `chatJoinRequest` offset, as official clients do.
+pub fn get_chat_join_requests(
+    extra: RequestId,
+    chat_id: i64,
+    invite_link: &str,
+    query: &str,
+    limit: i32,
+) -> String {
+    json!({
+        "@type": "getChatJoinRequests",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id,
+        "invite_link": invite_link,
+        "query": query,
+        "offset_request": {
+            "@type": "chatJoinRequest",
+        },
+        "limit": limit,
+    })
+    .to_string()
+}
+
+/// Phase D3a: `processChatJoinRequest` (TDLib 1.8.67, `schema/td_api.tl:14177`):
+/// `processChatJoinRequest chat_id:int53 user_id:int53 approve:Bool = Ok;`
+/// Approves or declines a user's pending request to join the chat.
+pub fn process_chat_join_request(
+    extra: RequestId,
+    chat_id: i64,
+    user_id: i64,
+    approve: bool,
+) -> String {
+    json!({
+        "@type": "processChatJoinRequest",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id,
+        "user_id": user_id,
+        "approve": approve,
+    })
+    .to_string()
+}
+
 /// Phase B1: `createNewSecretChat` (TDLib 1.8.67, `schema/td_api.tl:13340`):
 /// `createNewSecretChat user_id:int53 = Chat;`
 /// "Creates a new secret chat. Returns the newly created chat". The new
@@ -2990,6 +3125,128 @@ mod tests {
         assert_eq!(v["@extra"], "63");
         assert_eq!(v["chat_id"], 13);
         assert_eq!(v["is_dark"], true);
+        assert!(!json.contains("CANARY"));
+    }
+
+    #[test]
+    fn get_chat_invite_links_shape_matches_1_8_67() {
+        // `getChatInviteLinks chat_id:int53 creator_user_id:int53 is_revoked:Bool offset_date:int32 offset_invite_link:string limit:int32 = ChatInviteLinks;`
+        // (schema 1.8.67, line 14138).
+        let json = get_chat_invite_links(
+            RequestId(64),
+            101,
+            202,
+            true,
+            1_700_000_000,
+            "https://t.me/+offset",
+            25,
+        );
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "getChatInviteLinks");
+        assert_eq!(v["@extra"], "64");
+        assert_eq!(v["chat_id"], 101);
+        assert_eq!(v["creator_user_id"], 202);
+        assert_eq!(v["is_revoked"], true);
+        assert_eq!(v["offset_date"], 1_700_000_000);
+        assert_eq!(v["offset_invite_link"], "https://t.me/+offset");
+        assert_eq!(v["limit"], 25);
+        assert!(!json.contains("CANARY"));
+    }
+
+    #[test]
+    fn create_chat_invite_link_shape_matches_1_8_67() {
+        // `createChatInviteLink chat_id:int53 name:string expiration_date:int32 member_limit:int32 creates_join_request:Bool = ChatInviteLink;`
+        // (schema 1.8.67, line 14097).
+        let json = create_chat_invite_link(
+            RequestId(65),
+            303,
+            "Moderated access",
+            1_800_000_000,
+            50,
+            true,
+        );
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "createChatInviteLink");
+        assert_eq!(v["@extra"], "65");
+        assert_eq!(v["chat_id"], 303);
+        assert_eq!(v["name"], "Moderated access");
+        assert_eq!(v["expiration_date"], 1_800_000_000);
+        assert_eq!(v["member_limit"], 50);
+        assert_eq!(v["creates_join_request"], true);
+        assert!(!json.contains("CANARY"));
+    }
+
+    #[test]
+    fn edit_chat_invite_link_shape_matches_1_8_67() {
+        // `editChatInviteLink chat_id:int53 invite_link:string name:string expiration_date:int32 member_limit:int32 creates_join_request:Bool = ChatInviteLink;`
+        // (schema 1.8.67, line 14115).
+        let json = edit_chat_invite_link(
+            RequestId(66),
+            404,
+            "https://t.me/+existing",
+            "Updated access",
+            1_900_000_000,
+            75,
+            false,
+        );
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "editChatInviteLink");
+        assert_eq!(v["@extra"], "66");
+        assert_eq!(v["chat_id"], 404);
+        assert_eq!(v["invite_link"], "https://t.me/+existing");
+        assert_eq!(v["name"], "Updated access");
+        assert_eq!(v["expiration_date"], 1_900_000_000);
+        assert_eq!(v["member_limit"], 75);
+        assert_eq!(v["creates_join_request"], false);
+        assert!(!json.contains("CANARY"));
+    }
+
+    #[test]
+    fn revoke_chat_invite_link_shape_matches_1_8_67() {
+        // `revokeChatInviteLink chat_id:int53 invite_link:string = ChatInviteLinks;`
+        // (schema 1.8.67, line 14152).
+        let json = revoke_chat_invite_link(RequestId(67), 505, "https://t.me/+revoked");
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "revokeChatInviteLink");
+        assert_eq!(v["@extra"], "67");
+        assert_eq!(v["chat_id"], 505);
+        assert_eq!(v["invite_link"], "https://t.me/+revoked");
+        assert!(!json.contains("CANARY"));
+    }
+
+    #[test]
+    fn get_chat_join_requests_shape_matches_1_8_67() {
+        // `getChatJoinRequests chat_id:int53 invite_link:string query:string offset_request:chatJoinRequest limit:int32 = ChatJoinRequests;`
+        // (schema 1.8.67, line 14174).
+        let json =
+            get_chat_join_requests(RequestId(68), 606, "https://t.me/+requests", "alice", 30);
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "getChatJoinRequests");
+        assert_eq!(v["@extra"], "68");
+        assert_eq!(v["chat_id"], 606);
+        assert_eq!(v["invite_link"], "https://t.me/+requests");
+        assert_eq!(v["query"], "alice");
+        assert_eq!(
+            v["offset_request"],
+            serde_json::json!({
+                "@type": "chatJoinRequest",
+            })
+        );
+        assert_eq!(v["limit"], 30);
+        assert!(!json.contains("CANARY"));
+    }
+
+    #[test]
+    fn process_chat_join_request_shape_matches_1_8_67() {
+        // `processChatJoinRequest chat_id:int53 user_id:int53 approve:Bool = Ok;`
+        // (schema 1.8.67, line 14177).
+        let json = process_chat_join_request(RequestId(69), 707, 808, true);
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "processChatJoinRequest");
+        assert_eq!(v["@extra"], "69");
+        assert_eq!(v["chat_id"], 707);
+        assert_eq!(v["user_id"], 808);
+        assert_eq!(v["approve"], true);
         assert!(!json.contains("CANARY"));
     }
 
