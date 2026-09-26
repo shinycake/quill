@@ -51,6 +51,7 @@ use quill::telegram::envelope::{
     ParsedFile, ParsedSecretChat, ParsedStory, PollContent, PollOption, PollType,
     ScopeNotificationSettings, SecretChatState, SponsoredMessage, toggle_chosen_emoji_reaction,
 };
+use quill::telegram::requests::SelfDestructSend;
 use quill::text::{TextEntity, styled_runs, utf8_to_utf16_offset};
 use quill::voice::{self, VoiceCapture, format_voice_duration};
 use smallvec::SmallVec;
@@ -373,6 +374,12 @@ pub struct QuillApp {
     /// One item sends with `sendMessage`. Two or more photos/videos send with
     /// `sendMessageAlbum`.
     pending_attachments: Vec<ComposerAttachment>,
+    /// Phase B3: the composer's self-destruct choice for photo/video
+    /// sends (`inputMessagePhoto`/`inputMessageVideo`
+    /// `self_destruct_type`, schema 1.8.67 lines 6115/6126 — private
+    /// chats only). Cycles Off → 5s → 30s → 1m → View once via the
+    /// picker button; captured into `ComposerSnapshot` at submit time.
+    composer_self_destruct: Option<SelfDestructSend>,
     /// Same-chat reply draft (tdesktop `FieldHeader::replyToMessage`).
     pending_reply: Option<ComposerReplyTo>,
     /// Chat whose draft should be cleared after `updateMessageSendSucceeded`
@@ -415,6 +422,10 @@ pub struct QuillApp {
     /// Phase A1: the open chat whose slow-mode countdown is ticking
     /// (`Some` exactly while the 1s tick task runs). Mirrors `voice_tick`.
     slow_mode_tick_chat: Option<ChatId>,
+    /// Phase B3: the open chat whose self-destruct countdown badges are
+    /// ticking (`Some` exactly while the 1s tick task runs). Mirrors
+    /// `slow_mode_tick_chat`.
+    self_destruct_tick_chat: Option<ChatId>,
     /// History row whose voice note is playing.
     playing_voice: Option<MessageId>,
     /// History row whose music file (`messageAudio`) is playing. Shares `voice_player`.
@@ -732,6 +743,16 @@ pub enum ScreenshotDemo {
     /// info panel open showing the "Encryption key" 12×12 fingerprint
     /// grid plus the verification copy.
     ReadyKeyVerification,
+    /// Phase B3: self-destructing media (injected, no live Telegram) —
+    /// a Ready *private* (1:1 cloud) chat with Zed: an incoming photo
+    /// with a live 60s `messageSelfDestructTypeTimer` countdown, an
+    /// outgoing `messageSelfDestructTypeImmediately` ("view once")
+    /// photo, and a pending photo attachment with the composer's timer
+    /// picker on 30s. Private chat — not a secret chat — because TDLib
+    /// only accepts per-media `self_destruct_type` in
+    /// `chatTypePrivate` chats (schema 1.8.67 lines 6115/6126,
+    /// "private chats only").
+    ReadySelfDestruct,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1470,6 +1491,15 @@ impl QuillApp {
                     AuthorizationState::Ready,
                 )
             }
+            Some(ScreenshotDemo::ReadySelfDestruct) => {
+                demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
+                (
+                    ConnectUiStatus::DemoReadyChats,
+                    None,
+                    "screenshot demo — self-destructing media (injected, no live Telegram)".into(),
+                    AuthorizationState::Ready,
+                )
+            }
             None => bootstrap_connect(credentials),
         };
 
@@ -1494,6 +1524,15 @@ impl QuillApp {
             && let Some(att) = ComposerAttachment::pick(
                 &demo_media_allowlist().join("demo-video-note.mp4"),
                 AttachmentKind::VideoNote,
+            )
+        {
+            ComposerAttachment::push_attachment(&mut pending_attachments, att);
+        }
+        // Phase B3: pending photo for the self-destruct picker demo.
+        if matches!(demo, Some(ScreenshotDemo::ReadySelfDestruct))
+            && let Some(att) = ComposerAttachment::pick(
+                &demo_media_allowlist().join("demo-thumb.png"),
+                AttachmentKind::Photo,
             )
         {
             ComposerAttachment::push_attachment(&mut pending_attachments, att);
@@ -1546,6 +1585,7 @@ impl QuillApp {
             notify_clicks: Arc::new(Mutex::new(Vec::new())),
             notify_inflight: Arc::new(AtomicUsize::new(0)),
             pending_attachments,
+            composer_self_destruct: None,
             pending_reply: None,
             clear_draft_on_success: None,
             pending_edit: None,
@@ -1565,6 +1605,7 @@ impl QuillApp {
             voice_capture: None,
             voice_tick: false,
             slow_mode_tick_chat: None,
+            self_destruct_tick_chat: None,
             playing_voice: None,
             playing_audio: None,
             pending_audio_play: None,
@@ -1916,6 +1957,20 @@ impl QuillApp {
             }
             app.status_note =
                 "secret chat key verification — compare with your contact's device".into();
+        }
+        // Phase B3: self-destructing media fixture — a private chat with
+        // Zed carrying a live-timer incoming photo and a view-once
+        // outgoing photo; the composer's pending photo attachment has
+        // the picker pre-set to 30s.
+        if matches!(demo, Some(ScreenshotDemo::ReadySelfDestruct)) {
+            if let Some(session) = app.demo_session.as_mut() {
+                app.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_self_destruct(session, &app.demo_sink, &app.demo_seq);
+            }
+            app.composer_self_destruct = Some(SelfDestructSend::Timer(30));
+            app.status_note =
+                "screenshot demo — self-destructing media · picker on 30s (injected, no live Telegram)"
+                    .into();
         }
         if matches!(demo, Some(ScreenshotDemo::ReadyVideoSend)) {
             app.composer.update(cx, |input, cx| {
@@ -2472,6 +2527,16 @@ impl QuillApp {
                         return;
                     }
                     let attachments = self.pending_attachments.clone();
+                    // Phase B3: self-destruct only leaves the composer on
+                    // photo/video attachments; the driver additionally
+                    // strips it for non-private chats (TDLib's 400 gate).
+                    let self_destruct = attachments
+                        .iter()
+                        .all(|att| {
+                            matches!(att.kind, AttachmentKind::Photo | AttachmentKind::Video)
+                        })
+                        .then_some(self.composer_self_destruct)
+                        .flatten();
                     let snap = if attachments.len() >= 2
                         && attachments.iter().all(|att| {
                             matches!(att.kind, AttachmentKind::Photo | AttachmentKind::Video)
@@ -2485,7 +2550,8 @@ impl QuillApp {
                             attachments.first().cloned(),
                         )
                     }
-                    .with_reply(self.pending_reply.clone());
+                    .with_reply(self.pending_reply.clone())
+                    .with_self_destruct(self_destruct);
                     if snap.is_empty() {
                         self.status_note = "type a message or attach a file".into();
                         cx.notify();
@@ -2505,6 +2571,9 @@ impl QuillApp {
                     match result {
                         Ok(_) => {
                             self.pending_attachments.clear();
+                            // Phase B3: the timer choice was consumed by the
+                            // snapshot — reset the picker for the next send.
+                            self.composer_self_destruct = None;
                             self.pending_reply = None;
                             self.clear_draft_on_success = Some(chat_id);
                             self.composer
@@ -2621,8 +2690,76 @@ impl QuillApp {
 
     fn clear_attachment(&mut self, cx: &mut Context<Self>) {
         self.pending_attachments.clear();
+        self.composer_self_destruct = None;
         self.status_note = "attachment cleared".into();
         cx.notify();
+    }
+
+    /// Phase B3: schema-valid self-destruct choices for
+    /// `inputMessagePhoto`/`inputMessageVideo` (`messageSelfDestructType*`,
+    /// schema 1.8.67 lines 5915–5918; the runtime validates the timer as
+    /// 1..=60 seconds, so the picker offers only Off / 5s / 30s / 1m /
+    /// View once — no `1h`/`1d`).
+    const SELF_DESTRUCT_CHOICES: [Option<SelfDestructSend>; 5] = [
+        None,
+        Some(SelfDestructSend::Timer(5)),
+        Some(SelfDestructSend::Timer(30)),
+        Some(SelfDestructSend::Timer(60)),
+        Some(SelfDestructSend::Immediately),
+    ];
+
+    /// Phase B3: whether the self-destruct picker may appear — a private
+    /// (1:1 cloud) chat with a photo/video attachment pending, the only
+    /// combination TDLib accepts `self_destruct_type` for (schema 1.8.67
+    /// lines 6115/6126 "private chats only"; the driver also strips the
+    /// choice for any other chat kind as defense in depth).
+    fn self_destruct_picker_visible(&self) -> bool {
+        let session = match self.session() {
+            Some(session) => session,
+            None => return false,
+        };
+        let Some(open) = session.open_chat else {
+            return false;
+        };
+        let is_private = session
+            .chats
+            .get(&open.0)
+            .is_some_and(|chat| matches!(chat.kind, ChatKind::Private { .. }));
+        is_private
+            && !self.pending_attachments.is_empty()
+            && self
+                .pending_attachments
+                .iter()
+                .all(|att| matches!(att.kind, AttachmentKind::Photo | AttachmentKind::Video))
+    }
+
+    /// Phase B3: cycle the composer's self-destruct choice (Off → 5s →
+    /// 30s → 1m → View once → Off). Called from the picker button and the
+    /// screenshot demo.
+    fn cycle_composer_self_destruct(&mut self, cx: &mut Context<Self>) {
+        let choices = Self::SELF_DESTRUCT_CHOICES;
+        let next = choices
+            .iter()
+            .position(|choice| *choice == self.composer_self_destruct)
+            .and_then(|index| choices.get(index + 1))
+            .copied()
+            .unwrap_or(choices[0]);
+        self.composer_self_destruct = next;
+        self.status_note = match next {
+            None => "self-destruct off".into(),
+            Some(SelfDestructSend::Timer(secs)) => format!("self-destruct: {secs}s"),
+            Some(SelfDestructSend::Immediately) => "self-destruct: view once".into(),
+        };
+        cx.notify();
+    }
+
+    /// Phase B3: label for the picker button (`⏱` cycle affordance).
+    fn self_destruct_button_label(&self) -> String {
+        match self.composer_self_destruct {
+            None => "⏱ Off".to_string(),
+            Some(SelfDestructSend::Timer(secs)) => format!("⏱ {secs}s"),
+            Some(SelfDestructSend::Immediately) => "⏱ Once".to_string(),
+        }
     }
 
     fn apply_demo_album(
@@ -5306,6 +5443,57 @@ impl QuillApp {
                         } else {
                             if this.slow_mode_tick_chat == Some(chat_id) {
                                 this.slow_mode_tick_chat = None;
+                            }
+                            false
+                        }
+                    })
+                    .unwrap_or(false);
+                if !cont {
+                    break;
+                }
+            }
+        })
+        .detach();
+    }
+
+    /// Phase B3: keep the self-destruct countdown badges re-rendering
+    /// while the open chat has a live `self_destruct_in` timer. At most
+    /// one task per open chat (guarded by `self_destruct_tick_chat`,
+    /// mirroring the Phase A1 slow-mode tick); it exits when no timer is
+    /// live or the open chat changes. Called from `render`, which has the
+    /// `&mut self` the tick needs.
+    fn ensure_self_destruct_tick(&mut self, cx: &mut Context<Self>) {
+        let now_ms = unix_ms_now();
+        let Some(chat_id) = self
+            .session()
+            .and_then(|session| session.open_chat)
+            .filter(|_| {
+                self.session()
+                    .is_some_and(|session| session.open_chat_has_live_self_destruct(now_ms))
+            })
+        else {
+            return;
+        };
+        if self.self_destruct_tick_chat == Some(chat_id) {
+            return;
+        }
+        self.self_destruct_tick_chat = Some(chat_id);
+        cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor().timer(Duration::from_secs(1)).await;
+                let cont = this
+                    .update(cx, |this, cx| {
+                        let now_ms = unix_ms_now();
+                        let still_open = this.session().and_then(|s| s.open_chat) == Some(chat_id);
+                        let still_live = this.session().is_some_and(|session| {
+                            session.open_chat_has_live_self_destruct(now_ms)
+                        });
+                        if still_open && still_live {
+                            cx.notify();
+                            true
+                        } else {
+                            if this.self_destruct_tick_chat == Some(chat_id) {
+                                this.self_destruct_tick_chat = None;
                             }
                             false
                         }
@@ -12204,6 +12392,10 @@ impl Render for QuillApp {
         // Phase A1: keep the slow-mode countdown ticking while the open
         // chat is gated (spawns at most one 1s task per open chat).
         self.ensure_slow_mode_tick(cx);
+        // Phase B3: keep self-destruct countdown badges fresh while the
+        // open chat has a live `self_destruct_in` timer (same 1s task
+        // pattern as slow mode).
+        self.ensure_self_destruct_tick(cx);
         // Phase 9.1: resolve a tapped story whose `story` response landed
         // since the click (`getStory` prefetch finished).
         // Parity slice: prefill the folder editor once its `getChatFolder`
@@ -12591,6 +12783,20 @@ impl QuillApp {
                                                     this.clear_attachment(cx);
                                                 }),
                                             ),
+                                        )
+                                    })
+                                    // Phase B3: self-destruct timer picker —
+                                    // only for photo/video in private chats
+                                    // (the only combination TDLib accepts
+                                    // `self_destruct_type` for).
+                                    .when(self.self_destruct_picker_visible(), |row| {
+                                        let label = self.self_destruct_button_label();
+                                        row.child(
+                                            Button::new("self-destruct-cycle")
+                                                .label(label)
+                                                .on_click(cx.listener(|this, _, _, cx| {
+                                                    this.cycle_composer_self_destruct(cx);
+                                                })),
                                         )
                                     }),
                             )
@@ -13988,6 +14194,47 @@ fn apply_ready_key_verification(session: &mut Session, sink: &Arc<MemorySink>, s
     }
     session.open_chat(ChatId(chat_id));
     session.open_info_panel = Some(InfoPanelTarget::User(user_id));
+}
+
+/// Phase B3: self-destructing media fixture — a Ready *private* (1:1
+/// cloud) chat with Zed (user 41), opened with an incoming photo
+/// carrying a live 60s `messageSelfDestructTypeTimer`
+/// (`self_destruct_in` 45s at fixture time, so the badge shows a live
+/// countdown) and an outgoing
+/// `messageSelfDestructTypeImmediately` ("view once") photo. Private —
+/// not secret — because TDLib only accepts per-media
+/// `self_destruct_type` in `chatTypePrivate` chats (schema 1.8.67
+/// lines 6115/6126, "private chats only"). Injected demo data.
+fn apply_ready_self_destruct(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let chat_id = 11i64;
+    let user_id = 41i64;
+    let incoming = demo_file_json(91, &demo_thumb_png_path(), true);
+    let outgoing = demo_file_json(92, &demo_thumb_png_path(), true);
+    let jsons = [
+        format!(
+            r#"{{"@type":"updateUser","user":{{"id":{user_id},"first_name":"Zed","last_name":"Hopper","usernames":{{"@type":"usernames","active_usernames":["zedhopper"],"disabled_usernames":[],"editable_username":"zedhopper","collectible_usernames":[]}},"phone_number":"+15550101041","status":{{"@type":"userStatusOnline","expires":9999999999}},"is_contact":false,"type":{{"@type":"userTypeRegular"}}}}}}"#
+        ),
+        format!(
+            r#"{{"@type":"updateNewChat","chat":{{"id":{chat_id},"title":"Zed","type":{{"@type":"chatTypePrivate","user_id":{user_id}}},"unread_count":0}}}}"#
+        ),
+        format!(
+            r#"{{"@type":"updateChatPosition","chat_id":{chat_id},"position":{{"@type":"chatPosition","list":{{"@type":"chatListMain"}},"order":"85","is_pinned":false}}}}"#
+        ),
+        format!(
+            r#"{{"@type":"updateNewMessage","message":{{"id":901,"chat_id":{chat_id},"is_outgoing":false,"content":{{"@type":"messagePhoto","photo":{{"@type":"photo","has_stickers":false,"sizes":[{{"@type":"photoSize","type":"m","photo":{incoming},"width":240,"height":200,"progressive_sizes":[]}}]}},"caption":{{"@type":"formattedText","text":"tap to view — 60s timer","entities":[]}},"show_caption_above_media":false,"has_spoiler":false,"is_secret":false}},"self_destruct_type":{{"@type":"messageSelfDestructTypeTimer","self_destruct_time":60}},"self_destruct_in":45.0}}}}"#
+        ),
+        format!(
+            r#"{{"@type":"updateNewMessage","message":{{"id":902,"chat_id":{chat_id},"is_outgoing":true,"content":{{"@type":"messagePhoto","photo":{{"@type":"photo","has_stickers":false,"sizes":[{{"@type":"photoSize","type":"m","photo":{outgoing},"width":240,"height":200,"progressive_sizes":[]}}]}},"caption":{{"@type":"formattedText","text":"one look only","entities":[]}},"show_caption_above_media":false,"has_spoiler":false,"is_secret":false}},"self_destruct_type":{{"@type":"messageSelfDestructTypeImmediately"}},"self_destruct_in":0}}}}"#
+        ),
+        r#"{"@type":"updateDeleteMessages","chat_id":11,"message_ids":[101,102,103],"is_permanent":true,"from_cache":false}"#.to_string(),
+    ];
+    for json in jsons {
+        if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
+            session.apply(owned);
+        }
+    }
+    session.open_chat(ChatId(chat_id));
 }
 
 fn apply_ready_drafts(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
@@ -17058,10 +17305,25 @@ fn session_history_row(
         MessageContent::Text(_) | MessageContent::Unsupported { .. } => None,
     };
     let keyboard = inline_keyboard(message, cx);
+    // Phase B3: self-destruct timer badge (`message.self_destruct_type` /
+    // `message.self_destruct_in`, schema 1.8.67 lines 3146–3147). The
+    // countdown decays locally against `unix_ms_now()` (same pattern as
+    // the Phase A1 slow-mode countdown); TDLib removes the row via
+    // `updateDeleteMessages` when the timer fires. The 1-second render
+    // tick (see `maybe_begin_self_destruct_tick`) keeps this fresh.
+    let self_destruct_badge = message.self_destruct_badge(unix_ms_now()).map(|label| {
+        div()
+            .id(("self-destruct-badge", message.id.0 as u64))
+            .mt_1()
+            .text_xs()
+            .text_color(rgb(0xffd479))
+            .child(label)
+    });
     let extra = Some(
         div()
             .id(("bubble-extra", message.id.0 as u64))
             .when_some(extra_media, |this, media| this.child(media))
+            .when_some(self_destruct_badge, |this, badge| this.child(badge))
             .when_some(keyboard, |this, keyboard| this.child(keyboard))
             .when_some(views_footer, |this, footer| this.child(footer))
             .when_some(chip_row, |this, chips| this.child(chips))

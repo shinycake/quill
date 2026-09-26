@@ -364,6 +364,7 @@ mod tests {
         )
     }
 
+    /// `SearchMessageHit` construction in `media_viewer.rs` (test fixture).
     fn test_message(chat: i64, id: i64, content: MessageContent) -> HistoryMessage {
         HistoryMessage {
             id: MessageId(id),
@@ -377,6 +378,7 @@ mod tests {
             is_pinned: false,
             media_album_id: 0,
             reply_markup: None,
+            self_destruct: None,
         }
     }
 

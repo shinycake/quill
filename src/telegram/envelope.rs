@@ -1393,6 +1393,112 @@ pub struct ParsedMessage {
     /// Schema `message.reply_markup` (TDLib 1.8.67). Only
     /// `replyMarkupInlineKeyboard` is kept; other markups are `None`.
     pub reply_markup: Option<InlineKeyboard>,
+    /// Phase B3: `message.self_destruct_type` / `message.self_destruct_in`
+    /// (TDLib 1.8.67, `schema/td_api.tl:3146`–`:3147` / `:3165`).
+    /// `messageSelfDestructTypeTimer` (line 5915) /
+    /// `messageSelfDestructTypeImmediately` (line 5918); unknown future
+    /// variants degrade to `None` (message renders without a timer badge).
+    pub self_destruct: Option<MessageSelfDestruct>,
+}
+
+/// Phase B3: the configured self-destruct mode of a message.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SelfDestructKind {
+    /// `messageSelfDestructTypeTimer` — destroyed `secs` seconds after the
+    /// content was opened (schema 1.8.67 line 5915).
+    Timer { secs: i32 },
+    /// `messageSelfDestructTypeImmediately` — destroyed once closed after a
+    /// single viewing (schema 1.8.67 line 5918).
+    Immediately,
+}
+
+/// Phase B3: parsed `message.self_destruct_type` + `message.self_destruct_in`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MessageSelfDestruct {
+    pub kind: SelfDestructKind,
+    /// Latest `message.self_destruct_in`, converted to whole milliseconds.
+    /// `0` means the destruction isn't scheduled yet (the content hasn't
+    /// been opened; schema 1.8.67 line 3147). TDLib emits
+    /// `updateDeleteMessages` when the timer fires, so the row disappears
+    /// through the normal delete path — no special handling needed.
+    /// Whole milliseconds (not `f64` seconds) so the struct keeps the
+    /// `Eq` derive that `ParsedMessage` / `HistoryMessage` require.
+    pub expires_in_ms: i64,
+    /// Local clock (ms) when `expires_in_ms` was received, for the local
+    /// countdown decay (`slow_mode_delay_expires_in` pattern, Phase A1).
+    pub fetched_at_ms: u64,
+}
+
+impl MessageSelfDestruct {
+    /// Locally decayed whole seconds left, or `None` when destruction isn't
+    /// scheduled yet. The value keeps decaying to 0 (the row stays until
+    /// TDLib's `updateDeleteMessages` removes it).
+    pub fn remaining_secs(&self, now_ms: u64) -> Option<u64> {
+        if self.expires_in_ms <= 0 {
+            return None;
+        }
+        let elapsed_ms = now_ms.saturating_sub(self.fetched_at_ms) as i64;
+        let remaining_ms = self.expires_in_ms - elapsed_ms;
+        Some(if remaining_ms > 0 {
+            ((remaining_ms + 999) / 1000) as u64
+        } else {
+            0
+        })
+    }
+
+    /// Timer badge for media rows: "⏱ view once" / "⏱ 60s" (not scheduled
+    /// yet) / "⏱ 42s left" (scheduled).
+    pub fn badge_label(&self, now_ms: u64) -> String {
+        match self.kind {
+            SelfDestructKind::Immediately => "⏱ view once".to_string(),
+            SelfDestructKind::Timer { secs } => match self.remaining_secs(now_ms) {
+                Some(left) => format!("⏱ {left}s left"),
+                None => format!("⏱ {secs}s"),
+            },
+        }
+    }
+}
+
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+/// Parse `message.self_destruct_type` + `message.self_destruct_in` (schema
+/// 1.8.67 lines 3146–3147 / 3165 / 5915 / 5918). `self_destruct_in` arrives
+/// as a double (seconds, possibly fractional); non-finite or negative
+/// values are treated as unscheduled.
+fn parse_self_destruct(
+    type_value: Option<&Value>,
+    in_value: Option<&Value>,
+) -> Option<MessageSelfDestruct> {
+    let type_value = type_value?;
+    if type_value.is_null() {
+        return None;
+    }
+    let kind = match type_value.get("@type").and_then(Value::as_str) {
+        Some("messageSelfDestructTypeTimer") => SelfDestructKind::Timer {
+            secs: type_value
+                .get("self_destruct_time")
+                .and_then(Value::as_i64)
+                .map(|s| s.clamp(0, i32::MAX as i64) as i32)
+                .unwrap_or(0),
+        },
+        Some("messageSelfDestructTypeImmediately") => SelfDestructKind::Immediately,
+        _ => return None,
+    };
+    let expires_in_ms = in_value
+        .and_then(Value::as_f64)
+        .filter(|v| v.is_finite() && *v >= 0.0)
+        .map(|v| (v * 1000.0).round() as i64)
+        .unwrap_or(0);
+    Some(MessageSelfDestruct {
+        kind,
+        expires_in_ms,
+        fetched_at_ms: now_ms(),
+    })
 }
 
 /// One `forumTopic` (TDLib 1.8.67, `schema/td_api.tl:3968` + `forumTopicInfo`
@@ -4129,6 +4235,10 @@ fn parse_message(value: &Value) -> Result<ParsedMessage, ParseError> {
         forward_info: parse_forward_info(value.get("forward_info")),
         interaction_info: parse_interaction_info(value.get("interaction_info")),
         reply_markup: parse_reply_markup(value.get("reply_markup")),
+        self_destruct: parse_self_destruct(
+            value.get("self_destruct_type"),
+            value.get("self_destruct_in"),
+        ),
     })
 }
 
@@ -5801,6 +5911,70 @@ mod tests {
             }
             other => panic!("unexpected {other:?}"),
         }
+    }
+
+    /// Phase B3: `message.self_destruct_type` / `message.self_destruct_in`
+    /// parse (schema 1.8.67 lines 3146–3147 / 3165 / 5915 / 5918); unknown
+    /// future variants degrade to `None`; absent/null fields mean no timer.
+    #[test]
+    fn self_destruct_type_and_in_parsed() {
+        let base = |sd_type: &str, sd_in: &str| {
+            format!(
+                r#"{{"id":1,"chat_id":41,"is_outgoing":false,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"hi","entities":[]}}}},"self_destruct_type":{sd_type},"self_destruct_in":{sd_in}}}"#
+            )
+        };
+        let parse = |json: &str| {
+            let value: Value = serde_json::from_str(json).unwrap();
+            parse_message(&value).unwrap()
+        };
+
+        let timer = parse(&base(
+            r#"{"@type":"messageSelfDestructTypeTimer","self_destruct_time":60}"#,
+            "42.5",
+        ));
+        let sd = timer.self_destruct.expect("timer parsed");
+        assert_eq!(sd.kind, SelfDestructKind::Timer { secs: 60 });
+        assert_eq!(sd.expires_in_ms, 42_500);
+
+        let immediate = parse(&base(
+            r#"{"@type":"messageSelfDestructTypeImmediately"}"#,
+            "0",
+        ));
+        let sd = immediate.self_destruct.expect("immediately parsed");
+        assert_eq!(sd.kind, SelfDestructKind::Immediately);
+        assert_eq!(sd.remaining_secs(sd.fetched_at_ms), None);
+
+        let plain = parse(&base("null", "0"));
+        assert_eq!(plain.self_destruct, None);
+
+        let future = parse(&base(
+            r#"{"@type":"messageSelfDestructTypeFuture"}"#,
+            "10.0",
+        ));
+        assert_eq!(future.self_destruct, None);
+
+        // `remaining_secs` decays locally; garbage `self_destruct_in`
+        // values degrade to "not scheduled".
+        let sd = timer.self_destruct.unwrap();
+        assert_eq!(sd.remaining_secs(sd.fetched_at_ms), Some(43));
+        assert_eq!(sd.remaining_secs(sd.fetched_at_ms + 42_500), Some(0));
+        assert_eq!(sd.badge_label(sd.fetched_at_ms), "⏱ 43s left");
+        let never = parse(&base(
+            r#"{"@type":"messageSelfDestructTypeTimer","self_destruct_time":60}"#,
+            "0",
+        ));
+        assert_eq!(
+            never
+                .self_destruct
+                .unwrap()
+                .badge_label(never.self_destruct.unwrap().fetched_at_ms),
+            "⏱ 60s"
+        );
+        let nan = parse(&base(
+            r#"{"@type":"messageSelfDestructTypeTimer","self_destruct_time":60}"#,
+            "-3.0",
+        ));
+        assert_eq!(nan.self_destruct.unwrap().remaining_secs(u64::MAX), None);
     }
 
     #[test]

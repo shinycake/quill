@@ -2111,3 +2111,74 @@ are rough (S < 1 day, M = days, L = week+).
   display alternative (the schema comment's "alternatively" clause —
   official mobile clients show the image, so the image is the parity
   target).
+
+## Phase B3 — Self-destructing messages (2026-09-26)
+
+- **Rationale.** Official clients let the sender attach a self-destruct
+  timer to a photo/video; the content is destroyed after the timer once
+  opened. Quill needed the send path, the receive badge, and a live
+  countdown — all grounded in the pinned schema, not guessed.
+- **Schema (1.8.67, verified verbatim in `schema/td_api.tl`):**
+  `messageSelfDestructTypeTimer self_destruct_time:int32` (:5915) /
+  `messageSelfDestructTypeImmediately` (:5918); `inputMessagePhoto` /
+  `inputMessageVideo` carry `self_destruct_type` (:6117/:6128) with the
+  comment "private chats only" (:6115/:6126); `message` carries
+  `self_destruct_type` (:3146) and `self_destruct_in` (:3147) in its
+  constructor (:3165). `inputMessageText` has **no** self-destruct
+  field (:6081) — plain text cannot carry per-message self-destruction,
+  so no text UI is offered (documented, not faked).
+- **Compatibility finding (verified against the pinned TDLib commit
+  `d1085f9`, not just master).** `MessageContent.cpp`
+  `get_input_message_content` returns 400 "Messages can self-destruct
+  only in private chats" unless `dialog_id.get_type() ==
+  DialogType::User`; `DialogId.h` lists `User` and `SecretChat` as
+  distinct `DialogType` values — so "private chats" means 1:1 **cloud**
+  chats, **not** secret chats (secret chats use their own per-chat TTL
+  mechanism server-side). `MessageSelfDestructType.cpp` validates the
+  timer as 1..=60 (`MAX_PRIVATE_MESSAGE_TTL = 60`, "server-side
+  limit"). Consequence: this slice ships for **private chats only**;
+  the original "secret chats" assumption in the task brief was wrong
+  and is not implemented. The picker is gated to `ChatKind::Private`,
+  and the driver strips the choice for every other chat kind
+  (defense in depth — a stale snapshot can never turn a send into a
+  400). The schema-valid picker offers only Off / 5s / 30s / 1m /
+  View once (no `1h`/`1d` — the server would 400 them).
+- **Send.** `SelfDestructSend::{Timer(i32), Immediately}` in
+  `src/telegram/requests.rs` (`Copy`); `self_destruct_type_value`
+  emits `messageSelfDestructTypeTimer` /
+  `messageSelfDestructTypeImmediately` / null. `input_message_photo`
+  and `send_photo` take `Option<SelfDestructSend>`; for video the
+  choice rides on the `VideoSend` struct (keeps `send_video` at 7 args
+  for the `too_many_arguments` lint). `ComposerSnapshot` gains
+  `self_destruct` + `with_self_destruct`; `send_snapshot` and
+  `send_album_snapshot` (connect.rs) apply the private-chat gate.
+- **Receive.** `ParsedMessage` / `HistoryMessage` gain
+  `self_destruct: Option<MessageSelfDestruct>` (`kind` +
+  `expires_in_ms` — whole milliseconds, not `f64`, to keep the `Eq`
+  derive — + `fetched_at_ms`); unknown future variants degrade to
+  `None`. `remaining_secs` / `badge_label` decay the countdown locally
+  ("⏱ 60s" unscheduled → "⏱ 42s left" → 0); rows disappear via the
+  normal `updateDeleteMessages` path — no special deletion code.
+- **UI.** `session_history_row` renders the badge under the media for
+  incoming and outgoing rows; a 1-second render tick
+  (`ensure_self_destruct_tick`, mirroring the Phase A1 slow-mode tick,
+  guarded by `self_destruct_tick_chat`) keeps badges fresh while the
+  open chat has a live timer; the tick exits when no timer is live or
+  the chat changes. The composer shows a ⏱ cycle button (Off → 5s →
+  30s → 1m → View once → Off) only when the open chat is private and a
+  photo/video attachment is pending; the choice resets after a
+  successful send.
+- **Screenshot:** `docs/screenshots/ready-self-destruct.png` —
+  `quill --screenshot-demo ready-self-destruct`: private chat with Zed,
+  incoming photo with live ⏱ countdown badge, outgoing ⏱ view once
+  photo, composer picker on 30s.
+- **Tests.** Request shapes (null / timer / immediately, timer carries
+  `self_destruct_time`); parse of both variants + unknown-variant
+  degradation + local countdown decay + garbage `self_destruct_in`;
+  replay test: self-destructing photo arrives, badge data on the row,
+  `updateDeleteMessages` removes it and the tick gate goes quiet.
+- **Out of this slice (→ future):** auto-delete timers for regular
+  chats (`messageAutoDeleteTime`); screenshot-detection notices;
+  secret-chat-specific notification behavior; secret-chat TTL UI
+  (the server-side per-chat timer, a different mechanism from this
+  slice's per-media type).

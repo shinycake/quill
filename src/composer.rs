@@ -3,6 +3,7 @@
 use crate::ids::{ChatId, MessageId, ViewGeneration};
 use crate::local_path::{is_explicit_send_path, pick_send_path};
 use crate::telegram::envelope::{BotCommand, MessageContent};
+use crate::telegram::requests::SelfDestructSend;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -499,6 +500,11 @@ pub struct ComposerSnapshot {
     /// 2–10 photos and/or videos. Empty when `attachment` is the single send.
     pub album: Vec<ComposerAttachment>,
     pub reply_to: Option<ComposerReplyTo>,
+    /// Phase B3: self-destruct choice for photo/video sends
+    /// (`inputMessagePhoto`/`inputMessageVideo` `self_destruct_type`,
+    /// TDLib 1.8.67 lines 6115/6126 — "private chats only"). Set from the
+    /// composer's timer picker; the driver strips it for non-private chats.
+    pub self_destruct: Option<SelfDestructSend>,
 }
 
 impl ComposerSnapshot {
@@ -524,6 +530,7 @@ impl ComposerSnapshot {
             attachment,
             album: Vec::new(),
             reply_to: None,
+            self_destruct: None,
         }
     }
 
@@ -541,11 +548,19 @@ impl ComposerSnapshot {
             attachment: None,
             album,
             reply_to: None,
+            self_destruct: None,
         }
     }
 
     pub fn with_reply(mut self, reply_to: Option<ComposerReplyTo>) -> Self {
         self.reply_to = reply_to;
+        self
+    }
+
+    /// Phase B3: attach the composer's self-destruct choice (photo/video
+    /// sends only; the driver enforces the private-chat gate).
+    pub fn with_self_destruct(mut self, choice: Option<SelfDestructSend>) -> Self {
+        self.self_destruct = choice;
         self
     }
 

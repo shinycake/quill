@@ -696,8 +696,45 @@ fn formatted_caption(caption: &str) -> Value {
     })
 }
 
+/// Phase B3: self-destruct choice for `inputMessagePhoto` /
+/// `inputMessageVideo` (TDLib 1.8.67, `schema/td_api.tl:6115` /
+/// `:6126` — "private chats only"). TDLib validates the choice at runtime
+/// (`MessageSelfDestructType::get_message_self_destruct_type`): the timer
+/// must be 1–60 seconds (`MAX_PRIVATE_MESSAGE_TTL = 60`), and any non-empty
+/// choice in a non-`DialogType::User` chat fails with 400 "Messages can
+/// self-destruct only in private chats" — secret chats included. The driver
+/// therefore strips the choice for every non-`chatTypePrivate` chat
+/// (defense in depth; the composer picker is gated the same way).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SelfDestructSend {
+    /// `messageSelfDestructTypeTimer` (schema 1.8.67 line 5915).
+    Timer(i32),
+    /// `messageSelfDestructTypeImmediately` (schema 1.8.67 line 5918) —
+    /// view once, destroyed after being closed.
+    Immediately,
+}
+
+/// `MessageSelfDestructType` JSON for an `inputMessage*` `self_destruct_type`
+/// field. `None` is JSON null (schema: "pass null if none").
+fn self_destruct_type_value(choice: Option<SelfDestructSend>) -> Value {
+    match choice {
+        None => Value::Null,
+        Some(SelfDestructSend::Timer(secs)) => json!({
+            "@type": "messageSelfDestructTypeTimer",
+            "self_destruct_time": secs
+        }),
+        Some(SelfDestructSend::Immediately) => json!({
+            "@type": "messageSelfDestructTypeImmediately"
+        }),
+    }
+}
+
 /// `inputMessagePhoto` body (TDLib 1.8.67). Shared by `sendMessage` and `sendMessageAlbum`.
-pub fn input_message_photo(path: &str, caption: &str) -> Value {
+pub fn input_message_photo(
+    path: &str,
+    caption: &str,
+    self_destruct: Option<SelfDestructSend>,
+) -> Value {
     json!({
         "@type": "inputMessagePhoto",
         "photo": {
@@ -714,7 +751,7 @@ pub fn input_message_photo(path: &str, caption: &str) -> Value {
         },
         "caption": formatted_caption(caption),
         "show_caption_above_media": false,
-        "self_destruct_type": Value::Null,
+        "self_destruct_type": self_destruct_type_value(self_destruct),
         "has_spoiler": false
     })
 }
@@ -728,6 +765,7 @@ pub fn send_photo(
     path: &str,
     caption: &str,
     reply_to: Option<MessageId>,
+    self_destruct: Option<SelfDestructSend>,
 ) -> String {
     json!({
         "@type": "sendMessage",
@@ -737,7 +775,7 @@ pub fn send_photo(
         "reply_to": input_message_reply_to(reply_to),
         "options": Value::Null,
         "reply_markup": Value::Null,
-        "input_message_content": input_message_photo(path, caption)
+        "input_message_content": input_message_photo(path, caption, self_destruct)
     })
     .to_string()
 }
@@ -867,6 +905,9 @@ pub struct VideoSend {
     pub width: i32,
     pub height: i32,
     pub supports_streaming: bool,
+    /// Phase B3: `inputMessageVideo.self_destruct_type` (schema 1.8.67
+    /// line 6126 — private chats only).
+    pub self_destruct: Option<SelfDestructSend>,
 }
 
 /// `inputMessageVideo` body (TDLib 1.8.67). Shared by `sendMessage` and `sendMessageAlbum`.
@@ -890,7 +931,7 @@ pub fn input_message_video(path: &str, video: &VideoSend, caption: &str) -> Valu
         },
         "caption": formatted_caption(caption),
         "show_caption_above_media": false,
-        "self_destruct_type": Value::Null,
+        "self_destruct_type": self_destruct_type_value(video.self_destruct),
         "has_spoiler": false
     })
 }
@@ -1920,6 +1961,7 @@ mod tests {
             "/tmp/picked.png",
             "CANARY_CAP",
             None,
+            None,
         );
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(v["@type"], "sendMessage");
@@ -1953,6 +1995,79 @@ mod tests {
             Value::Null
         );
         assert!(!json.contains("message_thread_id"));
+    }
+
+    /// Phase B3: `self_destruct_type` shapes on `inputMessagePhoto` /
+    /// `inputMessageVideo` (schema 1.8.67, lines 5915/5918/6115/6126).
+    #[test]
+    fn send_photo_self_destruct_shapes() {
+        for (choice, type_name) in [
+            (None, None),
+            (
+                Some(SelfDestructSend::Timer(30)),
+                Some("messageSelfDestructTypeTimer"),
+            ),
+            (
+                Some(SelfDestructSend::Immediately),
+                Some("messageSelfDestructTypeImmediately"),
+            ),
+        ] {
+            let json = send_photo(
+                RequestId(11),
+                ChatId(7),
+                None,
+                "/tmp/picked.png",
+                "cap",
+                None,
+                choice,
+            );
+            let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+            let sd = &v["input_message_content"]["self_destruct_type"];
+            match type_name {
+                None => assert_eq!(sd, &Value::Null),
+                Some(name) => assert_eq!(sd["@type"], name),
+            }
+        }
+        // Timer carries `self_destruct_time`; Immediately carries no fields.
+        let json = send_photo(
+            RequestId(11),
+            ChatId(7),
+            None,
+            "/tmp/picked.png",
+            "cap",
+            None,
+            Some(SelfDestructSend::Timer(30)),
+        );
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(
+            v["input_message_content"]["self_destruct_type"]["self_destruct_time"],
+            30
+        );
+        let json = send_video(
+            RequestId(17),
+            ChatId(7),
+            None,
+            "/tmp/picked.mp4",
+            &VideoSend {
+                duration: 1,
+                width: 320,
+                height: 180,
+                supports_streaming: true,
+                self_destruct: Some(SelfDestructSend::Immediately),
+            },
+            "cap",
+            None,
+        );
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(
+            v["input_message_content"]["self_destruct_type"]["@type"],
+            "messageSelfDestructTypeImmediately"
+        );
+        assert!(
+            v["input_message_content"]["self_destruct_type"]
+                .get("self_destruct_time")
+                .is_none()
+        );
     }
 
     #[test]
@@ -2060,6 +2175,7 @@ mod tests {
                 width: 320,
                 height: 180,
                 supports_streaming: true,
+                self_destruct: None,
             },
             "CANARY_VIDEO",
             Some(MessageId(9)),

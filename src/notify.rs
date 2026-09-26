@@ -450,6 +450,7 @@ mod tests {
             forward_info: None,
             interaction_info: None,
             reply_markup: None,
+            self_destruct: None,
         }
     }
 
