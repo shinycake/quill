@@ -1066,6 +1066,8 @@ impl MessageContent {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PhotoContent {
     pub caption: String,
+    /// Phase 4.1: entities for `caption` (same list as message text).
+    pub caption_entities: Vec<TextEntity>,
     pub sizes: Vec<PhotoSizeView>,
     pub is_secret: bool,
     pub has_spoiler: bool,
@@ -1142,6 +1144,8 @@ pub struct DocumentContent {
     pub file_name: String,
     pub mime_type: String,
     pub caption: String,
+    /// Phase 4.1: entities for `caption` (same list as message text).
+    pub caption_entities: Vec<TextEntity>,
     pub file_id: FileId,
 }
 
@@ -1185,6 +1189,8 @@ pub struct AudioContent {
     pub file_name: String,
     pub mime_type: String,
     pub caption: String,
+    /// Phase 4.1: entities for `caption` (same list as message text).
+    pub caption_entities: Vec<TextEntity>,
     pub album_cover_minithumbnail: Option<MiniThumbnail>,
     pub album_cover_thumbnail: Option<AlbumCoverThumb>,
     pub external_album_covers: Vec<AlbumCoverThumb>,
@@ -1222,6 +1228,8 @@ pub struct VoiceNoteContent {
     pub waveform: Vec<u8>,
     pub mime_type: String,
     pub caption: String,
+    /// Phase 4.1: entities for `caption` (same list as message text).
+    pub caption_entities: Vec<TextEntity>,
     pub is_listened: bool,
     pub file_id: FileId,
 }
@@ -1288,6 +1296,8 @@ pub struct AnimationContent {
     pub file_name: String,
     pub mime_type: String,
     pub caption: String,
+    /// Phase 4.1: entities for `caption` (same list as message text).
+    pub caption_entities: Vec<TextEntity>,
     pub show_caption_above_media: bool,
     pub has_spoiler: bool,
     pub is_secret: bool,
@@ -1318,6 +1328,8 @@ pub struct VideoContent {
     pub file_name: String,
     pub mime_type: String,
     pub caption: String,
+    /// Phase 4.1: entities for `caption` (same list as message text).
+    pub caption_entities: Vec<TextEntity>,
     pub show_caption_above_media: bool,
     pub has_spoiler: bool,
     pub is_secret: bool,
@@ -2525,13 +2537,24 @@ fn parse_text_content(value: Option<&Value>) -> TextContent {
     let text = parse_formatted_text(value);
     TextContent {
         text: text.clone(),
-        entities: parse_link_entities(&text, value),
+        entities: parse_text_entities(&text, value),
         link_preview: None,
     }
 }
 
-/// Keep `textEntityTypeUrl` and `textEntityTypeTextUrl`. Other entity types are ignored.
-fn parse_link_entities(text: &str, formatted: Option<&Value>) -> Vec<TextEntity> {
+/// Parse a `formattedText` caption into (text, entities). Captions carry the
+/// same entity list as message text (Phase 4.1).
+fn parse_caption(value: Option<&Value>) -> (String, Vec<TextEntity>) {
+    let text = parse_formatted_text(value);
+    let entities = parse_text_entities(&text, value);
+    (text, entities)
+}
+
+/// Keep the entity types Quill renders (Phase 4.1): links plus the style
+/// entities (`textEntityTypeBold` … `textEntityTypePreCode`). Unknown entity
+/// types (mentions, hashtags, phone numbers, bank-card numbers, block
+/// quotes, custom emoji, media timestamps, dates, …) are ignored.
+fn parse_text_entities(text: &str, formatted: Option<&Value>) -> Vec<TextEntity> {
     let Some(entries) = formatted
         .and_then(|value| value.get("entities"))
         .and_then(Value::as_array)
@@ -2566,6 +2589,20 @@ fn parse_link_entities(text: &str, formatted: Option<&Value>) -> Vec<TextEntity>
             Some("textEntityTypeTextUrl") => TextEntityKind::TextUrl {
                 url: type_value
                     .and_then(|t| t.get("url"))
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string(),
+            },
+            Some("textEntityTypeBold") => TextEntityKind::Bold,
+            Some("textEntityTypeItalic") => TextEntityKind::Italic,
+            Some("textEntityTypeUnderline") => TextEntityKind::Underline,
+            Some("textEntityTypeStrikethrough") => TextEntityKind::Strikethrough,
+            Some("textEntityTypeSpoiler") => TextEntityKind::Spoiler,
+            Some("textEntityTypeCode") => TextEntityKind::Code,
+            Some("textEntityTypePre") => TextEntityKind::Pre,
+            Some("textEntityTypePreCode") => TextEntityKind::PreCode {
+                language: type_value
+                    .and_then(|t| t.get("language"))
                     .and_then(Value::as_str)
                     .unwrap_or("")
                     .to_string(),
@@ -2629,6 +2666,7 @@ fn parse_link_preview_photo(preview_type: &Value) -> (Option<PhotoContent>, Vec<
         return (
             Some(PhotoContent {
                 caption: String::new(),
+                caption_entities: Vec::new(),
                 sizes,
                 is_secret: false,
                 has_spoiler: false,
@@ -2650,9 +2688,11 @@ fn json_field_str(value: &Value, key: &str) -> String {
 fn parse_message_photo(value: &Value) -> (MessageContent, Vec<ParsedFile>) {
     let photo = value.get("photo");
     let (sizes, files) = photo.map(parse_photo_sizes).unwrap_or_default();
+    let (caption, caption_entities) = parse_caption(value.get("caption"));
     (
         MessageContent::Photo(PhotoContent {
-            caption: parse_formatted_text(value.get("caption")),
+            caption,
+            caption_entities,
             sizes,
             is_secret: value
                 .get("is_secret")
@@ -2683,6 +2723,7 @@ fn parse_message_document(value: &Value) -> (MessageContent, Vec<ParsedFile>) {
     {
         files.push(thumb_file);
     }
+    let (caption, caption_entities) = parse_caption(value.get("caption"));
     (
         MessageContent::Document(DocumentContent {
             file_name: document
@@ -2695,7 +2736,8 @@ fn parse_message_document(value: &Value) -> (MessageContent, Vec<ParsedFile>) {
                 .and_then(Value::as_str)
                 .unwrap_or("")
                 .to_string(),
-            caption: parse_formatted_text(value.get("caption")),
+            caption,
+            caption_entities,
             file_id,
         }),
         files,
@@ -2747,6 +2789,7 @@ fn parse_message_animation(value: &Value) -> (MessageContent, Vec<ParsedFile>) {
         );
     };
     files.retain(|file| file.id.0 != 0);
+    let (caption, caption_entities) = parse_caption(value.get("caption"));
     (
         MessageContent::Animation(AnimationContent {
             duration: item.duration,
@@ -2754,7 +2797,8 @@ fn parse_message_animation(value: &Value) -> (MessageContent, Vec<ParsedFile>) {
             height: item.height,
             file_name: item.file_name,
             mime_type: item.mime_type,
-            caption: parse_formatted_text(value.get("caption")),
+            caption,
+            caption_entities,
             show_caption_above_media: value
                 .get("show_caption_above_media")
                 .and_then(Value::as_bool)
@@ -2777,6 +2821,7 @@ fn parse_message_animation(value: &Value) -> (MessageContent, Vec<ParsedFile>) {
 }
 
 fn parse_message_video(value: &Value) -> (MessageContent, Vec<ParsedFile>) {
+    let (caption, caption_entities) = parse_caption(value.get("caption"));
     let video = value.get("video");
     if video
         .and_then(|video| video.get("@type"))
@@ -2834,7 +2879,8 @@ fn parse_message_video(value: &Value) -> (MessageContent, Vec<ParsedFile>) {
                 .and_then(Value::as_str)
                 .unwrap_or("")
                 .to_string(),
-            caption: parse_formatted_text(value.get("caption")),
+            caption,
+            caption_entities,
             show_caption_above_media: value
                 .get("show_caption_above_media")
                 .and_then(Value::as_bool)
@@ -3098,6 +3144,7 @@ fn parse_sponsored_photo(photo: &Value) -> (Option<PhotoContent>, Vec<ParsedFile
     (
         Some(PhotoContent {
             caption: String::new(),
+            caption_entities: Vec::new(),
             sizes,
             is_secret: false,
             has_spoiler: false,
@@ -3129,6 +3176,7 @@ fn parse_report_options(value: Option<&Value>) -> Vec<ReportOption> {
 }
 
 fn parse_message_audio(value: &Value) -> (MessageContent, Vec<ParsedFile>) {
+    let (caption, caption_entities) = parse_caption(value.get("caption"));
     let audio = value.get("audio");
     if audio
         .and_then(|audio| audio.get("@type"))
@@ -3172,7 +3220,8 @@ fn parse_message_audio(value: &Value) -> (MessageContent, Vec<ParsedFile>) {
             performer: json_field_str(audio, "performer"),
             file_name: json_field_str(audio, "file_name"),
             mime_type: json_field_str(audio, "mime_type"),
-            caption: parse_formatted_text(value.get("caption")),
+            caption,
+            caption_entities,
             album_cover_minithumbnail: parse_minithumbnail(audio.get("album_cover_minithumbnail")),
             album_cover_thumbnail,
             external_album_covers,
@@ -3216,6 +3265,7 @@ fn parse_album_cover_thumb(value: &Value, files: &mut Vec<ParsedFile>) -> Option
 }
 
 fn parse_message_voice_note(value: &Value) -> (MessageContent, Vec<ParsedFile>) {
+    let (caption, caption_entities) = parse_caption(value.get("caption"));
     let voice_note = value.get("voice_note");
     let mut files = Vec::new();
     let file_id = match voice_note.and_then(|note| parse_file(note.get("voice")).ok()) {
@@ -3240,7 +3290,8 @@ fn parse_message_voice_note(value: &Value) -> (MessageContent, Vec<ParsedFile>) 
                 .and_then(Value::as_str)
                 .unwrap_or("")
                 .to_string(),
-            caption: parse_formatted_text(value.get("caption")),
+            caption,
+            caption_entities,
             is_listened: value
                 .get("is_listened")
                 .and_then(Value::as_bool)
@@ -3995,7 +4046,7 @@ mod tests {
             panic!("expected text");
         };
         assert_eq!(content.text, text);
-        assert_eq!(content.entities.len(), 2);
+        assert_eq!(content.entities.len(), 3);
         assert!(matches!(
             content.entities[0].kind,
             crate::text::TextEntityKind::Url
@@ -4004,6 +4055,13 @@ mod tests {
             content.entities[1].open_href(&content.text),
             Some("https://example.com/notes")
         );
+        // Phase 4.1: style entities parse alongside links.
+        assert!(matches!(
+            content.entities[2].kind,
+            crate::text::TextEntityKind::Bold
+        ));
+        assert_eq!(content.entities[2].utf8_start, 0);
+        assert_eq!(content.entities[2].utf8_end, 3);
         let preview = content.link_preview.expect("preview");
         assert_eq!(preview.site_name, "Example");
         assert_eq!(preview.title, "A short story");

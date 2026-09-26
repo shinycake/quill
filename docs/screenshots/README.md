@@ -84,9 +84,11 @@ bash scripts/capture-connect-screenshots.sh
 #   cargo run --features ui -- --screenshot-demo ready-drafts docs/screenshots
 #   cargo run --features ui -- --screenshot-demo ready-albums docs/screenshots
 #   cargo run --features ui -- --screenshot-demo ready-sponsored docs/screenshots
+#   cargo run --features ui -- --screenshot-demo ready-text-entities docs/screenshots
 ```
 
 Environment used by the script: `DISPLAY`, `LIBGL_ALWAYS_SOFTWARE=1`, `WGPU_BACKEND=vulkan`, `VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json`.
 
 VoiceOver was **not** recorded here (no macOS GUI runner). Keyboard shortcuts are listed in the status bar.
 | `ready-bot-command-menu.png` | **Phase 3.3** Same bot chat with the composer `/` menu open above the composer: bot-specific commands (`/start`, `/help`, `/ping` from `botInfo`) plus a **Global** section (`/settings` from an injected `botCommands` response through the real `getCommands` reducer path), first row highlighted. Injected data, no live Telegram. Driven by `quill --screenshot-demo ready-bot-command-menu`. |
+| `ready-text-entities.png` | **Phase 4.1** Dedicated **Demo entities** chat: a `messageText` with mixed nested entities (bold, italic, bold-italic, underline, strikethrough, spoiler chip, inline `code`, URL, `rust` pre block) plus a `messagePhoto` whose caption carries bold + link entities. Injected `updateNewChat` / `updateNewMessage` JSON through the real reducer, no live Telegram. Driven by `quill --screenshot-demo ready-text-entities`. |

@@ -64,17 +64,35 @@ pub fn contains_canary(haystack: &str, needle: &str) -> bool {
     haystack.contains(needle)
 }
 
-/// Link-bearing text entities Quill paints in private chats.
+/// Styled text entities Quill paints in message text and captions (Phase 4.1).
 ///
 /// TDLib `textEntity` offsets are UTF-16. Callers convert them to UTF-8 byte
-/// indices before storing a span. Bold/italic and the other entity types stay
-/// unstyled in this slice.
+/// indices before storing a span. Entity type constructors are verified
+/// against `schema/td_api.tl` (1.8.67, lines 5719–5785); anything not listed
+/// here (mentions, hashtags, phone numbers, bank-card numbers, block quotes,
+/// custom emoji, media timestamps, dates, …) stays unparsed and unstyled.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TextEntityKind {
     /// `textEntityTypeUrl` — the substring is the HTTP URL.
     Url,
     /// `textEntityTypeTextUrl` — visible label, `url` is opened on click.
     TextUrl { url: String },
+    /// `textEntityTypeBold`
+    Bold,
+    /// `textEntityTypeItalic`
+    Italic,
+    /// `textEntityTypeUnderline`
+    Underline,
+    /// `textEntityTypeStrikethrough`
+    Strikethrough,
+    /// `textEntityTypeSpoiler` — hidden until tapped.
+    Spoiler,
+    /// `textEntityTypeCode` — inline monospace chip.
+    Code,
+    /// `textEntityTypePre` — monospace block, no language.
+    Pre,
+    /// `textEntityTypePreCode language:string` — monospace block with language.
+    PreCode { language: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -90,66 +108,126 @@ impl TextEntity {
         let raw = match &self.kind {
             TextEntityKind::Url => text.get(self.utf8_start..self.utf8_end)?,
             TextEntityKind::TextUrl { url } => url.as_str(),
+            // Style entities carry no link target.
+            _ => return None,
         };
         openable_http_url(raw).then_some(raw.trim())
     }
 }
 
-/// One painted slice of message text. `href` is set for clickable links.
+/// One painted slice of message text. `href` is set for clickable links;
+/// `style` carries the Phase 4.1 entity styling for the same slice.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TextRun {
     pub text: String,
     pub href: Option<String>,
+    pub style: RunStyle,
 }
 
-/// Split `text` on non-overlapping link entities, in source order.
+/// Combined styling for one painted run (Phase 4.1).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RunStyle {
+    pub bold: bool,
+    pub italic: bool,
+    pub underline: bool,
+    pub strikethrough: bool,
+    /// Spoiler: hidden until tapped; the UI keeps reveal state.
+    pub spoiler: bool,
+    /// Inline `code`: monospace chip.
+    pub code: bool,
+    /// `pre` / `preCode`: monospace block.
+    pub pre: bool,
+    /// Language from `textEntityTypePreCode`; `None` for plain `pre`.
+    pub language: Option<String>,
+}
+
+impl RunStyle {
+    /// True when the run carries no entity styling at all.
+    pub fn is_plain(&self) -> bool {
+        self == &RunStyle::default()
+    }
+}
+
+/// Split `text` into painted runs honoring every entity, nested or not.
 ///
-/// Nested or overlapping spans are skipped once a earlier link covers them
-/// (schema: Url and TextUrl must not contain each other).
-pub fn link_runs(text: &str, entities: &[TextEntity]) -> Vec<TextRun> {
-    let mut links: Vec<&TextEntity> = entities
+/// Nesting rule (Phase 4.1): the text is cut at every entity boundary, so
+/// each emitted run is covered by one fixed set of entities. Styles combine
+/// additively across nested / partially overlapping entities (bold inside
+/// italic renders bold italic; `code` inside a spoiler renders a hidden code
+/// chip; `pre` inside a spoiler renders a hidden block). Adjacent runs with
+/// identical styling are merged back together.
+///
+/// Degradation rules, all deterministic and panic-free:
+/// - `href`: the entity with the smallest `(utf8_start, utf8_end)` wins per
+///   run. The schema forbids Url / TextUrl nesting, so this only matters for
+///   malformed input.
+/// - `pre` wins over `code` for the block look; both stay monospace.
+/// - Degenerate entities (zero length, outside the text, or splitting a
+///   UTF-8 char boundary) are dropped.
+pub fn styled_runs(text: &str, entities: &[TextEntity]) -> Vec<TextRun> {
+    let mut spans: Vec<&TextEntity> = entities
         .iter()
         .filter(|entity| {
-            matches!(
-                entity.kind,
-                TextEntityKind::Url | TextEntityKind::TextUrl { .. }
-            )
+            entity.utf8_start < entity.utf8_end
+                && entity.utf8_end <= text.len()
+                && text.is_char_boundary(entity.utf8_start)
+                && text.is_char_boundary(entity.utf8_end)
         })
         .collect();
-    links.sort_by_key(|entity| (entity.utf8_start, entity.utf8_end));
-    let mut runs = Vec::new();
-    let mut cursor = 0usize;
-    for entity in links {
-        if entity.utf8_start < cursor
-            || entity.utf8_end > text.len()
-            || entity.utf8_start >= entity.utf8_end
-            || !text.is_char_boundary(entity.utf8_start)
-            || !text.is_char_boundary(entity.utf8_end)
-        {
+    spans.sort_by_key(|entity| (entity.utf8_start, entity.utf8_end));
+    let mut points = vec![0usize, text.len()];
+    for entity in &spans {
+        points.push(entity.utf8_start);
+        points.push(entity.utf8_end);
+    }
+    points.sort_unstable();
+    points.dedup();
+    let mut runs: Vec<TextRun> = Vec::new();
+    for window in points.windows(2) {
+        let (start, end) = (window[0], window[1]);
+        if start >= end {
             continue;
         }
-        if entity.utf8_start > cursor {
+        let mut style = RunStyle::default();
+        let mut href: Option<String> = None;
+        for entity in &spans {
+            if entity.utf8_start > start || entity.utf8_end < end {
+                continue;
+            }
+            match &entity.kind {
+                TextEntityKind::Url | TextEntityKind::TextUrl { .. } => {
+                    if href.is_none() {
+                        href = entity.open_href(text).map(str::to_string);
+                    }
+                }
+                TextEntityKind::Bold => style.bold = true,
+                TextEntityKind::Italic => style.italic = true,
+                TextEntityKind::Underline => style.underline = true,
+                TextEntityKind::Strikethrough => style.strikethrough = true,
+                TextEntityKind::Spoiler => style.spoiler = true,
+                TextEntityKind::Code => style.code = true,
+                TextEntityKind::Pre => style.pre = true,
+                TextEntityKind::PreCode { language } => {
+                    style.pre = true;
+                    if style.language.is_none() {
+                        style.language = Some(language.clone());
+                    }
+                }
+            }
+        }
+        let slice = text[start..end].to_string();
+        if let Some(last) = runs.last_mut()
+            && last.style == style
+            && last.href == href
+        {
+            last.text.push_str(&slice);
+        } else {
             runs.push(TextRun {
-                text: text[cursor..entity.utf8_start].to_string(),
-                href: None,
+                text: slice,
+                href,
+                style,
             });
         }
-        let slice = text[entity.utf8_start..entity.utf8_end].to_string();
-        let href = entity.open_href(text).map(str::to_string);
-        runs.push(TextRun { text: slice, href });
-        cursor = entity.utf8_end;
-    }
-    if cursor < text.len() {
-        runs.push(TextRun {
-            text: text[cursor..].to_string(),
-            href: None,
-        });
-    }
-    if runs.is_empty() && !text.is_empty() {
-        runs.push(TextRun {
-            text: text.to_string(),
-            href: None,
-        });
     }
     runs
 }
@@ -254,22 +332,19 @@ mod tests {
         let start = text.find("https").unwrap();
         let end = start + "https://example.com".len();
         let entities = vec![
-            TextEntity {
-                utf8_start: start,
-                utf8_end: end,
-                kind: TextEntityKind::Url,
-            },
-            TextEntity {
-                utf8_start: text.find("now").unwrap(),
-                utf8_end: text.len(),
-                kind: TextEntityKind::TextUrl {
+            entity(start, end, TextEntityKind::Url),
+            entity(
+                text.find("now").unwrap(),
+                text.len(),
+                TextEntityKind::TextUrl {
                     url: "https://example.com/notes".into(),
                 },
-            },
+            ),
         ];
-        let runs = link_runs(text, &entities);
+        let runs = styled_runs(text, &entities);
         assert_eq!(runs[0].text, "see ");
         assert!(runs[0].href.is_none());
+        assert!(runs[0].style.is_plain());
         assert_eq!(runs[1].href.as_deref(), Some("https://example.com"));
         assert_eq!(runs[2].text, " ");
         assert_eq!(runs[3].text, "now");
@@ -280,48 +355,240 @@ mod tests {
     fn emoji_prefix_does_not_shift_link_bytes() {
         let text = "👋 https://example.com";
         let start = text.find("https").unwrap();
-        let entity = TextEntity {
-            utf8_start: start,
-            utf8_end: text.len(),
-            kind: TextEntityKind::Url,
-        };
-        let runs = link_runs(text, &[entity]);
+        let runs = styled_runs(text, &[entity(start, text.len(), TextEntityKind::Url)]);
         assert_eq!(runs[0].text, "👋 ");
         assert_eq!(runs[1].href.as_deref(), Some("https://example.com"));
     }
 
     #[test]
-    fn rejects_non_http_and_overlapping_links() {
+    fn rejects_non_http_and_first_link_wins_overlap() {
         let text = "javascript:alert(1) hi";
-        let bad = TextEntity {
-            utf8_start: 0,
-            utf8_end: "javascript:alert(1)".len(),
-            kind: TextEntityKind::Url,
-        };
-        let runs = link_runs(text, &[bad]);
+        let bad = entity(0, "javascript:alert(1)".len(), TextEntityKind::Url);
+        let runs = styled_runs(text, &[bad]);
         assert!(runs.iter().all(|run| run.href.is_none()));
         assert!(!openable_http_url("javascript:alert(1)"));
         assert!(!openable_http_url("https://evil.com/a b"));
         assert!(openable_http_url("https://example.com/a"));
 
+        // Overlapping links (forbidden by the schema) degrade deterministically:
+        // the entity with the smallest (start, end) wins each run.
         let overlap = [
-            TextEntity {
-                utf8_start: 0,
-                utf8_end: 4,
-                kind: TextEntityKind::TextUrl {
+            entity(
+                0,
+                4,
+                TextEntityKind::TextUrl {
                     url: "https://a.example".into(),
                 },
-            },
-            TextEntity {
-                utf8_start: 2,
-                utf8_end: 6,
-                kind: TextEntityKind::TextUrl {
+            ),
+            entity(
+                2,
+                6,
+                TextEntityKind::TextUrl {
                     url: "https://b.example".into(),
                 },
-            },
+            ),
         ];
-        let runs = link_runs("abcdef", &overlap);
+        let runs = styled_runs("abcdef", &overlap);
+        assert_eq!(runs.len(), 2);
+        assert_eq!(runs[0].text, "abcd");
         assert_eq!(runs[0].href.as_deref(), Some("https://a.example"));
-        assert!(runs.iter().skip(1).all(|run| run.href.is_none()));
+        assert_eq!(runs[1].text, "ef");
+        assert_eq!(runs[1].href.as_deref(), Some("https://b.example"));
+    }
+
+    fn entity(start: usize, end: usize, kind: TextEntityKind) -> TextEntity {
+        TextEntity {
+            utf8_start: start,
+            utf8_end: end,
+            kind,
+        }
+    }
+
+    #[test]
+    fn styled_runs_plain_text_is_one_run() {
+        let runs = styled_runs("hello", &[]);
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].text, "hello");
+        assert!(runs[0].style.is_plain());
+        assert!(runs[0].href.is_none());
+    }
+
+    #[test]
+    fn styled_runs_single_style_segments() {
+        let text = "bold and italic";
+        let runs = styled_runs(
+            text,
+            &[
+                entity(0, 4, TextEntityKind::Bold),
+                entity(9, 15, TextEntityKind::Italic),
+            ],
+        );
+        assert_eq!(runs.len(), 3);
+        assert_eq!(runs[0].text, "bold");
+        assert!(runs[0].style.bold);
+        assert_eq!(runs[1].text, " and ");
+        assert!(runs[1].style.is_plain());
+        assert_eq!(runs[2].text, "italic");
+        assert!(runs[2].style.italic);
+    }
+
+    #[test]
+    fn styled_runs_nested_styles_combine() {
+        // "abcdef": bold over 0..6, italic over 2..4, strikethrough over 3..6.
+        let text = "abcdef";
+        let runs = styled_runs(
+            text,
+            &[
+                entity(0, 6, TextEntityKind::Bold),
+                entity(2, 4, TextEntityKind::Italic),
+                entity(3, 6, TextEntityKind::Strikethrough),
+            ],
+        );
+        assert_eq!(runs.len(), 4);
+        assert_eq!(runs[0].text, "ab");
+        assert!(runs[0].style.bold && !runs[0].style.italic);
+        assert_eq!(runs[1].text, "c");
+        assert!(runs[1].style.bold && runs[1].style.italic);
+        assert_eq!(runs[2].text, "d");
+        assert!(runs[2].style.bold && runs[2].style.italic && runs[2].style.strikethrough);
+        assert_eq!(runs[3].text, "ef");
+        assert!(runs[3].style.bold && runs[3].style.strikethrough && !runs[3].style.italic);
+    }
+
+    #[test]
+    fn styled_runs_partial_overlap_splits_and_merges() {
+        // bold 0..4, italic 2..6: runs are 0..2 bold, 2..4 bold+italic,
+        // 4..6 italic.
+        let runs = styled_runs(
+            "abcdef",
+            &[
+                entity(0, 4, TextEntityKind::Bold),
+                entity(2, 6, TextEntityKind::Italic),
+            ],
+        );
+        assert_eq!(runs.len(), 3);
+        assert!(runs[0].style.bold && !runs[0].style.italic);
+        assert!(runs[1].style.bold && runs[1].style.italic);
+        assert!(!runs[2].style.bold && runs[2].style.italic);
+    }
+
+    #[test]
+    fn styled_runs_adjacent_same_style_merges() {
+        let runs = styled_runs(
+            "abcd",
+            &[
+                entity(0, 2, TextEntityKind::Bold),
+                entity(2, 4, TextEntityKind::Bold),
+            ],
+        );
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].text, "abcd");
+        assert!(runs[0].style.bold);
+    }
+
+    #[test]
+    fn styled_runs_code_pre_and_language() {
+        let runs = styled_runs(
+            "a b c",
+            &[
+                entity(2, 3, TextEntityKind::Code),
+                entity(4, 5, TextEntityKind::Pre),
+            ],
+        );
+        assert_eq!(runs.len(), 4);
+        assert_eq!(runs[0].text, "a ");
+        assert!(runs[0].style.is_plain());
+        assert_eq!(runs[1].text, "b");
+        assert!(runs[1].style.code && !runs[1].style.pre);
+        assert_eq!(runs[2].text, " ");
+        assert!(runs[2].style.is_plain());
+        assert_eq!(runs[3].text, "c");
+        assert!(runs[3].style.pre && !runs[3].style.code);
+        assert!(runs[3].style.language.is_none());
+
+        let runs = styled_runs(
+            "rust",
+            &[entity(
+                0,
+                4,
+                TextEntityKind::PreCode {
+                    language: "rust".into(),
+                },
+            )],
+        );
+        assert_eq!(runs.len(), 1);
+        assert!(runs[0].style.pre);
+        assert_eq!(runs[0].style.language.as_deref(), Some("rust"));
+    }
+
+    #[test]
+    fn styled_runs_spoiler_and_link_combine_with_first_link_wins() {
+        let text = "secret link";
+        let runs = styled_runs(
+            text,
+            &[
+                entity(0, 11, TextEntityKind::Spoiler),
+                entity(
+                    7,
+                    11,
+                    TextEntityKind::TextUrl {
+                        url: "https://example.com".into(),
+                    },
+                ),
+            ],
+        );
+        assert_eq!(runs.len(), 2);
+        assert_eq!(runs[0].text, "secret ");
+        assert!(runs[0].style.spoiler);
+        assert!(runs[0].href.is_none());
+        assert_eq!(runs[1].text, "link");
+        assert!(runs[1].style.spoiler);
+        assert_eq!(runs[1].href.as_deref(), Some("https://example.com"));
+    }
+
+    #[test]
+    fn styled_runs_drops_malformed_entities() {
+        let text = "ok";
+        let runs = styled_runs(
+            text,
+            &[
+                // zero length
+                entity(1, 1, TextEntityKind::Bold),
+                // past the end
+                entity(0, 99, TextEntityKind::Italic),
+                // negative-ish (wraps to huge usize start)
+                TextEntity {
+                    utf8_start: usize::MAX - 1,
+                    utf8_end: usize::MAX,
+                    kind: TextEntityKind::Underline,
+                },
+            ],
+        );
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].text, "ok");
+        assert!(runs[0].style.is_plain());
+    }
+
+    #[test]
+    fn styled_runs_multibyte_boundaries() {
+        // "é" is two UTF-8 bytes; an entity over the whole char styles it,
+        // one splitting the bytes is dropped.
+        let text = "aé";
+        let runs = styled_runs(
+            text,
+            &[
+                entity(1, 3, TextEntityKind::Bold),
+                entity(2, 3, TextEntityKind::Italic),
+            ],
+        );
+        assert_eq!(runs.len(), 2);
+        assert_eq!(runs[1].text, "é");
+        assert!(runs[1].style.bold);
+        assert!(!runs[1].style.italic);
+    }
+
+    #[test]
+    fn styled_runs_empty_text() {
+        assert!(styled_runs("", &[entity(0, 0, TextEntityKind::Bold)]).is_empty());
     }
 }

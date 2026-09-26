@@ -684,3 +684,63 @@ Research snapshot 2026-09-16, pin recheck **2026-09-17**.
   namespaced commands in groups; sending `/`-commands as typed (already
   works — they are plain text); ephemeral-command rendering
   (`is_ephemeral` is not kept).
+
+## Phase 4.1 — Rich text entities (2026-09-26)
+
+- **Rationale:** message text and media captions arrive from TDLib as
+  `formattedText` with `textEntity` spans, but Quill rendered only plain
+  text (URLs got link treatment via a separate ad-hoc path). This slice
+  parses the full Phase 4.1 set of styling constructors and renders them
+  in the history — bold, italic, underline, strikethrough, spoiler,
+  inline code, pre blocks, and pre-with-language blocks — while keeping
+  the existing URL / `textEntityTypeTextUrl` link behavior.
+- **Schema (1.8.67, verified in `schema/td_api.tl`):**
+  - `textEntity offset:int32 length:int32 type:TextEntityType =
+    TextEntity;` (line 110) — offsets/lengths are UTF-16 code units
+  - `textEntityTypeUrl = TextEntityType;` (line 5731) — autodetected URL
+  - `textEntityTypeBold` (5743), `textEntityTypeItalic` (5746),
+    `textEntityTypeUnderline` (5749), `textEntityTypeStrikethrough`
+    (5752), `textEntityTypeSpoiler` (5755), `textEntityTypeCode` (5758),
+    `textEntityTypePre` (5761), `textEntityTypePreCode language:string`
+    (5764) — all supported
+  - `textEntityTypeTextUrl url:string = TextEntityType;` (5773) —
+    explicit link target, already supported by the URL path
+  - `formattedText text:string entities:vector<textEntity> =
+    FormattedText;` — unchanged; caption fields on `messagePhoto`,
+    `messageDocument`, `messageAnimation`, `messageVideo`,
+    `messageVoiceNote`, `messageAudio` are all `formattedText` and are
+    now parsed for entities (previously captions were text-only)
+- **Additive nesting rule:** entity boundaries split the text into runs;
+  overlapping entities combine additively (a bold span inside an italic
+  span renders bold-italic; partial overlaps get all intersecting
+  styles); adjacent runs with identical style and href merge. Two links
+  overlapping the same run cannot both render — the earliest (by
+  offset, then length) wins for that run.
+- **Malformed spans are dropped, never crash:** zero-length spans,
+  spans starting past the text end, and offsets that don't land on
+  UTF-16 code-unit boundaries are skipped by `parse_text_entities`.
+- **Rendering (`rich_text_line`, used for message text and captions):**
+  bold → `FontWeight::BOLD`; italic; underline; strikethrough via
+  `line_through`; inline code → monospace chip; `pre` / `preCode` →
+  full-width monospace block (pre visually wins over code, both stay
+  monospace; the `preCode` language is retained in the run style but not
+  yet syntax-highlighted); URLs/`textUrl` keep accent color, underline,
+  and click behavior.
+- **Spoiler UX (tdesktop-style tap-to-reveal):** spoiler runs render as
+  an opaque chip (same-color text on a solid background) until tapped;
+  tapping toggles reveal. Reveal state lives in
+  `QuillApp::spoiler_revealed`, keyed by `(chat id, message id, run index,
+  is_caption)` (message ids are only unique within a chat), threaded through the row render functions as a
+  read-only set (rendering cannot read the app entity mid-update, so
+  the set is passed down rather than re-read).
+- **Screenshot:** `docs/screenshots/ready-text-entities.png` — a
+  dedicated "Demo entities" chat with a mixed-entity `messageText` and
+  a `messagePhoto` whose caption carries bold + link entities, driven
+  by `quill --screenshot-demo ready-text-entities`.
+- **Out of this slice (→ future):** custom-emoji entities
+  (`textEntityTypeCustomEmoji`) and other unsupported/autodetected
+  entity types (`textEntityTypeMention`, `textEntityTypeBlockQuote`,
+  bank-card / phone-number / email autodetects, `textEntityTypeMediaTimestamp`
+  etc. — parsed types outside 4.1 are ignored); syntax highlighting for
+  `preCode` languages; entity styling in forward/quote strips (those are
+  plain text today).
