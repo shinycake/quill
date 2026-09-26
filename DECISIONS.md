@@ -2502,6 +2502,8 @@ shaping beyond what cosmic-text/harfbuzz already do.
 - C2: media transport spike + real 1:1 audio (libtgvoip or equivalent):
   produce/consume signaling payloads, platform device enumeration +
   selection UI, mute/speaker routing. This unblocks real sound for C1/C1b.
+  (→ spike outcome 2026-09-26: engine = **tgcalls** (LGPLv3), NOT libtgvoip —
+  program split into C2a–C2d; see "Phase C2 — media transport spike" below.)
 - C3: group calls — signaling surface first (create/join/leave/end,
   participant grid with `is_speaking`/`recent_speakers` indicators,
   mute/unmute self + admin, hand raise, invite links, titles, `need_rejoin`
@@ -2511,6 +2513,129 @@ shaping beyond what cosmic-text/harfbuzz already do.
   upgrade path (1:1 → group call), rating comments/problems.
 - Out: nothing dropped — the original "honest no-media" stance stands until
   C2 lands; no UI may imply working audio/video before its transport exists.
+
+## Phase C2 — media transport spike (2026-09-26)
+
+**Verdict: real 1:1 audio is a multi-slice program (C2a–C2d), not one
+slice.** This slice is the spike only — no app code changed, no transport
+built. The C1/C1b honest no-transport UI stays exactly as-is; its "voice
+transport ships in Phase C2" notes now refer to the C2 transport program
+below.
+
+**What the official clients actually use (verified from source, not
+lore).** The slice brief assumed libtgvoip ("used by all official
+clients"). That is outdated:
+- Telegram Desktop (`calls/calls_call.cpp`, dev branch, fetched
+  2026-09-26) drives 1:1 calls through **tgcalls**: a
+  `tgcalls::Descriptor` wires `signalingDataEmitted` →
+  `MTPphone_SendSignalingData`, and inbound
+  `MTPDupdatePhoneCallSignalingData` → `_instance->receiveSignalingData`.
+- Telegram Android's JNI tree contains `TMessagesProj/jni/voip/tgcalls/`
+  (`Instance.h`, `v2/InstanceV2ReferenceImpl.cpp`, …) — tgcalls, not the
+  old `VoIPController` JNI.
+- iOS ships the same core as its `TgVoipWebrtc` module (name visible in
+  the tgcalls repo's own testbench paths).
+- Industry consensus: libtgvoip is deprecated — e.g. wzgram's voice-call
+  docs note "pylibtgvoip is outdated: the Telegram VoIP library underneath
+  it was deprecated."
+
+**Option A — libtgvoip via FFI: REJECTED (technically unviable).**
+- License is actually FINE — the brief's "libtgvoip is GPL" premise is
+  wrong: `UNLICENSE` plus every source header in grishka/libtgvoip say
+  "libtgvoip is free and unencumbered public domain software." No
+  copyleft issue for this MIT repo. (Telegram Desktop as a whole is GPL;
+  the library itself is not.)
+- But the library is abandoned: last commit 2019-06-30 (`6c82c9d`).
+- Fatal: **no signaling-data API at all** — zero hits for
+  `receiveSignalingData` / `signalingDataEmitted` / any `*ignaling*`
+  method in `VoIPController.h` or the whole tree. It cannot produce the
+  `sendCallSignalingData` payloads or consume `updateNewCallSignalingData`,
+  so it cannot complete the current endpoint-exchange handshake or
+  interoperate with current clients (whose protocol layers it also
+  predates).
+- Its build would be light (C++14; OpenSSL + Opus via configure; g++ and
+  cmake are present in the sandbox) — irrelevant given the above.
+
+**Option B — tgcalls via FFI: CHOSEN as the engine, but NOT one slice.**
+`TelegramMessenger/tgcalls`, the current official stack:
+- Public API (`tgcalls/Instance.h`, read verbatim) fits Quill's needs
+  exactly: `Meta::Create(version, Descriptor)`; `Descriptor{ config,
+  endpoints, encryptionKey, mediaDevicesConfig, stateUpdated,
+  signalingDataEmitted, createAudioDeviceModule, … }`;
+  `Instance::receiveSignalingData(bytes)` ← `updateNewCallSignalingData`
+  (:10862); `signalingDataEmitted` → `sendCallSignalingData` (:14218);
+  `setMuteMicrophone`, `setAudioInputDevice` / `setAudioOutputDevice`,
+  `setInputVolume` / `setOutputVolume`; `Meta::Versions()` →
+  `["7.0.0","8.0.0","9.0.0","12.0.0","13.0.0"]` and `Meta::MaxLayer()` →
+  `92` (matches the `max_layer: 92` real peers advertise — the honest
+  `callProtocol` (:7008) values fall straight out: `udp_p2p` /
+  `udp_reflector` per engine config, `min_layer` 65 / `max_layer` 92,
+  `library_versions` from `Versions()`). `EncryptionKey` is exactly the
+  256-byte `callStateReady.encryption_key` (:7068) + `isOutgoing` —
+  TDLib already did the DH; the app does no crypto itself.
+- License: **LGPLv3** (LICENSE + README). Compatible with this MIT repo
+  via dynamic loading: a sidecar worker `dlopen`s `libtgcalls.so` (no
+  static link into the Quill binary), plus attribution in
+  `THIRD_PARTY.md` and the LGPL source offer for the library itself.
+  (Static linking would instead trigger LGPL relink obligations —
+  avoided by design.)
+- **Build is the blocker.** tgcalls is 81 C++ files but needs a large
+  WebRTC subset (`rtc_base`, `api`, `pc`, `media/base`), abseil, libyuv,
+  and boringssl/OpenSSL. Known-good builds: tdesktop's
+  `ThirdParty/tgcalls` CMake against `desktop-app/lib_webrtc` (custom
+  CMake-ified WebRTC static lib — clang, hours-long build, no published
+  prebuilts), or the repo's own Bazel testbench (Bazel 8.4.2 + full
+  submodule tree + meson/ninja/nasm/autoconf toolchain). This sandbox
+  has no clang, no WebRTC sources, no abseil, no Bazel — engine
+  procurement alone is a full slice, likely on a beefier builder or
+  Idan's machine.
+
+**Option C — pure-Rust reimplementation: REJECTED.**
+Telegram 1:1 media is a custom UDP protocol (DH-derived keys, custom
+framing, Opus, jitter/congestion control, reflector relays) — NOT
+WebRTC/RTP/SDP, so `str0m` / `webrtc-rs` don't speak it. Reimplementing
+it is man-months of reverse engineering. No Rust crate speaks it today
+(`grammers` has no call media; a crates.io `tgcalls` crate mentioned in
+ferogram's README could not be verified — crates.io API unreachable from
+the sandbox). The closest prior art, crossgram's `voice-worker`,
+reimplements only the DH/signaling scaffolding in Rust and still defers
+media to a native tgcalls backend seam — even the ambitious Rust projects
+conclude the media engine must be tgcalls.
+
+**Sliced plan (C2a → C2d).**
+- **C2a — engine procurement.** Reproducibly build `libtgcalls.so`
+  (Linux x86_64 first): WebRTC subset (lib_webrtc path or Bazel
+  testbench path), abseil, libyuv, boringssl; validate with the repo's
+  `tgcalls_cli` (`--mode p2p`, `--mode reflector`); record LGPL
+  attribution in `THIRD_PARTY.md`; document the build. Needs a builder
+  with clang + WebRTC sources — beyond this sandbox.
+- **C2b — engine boundary.** Rust `CallEngine` trait (a mock keeps every
+  existing test green — no real network/audio in tests) + C-ABI shim over
+  `tgcalls::Meta` / `Instance`, loaded at runtime via `dlopen` from a
+  sidecar worker (crossgram `voice-worker` pattern: framed IPC, fake
+  backend for tests, unavailable-fallback so the seam alone can't fake
+  media). Wire `sendCallSignalingData` ← `signalingDataEmitted` and
+  `updateNewCallSignalingData` → `receiveSignalingData`; advertise the
+  honest `callProtocol` from `Meta` (min 65 / max 92 / versions /
+  udp_p2p+udp_reflector per config).
+- **C2c — real audio I/O.** WebRTC `AudioDeviceModule` for Linux
+  (PipeWire/PulseAudio; tgcalls' own CLI uses `FakeAudioDeviceModule` —
+  sine/noop — which is test-only) or the callback-audio path; platform
+  device enumeration + mic/speaker pickers in the call UI; real
+  mute/unmute (`setMuteMicrophone`), volumes, AEC/NS/AGC config;
+  screenshot of device selection.
+- **C2d — hardening.** Reconnects, `setNetworkType`, stats/debug
+  surface, `sendCallDebugInformation` upload, E2E test against a real
+  peer, docs.
+- Out of the program: video transport/encoding (placeholder grid stays),
+  group calls (C3), screen sharing, call recording.
+
+**Sandbox evidence (2026-09-26).** g++/cc/cmake/pkg-config present, no
+clang++; OpenSSL 3.0.13 dev headers present; NO Opus/PulseAudio/PipeWire
+dev headers, no audio daemons; cargo registry cache holds no
+str0m/webrtc/grammers/opus/cpal sources. Even Option A's light build
+couldn't fully link here (no Opus), and Option B's WebRTC requirement is
+orders of magnitude beyond it.
 
 ## Phase E — emoji × all languages (folded in 2026-09-26, per Idan)
 
