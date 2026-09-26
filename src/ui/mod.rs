@@ -2069,13 +2069,17 @@ impl QuillApp {
         let command = item.command.clone();
         let current = self.composer.read(cx).value().to_string();
         let base = strip_command_menu_trigger(&current).unwrap_or(current.as_str());
-        let next = quill::composer::insert_bot_command_text(base, &command);
+        // Trailing space (tdesktop behavior): without it, the `/`-token
+        // trigger still matches `/command`, the menu reopens on the next
+        // Enter and consumes it in a no-op loop — Enter could never send.
+        let next = format!(
+            "{} ",
+            quill::composer::insert_bot_command_text(base, &command).trim_end()
+        );
         self.composer.update(cx, |input, cx| {
             input.set_value(next, window, cx);
         });
-        self.command_menu_open = false;
-        self.command_menu_selected = 0;
-        cx.notify();
+        self.close_command_menu(cx);
     }
 
     /// Phase 3.3: the `/` command menu popup above the composer.

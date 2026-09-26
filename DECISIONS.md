@@ -683,4 +683,4 @@ Research snapshot 2026-09-16, pin recheck **2026-09-17**.
   (`botCommandScope…` with non-empty `language_code`); `@botname`
   namespaced commands in groups; sending `/`-commands as typed (already
   works — they are plain text); ephemeral-command rendering
-  (`is_ephemeral` is parsed but not kept).
+  (`is_ephemeral` is not kept).
