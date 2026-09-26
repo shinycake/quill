@@ -1380,7 +1380,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         let user = self.session.user(user_id);
         let is_bot = user.is_some_and(|u| u.is_bot);
-        if user.is_none() || is_bot {
+        let is_self = self.session.my_user_id.is_some_and(|me| me == user_id);
+        if user.is_none() || is_bot || is_self {
             return Err(ConnectSendError::InvalidRequest);
         }
         let extra = self

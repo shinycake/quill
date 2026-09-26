@@ -12058,7 +12058,7 @@ fn live_status_for(auth: &AuthorizationState) -> String {
         AuthorizationState::WaitPassword { .. } => {
             "enter your two-step verification password".into()
         }
-        AuthorizationState::Ready => "signed in — cloud chats only".into(),
+        AuthorizationState::Ready => "signed in — cloud + secret chats".into(),
         AuthorizationState::WaitOtherDeviceConfirmation => {
             "confirm on another device (QR payload is not logged)".into()
         }

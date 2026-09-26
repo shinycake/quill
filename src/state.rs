@@ -887,6 +887,9 @@ impl ChatSummary {
         if self.unread_count > 0 {
             return format!("{} unread", self.unread_count);
         }
+        if matches!(self.kind, ChatKind::Secret { .. }) {
+            return "Secret chat".into();
+        }
         "cloud chat".into()
     }
 
@@ -1688,7 +1691,6 @@ pub struct Session {
     /// Parity slice: local sound-file paths the UI should play, drained by
     /// `flush_notifications`. The reducer never spawns processes.
     pub pending_sound_plays: Vec<std::path::PathBuf>,
-    /// Phase B1: latest known `SecretChatState` per secret_chat_id, from
     /// Phase B1: secret-chat records keyed by `secret_chat_id`
     /// (`updateSecretChat` / `getSecretChat` answers). Kept at the
     /// session level because `updateSecretChat` is guaranteed to arrive
