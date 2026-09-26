@@ -413,6 +413,21 @@ pub fn get_supergroup_full_info(extra: RequestId, supergroup_id: i64) -> String 
     .to_string()
 }
 
+/// Phase D2: `getChatStatistics` (TDLib 1.8.67, `schema/td_api.tl:15760`):
+/// `getChatStatistics chat_id:int53 is_dark:Bool = ChatStatistics;`
+/// Response is `chatStatisticsChannel` / `chatStatisticsSupergroup`.
+/// Usable only when `supergroupFullInfo.can_get_statistics` is true
+/// (checked by the driver before sending); TDLib errors otherwise.
+pub fn get_chat_statistics(extra: RequestId, chat_id: i64, is_dark: bool) -> String {
+    json!({
+        "@type": "getChatStatistics",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id,
+        "is_dark": is_dark,
+    })
+    .to_string()
+}
+
 /// Phase B1: `createNewSecretChat` (TDLib 1.8.67, `schema/td_api.tl:13340`):
 /// `createNewSecretChat user_id:int53 = Chat;`
 /// "Creates a new secret chat. Returns the newly created chat". The new
@@ -2962,6 +2977,19 @@ mod tests {
         assert_eq!(v["@type"], "getSupergroupFullInfo");
         assert_eq!(v["@extra"], "62");
         assert_eq!(v["supergroup_id"], 77);
+        assert!(!json.contains("CANARY"));
+    }
+
+    #[test]
+    fn get_chat_statistics_shape_matches_1_8_67() {
+        // `getChatStatistics chat_id:int53 is_dark:Bool = ChatStatistics;`
+        // (schema 1.8.67, line 15760).
+        let json = get_chat_statistics(RequestId(63), 13, true);
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "getChatStatistics");
+        assert_eq!(v["@extra"], "63");
+        assert_eq!(v["chat_id"], 13);
+        assert_eq!(v["is_dark"], true);
         assert!(!json.contains("CANARY"));
     }
 

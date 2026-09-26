@@ -2759,3 +2759,93 @@ pipeline: formatted-text entity offsets, composer caret mapping,
 selection/hit-testing with emoji present (emoji are multi-code-unit in
 UTF-16 and multi-scalar in general — a classic offset-corruption source).
 Failing cases become regression tests/screenshots in E5.
+
+## Phase D2 — channel author signatures + channel statistics view (2026-09-26)
+
+- **Rationale.** Two channel-parity gaps: (1) channel posts signed by
+  an admin show the author's signature under the post in official
+  clients; (2) channel/group admins get a statistics view
+  (`getChatStatistics`). This slice implements both, gated exactly as
+  TDLib gates them.
+- **Schema (1.8.67, verified verbatim in `schema/td_api.tl`):**
+  `message.author_signature` (:3165, comment :3155);
+  `messageOriginChat.author_signature` (:2893) and
+  `messageOriginChannel.author_signature` (:2899) for forwarded
+  attribution; `supergroupFullInfo.can_get_statistics` (:2792);
+  `getChatStatistics chat_id:int53 is_dark:Bool = ChatStatistics`
+  (:15760); `dateRange` (:10135); `statisticalValue` (:10139);
+  `statisticalGraphData` / `statisticalGraphAsync` /
+  `statisticalGraphError` (:10145/:10148/:10151);
+  `chatStatisticsObjectTypeMessage` / `Story` (:10157/:10160);
+  interaction/sender/admin/inviter wrappers
+  (:10168/:10174/:10181/:10186); `chatStatisticsSupergroup` (:10208,
+  8 graph fields); `chatStatisticsChannel` (:10233, 12 graph fields).
+  All graph fields are required in both constructors — no optional
+  flags — so a null/absent graph is a parse error, never a silent
+  empty graph. The same applies to every `statisticalValue` field
+  (`value` / `previous_value` / `growth_rate_percentage` all required,
+  :10139) and the `dateRange` period (`start_date` / `end_date`
+  required, :10135): a null, absent, or mistyped one is a parse error,
+  never fabricated zeros. Unknown future `ChatStatistics`
+  constructors fail parsing rather than fabricating data — including
+  at the envelope level, where the `Unknown` catch-all explicitly
+  rejects any `@type` starting with `chatStatistics` so a future
+  statistics constructor surfaces as an error instead of silently
+  dropping the response.
+- **Scope decision.** Signatures parse into `ParsedMessage` /
+  `HistoryMessage` / `SearchMessageHit` and render as a small muted
+  line under the channel post. The line is suppressed when the message
+  carries `forward_info`: forwarded headers already include the
+  origin's author signature, and showing both would duplicate
+  attribution. `getMessageStatistics`, story statistics, revenue/star
+  statistics, and invite-link/admin-management gaps are out of this
+  slice (→ D3/future).
+- **Send.** `requests::get_chat_statistics(extra, chat_id, is_dark)`
+  (shape test against :15760). Driver `fetch_chat_statistics` gates
+  strictly on `SupergroupFullInfoData.can_get_statistics` — the entry
+  point is never exposed when false/absent, because TDLib errors the
+  request anyway. Dedupes `Loading`/`Loaded` and in-flight requests;
+  `refresh_chat_statistics` clears the cache and refetches. `is_dark`
+  is passed as `false`: it only tints server-rendered graph images,
+  and Quill draws its own sparklines from `json_data` client-side (the
+  app has no dark-mode concept to report).
+- **Receive.** `EnvelopePayload::ChatStatistics { statistics }` — the
+  response carries no chat id, so `Session::apply` correlates it
+  through the pending `GetChatStatistics` request's chat id
+  (`chat_statistics: HashMap<i64, ChatStatisticsFetch>` with
+  `Loading` / `Loaded` / `Failed`). A TDLib `error` for the request
+  lands `Failed` with an honest message instead of spinning forever.
+  `ChatStatistics` / `ChatStatisticsFetch` box their large variants
+  (clippy `large_enum_variant`, `-D warnings`).
+- **UI.** `InfoPanelTarget::Statistics(chat_id)` renders a statistics
+  panel: period label, value rows (`12.4K (+5.6%)` growth vs previous),
+  notifications-enabled percentage (channel), Unicode sparklines
+  (`▁▂▃▄▅▆▇█`) from the first non-`x` numeric column of each
+  `statisticalGraphData` `json_data`, recent interactions (channel) /
+  top senders · administrators · inviters with resolved display names
+  (supergroup). `Async` graphs render "Still processing — check back
+  later"; `Error` graphs render the server text inline; graphs with no
+  usable series are omitted — no placeholder numbers anywhere. The
+  info panel gains a `Statistics` button only when
+  `can_get_statistics` is true. Refresh button included.
+- **Screenshot:** `docs/screenshots/ready-channel-stats.png` —
+  `quill --screenshot-demo ready-channel-stats`: demo channel 13 with
+  `can_get_statistics: true` and a loaded `chatStatisticsChannel`
+  fixture (real graph JSON, Async + Error graph variants, recent
+  interactions), stats panel open directly. The channel fixtures'
+  posts also carry `author_signature` ("Demo Admin" / "News Desk"),
+  so `ready-channels.png`, `ready-channels-admin.png`, and
+  `ready-sponsored.png` now show the signature line and were
+  recaptured.
+- **Tests.** Request shape (`getChatStatistics` vs :15760). Envelope:
+  `author_signature` present/absent/empty, `can_get_statistics`
+  true/absent, full `chatStatisticsChannel` (values, Data/Async/Error
+  graphs, message+story interactions), null graph → parse error,
+  `chatStatisticsSupergroup` top lists, unknown constructor →
+  parse error. Replay: request → `Loaded` correlated via pending
+  request; TDLib error → `Failed`.
+- **Out of this slice (→ future):** `getMessageStatistics` /
+  `getStoryStatistics` and revenue/star statistics; invite-link and
+  admin-management gaps; server-rendered graph images (`zoom_token`
+  drill-down); dark-theme reporting for `is_dark` if the app ever
+  gains a dark mode.

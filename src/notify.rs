@@ -443,6 +443,7 @@ mod tests {
             is_outgoing: outgoing,
             is_pinned: false,
             media_album_id: 0,
+            author_signature: None,
             topic_id: None,
             content: MessageContent::Text(TextContent::plain(text)),
             files: Vec::new(),
