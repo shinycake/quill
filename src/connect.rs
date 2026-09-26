@@ -876,6 +876,9 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .send_json(&edit_chat_folder(extra, folder_id, &edited))
             {
                 self.session.requests.take(extra);
+                // Restore the current intent so a transient send failure
+                // retries on the next ingest instead of silently dropping it.
+                still_pending.push((chat_id, folder_id));
                 self.session.folder_remove_queue = still_pending;
                 return Err(err);
             }

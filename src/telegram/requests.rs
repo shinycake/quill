@@ -1472,9 +1472,8 @@ pub fn add_chat_to_list_value(extra: RequestId, chat_id: ChatId, chat_list: Valu
 
 /// The `chatFolder` constructor body (TDLib 1.8.67, `schema/td_api.tl:3476`)
 /// for `createChatFolder` / `editChatFolder`. Quill sends `icon: null`
-/// (default icon; `getChatFolderDefaultIconName` is a synchronous TDLib
-/// call clients may use — the null default is what the schema allows),
-/// `color_id: -1` (disabled), `is_shareable: false` — custom-emoji icon
+/// (default icon; `getChatFolderDefaultIconName` is an async TDLib call
+/// clients may use — the null default is what the schema allows),
 /// rendering and folder invite links are out of scope. Folder names are
 /// 1–12 characters without line feeds (schema doc on `chatFolderName`).
 pub fn chat_folder_json(spec: &crate::telegram::envelope::ChatFolderSpec) -> Value {

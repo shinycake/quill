@@ -1267,7 +1267,7 @@ Research snapshot 2026-09-16, pin recheck **2026-09-17**.
 - **Schema (1.8.67, verified in `schema/td_api.tl`):**
   - `createChatFolder folder:chatFolder = ChatFolderInfo` (line 13358);
     `editChatFolder chat_folder_id:int32 folder:chatFolder = ChatFolderInfo`
-    (line 13361); `deleteChatFolder chat_folder_id:int32 = Ok`
+    (line 13361); `deleteChatFolder chat_folder_id:int32 leave_chat_ids:vector<int53> = Ok`
     (line 13364); `getChatFolder chat_folder_id:int32 = ChatFolder`
     (line 13355); `reorderChatFolders chat_folder_ids:vector<int32>
     main_chat_list_position:int32 = Ok` (line 13373);
