@@ -52,8 +52,12 @@ handling exists.
   URL buttons → OS open; `switchInline` buttons → insert query in the
   current chat's composer; `updateMessageEdited` refreshes keyboards.
   `docs/screenshots/ready-bot-keyboard.png`.
-- **3.3 Bot commands menu.** Composer `/` menu from `bot_info.commands` /
-  `getCommands`; tap inserts the command.
+- **3.3 Bot commands menu.** ✅ 2026-09-26 — Composer `/` menu from
+  `bot_info.commands` plus `getCommands` (global scope); tap/keyboard
+  inserts the command. `getCommands` is schema-annotated "for bots
+  only", so on a user session the fetch errors are absorbed and the menu
+  falls back to `bot_info` commands (documented in DECISIONS).
+  `docs/screenshots/ready-bot-command-menu.png`.
 
 ## Phase 4 — Message richness
 

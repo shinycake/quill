@@ -269,6 +269,24 @@ pub fn get_user_full_info(extra: RequestId, user_id: i64) -> String {
     .to_string()
 }
 
+/// Phase 3.3: `getCommands` for a bot's global (default) command scope
+/// (TDLib 1.8.67, `schema/td_api.tl:14953`):
+/// `getCommands scope:BotCommandScope language_code:string = BotCommands;`
+/// The schema annotates the method "for bots only", so a user session
+/// gets an `error` answer instead of `botCommands`; the driver absorbs it
+/// and the `/` menu falls back to the `botInfo` commands. The scope is
+/// `botCommandScopeDefault` (line 10360, "a scope covering all users");
+/// the chat-specific commands already arrive via `botInfo`.
+pub fn get_commands(extra: RequestId) -> String {
+    json!({
+        "@type": "getCommands",
+        "@extra": extra.as_extra(),
+        "scope": null,
+        "language_code": "",
+    })
+    .to_string()
+}
+
 /// `joinChat` for a public channel (TDLib 1.8.67). Response is
 /// `ChatJoinResult`.
 pub fn join_chat(extra: RequestId, chat_id: ChatId) -> String {
@@ -1174,6 +1192,20 @@ pub fn expected_runtime_label() -> String {
 mod tests {
     use super::*;
     use crate::ids::RequestId;
+
+    #[test]
+    fn get_commands_shape_matches_1_8_67() {
+        // `getCommands scope:BotCommandScope language_code:string =
+        // BotCommands` (schema 1.8.67 line 14953); a null scope selects the
+        // default scope (`botCommandScopeDefault`, line 10360) and an empty
+        // language code is allowed.
+        let json = get_commands(RequestId(9));
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "getCommands");
+        assert_eq!(v["@extra"], "9");
+        assert!(v["scope"].is_null());
+        assert_eq!(v["language_code"], "");
+    }
 
     #[test]
     fn send_text_includes_topic_id_null() {

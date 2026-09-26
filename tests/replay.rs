@@ -1678,6 +1678,110 @@ fn replay_bot_info_cached_from_full_info() {
     assert_eq!(info.commands[1].command, "help");
 }
 
+/// Phase 3.3: a `getCommands` response caches the global-scope commands and
+/// merges them below the `botInfo` commands in `command_menu_items`
+/// (deduped by command name); a stray `botCommands` with no matching
+/// pending request is ignored.
+#[test]
+fn replay_bot_commands_cached_from_get_commands() {
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn quill::diagnostics::DiagnosticSink> = sink.clone();
+    let mut session = Session::new(AccountKey::primary(), dyn_sink);
+    let seq = AtomicU64::new(0);
+    apply_all_seq(
+        &mut session,
+        &sink,
+        &seq,
+        &[
+            BOT_USER_JSON,
+            r#"{"@type":"updateNewChat","chat":{"id":21,"title":"Demo Bot","type":{"@type":"chatTypePrivate","user_id":21},"unread_count":0}}"#,
+        ],
+    );
+    let chat = quill::ids::ChatId(21);
+    assert!(session.command_menu_items(chat).is_empty());
+
+    // `botInfo` commands first (specific).
+    let full_extra = session.request(RequestPurpose::GetUserFullInfo, Some(chat));
+    apply_all_seq(
+        &mut session,
+        &sink,
+        &seq,
+        &[&format!(
+            r#"{{"@type":"userFullInfo","@extra":"{}","bot_info":{{"@type":"botInfo","short_description":"","description":"","commands":[{{"@type":"botCommand","command":"start","description":"Start the bot","is_ephemeral":false}}]}}}}"#,
+            full_extra.0
+        )],
+    );
+
+    // `botCommands` response to the matching `getCommands` request
+    // (global scope).
+    let cmd_extra = session.request(RequestPurpose::GetCommands, Some(chat));
+    apply_all_seq(
+        &mut session,
+        &sink,
+        &seq,
+        &[&format!(
+            r#"{{"@type":"botCommands","@extra":"{}","bot_user_id":21,"commands":[{{"@type":"botCommand","command":"settings","description":"Global settings","is_ephemeral":false}},{{"@type":"botCommand","command":"start","description":"Global start","is_ephemeral":false}}]}}"#,
+            cmd_extra.0
+        )],
+    );
+    let items = session.command_menu_items(chat);
+    assert_eq!(items.len(), 2);
+    assert_eq!(items[0].command, "start");
+    assert_eq!(items[0].description, "Start the bot");
+    assert!(!items[0].global);
+    // `settings` is new and global; the `start` duplicate is dropped so
+    // the bot-specific description wins.
+    assert_eq!(items[1].command, "settings");
+    assert_eq!(items[1].description, "Global settings");
+    assert!(items[1].global);
+
+    // A stray `botCommands` with no matching pending request is ignored.
+    apply_all_seq(
+        &mut session,
+        &sink,
+        &seq,
+        &[
+            r#"{"@type":"botCommands","@extra":"4242","bot_user_id":21,"commands":[{"@type":"botCommand","command":"evil","description":"","is_ephemeral":false}]}"#,
+        ],
+    );
+    let items = session.command_menu_items(chat);
+    assert_eq!(items.len(), 2);
+    assert!(items.iter().all(|item| item.command != "evil"));
+}
+
+/// Phase 3.3: an `error` answer to `getCommands` records an empty command
+/// set — the menu falls back to the `botInfo` commands and the driver
+/// will not retry the fetch.
+#[test]
+fn replay_bot_commands_error_records_empty_set() {
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn quill::diagnostics::DiagnosticSink> = sink.clone();
+    let mut session = Session::new(AccountKey::primary(), dyn_sink);
+    let seq = AtomicU64::new(0);
+    apply_all_seq(
+        &mut session,
+        &sink,
+        &seq,
+        &[
+            BOT_USER_JSON,
+            r#"{"@type":"updateNewChat","chat":{"id":21,"title":"Demo Bot","type":{"@type":"chatTypePrivate","user_id":21},"unread_count":0}}"#,
+        ],
+    );
+    let chat = quill::ids::ChatId(21);
+    let cmd_extra = session.request(RequestPurpose::GetCommands, Some(chat));
+    apply_all_seq(
+        &mut session,
+        &sink,
+        &seq,
+        &[&format!(
+            r#"{{"@type":"error","@extra":"{}","code":400,"message":"CANARY_bots_only"}}"#,
+            cmd_extra.0
+        )],
+    );
+    assert!(session.bot_commands.contains_key(&21));
+    assert!(session.command_menu_items(chat).is_empty());
+}
+
 /// Phase 3.1: `updateUserFullInfo` refreshes the cached bot info live.
 #[test]
 fn replay_bot_info_refreshed_by_update() {

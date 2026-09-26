@@ -2,7 +2,7 @@
 
 use crate::ids::{ChatId, MessageId, ViewGeneration};
 use crate::local_path::{is_explicit_send_path, pick_send_path};
-use crate::telegram::envelope::MessageContent;
+use crate::telegram::envelope::{BotCommand, MessageContent};
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -383,6 +383,90 @@ pub fn insert_bot_command_text(current: &str, command: &str) -> String {
     } else {
         format!("{current} {insertion}")
     }
+}
+
+/// Phase 3.3: one row in the composer `/` command menu.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommandMenuItem {
+    /// Command name without the leading `/`.
+    pub command: String,
+    pub description: String,
+    /// True when the row comes from `getCommands` (global/default scope)
+    /// rather than the bot's `botInfo`; rendered in the "Global" section
+    /// below the bot-specific commands.
+    pub global: bool,
+}
+
+/// Phase 3.3: `/` command-menu trigger. Returns the filter prefix typed
+/// after the `/` when the composer text ends with a `/`-led token at a
+/// word boundary — start of text or right after whitespace — e.g.
+/// `Some("")` for a bare `/`, `Some("st")` for `/st`. Returns `None` for
+/// mid-word slashes (`a/b`, `http://…`), so the menu never opens inside
+/// words or URLs. The trailing-token convention matches the input's lack
+/// of an exposed cursor offset (documented in DECISIONS).
+pub fn command_menu_trigger(text: &str) -> Option<&str> {
+    let token = text.split(char::is_whitespace).next_back()?;
+    let prefix = token.strip_prefix('/')?;
+    // `/` alone or `/` + command chars; a second `/` (`/a/b`, `//`) is not
+    // a command token.
+    if prefix.contains('/') {
+        return None;
+    }
+    Some(prefix)
+}
+
+/// Phase 3.3: composer text with the trailing `/`-token removed, for menu
+/// picks. The menu replaces the partial token the user typed, so `/st` +
+/// pick `start` → `/start`, not `/st /start`. Returns `None` when there is
+/// no trigger token (the caller should not pick).
+pub fn strip_command_menu_trigger(text: &str) -> Option<&str> {
+    let prefix = command_menu_trigger(text)?;
+    let token_len = prefix.len() + 1; // leading `/`
+    text.get(..text.len() - token_len)
+}
+
+/// Phase 3.3: merge `botInfo.commands` (bot-specific) with `getCommands`
+/// results (global/default scope) into menu rows. Bot-specific rows come
+/// first; global rows follow, skipping command names already listed, so a
+/// command defined in both scopes appears once (the bot-specific
+/// description wins).
+pub fn merge_command_menu_items(
+    specific: &[BotCommand],
+    global: &[BotCommand],
+) -> Vec<CommandMenuItem> {
+    let mut items: Vec<CommandMenuItem> = specific
+        .iter()
+        .map(|command| CommandMenuItem {
+            command: command.command.clone(),
+            description: command.description.clone(),
+            global: false,
+        })
+        .collect();
+    for command in global {
+        if items.iter().any(|item| item.command == command.command) {
+            continue;
+        }
+        items.push(CommandMenuItem {
+            command: command.command.clone(),
+            description: command.description.clone(),
+            global: true,
+        });
+    }
+    items
+}
+
+/// Phase 3.3: filter menu rows by the typed prefix (case-insensitive; bot
+/// commands are lowercase `a-z0-9_` but users may type capitals). An empty
+/// prefix matches everything.
+pub fn filter_command_menu_items<'a>(
+    items: &'a [CommandMenuItem],
+    prefix: &str,
+) -> Vec<&'a CommandMenuItem> {
+    let prefix = prefix.to_lowercase();
+    items
+        .iter()
+        .filter(|item| item.command.to_lowercase().starts_with(&prefix))
+        .collect()
 }
 
 /// Phase 3.2: composer text after tapping a `switchInline` keyboard button.
@@ -771,5 +855,122 @@ mod tests {
         assert_eq!(draft_text_to_store("  ", false), None);
         assert_eq!(draft_text_to_store("  ", true), Some("  "));
         assert_eq!(draft_text_to_store("hi", false), Some("hi"));
+    }
+
+    // Phase 3.3: `/` command-menu trigger / merge / filter.
+    fn bot_command(command: &str, description: &str) -> BotCommand {
+        BotCommand {
+            command: command.into(),
+            description: description.into(),
+        }
+    }
+
+    #[test]
+    fn command_menu_trigger_matches_trailing_slash_token() {
+        assert_eq!(command_menu_trigger("/"), Some(""));
+        assert_eq!(command_menu_trigger("/st"), Some("st"));
+        assert_eq!(command_menu_trigger("hello /st"), Some("st"));
+        assert_eq!(command_menu_trigger("hi\n/he"), Some("he"));
+        assert_eq!(command_menu_trigger("/ST"), Some("ST"));
+    }
+
+    #[test]
+    fn command_menu_trigger_rejects_mid_word_slashes() {
+        assert_eq!(command_menu_trigger(""), None);
+        assert_eq!(command_menu_trigger("hello"), None);
+        assert_eq!(command_menu_trigger("a/b"), None);
+        assert_eq!(command_menu_trigger("hello a/b"), None);
+        assert_eq!(command_menu_trigger("http://x"), None);
+        assert_eq!(command_menu_trigger("/a/b"), None);
+        assert_eq!(command_menu_trigger("//"), None);
+        // Trailing whitespace ends the token: the menu closes once the
+        // user commits the token with a space.
+        assert_eq!(command_menu_trigger("/start "), None);
+        assert_eq!(command_menu_trigger("hello /st "), None);
+    }
+
+    #[test]
+    fn strip_command_menu_trigger_removes_trailing_token() {
+        assert_eq!(strip_command_menu_trigger("/"), Some(""));
+        assert_eq!(strip_command_menu_trigger("/st"), Some(""));
+        assert_eq!(strip_command_menu_trigger("hello /st"), Some("hello "));
+        assert_eq!(strip_command_menu_trigger("hi\n/he"), Some("hi\n"));
+        assert_eq!(strip_command_menu_trigger("a/b"), None);
+        assert_eq!(strip_command_menu_trigger("/start "), None);
+    }
+
+    #[test]
+    fn merge_command_menu_items_prefers_specific_descriptions() {
+        let specific = vec![bot_command("start", "Start the bot")];
+        let global = vec![
+            bot_command("start", "Global start"),
+            bot_command("settings", "Tweak the bot"),
+        ];
+        let items = merge_command_menu_items(&specific, &global);
+        assert_eq!(items.len(), 2);
+        // Bot-specific rows first; the duplicate keeps the bot-specific
+        // description.
+        assert_eq!(
+            items[0],
+            CommandMenuItem {
+                command: "start".into(),
+                description: "Start the bot".into(),
+                global: false,
+            }
+        );
+        assert_eq!(
+            items[1],
+            CommandMenuItem {
+                command: "settings".into(),
+                description: "Tweak the bot".into(),
+                global: true,
+            }
+        );
+    }
+
+    #[test]
+    fn merge_command_menu_items_empty_sides() {
+        assert!(merge_command_menu_items(&[], &[]).is_empty());
+        let items = merge_command_menu_items(&[bot_command("start", "")], &[]);
+        assert_eq!(items.len(), 1);
+        assert!(!items[0].global);
+    }
+
+    #[test]
+    fn filter_command_menu_items_matches_prefix_case_insensitively() {
+        let items = vec![
+            CommandMenuItem {
+                command: "start".into(),
+                description: String::new(),
+                global: false,
+            },
+            CommandMenuItem {
+                command: "settings".into(),
+                description: String::new(),
+                global: true,
+            },
+            CommandMenuItem {
+                command: "help".into(),
+                description: String::new(),
+                global: false,
+            },
+        ];
+        let all: Vec<&str> = filter_command_menu_items(&items, "")
+            .iter()
+            .map(|item| item.command.as_str())
+            .collect();
+        assert_eq!(all, vec!["start", "settings", "help"]);
+        let st: Vec<&str> = filter_command_menu_items(&items, "st")
+            .iter()
+            .map(|item| item.command.as_str())
+            .collect();
+        assert_eq!(st, vec!["start"]);
+        // Capitalized input still matches lowercase commands.
+        let caps: Vec<&str> = filter_command_menu_items(&items, "ST")
+            .iter()
+            .map(|item| item.command.as_str())
+            .collect();
+        assert_eq!(caps, vec!["start"]);
+        assert!(filter_command_menu_items(&items, "zzz").is_empty());
     }
 }

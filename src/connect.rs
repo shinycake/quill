@@ -27,14 +27,14 @@ use crate::telegram::requests::{
     close_chat, close_request, delete_messages, download_file as download_file_request,
     edit_message_caption, edit_message_text, forward_messages, get_authorization_state,
     get_callback_query_answer, get_chat_history, get_chat_member, get_chat_sponsored_messages,
-    get_installed_sticker_sets, get_me, get_saved_animations, get_sticker_set, get_user_full_info,
-    input_message_photo, input_message_video, join_chat, leave_chat, load_chats, open_chat,
-    open_message_content, pin_chat_message, remove_message_reaction, report_chat_sponsored_message,
-    search_chat_messages, search_chats, search_messages, search_recently_found_chats,
-    send_animation, send_chat_action, send_chat_action_kind, send_document, send_message_album,
-    send_photo, send_sticker, send_text, send_video, send_video_note, send_voice_note,
-    set_authentication_phone_number, set_chat_draft_message, set_chat_notification_settings,
-    unpin_chat_message, view_messages, view_sponsored_chat,
+    get_commands, get_installed_sticker_sets, get_me, get_saved_animations, get_sticker_set,
+    get_user_full_info, input_message_photo, input_message_video, join_chat, leave_chat,
+    load_chats, open_chat, open_message_content, pin_chat_message, remove_message_reaction,
+    report_chat_sponsored_message, search_chat_messages, search_chats, search_messages,
+    search_recently_found_chats, send_animation, send_chat_action, send_chat_action_kind,
+    send_document, send_message_album, send_photo, send_sticker, send_text, send_video,
+    send_video_note, send_voice_note, set_authentication_phone_number, set_chat_draft_message,
+    set_chat_notification_settings, unpin_chat_message, view_messages, view_sponsored_chat,
 };
 use crate::voice::VoiceDraft;
 use std::path::Path;
@@ -490,6 +490,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if self.session.open_chat == Some(chat_id) {
             self.maybe_probe_channel_membership()?;
             self.maybe_fetch_bot_info()?;
+            self.maybe_fetch_bot_commands()?;
             self.maybe_view_open_messages()?;
             self.maybe_download_open_thumbs()?;
             self.fetch_sponsored_messages(chat_id)?;
@@ -505,6 +506,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.send_open_chat(chat_id)?;
         self.maybe_probe_channel_membership()?;
         self.maybe_fetch_bot_info()?;
+        self.maybe_fetch_bot_commands()?;
         self.maybe_view_open_messages()?;
         self.maybe_download_open_thumbs()?;
         self.fetch_sponsored_messages(chat_id)?;
@@ -598,6 +600,45 @@ impl<S: JsonSender> ConnectDriver<S> {
             .session
             .request(RequestPurpose::GetUserFullInfo, Some(chat_id));
         if let Err(err) = self.sender.send_json(&get_user_full_info(extra, user_id)) {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(())
+    }
+
+    /// Phase 3.3: `getCommands` for the open bot chat's global commands.
+    /// A null scope selects the default scope (`botCommandScopeDefault`,
+    /// schema 1.8.67 line 10360) with an empty language code. Fires once
+    /// per bot (deduped by cache and in-flight purpose) alongside the
+    /// `getUserFullInfo` fetch. The schema annotates `getCommands`
+    /// "for bots only" (TDLib 1.8.67 line 14953), so a user session gets
+    /// an `error` answer — recorded as an empty command set by
+    /// `Session::apply`, with no retry on later chat selections; the `/`
+    /// menu then shows the `botInfo` commands only.
+    fn maybe_fetch_bot_commands(&mut self) -> Result<(), ConnectSendError> {
+        if !self.chats_path_active() {
+            return Ok(());
+        }
+        let Some(chat_id) = self.session.open_chat else {
+            return Ok(());
+        };
+        let Some(user_id) = self.session.bot_user_id_for_chat(chat_id) else {
+            return Ok(());
+        };
+        if self.session.bot_commands.contains_key(&user_id) {
+            return Ok(());
+        }
+        if self
+            .session
+            .requests
+            .has_purpose_for_chat(RequestPurpose::GetCommands, chat_id)
+        {
+            return Ok(());
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::GetCommands, Some(chat_id));
+        if let Err(err) = self.sender.send_json(&get_commands(extra)) {
             self.session.requests.take(extra);
             return Err(err);
         }
@@ -3406,6 +3447,213 @@ mod tests {
         // A regular private chat never triggers the fetch.
         driver.select_chat(ChatId(22)).unwrap();
         assert_eq!(info_fetches().len(), 1);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn bot_commands_fetched_once_on_chat_open() {
+        // Phase 3.3: opening a bot chat lazily sends `getCommands` once
+        // (null scope selects the default scope, schema 1.8.67 line
+        // 14953). The `botCommands` response populates the cache and
+        // merges below the `botInfo` commands in `command_menu_items`;
+        // an `error` answer is recorded as an empty set so the fetch is
+        // never retried. Non-bot chats never trigger the fetch.
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = Arc::new(RecordingSender::new());
+        let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+        let mut driver =
+            ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+        let seq = AtomicU64::new(0);
+        driver
+            .ingest(
+                copy_and_parse(
+                    r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        // Bot private chat (id 21) and a regular private chat (id 22).
+        for json in [
+            r#"{"@type":"updateUser","user":{"id":21,"first_name":"Bot","type":{"@type":"userTypeBot","can_be_edited":false,"can_join_groups":false,"can_read_all_group_messages":false,"has_main_web_app":false,"has_topics":false,"allows_users_to_create_topics":false,"can_manage_bots":false,"is_inline":false,"inline_query_placeholder":"","supports_guest_queries":false,"is_guard":false,"need_location":false,"can_connect_to_business":false,"can_be_added_to_attachment_menu":false,"active_user_count":0}}}"#,
+            r#"{"@type":"updateNewChat","chat":{"id":21,"title":"Demo Bot","type":{"@type":"chatTypePrivate","user_id":21},"unread_count":0}}"#,
+            r#"{"@type":"updateNewChat","chat":{"id":22,"title":"Ada","type":{"@type":"chatTypePrivate","user_id":22},"unread_count":0}}"#,
+        ] {
+            driver
+                .ingest(copy_and_parse(json, &seq, &dyn_sink).unwrap())
+                .unwrap();
+        }
+
+        driver.select_chat(ChatId(21)).unwrap();
+        let cmd_fetches = || {
+            recorder
+                .snapshot()
+                .into_iter()
+                .filter(|j| j.contains("\"@type\":\"getCommands\""))
+                .collect::<Vec<_>>()
+        };
+        let first = cmd_fetches();
+        assert_eq!(first.len(), 1);
+        assert!(first[0].contains("\"scope\":null"));
+        assert!(first[0].contains("\"language_code\":\"\""));
+        let extra = driver
+            .session
+            .requests
+            .pending_extra_for(RequestPurpose::GetCommands, Some(ChatId(21)))
+            .expect("getCommands in flight");
+
+        // Re-selecting while the fetch is in flight sends nothing new.
+        driver.select_chat(ChatId(21)).unwrap();
+        assert_eq!(cmd_fetches().len(), 1);
+
+        // The `botCommands` response lands in the cache as global rows.
+        driver
+            .ingest(
+                copy_and_parse(
+                    &format!(
+                        r#"{{"@type":"botCommands","@extra":"{}","bot_user_id":21,"commands":[{{"@type":"botCommand","command":"settings","description":"CANARY_global","is_ephemeral":false}}]}}"#,
+                        extra.0,
+                    ),
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        let items = driver.session.command_menu_items(ChatId(21));
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].command, "settings");
+        assert_eq!(items[0].description, "CANARY_global");
+        assert!(items[0].global);
+        driver.select_chat(ChatId(21)).unwrap();
+        assert_eq!(cmd_fetches().len(), 1);
+
+        // `botInfo` commands merge first; duplicates keep the
+        // bot-specific description and are not repeated.
+        let full_extra = driver
+            .session
+            .request(RequestPurpose::GetUserFullInfo, Some(ChatId(21)));
+        driver
+            .ingest(
+                copy_and_parse(
+                    &format!(
+                        r#"{{"@type":"userFullInfo","@extra":"{}","bot_info":{{"@type":"botInfo","short_description":"","description":"","commands":[{{"@type":"botCommand","command":"start","description":"Start","is_ephemeral":false}},{{"@type":"botCommand","command":"settings","description":"Specific settings","is_ephemeral":false}}]}}}}"#,
+                        full_extra.0,
+                    ),
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        let items = driver.session.command_menu_items(ChatId(21));
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0].command, "start");
+        assert!(!items[0].global);
+        assert_eq!(items[1].command, "settings");
+        assert_eq!(items[1].description, "Specific settings");
+        assert!(!items[1].global);
+
+        // A regular private chat never triggers the fetch.
+        driver.select_chat(ChatId(22)).unwrap();
+        assert_eq!(cmd_fetches().len(), 1);
+        assert!(driver.session.command_menu_items(ChatId(22)).is_empty());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn bot_commands_error_absorbed_without_retry() {
+        // Phase 3.3: an `error` answer to `getCommands` (user sessions —
+        // the schema annotates the method "for bots only") is recorded as
+        // an empty command set, so opening the chat again does not
+        // refetch; the menu falls back to the `botInfo` commands.
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = Arc::new(RecordingSender::new());
+        let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+        let mut driver =
+            ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+        let seq = AtomicU64::new(0);
+        driver
+            .ingest(
+                copy_and_parse(
+                    r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        for json in [
+            r#"{"@type":"updateUser","user":{"id":21,"first_name":"Bot","type":{"@type":"userTypeBot","can_be_edited":false,"can_join_groups":false,"can_read_all_group_messages":false,"has_main_web_app":false,"has_topics":false,"allows_users_to_create_topics":false,"can_manage_bots":false,"is_inline":false,"inline_query_placeholder":"","supports_guest_queries":false,"is_guard":false,"need_location":false,"can_connect_to_business":false,"can_be_added_to_attachment_menu":false,"active_user_count":0}}}"#,
+            r#"{"@type":"updateNewChat","chat":{"id":21,"title":"Demo Bot","type":{"@type":"chatTypePrivate","user_id":21},"unread_count":0}}"#,
+        ] {
+            driver
+                .ingest(copy_and_parse(json, &seq, &dyn_sink).unwrap())
+                .unwrap();
+        }
+        // Seed `botInfo` so the fallback menu has rows after the error.
+        let full_extra = driver
+            .session
+            .request(RequestPurpose::GetUserFullInfo, Some(ChatId(21)));
+        driver
+            .ingest(
+                copy_and_parse(
+                    &format!(
+                        r#"{{"@type":"userFullInfo","@extra":"{}","bot_info":{{"@type":"botInfo","short_description":"","description":"","commands":[{{"@type":"botCommand","command":"start","description":"Start","is_ephemeral":false}}]}}}}"#,
+                        full_extra.0,
+                    ),
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+
+        driver.select_chat(ChatId(21)).unwrap();
+        let cmd_fetches = || {
+            recorder
+                .snapshot()
+                .into_iter()
+                .filter(|j| j.contains("\"@type\":\"getCommands\""))
+                .count()
+        };
+        assert_eq!(cmd_fetches(), 1);
+        let extra = driver
+            .session
+            .requests
+            .pending_extra_for(RequestPurpose::GetCommands, Some(ChatId(21)))
+            .expect("getCommands in flight");
+        driver
+            .ingest(
+                copy_and_parse(
+                    &format!(
+                        r#"{{"@type":"error","@extra":"{}","code":400,"message":"CANARY_bots_only"}}"#,
+                        extra.0,
+                    ),
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+
+        // The error records an empty set; re-opening the chat refetches
+        // nothing, and the menu shows the `botInfo` commands only.
+        driver.select_chat(ChatId(21)).unwrap();
+        assert_eq!(cmd_fetches(), 1);
+        let items = driver.session.command_menu_items(ChatId(21));
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].command, "start");
+        assert!(!items[0].global);
 
         let _ = std::fs::remove_dir_all(&dir);
     }

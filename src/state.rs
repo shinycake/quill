@@ -1,16 +1,18 @@
 use crate::auth::{AuthView, view_for};
+use crate::composer::{CommandMenuItem, merge_command_menu_items};
 use crate::diagnostics::{Diagnostic, DiagnosticSink};
 use crate::ids::{
     AccountGeneration, AccountKey, ChatId, FileId, MessageId, RequestId, ViewGeneration,
 };
 use crate::telegram::client::OwnedEnvelope;
 use crate::telegram::envelope::{
-    AnimationItem, AuthorizationState, BotInfo, CallbackQueryAnswer, ChannelMemberStatus,
-    ChatAction, ChatDraft, ChatJoinResult, ChatKind, ChatList, ChatNotificationSettings,
-    ChatPositionUpdate, ConnectionState, EnvelopePayload, ErrorClass, InlineKeyboard,
-    MessageContent, MessageForwardInfo, MessageInteractionInfo, MessageOrigin, MessageReaction,
-    MessageReplyTo, MessageSender, ParsedChatMember, ParsedFile, ParsedMessage, ReportOption,
-    ReportSponsoredResult, SponsoredMessage, StickerFormat, StickerItem, StickerSetInfo,
+    AnimationItem, AuthorizationState, BotCommand, BotInfo, CallbackQueryAnswer,
+    ChannelMemberStatus, ChatAction, ChatDraft, ChatJoinResult, ChatKind, ChatList,
+    ChatNotificationSettings, ChatPositionUpdate, ConnectionState, EnvelopePayload, ErrorClass,
+    InlineKeyboard, MessageContent, MessageForwardInfo, MessageInteractionInfo, MessageOrigin,
+    MessageReaction, MessageReplyTo, MessageSender, ParsedChatMember, ParsedFile, ParsedMessage,
+    ReportOption, ReportSponsoredResult, SponsoredMessage, StickerFormat, StickerItem,
+    StickerSetInfo,
 };
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
@@ -93,6 +95,12 @@ pub enum RequestPurpose {
     /// `getUserFullInfo` for a bot user. Response is `userFullInfo`; the
     /// user id is resolved from the request's chat (`ChatKind::Private`).
     GetUserFullInfo,
+    /// `getCommands` for a bot's global (default) command scope (Phase
+    /// 3.3). Response is `botCommands`; the user id is resolved from the
+    /// request's chat. The schema annotates the method "for bots only",
+    /// so a user session gets an `error` answer — absorbed silently, no
+    /// retry loop.
+    GetCommands,
     /// `getCallbackQueryAnswer` for an inline keyboard callback-button press
     /// (Phase 3.2). Response is `callbackQueryAnswer`; the answer is shown
     /// via the transient status line (URL answers open in the OS browser).
@@ -1253,6 +1261,11 @@ pub struct Session {
     /// by bot user id. `None` records "fetched, not a bot" so a null
     /// `bot_info` does not trigger a refetch loop.
     pub bot_info: HashMap<i64, Option<BotInfo>>,
+    /// Cached `getCommands` results for the default scope (a null `scope`
+    /// selects `botCommandScopeDefault`, Phase 3.3), keyed by bot user id. Presence records "fetched"
+    /// so the driver never retries — including when the response was an
+    /// `error` (user sessions; `getCommands` is annotated "for bots only").
+    pub bot_commands: HashMap<i64, Vec<BotCommand>>,
     /// Composer text changed since the last persisted draft. Remote
     /// `updateChatDraftMessage` must not replace it (schema comment).
     draft_dirty: HashSet<i64>,
@@ -1305,6 +1318,7 @@ impl Session {
             gifs: GifPanel::default(),
             bot_user_ids: HashSet::new(),
             bot_info: HashMap::new(),
+            bot_commands: HashMap::new(),
             draft_dirty: HashSet::new(),
             draft_clears: Vec::new(),
             sponsored: HashMap::new(),
@@ -1348,6 +1362,26 @@ impl Session {
         self.bot_user_id_for_chat(chat_id)
             .and_then(|user_id| self.bot_info.get(&user_id))
             .and_then(|info| info.as_ref())
+    }
+
+    /// Phase 3.3: merged `/`-menu rows for the open chat's bot — the
+    /// bot's `botInfo` commands first, then cached `getCommands`
+    /// (global scope) results below, deduped by command name. Empty for
+    /// non-bot chats, unknown chats, or when no commands are known yet.
+    pub fn command_menu_items(&self, chat_id: ChatId) -> Vec<CommandMenuItem> {
+        let Some(user_id) = self.bot_user_id_for_chat(chat_id) else {
+            return Vec::new();
+        };
+        let specific: &[BotCommand] = self
+            .bot_info_for_chat(chat_id)
+            .map(|info| info.commands.as_slice())
+            .unwrap_or(&[]);
+        let global: &[BotCommand] = self
+            .bot_commands
+            .get(&user_id)
+            .map(Vec::as_slice)
+            .unwrap_or(&[]);
+        merge_command_menu_items(specific, global)
     }
 
     pub fn mark_draft_dirty(&mut self, chat_id: ChatId) {
@@ -1842,6 +1876,19 @@ impl Session {
             EnvelopePayload::UpdateUserFullInfo { user_id, bot_info } => {
                 self.bot_info.insert(user_id.0, bot_info);
             }
+            EnvelopePayload::BotCommands {
+                bot_user_id,
+                commands,
+            } => {
+                // Phase 3.3: `getCommands` response — cache the global-scope
+                // commands for the bot. Only answers to our own fetch are
+                // cached (matched by `@extra`); a user session gets an
+                // `error` instead of `botCommands` (schema: "for bots
+                // only"), recorded as an empty set by the `Error` arm.
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetCommands) {
+                    self.bot_commands.insert(bot_user_id.0, commands);
+                }
+            }
             EnvelopePayload::UpdateChatMember { chat_id, member } => {
                 self.accept_own_chat_member(chat_id, member);
             }
@@ -1890,6 +1937,17 @@ impl Session {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::LoadChats) && err.code == 404
                 {
                     self.chats_exhausted = true;
+                }
+                // Phase 3.3: `getCommands` failed — on a user session the
+                // method is annotated "for bots only" (schema 1.8.67 line
+                // 14953), so the error is permanent. Record an empty set
+                // so the fetch is never retried; the `/` menu falls back
+                // to the bot's `botInfo` commands.
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetCommands)
+                    && let Some(chat_id) = pending.and_then(|p| p.chat_id)
+                    && let Some(user_id) = self.bot_user_id_for_chat(chat_id)
+                {
+                    self.bot_commands.entry(user_id).or_default();
                 }
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::ViewMessages)
                     && let Some(chat_id) = pending.and_then(|p| p.chat_id)

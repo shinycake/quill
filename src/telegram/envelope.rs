@@ -215,6 +215,17 @@ pub enum EnvelopePayload {
         user_id: UserId,
         bot_info: Option<BotInfo>,
     },
+    /// `botCommands` — `getCommands` response (TDLib 1.8.67,
+    /// `schema/td_api.tl:829`): the bot's commands for the requested scope
+    /// as a bare `vector<botCommand>`. The schema annotates `getCommands`
+    /// "for bots only" (line 14953); on a user session the response is an
+    /// `error` instead, which `Session::apply` absorbs silently. The
+    /// response's `bot_user_id` is cached as the global-scope command set
+    /// shown below the bot's `botInfo` commands in the 3.3 `/` menu.
+    BotCommands {
+        bot_user_id: UserId,
+        commands: Vec<BotCommand>,
+    },
     /// `ChatJoinResult` — `joinChat` response.
     JoinChatResult(ChatJoinResult),
     /// `callbackQueryAnswer` — response to `getCallbackQueryAnswer` after an
@@ -1773,6 +1784,19 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
                     .get("user_full_info")
                     .and_then(|info| info.get("bot_info")),
             ),
+        }),
+        "botCommands" => Ok(EnvelopePayload::BotCommands {
+            bot_user_id: UserId(int53(value.get("bot_user_id"))?),
+            commands: value
+                .get("commands")
+                .and_then(Value::as_array)
+                .map(|commands| {
+                    commands
+                        .iter()
+                        .filter_map(|command| parse_bot_command(Some(command)))
+                        .collect()
+                })
+                .unwrap_or_default(),
         }),
         "chatJoinResultSuccess" => Ok(EnvelopePayload::JoinChatResult(ChatJoinResult::Success {
             chat_id: ChatId(int53(value.get("chat_id"))?),
@@ -3597,6 +3621,57 @@ mod tests {
             }
             other => panic!("{other:?}"),
         }
+    }
+
+    #[test]
+    fn bot_commands_parsed_from_get_commands_response() {
+        // `botCommands` (schema 1.8.67 line 829): the `getCommands`
+        // response — `bot_user_id:int53` plus a bare
+        // `vector<botCommand>`, parsed with the same `parse_bot_command`
+        // as `botInfo.commands`.
+        let json = r#"{"@type":"botCommands","@extra":"9","bot_user_id":21,"commands":[{"@type":"botCommand","command":"settings","description":"Tweak the bot","is_ephemeral":false},{"@type":"botCommand","command":"help","description":"","is_ephemeral":false}]}"#;
+        let env = parse_envelope(json).unwrap();
+        match env.payload {
+            EnvelopePayload::BotCommands {
+                bot_user_id,
+                commands,
+            } => {
+                assert_eq!(bot_user_id.0, 21);
+                assert_eq!(commands.len(), 2);
+                assert_eq!(commands[0].command, "settings");
+                assert_eq!(commands[0].description, "Tweak the bot");
+                assert_eq!(commands[1].command, "help");
+                assert_eq!(commands[1].description, "");
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn bot_commands_parsed_without_command_list() {
+        // Missing/null `commands` degrades to an empty list rather than a
+        // parse failure — the menu then simply shows no global rows.
+        let json = r#"{"@type":"botCommands","@extra":"9","bot_user_id":21}"#;
+        let env = parse_envelope(json).unwrap();
+        match env.payload {
+            EnvelopePayload::BotCommands {
+                bot_user_id,
+                commands,
+            } => {
+                assert_eq!(bot_user_id.0, 21);
+                assert!(commands.is_empty());
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn bot_commands_rejects_missing_bot_user_id() {
+        // `bot_user_id:int53` is a required schema field (line 829) —
+        // a response without it is a parse error, not a cache entry
+        // under user id 0.
+        let json = r#"{"@type":"botCommands","@extra":"9","commands":[]}"#;
+        assert!(parse_envelope(json).is_err());
     }
 
     #[test]
