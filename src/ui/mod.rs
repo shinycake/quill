@@ -20,6 +20,7 @@ use quill::connect::{
 };
 use quill::credentials::TelegramCredentials;
 use quill::diagnostics::{DiagnosticSink, MemorySink};
+use quill::folders::FolderEditor;
 use quill::ids::{AccountKey, ChatId, FileId, MessageId};
 use quill::local_path::sandboxed_display_path;
 use quill::media_viewer::{MediaViewer, MediaViewerItem, MediaViewerKind, collect_media_items};
@@ -37,11 +38,12 @@ use quill::state::{
 use quill::story_viewer::{StoryViewer, StoryViewerItem, StoryViewerKind, collect_story_items};
 use quill::telegram::client::copy_and_parse;
 use quill::telegram::envelope::{
-    AuthorizationState, BotInfo, CallbackQueryAnswer, ChannelMemberStatus, ChatDraft, ChatKind,
-    ChatNotificationSettings, DEFAULT_EMOJI_REACTIONS, ForumTopic, InlineKeyboardButton,
-    InlineKeyboardButtonStyle, InlineKeyboardButtonType, MUTE_FOR_1_HOUR, MUTE_FOR_2_DAYS,
-    MUTE_FOR_8_HOURS, MUTE_FOREVER, MessageContent, MessageInteractionInfo, ParsedFile,
-    PollContent, PollOption, PollType, SponsoredMessage, toggle_chosen_emoji_reaction,
+    AuthorizationState, BotInfo, CallbackQueryAnswer, ChannelMemberStatus, ChatDraft,
+    ChatFolderInfo, ChatFolderSpec, ChatKind, ChatList, ChatNotificationSettings,
+    DEFAULT_EMOJI_REACTIONS, ForumTopic, InlineKeyboardButton, InlineKeyboardButtonStyle,
+    InlineKeyboardButtonType, MUTE_FOR_1_HOUR, MUTE_FOR_2_DAYS, MUTE_FOR_8_HOURS, MUTE_FOREVER,
+    MessageContent, MessageInteractionInfo, ParsedFile, PollContent, PollOption, PollType,
+    SponsoredMessage, toggle_chosen_emoji_reaction,
 };
 use quill::text::{TextEntity, styled_runs, utf8_to_utf16_offset};
 use quill::voice::{self, VoiceCapture, format_voice_duration};
@@ -233,6 +235,65 @@ impl AddContactDialog {
     }
 }
 
+/// Parity slice: create/edit chat-folder dialog. The editable folder model
+/// is [`FolderEditor`]; on save it freezes to a [`ChatFolderSpec`] sent via
+/// `createChatFolder` / `editChatFolder`.
+pub struct FolderEditorDialog {
+    /// `None` = create; `Some(id)` = edit.
+    folder_id: Option<i32>,
+    editor: FolderEditor,
+    name_input: Entity<TextareaState>,
+    /// Edit flow: waiting on `getChatFolder` before the editor prefills.
+    fetch_pending: bool,
+    error: Option<String>,
+}
+
+impl FolderEditorDialog {
+    fn new(window: &mut Window, cx: &mut Context<QuillApp>, folder_id: Option<i32>) -> Self {
+        let name_input = cx.new(|cx| {
+            TextareaState::new(window, cx)
+                .placeholder("Folder name (1–12 characters)")
+                .auto_grow(1, 1)
+                .submit_on_enter(false)
+        });
+        Self {
+            folder_id,
+            editor: FolderEditor::new(),
+            name_input,
+            fetch_pending: folder_id.is_some(),
+            error: None,
+        }
+    }
+
+    /// Prefill from the `getChatFolder` response (edit flow).
+    fn prefill_from_spec(
+        &mut self,
+        spec: &ChatFolderSpec,
+        window: &mut Window,
+        cx: &mut Context<QuillApp>,
+    ) {
+        self.editor = FolderEditor::from_spec(spec);
+        self.fetch_pending = false;
+        self.error = None;
+        let name = spec.name.clone();
+        self.name_input.update(cx, |input, cx| {
+            input.set_value(name, window, cx);
+        });
+    }
+
+    fn name(&self, cx: &App) -> String {
+        self.name_input.read(cx).value().to_string()
+    }
+}
+
+/// Parity slice: delete-folder confirmation. Optionally leaves suggested
+/// chats with the folder (`getChatFolderChatsToLeave`).
+pub struct FolderDeleteConfirm {
+    folder_id: i32,
+    name: String,
+    leave_with_folder: bool,
+}
+
 pub struct QuillApp {
     chat: Entity<SyntheticChat>,
     composer: Entity<TextareaState>,
@@ -361,6 +422,12 @@ pub struct QuillApp {
     /// Phase 6: add-contact dialog (phone + first/last name) opened from
     /// the user info panel.
     add_contact_dialog: Option<AddContactDialog>,
+    /// Parity slice: folder management (manage dialog / editor / delete
+    /// confirm / per-chat folder menu).
+    folder_manage_open: bool,
+    folder_editor: Option<FolderEditorDialog>,
+    folder_delete_confirm: Option<FolderDeleteConfirm>,
+    folder_menu_open: bool,
 }
 
 /// Forced UI surfaces for screenshot proof (no live Telegram / no real credentials).
@@ -495,6 +562,9 @@ pub enum ScreenshotDemo {
     /// positions) with the non-default "News" folder selected, so the chat
     /// list shows only that folder's chats.
     ReadyFolders,
+    /// Parity slice: folder manage dialog over the ReadyFolders fixture
+    /// (injected, no live Telegram).
+    ReadyFoldersManage,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1122,6 +1192,17 @@ impl QuillApp {
                     AuthorizationState::Ready,
                 )
             }
+            // Parity slice: same fixture as ReadyFolders; the demo block
+            // opens the manage dialog over it.
+            Some(ScreenshotDemo::ReadyFoldersManage) => {
+                demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
+                (
+                    ConnectUiStatus::DemoReadyChats,
+                    None,
+                    "screenshot demo — folder management (injected, no live Telegram)".into(),
+                    AuthorizationState::Ready,
+                )
+            }
             None => bootstrap_connect(credentials),
         };
 
@@ -1241,6 +1322,10 @@ impl QuillApp {
             pending_story_open: None,
             contacts_tab_open: false,
             folder_tab: None,
+            folder_manage_open: false,
+            folder_editor: None,
+            folder_delete_confirm: None,
+            folder_menu_open: false,
             add_contact_dialog: None,
         };
         if matches!(demo, Some(ScreenshotDemo::ReadyChatsComposer)) {
@@ -1466,6 +1551,16 @@ impl QuillApp {
             app.folder_tab = Some(2);
             app.status_note = "screenshot demo — folder tabs · News folder".into();
         }
+        // Parity slice: manage dialog over the same folder fixture.
+        if matches!(demo, Some(ScreenshotDemo::ReadyFoldersManage)) {
+            if let Some(session) = app.demo_session.as_mut() {
+                app.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_folders(session, &app.demo_sink, &app.demo_seq);
+            }
+            // Open the manage dialog over the folder fixture.
+            app.folder_manage_open = true;
+            app.status_note = "screenshot demo — folder management dialog".into();
+        }
         if matches!(demo, Some(ScreenshotDemo::ReadyVideoSend)) {
             app.composer.update(cx, |input, cx| {
                 input.set_value("sending a clip", window, cx);
@@ -1679,6 +1774,18 @@ impl QuillApp {
                 send_failed = true;
             }
             progressed = true;
+        }
+        // Parity slice: the selected folder tab may have been deleted or
+        // removed remotely (`updateChatFolders`); fall back to Main.
+        if let Some(folder_id) = self.folder_tab
+            && !live
+                .driver
+                .session
+                .chat_folders
+                .iter()
+                .any(|f| f.id == folder_id)
+        {
+            self.folder_tab = None;
         }
         let err = live.driver.session.last_auth_error;
         let new_auth = live.driver.session.auth.clone();
@@ -4856,9 +4963,6 @@ impl QuillApp {
                     .collect()
             })
             .unwrap_or_default();
-        if folders.is_empty() {
-            return div().into_any_element();
-        }
         let selected = self.folder_tab;
         let mut row = div()
             .id("folder-tabs")
@@ -4867,6 +4971,8 @@ impl QuillApp {
             .flex_wrap()
             .items_center()
             .gap_1();
+        // Parity slice: the manage entry is always present so folders can
+        // be created even when the account has none yet.
         let tabs: Vec<(Option<i32>, String)> = std::iter::once((None, "Main".to_string()))
             .chain(folders.into_iter().map(|(id, name)| (Some(id), name)))
             .collect();
@@ -4896,6 +5002,14 @@ impl QuillApp {
                     })),
             );
         }
+        row = row.child(
+            Button::new("folder-manage")
+                .label("⋯")
+                .ghost()
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.open_folder_manage(cx);
+                })),
+        );
         row.into_any_element()
     }
 
@@ -5476,6 +5590,533 @@ impl QuillApp {
         )
     }
 
+    /// Parity slice: folder manage / editor / delete-confirm overlays.
+    /// The editor replaces the manage list while open (modal flow).
+    fn folder_overlays(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        if self.folder_editor.is_some() {
+            return Some(self.folder_editor_overlay(cx));
+        }
+        if self.folder_delete_confirm.is_some() {
+            return Some(self.folder_delete_overlay(cx));
+        }
+        if self.folder_manage_open {
+            return Some(self.folder_manage_overlay(cx));
+        }
+        None
+    }
+
+    fn folder_backdrop(&self, cx: &mut Context<Self>, id: &str) -> AnyElement {
+        div()
+            .id(format!("{id}-backdrop"))
+            .absolute()
+            .top_0()
+            .left_0()
+            .right_0()
+            .bottom_0()
+            .bg(rgba(0x000000e6))
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.close_folder_manage(cx);
+            }))
+            .into_any_element()
+    }
+
+    fn folder_manage_overlay(&self, cx: &mut Context<Self>) -> AnyElement {
+        let session = self.session();
+        let tags_enabled = session.as_ref().is_some_and(|s| s.are_folder_tags_enabled);
+        let folders: Vec<(i32, String, usize)> = session
+            .as_ref()
+            .map(|s| {
+                s.chat_folders
+                    .iter()
+                    .map(|f| {
+                        let count = s
+                            .chats
+                            .values()
+                            .filter(|c| c.folder_positions.contains_key(&f.id))
+                            .count();
+                        (f.id, f.name.clone(), count)
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        let mut list = div().id("folder-manage-list").flex().flex_col().gap_1();
+        if folders.is_empty() {
+            list = list.child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("No folders yet. Create one to organize your chats."),
+            );
+        }
+        for (index, (folder_id, name, count)) in folders.iter().enumerate() {
+            let folder_id = *folder_id;
+            let is_first = index == 0;
+            let is_last = index + 1 == folders.len();
+            let name_label = format!("{name} ({count})");
+            list = list.child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .gap_2()
+                    .px_2()
+                    .py_1()
+                    .rounded_md()
+                    .child(div().text_sm().font_medium().child(name_label))
+                    .child(
+                        div()
+                            .flex()
+                            .gap_1()
+                            .child(
+                                Button::new(format!("folder-up-{folder_id}"))
+                                    .label("↑")
+                                    .ghost()
+                                    .when(is_first, |this| this.disabled(true))
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        this.move_folder(folder_id, true, cx);
+                                    })),
+                            )
+                            .child(
+                                Button::new(format!("folder-down-{folder_id}"))
+                                    .label("↓")
+                                    .ghost()
+                                    .when(is_last, |this| this.disabled(true))
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        this.move_folder(folder_id, false, cx);
+                                    })),
+                            )
+                            .child(
+                                Button::new(format!("folder-edit-{folder_id}"))
+                                    .label("Edit")
+                                    .ghost()
+                                    .on_click(cx.listener(move |this, _, window, cx| {
+                                        this.open_folder_edit(folder_id, window, cx);
+                                    })),
+                            )
+                            .child(
+                                Button::new(format!("folder-delete-{folder_id}"))
+                                    .label("Delete")
+                                    .ghost()
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        this.open_folder_delete(folder_id, cx);
+                                    })),
+                            ),
+                    ),
+            );
+        }
+        div()
+            .id("folder-manage-overlay")
+            .absolute()
+            .top_0()
+            .left_0()
+            .right_0()
+            .bottom_0()
+            .flex()
+            .items_center()
+            .justify_center()
+            .child(self.folder_backdrop(cx, "folder-manage"))
+            .child(
+                div()
+                    .id("folder-manage-panel")
+                    .flex()
+                    .flex_col()
+                    .gap_2()
+                    .p_4()
+                    .w(px(440.))
+                    .rounded_md()
+                    .border_1()
+                    .border_color(cx.theme().border)
+                    .bg(cx.theme().sidebar)
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .justify_between()
+                            .child(div().text_sm().font_semibold().child("Folders"))
+                            .child(
+                                Button::new("folder-manage-close")
+                                    .label("Close")
+                                    .ghost()
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.close_folder_manage(cx);
+                                    })),
+                            ),
+                    )
+                    .child(list)
+                    .child(
+                        div().flex().items_center().gap_2().child(
+                            Button::new("folder-tags-toggle")
+                                .label(if tags_enabled {
+                                    "☑ Show folder tags"
+                                } else {
+                                    "☐ Show folder tags"
+                                })
+                                .ghost()
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.toggle_folder_tags_ui(cx);
+                                })),
+                        ),
+                    )
+                    .child(
+                        Button::new("folder-create")
+                            .label("New folder")
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.open_folder_create(window, cx);
+                            })),
+                    ),
+            )
+            .into_any_element()
+    }
+
+    fn folder_editor_overlay(&self, cx: &mut Context<Self>) -> AnyElement {
+        div()
+            .id("folder-editor-overlay")
+            .absolute()
+            .top_0()
+            .left_0()
+            .right_0()
+            .bottom_0()
+            .flex()
+            .items_center()
+            .justify_center()
+            .child(self.folder_backdrop(cx, "folder-editor"))
+            .child(self.folder_editor_panel(cx))
+            .into_any_element()
+    }
+
+    /// Parity slice: create/edit folder form — name, include-type filters,
+    /// per-chat include/exclude multi-select, exclude flags.
+    fn folder_editor_panel(&self, cx: &mut Context<Self>) -> AnyElement {
+        let dialog = self.folder_editor.as_ref();
+        let title = match dialog.and_then(|d| d.folder_id) {
+            Some(_) => "Edit folder",
+            None => "New folder",
+        };
+        let mut panel = div()
+            .id("folder-editor-panel")
+            .flex()
+            .flex_col()
+            .gap_2()
+            .p_4()
+            .w(px(480.))
+            .rounded_md()
+            .border_1()
+            .border_color(cx.theme().border)
+            .bg(cx.theme().sidebar)
+            .child(div().text_sm().font_semibold().child(title));
+        let Some(dialog) = dialog else {
+            return panel.into_any_element();
+        };
+        panel = panel.child(Textarea::new(&dialog.name_input));
+        if let Some(error) = dialog.error.clone() {
+            panel = panel.child(
+                div()
+                    .id("folder-editor-error")
+                    .text_xs()
+                    .text_color(rgb(0xd44a3a))
+                    .child(error),
+            );
+        }
+        if dialog.fetch_pending {
+            return panel
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child("Loading folder…"),
+                )
+                .into_any_element();
+        }
+        // Include-type filters.
+        let include_filters = [
+            (
+                "Contacts",
+                dialog.editor.include_contacts,
+                "include-contacts",
+            ),
+            (
+                "Non-contacts",
+                dialog.editor.include_non_contacts,
+                "include-non-contacts",
+            ),
+            ("Groups", dialog.editor.include_groups, "include-groups"),
+            (
+                "Channels",
+                dialog.editor.include_channels,
+                "include-channels",
+            ),
+            ("Bots", dialog.editor.include_bots, "include-bots"),
+        ];
+        let mut filters_row = div().flex().flex_row().flex_wrap().gap_1().child(
+            div()
+                .text_xs()
+                .font_semibold()
+                .text_color(cx.theme().muted_foreground)
+                .child("Include types:"),
+        );
+        for (label, checked, key) in include_filters {
+            let mark = if checked { "☑" } else { "☐" };
+            filters_row = filters_row.child(
+                Button::new(format!("folder-filter-{key}"))
+                    .label(format!("{mark} {label}"))
+                    .ghost()
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        if let Some(dialog) = this.folder_editor.as_mut() {
+                            match key {
+                                "include-contacts" => {
+                                    dialog.editor.include_contacts =
+                                        !dialog.editor.include_contacts;
+                                }
+                                "include-non-contacts" => {
+                                    dialog.editor.include_non_contacts =
+                                        !dialog.editor.include_non_contacts;
+                                }
+                                "include-groups" => {
+                                    dialog.editor.include_groups = !dialog.editor.include_groups;
+                                }
+                                "include-channels" => {
+                                    dialog.editor.include_channels =
+                                        !dialog.editor.include_channels;
+                                }
+                                _ => {
+                                    dialog.editor.include_bots = !dialog.editor.include_bots;
+                                }
+                            }
+                        }
+                        cx.notify();
+                    })),
+            );
+        }
+        panel = panel.child(filters_row);
+        // Per-chat include/exclude multi-select.
+        let mut chats: Vec<(i64, String)> = self
+            .session()
+            .map(|s| {
+                s.chats
+                    .values()
+                    .map(|c| (c.id.0, c.title.clone()))
+                    .collect()
+            })
+            .unwrap_or_default();
+        chats.sort_by(|a, b| a.1.to_lowercase().cmp(&b.1.to_lowercase()));
+        let mut chat_list = div()
+            .id("folder-editor-chats")
+            .flex()
+            .flex_col()
+            .gap_1()
+            .overflow_y_scroll()
+            .max_h(px(220.))
+            .child(
+                div()
+                    .text_xs()
+                    .font_semibold()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("Chats (include / exclude):"),
+            );
+        for (chat_id, chat_title) in chats {
+            let included = dialog.editor.included.contains(&chat_id);
+            let excluded = dialog.editor.excluded.contains(&chat_id);
+            chat_list = chat_list.child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .gap_2()
+                    .px_2()
+                    .py_1()
+                    .rounded_md()
+                    .child(div().text_sm().min_w_0().child(chat_title))
+                    .child(
+                        div()
+                            .flex()
+                            .gap_1()
+                            .child(
+                                Button::new(("folder-include-chat", chat_id as u64))
+                                    .label(if included { "☑ In" } else { "☐ In" })
+                                    .ghost()
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        if let Some(dialog) = this.folder_editor.as_mut() {
+                                            dialog.editor.toggle_included(chat_id);
+                                        }
+                                        cx.notify();
+                                    })),
+                            )
+                            .child(
+                                Button::new(("folder-exclude-chat", chat_id as u64))
+                                    .label(if excluded { "☑ Out" } else { "☐ Out" })
+                                    .ghost()
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        if let Some(dialog) = this.folder_editor.as_mut() {
+                                            dialog.editor.toggle_excluded(chat_id);
+                                        }
+                                        cx.notify();
+                                    })),
+                            ),
+                    ),
+            );
+        }
+        panel = panel.child(chat_list);
+        // Exclude flags.
+        let exclude_flags = [
+            ("Muted", dialog.editor.exclude_muted, "exclude-muted"),
+            ("Read", dialog.editor.exclude_read, "exclude-read"),
+            (
+                "Archived",
+                dialog.editor.exclude_archived,
+                "exclude-archived",
+            ),
+        ];
+        let mut exclude_row = div().flex().flex_row().flex_wrap().gap_1().child(
+            div()
+                .text_xs()
+                .font_semibold()
+                .text_color(cx.theme().muted_foreground)
+                .child("Exclude:"),
+        );
+        for (label, checked, key) in exclude_flags {
+            let mark = if checked { "☑" } else { "☐" };
+            exclude_row = exclude_row.child(
+                Button::new(format!("folder-exclude-flag-{key}"))
+                    .label(format!("{mark} {label}"))
+                    .ghost()
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        if let Some(dialog) = this.folder_editor.as_mut() {
+                            match key {
+                                "exclude-muted" => {
+                                    dialog.editor.exclude_muted = !dialog.editor.exclude_muted;
+                                }
+                                "exclude-read" => {
+                                    dialog.editor.exclude_read = !dialog.editor.exclude_read;
+                                }
+                                _ => {
+                                    dialog.editor.exclude_archived =
+                                        !dialog.editor.exclude_archived;
+                                }
+                            }
+                        }
+                        cx.notify();
+                    })),
+            );
+        }
+        panel = panel.child(exclude_row).child(
+            div()
+                .flex()
+                .justify_end()
+                .gap_2()
+                .child(
+                    Button::new("folder-editor-cancel")
+                        .label("Cancel")
+                        .ghost()
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.folder_editor = None;
+                            cx.notify();
+                        })),
+                )
+                .child(
+                    Button::new("folder-editor-save")
+                        .label("Save")
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.save_folder_editor(cx);
+                        })),
+                ),
+        );
+        panel.into_any_element()
+    }
+
+    fn folder_delete_overlay(&self, cx: &mut Context<Self>) -> AnyElement {
+        let confirm = self.folder_delete_confirm.as_ref();
+        let mut panel = div()
+            .id("folder-delete-panel")
+            .flex()
+            .flex_col()
+            .gap_2()
+            .p_4()
+            .w(px(400.))
+            .rounded_md()
+            .border_1()
+            .border_color(cx.theme().border)
+            .bg(cx.theme().sidebar);
+        if let Some(confirm) = confirm {
+            let leave_count = self
+                .session()
+                .and_then(|s| s.folder_chats_to_leave.get(&confirm.folder_id))
+                .map(|ids| ids.len())
+                .unwrap_or(0);
+            let leave_label = if leave_count > 0 {
+                format!(
+                    "{} Also leave {leave_count} suggested chat{}",
+                    if confirm.leave_with_folder {
+                        "☑"
+                    } else {
+                        "☐"
+                    },
+                    if leave_count == 1 { "" } else { "s" },
+                )
+            } else {
+                "Also leave suggested chats".to_string()
+            };
+            panel = panel
+                .child(
+                    div()
+                        .text_sm()
+                        .font_semibold()
+                        .child(format!("Delete “{}”?", confirm.name)),
+                )
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child("Chats stay in your main list unless you leave them."),
+                )
+                .child(
+                    Button::new("folder-delete-leave-toggle")
+                        .label(leave_label)
+                        .ghost()
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            if let Some(confirm) = this.folder_delete_confirm.as_mut() {
+                                confirm.leave_with_folder = !confirm.leave_with_folder;
+                            }
+                            cx.notify();
+                        })),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .justify_end()
+                        .gap_2()
+                        .child(
+                            Button::new("folder-delete-cancel")
+                                .label("Cancel")
+                                .ghost()
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.folder_delete_confirm = None;
+                                    cx.notify();
+                                })),
+                        )
+                        .child(
+                            Button::new("folder-delete-confirm")
+                                .label("Delete")
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.confirm_folder_delete(cx);
+                                })),
+                        ),
+                );
+        }
+        div()
+            .id("folder-delete-overlay")
+            .absolute()
+            .top_0()
+            .left_0()
+            .right_0()
+            .bottom_0()
+            .flex()
+            .items_center()
+            .justify_center()
+            .child(self.folder_backdrop(cx, "folder-delete"))
+            .child(panel)
+            .into_any_element()
+    }
+
     fn add_poll_option_row(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(dialog) = self.poll_dialog.as_mut() else {
             return;
@@ -5741,6 +6382,314 @@ impl QuillApp {
             };
             cx.notify();
         }
+    }
+
+    // ------------------------------------------------------------------
+    // Parity slice: folder management (create / edit / delete / reorder /
+    // tags / per-chat membership).
+    // ------------------------------------------------------------------
+
+    fn open_folder_manage(&mut self, cx: &mut Context<Self>) {
+        self.folder_manage_open = true;
+        self.folder_editor = None;
+        self.folder_delete_confirm = None;
+        cx.notify();
+    }
+
+    fn close_folder_manage(&mut self, cx: &mut Context<Self>) {
+        self.folder_manage_open = false;
+        self.folder_editor = None;
+        self.folder_delete_confirm = None;
+        cx.notify();
+    }
+
+    fn open_folder_create(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.folder_editor = Some(FolderEditorDialog::new(window, cx, None));
+        cx.notify();
+    }
+
+    fn open_folder_edit(&mut self, folder_id: i32, window: &mut Window, cx: &mut Context<Self>) {
+        // Reuse the cached spec when the manage dialog just created it;
+        // otherwise fetch the full folder for the prefill.
+        let cached = self
+            .session()
+            .and_then(|s| s.folder_specs.get(&folder_id).cloned());
+        let mut dialog = FolderEditorDialog::new(window, cx, Some(folder_id));
+        if let Some(spec) = cached {
+            dialog.prefill_from_spec(&spec, window, cx);
+        } else if let Some(live) = self.live.as_mut()
+            && let Err(err) = live.driver.fetch_chat_folder(folder_id)
+        {
+            self.status_note = format!("could not load folder: {err:?}");
+        }
+        self.folder_editor = Some(dialog);
+        cx.notify();
+    }
+
+    /// Edit flow: once the `getChatFolder` spec arrives, prefill the open
+    /// editor (no-op for create, or when already prefilled).
+    fn maybe_prefill_folder_editor(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let folder_id = match self.folder_editor.as_ref() {
+            Some(dialog) if dialog.fetch_pending => dialog.folder_id,
+            _ => return,
+        };
+        let Some(folder_id) = folder_id else {
+            return;
+        };
+        let Some(spec) = self
+            .session()
+            .and_then(|s| s.folder_specs.get(&folder_id).cloned())
+        else {
+            return;
+        };
+        if let Some(dialog) = self.folder_editor.as_mut() {
+            dialog.prefill_from_spec(&spec, window, cx);
+        }
+        cx.notify();
+    }
+
+    fn save_folder_editor(&mut self, cx: &mut Context<Self>) {
+        let (name, folder_id) = match self.folder_editor.as_ref() {
+            Some(dialog) => (dialog.name(cx), dialog.folder_id),
+            None => return,
+        };
+        if let Some(dialog) = self.folder_editor.as_mut() {
+            dialog.editor.name = name;
+            if let Some(err) = dialog.editor.validate() {
+                dialog.error = Some(err.to_string());
+                cx.notify();
+                return;
+            }
+        }
+        let spec = self
+            .folder_editor
+            .as_ref()
+            .map(|dialog| dialog.editor.to_spec());
+        let Some(spec) = spec else { return };
+        let result = match self.live.as_mut() {
+            Some(live) => match folder_id {
+                Some(id) => live.driver.edit_chat_folder(id, &spec).map(|_| ()),
+                None => live.driver.create_chat_folder(&spec).map(|_| ()),
+            },
+            None => {
+                // Screenshot demo: apply locally so the manage dialog shows
+                // the change without live Telegram.
+                self.apply_demo_folder_save(folder_id, spec);
+                Ok(())
+            }
+        };
+        match result {
+            Ok(()) => {
+                self.folder_editor = None;
+                self.status_note = if folder_id.is_some() {
+                    "folder updated".into()
+                } else {
+                    "folder created".into()
+                };
+            }
+            Err(err) => {
+                if let Some(dialog) = self.folder_editor.as_mut() {
+                    dialog.error = Some(format!("could not save folder: {err:?}"));
+                }
+            }
+        }
+        cx.notify();
+    }
+
+    fn open_folder_delete(&mut self, folder_id: i32, cx: &mut Context<Self>) {
+        let name = self
+            .session()
+            .and_then(|s| s.chat_folders.iter().find(|f| f.id == folder_id))
+            .map(|f| f.name.clone())
+            .unwrap_or_else(|| format!("Folder {folder_id}"));
+        self.folder_delete_confirm = Some(FolderDeleteConfirm {
+            folder_id,
+            name,
+            leave_with_folder: false,
+        });
+        if let Some(live) = self.live.as_mut()
+            && let Err(err) = live.driver.fetch_chat_folder_chats_to_leave(folder_id)
+        {
+            self.status_note = format!("could not load folder chats: {err:?}");
+        }
+        cx.notify();
+    }
+
+    fn confirm_folder_delete(&mut self, cx: &mut Context<Self>) {
+        let Some(confirm) = self.folder_delete_confirm.take() else {
+            return;
+        };
+        let leave: Vec<i64> = if confirm.leave_with_folder {
+            self.session()
+                .and_then(|s| s.folder_chats_to_leave.get(&confirm.folder_id).cloned())
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+        let result = match self.live.as_mut() {
+            Some(live) => live
+                .driver
+                .delete_chat_folder(confirm.folder_id, &leave)
+                .map(|_| ()),
+            None => {
+                self.apply_demo_folder_delete(confirm.folder_id);
+                Ok(())
+            }
+        };
+        self.status_note = match result {
+            Ok(()) => "folder deleted".into(),
+            Err(err) => format!("could not delete folder: {err:?}"),
+        };
+        if self.folder_tab == Some(confirm.folder_id) {
+            self.folder_tab = None;
+        }
+        cx.notify();
+    }
+
+    fn move_folder(&mut self, folder_id: i32, up: bool, cx: &mut Context<Self>) {
+        let Some(session) = self.session() else {
+            return;
+        };
+        let mut ids: Vec<i32> = session.chat_folders.iter().map(|f| f.id).collect();
+        let Some(pos) = ids.iter().position(|&id| id == folder_id) else {
+            return;
+        };
+        let target = if up { pos.saturating_sub(1) } else { pos + 1 };
+        if target >= ids.len() || target == pos {
+            return;
+        }
+        ids.swap(pos, target);
+        let result = match self.live.as_mut() {
+            Some(live) => live.driver.reorder_chat_folders(&ids).map(|_| ()),
+            None => {
+                self.apply_demo_folder_reorder(&ids);
+                Ok(())
+            }
+        };
+        self.status_note = match result {
+            Ok(()) => "folders reordered".into(),
+            Err(err) => format!("could not reorder folders: {err:?}"),
+        };
+        cx.notify();
+    }
+
+    fn toggle_folder_tags_ui(&mut self, cx: &mut Context<Self>) {
+        let enabled = self
+            .session()
+            .map(|s| !s.are_folder_tags_enabled)
+            .unwrap_or(true);
+        let result = match self.live.as_mut() {
+            Some(live) => live.driver.toggle_chat_folder_tags(enabled).map(|_| ()),
+            None => {
+                if let Some(session) = self.demo_session.as_mut() {
+                    session.are_folder_tags_enabled = enabled;
+                }
+                Ok(())
+            }
+        };
+        self.status_note = match result {
+            Ok(()) if enabled => "folder tags on".into(),
+            Ok(()) => "folder tags off".into(),
+            Err(err) => format!("could not toggle folder tags: {err:?}"),
+        };
+        cx.notify();
+    }
+
+    fn open_folder_menu(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
+        self.folder_menu_open = true;
+        if let Some(live) = self.live.as_mut()
+            && let Err(err) = live.driver.fetch_chat_lists_to_add_chat(chat_id)
+        {
+            self.status_note = format!("could not load folder options: {err:?}");
+        }
+        cx.notify();
+    }
+
+    fn close_folder_menu(&mut self, cx: &mut Context<Self>) {
+        self.folder_menu_open = false;
+        cx.notify();
+    }
+
+    fn add_open_chat_to_folder(&mut self, chat_id: ChatId, folder_id: i32, cx: &mut Context<Self>) {
+        let result = match self.live.as_mut() {
+            Some(live) => live
+                .driver
+                .add_chat_to_folder(chat_id, folder_id)
+                .map(|_| ()),
+            None => Ok(()),
+        };
+        self.status_note = match result {
+            Ok(()) => "adding chat to folder…".into(),
+            Err(err) => format!("could not add chat to folder: {err:?}"),
+        };
+        self.folder_menu_open = false;
+        cx.notify();
+    }
+
+    fn remove_open_chat_from_folder(
+        &mut self,
+        chat_id: ChatId,
+        folder_id: i32,
+        cx: &mut Context<Self>,
+    ) {
+        let result = match self.live.as_mut() {
+            Some(live) => live.driver.remove_chat_from_folder(chat_id, folder_id),
+            None => Ok(()),
+        };
+        self.status_note = match result {
+            Ok(()) => "removing chat from folder…".into(),
+            Err(err) => format!("could not remove chat from folder: {err:?}"),
+        };
+        self.folder_menu_open = false;
+        cx.notify();
+    }
+
+    /// Parity slice: screenshot-demo folder create/edit (no live Telegram —
+    /// apply to the demo session directly).
+    fn apply_demo_folder_save(&mut self, folder_id: Option<i32>, spec: ChatFolderSpec) {
+        let Some(session) = self.demo_session.as_mut() else {
+            return;
+        };
+        match folder_id {
+            Some(id) => {
+                if let Some(info) = session.chat_folders.iter_mut().find(|f| f.id == id) {
+                    info.name = spec.name.clone();
+                }
+                session.folder_specs.insert(id, spec);
+            }
+            None => {
+                let id = session.chat_folders.iter().map(|f| f.id).max().unwrap_or(0) + 1;
+                session.chat_folders.push(ChatFolderInfo {
+                    id,
+                    name: spec.name.clone(),
+                    icon_name: String::new(),
+                    color_id: -1,
+                });
+                session.folder_specs.insert(id, spec);
+            }
+        }
+    }
+
+    /// Parity slice: screenshot-demo folder delete.
+    fn apply_demo_folder_delete(&mut self, folder_id: i32) {
+        let Some(session) = self.demo_session.as_mut() else {
+            return;
+        };
+        session.chat_folders.retain(|f| f.id != folder_id);
+        session.folder_specs.remove(&folder_id);
+        session.folder_chats_to_leave.remove(&folder_id);
+        session.folder_chats_exhausted.remove(&folder_id);
+    }
+
+    /// Parity slice: screenshot-demo folder reorder.
+    fn apply_demo_folder_reorder(&mut self, ids: &[i32]) {
+        let Some(session) = self.demo_session.as_mut() else {
+            return;
+        };
+        let order: HashMap<i32, usize> = ids.iter().enumerate().map(|(i, id)| (*id, i)).collect();
+        session
+            .chat_folders
+            .sort_by_key(|f| order.get(&f.id).copied().unwrap_or(usize::MAX));
     }
 
     fn apply_demo_archive(&mut self, chat_id: ChatId, archive: bool) {
@@ -6145,6 +7094,23 @@ impl QuillApp {
                                 .on_click(cx.listener(move |this, _, _, cx| {
                                     this.toggle_archive(chat_id, cx);
                                 })),
+                        )
+                        // Parity slice: per-chat folder picker — destinations
+                        // come from `getChatListsToAddChat`, as the schema
+                        // intends; removals go through `editChatFolder`
+                        // (there is no `removeChatFromList` in 1.8.67).
+                        .child(
+                            Button::new("chat-folders")
+                                .label("Folders")
+                                .ghost()
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    if this.folder_menu_open {
+                                        this.folder_menu_open = false;
+                                        cx.notify();
+                                    } else {
+                                        this.open_folder_menu(chat_id, cx);
+                                    }
+                                })),
                         ),
                 )
             })
@@ -6203,6 +7169,136 @@ impl QuillApp {
                     .child("1 hour, 8 hours, 2 days, or forever."),
             )
             .child(row)
+    }
+
+    /// Parity slice: per-chat folder picker below the header. Destinations
+    /// come from `getChatListsToAddChat` (as the schema intends); current
+    /// folder memberships render as remove rows (`editChatFolder` chain —
+    /// there is no `removeChatFromList` in 1.8.67).
+    fn folder_menu_panel(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let session = self.session();
+        let open = session.as_ref().and_then(|s| s.open_chat);
+        let mut panel = div()
+            .id("folder-menu")
+            .flex()
+            .flex_col()
+            .gap_1()
+            .px_4()
+            .py_2()
+            .border_b_1()
+            .border_color(cx.theme().border)
+            .bg(cx.theme().sidebar)
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .child(div().font_semibold().child("Chat folders"))
+                    .child(
+                        Button::new("close-folder-menu")
+                            .label("Close")
+                            .ghost()
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.close_folder_menu(cx);
+                            })),
+                    ),
+            );
+        let (Some(session), Some(chat_id)) = (session, open) else {
+            return panel
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child("No chat open."),
+                )
+                .into_any_element();
+        };
+        let folder_name = |id: i32| {
+            session
+                .chat_folders
+                .iter()
+                .find(|f| f.id == id)
+                .map(|f| f.name.clone())
+                .unwrap_or_else(|| format!("Folder {id}"))
+        };
+        let Some(lists) = session.chat_lists_for_add.get(&chat_id.0) else {
+            return panel
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child("Loading folder options…"),
+                )
+                .into_any_element();
+        };
+        if lists.is_empty() {
+            panel = panel.child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("No folder destinations available for this chat."),
+            );
+        }
+        for list in lists {
+            if let ChatList::Unknown = list {
+                continue;
+            }
+            let (label, id_suffix) = match list {
+                ChatList::Main => ("Move to main list".to_string(), "main".to_string()),
+                ChatList::Archive => ("Archive chat".to_string(), "archive".to_string()),
+                ChatList::Folder(folder_id) => (
+                    format!("Add to {}", folder_name(*folder_id)),
+                    format!("add-{folder_id}"),
+                ),
+                // Filtered above; kept for exhaustiveness.
+                ChatList::Unknown => (String::new(), "unknown".to_string()),
+            };
+            let list = *list;
+            panel = panel.child(
+                Button::new(format!("folder-menu-add-{id_suffix}"))
+                    .label(label)
+                    .ghost()
+                    .on_click(cx.listener(move |this, _, _, cx| match list {
+                        ChatList::Main => {
+                            if let Some(live) = this.live.as_mut()
+                                && let Err(err) = live.driver.unarchive_chat(chat_id)
+                            {
+                                this.status_note = format!("could not move chat: {err:?}");
+                            }
+                            this.folder_menu_open = false;
+                            cx.notify();
+                        }
+                        ChatList::Archive => {
+                            if let Some(live) = this.live.as_mut()
+                                && let Err(err) = live.driver.archive_chat(chat_id)
+                            {
+                                this.status_note = format!("could not archive chat: {err:?}");
+                            }
+                            this.folder_menu_open = false;
+                            cx.notify();
+                        }
+                        ChatList::Folder(folder_id) => {
+                            this.add_open_chat_to_folder(chat_id, folder_id, cx);
+                        }
+                        ChatList::Unknown => {}
+                    })),
+            );
+        }
+        // Current folder memberships (positional) render as remove rows.
+        if let Some(chat) = session.chats.get(&chat_id.0) {
+            for folder_id in chat.folder_positions.keys() {
+                let folder_id = *folder_id;
+                panel = panel.child(
+                    Button::new(format!("folder-menu-remove-{folder_id}"))
+                        .label(format!("Remove from {}", folder_name(folder_id)))
+                        .ghost()
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.remove_open_chat_from_folder(chat_id, folder_id, cx);
+                        })),
+                );
+            }
+        }
+        panel.into_any_element()
     }
 
     /// Phase 3.1: bot info panel rendered below the conversation header when
@@ -8188,6 +9284,9 @@ impl Render for QuillApp {
         self.flush_notifications(window, cx);
         // Phase 9.1: resolve a tapped story whose `story` response landed
         // since the click (`getStory` prefetch finished).
+        // Parity slice: prefill the folder editor once its `getChatFolder`
+        // spec arrives.
+        self.maybe_prefill_folder_editor(window, cx);
         if let Some((chat_id, story_id)) = self.pending_story_open {
             let ready = self
                 .session()
@@ -8284,6 +9383,11 @@ impl Render for QuillApp {
             })
             // Phase 6: add-contact dialog above everything else.
             .when_some(self.add_contact_dialog_overlay(cx), |this, overlay| {
+                this.child(overlay)
+            })
+            // Parity slice: folder manage / editor / delete-confirm above
+            // everything else.
+            .when_some(self.folder_overlays(cx), |this, overlay| {
                 this.child(overlay)
             })
     }
@@ -8830,6 +9934,10 @@ impl QuillApp {
             .when_some(self.bot_info_panel(cx), |this, panel| this.child(panel))
             .when(self.mute_menu_open, |this| {
                 this.child(self.mute_menu_panel(cx))
+            })
+            // Parity slice: per-chat folder picker below the header.
+            .when(self.folder_menu_open, |this| {
+                this.child(self.folder_menu_panel(cx))
             })
             .when_some(pinned, |this, message| {
                 this.child(self.pinned_message_banner(&message, cx))
@@ -9547,6 +10655,20 @@ impl QuillApp {
                     } else {
                         let open = self.session().and_then(|s| s.open_chat);
                         let folder = self.folder_tab;
+                        // Parity slice: folder names + tags flag for chat-row
+                        // chips.
+                        let (folder_names, show_folder_tags) = self
+                            .session()
+                            .map(|s| {
+                                (
+                                    s.chat_folders
+                                        .iter()
+                                        .map(|f| (f.id, f.name.clone()))
+                                        .collect::<Vec<_>>(),
+                                    s.are_folder_tags_enabled,
+                                )
+                            })
+                            .unwrap_or_default();
                         let chats: Vec<ChatSummary> = self
                             .session()
                             .map(|s| match folder {
@@ -9575,8 +10697,19 @@ impl QuillApp {
                         }
                         for chat in chats {
                             let selected = open == Some(chat.id);
-                            list = list.child(session_chat_row(&chat, selected, cx));
+                            list = list.child(session_chat_row(
+                                &chat,
+                                selected,
+                                &folder_names,
+                                show_folder_tags,
+                                cx,
+                            ));
                         }
+                        // Parity slice: folder chats page eagerly — the driver
+                        // re-requests `loadChats(chatListFolder)` after each
+                        // `ok` until a 404 marks the folder exhausted, the
+                        // same pattern as the main list. No "Load more"
+                        // button: paging is automatic, not user-triggered.
                         // Archive stays as-is under the main list; a folder
                         // tab shows only that folder's chats.
                         if folder.is_none() {
@@ -9596,7 +10729,13 @@ impl QuillApp {
                                 );
                                 for chat in archived {
                                     let selected = open == Some(chat.id);
-                                    list = list.child(session_chat_row(&chat, selected, cx));
+                                    list = list.child(session_chat_row(
+                                        &chat,
+                                        selected,
+                                        &folder_names,
+                                        show_folder_tags,
+                                        cx,
+                                    ));
                                 }
                             }
                         }
@@ -11229,12 +12368,25 @@ fn initials_avatar(name: &str, size: f32) -> impl IntoElement {
 fn session_chat_row(
     chat: &ChatSummary,
     selected: bool,
+    // Parity slice: `(folder id, name)` for folder-tag chips.
+    folders: &[(i32, String)],
+    // Parity slice: show folder-tag chips (`are_folder_tags_enabled`).
+    show_tags: bool,
     cx: &mut Context<QuillApp>,
 ) -> impl IntoElement {
     let id = chat.id;
     let title = chat.title.clone();
     let preview = chat.sidebar_preview();
     let badge = unread_badge_text(chat.unread_count);
+    let tags: Vec<String> = if show_tags {
+        folders
+            .iter()
+            .filter(|(folder_id, _)| chat.folder_positions.contains_key(folder_id))
+            .map(|(_, name)| name.clone())
+            .collect()
+    } else {
+        Vec::new()
+    };
     div()
         .id(("chat-row", id.0 as u64))
         .px_2()
@@ -11273,6 +12425,18 @@ fn session_chat_row(
                 .text_color(cx.theme().muted_foreground)
                 .child(preview),
         )
+        .when(!tags.is_empty(), |this| {
+            this.child(div().flex().flex_row().flex_wrap().gap_1().pt_1().children(
+                tags.into_iter().map(|name| {
+                    div()
+                        .px_1()
+                        .rounded_sm()
+                        .bg(cx.theme().accent.opacity(0.12))
+                        .text_xs()
+                        .child(name)
+                }),
+            ))
+        })
 }
 
 /// One `sponsoredMessage` row: Sponsored / Recommended label, title, content,

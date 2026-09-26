@@ -9,12 +9,12 @@ use crate::telegram::client::OwnedEnvelope;
 use crate::telegram::envelope::{
     AnimationItem, AuthorizationState, BotCommand, BotInfo, CallbackQueryAnswer,
     ChannelMemberStatus, ChatAction, ChatActiveStoriesView, ChatDraft, ChatFolderInfo,
-    ChatJoinResult, ChatKind, ChatList, ChatNotificationSettings, ChatPositionUpdate,
-    ConnectionState, EnvelopePayload, ErrorClass, ForumTopic, InlineKeyboard, MessageContent,
-    MessageForwardInfo, MessageInteractionInfo, MessageOrigin, MessageReaction, MessageReplyTo,
-    MessageSender, ParsedChatMember, ParsedFile, ParsedMessage, ParsedStory, ParsedUser, Poll,
-    ReportOption, ReportSponsoredResult, SponsoredMessage, StickerFormat, StickerItem,
-    StickerSetInfo, StoryListView,
+    ChatFolderSpec, ChatJoinResult, ChatKind, ChatList, ChatNotificationSettings,
+    ChatPositionUpdate, ConnectionState, EnvelopePayload, ErrorClass, ForumTopic, InlineKeyboard,
+    MessageContent, MessageForwardInfo, MessageInteractionInfo, MessageOrigin, MessageReaction,
+    MessageReplyTo, MessageSender, ParsedChatMember, ParsedFile, ParsedMessage, ParsedStory,
+    ParsedUser, Poll, ReportOption, ReportSponsoredResult, SponsoredMessage, StickerFormat,
+    StickerItem, StickerSetInfo, StoryListView,
 };
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
@@ -153,6 +153,39 @@ pub enum RequestPurpose {
     GetStory,
     OpenStory,
     CloseStory,
+    /// Parity slice: `createChatFolder`. Response is `chatFolderInfo`;
+    /// upserted into `Session::chat_folders` (`updateChatFolders` stays the
+    /// source of truth).
+    CreateChatFolder,
+    /// Parity slice: `editChatFolder`. Response is `chatFolderInfo`;
+    /// upserted into `Session::chat_folders`. Also the purpose of the
+    /// remove-from-folder chain (chat dropped from the folder's spec);
+    /// correlated via `PendingRequest::folder_id`.
+    EditChatFolder,
+    /// Parity slice: `deleteChatFolder`. Response is `ok`; the folder leaves
+    /// `Session::chat_folders` on ok (correlated via
+    /// `PendingRequest::folder_id`).
+    DeleteChatFolder,
+    /// Parity slice: `reorderChatFolders`. Response is `ok`; the tab order
+    /// is applied optimistically at send time and confirmed by the next
+    /// `updateChatFolders`.
+    ReorderChatFolders,
+    /// Parity slice: `toggleChatFolderTags`. Response is `ok`;
+    /// `Session::are_folder_tags_enabled` flips optimistically at send.
+    ToggleChatFolderTags,
+    /// Parity slice: `getChatFolder`. Response is the full `chatFolder`
+    /// spec, cached in `Session::folder_specs` (keyed by
+    /// `PendingRequest::folder_id`) for the edit dialog prefill and the
+    /// remove-from-folder chain.
+    GetChatFolder,
+    /// Parity slice: `getChatListsToAddChat`. Response is `chatLists`;
+    /// cached in `Session::chat_lists_for_add` (keyed by
+    /// `PendingRequest::chat_id`) for the per-chat folder picker.
+    GetChatListsToAddChat,
+    /// Parity slice: `getChatFolderChatsToLeave`. Response is `chats`;
+    /// cached in `Session::folder_chats_to_leave` (keyed by
+    /// `PendingRequest::folder_id`) for the delete-confirm dialog.
+    GetChatFolderChatsToLeave,
     Close,
     LogOut,
     Other,
@@ -299,6 +332,10 @@ pub struct PendingRequest {
     /// Phase 9.1: `story_id` for `GetStory` requests so in-flight
     /// per-story dedupe distinguishes stories of the same chat.
     pub story_id: Option<i32>,
+    /// Parity slice: `folder_id` for folder-scoped requests
+    /// (`GetChatFolder`, `EditChatFolder`, `DeleteChatFolder`,
+    /// `LoadFolderChats`) so responses correlate to the folder.
+    pub folder_id: Option<i32>,
 }
 
 #[derive(Debug, Default)]
@@ -332,6 +369,7 @@ impl RequestRegistry {
                 user_id: None,
                 supergroup_id: None,
                 story_id: None,
+                folder_id: None,
             },
         );
         id
@@ -360,6 +398,7 @@ impl RequestRegistry {
                 user_id: None,
                 supergroup_id: None,
                 story_id: None,
+                folder_id: None,
             },
         );
         id
@@ -389,6 +428,7 @@ impl RequestRegistry {
                 user_id: None,
                 supergroup_id: None,
                 story_id: None,
+                folder_id: None,
             },
         );
         id
@@ -418,6 +458,7 @@ impl RequestRegistry {
                 user_id: None,
                 supergroup_id: None,
                 story_id: None,
+                folder_id: None,
             },
         );
         id
@@ -445,6 +486,7 @@ impl RequestRegistry {
                 user_id: None,
                 supergroup_id: None,
                 story_id: None,
+                folder_id: None,
             },
         );
         id
@@ -509,6 +551,19 @@ impl RequestRegistry {
         })
     }
 
+    /// Parity slice: an in-flight request for a purpose/folder pair
+    /// (`GetChatFolder` / `LoadFolderChats` / folder mutations).
+    pub fn has_purpose_for_folder(&self, purpose: RequestPurpose, folder_id: i32) -> bool {
+        self.pending
+            .values()
+            .any(|p| p.purpose == purpose && p.folder_id == Some(folder_id))
+    }
+
+    /// Parity slice: the folder id stamped on an in-flight request, if any.
+    pub fn folder_id_for(&self, id: RequestId) -> Option<i32> {
+        self.pending.get(&id.0).and_then(|p| p.folder_id)
+    }
+
     /// The in-flight request id for a purpose/chat pair (test hook; the live
     /// path matches responses by `@extra`).
     pub fn pending_extra_for(
@@ -519,6 +574,19 @@ impl RequestRegistry {
         self.pending
             .values()
             .find(|p| p.purpose == purpose && p.chat_id == chat_id)
+            .map(|p| p.id)
+    }
+
+    /// Parity slice: the in-flight request id for a purpose/folder pair
+    /// (test hook; the live path matches responses by `@extra`).
+    pub fn pending_extra_for_folder(
+        &self,
+        purpose: RequestPurpose,
+        folder_id: i32,
+    ) -> Option<RequestId> {
+        self.pending
+            .values()
+            .find(|p| p.purpose == purpose && p.folder_id == Some(folder_id))
             .map(|p| p.id)
     }
 
@@ -1401,6 +1469,30 @@ pub struct Session {
     /// Phase 7.1: folder list from `updateChatFolders` (schema 1.8.67 line
     /// 10606). Empty until TDLib pushes the update (after authorization).
     pub chat_folders: Vec<ChatFolderInfo>,
+    /// Parity slice: `are_tags_enabled` from `updateChatFolders` (schema
+    /// 1.8.67 line 10606). When true, chat rows render folder-name tag
+    /// chips; toggled via `toggleChatFolderTags` (`:13376`).
+    pub are_folder_tags_enabled: bool,
+    /// Parity slice: cached full `chatFolder` specs from `getChatFolder`
+    /// responses (keyed by folder id) — edit dialog prefill and the
+    /// remove-from-folder chain. Stale entries are dropped when the folder
+    /// is edited or deleted.
+    pub folder_specs: HashMap<i32, ChatFolderSpec>,
+    /// Parity slice: `getChatListsToAddChat` results per chat id — the chat
+    /// lists a chat may be added to. Drives the per-chat folder picker as
+    /// the schema intends (`:13347` doc comment).
+    pub chat_lists_for_add: HashMap<i64, Vec<ChatList>>,
+    /// Parity slice: folder ids whose `loadChats(chatListFolder)` paging hit
+    /// 404 — no "load more" for these folders.
+    pub folder_chats_exhausted: HashSet<i32>,
+    /// Parity slice: queued remove-from-folder intents `(chat_id,
+    /// folder_id)`. The driver sends `getChatFolder`, then `editChatFolder`
+    /// with the chat dropped from the spec — there is no
+    /// `removeChatFromList` in 1.8.67.
+    pub folder_remove_queue: Vec<(ChatId, i32)>,
+    /// Parity slice: `getChatFolderChatsToLeave` results per folder id —
+    /// chats the delete-confirm dialog offers to leave with the folder.
+    pub folder_chats_to_leave: HashMap<i32, Vec<i64>>,
     pub histories: HashMap<i64, HistoryState>,
     pub open_chat: Option<ChatId>,
     /// Phase 8.1: whether the OS considers our window focused. The UI sets
@@ -1555,6 +1647,12 @@ impl Session {
             main_order: Vec::new(),
             archive_order: Vec::new(),
             chat_folders: Vec::new(),
+            are_folder_tags_enabled: false,
+            folder_specs: HashMap::new(),
+            chat_lists_for_add: HashMap::new(),
+            folder_chats_exhausted: HashSet::new(),
+            folder_remove_queue: Vec::new(),
+            folder_chats_to_leave: HashMap::new(),
             histories: HashMap::new(),
             open_chat: None,
             app_active: true,
@@ -1970,9 +2068,39 @@ impl Session {
                 self.apply_position_fields(pos);
                 self.rebuild_main_order();
             }
-            EnvelopePayload::UpdateChatFolders { folders } => {
+            EnvelopePayload::UpdateChatFolders {
+                folders,
+                are_tags_enabled,
+            } => {
                 // The update carries the full ordered list — replace.
                 self.chat_folders = folders;
+                self.are_folder_tags_enabled = are_tags_enabled;
+            }
+            EnvelopePayload::ChatFolderInfo(info) => {
+                // Parity slice: `createChatFolder` / `editChatFolder`
+                // response — upsert into the tab list so the UI reflects the
+                // change without waiting for `updateChatFolders` (which
+                // stays the source of truth).
+                match self.chat_folders.iter_mut().find(|f| f.id == info.id) {
+                    Some(existing) => *existing = info,
+                    None => self.chat_folders.push(info),
+                }
+            }
+            EnvelopePayload::ChatFolder { spec } => {
+                // Parity slice: `getChatFolder` response — cache the full
+                // spec for the edit dialog prefill / remove-from-folder
+                // chain (correlated via `PendingRequest::folder_id`).
+                if let Some(folder_id) = pending.and_then(|p| p.folder_id) {
+                    self.folder_specs.insert(folder_id, spec);
+                }
+            }
+            EnvelopePayload::ChatLists { lists } => {
+                // Parity slice: `getChatListsToAddChat` response — cache per
+                // chat for the folder picker (correlated via
+                // `PendingRequest::chat_id`).
+                if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
+                    self.chat_lists_for_add.insert(chat_id.0, lists);
+                }
             }
             EnvelopePayload::UpdateChatActiveStories { active_stories } => {
                 // Phase 9.1: keep the tray entry only for the main story
@@ -2118,6 +2246,15 @@ impl Session {
                 }
             }
             EnvelopePayload::Chats { chat_ids, .. } => {
+                // Parity slice: `getChatFolderChatsToLeave` response for the
+                // delete-confirm dialog (correlated via folder_id). Runs
+                // before the search branch below consumes `chat_ids`.
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetChatFolderChatsToLeave)
+                    && let Some(folder_id) = pending.and_then(|p| p.folder_id)
+                {
+                    self.folder_chats_to_leave
+                        .insert(folder_id, chat_ids.iter().map(|id| id.0).collect());
+                }
                 if self.search.matches_generation(pending) {
                     match pending.map(|p| p.purpose) {
                         Some(
@@ -2434,6 +2571,16 @@ impl Session {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::LoadChats) {
                     // A short OK is not exhaustion; 404 is.
                 }
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::DeleteChatFolder)
+                    && let Some(folder_id) = pending.and_then(|p| p.folder_id)
+                {
+                    // Parity slice: `deleteChatFolder` confirmed — drop the
+                    // tab and any cached spec. `updateChatFolders` stays the
+                    // source of truth and will confirm.
+                    self.chat_folders.retain(|f| f.id != folder_id);
+                    self.folder_specs.remove(&folder_id);
+                    self.folder_chats_exhausted.remove(&folder_id);
+                }
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::ViewMessages)
                     && let Some(chat_id) = pending.and_then(|p| p.chat_id)
                 {
@@ -2462,6 +2609,14 @@ impl Session {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::LoadChats) && err.code == 404
                 {
                     self.chats_exhausted = true;
+                }
+                // Parity slice: folder `loadChats` paging ends the same way
+                // as the main list — a 404 marks that folder exhausted.
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::LoadFolderChats)
+                    && err.code == 404
+                    && let Some(folder_id) = pending.and_then(|p| p.folder_id)
+                {
+                    self.folder_chats_exhausted.insert(folder_id);
                 }
                 // Phase 6: a failed `getContacts` surfaces a retry in the
                 // contacts tab instead of a stuck spinner.
@@ -3372,6 +3527,18 @@ impl Session {
         let id = self.request(purpose, Some(chat_id));
         if let Some(pending) = self.requests.pending.get_mut(&id.0) {
             pending.story_id = Some(story_id);
+        }
+        id
+    }
+
+    /// Parity slice: like `request`, but stamps the folder id for
+    /// folder-scoped requests (`GetChatFolder`, `EditChatFolder`,
+    /// `DeleteChatFolder`, `LoadFolderChats`) so responses correlate
+    /// (`PendingRequest::folder_id`).
+    pub fn request_for_folder(&mut self, purpose: RequestPurpose, folder_id: i32) -> RequestId {
+        let id = self.request(purpose, None);
+        if let Some(pending) = self.requests.pending.get_mut(&id.0) {
+            pending.folder_id = Some(folder_id);
         }
         id
     }
@@ -6276,6 +6443,31 @@ mod tests {
             r#"{"@type":"updateChatRemovedFromList","chat_id":5,"chat_list":{"@type":"chatListFolder","chat_folder_id":3}}"#,
         );
         assert!(session.ordered_folder_chats(3).is_empty());
+    }
+
+    // Parity slice: a `chats` response to `GetChatFolderChatsToLeave` is
+    // cached per folder id for the delete-confirm dialog; a `chats`
+    // response for another purpose must not touch the cache.
+    #[test]
+    fn folder_chats_to_leave_cached_per_folder() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        let extra = session.request_for_folder(RequestPurpose::GetChatFolderChatsToLeave, 3);
+        let json = format!(
+            r#"{{"@type":"chats","@extra":"{}","total_count":2,"chat_ids":[5,6]}}"#,
+            extra.0
+        );
+        apply_json(&mut session, &seq, &sink, &json);
+        assert_eq!(session.folder_chats_to_leave.get(&3), Some(&vec![5, 6]));
+        // Same payload shape, different purpose: cache untouched.
+        let extra2 = session.request(RequestPurpose::SearchChats, None);
+        let json2 = json.replace(
+            &format!("\"@extra\":\"{}\"", extra.0),
+            &format!("\"@extra\":\"{}\"", extra2.0),
+        );
+        session.folder_chats_to_leave.clear();
+        apply_json(&mut session, &seq, &sink, &json2);
+        assert!(!session.folder_chats_to_leave.contains_key(&3));
     }
 
     // Phase 7.2: `searchPublicChats` results land in `public_chat_ids` and
