@@ -3143,28 +3143,30 @@ fn parse_message_contact(value: &Value) -> (MessageContent, Vec<ParsedFile>) {
 /// `final_state` (`DiceStickers`) and `success_animation_frame_number` are
 /// dropped (see `DiceContent`); `emoji` falls back to 🎲 when empty.
 ///
-/// **Safe rule:** `value` is the rolled number and is required — a missing
-/// or non-integer `value` can't be displayed honestly, so the whole message
-/// becomes `Unsupported` (`messageDice`) instead of inventing a number.
+/// **Safe rule:** `value` is the rolled number and is required — a missing,
+/// non-integer, or out-of-`i32`-range `value` can't be displayed honestly,
+/// so the whole message becomes `Unsupported` (`messageDice`) instead of
+/// inventing (or wrapping) a number.
 fn parse_message_dice(value: &Value) -> (MessageContent, Vec<ParsedFile>) {
     let emoji = value
         .get("emoji")
         .and_then(Value::as_str)
         .unwrap_or("")
         .to_string();
+    let unsupported = (
+        MessageContent::Unsupported {
+            type_name: "messageDice".into(),
+        },
+        Vec::new(),
+    );
     let Some(number) = value.get("value").and_then(Value::as_i64) else {
-        return (
-            MessageContent::Unsupported {
-                type_name: "messageDice".into(),
-            },
-            Vec::new(),
-        );
+        return unsupported;
+    };
+    let Ok(value) = i32::try_from(number) else {
+        return unsupported;
     };
     (
-        MessageContent::Dice(DiceContent {
-            emoji,
-            value: number as i32,
-        }),
+        MessageContent::Dice(DiceContent { emoji, value }),
         Vec::new(),
     )
 }
@@ -5718,12 +5720,20 @@ mod channel_envelope_tests {
     // rendering nothing (the value still parses).
     #[test]
     fn message_dice_empty_emoji_falls_back_to_die() {
-        let dice = DiceContent {
-            emoji: String::new(),
-            value: 3,
-        };
-        assert_eq!(dice.face(), "🎲");
-        assert_eq!(dice.label(), "🎲 3");
+        // Parser-level: emoji present but empty in the JSON (not constructed
+        // directly) — the row falls back to 🎲.
+        let json = r#"{"@type":"updateNewMessage","message":{"id":116,"chat_id":17,"is_outgoing":false,"content":{"@type":"messageDice","emoji":"","value":3}}}"#;
+        let env = parse_envelope(json).unwrap();
+        match env.payload {
+            EnvelopePayload::UpdateNewMessage(message) => {
+                let MessageContent::Dice(dice) = &message.content else {
+                    panic!("{message:?}");
+                };
+                assert_eq!(dice.face(), "🎲");
+                assert_eq!(dice.label(), "🎲 3");
+            }
+            other => panic!("{other:?}"),
+        }
     }
 
     // Phase 4.3 safe rule: coordinates must be finite and in range; the
