@@ -481,7 +481,8 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     /// Select a chat, inform TDLib it is open, and request history.
-    /// Returns `None` if history is already complete or the chat is gated.
+    /// Returns `None` if history is already complete or a history request
+    /// is already in flight.
     pub fn select_chat(&mut self, chat_id: ChatId) -> Result<Option<RequestId>, ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
@@ -914,9 +915,9 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// `getChatSponsoredMessages` for a channel chat (TDLib 1.8.67). Called
     /// when a channel is opened; rows render Sponsored / Recommended.
-    /// Channels stay gated until Phase 2.2 — the fetch already runs so the
-    /// pipeline is proven with replay fixtures. Bot chats can also carry
-    /// sponsored messages per the schema; they are not fetched yet (2.2+).
+    /// The fetch already runs so the pipeline is proven with replay
+    /// fixtures. Bot chats can also carry sponsored messages per the
+    /// schema; they are not fetched yet (Phase 3).
     pub fn fetch_sponsored_messages(
         &mut self,
         chat_id: ChatId,
@@ -3115,20 +3116,20 @@ mod tests {
         assert!(send_json.contains(&format!("\"@extra\":\"{}\"", send_extra.0)));
         assert!(!sink.rendered().contains("CANARY_SEND"));
 
-        let gated = copy_and_parse(
+        let channel_no_post = copy_and_parse(
             r#"{"@type":"updateNewChat","chat":{"id":8,"title":"News","type":{"@type":"chatTypeSupergroup","supergroup_id":8,"is_channel":true},"unread_count":0}}"#,
             &seq,
             &dyn_sink,
         )
         .unwrap();
-        driver.ingest(gated).unwrap();
-        let gated_snap = crate::composer::ComposerSnapshot::capture(
+        driver.ingest(channel_no_post).unwrap();
+        let channel_snap = crate::composer::ComposerSnapshot::capture(
             ChatId(8),
             driver.session.view_generation,
             "nope",
         );
         assert_eq!(
-            driver.send_text_snapshot(&gated_snap),
+            driver.send_text_snapshot(&channel_snap),
             Err(ConnectSendError::InvalidRequest)
         );
         assert!(!sink.rendered().contains("CANARY_SEND"));
