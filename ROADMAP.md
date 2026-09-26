@@ -61,9 +61,12 @@ handling exists.
 
 ## Phase 4 — Message richness
 
-- **4.1 Text entities.** Bold, italic, underline, strikethrough, spoiler,
-  `code`, `pre` (`textEntityTypeBold` … `textEntityTypePreCode`) in message
-  text and captions. (URLs already done.)
+- **4.1 Text entities.** ✅ 2026-09-26 — Bold, italic, underline,
+  strikethrough, spoiler (tap-to-reveal), `code`, `pre` / `preCode`
+  (`textEntityTypeBold` … `textEntityTypePreCode`) in message text and
+  media captions; additive nesting, malformed spans dropped, unknown
+  types ignored. (URLs already done.)
+  `docs/screenshots/ready-text-entities.png`.
 - **4.2 Polls.** `messagePoll` display with bars and voter counts;
   `setPollAnswer` voting; `inputMessagePoll` creation from the composer.
 - **4.3 Location / venue / contact.** `messageLocation`, `messageVenue`,

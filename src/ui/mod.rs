@@ -34,8 +34,9 @@ use quill::telegram::envelope::{
     MUTE_FOR_8_HOURS, MUTE_FOREVER, MessageContent, MessageInteractionInfo, ParsedFile,
     SponsoredMessage, toggle_chosen_emoji_reaction,
 };
+use quill::text::{TextEntity, styled_runs, utf8_to_utf16_offset};
 use quill::voice::{self, VoiceCapture, format_voice_duration};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::Arc;
@@ -184,6 +185,9 @@ pub struct QuillApp {
     /// `ReadySponsored` fixture surface: the demo channel renders sponsored rows
     /// instead of history. Normal live path unchanged.
     sponsored_demo: bool,
+    /// Phase 4.1: revealed text-entity spoilers, keyed by
+    /// (message row id, run index, is-caption block).
+    spoiler_revealed: HashSet<(u64, u64, bool)>,
 }
 
 /// Forced UI surfaces for screenshot proof (no live Telegram / no real credentials).
@@ -268,6 +272,10 @@ pub enum ScreenshotDemo {
     /// scope) so the `/` command menu renders open above the composer
     /// with the bot-specific and "Global" sections (Phase 3.3).
     ReadyBotCommandMenu,
+    /// Text-entity demo (injected, no live Telegram): a message with mixed
+    /// entities (bold/italic/underline/strikethrough/spoiler/code/pre, incl.
+    /// nested runs) plus a photo whose caption carries entities (Phase 4.1).
+    ReadyTextEntities,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -774,6 +782,15 @@ impl QuillApp {
                     AuthorizationState::Ready,
                 )
             }
+            Some(ScreenshotDemo::ReadyTextEntities) => {
+                demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
+                (
+                    ConnectUiStatus::DemoReadyChats,
+                    None,
+                    "screenshot demo — text entities in text + caption".into(),
+                    AuthorizationState::Ready,
+                )
+            }
             None => bootstrap_connect(credentials),
         };
 
@@ -877,6 +894,7 @@ impl QuillApp {
             video_cache_file: None,
             pending_video_play: None,
             sponsored_demo: false,
+            spoiler_revealed: HashSet::new(),
         };
         if matches!(demo, Some(ScreenshotDemo::ReadyChatsComposer)) {
             app.composer.update(cx, |input, cx| {
@@ -1115,6 +1133,13 @@ impl QuillApp {
                 apply_ready_link_preview(session, &app.demo_sink, &app.demo_seq);
             }
             app.status_note = "screenshot demo — link preview".into();
+        }
+        if matches!(demo, Some(ScreenshotDemo::ReadyTextEntities)) {
+            if let Some(session) = app.demo_session.as_mut() {
+                app.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_text_entities(session, &app.demo_sink, &app.demo_seq);
+            }
+            app.status_note = "screenshot demo — text entities".into();
         }
         if matches!(demo, Some(ScreenshotDemo::ReadySponsored)) {
             if let Some(session) = app.demo_session.as_mut() {
@@ -6398,6 +6423,7 @@ impl QuillApp {
                         animation_frame,
                         video_playing,
                         video_frame,
+                        &self.spoiler_revealed,
                         cx,
                     );
                     list = list.child(
@@ -6487,6 +6513,7 @@ impl QuillApp {
                 &files,
                 &downloading,
                 &media_roots,
+                &self.spoiler_revealed,
                 cx,
             ));
         }
@@ -6832,6 +6859,95 @@ fn apply_ready_link_preview(session: &mut Session, sink: &Arc<MemorySink>, seq: 
     );
     if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
         session.apply(owned);
+    }
+}
+
+/// `ReadyTextEntities` fixture (Phase 4.1): open a dedicated "Demo entities"
+/// chat (id 14) holding a `messageText` with mixed entities
+/// (bold/italic/underline/strikethrough/spoiler/code/preCode with a `rust`
+/// language, incl. a nested bold-inside-italic run) plus a `messagePhoto`
+/// whose caption carries bold + link entities — all through the normal
+/// reducer, no live Telegram. Offsets are computed in UTF-16 code units via
+/// the same helper the parser uses.
+fn apply_ready_text_entities(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let thumb = demo_file_json(51, &demo_thumb_png_path(), true);
+    // A dedicated chat keeps the screenshot focused: just the two fixture
+    // messages, both visible without scrolling.
+    let chat_id = 14;
+    let chat_json = format!(
+        r#"{{"@type":"updateNewChat","chat":{{"id":{chat_id},"title":"Demo entities","type":{{"@type":"chatTypePrivate","user_id":{chat_id}}},"unread_count":0}}}}"#
+    );
+    let position_json = format!(
+        r#"{{"@type":"updateChatPosition","chat_id":{chat_id},"position":{{"@type":"chatPosition","list":{{"@type":"chatListMain"}},"order":"50","is_pinned":false}}}}"#
+    );
+    for json in [chat_json, position_json] {
+        if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
+            session.apply(owned);
+        }
+    }
+    session.open_chat(ChatId(chat_id));
+
+    let body = "Bold italic bolditalic underline strike secret code https://example.com\nfn demo() {\n  42\n}";
+    let span = |text: &str, needle: &str| -> (i32, i32) {
+        let start = text.find(needle).expect("demo needle");
+        let utf16_start = utf8_to_utf16_offset(text, start).expect("demo offset");
+        let utf16_end = utf8_to_utf16_offset(text, start + needle.len()).expect("demo offset");
+        (utf16_start, utf16_end - utf16_start)
+    };
+    let ent = |text: &str, needle: &str, type_json: &str| -> String {
+        let (offset, length) = span(text, needle);
+        format!(
+            r#"{{"@type":"textEntity","offset":{offset},"length":{length},"type":{type_json}}}"#
+        )
+    };
+    let bold = r#"{"@type":"textEntityTypeBold"}"#;
+    let entities = [
+        ent(body, "Bold", bold),
+        ent(body, "italic", r#"{"@type":"textEntityTypeItalic"}"#),
+        // Nested: bold inside italic renders bold italic.
+        ent(body, "bolditalic", bold),
+        ent(body, "bolditalic", r#"{"@type":"textEntityTypeItalic"}"#),
+        ent(body, "underline", r#"{"@type":"textEntityTypeUnderline"}"#),
+        ent(body, "strike", r#"{"@type":"textEntityTypeStrikethrough"}"#),
+        ent(body, "secret", r#"{"@type":"textEntityTypeSpoiler"}"#),
+        ent(body, "code", r#"{"@type":"textEntityTypeCode"}"#),
+        ent(
+            body,
+            "https://example.com",
+            r#"{"@type":"textEntityTypeUrl"}"#,
+        ),
+        ent(
+            body,
+            "fn demo() {\n  42\n}",
+            r#"{"@type":"textEntityTypePreCode","language":"rust"}"#,
+        ),
+    ]
+    .join(",");
+    let text_json = serde_json::to_string(body).unwrap();
+    let text_message = format!(
+        r#"{{"@type":"updateNewMessage","message":{{"id":104,"chat_id":14,"is_outgoing":false,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":{text_json},"entities":[{entities}]}}}}}}}}"#
+    );
+
+    let caption = "A captioned photo: bold caption and a link https://example.com/pic";
+    let caption_entities = [
+        ent(caption, "bold caption", bold),
+        ent(
+            caption,
+            "https://example.com/pic",
+            r#"{"@type":"textEntityTypeUrl"}"#,
+        ),
+    ]
+    .join(",");
+    let caption_json = serde_json::to_string(caption).unwrap();
+    let photo_message = format!(
+        r#"{{"@type":"updateNewMessage","message":{{"id":105,"chat_id":14,"is_outgoing":false,"content":{{"@type":"messagePhoto","photo":{{"@type":"photo","has_stickers":false,"sizes":[{{"@type":"photoSize","type":"m","photo":{thumb},"width":240,"height":160,"progressive_sizes":[]}}]}},"caption":{{"@type":"formattedText","text":{caption_json},"entities":[{caption_entities}]}},"has_spoiler":false,"is_secret":false}}}}}}"#
+    );
+
+    for json in [text_message, photo_message] {
+        if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
+            session.apply(owned);
+        }
     }
 }
 
@@ -7851,6 +7967,7 @@ fn sponsored_message_row(
     files: &HashMap<i32, ParsedFile>,
     downloading: &std::collections::HashSet<i32>,
     media_roots: &[PathBuf],
+    revealed: &std::collections::HashSet<(u64, u64, bool)>,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
     let row_id = message.message_id as u64;
@@ -7878,6 +7995,7 @@ fn sponsored_message_row(
             files,
             downloading,
             media_roots,
+            revealed,
             cx,
         )),
         MessageContent::Photo(photo) => Some(photo_attachment(
@@ -8382,6 +8500,7 @@ fn session_history_row(
     animation_frame: Option<PathBuf>,
     video_playing: bool,
     video_frame: Option<PathBuf>,
+    revealed: &std::collections::HashSet<(u64, u64, bool)>,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
     let quote = message.reply_to.as_ref().and_then(|reply| {
@@ -8552,6 +8671,7 @@ fn session_history_row(
             files,
             downloading,
             media_roots,
+            revealed,
             cx,
         )),
         _ => None,
@@ -8659,17 +8779,29 @@ fn session_history_row(
             )
             .into_any_element(),
     );
-    let body = match &message.content {
-        MessageContent::Text(_) => String::new(),
+    // Captions carry entities too (Phase 4.1); they render through the same
+    // rich-text path as message text. Everything else about captions is
+    // unchanged (order in the bubble, preview text, media attachments).
+    let caption: Option<(&str, &[TextEntity])> = match &message.content {
+        MessageContent::Photo(photo) => (!photo.caption.is_empty())
+            .then_some((photo.caption.as_str(), photo.caption_entities.as_slice())),
+        MessageContent::Document(doc) => (!doc.caption.is_empty())
+            .then_some((doc.caption.as_str(), doc.caption_entities.as_slice())),
+        MessageContent::Animation(animation) => (!animation.caption.is_empty()).then_some((
+            animation.caption.as_str(),
+            animation.caption_entities.as_slice(),
+        )),
+        MessageContent::Video(video) => (!video.caption.is_empty())
+            .then_some((video.caption.as_str(), video.caption_entities.as_slice())),
+        MessageContent::VoiceNote(note) => (!note.caption.is_empty())
+            .then_some((note.caption.as_str(), note.caption_entities.as_slice())),
+        MessageContent::Audio(audio) => (!audio.caption.is_empty())
+            .then_some((audio.caption.as_str(), audio.caption_entities.as_slice())),
+        _ => None,
+    };
+    let unsupported_body = match &message.content {
         MessageContent::Unsupported { type_name } => format!("({type_name})"),
-        MessageContent::Photo(photo) => photo.caption.clone(),
-        MessageContent::Document(doc) => doc.caption.clone(),
-        MessageContent::Sticker(_) => String::new(),
-        MessageContent::Animation(animation) => animation.caption.clone(),
-        MessageContent::Video(video) => video.caption.clone(),
-        MessageContent::VideoNote(_) => String::new(),
-        MessageContent::VoiceNote(note) => note.caption.clone(),
-        MessageContent::Audio(audio) => audio.caption.clone(),
+        _ => String::new(),
     };
     if let Some(text_body) = text_body {
         return session_bubble_rich(
@@ -8681,51 +8813,136 @@ fn session_history_row(
             header,
         );
     }
+    if let Some((caption_text, caption_entities)) = caption {
+        return session_bubble_rich(
+            message.id.0 as u64,
+            label,
+            message.is_outgoing,
+            rich_text_line(
+                caption_text,
+                caption_entities,
+                message.id.0 as u64,
+                true,
+                revealed,
+                cx,
+            ),
+            extra,
+            header,
+        );
+    }
     session_bubble_quoted(
         message.id.0 as u64,
         label,
-        body,
+        unsupported_body,
         message.is_outgoing,
         extra,
         header,
     )
 }
 
+/// Monospace family for `code` / `pre` entity runs (Phase 4.1). The generic
+/// family resolves through the platform font stack (fontconfig on Linux).
+const MONO_FONT: &str = "monospace";
+
+/// Render message text or a caption with text-entity styling (Phase 4.1).
+///
+/// Runs come from `styled_runs`, so nested entities combine additively
+/// (bold inside italic renders bold italic). `code` is a monospace chip,
+/// `pre` a full-width monospace block, and spoilers render as opaque blocks
+/// until tapped — reveal state lives on the app, keyed by
+/// `(row_id, run index, is_caption)`. Links keep their existing
+/// accent-color + open-on-click behavior.
+fn rich_text_line(
+    text: &str,
+    entities: &[TextEntity],
+    row_id: u64,
+    is_caption: bool,
+    revealed: &std::collections::HashSet<(u64, u64, bool)>,
+    cx: &mut Context<QuillApp>,
+) -> AnyElement {
+    let mut line = div()
+        .id(("msg-rich-text", row_id * 2 + is_caption as u64))
+        .text_sm()
+        .flex()
+        .flex_wrap()
+        .gap_0();
+    for (index, run) in styled_runs(text, entities).into_iter().enumerate() {
+        if run.text.is_empty() {
+            continue;
+        }
+        let run_id = format!("msg-run-{row_id}-{}-{index}", is_caption as u64);
+        let style = &run.style;
+        let revealed = !style.spoiler || revealed.contains(&(row_id, index as u64, is_caption));
+        if !revealed {
+            let key = (row_id, index as u64, is_caption);
+            line = line.child(
+                div()
+                    .id(run_id)
+                    .bg(rgb(0x444c56))
+                    .rounded_sm()
+                    .px_1()
+                    .text_color(rgb(0x444c56))
+                    .cursor_pointer()
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.spoiler_revealed.insert(key);
+                        cx.notify();
+                    }))
+                    .child(run.text),
+            );
+            continue;
+        }
+        let mut el = div().id(run_id);
+        if style.bold {
+            el = el.font_weight(FontWeight::BOLD);
+        }
+        if style.italic {
+            el = el.italic();
+        }
+        if style.underline {
+            el = el.underline();
+        }
+        if style.strikethrough {
+            el = el.line_through();
+        }
+        if style.code || style.pre {
+            el = el.font_family(MONO_FONT);
+        }
+        if style.pre {
+            el = el
+                .w_full()
+                .bg(rgb(0x22262d))
+                .rounded_md()
+                .px_2()
+                .py_1()
+                .my_1();
+        } else if style.code {
+            el = el.bg(rgb(0x444c56)).rounded_sm().px_1();
+        }
+        if let Some(href) = run.href {
+            el = el
+                .text_color(rgb(0x9ecbff))
+                .underline()
+                .cursor_pointer()
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.open_message_url(&href, cx);
+                }));
+        }
+        line = line.child(el.child(run.text));
+    }
+    line.into_any_element()
+}
+
+/// Read-only spoiler-reveal lookup without borrowing the app mutably.
 fn message_text_block(
     row_id: u64,
     text: &quill::telegram::envelope::TextContent,
     files: &HashMap<i32, ParsedFile>,
     downloading: &std::collections::HashSet<i32>,
     media_roots: &[PathBuf],
+    revealed: &std::collections::HashSet<(u64, u64, bool)>,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
-    let runs = quill::text::link_runs(&text.text, &text.entities);
-    let mut line = div()
-        .id(("msg-text", row_id))
-        .text_sm()
-        .flex()
-        .flex_wrap()
-        .gap_0();
-    if runs.is_empty() {
-        line = line.child(text.text.clone());
-    }
-    for (index, run) in runs.into_iter().enumerate() {
-        if let Some(href) = run.href.clone() {
-            line = line.child(
-                div()
-                    .id(("msg-link", row_id * 32 + index as u64))
-                    .text_color(rgb(0x9ecbff))
-                    .underline()
-                    .cursor_pointer()
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.open_message_url(&href, cx);
-                    }))
-                    .child(run.text),
-            );
-        } else if !run.text.is_empty() {
-            line = line.child(run.text);
-        }
-    }
+    let line = rich_text_line(&text.text, &text.entities, row_id, false, revealed, cx);
     let card = text.link_preview.as_ref().and_then(|preview| {
         preview
             .has_card()
