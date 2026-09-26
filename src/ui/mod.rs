@@ -2,7 +2,7 @@ mod synthetic;
 
 use gpui_kit::component::button::*;
 use gpui_kit::component::input::{InputEvent, Textarea, TextareaState};
-use gpui_kit::component::slider::{Slider, SliderEvent, SliderState};
+use gpui_kit::component::slider::{Slider, SliderEvent, SliderState, SliderValue};
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
@@ -3544,17 +3544,19 @@ impl QuillApp {
         if self.playing_voice.is_some() {
             self.kill_shared_player();
         }
-        self.playing_voice = None;
+        // Save the position before clearing the id: clear_playback_state
+        // reads active_playback_id().
         self.clear_playback_state();
+        self.playing_voice = None;
     }
 
     fn stop_audio_playback(&mut self) {
         if self.playing_audio.is_some() {
             self.kill_shared_player();
         }
+        self.clear_playback_state();
         self.playing_audio = None;
         self.pending_audio_play = None;
-        self.clear_playback_state();
     }
 
     /// Drop the seek-bar state for the active track (clock, slider entity,
@@ -3762,11 +3764,15 @@ impl QuillApp {
                             .as_ref()
                             .is_some_and(|clock| clock.is_playing() && clock.finished());
                         if finished && !this.seek_scrubbing {
-                            if let Some(id) = this.active_playback_id() {
-                                this.playback_positions.insert(id, 0.0);
-                            }
+                            // Capture the id first: the stops below save the
+                            // (now end-of-track) position via clear_playback_state,
+                            // then reset to 0.0 so replay-after-finish starts at the top.
+                            let finished_id = this.active_playback_id();
                             this.stop_voice_playback();
                             this.stop_audio_playback();
+                            if let Some(id) = finished_id {
+                                this.playback_positions.insert(id, 0.0);
+                            }
                             this.status_note = "playback finished".into();
                         }
                         cx.notify();
@@ -3796,9 +3802,15 @@ impl QuillApp {
             (self.seek_slider.as_ref(), self.playback_clock.as_ref())
         {
             let value = clock.elapsed_secs().clamp(0.0, clock.duration_secs()) as f32;
-            slider.update(cx, |state, cx| {
-                state.set_value(value, window, cx);
-            });
+            // `set_value` calls `cx.notify()` unconditionally — only push when
+            // the value actually changed, otherwise this render-triggered sync
+            // loops at frame rate instead of the tick cadence.
+            let changed = slider.read(cx).value() != SliderValue::Single(value);
+            if changed {
+                slider.update(cx, |state, cx| {
+                    state.set_value(value, window, cx);
+                });
+            }
         }
     }
 
