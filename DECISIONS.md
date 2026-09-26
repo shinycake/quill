@@ -2639,6 +2639,68 @@ str0m/webrtc/grammers/opus/cpal sources. Even Option A's light build
 couldn't fully link here (no Opus), and Option B's WebRTC requirement is
 orders of magnitude beyond it.
 
+## Phase C2a — engine procurement (2026-09-26)
+
+**Rationale.** The C2 spike's blocker ("needs a clang+WebRTC builder —
+beyond this sandbox") is dissolved: `pytgcalls/ntgcalls` v3.0.0 (released
+2026-09-25) publishes prebuilt shared libraries, including
+`ntgcalls.linux-x86_64-shared_libs.zip` with `lib/libntgcalls.so` (125MB,
+Linux x86_64) + `include/ntgcalls.h` (C API). The engine question is
+settled by procurement, not construction — this slice vendors the
+prebuilt engine and writes the FFI crate. Same release ships
+`macos-arm64` and `windows-x86_64` shared_libs zips for the
+cross-platform story (Linux x86_64 only in this slice).
+
+**What was vendored and verified (human-direct, not delegated).**
+- `scripts/vendor-ntgcalls.sh`: downloads the pinned release asset,
+  verifies SHA256
+  `b28f99eec39ae62a9c612da1e16b2884c5662f32c52effc0d985a6918f2831f0`
+  (no checksums are published on the release page, so this is the
+  implementer-observed hash; the script fails loudly on mismatch), and
+  extracts into `vendor/ntgcalls/` (git-ignored — the 125MB `.so` is
+  NEVER committed). Re-runnable.
+- Verified against the artifact itself: `nm -D` shows 76 defined
+  `ntg_*` symbols with proper `visibility("default")`; dlopen-able.
+  `ntg_get_version()` returns `"3.0.0"` via the loader smoke test.
+- `crates/ntgcalls-sys/`: hand-written `extern "C"` declarations for all
+  76 exported functions + every type/callback in `ntgcalls.h`, each
+  signature checked verbatim against the vendored header. Notable
+  correction vs the brief: there is **no `ntg_destroy`** — instance
+  lifecycle is `ntg_create_p2p_call`/`ntg_create_call`/`ntg_init_conference`
+  on a `ntg_instance_create` handle, ended with `ntg_stop` +
+  `ntg_instance_destroy`. Pattern studied from
+  `YouKnow-sys/ntgcalls-rs` (`libntgcalls-sys`), but deliberately
+  **not** their link-time approach: Quill's crate resolves everything at
+  runtime via `libloading` (NO link-time dependency on the `.so`).
+- `Loader` (in the `-sys` crate): `load(path)` / `load_default()` (env
+  `QUILL_NTGCALLS_LIB` → exe-ancestor `vendor/ntgcalls/lib/libntgcalls.so`
+  → system `libntgcalls.so`); fails with a clear diagnostic
+  (`LoadError::LibraryMissing` naming every searched location, or
+  `LoadError::SymbolMissing` naming the symbol) when the sidecar is
+  absent — the call UI keeps its honest "no audio yet" stance until C2b
+  wires this.
+- Smoke test (`tests/dlopen_smoke.rs`): skips gracefully when the `.so`
+  is not vendored; otherwise asserts the key roadmap symbols resolve
+  (lifecycle, signaling bridge, mute/pause/resume, `ntg_get_media_devices`,
+  E2E fingerprint, video, presentation, `ntg_get_protocol`) and that
+  `ntg_get_version()` is a non-empty C string. No network, no audio.
+- **License: LGPLv3 confirmed** — full license text fetched from the
+  repo's `master` LICENSE (opens "GNU LESSER GENERAL PUBLIC LICENSE,
+  Version 3") and GitHub API reports `LGPL-3.0`. Compliance via the
+  dlopen sidecar already reasoned in the C2 spike: dynamic loading, no
+  static link, attribution + source-offer wording in `THIRD_PARTY.md`
+  (source: https://github.com/pytgcalls/ntgcalls, tag v3.0.0,
+  unmodified).
+
+**Out of this slice (→ C2b/C2c).** Wiring signaling to TDLib
+(`sendCallSignalingData` ← `signalingDataEmitted`,
+`updateNewCallSignalingData` → `receiveSignalingData`); the `CallEngine`
+trait (a mock keeps tests green until then); real audio I/O; device UI;
+video frames; group calls on the engine. **Explicit C2b gate:** verify
+ntgcalls 3.0.0 speaks the call-protocol version TDLib 1.8.67 negotiates
+(min layer 65 / max from `ntg_get_protocol`, `library_versions`) before
+shipping real audio.
+
 ## Phase C3a — group-call signaling surface (2026-09-26)
 
 **Scope: chat-bound voice chats, signaling only.** No audio/video

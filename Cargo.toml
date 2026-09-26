@@ -1,3 +1,7 @@
+[workspace]
+members = [".", "crates/ntgcalls-sys"]
+resolver = "2"
+
 [package]
 name = "quill"
 version = "0.1.0"
