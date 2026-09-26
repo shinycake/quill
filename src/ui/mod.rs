@@ -27,7 +27,7 @@ use quill::state::{
 };
 use quill::telegram::client::copy_and_parse;
 use quill::telegram::envelope::{
-    AuthorizationState, ChannelMemberStatus, ChatDraft, ChatNotificationSettings,
+    AuthorizationState, BotInfo, ChannelMemberStatus, ChatDraft, ChatNotificationSettings,
     DEFAULT_EMOJI_REACTIONS, MUTE_FOR_1_HOUR, MUTE_FOR_2_DAYS, MUTE_FOR_8_HOURS, MUTE_FOREVER,
     MessageContent, MessageInteractionInfo, ParsedFile, SponsoredMessage,
     toggle_chosen_emoji_reaction,
@@ -246,6 +246,11 @@ pub enum ScreenshotDemo {
     /// (`rights.can_post_messages: true`), so the composer is visible above
     /// the broadcast posts (Phase 2.3).
     ReadyChannelsAdmin,
+    /// Bot chat demo (injected, no live Telegram): private chat with a
+    /// `userTypeBot` user (id 21), opened with history plus a cached
+    /// `botInfo` (description + commands), so the bot panel renders under
+    /// the header and the composer is visible (Phase 3.1).
+    ReadyBotChat,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -714,6 +719,15 @@ impl QuillApp {
                     AuthorizationState::Ready,
                 )
             }
+            Some(ScreenshotDemo::ReadyBotChat) => {
+                demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
+                (
+                    ConnectUiStatus::DemoReadyChats,
+                    None,
+                    "screenshot demo — bot chat with info panel".into(),
+                    AuthorizationState::Ready,
+                )
+            }
             None => bootstrap_connect(credentials),
         };
 
@@ -1075,6 +1089,13 @@ impl QuillApp {
                 apply_ready_channels_admin(session, &app.demo_sink, &app.demo_seq);
             }
             app.status_note = "screenshot demo — broadcast channel admin".into();
+        }
+        if matches!(demo, Some(ScreenshotDemo::ReadyBotChat)) {
+            if let Some(session) = app.demo_session.as_mut() {
+                app.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_bot_chat(session, &app.demo_sink, &app.demo_seq);
+            }
+            app.status_note = "screenshot demo — bot chat with info panel".into();
         }
         if app.live.is_some() {
             app.spawn_poll_loop(cx);
@@ -3848,6 +3869,72 @@ impl QuillApp {
             .child(row)
     }
 
+    /// Phase 3.1: bot info panel rendered below the conversation header when
+    /// the open chat is a bot chat with cached `botInfo` (lazy
+    /// `getUserFullInfo` on chat open). Shows the bot description and its
+    /// command list; tapping a command inserts it into the composer (the
+    /// full `/` command menu is 3.3). Returns `None` when there is no bot
+    /// info to show.
+    fn bot_info_panel(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let session = self.session()?;
+        let open = session.open_chat?;
+        let info: BotInfo = session.bot_info_for_chat(open)?.clone();
+        if info.description.is_empty() && info.commands.is_empty() {
+            return None;
+        }
+        let mut panel = div()
+            .id("bot-info")
+            .flex()
+            .flex_col()
+            .gap_1()
+            .px_4()
+            .py_2()
+            .border_b_1()
+            .border_color(cx.theme().border)
+            .bg(cx.theme().sidebar)
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("Bot"),
+            );
+        if !info.description.is_empty() {
+            panel = panel.child(div().text_sm().child(info.description.clone()));
+        }
+        if !info.commands.is_empty() {
+            let mut row = div().id("bot-commands").flex().flex_wrap().gap_1();
+            for command in &info.commands {
+                let name = command.command.clone();
+                let label = if command.description.is_empty() {
+                    format!("/{name}")
+                } else {
+                    format!("/{name} — {}", command.description)
+                };
+                row = row.child(
+                    Button::new(format!("bot-command-{name}"))
+                        .label(label)
+                        .ghost()
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            this.insert_bot_command(&name, window, cx);
+                        })),
+                );
+            }
+            panel = panel.child(row);
+        }
+        Some(panel.into_any_element())
+    }
+
+    /// Phase 3.1: insert a tapped bot command into the composer. Empty
+    /// composer → the bare command; otherwise appended after a space (3.3
+    /// owns the full `/` menu).
+    fn insert_bot_command(&mut self, command: &str, window: &mut Window, cx: &mut Context<Self>) {
+        self.composer.update(cx, |input, cx| {
+            let next =
+                quill::composer::insert_bot_command_text(&input.value().to_string(), command);
+            input.set_value(next, window, cx);
+        });
+    }
+
     fn pinned_message_banner(
         &self,
         message: &HistoryMessage,
@@ -5807,6 +5894,7 @@ impl QuillApp {
             .min_h_0()
             .min_w_0()
             .child(self.conversation_header(&title, chat_actions, peer_typing, cx))
+            .when_some(self.bot_info_panel(cx), |this, panel| this.child(panel))
             .when(self.mute_menu_open, |this| {
                 this.child(self.mute_menu_panel(cx))
             })
@@ -6445,6 +6533,39 @@ fn apply_ready_channels(session: &mut Session, sink: &Arc<MemorySink>, seq: &Ato
         // Live view-count bump on the first post.
         r#"{"@type":"updateMessageInteractionInfo","chat_id":13,"message_id":201,"interaction_info":{"@type":"messageInteractionInfo","view_count":12402,"forward_count":7,"reply_info":null,"reactions":null}}"#
             .to_string(),
+    ];
+    for json in jsons {
+        if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
+            session.apply(owned);
+        }
+    }
+}
+
+/// `ReadyBotChat` fixture (Phase 3.1): a private chat with a bot user —
+/// `updateUser` marks user 21 `userTypeBot` (schema 1.8.67 line 816) —
+/// opened with history, plus a `getUserFullInfo` round-trip whose
+/// `userFullInfo` response caches `botInfo` (description + commands) so the
+/// bot panel renders under the header. Bot chats ride the ordinary
+/// private-chat path, so the composer stays visible.
+fn apply_ready_bot_chat(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    session.open_chat(ChatId(21));
+    let info_extra = session.request(RequestPurpose::GetUserFullInfo, Some(ChatId(21)));
+    let jsons = [
+        r#"{"@type":"updateUser","user":{"id":21,"first_name":"Demo","type":{"@type":"userTypeBot","can_be_edited":false,"can_join_groups":false,"can_read_all_group_messages":false,"has_main_web_app":false,"has_topics":false,"allows_users_to_create_topics":false,"can_manage_bots":false,"is_inline":false,"inline_query_placeholder":"","supports_guest_queries":false,"is_guard":false,"need_location":false,"can_connect_to_business":false,"can_be_added_to_attachment_menu":false,"active_user_count":0}}}"#
+            .to_string(),
+        r#"{"@type":"updateNewChat","chat":{"id":21,"title":"Demo Bot","type":{"@type":"chatTypePrivate","user_id":21},"unread_count":0}}"#
+            .to_string(),
+        r#"{"@type":"updateChatPosition","chat_id":21,"position":{"@type":"chatPosition","list":{"@type":"chatListMain"},"order":"40","is_pinned":false}}"#
+            .to_string(),
+        r#"{"@type":"updateNewMessage","message":{"id":301,"chat_id":21,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"Hi! I'm Demo Bot. Tap a command below to try it.","entities":[]}}}}"#
+            .to_string(),
+        r#"{"@type":"updateNewMessage","message":{"id":302,"chat_id":21,"is_outgoing":true,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"/start","entities":[]}}}}"#
+            .to_string(),
+        format!(
+            r#"{{"@type":"userFullInfo","@extra":"{}","bot_info":{{"@type":"botInfo","short_description":"A demo bot","description":"Demo Bot answers questions and shows how the info panel looks. It understands /start, /help and /ping.","commands":[{{"@type":"botCommand","command":"start","description":"Start the bot","is_ephemeral":false}},{{"@type":"botCommand","command":"help","description":"Show help","is_ephemeral":false}},{{"@type":"botCommand","command":"ping","description":"Check latency","is_ephemeral":false}}]}}}}"#,
+            info_extra.0,
+        ),
     ];
     for json in jsons {
         if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {

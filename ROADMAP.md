@@ -42,8 +42,10 @@ handling exists.
 
 ## Phase 3 — Bots
 
-- **3.1 Bot chats.** Private chats with `userTypeBot` users ungated; bot info
-  panel (`getUserFullInfo` → `bot_info`: description, commands).
+- **3.1 Bot chats.** ✅ done 2026-09-26 — Private chats with `userTypeBot`
+  users ungated; bot info panel (`getUserFullInfo` → `bot_info`:
+  description, commands) with tap-to-insert command buttons.
+  `docs/screenshots/ready-bot-chat.png`.
 - **3.2 Inline keyboards.** Render `replyMarkupInlineKeyboard` under bot
   messages; callback buttons → `answerCallbackQuery`; URL buttons → OS open;
   `switchInline` buttons → insert query in the chosen chat's composer.

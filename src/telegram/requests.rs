@@ -257,6 +257,18 @@ pub fn get_chat_member(extra: RequestId, chat_id: ChatId, user_id: i64) -> Strin
     .to_string()
 }
 
+/// `getUserFullInfo` for a bot user (TDLib 1.8.67,
+/// `getUserFullInfo user_id:int53 = UserFullInfo`). Response is
+/// `userFullInfo`; `bot_info` feeds the bot panel.
+pub fn get_user_full_info(extra: RequestId, user_id: i64) -> String {
+    json!({
+        "@type": "getUserFullInfo",
+        "@extra": extra.as_extra(),
+        "user_id": user_id,
+    })
+    .to_string()
+}
+
 /// `joinChat` for a public channel (TDLib 1.8.67). Response is
 /// `ChatJoinResult`.
 pub fn join_chat(extra: RequestId, chat_id: ChatId) -> String {
