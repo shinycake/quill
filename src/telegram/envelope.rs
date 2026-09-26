@@ -115,6 +115,10 @@ pub enum EnvelopePayload {
         /// self-destruct (secret chats) timer, in seconds; 0 when
         /// disabled. Refreshed by `updateChatMessageAutoDeleteTime`.
         message_auto_delete_time: i32,
+        /// Phase C3a: `chat.video_chat` (`videoChat`, schema 1.8.67,
+        /// lines 3576 / 3579 / 3627). `None` when `group_call_id` is 0
+        /// (no active video chat).
+        video_chat: Option<ParsedVideoChat>,
     },
     /// `updateChatDraftMessage`. Positions are the new chat-list orders.
     UpdateChatDraftMessage {
@@ -202,7 +206,53 @@ pub enum EnvelopePayload {
     CallId {
         id: i32,
     },
+    /// Phase C3a: `groupCallId` (schema 1.8.67, line 7037) — the
+    /// `createVideoChat` answer. Correlated via `@extra` /
+    /// `RequestPurpose::CreateVideoChat`.
+    GroupCallId {
+        id: i32,
+    },
+    /// Phase C3a: `updateGroupCall` (schema 1.8.67, line 10819) — a
+    /// group call was created or its information was updated.
+    UpdateGroupCall {
+        group_call: ParsedGroupCall,
+    },
+    /// Phase C3a: `updateGroupCallParticipant` (schema 1.8.67, line
+    /// 10824) — information about a group call participant changed.
+    UpdateGroupCallParticipant {
+        group_call_id: i32,
+        participant: ParsedGroupCallParticipant,
+    },
+    /// Phase C3a: `updateGroupCallParticipants` (schema 1.8.67, line
+    /// 10830) — the participant list changed; carries only user ids.
+    UpdateGroupCallParticipants {
+        group_call_id: i32,
+        participant_user_ids: Vec<i64>,
+    },
+    /// Phase C3a: `updateGroupCallVerificationState` (schema 1.8.67,
+    /// line 10836) — E2E verification emojis for the group call.
+    UpdateGroupCallVerificationState {
+        group_call_id: i32,
+        generation: i32,
+        emojis: Vec<String>,
+    },
+    /// Phase C3a: `updateChatVideoChat` (schema 1.8.67, line 10576) —
+    /// a chat's video chat changed.
+    UpdateChatVideoChat {
+        chat_id: i64,
+        video_chat: ParsedVideoChat,
+    },
     Ok,
+    /// Phase C3a: `text` (schema 1.8.67, line 10071) — the
+    /// `joinVideoChat` answer (join payload for tgcalls).
+    Text {
+        text: String,
+    },
+    /// Phase C3a: `httpUrl` (schema 1.8.67, line 7458) — the
+    /// `getVideoChatInviteLink` answer.
+    HttpUrl {
+        url: String,
+    },
     Error(TdError),
     Messages(Vec<ParsedMessage>),
     Message(ParsedMessage),
@@ -893,6 +943,206 @@ fn parse_call(value: Option<&Value>) -> Option<ParsedCall> {
             .and_then(Value::as_bool)
             .unwrap_or(false),
         state: CallState::from_value(value.get("state")),
+    })
+}
+
+/// Phase C3a: `groupCall` subset (TDLib 1.8.67, `schema/td_api.tl:7154`).
+/// Only the fields the signaling surface needs are parsed: identity,
+/// join state, admin rights, participant bookkeeping, self video
+/// state, and recent speakers. Video/RTMP/record fields are dropped —
+/// media transport is Phase C2.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParsedGroupCall {
+    pub id: i32,
+    pub title: String,
+    pub is_active: bool,
+    pub is_video_chat: bool,
+    pub is_joined: bool,
+    pub need_rejoin: bool,
+    pub is_owned: bool,
+    pub can_be_managed: bool,
+    pub participant_count: i32,
+    pub loaded_all_participants: bool,
+    /// `(participant_id, is_speaking)` from
+    /// `groupCallRecentSpeaker` (schema 1.8.67, line 7118).
+    pub recent_speakers: Vec<(MessageSender, bool)>,
+    pub is_my_video_enabled: bool,
+    pub is_my_video_paused: bool,
+    pub can_enable_video: bool,
+    pub mute_new_participants: bool,
+    pub can_toggle_mute_new_participants: bool,
+    pub scheduled_start_date: i32,
+}
+
+fn parse_group_call(value: Option<&Value>) -> Option<ParsedGroupCall> {
+    let value = value?;
+    let recent_speakers = value
+        .get("recent_speakers")
+        .and_then(Value::as_array)
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|item| {
+                    let participant_id = parse_message_sender(item.get("participant_id")).ok()?;
+                    let is_speaking = item
+                        .get("is_speaking")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false);
+                    Some((participant_id, is_speaking))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    Some(ParsedGroupCall {
+        id: value.get("id").and_then(Value::as_i64).unwrap_or(0) as i32,
+        title: value
+            .get("title")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string(),
+        is_active: value
+            .get("is_active")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        is_video_chat: value
+            .get("is_video_chat")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        is_joined: value
+            .get("is_joined")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        need_rejoin: value
+            .get("need_rejoin")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        is_owned: value
+            .get("is_owned")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        can_be_managed: value
+            .get("can_be_managed")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        participant_count: value
+            .get("participant_count")
+            .and_then(Value::as_i64)
+            .unwrap_or(0) as i32,
+        loaded_all_participants: value
+            .get("loaded_all_participants")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        recent_speakers,
+        is_my_video_enabled: value
+            .get("is_my_video_enabled")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        is_my_video_paused: value
+            .get("is_my_video_paused")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        can_enable_video: value
+            .get("can_enable_video")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        mute_new_participants: value
+            .get("mute_new_participants")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        can_toggle_mute_new_participants: value
+            .get("can_toggle_mute_new_participants")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        scheduled_start_date: value
+            .get("scheduled_start_date")
+            .and_then(Value::as_i64)
+            .unwrap_or(0) as i32,
+    })
+}
+
+/// Phase C3a: `groupCallParticipant` subset (TDLib 1.8.67,
+/// `schema/td_api.tl:7184`). Video info fields
+/// (`video_info`/`screen_sharing_video_info`) are skipped — no media
+/// transport until Phase C2. An empty `order` means the participant
+/// must be removed from the list (schema note on `order`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParsedGroupCallParticipant {
+    pub participant_id: MessageSender,
+    pub audio_source_id: i32,
+    pub is_current_user: bool,
+    pub is_speaking: bool,
+    pub is_hand_raised: bool,
+    pub can_be_muted_for_all_users: bool,
+    pub can_be_unmuted_for_all_users: bool,
+    pub can_be_muted_for_current_user: bool,
+    pub can_be_unmuted_for_current_user: bool,
+    pub is_muted_for_all_users: bool,
+    pub is_muted_for_current_user: bool,
+    pub can_unmute_self: bool,
+    pub volume_level: i32,
+    pub order: String,
+    /// Phase C3a: `video_info != null` / `screen_sharing_video_info !=
+    /// null` (schema 1.8.67, line 7184).
+    pub video_enabled: bool,
+    pub screen_sharing_enabled: bool,
+}
+
+fn parse_group_call_participant(value: Option<&Value>) -> Option<ParsedGroupCallParticipant> {
+    let value = value?;
+    let flag = |name: &str| value.get(name).and_then(Value::as_bool).unwrap_or(false);
+    Some(ParsedGroupCallParticipant {
+        participant_id: parse_message_sender(value.get("participant_id")).ok()?,
+        audio_source_id: value
+            .get("audio_source_id")
+            .and_then(Value::as_i64)
+            .unwrap_or(0) as i32,
+        is_current_user: flag("is_current_user"),
+        is_speaking: flag("is_speaking"),
+        is_hand_raised: flag("is_hand_raised"),
+        can_be_muted_for_all_users: flag("can_be_muted_for_all_users"),
+        can_be_unmuted_for_all_users: flag("can_be_unmuted_for_all_users"),
+        can_be_muted_for_current_user: flag("can_be_muted_for_current_user"),
+        can_be_unmuted_for_current_user: flag("can_be_unmuted_for_current_user"),
+        is_muted_for_all_users: flag("is_muted_for_all_users"),
+        is_muted_for_current_user: flag("is_muted_for_current_user"),
+        can_unmute_self: flag("can_unmute_self"),
+        volume_level: value
+            .get("volume_level")
+            .and_then(Value::as_i64)
+            .unwrap_or(0) as i32,
+        order: value
+            .get("order")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string(),
+        video_enabled: value.get("video_info").is_some_and(|info| !info.is_null()),
+        screen_sharing_enabled: value
+            .get("screen_sharing_video_info")
+            .is_some_and(|info| !info.is_null()),
+    })
+}
+
+/// Phase C3a: `videoChat` (TDLib 1.8.67, `schema/td_api.tl:3579`):
+/// `videoChat group_call_id:int32 has_participants:Bool
+/// default_participant_id:MessageSender = VideoChat;`
+/// `group_call_id` is 0 when the chat has no active video chat.
+/// `default_participant_id` is dropped (not needed this slice).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParsedVideoChat {
+    pub group_call_id: i32,
+    pub has_participants: bool,
+}
+
+fn parse_video_chat(value: Option<&Value>) -> Option<ParsedVideoChat> {
+    let value = value?;
+    Some(ParsedVideoChat {
+        group_call_id: value
+            .get("group_call_id")
+            .and_then(Value::as_i64)
+            .unwrap_or(0) as i32,
+        has_participants: value
+            .get("has_participants")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
     })
 }
 
@@ -3373,6 +3623,68 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
                 .and_then(Value::as_i64)
                 .ok_or(ParseError::MissingField)? as i32,
         }),
+        // Phase C3a: `groupCallId` (schema 1.8.67, line 7037) — the
+        // `createVideoChat` answer. The driver fetches the full
+        // `groupCall` via `getGroupCall`; live state arrives as
+        // `updateGroupCall`.
+        "groupCallId" => Ok(EnvelopePayload::GroupCallId {
+            id: value
+                .get("id")
+                .and_then(Value::as_i64)
+                .ok_or(ParseError::MissingField)? as i32,
+        }),
+        // Phase C3a: group-call signaling updates (schema 1.8.67,
+        // lines 10819 / 10824 / 10830 / 10836 / 10576). All
+        // signaling-only: no media transport until Phase C2.
+        "updateGroupCall" => Ok(EnvelopePayload::UpdateGroupCall {
+            group_call: parse_group_call(value.get("group_call"))
+                .ok_or(ParseError::MissingField)?,
+        }),
+        "updateGroupCallParticipant" => Ok(EnvelopePayload::UpdateGroupCallParticipant {
+            group_call_id: value
+                .get("group_call_id")
+                .and_then(Value::as_i64)
+                .ok_or(ParseError::MissingField)? as i32,
+            participant: parse_group_call_participant(value.get("participant"))
+                .ok_or(ParseError::MissingField)?,
+        }),
+        "updateGroupCallParticipants" => Ok(EnvelopePayload::UpdateGroupCallParticipants {
+            group_call_id: value
+                .get("group_call_id")
+                .and_then(Value::as_i64)
+                .ok_or(ParseError::MissingField)? as i32,
+            participant_user_ids: value
+                .get("participant_user_ids")
+                .and_then(Value::as_array)
+                .map(|arr| arr.iter().filter_map(|v| v.as_i64()).collect::<Vec<i64>>())
+                .ok_or(ParseError::MissingField)?,
+        }),
+        "updateGroupCallVerificationState" => {
+            Ok(EnvelopePayload::UpdateGroupCallVerificationState {
+                group_call_id: value
+                    .get("group_call_id")
+                    .and_then(Value::as_i64)
+                    .ok_or(ParseError::MissingField)? as i32,
+                generation: value
+                    .get("generation")
+                    .and_then(Value::as_i64)
+                    .ok_or(ParseError::MissingField)? as i32,
+                emojis: value
+                    .get("emojis")
+                    .and_then(Value::as_array)
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                            .collect::<Vec<String>>()
+                    })
+                    .ok_or(ParseError::MissingField)?,
+            })
+        }
+        "updateChatVideoChat" => Ok(EnvelopePayload::UpdateChatVideoChat {
+            chat_id: int53(value.get("chat_id"))?,
+            video_chat: parse_video_chat(value.get("video_chat"))
+                .ok_or(ParseError::MissingField)?,
+        }),
         "updateStoryPostSucceeded" => {
             let story = value.get("story").ok_or(ParseError::MissingField)?;
             let (story, files) = parse_story(story).ok_or(ParseError::MissingField)?;
@@ -3511,6 +3823,11 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
                     .get("message_auto_delete_time")
                     .and_then(Value::as_i64)
                     .unwrap_or(0) as i32,
+                // Phase C3a: `chat.video_chat` (`videoChat`, schema
+                // 1.8.67, lines 3576 / 3579). `group_call_id` 0 → None
+                // (no active video chat).
+                video_chat: parse_video_chat(chat.get("video_chat"))
+                    .filter(|v| v.group_call_id != 0),
             })
         }
         "updateChatPermissions" => {
@@ -3538,6 +3855,26 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
             })
         }
         "ok" => Ok(EnvelopePayload::Ok),
+        // Phase C3a: `text` (schema 1.8.67, line 10071) — the
+        // `joinVideoChat` / `joinGroupCall` answer ("join response
+        // payload for tgcalls"). Quill stores it, never consumes it
+        // (no media transport until Phase C2).
+        "text" => Ok(EnvelopePayload::Text {
+            text: value
+                .get("text")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string(),
+        }),
+        // Phase C3a: `httpUrl` (schema 1.8.67, line 7458) — the
+        // `getVideoChatInviteLink` answer.
+        "httpUrl" => Ok(EnvelopePayload::HttpUrl {
+            url: value
+                .get("url")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string(),
+        }),
         "callbackQueryAnswer" => Ok(EnvelopePayload::CallbackQueryAnswer(
             parse_callback_query_answer(&value),
         )),
@@ -8960,6 +9297,137 @@ mod channel_envelope_tests {
             } => {
                 assert_eq!(poster_chat_id, 11);
                 assert_eq!(story_id, 7);
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    /// Phase C3a: `updateGroupCall` / `updateGroupCallParticipant` /
+    /// `updateGroupCallParticipants` /
+    /// `updateGroupCallVerificationState` / `updateChatVideoChat`
+    /// parsing (schema 1.8.67, lines 10819 / 10824 / 10830 / 10836 /
+    /// 10576).
+    #[test]
+    fn update_group_call_parsed() {
+        let json = r#"{"@type":"updateGroupCall","group_call":{"@type":"groupCall","id":555,"unique_id":"999","title":"Team standup","invite_link":"","paid_message_star_count":0,"scheduled_start_date":0,"enabled_start_notification":false,"is_active":true,"is_video_chat":true,"is_live_story":false,"is_rtmp_stream":false,"is_joined":true,"need_rejoin":false,"is_owned":false,"can_be_managed":true,"participant_count":4,"has_hidden_listeners":false,"loaded_all_participants":false,"message_sender_id":null,"recent_speakers":[{"@type":"groupCallRecentSpeaker","participant_id":{"@type":"messageSenderUser","user_id":43},"is_speaking":true}],"is_my_video_enabled":false,"is_my_video_paused":false,"can_enable_video":true,"mute_new_participants":false,"can_toggle_mute_new_participants":true,"can_send_messages":true,"are_messages_allowed":true,"can_toggle_are_messages_allowed":false,"can_delete_messages":false,"record_duration":0,"is_video_recorded":false,"duration":0}}"#;
+        let env = parse_envelope(json).unwrap();
+        match env.payload {
+            EnvelopePayload::UpdateGroupCall { group_call } => {
+                assert_eq!(group_call.id, 555);
+                assert_eq!(group_call.title, "Team standup");
+                assert!(group_call.is_active);
+                assert!(group_call.is_video_chat);
+                assert!(group_call.is_joined);
+                assert!(!group_call.need_rejoin);
+                assert!(group_call.can_be_managed);
+                assert_eq!(group_call.participant_count, 4);
+                assert_eq!(group_call.recent_speakers.len(), 1);
+                assert_eq!(
+                    group_call.recent_speakers[0].0,
+                    MessageSender::User { user_id: 43 }
+                );
+                assert!(group_call.recent_speakers[0].1);
+                assert!(group_call.can_toggle_mute_new_participants);
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn update_group_call_participant_parsed() {
+        let json = r#"{"@type":"updateGroupCallParticipant","group_call_id":555,"participant":{"@type":"groupCallParticipant","participant_id":{"@type":"messageSenderUser","user_id":44},"audio_source_id":7,"screen_sharing_audio_source_id":0,"video_info":null,"screen_sharing_video_info":null,"bio":"","is_current_user":false,"is_speaking":false,"is_hand_raised":true,"can_be_muted_for_all_users":true,"can_be_unmuted_for_all_users":false,"can_be_muted_for_current_user":true,"can_be_unmuted_for_current_user":true,"is_muted_for_all_users":false,"is_muted_for_current_user":false,"can_unmute_self":false,"volume_level":10000,"order":"zz9"}}"#;
+        let env = parse_envelope(json).unwrap();
+        match env.payload {
+            EnvelopePayload::UpdateGroupCallParticipant {
+                group_call_id,
+                participant,
+            } => {
+                assert_eq!(group_call_id, 555);
+                assert_eq!(
+                    participant.participant_id,
+                    MessageSender::User { user_id: 44 }
+                );
+                assert!(participant.is_hand_raised);
+                assert!(!participant.is_speaking);
+                assert!(participant.can_be_muted_for_all_users);
+                assert_eq!(participant.order, "zz9");
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn update_group_call_participants_parsed() {
+        let json = r#"{"@type":"updateGroupCallParticipants","group_call_id":555,"participant_user_ids":[41,42,43]}"#;
+        let env = parse_envelope(json).unwrap();
+        match env.payload {
+            EnvelopePayload::UpdateGroupCallParticipants {
+                group_call_id,
+                participant_user_ids,
+            } => {
+                assert_eq!(group_call_id, 555);
+                assert_eq!(participant_user_ids, vec![41, 42, 43]);
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn update_group_call_verification_state_parsed() {
+        let json = r#"{"@type":"updateGroupCallVerificationState","group_call_id":555,"generation":7,"emojis":["🍎","🍌","🍒","🍇"]}"#;
+        let env = parse_envelope(json).unwrap();
+        match env.payload {
+            EnvelopePayload::UpdateGroupCallVerificationState {
+                group_call_id,
+                generation,
+                emojis,
+            } => {
+                assert_eq!(group_call_id, 555);
+                assert_eq!(generation, 7);
+                assert_eq!(emojis, vec!["🍎", "🍌", "🍒", "🍇"]);
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn update_chat_video_chat_parsed() {
+        // `updateChatVideoChat` (schema 1.8.67, line 10576) with
+        // `videoChat` (line 3579).
+        let json = r#"{"@type":"updateChatVideoChat","chat_id":100,"video_chat":{"@type":"videoChat","group_call_id":555,"has_participants":true,"default_participant_id":{"@type":"messageSenderUser","user_id":41}}}"#;
+        let env = parse_envelope(json).unwrap();
+        match env.payload {
+            EnvelopePayload::UpdateChatVideoChat {
+                chat_id,
+                video_chat,
+            } => {
+                assert_eq!(chat_id, 100);
+                assert_eq!(video_chat.group_call_id, 555);
+                assert!(video_chat.has_participants);
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn update_new_chat_video_chat_parsed() {
+        // `chat.video_chat` on `updateNewChat` (schema 1.8.67, lines
+        // 3576 / 3627): `group_call_id` 0 → None.
+        let json = r#"{"@type":"updateNewChat","chat":{"id":100,"title":"Team standup","type":{"@type":"chatTypeSupergroup","supergroup_id":100,"is_channel":false},"unread_count":0,"video_chat":{"@type":"videoChat","group_call_id":555,"has_participants":false,"default_participant_id":null}}}"#;
+        let env = parse_envelope(json).unwrap();
+        match env.payload {
+            EnvelopePayload::UpdateNewChat { video_chat, .. } => {
+                let v = video_chat.expect("video chat present");
+                assert_eq!(v.group_call_id, 555);
+                assert!(!v.has_participants);
+            }
+            other => panic!("{other:?}"),
+        }
+        let json = r#"{"@type":"updateNewChat","chat":{"id":100,"title":"Team standup","type":{"@type":"chatTypeSupergroup","supergroup_id":100,"is_channel":false},"unread_count":0,"video_chat":{"@type":"videoChat","group_call_id":0,"has_participants":false,"default_participant_id":null}}}"#;
+        let env = parse_envelope(json).unwrap();
+        match env.payload {
+            EnvelopePayload::UpdateNewChat { video_chat, .. } => {
+                assert!(video_chat.is_none());
             }
             other => panic!("{other:?}"),
         }

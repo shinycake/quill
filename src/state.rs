@@ -14,8 +14,9 @@ use crate::telegram::envelope::{
     ChatPositionUpdate, ConnectionState, EnvelopePayload, ErrorClass, ForumTopic, InlineKeyboard,
     MessageAutoDelete, MessageContent, MessageForwardInfo, MessageInteractionInfo, MessageOrigin,
     MessageReaction, MessageReplyTo, MessageSelfDestruct, MessageSender, NotificationSettingsScope,
-    NotificationSound, ParsedCall, ParsedChatMember, ParsedFile, ParsedMessage, ParsedSecretChat,
-    ParsedStory, ParsedUser, Poll, ReportOption, ReportSponsoredResult, ScopeNotificationSettings,
+    NotificationSound, ParsedCall, ParsedChatMember, ParsedFile, ParsedGroupCall,
+    ParsedGroupCallParticipant, ParsedMessage, ParsedSecretChat, ParsedStory, ParsedUser,
+    ParsedVideoChat, Poll, ReportOption, ReportSponsoredResult, ScopeNotificationSettings,
     SecretChatState, SponsoredMessage, StickerFormat, StickerItem, StickerSetInfo,
     StoryAvailableReactionView, StoryListView, TdError,
 };
@@ -249,6 +250,65 @@ pub enum RequestPurpose {
     /// Phase C1: `sendCallRating`. Response is `ok`; sent from the
     /// call-end rating card when `callStateDiscarded.need_rating`.
     SendCallRating,
+    /// Phase C3a: `createVideoChat`. Response is `groupCallId`; the
+    /// chat-bound voice chat's states arrive as `updateGroupCall`.
+    CreateVideoChat {
+        chat_id: i64,
+    },
+    /// Phase C3a: `joinVideoChat`. Response is `text` (join payload
+    /// for tgcalls) — stored on the tracked call, never consumed (no
+    /// media transport until Phase C2).
+    JoinVideoChat {
+        group_call_id: i32,
+    },
+    /// Phase C3a: `leaveGroupCall`. Response is `ok`.
+    LeaveGroupCall {
+        group_call_id: i32,
+    },
+    /// Phase C3a: `endGroupCall`. Response is `ok`.
+    EndGroupCall {
+        group_call_id: i32,
+    },
+    /// Phase C3a: `getGroupCall`. Response is `groupCall`; refreshes
+    /// the tracked call via `updateGroupCall`-equivalent handling.
+    GetGroupCall {
+        group_call_id: i32,
+    },
+    /// Phase C3a: `loadGroupCallParticipants`. Response is `ok`;
+    /// participants arrive as updates.
+    LoadGroupCallParticipants {
+        group_call_id: i32,
+    },
+    /// Phase C3a: `getVideoChatInviteLink`. Response is `httpUrl`.
+    GetVideoChatInviteLink {
+        group_call_id: i32,
+    },
+    /// Phase C3a: `setVideoChatTitle`. Response is `ok`; the new title
+    /// arrives as `updateGroupCall`.
+    SetVideoChatTitle {
+        group_call_id: i32,
+    },
+    /// Phase C3a: `toggleGroupCallIsMyVideoEnabled` /
+    /// `toggleGroupCallIsMyVideoPaused`. Response is `ok`; state
+    /// refreshes via `updateGroupCall`.
+    ToggleGroupCallVideo {
+        group_call_id: i32,
+    },
+    /// Phase C3a: `toggleGroupCallParticipantIsMuted`. Response is
+    /// `ok`; state refreshes via updates.
+    ToggleGroupCallParticipantMute {
+        group_call_id: i32,
+    },
+    /// Phase C3a: `toggleGroupCallParticipantIsHandRaised`. Response is
+    /// `ok`; state refreshes via updates.
+    ToggleGroupCallParticipantHand {
+        group_call_id: i32,
+    },
+    /// Phase C3a: `toggleVideoChatMuteNewParticipants`. Response is
+    /// `ok`; state refreshes via `updateGroupCall`.
+    ToggleVideoChatMuteNew {
+        group_call_id: i32,
+    },
     /// Phase B4: `setChatMessageAutoDeleteTime`. Response is `ok`; the
     /// new timer arrives as `updateChatMessageAutoDeleteTime` (plus a
     /// `messageChatSetMessageAutoDeleteTime` service message in history).
@@ -822,6 +882,18 @@ pub struct ChatSummary {
     /// (secret chats) timer, in seconds; 0 when disabled. Set by
     /// `updateNewChat`, refreshed by `updateChatMessageAutoDeleteTime`.
     pub message_auto_delete_time: i32,
+    /// Phase C3a: `chat.video_chat` (`videoChat`, schema 1.8.67, lines
+    /// 3576 / 3579 / 3627). `None` when the chat has no active video
+    /// chat. Set by `updateNewChat`, refreshed by `updateChatVideoChat`.
+    pub video_chat: Option<VideoChatInfo>,
+}
+
+/// Phase C3a: a chat's active video chat (`videoChat`, schema 1.8.67,
+/// line 3579).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VideoChatInfo {
+    pub group_call_id: i32,
+    pub has_participants: bool,
 }
 
 impl ChatSummary {
@@ -1015,6 +1087,9 @@ fn placeholder_chat(chat_id: ChatId) -> ChatSummary {
         // Phase B4: 0 = disabled (`chat.message_auto_delete_time`,
         // schema 1.8.67, lines 3616 / 3627).
         message_auto_delete_time: 0,
+        // Phase C3a: unknown until `updateNewChat` / `updateChatVideoChat`
+        // resolves it.
+        video_chat: None,
     }
 }
 
@@ -1791,6 +1866,106 @@ impl ActiveCall {
     }
 }
 
+/// Phase C3a: E2E verification state of a group call
+/// (`updateGroupCallVerificationState`, schema 1.8.67, line 10836).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GroupCallVerificationState {
+    pub generation: i32,
+    pub emojis: Vec<String>,
+}
+
+/// Phase C3a: the tracked group call / voice chat (**signaling
+/// only** — no media transport; real group audio/video is the C2
+/// program). State follows TDLib's `groupCall` (schema 1.8.67, line
+/// 7154) and its participant updates (`updateGroupCall` 10819,
+/// `updateGroupCallParticipant` 10824, `updateGroupCallParticipants`
+/// 10830, `updateGroupCallVerificationState` 10836).
+#[derive(Debug, Clone)]
+pub struct ActiveGroupCall {
+    pub id: i32,
+    pub title: String,
+    pub is_video_chat: bool,
+    pub is_joined: bool,
+    /// `need_rejoin` arrived (kicked by network loss).
+    pub need_rejoin: bool,
+    /// UI "reconnecting" banner; set on `need_rejoin`, cleared when a
+    /// rejoin is issued or a fresh joined `updateGroupCall` arrives.
+    pub reconnecting: bool,
+    pub can_be_managed: bool,
+    pub is_owned: bool,
+    pub participant_count: i32,
+    pub loaded_all_participants: bool,
+    /// Sorted: recent speakers first (in `recent_speakers` order),
+    /// then by `order` descending (lexicographic — schema: "The
+    /// bigger is order, the higher is user in the list").
+    pub participants: Vec<ParsedGroupCallParticipant>,
+    /// Recent speakers as last reported by `updateGroupCall` (drives
+    /// the participant ordering above).
+    pub recent_speaker_order: Vec<MessageSender>,
+    /// Phase C3a: local-only self mute. TDLib has no "mute self"
+    /// request for group calls outside the join parameters, and there
+    /// is no audio path yet (C2) — the UI labels this honestly as
+    /// local-only. Sent as `is_muted` on (re)join.
+    pub is_muted_self: bool,
+    pub is_my_video_enabled: bool,
+    pub is_my_video_paused: bool,
+    pub can_enable_video: bool,
+    pub mute_new_participants: bool,
+    pub can_toggle_mute_new_participants: bool,
+    pub verification: Option<GroupCallVerificationState>,
+    /// The `Text` join payload returned by `joinVideoChat` — stored
+    /// honestly, **never consumed** (it feeds tgcalls in Phase C2).
+    pub join_payload: String,
+    /// `HttpUrl` from `getVideoChatInviteLink`, fetched on demand.
+    pub invite_link: Option<String>,
+}
+
+impl ActiveGroupCall {
+    /// Blank tracked call for a newly seen call id. Participant state
+    /// repopulates from updates.
+    fn fresh(id: i32) -> Self {
+        ActiveGroupCall {
+            id,
+            title: String::new(),
+            is_video_chat: false,
+            is_joined: false,
+            need_rejoin: false,
+            reconnecting: false,
+            can_be_managed: false,
+            is_owned: false,
+            participant_count: 0,
+            loaded_all_participants: false,
+            participants: Vec::new(),
+            recent_speaker_order: Vec::new(),
+            is_muted_self: false,
+            is_my_video_enabled: false,
+            is_my_video_paused: false,
+            can_enable_video: false,
+            mute_new_participants: false,
+            can_toggle_mute_new_participants: false,
+            verification: None,
+            join_payload: String::new(),
+            invite_link: None,
+        }
+    }
+
+    /// Re-sort participants: recent speakers first (in reported
+    /// order), then by `order` descending (lexicographic).
+    fn sort_participants(&mut self) {
+        let recent = self.recent_speaker_order.clone();
+        self.participants.sort_by(|a, b| {
+            let ra = recent.iter().position(|s| s == &a.participant_id);
+            let rb = recent.iter().position(|s| s == &b.participant_id);
+            match (ra, rb) {
+                (Some(x), Some(y)) => x.cmp(&y),
+                (Some(_), None) => std::cmp::Ordering::Less,
+                (None, Some(_)) => std::cmp::Ordering::Greater,
+                (None, None) => b.order.cmp(&a.order),
+            }
+        });
+    }
+}
+
 impl CallSummary {
     /// Build the end screen from a terminal `updateCall`. `duration_secs`
     /// is the connected time (0 when the call never reached `Ready`).
@@ -1936,11 +2111,24 @@ pub struct Session {
     /// rejected), shown on the call overlay and cleared when
     /// dismissed. Never a secret.
     pub call_error: Option<String>,
+    /// Phase C3a: last async group-call request error (e.g.
+    /// `joinVideoChat` rejected), shown on the group-call overlay and
+    /// cleared when dismissed. Never a secret.
+    pub group_call_error: Option<String>,
     /// Phase C1: incoming calls that arrived while another call was
     /// active — the driver discards them (busy) via `discardCall`.
     /// Entries are `(call_id, is_video)` so the decline reports the
     /// actual call kind rather than a hardcoded one.
     pub call_busy_decline_queue: Vec<(i32, bool)>,
+    /// Phase C3a: the tracked group call / voice chat, if any.
+    /// **Signaling only** — TDLib transports no audio/video; the
+    /// `joinVideoChat` response payload is stored (`join_payload`) and
+    /// never consumed (real media transport is the C2 program).
+    pub active_group_call: Option<ActiveGroupCall>,
+    /// Phase C3a: group-call ids whose full `groupCall` still needs a
+    /// `getGroupCall` fetch (queued from the `createVideoChat`
+    /// `groupCallId` answer). Drained by the driver.
+    pub group_call_fetch_queue: Vec<i32>,
     /// Phase 5.1: selected forum topic (`forum_topic_id`) of the open chat.
     /// `None` = topic list (or a non-forum chat). Reset by `open_chat`.
     pub open_topic: Option<i32>,
@@ -2173,7 +2361,10 @@ impl Session {
             active_call: None,
             call_summary: None,
             call_error: None,
+            group_call_error: None,
             call_busy_decline_queue: Vec::new(),
+            active_group_call: None,
+            group_call_fetch_queue: Vec::new(),
             open_topic: None,
             forum_topics: HashMap::new(),
             topic_histories: HashMap::new(),
@@ -2531,6 +2722,7 @@ impl Session {
                 photo,
                 can_send_basic_messages,
                 message_auto_delete_time,
+                video_chat,
             } => {
                 // Parity slice: keep the chat photo (`chatPhotoInfo.small`)
                 // file id so the chat list can render avatars. The file
@@ -2556,6 +2748,12 @@ impl Session {
                 // (`chat.message_auto_delete_time`, schema 1.8.67, lines
                 // 3616 / 3627).
                 chat.message_auto_delete_time = message_auto_delete_time;
+                // Phase C3a: the chat's active video chat (`videoChat`,
+                // schema 1.8.67, lines 3576 / 3579).
+                chat.video_chat = video_chat.map(|v| VideoChatInfo {
+                    group_call_id: v.group_call_id,
+                    has_participants: v.has_participants,
+                });
                 // Phase B1: secret chats — `updateSecretChat` arrives before
                 // `updateNewChat` (schema 1.8.67, line 10740), so a state
                 // may already be recorded; otherwise the driver fetches it
@@ -2781,6 +2979,52 @@ impl Session {
                     self.call_summary = None;
                     self.call_error = None;
                 }
+            }
+            // Phase C3a: `groupCallId` — the `createVideoChat` answer.
+            // Queue a `getGroupCall` fetch so tracking starts even if
+            // the `updateGroupCall` is delayed; the update remains the
+            // source of truth.
+            EnvelopePayload::GroupCallId { id } => {
+                if let Some(RequestPurpose::CreateVideoChat { .. }) = pending.map(|p| p.purpose)
+                    && !self.group_call_fetch_queue.contains(&id)
+                {
+                    self.group_call_fetch_queue.push(id);
+                }
+                self.group_call_error = None;
+            }
+            // Phase C3a: group-call signaling (schema 1.8.67, lines
+            // 10819 / 10824 / 10830 / 10836 / 10576). `updateGroupCall`
+            // drives the tracked-call state; participant updates feed
+            // the grid; the verification state feeds the E2E emoji UI;
+            // `updateChatVideoChat` refreshes the chat's join affordance.
+            // All signaling-only — no media transport until Phase C2.
+            EnvelopePayload::UpdateGroupCall { group_call } => {
+                self.accept_group_call_update(&group_call);
+            }
+            EnvelopePayload::UpdateGroupCallParticipant {
+                group_call_id,
+                participant,
+            } => {
+                self.accept_group_call_participant_update(group_call_id, &participant);
+            }
+            EnvelopePayload::UpdateGroupCallParticipants {
+                group_call_id,
+                participant_user_ids,
+            } => {
+                self.accept_group_call_participants_update(group_call_id, &participant_user_ids);
+            }
+            EnvelopePayload::UpdateGroupCallVerificationState {
+                group_call_id,
+                generation,
+                emojis,
+            } => {
+                self.accept_group_call_verification_state(group_call_id, generation, &emojis);
+            }
+            EnvelopePayload::UpdateChatVideoChat {
+                chat_id,
+                video_chat,
+            } => {
+                self.accept_chat_video_chat(ChatId(chat_id), &video_chat);
             }
             EnvelopePayload::UpdateChatTitle { chat_id, title } => {
                 self.chats
@@ -3499,7 +3743,42 @@ impl Session {
                 self.scope_notification_settings.insert(scope, settings);
                 self.scope_settings_loading.remove(&scope);
             }
+            // Phase C3a: `joinVideoChat` returns `text` — the join
+            // payload for tgcalls. Stored on the tracked call, never
+            // consumed (no media transport until Phase C2).
+            EnvelopePayload::Text { text } => {
+                if let Some(RequestPurpose::JoinVideoChat { group_call_id }) =
+                    pending.map(|p| p.purpose)
+                {
+                    self.set_group_call_join_payload(group_call_id, text);
+                }
+            }
+            // Phase C3a: `getVideoChatInviteLink` returns `httpUrl`.
+            EnvelopePayload::HttpUrl { url } => {
+                if let Some(RequestPurpose::GetVideoChatInviteLink { group_call_id }) =
+                    pending.map(|p| p.purpose)
+                {
+                    self.set_group_call_invite_link(group_call_id, url);
+                }
+            }
             EnvelopePayload::Ok => {
+                // Phase C3a: a successful `leaveGroupCall` /
+                // `endGroupCall` drops the tracked call (the `ok`
+                // confirms the server side; `updateGroupCall`
+                // `!is_active` is the backstop).
+                match pending.map(|p| p.purpose) {
+                    Some(
+                        RequestPurpose::LeaveGroupCall { group_call_id }
+                        | RequestPurpose::EndGroupCall { group_call_id },
+                    ) if self
+                        .active_group_call
+                        .as_ref()
+                        .is_some_and(|c| c.id == group_call_id) =>
+                    {
+                        self.leave_group_call_local();
+                    }
+                    _ => {}
+                }
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::LoadChats) {
                     // A short OK is not exhaustion; 404 is.
                 }
@@ -3563,6 +3842,38 @@ impl Session {
                     Some(RequestPurpose::SendCallRating) => {
                         self.call_error =
                             Some(call_request_error_line(&err, "Could not send the rating"));
+                    }
+                    // Phase C3a: group-call request failures surface on
+                    // the group-call overlay (shown and cleared by the
+                    // UI). A failed `joinVideoChat` leaves any tracked
+                    // call in place — `updateGroupCall` is the source
+                    // of truth for join state.
+                    Some(RequestPurpose::CreateVideoChat { .. }) => {
+                        self.group_call_error = Some(call_request_error_line(
+                            &err,
+                            "Could not start the voice chat",
+                        ));
+                    }
+                    Some(RequestPurpose::JoinVideoChat { .. }) => {
+                        self.group_call_error = Some(call_request_error_line(
+                            &err,
+                            "Could not join the voice chat",
+                        ));
+                    }
+                    Some(
+                        RequestPurpose::LeaveGroupCall { .. }
+                        | RequestPurpose::EndGroupCall { .. }
+                        | RequestPurpose::GetGroupCall { .. }
+                        | RequestPurpose::LoadGroupCallParticipants { .. }
+                        | RequestPurpose::GetVideoChatInviteLink { .. }
+                        | RequestPurpose::SetVideoChatTitle { .. }
+                        | RequestPurpose::ToggleGroupCallVideo { .. }
+                        | RequestPurpose::ToggleGroupCallParticipantMute { .. }
+                        | RequestPurpose::ToggleGroupCallParticipantHand { .. }
+                        | RequestPurpose::ToggleVideoChatMuteNew { .. },
+                    ) => {
+                        self.group_call_error =
+                            Some(call_request_error_line(&err, "Voice chat request failed"));
                     }
                     _ => {}
                 }
@@ -4240,6 +4551,205 @@ impl Session {
         self.call_summary = Some(CallSummary::from_terminal(call, duration_secs));
         self.call_busy_decline_queue
             .retain(|(id, _)| *id != call.id);
+    }
+
+    /// Phase C3a: `updateGroupCall` state machine. Quill tracks at most
+    /// one group call at a time (like the single 1:1 call):
+    /// - a different call id replaces the tracked call (participants
+    ///   reload via updates);
+    /// - `need_rejoin` sets the `reconnecting` flag so the UI shows
+    ///   "Reconnecting…" and the driver re-issues the join;
+    /// - a fresh joined, non-`need_rejoin` update clears `reconnecting`;
+    /// - `!is_active` (ended) drops the tracked call.
+    ///
+    /// Everything here is signaling — `join_payload` is stored, never
+    /// consumed (no media transport until Phase C2).
+    fn accept_group_call_update(&mut self, group_call: &ParsedGroupCall) {
+        if !group_call.is_active {
+            if self
+                .active_group_call
+                .as_ref()
+                .is_some_and(|c| c.id == group_call.id)
+            {
+                self.active_group_call = None;
+                self.diagnostics.record(Diagnostic {
+                    category: "group_call",
+                    type_name: Some("updateGroupCall".to_string()),
+                    extra: None,
+                    seq: Some(self.last_seq),
+                    note: "call-ended-tracked-cleared",
+                });
+            }
+            return;
+        }
+        let tracked = self
+            .active_group_call
+            .get_or_insert_with(|| ActiveGroupCall::fresh(group_call.id));
+        if tracked.id != group_call.id {
+            // A different call took over the slot — reset participant
+            // state; fresh updates repopulate it.
+            *tracked = ActiveGroupCall::fresh(group_call.id);
+        }
+        let tracked = self.active_group_call.as_mut().expect("just inserted");
+        tracked.title = group_call.title.clone();
+        tracked.is_video_chat = group_call.is_video_chat;
+        tracked.is_joined = group_call.is_joined;
+        tracked.need_rejoin = group_call.need_rejoin;
+        tracked.can_be_managed = group_call.can_be_managed;
+        tracked.is_owned = group_call.is_owned;
+        tracked.participant_count = group_call.participant_count;
+        tracked.loaded_all_participants = group_call.loaded_all_participants;
+        tracked.is_my_video_enabled = group_call.is_my_video_enabled;
+        tracked.is_my_video_paused = group_call.is_my_video_paused;
+        tracked.can_enable_video = group_call.can_enable_video;
+        tracked.mute_new_participants = group_call.mute_new_participants;
+        tracked.can_toggle_mute_new_participants = group_call.can_toggle_mute_new_participants;
+        tracked.recent_speaker_order = group_call
+            .recent_speakers
+            .iter()
+            .map(|(sender, _)| *sender)
+            .collect();
+        if group_call.need_rejoin {
+            tracked.reconnecting = true;
+        } else if group_call.is_joined {
+            tracked.reconnecting = false;
+        }
+        tracked.sort_participants();
+    }
+
+    /// Phase C3a: `updateGroupCallParticipant`. Upserts the participant;
+    /// an empty `order` removes them (schema note on
+    /// `groupCallParticipant.order`). Updates for an untracked call id
+    /// are ignored.
+    fn accept_group_call_participant_update(
+        &mut self,
+        group_call_id: i32,
+        participant: &ParsedGroupCallParticipant,
+    ) {
+        let Some(tracked) = self.active_group_call.as_mut() else {
+            return;
+        };
+        if tracked.id != group_call_id {
+            return;
+        }
+        if participant.order.is_empty() {
+            tracked
+                .participants
+                .retain(|p| p.participant_id != participant.participant_id);
+        } else if let Some(existing) = tracked
+            .participants
+            .iter_mut()
+            .find(|p| p.participant_id == participant.participant_id)
+        {
+            *existing = participant.clone();
+        } else {
+            tracked.participants.push(participant.clone());
+        }
+        tracked.sort_participants();
+    }
+
+    /// Phase C3a: `updateGroupCallParticipants`. Drops user participants
+    /// not in the reported id list. Chat senders (`MessageSender::Chat`)
+    /// are kept — the update only carries user ids, so chat senders
+    /// can't be verified against it.
+    fn accept_group_call_participants_update(
+        &mut self,
+        group_call_id: i32,
+        participant_user_ids: &[i64],
+    ) {
+        let Some(tracked) = self.active_group_call.as_mut() else {
+            return;
+        };
+        if tracked.id != group_call_id {
+            return;
+        }
+        tracked.participants.retain(|p| match p.participant_id {
+            MessageSender::User { user_id } => participant_user_ids.contains(&user_id),
+            MessageSender::Chat { .. } => true,
+        });
+        tracked.sort_participants();
+    }
+
+    /// Phase C3a: `updateGroupCallVerificationState`. Stores the E2E
+    /// emoji check for the tracked call; ignored on id mismatch.
+    fn accept_group_call_verification_state(
+        &mut self,
+        group_call_id: i32,
+        generation: i32,
+        emojis: &[String],
+    ) {
+        let Some(tracked) = self.active_group_call.as_mut() else {
+            return;
+        };
+        if tracked.id != group_call_id {
+            return;
+        }
+        tracked.verification = Some(GroupCallVerificationState {
+            generation,
+            emojis: emojis.to_vec(),
+        });
+    }
+
+    /// Phase C3a: `updateChatVideoChat`. Refreshes the chat's join
+    /// affordance (`group_call_id` 0 → no active video chat).
+    fn accept_chat_video_chat(&mut self, chat_id: ChatId, video_chat: &ParsedVideoChat) {
+        let chat = self
+            .chats
+            .entry(chat_id.0)
+            .or_insert_with(|| placeholder_chat(chat_id));
+        chat.video_chat = if video_chat.group_call_id == 0 {
+            None
+        } else {
+            Some(VideoChatInfo {
+                group_call_id: video_chat.group_call_id,
+                has_participants: video_chat.has_participants,
+            })
+        };
+    }
+
+    /// Phase C3a: drop the tracked group call after the local user
+    /// leaves or ends it.
+    pub fn leave_group_call_local(&mut self) {
+        self.active_group_call = None;
+    }
+
+    /// Phase C3a: flip the local-only self-mute state. There is no
+    /// TDLib "mute self" request for group calls outside the join
+    /// parameters, and no audio path exists yet (C2) — the UI labels
+    /// this honestly as local-only.
+    pub fn set_group_call_self_muted(&mut self, muted: bool) {
+        if let Some(tracked) = self.active_group_call.as_mut() {
+            tracked.is_muted_self = muted;
+        }
+    }
+
+    /// Phase C3a: clear the `reconnecting` flag once a rejoin has been
+    /// issued by the driver.
+    pub fn clear_group_call_reconnecting(&mut self) {
+        if let Some(tracked) = self.active_group_call.as_mut() {
+            tracked.reconnecting = false;
+        }
+    }
+
+    /// Phase C3a: store the `joinVideoChat` `Text` response payload on
+    /// the tracked call. Stored honestly, **never consumed** — it feeds
+    /// tgcalls in Phase C2.
+    pub fn set_group_call_join_payload(&mut self, group_call_id: i32, payload: String) {
+        if let Some(tracked) = self.active_group_call.as_mut()
+            && tracked.id == group_call_id
+        {
+            tracked.join_payload = payload;
+        }
+    }
+
+    /// Phase C3a: store the `getVideoChatInviteLink` `HttpUrl` response
+    /// on the tracked call.
+    pub fn set_group_call_invite_link(&mut self, group_call_id: i32, link: String) {
+        if let Some(tracked) = self.active_group_call.as_mut()
+            && tracked.id == group_call_id
+        {
+            tracked.invite_link = Some(link);
+        }
     }
 
     /// Record a `joinChat` outcome. `Success` flips status optimistically;
