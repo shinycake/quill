@@ -768,9 +768,11 @@ impl CallDiscardReason {
 /// `callStateExchangingKeys` (:7063), `callStateReady` (:7066),
 /// `callStateHangingUp` (:7077), `callStateDiscarded` (:7080 —
 /// `reason` / `need_rating` / `need_debug_information` / `need_log`),
-/// `callStateError` (:7086). The `Ready` state's protocol / servers /
-/// encryption key are media-transport material — Quill has no
-/// transport yet (C2), so only the state tag is kept.
+/// `callStateError` (:7081 — the `error` wrapper; only its numeric
+/// code is kept, never the message text, which can contain
+/// secrets). The `Ready` state's protocol / servers / encryption key
+/// are media-transport material — Quill has no transport yet (C2), so
+/// only the state tag is kept.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CallState {
     Pending {
@@ -786,9 +788,10 @@ pub enum CallState {
         need_debug_information: bool,
         need_log: bool,
     },
+    /// TDLib error code only — the `message` text is deliberately not
+    /// stored (it can contain phone numbers or other secrets).
     Error {
         code: i32,
-        message: String,
     },
     Unknown(String),
 }
@@ -836,11 +839,6 @@ impl CallState {
                         .and_then(|e| e.get("code"))
                         .and_then(Value::as_i64)
                         .unwrap_or(0) as i32,
-                    message: error
-                        .and_then(|e| e.get("message"))
-                        .and_then(Value::as_str)
-                        .unwrap_or("")
-                        .to_string(),
                 }
             }
             other => CallState::Unknown(other.to_string()),
@@ -8905,7 +8903,7 @@ mod notification_sound_tests {
         // fields. Lines: updateCall :10816, updateNewCallSignalingData
         // :10862, callId :7034, createCall :14212, acceptCall :14215,
         // sendCallSignalingData :14218, discardCall :14227,
-        // sendCallRating :14233, sendCallDebugInformation :14237,
+        // sendCallRating :14234, sendCallDebugInformation :14237,
         // call :7287, callProtocol :7008, states :7058–7086,
         // discard reasons :6984–6999, problems :7253–7277.
         let schema = include_str!("../../schema/td_api.tl");
@@ -8998,6 +8996,20 @@ mod notification_sound_tests {
                 }
                 other => panic!("unexpected {other:?}"),
             }
+        }
+        // `callStateError` keeps the numeric code only — TDLib error
+        // message text is never stored (it can contain secrets). Parse a
+        // message that would leak if retained and assert it is gone.
+        let err = r#"{"@type":"updateCall","call":{"@type":"call","id":82,"unique_id":"104","user_id":41,"is_outgoing":false,"is_video":false,"state":{"@type":"callStateError","error":{"@type":"error","code":500,"message":"SECRET_LEAK_TEXT"}}}}"#;
+        match parse_envelope(err).unwrap().payload {
+            EnvelopePayload::UpdateCall { call } => {
+                assert_eq!(call.state, CallState::Error { code: 500 });
+                assert!(
+                    !format!("{call:?}").contains("SECRET_LEAK_TEXT"),
+                    "TDLib error message text must not be retained"
+                );
+            }
+            other => panic!("unexpected {other:?}"),
         }
         // Discard reason summaries.
         assert_eq!(CallDiscardReason::Missed.summary(false), "Missed call");

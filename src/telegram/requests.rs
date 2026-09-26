@@ -530,7 +530,7 @@ pub fn discard_call(
     .to_string()
 }
 
-/// Phase C1: `sendCallRating` (TDLib 1.8.67, `schema/td_api.tl:14233`):
+/// Phase C1: `sendCallRating` (TDLib 1.8.67, `schema/td_api.tl:14234`):
 /// `sendCallRating call_id:InputCall rating:int32 comment:string
 /// problems:vector<CallProblem> = Ok;` "Sends a call rating". The call
 /// has ended, so the call is identified with `inputCallDiscarded`.

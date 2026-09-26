@@ -261,7 +261,8 @@ fn is_auth_submit(purpose: RequestPurpose) -> bool {
 
 /// Phase C1: classified error line for a failed call request. Only the
 /// numeric code is shown — TDLib's `message` is never stored (it can
-/// contain secrets), except the 4005000 timeout the schema documents.
+/// contain secrets). Code 4005000 (outgoing call missed because the
+/// timeout expired) gets a plain-language line instead.
 fn call_request_error_line(err: &TdError, action: &str) -> String {
     if err.code == 4005000 {
         format!("{action}: no answer — the call timed out")
@@ -1746,15 +1747,15 @@ impl CallSummary {
                 *need_debug_information,
                 *need_log,
             ),
-            CallState::Error { code, message } => {
-                // Schema 1.8.67, line 7086: code 4005000 means the
-                // outgoing call was missed because the timeout expired.
+            CallState::Error { code } => {
+                // TDLib reports a missed outgoing call whose timeout
+                // expired with error code 4005000; the raw message text
+                // is never stored (it can contain secrets), so any other
+                // code renders as the code only.
                 let line = if *code == 4005000 {
                     "No answer — the call timed out".to_string()
-                } else if message.is_empty() {
-                    format!("Call failed (error {code})")
                 } else {
-                    format!("Call failed (error {code}): {message}")
+                    format!("Call failed (error {code})")
                 };
                 (line, false, false, false)
             }
@@ -1875,10 +1876,11 @@ pub struct Session {
     /// rejected), shown on the call overlay and cleared when
     /// dismissed. Never a secret.
     pub call_error: Option<String>,
-    /// Phase C1: call ids of incoming calls that arrived while another
-    /// call was active — the driver discards them (busy) via
-    /// `discardCall`.
-    pub call_busy_decline_queue: Vec<i32>,
+    /// Phase C1: incoming calls that arrived while another call was
+    /// active — the driver discards them (busy) via `discardCall`.
+    /// Entries are `(call_id, is_video)` so the decline reports the
+    /// actual call kind rather than a hardcoded one.
+    pub call_busy_decline_queue: Vec<(i32, bool)>,
     /// Phase 5.1: selected forum topic (`forum_topic_id`) of the open chat.
     /// `None` = topic list (or a non-forum chat). Reset by `open_chat`.
     pub open_topic: Option<i32>,
@@ -4080,9 +4082,12 @@ impl Session {
         if self.active_call.is_some() {
             if !call.is_outgoing
                 && matches!(call.state, CallState::Pending { .. })
-                && !self.call_busy_decline_queue.contains(&call.id)
+                && !self
+                    .call_busy_decline_queue
+                    .iter()
+                    .any(|(id, _)| *id == call.id)
             {
-                self.call_busy_decline_queue.push(call.id);
+                self.call_busy_decline_queue.push((call.id, call.is_video));
                 self.diagnostics.record(Diagnostic {
                     category: "call",
                     type_name: Some("updateCall".to_string()),
@@ -4149,7 +4154,8 @@ impl Session {
             .map(|t| t.elapsed().as_secs() as i64)
             .unwrap_or(0);
         self.call_summary = Some(CallSummary::from_terminal(call, duration_secs));
-        self.call_busy_decline_queue.retain(|id| *id != call.id);
+        self.call_busy_decline_queue
+            .retain(|(id, _)| *id != call.id);
     }
 
     /// Record a `joinChat` outcome. `Success` flips status optimistically;

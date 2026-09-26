@@ -1512,12 +1512,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Ok(());
         }
-        let queued: Vec<i32> = std::mem::take(&mut self.session.call_busy_decline_queue);
-        for call_id in queued {
+        let queued: Vec<(i32, bool)> = std::mem::take(&mut self.session.call_busy_decline_queue);
+        for (call_id, is_video) in queued {
             let extra = self.session.request(RequestPurpose::DiscardCall, None);
             if let Err(err) = self
                 .sender
-                .send_json(&discard_call_request(extra, call_id, false, 0, false))
+                .send_json(&discard_call_request(extra, call_id, false, 0, is_video))
             {
                 self.session.requests.take(extra);
                 return Err(err);

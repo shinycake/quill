@@ -2605,7 +2605,7 @@ fn replay_call_signaling_lifecycle() {
         ],
     );
     assert_eq!(session.active_call.as_ref().expect("still call 77").id, 77);
-    assert_eq!(session.call_busy_decline_queue, vec![78]);
+    assert_eq!(session.call_busy_decline_queue, vec![(78, false)]);
 
     // Keys exchange, then Ready; signaling data is queued honestly.
     apply_all_seq(

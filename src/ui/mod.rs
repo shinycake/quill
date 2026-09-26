@@ -7651,10 +7651,14 @@ impl QuillApp {
         }
         // Honest no-transport note: the call can be "Connected" at the
         // signaling level while carrying no audio. Never fake a live
-        // call. The incoming card carries it too — accepting starts
-        // no audio in this build.
-        let no_transport_note = matches!(call.state, CallState::Ready | CallState::ExchangingKeys)
-            || (matches!(call.state, CallState::Pending { .. }) && !call.is_outgoing);
+        // call. Every pre-connected card carries it — incoming ringing,
+        // outgoing "Calling…", connecting — and the end screen repeats
+        // the note below; accepting/placing starts no audio in this
+        // build.
+        let no_transport_note = matches!(
+            call.state,
+            CallState::Ready | CallState::ExchangingKeys | CallState::Pending { .. }
+        );
         if no_transport_note {
             card = card.child(
                 div()
@@ -7734,26 +7738,27 @@ impl QuillApp {
             .child(div().text_lg().font_semibold().child(name))
             .child(div().text_sm().child(summary.end_line.clone()));
         if summary.duration_secs > 0 {
-            card = card
-                .child(
-                    div()
-                        .text_xs()
-                        .text_color(cx.theme().muted_foreground)
-                        .child(format!(
-                            "Connected for {}",
-                            Self::call_clock(summary.duration_secs.max(0) as u64)
-                        )),
-                )
-                .child(
-                    div()
-                        .text_xs()
-                        .text_color(cx.theme().muted_foreground)
-                        .child(
-                            "No audio was carried — voice transport isn't \
-                             implemented yet (Phase C2).",
-                        ),
-                );
+            card = card.child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(format!(
+                        "Connected for {}",
+                        Self::call_clock(summary.duration_secs.max(0) as u64)
+                    )),
+            );
         }
+        // Always present: the end screen never implies the call carried
+        // audio, even when it never connected.
+        card = card.child(
+            div()
+                .text_xs()
+                .text_color(cx.theme().muted_foreground)
+                .child(
+                    "No audio was carried — voice transport isn't \
+                     implemented yet (Phase C2).",
+                ),
+        );
         if summary.need_debug_information || summary.need_log {
             card = card.child(
                 div()

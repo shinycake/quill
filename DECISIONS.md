@@ -2200,7 +2200,7 @@ are rough (S < 1 day, M = days, L = week+).
   `callStateError` (:7086); `call` (:7287); `updateCall` (:10816);
   `updateNewCallSignalingData` (:10862); `createCall` (:14212);
   `acceptCall` (:14215); `sendCallSignalingData` (:14218);
-  `discardCall` (:14227); `sendCallRating` (:14233);
+  `discardCall` (:14227); `sendCallRating` (:14234);
   `sendCallDebugInformation` (:14237); discard reasons :6984–6999;
   call problems :7253–7277.
 - **Honesty design.** `callProtocol` claims no media transport
@@ -2218,14 +2218,15 @@ are rough (S < 1 day, M = days, L = week+).
   (terminal reason line, duration, `need_rating`, rating state) on the
   session; `call_error` for surfaced request failures;
   `call_busy_decline_queue` for a second incoming call while one is
-  active (declined with `callDiscardReasonBusy` once the active call
-  ends — the driver drains it during ingest). `accept_call_update`
+  active (busy-declined with plain `discardCall` once the active call
+  ends — there is no `callDiscardReasonBusy` constructor in 1.8.67 —
+  the driver drains it during ingest). `accept_call_update`
   starts tracking from `updateCall` or the `callId` answer, advances
   same-id states, starts the duration at `Ready`, and produces the
   summary on `Discarded`/`Error` (unknown future states stay
   nonterminal rather than dropping a possibly live call). Discard
   reasons map to human lines ("Missed call", "Call declined",
-  "You were busy", "The call timed out" for the documented 4005000
+  "You were busy", "The call timed out" for the 4005000 timeout
   code); TDLib error *message text* is never stored (it can contain
   secrets) — only code/class.
 - **Requests (`src/telegram/requests.rs`).** `create_call` (audio-only,
@@ -2241,8 +2242,8 @@ are rough (S < 1 day, M = days, L = week+).
   unknown-state honest label, end screen (reason line, duration, 1–5
   rating prompt when `need_rating` — `need_debug_information` /
   `need_log` are out of slice, stated on the card), and a request-error
-  banner with dismiss. A 1-second tick (`call_tick_active`, guarded by
-  `call_tick_active_id`) keeps clocks/durations fresh while a call is
+  banner with dismiss. A 1-second tick (guarded by the
+  `call_tick_active` flag) keeps clocks/durations fresh while a call is
   live.
 - **Screenshot:** `docs/screenshots/ready-call-ui.png` —
   `quill --screenshot-demo ready-call`: incoming voice call from Zed,
