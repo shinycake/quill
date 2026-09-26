@@ -371,6 +371,20 @@ pub fn draft_text_to_store(text: &str, has_reply: bool) -> Option<&str> {
     }
 }
 
+/// Phase 3.1: composer text after tapping a bot command. Empty field → the
+/// bare `/command`; otherwise appended after a space (or directly when the
+/// field already ends in whitespace).
+pub fn insert_bot_command_text(current: &str, command: &str) -> String {
+    let insertion = format!("/{command}");
+    if current.trim().is_empty() {
+        insertion
+    } else if current.ends_with(char::is_whitespace) {
+        format!("{current}{insertion}")
+    } else {
+        format!("{current} {insertion}")
+    }
+}
+
 /// Snapshot of a send attempt: destination is frozen at submit time.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ComposerSnapshot {
@@ -484,6 +498,16 @@ mod tests {
         ));
         fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn bot_command_insert_text() {
+        // Phase 3.1: tapping a command chip composes the new composer text.
+        assert_eq!(insert_bot_command_text("", "start"), "/start");
+        assert_eq!(insert_bot_command_text("   ", "start"), "/start");
+        assert_eq!(insert_bot_command_text("hello", "start"), "hello /start");
+        assert_eq!(insert_bot_command_text("hello ", "start"), "hello /start");
+        assert_eq!(insert_bot_command_text("/help", "start"), "/help /start");
     }
 
     #[test]

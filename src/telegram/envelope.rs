@@ -192,6 +192,20 @@ pub enum EnvelopePayload {
     Me {
         user_id: i64,
     },
+    /// `userFullInfo` — `getUserFullInfo` response (schema 1.8.67,
+    /// `getUserFullInfo user_id:int53 = UserFullInfo`, line 11501). The
+    /// response carries no user id; it is resolved from the pending
+    /// request's chat in `Session::apply`, so only `bot_info` (from
+    /// `userFullInfo.bot_info:botInfo`, line 2468) is kept.
+    UserFullInfo {
+        bot_info: Option<BotInfo>,
+    },
+    /// `updateUserFullInfo` — full info changed (schema 1.8.67, line 10744);
+    /// the user id is explicit here.
+    UpdateUserFullInfo {
+        user_id: UserId,
+        bot_info: Option<BotInfo>,
+    },
     /// `ChatJoinResult` — `joinChat` response.
     JoinChatResult(ChatJoinResult),
     Unknown(UnknownKind),
@@ -387,6 +401,29 @@ pub struct ParsedChatMember {
     pub member_id: MessageSender,
     pub status: ChannelMemberStatus,
     pub admin_can_post_messages: Option<bool>,
+}
+
+/// `botCommand` (TDLib 1.8.67, `schema/td_api.tl:826`):
+/// `botCommand command:string description:string is_ephemeral:Bool =
+/// BotCommand`. `is_ephemeral` is not kept — the panel only lists commands;
+/// tapping one inserts plain text into the composer (Phase 3.3 owns the
+/// command menu).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BotCommand {
+    pub command: String,
+    pub description: String,
+}
+
+/// `botInfo` subset (TDLib 1.8.67, `schema/td_api.tl:2430`): only what the
+/// bot panel renders — `short_description`, `description`, and
+/// `commands:vector<botCommand>` (a bare vector of `botCommand`, not the
+/// `botCommands` wrapper). Photo, menu button, rights, and links are
+/// intentionally not kept.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct BotInfo {
+    pub short_description: String,
+    pub description: String,
+    pub commands: Vec<BotCommand>,
 }
 
 /// Typed `ChatJoinResult` — `joinChat` response (TDLib 1.8.67: no
@@ -1611,6 +1648,17 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
         "user" => Ok(EnvelopePayload::Me {
             user_id: int53(value.get("id"))?,
         }),
+        "userFullInfo" => Ok(EnvelopePayload::UserFullInfo {
+            bot_info: parse_bot_info(value.get("bot_info")),
+        }),
+        "updateUserFullInfo" => Ok(EnvelopePayload::UpdateUserFullInfo {
+            user_id: UserId(int53(value.get("user_id"))?),
+            bot_info: parse_bot_info(
+                value
+                    .get("user_full_info")
+                    .and_then(|info| info.get("bot_info")),
+            ),
+        }),
         "chatJoinResultSuccess" => Ok(EnvelopePayload::JoinChatResult(ChatJoinResult::Success {
             chat_id: ChatId(int53(value.get("chat_id"))?),
         })),
@@ -1809,6 +1857,49 @@ fn parse_chat_member(value: Option<&Value>) -> Option<ParsedChatMember> {
         member_id,
         status,
         admin_can_post_messages,
+    })
+}
+
+/// `botCommand` (schema 1.8.67 line 826). A command without `command` text
+/// is dropped; the description may be empty.
+fn parse_bot_command(value: Option<&Value>) -> Option<BotCommand> {
+    let value = value.filter(|v| !v.is_null())?;
+    Some(BotCommand {
+        command: value.get("command")?.as_str()?.to_string(),
+        description: value
+            .get("description")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string(),
+    })
+}
+
+/// `botInfo` subset (schema 1.8.67 line 2430). `bot_info` arrives as null
+/// for non-bots (the schema comment says "may be null if the user isn't a
+/// bot"), so null → `None` rather than an empty struct.
+fn parse_bot_info(value: Option<&Value>) -> Option<BotInfo> {
+    let value = value.filter(|v| !v.is_null())?;
+    Some(BotInfo {
+        short_description: value
+            .get("short_description")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string(),
+        description: value
+            .get("description")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string(),
+        commands: value
+            .get("commands")
+            .and_then(Value::as_array)
+            .map(|commands| {
+                commands
+                    .iter()
+                    .filter_map(|v| parse_bot_command(Some(v)))
+                    .collect()
+            })
+            .unwrap_or_default(),
     })
 }
 
@@ -3210,6 +3301,54 @@ mod tests {
             } => {
                 assert_eq!(chat_id.0, 4);
                 assert_eq!(last_read_outbox_message_id.0, 91);
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn user_full_info_bot_info_parsed() {
+        // `getUserFullInfo` response (schema 1.8.67 lines 11501 / 2430 /
+        // 2468): `bot_info` carries `description` and a bare
+        // `vector<botCommand>` of `commands`.
+        let json = r#"{"@type":"userFullInfo","@extra":"7","block_list":null,"bio":{"@type":"formattedText","text":"","entities":[]},"birthdate":null,"bot_info":{"@type":"botInfo","short_description":"A demo bot","description":"This bot demonstrates the info panel.","commands":[{"@type":"botCommand","command":"start","description":"Start the bot","is_ephemeral":false},{"@type":"botCommand","command":"help","description":"Show help","is_ephemeral":false}]}}"#;
+        let env = parse_envelope(json).unwrap();
+        match env.payload {
+            EnvelopePayload::UserFullInfo { bot_info } => {
+                let info = bot_info.expect("bot_info");
+                assert_eq!(info.short_description, "A demo bot");
+                assert_eq!(info.description, "This bot demonstrates the info panel.");
+                assert_eq!(info.commands.len(), 2);
+                assert_eq!(info.commands[0].command, "start");
+                assert_eq!(info.commands[0].description, "Start the bot");
+                assert_eq!(info.commands[1].command, "help");
+            }
+            other => panic!("{other:?}"),
+        }
+        // Non-bot full info: `bot_info` null → None.
+        let env = parse_envelope(
+            r#"{"@type":"userFullInfo","@extra":"8","block_list":null,"bot_info":null}"#,
+        )
+        .unwrap();
+        match env.payload {
+            EnvelopePayload::UserFullInfo { bot_info } => assert!(bot_info.is_none()),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn update_user_full_info_parsed() {
+        // `updateUserFullInfo` (schema 1.8.67 line 10744): user id explicit,
+        // `bot_info` nested under `user_full_info`.
+        let json = r#"{"@type":"updateUserFullInfo","user_id":21,"user_full_info":{"@type":"userFullInfo","bot_info":{"@type":"botInfo","short_description":"","description":"Refreshed description.","commands":[{"@type":"botCommand","command":"ping","description":"","is_ephemeral":false}]}}}"#;
+        let env = parse_envelope(json).unwrap();
+        match env.payload {
+            EnvelopePayload::UpdateUserFullInfo { user_id, bot_info } => {
+                assert_eq!(user_id.0, 21);
+                let info = bot_info.expect("bot_info");
+                assert_eq!(info.description, "Refreshed description.");
+                assert_eq!(info.commands.len(), 1);
+                assert_eq!(info.commands[0].command, "ping");
             }
             other => panic!("{other:?}"),
         }

@@ -5,12 +5,12 @@ use crate::ids::{
 };
 use crate::telegram::client::OwnedEnvelope;
 use crate::telegram::envelope::{
-    AnimationItem, AuthorizationState, ChannelMemberStatus, ChatAction, ChatDraft, ChatJoinResult,
-    ChatKind, ChatList, ChatNotificationSettings, ChatPositionUpdate, ConnectionState,
-    EnvelopePayload, ErrorClass, MessageContent, MessageForwardInfo, MessageInteractionInfo,
-    MessageOrigin, MessageReaction, MessageReplyTo, MessageSender, ParsedChatMember, ParsedFile,
-    ParsedMessage, ReportOption, ReportSponsoredResult, SponsoredMessage, StickerFormat,
-    StickerItem, StickerSetInfo,
+    AnimationItem, AuthorizationState, BotInfo, ChannelMemberStatus, ChatAction, ChatDraft,
+    ChatJoinResult, ChatKind, ChatList, ChatNotificationSettings, ChatPositionUpdate,
+    ConnectionState, EnvelopePayload, ErrorClass, MessageContent, MessageForwardInfo,
+    MessageInteractionInfo, MessageOrigin, MessageReaction, MessageReplyTo, MessageSender,
+    ParsedChatMember, ParsedFile, ParsedMessage, ReportOption, ReportSponsoredResult,
+    SponsoredMessage, StickerFormat, StickerItem, StickerSetInfo,
 };
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
@@ -90,6 +90,9 @@ pub enum RequestPurpose {
     /// `getChatMember` for the current user in a channel. Response is
     /// `chatMember`; drives the composer gate and join/leave affordance.
     GetChatMember,
+    /// `getUserFullInfo` for a bot user. Response is `userFullInfo`; the
+    /// user id is resolved from the request's chat (`ChatKind::Private`).
+    GetUserFullInfo,
     /// `joinChat`. Response is `ChatJoinResult`; own status also arrives via
     /// `updateChatMember`.
     JoinChat,
@@ -388,6 +391,19 @@ impl RequestRegistry {
         self.pending
             .values()
             .any(|p| p.purpose == purpose && p.chat_id == Some(chat_id))
+    }
+
+    /// The in-flight request id for a purpose/chat pair (test hook; the live
+    /// path matches responses by `@extra`).
+    pub fn pending_extra_for(
+        &self,
+        purpose: RequestPurpose,
+        chat_id: Option<ChatId>,
+    ) -> Option<RequestId> {
+        self.pending
+            .values()
+            .find(|p| p.purpose == purpose && p.chat_id == chat_id)
+            .map(|p| p.id)
     }
 
     pub fn has_download(&self, file_id: FileId) -> bool {
@@ -1208,6 +1224,10 @@ pub struct Session {
     pub gifs: GifPanel,
     /// `userTypeBot` ids from `updateUser`. Private chats with these users skip drafts.
     bot_user_ids: HashSet<i64>,
+    /// Cached `botInfo` from `getUserFullInfo` / `updateUserFullInfo`, keyed
+    /// by bot user id. `None` records "fetched, not a bot" so a null
+    /// `bot_info` does not trigger a refetch loop.
+    pub bot_info: HashMap<i64, Option<BotInfo>>,
     /// Composer text changed since the last persisted draft. Remote
     /// `updateChatDraftMessage` must not replace it (schema comment).
     draft_dirty: HashSet<i64>,
@@ -1258,6 +1278,7 @@ impl Session {
             stickers: StickerPanel::default(),
             gifs: GifPanel::default(),
             bot_user_ids: HashSet::new(),
+            bot_info: HashMap::new(),
             draft_dirty: HashSet::new(),
             draft_clears: Vec::new(),
             sponsored: HashMap::new(),
@@ -1278,6 +1299,29 @@ impl Session {
             ChatKind::Private { user_id } => !self.bot_user_ids.contains(&user_id.0),
             _ => false,
         }
+    }
+
+    /// Phase 3.1: bot chats ride the ordinary private-chat path
+    /// (`is_supported_cloud_chat` / `can_post`) — no special gate. This
+    /// resolves the peer bot user id for a private chat whose user is a
+    /// known `userTypeBot`, feeding the lazy `getUserFullInfo` fetch.
+    /// `None` for every other chat kind.
+    pub fn bot_user_id_for_chat(&self, chat_id: ChatId) -> Option<i64> {
+        let chat = self.chats.get(&chat_id.0)?;
+        match chat.kind {
+            ChatKind::Private { user_id } if self.bot_user_ids.contains(&user_id.0) => {
+                Some(user_id.0)
+            }
+            _ => None,
+        }
+    }
+
+    /// Cached `botInfo` for the open chat's bot, if the lazy fetch (or an
+    /// `updateUserFullInfo`) already populated it.
+    pub fn bot_info_for_chat(&self, chat_id: ChatId) -> Option<&BotInfo> {
+        self.bot_user_id_for_chat(chat_id)
+            .and_then(|user_id| self.bot_info.get(&user_id))
+            .and_then(|info| info.as_ref())
     }
 
     pub fn mark_draft_dirty(&mut self, chat_id: ChatId) {
@@ -1378,7 +1422,10 @@ impl Session {
                 if is_bot {
                     self.bot_user_ids.insert(user_id.0);
                 } else {
+                    // No longer a bot: drop any cached bot info so the panel
+                    // cannot show stale description/commands (Phase 3.1).
                     self.bot_user_ids.remove(&user_id.0);
+                    self.bot_info.remove(&user_id.0);
                 }
             }
             EnvelopePayload::UpdateChatNotificationSettings {
@@ -1740,6 +1787,21 @@ impl Session {
                 {
                     self.accept_own_chat_member(chat_id, member);
                 }
+            }
+            EnvelopePayload::UserFullInfo { bot_info } => {
+                // `getUserFullInfo` response: resolve the bot user id from
+                // the pending request's private chat. Responses for chats
+                // that stopped being bot chats are dropped.
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetUserFullInfo)
+                    && let Some(pending) = pending
+                    && let Some(chat_id) = pending.chat_id
+                    && let Some(user_id) = self.bot_user_id_for_chat(chat_id)
+                {
+                    self.bot_info.insert(user_id, bot_info);
+                }
+            }
+            EnvelopePayload::UpdateUserFullInfo { user_id, bot_info } => {
+                self.bot_info.insert(user_id.0, bot_info);
             }
             EnvelopePayload::UpdateChatMember { chat_id, member } => {
                 self.accept_own_chat_member(chat_id, member);

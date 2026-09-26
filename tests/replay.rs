@@ -1592,3 +1592,154 @@ fn replay_channel_admin_status_change_flips_composer() {
     assert_eq!(chat.my_member_status, Some(ChannelMemberStatus::Creator));
     assert!(chat.can_post());
 }
+
+const BOT_USER_JSON: &str = r#"{"@type":"updateUser","user":{"id":21,"first_name":"Demo","type":{"@type":"userTypeBot","can_be_edited":false,"can_join_groups":false,"can_read_all_group_messages":false,"has_main_web_app":false,"has_topics":false,"allows_users_to_create_topics":false,"can_manage_bots":false,"is_inline":false,"inline_query_placeholder":"","supports_guest_queries":false,"is_guard":false,"need_location":false,"can_connect_to_business":false,"can_be_added_to_attachment_menu":false,"active_user_count":0}}}"#;
+
+/// Phase 3.1: bot private chats ride the ordinary private-chat path — they
+/// are listed, ungated, open, render history, and keep the composer. The
+/// gating infrastructure (`is_supported_cloud_chat` / `gate_reason` /
+/// `can_post`) is untouched.
+#[test]
+fn replay_bot_chat_ungated_with_history() {
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn quill::diagnostics::DiagnosticSink> = sink.clone();
+    let mut session = Session::new(AccountKey::primary(), dyn_sink);
+    let seq = AtomicU64::new(0);
+    apply_all_seq(
+        &mut session,
+        &sink,
+        &seq,
+        &[
+            BOT_USER_JSON,
+            r#"{"@type":"updateNewChat","chat":{"id":21,"title":"Demo Bot","type":{"@type":"chatTypePrivate","user_id":21},"unread_count":0}}"#,
+            r#"{"@type":"updateChatPosition","chat_id":21,"position":{"@type":"chatPosition","list":{"@type":"chatListMain"},"order":"40","is_pinned":false}}"#,
+            r#"{"@type":"updateNewMessage","message":{"id":301,"chat_id":21,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"ping","entities":[]}}}}"#,
+            r#"{"@type":"updateNewMessage","message":{"id":302,"chat_id":21,"is_outgoing":true,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"/start","entities":[]}}}}"#,
+        ],
+    );
+    // Chat list: the bot chat appears like any private chat.
+    let ids: Vec<i64> = session.ordered_chats().iter().map(|c| c.id.0).collect();
+    assert_eq!(ids, vec![21]);
+    let chat = session.chats.get(&21).unwrap();
+    assert!(chat.supported());
+    assert!(chat.kind.gate_reason().is_none());
+    assert!(chat.can_post());
+    // Bot detection feeds the lazy `getUserFullInfo` fetch.
+    assert_eq!(
+        session.bot_user_id_for_chat(quill::ids::ChatId(21)),
+        Some(21)
+    );
+    // History renders bot and own messages.
+    let history = session.histories.get(&21).unwrap();
+    assert_eq!(history.messages.len(), 2);
+    assert!(!history.messages[&301].is_outgoing);
+    assert!(history.messages[&302].is_outgoing);
+}
+
+/// Phase 3.1: a `getUserFullInfo` response caches `botInfo` (description +
+/// commands) for the bot chat; the panel reads it back.
+#[test]
+fn replay_bot_info_cached_from_full_info() {
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn quill::diagnostics::DiagnosticSink> = sink.clone();
+    let mut session = Session::new(AccountKey::primary(), dyn_sink);
+    let seq = AtomicU64::new(0);
+    apply_all_seq(
+        &mut session,
+        &sink,
+        &seq,
+        &[
+            BOT_USER_JSON,
+            r#"{"@type":"updateNewChat","chat":{"id":21,"title":"Demo Bot","type":{"@type":"chatTypePrivate","user_id":21},"unread_count":0}}"#,
+        ],
+    );
+    assert!(session.bot_info_for_chat(quill::ids::ChatId(21)).is_none());
+    let extra = session.request(
+        RequestPurpose::GetUserFullInfo,
+        Some(quill::ids::ChatId(21)),
+    );
+    apply_all_seq(
+        &mut session,
+        &sink,
+        &seq,
+        &[&format!(
+            r#"{{"@type":"userFullInfo","@extra":"{}","bot_info":{{"@type":"botInfo","short_description":"A demo bot","description":"CANARY_desc","commands":[{{"@type":"botCommand","command":"start","description":"Start the bot","is_ephemeral":false}},{{"@type":"botCommand","command":"help","description":"Show help","is_ephemeral":false}}]}}}}"#,
+            extra.0
+        )],
+    );
+    let info = session
+        .bot_info_for_chat(quill::ids::ChatId(21))
+        .expect("bot info cached");
+    assert_eq!(info.short_description, "A demo bot");
+    assert_eq!(info.description, "CANARY_desc");
+    assert_eq!(info.commands.len(), 2);
+    assert_eq!(info.commands[0].command, "start");
+    assert_eq!(info.commands[0].description, "Start the bot");
+    assert_eq!(info.commands[1].command, "help");
+}
+
+/// Phase 3.1: `updateUserFullInfo` refreshes the cached bot info live.
+#[test]
+fn replay_bot_info_refreshed_by_update() {
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn quill::diagnostics::DiagnosticSink> = sink.clone();
+    let mut session = Session::new(AccountKey::primary(), dyn_sink);
+    let seq = AtomicU64::new(0);
+    apply_all_seq(
+        &mut session,
+        &sink,
+        &seq,
+        &[
+            BOT_USER_JSON,
+            r#"{"@type":"updateNewChat","chat":{"id":21,"title":"Demo Bot","type":{"@type":"chatTypePrivate","user_id":21},"unread_count":0}}"#,
+            r#"{"@type":"updateUserFullInfo","user_id":21,"user_full_info":{"@type":"userFullInfo","bot_info":{"@type":"botInfo","short_description":"","description":"CANARY_refreshed","commands":[{"@type":"botCommand","command":"ping","description":"","is_ephemeral":false}]}}}"#,
+        ],
+    );
+    let info = session
+        .bot_info_for_chat(quill::ids::ChatId(21))
+        .expect("bot info cached");
+    assert_eq!(info.description, "CANARY_refreshed");
+    assert_eq!(info.commands.len(), 1);
+    assert_eq!(info.commands[0].command, "ping");
+    // If the user stops being a bot, the stale bot info is dropped.
+    apply_all_seq(
+        &mut session,
+        &sink,
+        &seq,
+        &[
+            r#"{"@type":"updateUser","user":{"id":21,"first_name":"Demo","type":{"@type":"userTypeRegular"}}}"#,
+        ],
+    );
+    assert!(session.bot_info_for_chat(quill::ids::ChatId(21)).is_none());
+    assert_eq!(session.bot_user_id_for_chat(quill::ids::ChatId(21)), None);
+}
+
+/// Phase 3.1: gating for everything else is unchanged. A secret chat stays
+/// gated, and a non-bot private chat is not a bot chat (no bot-info lookup,
+/// no draft change).
+#[test]
+fn replay_non_bot_chat_gating_unchanged() {
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn quill::diagnostics::DiagnosticSink> = sink.clone();
+    let mut session = Session::new(AccountKey::primary(), dyn_sink);
+    let seq = AtomicU64::new(0);
+    apply_all_seq(
+        &mut session,
+        &sink,
+        &seq,
+        &[
+            r#"{"@type":"updateNewChat","chat":{"id":31,"title":"Secret","type":{"@type":"chatTypeSecret","secret_chat_id":31,"user_id":7},"unread_count":0}}"#,
+            r#"{"@type":"updateNewChat","chat":{"id":32,"title":"Ada","type":{"@type":"chatTypePrivate","user_id":7},"unread_count":0}}"#,
+        ],
+    );
+    let secret = session.chats.get(&31).unwrap();
+    assert!(!secret.supported());
+    assert!(secret.kind.gate_reason().is_some());
+    assert!(!secret.can_post());
+    let peer = session.chats.get(&32).unwrap();
+    assert!(peer.supported());
+    assert!(peer.kind.gate_reason().is_none());
+    assert!(peer.can_post());
+    assert_eq!(session.bot_user_id_for_chat(quill::ids::ChatId(32)), None);
+    assert!(session.bot_info_for_chat(quill::ids::ChatId(32)).is_none());
+}

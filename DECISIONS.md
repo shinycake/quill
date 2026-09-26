@@ -453,3 +453,58 @@ Research snapshot 2026-09-16, pin recheck **2026-09-17**.
   subscriber counts; channel header extras (photo, description, username);
   chat-list avatars for any chat type; comment threading inside channels;
   admin log; boosts/statistics.
+
+## Phase 3.1 — Bot chats (2026-09-26)
+
+- **Rationale:** bots were already detectable (`updateUser` →
+  `userTypeBot`) but their info was never fetched and never shown; a bot
+  private chat looked like any other chat. This slice keeps bot chats on
+  the ordinary private-chat path (list, open, history, composer all work)
+  and adds the native bot info panel: lazily fetch `getUserFullInfo` when
+  the chat opens, cache `botInfo` (description + commands), and render it
+  below the conversation header. Tapping a command inserts it into the
+  composer (the full `/` menu is 3.3's job).
+- **Schema (1.8.67, verified in `schema/td_api.tl`):**
+  - `userTypeBot can_be_edited:Bool can_join_groups:Bool
+    can_read_all_group_messages:Bool … = UserType;` (line 816) — bot
+    detection already lived on this; nothing new invented
+  - `getUserFullInfo user_id:int53 = UserFullInfo;` (line 11501)
+  - `userFullInfo … bot_info:botInfo = UserFullInfo;` (line 2468)
+  - `botInfo short_description:string description:string …
+    commands:vector<botCommand> … = BotInfo;` (line 2430) — commands are
+    directly `vector<botCommand>`, not the `botCommands` wrapper (line 829)
+  - `botCommand command:string description:string is_ephemeral:Bool =
+    BotCommand;` (line 826) — `is_ephemeral` is parsed but intentionally
+    not stored: tapping a command always inserts the plain `/command` text
+  - `updateUserFullInfo user_id:int53 user_full_info:userFullInfo =
+    Update;` (line 10744)
+- **UX:**
+  - Bot private chats are listed, opened, and messaged exactly like other
+    private chats — no bot-specific gating bypass; `is_supported_cloud_chat`
+    / `gate_reason` / `can_post()` are untouched, so secret chats and other
+    unsupported types gate exactly as before.
+  - On first open of a known bot chat the driver sends one `getUserFullInfo`
+    (deduped: cached infos and in-flight requests are not refetched);
+    send failures drop the pending request so a retry can happen.
+  - The panel shows the bot description and one outlined button per
+    command (`/start — Start the bot` style). Tapping inserts `/command`
+    into the composer (bare when empty, space-separated after text).
+  - Screenshot demo: `quill --screenshot-demo ready-bot-chat` →
+    `docs/screenshots/ready-bot-chat.png`.
+- **Replay proof:** `tests/replay.rs` gains `replay_bot_chat_ungated_with_history`
+  (bot chat listed/ungated/postable, history renders, `bot_user_id_for_chat`
+  resolves), `replay_bot_info_cached_from_full_info` (description/commands
+  cached from the `userFullInfo` response), `replay_bot_info_refreshed_by_update`
+  (`updateUserFullInfo` replaces the cache), and
+  `replay_non_bot_chat_gating_unchanged` (secret chat still gated, regular
+  private chat still supported, no bot association). `src/connect.rs` gains
+  the driver test `bot_info_fetched_once_on_chat_open` (one `getUserFullInfo`
+  recorded per chat; repeat selects do not refetch; the `@extra`-matched
+  response caches the canary info). `envelope.rs` unit-tests the full-info
+  and update parses. `composer.rs` unit-tests `insert_bot_command_text`
+  (empty/whitespace/text/chained commands).
+- **Out of this slice (→ 3.2 and beyond):** inline keyboards and
+  `answerCallbackQuery`; full `/` command menu in the composer (3.3);
+  inline bots / `getCommands`; bot privacy modes and group membership
+  details; menu-button / web-app buttons; bot photo/avatar headers; bot
+  sponsored-message rows (fetching still skips bots).
