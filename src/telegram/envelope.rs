@@ -421,9 +421,11 @@ pub enum EnvelopePayload {
     /// "Discuss" affordance), plus the slow-mode fields and boost counts
     /// (Phase A1: `slow_mode_delay` / `slow_mode_delay_expires_in`, schema
     /// 1.8.67 lines 2758–2759; `my_boost_count` / `unrestrict_boost_count`,
-    /// lines 2779–2780) that drive composer slow-mode enforcement. Dropped:
-    /// admin/restricted/banned counts, invite link, sticker sets, gift
-    /// fields, paid-message and statistics flags, location.
+    /// lines 2779–2780) that drive composer slow-mode enforcement, plus
+    /// Phase D2's `can_get_statistics` (line 2792) gating the statistics
+    /// entry point. Dropped: admin/restricted/banned counts, invite link,
+    /// sticker sets, gift fields, paid-message and other statistics flags,
+    /// location.
     SupergroupFullInfo {
         description: String,
         member_count: i32,
@@ -432,6 +434,17 @@ pub enum EnvelopePayload {
         slow_mode_delay_expires_in: f64,
         my_boost_count: i32,
         unrestrict_boost_count: i32,
+        /// Phase D2: `supergroupFullInfo.can_get_statistics` (schema 1.8.67,
+        /// line 2792) — true when chat statistics are available via
+        /// `getChatStatistics`. Gates the statistics entry point.
+        can_get_statistics: bool,
+    },
+    /// Phase D2: `chatStatisticsChannel` / `chatStatisticsSupergroup` —
+    /// `getChatStatistics` response (schema 1.8.67, line 15760). The
+    /// response carries no chat id; it is resolved from the pending
+    /// request in `Session::apply`.
+    ChatStatistics {
+        statistics: ChatStatistics,
     },
     /// Parity slice: `updateSupergroupFullInfo` (schema 1.8.67, line 10750)
     /// — the update carries its own `supergroup_id`, so it applies
@@ -450,6 +463,9 @@ pub enum EnvelopePayload {
         slow_mode_delay_expires_in: f64,
         my_boost_count: i32,
         unrestrict_boost_count: i32,
+        /// Phase D2: `supergroupFullInfo.can_get_statistics` (schema 1.8.67,
+        /// line 2792).
+        can_get_statistics: bool,
     },
     /// `botCommands` — `getCommands` response (TDLib 1.8.67,
     /// `schema/td_api.tl:829`): the bot's commands for the requested scope
@@ -1681,6 +1697,402 @@ pub struct MessageForwardInfo {
     pub date: i32,
 }
 
+/// Phase D2: `statisticalValue` (TDLib 1.8.67, `schema/td_api.tl:10139`).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct StatisticalValue {
+    pub value: f64,
+    pub previous_value: f64,
+    pub growth_rate_percentage: f64,
+}
+
+impl StatisticalValue {
+    fn parse(value: &Value) -> Result<Self, ParseError> {
+        // `statisticalValue value:double previous_value:double
+        // growth_rate_percentage:double` (schema 1.8.67, line 10139) — all
+        // three fields are required; missing or mistyped fields are a
+        // parse error rather than fabricated zeros.
+        Ok(StatisticalValue {
+            value: value
+                .get("value")
+                .and_then(Value::as_f64)
+                .ok_or(ParseError::MissingField)?,
+            previous_value: value
+                .get("previous_value")
+                .and_then(Value::as_f64)
+                .ok_or(ParseError::MissingField)?,
+            growth_rate_percentage: value
+                .get("growth_rate_percentage")
+                .and_then(Value::as_f64)
+                .ok_or(ParseError::MissingField)?,
+        })
+    }
+}
+
+/// Phase D2: `StatisticalGraph` (TDLib 1.8.67) — `statisticalGraphData`
+/// (`schema/td_api.tl:10145`), `statisticalGraphAsync` (`:10148`),
+/// `statisticalGraphError` (`:10151`). Unknown variants are a parse error.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StatisticalGraph {
+    Data {
+        json_data: String,
+        zoom_token: String,
+    },
+    Async {
+        token: String,
+    },
+    Error {
+        error_message: String,
+    },
+}
+
+impl StatisticalGraph {
+    fn parse(value: &Value) -> Result<Self, ParseError> {
+        match value.get("@type").and_then(Value::as_str) {
+            Some("statisticalGraphData") => Ok(StatisticalGraph::Data {
+                json_data: value
+                    .get("json_data")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string(),
+                zoom_token: value
+                    .get("zoom_token")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string(),
+            }),
+            Some("statisticalGraphAsync") => Ok(StatisticalGraph::Async {
+                token: value
+                    .get("token")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string(),
+            }),
+            Some("statisticalGraphError") => Ok(StatisticalGraph::Error {
+                error_message: value
+                    .get("error_message")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string(),
+            }),
+            _ => Err(ParseError::MissingField),
+        }
+    }
+}
+
+/// Phase D2: `ChatStatisticsObjectType` (TDLib 1.8.67) —
+/// `chatStatisticsObjectTypeMessage` (`schema/td_api.tl:10157`),
+/// `chatStatisticsObjectTypeStory` (`schema/td_api.tl:10160`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChatStatisticsObject {
+    Message { message_id: i64 },
+    Story { story_id: i32 },
+}
+
+/// Phase D2: `chatStatisticsInteractionInfo` (TDLib 1.8.67,
+/// `schema/td_api.tl:10168`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ChatStatisticsInteractionInfo {
+    pub object: ChatStatisticsObject,
+    pub view_count: i32,
+    pub forward_count: i32,
+    pub reaction_count: i32,
+}
+
+/// Phase D2: `chatStatisticsMessageSenderInfo` (TDLib 1.8.67,
+/// `schema/td_api.tl:10174`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ChatStatisticsMessageSenderInfo {
+    pub user_id: i64,
+    pub sent_message_count: i32,
+    pub average_character_count: i32,
+}
+
+/// Phase D2: `chatStatisticsAdministratorActionsInfo` (TDLib 1.8.67,
+/// `schema/td_api.tl:10181`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ChatStatisticsAdministratorActionsInfo {
+    pub user_id: i64,
+    pub deleted_message_count: i32,
+    pub banned_user_count: i32,
+    pub restricted_user_count: i32,
+}
+
+/// Phase D2: `chatStatisticsInviterInfo` (TDLib 1.8.67,
+/// `schema/td_api.tl:10186`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ChatStatisticsInviterInfo {
+    pub user_id: i64,
+    pub added_member_count: i32,
+}
+
+/// Phase D2: `chatStatisticsChannel` (TDLib 1.8.67, `schema/td_api.tl:10233`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ChannelStatistics {
+    pub period_start: i32,
+    pub period_end: i32,
+    pub member_count: StatisticalValue,
+    pub mean_message_view_count: StatisticalValue,
+    pub mean_message_share_count: StatisticalValue,
+    pub mean_message_reaction_count: StatisticalValue,
+    pub mean_story_view_count: StatisticalValue,
+    pub mean_story_share_count: StatisticalValue,
+    pub mean_story_reaction_count: StatisticalValue,
+    pub enabled_notifications_percentage: f64,
+    pub member_count_graph: StatisticalGraph,
+    pub join_graph: StatisticalGraph,
+    pub mute_graph: StatisticalGraph,
+    pub view_count_by_hour_graph: StatisticalGraph,
+    pub view_count_by_source_graph: StatisticalGraph,
+    pub join_by_source_graph: StatisticalGraph,
+    pub language_graph: StatisticalGraph,
+    pub message_interaction_graph: StatisticalGraph,
+    pub message_reaction_graph: StatisticalGraph,
+    pub story_interaction_graph: StatisticalGraph,
+    pub story_reaction_graph: StatisticalGraph,
+    pub instant_view_interaction_graph: StatisticalGraph,
+    pub recent_interactions: Vec<ChatStatisticsInteractionInfo>,
+}
+
+/// Phase D2: `chatStatisticsSupergroup` (TDLib 1.8.67,
+/// `schema/td_api.tl:10208`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct SupergroupStatistics {
+    pub period_start: i32,
+    pub period_end: i32,
+    pub member_count: StatisticalValue,
+    pub message_count: StatisticalValue,
+    pub viewer_count: StatisticalValue,
+    pub sender_count: StatisticalValue,
+    pub member_count_graph: StatisticalGraph,
+    pub join_graph: StatisticalGraph,
+    pub join_by_source_graph: StatisticalGraph,
+    pub language_graph: StatisticalGraph,
+    pub message_content_graph: StatisticalGraph,
+    pub action_graph: StatisticalGraph,
+    pub day_graph: StatisticalGraph,
+    pub week_graph: StatisticalGraph,
+    pub top_senders: Vec<ChatStatisticsMessageSenderInfo>,
+    pub top_administrators: Vec<ChatStatisticsAdministratorActionsInfo>,
+    pub top_inviters: Vec<ChatStatisticsInviterInfo>,
+}
+
+/// Phase D2: `ChatStatistics` (TDLib 1.8.67) — the `getChatStatistics`
+/// response (`schema/td_api.tl:15760`). Revenue/star variants stay out of
+/// this slice.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ChatStatistics {
+    Channel(Box<ChannelStatistics>),
+    Supergroup(Box<SupergroupStatistics>),
+}
+
+fn parse_statistical_value(value: Option<&Value>) -> Result<StatisticalValue, ParseError> {
+    // All `statisticalValue` fields on `chatStatisticsChannel` /
+    // `chatStatisticsSupergroup` are required by the schema; a missing,
+    // null, or mistyped value is a parse error rather than fabricated
+    // zeros.
+    let value = value
+        .filter(|v| !v.is_null())
+        .ok_or(ParseError::MissingField)?;
+    StatisticalValue::parse(value)
+}
+
+fn parse_statistical_graph(value: Option<&Value>) -> Result<StatisticalGraph, ParseError> {
+    let value = value
+        .filter(|v| !v.is_null())
+        .ok_or(ParseError::MissingField)?;
+    StatisticalGraph::parse(value)
+}
+
+fn parse_statistics_period(value: Option<&Value>) -> Result<(i32, i32), ParseError> {
+    // `dateRange start_date:int32 end_date:int32` (schema 1.8.67, line 10135).
+    let value = value
+        .filter(|v| !v.is_null())
+        .ok_or(ParseError::MissingField)?;
+    let start = value
+        .get("start_date")
+        .and_then(Value::as_i64)
+        .ok_or(ParseError::MissingField)? as i32;
+    let end = value
+        .get("end_date")
+        .and_then(Value::as_i64)
+        .ok_or(ParseError::MissingField)? as i32;
+    Ok((start, end))
+}
+
+fn parse_chat_statistics_object(value: Option<&Value>) -> Option<ChatStatisticsObject> {
+    let value = value?;
+    match value.get("@type").and_then(Value::as_str) {
+        Some("chatStatisticsObjectTypeMessage") => Some(ChatStatisticsObject::Message {
+            message_id: int53_or_zero(value.get("message_id")),
+        }),
+        Some("chatStatisticsObjectTypeStory") => Some(ChatStatisticsObject::Story {
+            story_id: value.get("story_id").and_then(Value::as_i64).unwrap_or(0) as i32,
+        }),
+        _ => None,
+    }
+}
+
+fn parse_chat_statistics_interaction_info(value: &Value) -> Option<ChatStatisticsInteractionInfo> {
+    Some(ChatStatisticsInteractionInfo {
+        object: parse_chat_statistics_object(value.get("object_type"))?,
+        view_count: value.get("view_count").and_then(Value::as_i64).unwrap_or(0) as i32,
+        forward_count: value
+            .get("forward_count")
+            .and_then(Value::as_i64)
+            .unwrap_or(0) as i32,
+        reaction_count: value
+            .get("reaction_count")
+            .and_then(Value::as_i64)
+            .unwrap_or(0) as i32,
+    })
+}
+
+/// Phase D2: parses `chatStatisticsChannel` / `chatStatisticsSupergroup`
+/// into `ChatStatistics`. Unknown `ChatStatistics` variants are a parse
+/// error (the panel renders an honest "unsupported" state).
+fn parse_chat_statistics(value: &Value) -> Result<ChatStatistics, ParseError> {
+    match value.get("@type").and_then(Value::as_str) {
+        Some("chatStatisticsChannel") => {
+            let (period_start, period_end) = parse_statistics_period(value.get("period"))?;
+            let graph = |name: &str| parse_statistical_graph(value.get(name));
+            Ok(ChatStatistics::Channel(Box::new(ChannelStatistics {
+                period_start,
+                period_end,
+                member_count: parse_statistical_value(value.get("member_count"))?,
+                mean_message_view_count: parse_statistical_value(
+                    value.get("mean_message_view_count"),
+                )?,
+                mean_message_share_count: parse_statistical_value(
+                    value.get("mean_message_share_count"),
+                )?,
+                mean_message_reaction_count: parse_statistical_value(
+                    value.get("mean_message_reaction_count"),
+                )?,
+                mean_story_view_count: parse_statistical_value(value.get("mean_story_view_count"))?,
+                mean_story_share_count: parse_statistical_value(
+                    value.get("mean_story_share_count"),
+                )?,
+                mean_story_reaction_count: parse_statistical_value(
+                    value.get("mean_story_reaction_count"),
+                )?,
+                enabled_notifications_percentage: value
+                    .get("enabled_notifications_percentage")
+                    .and_then(Value::as_f64)
+                    .unwrap_or(0.0),
+                member_count_graph: graph("member_count_graph")?,
+                join_graph: graph("join_graph")?,
+                mute_graph: graph("mute_graph")?,
+                view_count_by_hour_graph: graph("view_count_by_hour_graph")?,
+                view_count_by_source_graph: graph("view_count_by_source_graph")?,
+                join_by_source_graph: graph("join_by_source_graph")?,
+                language_graph: graph("language_graph")?,
+                message_interaction_graph: graph("message_interaction_graph")?,
+                message_reaction_graph: graph("message_reaction_graph")?,
+                story_interaction_graph: graph("story_interaction_graph")?,
+                story_reaction_graph: graph("story_reaction_graph")?,
+                instant_view_interaction_graph: graph("instant_view_interaction_graph")?,
+                recent_interactions: value
+                    .get("recent_interactions")
+                    .and_then(Value::as_array)
+                    .map(|items| {
+                        items
+                            .iter()
+                            .filter_map(parse_chat_statistics_interaction_info)
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+            })))
+        }
+        Some("chatStatisticsSupergroup") => {
+            let (period_start, period_end) = parse_statistics_period(value.get("period"))?;
+            let graph = |name: &str| parse_statistical_graph(value.get(name));
+            Ok(ChatStatistics::Supergroup(Box::new(SupergroupStatistics {
+                period_start,
+                period_end,
+                member_count: parse_statistical_value(value.get("member_count"))?,
+                message_count: parse_statistical_value(value.get("message_count"))?,
+                viewer_count: parse_statistical_value(value.get("viewer_count"))?,
+                sender_count: parse_statistical_value(value.get("sender_count"))?,
+                member_count_graph: graph("member_count_graph")?,
+                join_graph: graph("join_graph")?,
+                join_by_source_graph: graph("join_by_source_graph")?,
+                language_graph: graph("language_graph")?,
+                message_content_graph: graph("message_content_graph")?,
+                action_graph: graph("action_graph")?,
+                day_graph: graph("day_graph")?,
+                week_graph: graph("week_graph")?,
+                top_senders: value
+                    .get("top_senders")
+                    .and_then(Value::as_array)
+                    .map(|items| {
+                        items
+                            .iter()
+                            .map(|item| ChatStatisticsMessageSenderInfo {
+                                user_id: int53_or_zero(item.get("user_id")),
+                                sent_message_count: item
+                                    .get("sent_message_count")
+                                    .and_then(Value::as_i64)
+                                    .unwrap_or(0)
+                                    as i32,
+                                average_character_count: item
+                                    .get("average_character_count")
+                                    .and_then(Value::as_i64)
+                                    .unwrap_or(0)
+                                    as i32,
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+                top_administrators: value
+                    .get("top_administrators")
+                    .and_then(Value::as_array)
+                    .map(|items| {
+                        items
+                            .iter()
+                            .map(|item| ChatStatisticsAdministratorActionsInfo {
+                                user_id: int53_or_zero(item.get("user_id")),
+                                deleted_message_count: item
+                                    .get("deleted_message_count")
+                                    .and_then(Value::as_i64)
+                                    .unwrap_or(0)
+                                    as i32,
+                                banned_user_count: item
+                                    .get("banned_user_count")
+                                    .and_then(Value::as_i64)
+                                    .unwrap_or(0)
+                                    as i32,
+                                restricted_user_count: item
+                                    .get("restricted_user_count")
+                                    .and_then(Value::as_i64)
+                                    .unwrap_or(0)
+                                    as i32,
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+                top_inviters: value
+                    .get("top_inviters")
+                    .and_then(Value::as_array)
+                    .map(|items| {
+                        items
+                            .iter()
+                            .map(|item| ChatStatisticsInviterInfo {
+                                user_id: int53_or_zero(item.get("user_id")),
+                                added_member_count: item
+                                    .get("added_member_count")
+                                    .and_then(Value::as_i64)
+                                    .unwrap_or(0)
+                                    as i32,
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+            })))
+        }
+        _ => Err(ParseError::MissingField),
+    }
+}
+
 /// Official Telegram default emoji reactions (tdesktop active-emoji first
 /// row / Unigram default picker). Custom emoji and paid stay out of this slice.
 pub const DEFAULT_EMOJI_REACTIONS: &[&str] = &[
@@ -1856,6 +2268,12 @@ pub struct ParsedMessage {
     pub topic_id: Option<i32>,
     /// Schema `message.media_album_id` (int64). `0` means the message is not in an album.
     pub media_album_id: i64,
+    /// Phase D2: schema `message.author_signature` (TDLib 1.8.67, lines
+    /// 3155/3165) — "For channel posts and anonymous group messages,
+    /// optional author signature". `None` when absent or empty; renders as
+    /// the small signature line under the post (suppressed under
+    /// forwarded-message headers, which already attribute it).
+    pub author_signature: Option<String>,
     pub content: MessageContent,
     pub files: Vec<ParsedFile>,
     pub reply_to: Option<MessageReplyTo>,
@@ -4178,6 +4596,12 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
                 .get("unrestrict_boost_count")
                 .and_then(Value::as_i64)
                 .unwrap_or(0) as i32,
+            // Phase D2: `can_get_statistics` (schema 1.8.67, line 2792) —
+            // gates the statistics entry point in the info panel.
+            can_get_statistics: value
+                .get("can_get_statistics")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
         }),
         // Parity slice: `updateSupergroupFullInfo` (schema 1.8.67, line
         // 10750) — same fields as the `supergroupFullInfo` response, with
@@ -4223,7 +4647,23 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
                 .and_then(|info| info.get("unrestrict_boost_count"))
                 .and_then(Value::as_i64)
                 .unwrap_or(0) as i32,
+            // Phase D2: `can_get_statistics` (schema 1.8.67, line 2792),
+            // nested like the other fields.
+            can_get_statistics: value
+                .get("supergroup_full_info")
+                .and_then(|info| info.get("can_get_statistics"))
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
         }),
+        // Phase D2: `getChatStatistics` response (schema 1.8.67, line
+        // 15760) — `chatStatisticsChannel` / `chatStatisticsSupergroup`.
+        // The response carries no chat id; `Session::apply` correlates it
+        // via the pending `GetChatStatistics` request.
+        "chatStatisticsChannel" | "chatStatisticsSupergroup" => {
+            Ok(EnvelopePayload::ChatStatistics {
+                statistics: parse_chat_statistics(&value)?,
+            })
+        }
         "botCommands" => Ok(EnvelopePayload::BotCommands {
             bot_user_id: UserId(int53(value.get("bot_user_id"))?),
             commands: value
@@ -4255,9 +4695,18 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
                 .and_then(Value::as_bool)
                 .unwrap_or(false),
         }),
-        other => Ok(EnvelopePayload::Unknown(UnknownKind {
-            type_name: other.to_string(),
-        })),
+        other => {
+            // Phase D2: an unknown future `ChatStatistics` constructor must
+            // fail parsing rather than silently becoming `Unknown` and
+            // dropping the statistics response. All other unknown types
+            // keep the existing `Unknown` convention.
+            if other.starts_with("chatStatistics") {
+                return Err(ParseError::MissingField);
+            }
+            Ok(EnvelopePayload::Unknown(UnknownKind {
+                type_name: other.to_string(),
+            }))
+        }
     }
 }
 
@@ -4962,6 +5411,13 @@ fn parse_message(value: &Value) -> Result<ParsedMessage, ParseError> {
             .and_then(Value::as_bool)
             .unwrap_or(false),
         media_album_id: int64(value.get("media_album_id")).unwrap_or(0),
+        // Phase D2: `message.author_signature` (TDLib 1.8.67, lines
+        // 3155/3165). Empty or absent → `None`.
+        author_signature: value
+            .get("author_signature")
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string),
         topic_id: parse_message_topic(value.get("topic_id")),
         content,
         files,
@@ -8789,6 +9245,8 @@ mod channel_envelope_tests {
                 slow_mode_delay_expires_in,
                 my_boost_count,
                 unrestrict_boost_count,
+                // Phase D2: absent → false (gates the statistics entry point).
+                can_get_statistics,
             } => {
                 assert_eq!(description, "CANARY group description");
                 assert_eq!(member_count, 1234);
@@ -8799,6 +9257,7 @@ mod channel_envelope_tests {
                 assert_eq!(slow_mode_delay_expires_in, 0.0);
                 assert_eq!(my_boost_count, 0);
                 assert_eq!(unrestrict_boost_count, 0);
+                assert!(!can_get_statistics);
             }
             other => panic!("{other:?}"),
         }
@@ -8844,6 +9303,189 @@ mod channel_envelope_tests {
             }
             other => panic!("{other:?}"),
         }
+    }
+
+    #[test]
+    fn message_parses_author_signature() {
+        // Phase D2: `message.author_signature` (schema 1.8.67, line 3165)
+        // — present → Some; absent or empty → None.
+        let json = r#"{"@type":"updateNewMessage","message":{"id":8,"chat_id":4,"is_outgoing":false,"author_signature":"News Desk","content":{"@type":"messageText","text":{"@type":"formattedText","text":"hi","entities":[]}}}}"#;
+        let env = parse_envelope(json).unwrap();
+        let EnvelopePayload::UpdateNewMessage(message) = env.payload else {
+            panic!("expected message");
+        };
+        assert_eq!(message.author_signature.as_deref(), Some("News Desk"));
+
+        let json = r#"{"@type":"updateNewMessage","message":{"id":9,"chat_id":4,"is_outgoing":false,"author_signature":"","content":{"@type":"messageText","text":{"@type":"formattedText","text":"hi","entities":[]}}}}"#;
+        let env = parse_envelope(json).unwrap();
+        let EnvelopePayload::UpdateNewMessage(message) = env.payload else {
+            panic!("expected message");
+        };
+        assert_eq!(message.author_signature, None);
+
+        let json = r#"{"@type":"updateNewMessage","message":{"id":10,"chat_id":4,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"hi","entities":[]}}}}"#;
+        let env = parse_envelope(json).unwrap();
+        let EnvelopePayload::UpdateNewMessage(message) = env.payload else {
+            panic!("expected message");
+        };
+        assert_eq!(message.author_signature, None);
+    }
+
+    #[test]
+    fn supergroup_full_info_parses_can_get_statistics() {
+        // Phase D2: `can_get_statistics` (schema 1.8.67, line 2792) gates
+        // the statistics entry point; absent → false.
+        let env = parse_envelope(
+            r#"{"@type":"supergroupFullInfo","@extra":"5","description":"d","member_count":10,"can_get_statistics":true}"#,
+        )
+        .unwrap();
+        match env.payload {
+            EnvelopePayload::SupergroupFullInfo {
+                can_get_statistics, ..
+            } => assert!(can_get_statistics),
+            other => panic!("{other:?}"),
+        }
+        let env = parse_envelope(
+            r#"{"@type":"supergroupFullInfo","@extra":"5","description":"d","member_count":10}"#,
+        )
+        .unwrap();
+        match env.payload {
+            EnvelopePayload::SupergroupFullInfo {
+                can_get_statistics, ..
+            } => assert!(!can_get_statistics),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    /// Phase D2: `chatStatisticsChannel` (schema 1.8.67, line 10233) —
+    /// values, all graph variants, and recent interactions (message +
+    /// story object types). All 12 graph fields are present, as TDLib
+    /// always sends them (schema has no optional flags on them).
+    fn channel_statistics_json() -> String {
+        let data_graph = |json_data: &str| {
+            format!(
+                r#"{{"@type":"statisticalGraphData","json_data":"{}","zoom_token":""}}"#,
+                json_data.replace('"', "\\\"")
+            )
+        };
+        format!(
+            r#"{{"@type":"chatStatisticsChannel","@extra":"7","period":{{"@type":"dateRange","start_date":1788000000,"end_date":1788604800}},"member_count":{{"@type":"statisticalValue","value":12345.0,"previous_value":11700.0,"growth_rate_percentage":5.5}},"mean_message_view_count":{{"@type":"statisticalValue","value":8421.0,"previous_value":9010.0,"growth_rate_percentage":-6.5}},"mean_message_share_count":{{"@type":"statisticalValue","value":312.0,"previous_value":280.0,"growth_rate_percentage":11.4}},"mean_message_reaction_count":{{"@type":"statisticalValue","value":428.0,"previous_value":390.0,"growth_rate_percentage":9.7}},"mean_story_view_count":{{"@type":"statisticalValue","value":5120.0,"previous_value":4980.0,"growth_rate_percentage":2.8}},"mean_story_share_count":{{"@type":"statisticalValue","value":96.0,"previous_value":104.0,"growth_rate_percentage":-7.7}},"mean_story_reaction_count":{{"@type":"statisticalValue","value":154.0,"previous_value":140.0,"growth_rate_percentage":10.0}},"enabled_notifications_percentage":61.5,"member_count_graph":{member_graph},"join_graph":{{"@type":"statisticalGraphAsync","token":"tok"}},"mute_graph":{{"@type":"statisticalGraphError","error_message":"STATS_GRAPH_NOT_AVAILABLE"}},"view_count_by_hour_graph":{hour_graph},"view_count_by_source_graph":{hour_graph},"join_by_source_graph":{hour_graph},"language_graph":{hour_graph},"message_interaction_graph":{hour_graph},"message_reaction_graph":{hour_graph},"story_interaction_graph":{hour_graph},"story_reaction_graph":{hour_graph},"instant_view_interaction_graph":{hour_graph},"recent_interactions":[{{"@type":"chatStatisticsInteractionInfo","object_type":{{"@type":"chatStatisticsObjectTypeMessage","message_id":201}},"view_count":12402,"forward_count":7,"reaction_count":213}},{{"@type":"chatStatisticsInteractionInfo","object_type":{{"@type":"chatStatisticsObjectTypeStory","story_id":44}},"view_count":987,"forward_count":12,"reaction_count":65}}]}}"#,
+            member_graph = data_graph(
+                &serde_json::to_string(&serde_json::json!({
+                    "columns": [["x", 1788000000, 1788086400], ["y0", 11800, 12345]],
+                    "types": {"x": "x", "y0": "line"},
+                }))
+                .unwrap()
+            ),
+            hour_graph = data_graph("{}"),
+        )
+    }
+
+    #[test]
+    fn chat_statistics_channel_parses_values_graphs_and_interactions() {
+        let env = parse_envelope(&channel_statistics_json()).unwrap();
+        let EnvelopePayload::ChatStatistics { statistics } = env.payload else {
+            panic!("expected statistics");
+        };
+        let ChatStatistics::Channel(stats) = statistics else {
+            panic!("expected channel statistics");
+        };
+        assert_eq!(
+            (stats.period_start, stats.period_end),
+            (1788000000, 1788604800)
+        );
+        assert_eq!(stats.member_count.value, 12345.0);
+        assert_eq!(stats.member_count.growth_rate_percentage, 5.5);
+        assert_eq!(stats.mean_message_view_count.growth_rate_percentage, -6.5);
+        // All mean_* values are required by the schema — the fixture carries
+        // real statisticalValue objects for each.
+        assert_eq!(stats.mean_message_share_count.value, 312.0);
+        assert_eq!(stats.mean_message_reaction_count.value, 428.0);
+        assert_eq!(stats.mean_story_share_count.value, 96.0);
+        assert_eq!(stats.mean_story_reaction_count.value, 154.0);
+        assert_eq!(stats.enabled_notifications_percentage, 61.5);
+        // Data graph keeps its json_data for client-side sparklines.
+        let StatisticalGraph::Data {
+            json_data,
+            zoom_token,
+        } = &stats.member_count_graph
+        else {
+            panic!("expected data graph");
+        };
+        assert!(json_data.contains("\"y0\""));
+        assert!(zoom_token.is_empty());
+        // Async / Error variants round-trip.
+        assert!(matches!(stats.join_graph, StatisticalGraph::Async { .. }));
+        let StatisticalGraph::Error { error_message } = &stats.mute_graph else {
+            panic!("expected error graph");
+        };
+        assert_eq!(error_message, "STATS_GRAPH_NOT_AVAILABLE");
+        // Recent interactions: message + story object types.
+        assert_eq!(stats.recent_interactions.len(), 2);
+        assert!(matches!(
+            stats.recent_interactions[0].object,
+            ChatStatisticsObject::Message { message_id: 201 }
+        ));
+        assert_eq!(stats.recent_interactions[0].view_count, 12402);
+        assert!(matches!(
+            stats.recent_interactions[1].object,
+            ChatStatisticsObject::Story { story_id: 44 }
+        ));
+        assert_eq!(stats.recent_interactions[1].forward_count, 12);
+    }
+
+    #[test]
+    fn chat_statistics_missing_graph_is_parse_error() {
+        // A missing (null) graph is `MissingField`, not a silent empty
+        // graph — TDLib always sends all 12 (schema has no optional
+        // flags), so a null one means a protocol change we must surface
+        // rather than fabricate.
+        let json = channel_statistics_json().replace(
+            r#""mute_graph":{"@type":"statisticalGraphError","error_message":"STATS_GRAPH_NOT_AVAILABLE"}"#,
+            r#""mute_graph":null"#,
+        );
+        assert!(parse_envelope(&json).is_err());
+    }
+
+    #[test]
+    fn chat_statistics_missing_value_is_parse_error() {
+        // A null required `statisticalValue` is a parse error, not
+        // fabricated zeros — the schema marks all of these required.
+        let json = channel_statistics_json().replace(
+            r#""mean_message_share_count":{"@type":"statisticalValue","value":312.0,"previous_value":280.0,"growth_rate_percentage":11.4}"#,
+            r#""mean_message_share_count":null"#,
+        );
+        assert!(parse_envelope(&json).is_err());
+    }
+
+    #[test]
+    fn chat_statistics_supergroup_parses_top_lists() {
+        // Phase D2: `chatStatisticsSupergroup` (schema 1.8.67, line 10208)
+        // with top senders / administrators / inviters.
+        let json = r#"{"@type":"chatStatisticsSupergroup","@extra":"7","period":{"@type":"dateRange","start_date":1788000000,"end_date":1788604800},"member_count":{"@type":"statisticalValue","value":420.0,"previous_value":400.0,"growth_rate_percentage":5.0},"message_count":{"@type":"statisticalValue","value":1234.0,"previous_value":1100.0,"growth_rate_percentage":12.2},"viewer_count":{"@type":"statisticalValue","value":380.0,"previous_value":360.0,"growth_rate_percentage":5.6},"sender_count":{"@type":"statisticalValue","value":95.0,"previous_value":90.0,"growth_rate_percentage":5.6},"member_count_graph":{"@type":"statisticalGraphData","json_data":"{}","zoom_token":""},"join_graph":{"@type":"statisticalGraphData","json_data":"{}","zoom_token":""},"join_by_source_graph":{"@type":"statisticalGraphData","json_data":"{}","zoom_token":""},"language_graph":{"@type":"statisticalGraphData","json_data":"{}","zoom_token":""},"message_content_graph":{"@type":"statisticalGraphData","json_data":"{}","zoom_token":""},"action_graph":{"@type":"statisticalGraphData","json_data":"{}","zoom_token":""},"day_graph":{"@type":"statisticalGraphData","json_data":"{}","zoom_token":""},"week_graph":{"@type":"statisticalGraphData","json_data":"{}","zoom_token":""},"top_senders":[{"@type":"chatStatisticsMessageSenderInfo","user_id":31,"sent_message_count":250,"average_character_count":120}],"top_administrators":[{"@type":"chatStatisticsAdministratorActionsInfo","user_id":32,"deleted_message_count":3,"banned_user_count":1,"restricted_user_count":0}],"top_inviters":[{"@type":"chatStatisticsInviterInfo","user_id":33,"added_member_count":7}]}"#;
+        let env = parse_envelope(json).unwrap();
+        let EnvelopePayload::ChatStatistics { statistics } = env.payload else {
+            panic!("expected statistics");
+        };
+        let ChatStatistics::Supergroup(stats) = statistics else {
+            panic!("expected supergroup statistics");
+        };
+        assert_eq!(stats.member_count.value, 420.0);
+        assert_eq!(stats.message_count.growth_rate_percentage, 12.2);
+        assert_eq!(stats.top_senders.len(), 1);
+        assert_eq!(stats.top_senders[0].user_id, 31);
+        assert_eq!(stats.top_senders[0].sent_message_count, 250);
+        assert_eq!(stats.top_administrators[0].deleted_message_count, 3);
+        assert_eq!(stats.top_inviters[0].added_member_count, 7);
+    }
+
+    #[test]
+    fn chat_statistics_unknown_variant_is_parse_error() {
+        // Unknown future `ChatStatistics` constructors fail parsing at the
+        // envelope level rather than silently becoming `Unknown` (and
+        // dropping the statistics response).
+        let env = parse_envelope(r#"{"@type":"chatStatisticsQuantum"}"#);
+        assert!(env.is_err());
     }
 
     #[test]

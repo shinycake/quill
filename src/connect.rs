@@ -15,8 +15,8 @@ use crate::platform::{DatabaseKey, KeyDecision, SecretStore, load_or_create_key}
 use crate::poll::{PollDraft, poll_answer_for_tap};
 use crate::settings::{AccountPaths, default_app_root};
 use crate::state::{
-    ChatSearchJumpNeed, ForwardFlight, InfoPanelTarget, RequestPurpose, SearchStatus, Session,
-    ShutdownPhase,
+    ChatSearchJumpNeed, ChatStatisticsFetch, ForwardFlight, InfoPanelTarget, RequestPurpose,
+    SearchStatus, Session, ShutdownPhase,
 };
 use crate::telegram::client::{LiveTdJson, OwnedEnvelope, ReceiveBridge};
 use crate::telegram::envelope::{
@@ -37,20 +37,21 @@ use crate::telegram::requests::{
     edit_message_caption, edit_message_text, end_group_call, forward_messages,
     get_authorization_state, get_callback_query_answer, get_chat_active_stories, get_chat_folder,
     get_chat_history, get_chat_lists_to_add_chat, get_chat_member, get_chat_sponsored_messages,
-    get_commands, get_contacts, get_forum_topics, get_group_call, get_installed_sticker_sets,
-    get_me, get_saved_animations, get_saved_notification_sounds, get_scope_notification_settings,
-    get_secret_chat, get_sticker_set, get_story, get_story_available_reactions, get_supergroup,
-    get_supergroup_full_info, get_user_full_info, get_video_chat_invite_link, input_message_photo,
-    input_message_video, join_chat, join_video_chat, leave_chat, leave_group_call,
-    load_active_stories, load_chats, load_chats_list, load_group_call_participants, open_chat,
-    open_message_content, open_story, pin_chat_message, remove_message_reaction,
-    reorder_chat_folders, report_chat_sponsored_message, search_chat_messages, search_chats,
-    search_messages, search_public_chats, search_recently_found_chats, send_animation,
-    send_call_rating, send_chat_action, send_chat_action_kind, send_document, send_message_album,
-    send_photo, send_poll, send_sticker, send_text, send_text_story_reply, send_video,
-    send_video_note, send_voice_note, set_authentication_phone_number, set_chat_draft_message,
-    set_chat_message_auto_delete_time, set_chat_notification_settings, set_chat_slow_mode_delay,
-    set_poll_answer, set_scope_notification_settings, set_story_reaction, set_video_chat_title,
+    get_chat_statistics, get_commands, get_contacts, get_forum_topics, get_group_call,
+    get_installed_sticker_sets, get_me, get_saved_animations, get_saved_notification_sounds,
+    get_scope_notification_settings, get_secret_chat, get_sticker_set, get_story,
+    get_story_available_reactions, get_supergroup, get_supergroup_full_info, get_user_full_info,
+    get_video_chat_invite_link, input_message_photo, input_message_video, join_chat,
+    join_video_chat, leave_chat, leave_group_call, load_active_stories, load_chats,
+    load_chats_list, load_group_call_participants, open_chat, open_message_content, open_story,
+    pin_chat_message, remove_message_reaction, reorder_chat_folders, report_chat_sponsored_message,
+    search_chat_messages, search_chats, search_messages, search_public_chats,
+    search_recently_found_chats, send_animation, send_call_rating, send_chat_action,
+    send_chat_action_kind, send_document, send_message_album, send_photo, send_poll, send_sticker,
+    send_text, send_text_story_reply, send_video, send_video_note, send_voice_note,
+    set_authentication_phone_number, set_chat_draft_message, set_chat_message_auto_delete_time,
+    set_chat_notification_settings, set_chat_slow_mode_delay, set_poll_answer,
+    set_scope_notification_settings, set_story_reaction, set_video_chat_title,
     toggle_chat_folder_tags, toggle_group_call_is_my_video_enabled,
     toggle_group_call_is_my_video_paused, toggle_group_call_participant_is_hand_raised,
     toggle_group_call_participant_is_muted, toggle_video_chat_mute_new_participants,
@@ -2473,6 +2474,72 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(err);
         }
         Ok(Some(extra))
+    }
+
+    /// Phase D2: `getChatStatistics` (TDLib 1.8.67, line 15760). Sent only
+    /// when `supergroupFullInfo.can_get_statistics` is true for the chat's
+    /// supergroup (the schema gates the method on it). Idempotent: a
+    /// cached `Loaded` result is kept until an explicit refresh clears it,
+    /// and no second request goes out while one is in flight. Returns
+    /// `Ok(None)` when nothing was sent.
+    pub fn fetch_chat_statistics(
+        &mut self,
+        chat_id: ChatId,
+        is_dark: bool,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let can_get = self
+            .session
+            .chats
+            .get(&chat_id.0)
+            .and_then(|chat| match chat.kind {
+                ChatKind::Supergroup { supergroup_id, .. } => {
+                    self.session.supergroup_full_infos.get(&supergroup_id)
+                }
+                _ => None,
+            })
+            .is_some_and(|info| info.can_get_statistics);
+        if !can_get {
+            return Ok(None);
+        }
+        if matches!(
+            self.session.chat_statistics.get(&chat_id.0),
+            Some(ChatStatisticsFetch::Loading | ChatStatisticsFetch::Loaded(_))
+        ) || self
+            .session
+            .requests
+            .has_purpose_for_chat(RequestPurpose::GetChatStatistics, chat_id)
+        {
+            return Ok(None);
+        }
+        self.session
+            .chat_statistics
+            .insert(chat_id.0, ChatStatisticsFetch::Loading);
+        let extra = self
+            .session
+            .request(RequestPurpose::GetChatStatistics, Some(chat_id));
+        if let Err(err) = self
+            .sender
+            .send_json(&get_chat_statistics(extra, chat_id.0, is_dark))
+        {
+            self.session.requests.take(extra);
+            self.session.chat_statistics.remove(&chat_id.0);
+            return Err(err);
+        }
+        Ok(Some(extra))
+    }
+
+    /// Phase D2: explicit refresh of `getChatStatistics` — clears the
+    /// cached result and re-sends (the plain fetch keeps `Loaded`).
+    pub fn refresh_chat_statistics(
+        &mut self,
+        chat_id: ChatId,
+        is_dark: bool,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        self.session.chat_statistics.remove(&chat_id.0);
+        self.fetch_chat_statistics(chat_id, is_dark)
     }
 
     /// Phase A1: forced `getSupergroupFullInfo` refresh for the slow-mode

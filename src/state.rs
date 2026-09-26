@@ -11,14 +11,14 @@ use crate::telegram::envelope::{
     AnimationItem, AuthorizationState, BotCommand, BotInfo, CallbackQueryAnswer,
     ChannelMemberStatus, ChatAction, ChatActiveStoriesView, ChatDraft, ChatFolderInfo,
     ChatFolderSpec, ChatJoinResult, ChatKind, ChatList, ChatNotificationSettings,
-    ChatPositionUpdate, ConnectionState, EnvelopePayload, ErrorClass, ForumTopic, InlineKeyboard,
-    MessageAutoDelete, MessageContent, MessageForwardInfo, MessageInteractionInfo, MessageOrigin,
-    MessageReaction, MessageReplyTo, MessageSelfDestruct, MessageSender, NotificationSettingsScope,
-    NotificationSound, ParsedCall, ParsedChatMember, ParsedFile, ParsedGroupCall,
-    ParsedGroupCallParticipant, ParsedMessage, ParsedSecretChat, ParsedStory, ParsedUser,
-    ParsedVideoChat, Poll, ReportOption, ReportSponsoredResult, ScopeNotificationSettings,
-    SecretChatState, SponsoredMessage, StickerFormat, StickerItem, StickerSetInfo,
-    StoryAvailableReactionView, StoryListView, TdError,
+    ChatPositionUpdate, ChatStatistics, ConnectionState, EnvelopePayload, ErrorClass, ForumTopic,
+    InlineKeyboard, MessageAutoDelete, MessageContent, MessageForwardInfo, MessageInteractionInfo,
+    MessageOrigin, MessageReaction, MessageReplyTo, MessageSelfDestruct, MessageSender,
+    NotificationSettingsScope, NotificationSound, ParsedCall, ParsedChatMember, ParsedFile,
+    ParsedGroupCall, ParsedGroupCallParticipant, ParsedMessage, ParsedSecretChat, ParsedStory,
+    ParsedUser, ParsedVideoChat, Poll, ReportOption, ReportSponsoredResult,
+    ScopeNotificationSettings, SecretChatState, SponsoredMessage, StickerFormat, StickerItem,
+    StickerSetInfo, StoryAvailableReactionView, StoryListView, TdError,
 };
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
@@ -157,6 +157,10 @@ pub enum RequestPurpose {
     /// Phase 6: `getSupergroupFullInfo`. Response is `supergroupFullInfo`;
     /// correlated via `PendingRequest::supergroup_id`.
     GetSupergroupFullInfo,
+    /// Phase D2: `getChatStatistics`. Response is
+    /// `chatStatisticsChannel` / `chatStatisticsSupergroup`; correlated
+    /// via `PendingRequest::chat_id` (the response carries no chat id).
+    GetChatStatistics,
     /// Phase A1: `setChatSlowModeDelay`. Response is `ok`; the new delay
     /// arrives via `updateSupergroupFullInfo`.
     SetChatSlowModeDelay,
@@ -1125,6 +1129,11 @@ pub struct HistoryMessage {
     /// when never. Renders as a countdown chip on the row; the row
     /// itself leaves via `updateDeleteMessages`.
     pub auto_delete: Option<MessageAutoDelete>,
+    /// Phase D2: schema `message.author_signature` (TDLib 1.8.67, lines
+    /// 3155/3165) — author signature on channel posts and anonymous group
+    /// messages. Rendered as a small signature line under the post, except
+    /// under forwarded-message headers (which already attribute it).
+    pub author_signature: Option<String>,
 }
 
 impl HistoryMessage {
@@ -1317,6 +1326,8 @@ pub struct SearchMessageHit {
     pub self_destruct: Option<MessageSelfDestruct>,
     /// Phase B4: same carry-through for the auto-delete countdown chip.
     pub auto_delete: Option<MessageAutoDelete>,
+    /// Phase D2: same carry-through for the author signature line.
+    pub author_signature: Option<String>,
 }
 
 impl SearchMessageHit {
@@ -1335,6 +1346,7 @@ impl SearchMessageHit {
             reply_markup: message.reply_markup.clone(),
             self_destruct: message.self_destruct,
             auto_delete: message.auto_delete,
+            author_signature: message.author_signature.clone(),
         }
     }
 
@@ -1353,6 +1365,7 @@ impl SearchMessageHit {
             reply_markup: self.reply_markup,
             self_destruct: self.self_destruct,
             auto_delete: self.auto_delete,
+            author_signature: self.author_signature,
         }
     }
 }
@@ -2205,6 +2218,8 @@ pub struct Session {
     /// Phase 6: cached `getSupergroupFullInfo`, keyed by supergroup id.
     /// Presence records "fetched".
     pub supergroup_full_infos: HashMap<i64, SupergroupFullInfoData>,
+    /// Phase D2: `getChatStatistics` fetch state, keyed by chat id.
+    pub chat_statistics: HashMap<i64, ChatStatisticsFetch>,
     /// Parity slice: first active username per supergroup (`supergroup`
     /// object / `updateSupergroup`, schema 1.8.67 line 2746), keyed by
     /// supergroup id. Feeds the channel/supergroup header's @username.
@@ -2251,6 +2266,10 @@ pub struct Session {
 pub enum InfoPanelTarget {
     User(i64),
     Supergroup(i64),
+    /// Phase D2: channel/group statistics view, keyed by chat id. The
+    /// `getChatStatistics` fetch is gated on
+    /// `supergroupFullInfo.can_get_statistics` before opening.
+    Statistics(i64),
 }
 
 /// Phase 6: cached `userFullInfo` subset (schema 1.8.67, line 2468) — the
@@ -2288,6 +2307,10 @@ pub struct SupergroupFullInfoData {
     /// Phase A1: wall-clock ms when this full info arrived (reducer
     /// stamp). `slow_mode_delay_expires_in` decays against it.
     pub fetched_at_ms: u64,
+    /// Phase D2: `supergroupFullInfo.can_get_statistics` (schema 1.8.67,
+    /// line 2792). Gates the channel statistics entry point in the info
+    /// panel; `getChatStatistics` errors when false.
+    pub can_get_statistics: bool,
 }
 
 impl Default for SupergroupFullInfoData {
@@ -2301,8 +2324,20 @@ impl Default for SupergroupFullInfoData {
             my_boost_count: 0,
             unrestrict_boost_count: 0,
             fetched_at_ms: 0,
+            can_get_statistics: false,
         }
     }
+}
+
+/// Phase D2: fetch state for one chat's `getChatStatistics` result
+/// (schema 1.8.67, line 15760). Keyed by chat id. `Loading` is also the
+/// in-flight guard — the driver never sends a second request while one
+/// is outstanding.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ChatStatisticsFetch {
+    Loading,
+    Loaded(Box<ChatStatistics>),
+    Failed(String),
 }
 
 /// Phase A1: wall-clock milliseconds. Used to timestamp
@@ -2399,6 +2434,7 @@ impl Session {
             contacts_error: false,
             user_full_infos: HashMap::new(),
             supergroup_full_infos: HashMap::new(),
+            chat_statistics: HashMap::new(),
             supergroup_usernames: HashMap::new(),
             supergroup_member_status: HashMap::new(),
             supergroup_restrict_right: HashMap::new(),
@@ -2844,6 +2880,7 @@ impl Session {
                 slow_mode_delay_expires_in,
                 my_boost_count,
                 unrestrict_boost_count,
+                can_get_statistics,
             } => {
                 // Phase 6: `getSupergroupFullInfo` answer — the response
                 // carries no id, so it is correlated via the pending
@@ -2867,6 +2904,7 @@ impl Session {
                             // when only the expiry changes, so the gate
                             // decays it locally against this stamp.
                             fetched_at_ms: unix_ms_now(),
+                            can_get_statistics,
                         },
                     );
                 }
@@ -2883,6 +2921,7 @@ impl Session {
                 slow_mode_delay_expires_in,
                 my_boost_count,
                 unrestrict_boost_count,
+                can_get_statistics,
             } => {
                 self.supergroup_full_infos.insert(
                     supergroup_id,
@@ -2895,8 +2934,21 @@ impl Session {
                         my_boost_count,
                         unrestrict_boost_count,
                         fetched_at_ms: unix_ms_now(),
+                        can_get_statistics,
                     },
                 );
+            }
+            // Phase D2: `getChatStatistics` answer — the response carries
+            // no chat id, so it is correlated via the pending request's
+            // `chat_id`.
+            EnvelopePayload::ChatStatistics { statistics } => {
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetChatStatistics)
+                    && let Some(pending) = pending
+                    && let Some(chat_id) = pending.chat_id
+                {
+                    self.chat_statistics
+                        .insert(chat_id.0, ChatStatisticsFetch::Loaded(Box::new(statistics)));
+                }
             }
             EnvelopePayload::UpdateChatNotificationSettings {
                 chat_id,
@@ -3874,6 +3926,20 @@ impl Session {
                     ) => {
                         self.group_call_error =
                             Some(call_request_error_line(&err, "Voice chat request failed"));
+                    }
+                    // Phase D2: a failed `getChatStatistics` lands in the
+                    // fetch state so the statistics panel shows an honest
+                    // error instead of spinning forever.
+                    Some(RequestPurpose::GetChatStatistics) => {
+                        if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
+                            self.chat_statistics.insert(
+                                chat_id.0,
+                                ChatStatisticsFetch::Failed(call_request_error_line(
+                                    &err,
+                                    "Could not load statistics",
+                                )),
+                            );
+                        }
                     }
                     _ => {}
                 }
@@ -5518,6 +5584,7 @@ impl Session {
                         preview: message.content.preview(),
                         is_outgoing: message.is_outgoing,
                         content: message.content.clone(),
+                        author_signature: message.author_signature.clone(),
                         reply_to: message.reply_to.clone(),
                         forward_info: message.forward_info.clone(),
                         interaction_info: message.interaction_info.clone(),
@@ -5617,6 +5684,7 @@ fn history_message(message: ParsedMessage, pending: bool) -> HistoryMessage {
         reply_markup: message.reply_markup,
         self_destruct: message.self_destruct,
         auto_delete: message.auto_delete,
+        author_signature: message.author_signature,
     }
 }
 
@@ -5806,6 +5874,67 @@ mod tests {
         assert!(!history.messages.contains_key(&-1));
         assert!(history.messages.contains_key(&88));
         assert!(!history.messages.get(&88).unwrap().pending);
+    }
+
+    #[test]
+    fn chat_statistics_fetch_flow_loads_and_caches() {
+        // Phase D2 replay: `getChatStatistics` request →
+        // `chatStatisticsChannel` response lands `Loaded` under the
+        // requested chat id, correlated through the pending request (the
+        // response itself carries no chat id).
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        let extra = session.request(RequestPurpose::GetChatStatistics, Some(ChatId(13)));
+        let graph = r#"{"@type":"statisticalGraphData","json_data":"{}","zoom_token":""}"#;
+        let value = r#"{"@type":"statisticalValue","value":1.0,"previous_value":1.0,"growth_rate_percentage":0.0}"#;
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"chatStatisticsChannel","@extra":"{}","period":{{"@type":"dateRange","start_date":1788000000,"end_date":1788604800}},"member_count":{{"@type":"statisticalValue","value":12345.0,"previous_value":11700.0,"growth_rate_percentage":5.5}},"mean_message_view_count":{v},"mean_message_share_count":{v},"mean_message_reaction_count":{v},"mean_story_view_count":{v},"mean_story_share_count":{v},"mean_story_reaction_count":{v},"enabled_notifications_percentage":61.5,"member_count_graph":{g},"join_graph":{g},"mute_graph":{g},"view_count_by_hour_graph":{g},"view_count_by_source_graph":{g},"join_by_source_graph":{g},"language_graph":{g},"message_interaction_graph":{g},"message_reaction_graph":{g},"story_interaction_graph":{g},"story_reaction_graph":{g},"instant_view_interaction_graph":{g},"recent_interactions":[]}}"#,
+                extra.0,
+                g = graph,
+                v = value,
+            ),
+        );
+        let ChatStatisticsFetch::Loaded(boxed) =
+            session.chat_statistics.get(&13).expect("statistics loaded")
+        else {
+            panic!("expected loaded channel statistics");
+        };
+        let ChatStatistics::Channel(stats) = boxed.as_ref() else {
+            panic!("expected channel statistics");
+        };
+        assert_eq!(stats.member_count.value, 12345.0);
+        assert_eq!(
+            (stats.period_start, stats.period_end),
+            (1788000000, 1788604800)
+        );
+    }
+
+    #[test]
+    fn chat_statistics_fetch_flow_error_marks_failed() {
+        // Phase D2 replay: a TDLib `error` for `getChatStatistics` lands
+        // `Failed` so the panel shows an honest error, not a spinner.
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        let extra = session.request(RequestPurpose::GetChatStatistics, Some(ChatId(13)));
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"error","@extra":"{}","code":400,"message":"CHAT_STATISTICS_NOT_AVAILABLE"}}"#,
+                extra.0
+            ),
+        );
+        let ChatStatisticsFetch::Failed(message) =
+            session.chat_statistics.get(&13).expect("statistics failed")
+        else {
+            panic!("expected failed statistics");
+        };
+        assert!(message.contains("Could not load statistics"));
     }
 
     #[test]
@@ -7484,6 +7613,7 @@ mod tests {
             preview: "gone".into(),
             is_outgoing: false,
             content: crate::telegram::envelope::MessageContent::Text("gone".into()),
+            author_signature: None,
             reply_to: None,
             forward_info: None,
             interaction_info: None,
@@ -7510,6 +7640,7 @@ mod tests {
             preview: "ghost".into(),
             is_outgoing: false,
             content: crate::telegram::envelope::MessageContent::Text("ghost".into()),
+            author_signature: None,
             reply_to: None,
             forward_info: None,
             interaction_info: None,
