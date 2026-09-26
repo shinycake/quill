@@ -179,6 +179,7 @@ impl ComposerEdit {
             MessageContent::Audio(audio) => (ComposerEditKind::Caption, audio.caption.clone()),
             MessageContent::VideoNote(_)
             | MessageContent::Sticker(_)
+            | MessageContent::Poll(_)
             | MessageContent::Unsupported { .. } => return None,
         };
         Some(Self {

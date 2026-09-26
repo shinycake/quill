@@ -15,6 +15,7 @@ pub mod lifecycle;
 pub mod local_path;
 pub mod pins;
 pub mod platform;
+pub mod poll;
 pub mod settings;
 pub mod state;
 pub mod telegram;

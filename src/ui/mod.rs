@@ -22,6 +22,9 @@ use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::{AccountKey, ChatId, FileId, MessageId};
 use quill::local_path::sandboxed_display_path;
 use quill::platform::live_secret_store;
+use quill::poll::{
+    POLL_OPTIONS_MAX, POLL_OPTIONS_MIN, PollDraft, poll_bar_fraction, voter_count_label,
+};
 use quill::state::{
     ChatSearchJump, ChatSummary, ForwardResult, HistoryMessage, OutboxReceipt, RequestPurpose,
     SearchStatus, Session, SponsoredReportFlight, outgoing_status_label, unread_badge_text,
@@ -32,7 +35,7 @@ use quill::telegram::envelope::{
     ChatNotificationSettings, DEFAULT_EMOJI_REACTIONS, InlineKeyboardButton,
     InlineKeyboardButtonStyle, InlineKeyboardButtonType, MUTE_FOR_1_HOUR, MUTE_FOR_2_DAYS,
     MUTE_FOR_8_HOURS, MUTE_FOREVER, MessageContent, MessageInteractionInfo, ParsedFile,
-    SponsoredMessage, toggle_chosen_emoji_reaction,
+    PollContent, PollOption, PollType, SponsoredMessage, toggle_chosen_emoji_reaction,
 };
 use quill::text::{TextEntity, styled_runs, utf8_to_utf16_offset};
 use quill::voice::{self, VoiceCapture, format_voice_duration};
@@ -100,6 +103,57 @@ pub enum ConnectUiStatus {
     /// Injected Ready + main chat list (no live Telegram).
     DemoReadyChats,
     Live,
+}
+
+/// Phase 4.2: poll creation dialog above the composer. Textarea entities are
+/// created when the dialog opens (option rows are dynamic); the dialog
+/// freezes into a validated `PollDraft` on "Create poll".
+pub struct PollDialog {
+    question_input: Entity<TextareaState>,
+    option_inputs: Vec<Entity<TextareaState>>,
+    is_anonymous: bool,
+    allows_multiple_answers: bool,
+}
+
+impl PollDialog {
+    fn new(window: &mut Window, cx: &mut Context<QuillApp>) -> Self {
+        let question_input = cx.new(|cx| {
+            TextareaState::new(window, cx)
+                .placeholder("Poll question")
+                .auto_grow(1, 3)
+                .submit_on_enter(false)
+        });
+        let option_inputs = (0..POLL_OPTIONS_MIN)
+            .map(|index| {
+                cx.new(|cx| {
+                    TextareaState::new(window, cx)
+                        .placeholder(format!("Option {}", index + 1))
+                        .auto_grow(1, 2)
+                        .submit_on_enter(false)
+                })
+            })
+            .collect();
+        Self {
+            question_input,
+            option_inputs,
+            is_anonymous: true,
+            allows_multiple_answers: false,
+        }
+    }
+
+    /// Freeze the dialog inputs into a `PollDraft` (validated by the caller).
+    fn draft(&self, cx: &App) -> PollDraft {
+        PollDraft {
+            question: self.question_input.read(cx).value().to_string(),
+            options: self
+                .option_inputs
+                .iter()
+                .map(|input| input.read(cx).value().to_string())
+                .collect(),
+            is_anonymous: self.is_anonymous,
+            allows_multiple_answers: self.allows_multiple_answers,
+        }
+    }
 }
 
 pub struct QuillApp {
@@ -189,6 +243,8 @@ pub struct QuillApp {
     /// (chat id, message id, run index, is-caption block). Message ids are
     /// only unique within a chat, so the chat id is part of the key.
     spoiler_revealed: HashSet<(i64, u64, u64, bool)>,
+    /// Phase 4.2: poll creation dialog (open above the composer).
+    poll_dialog: Option<PollDialog>,
 }
 
 /// Forced UI surfaces for screenshot proof (no live Telegram / no real credentials).
@@ -277,6 +333,11 @@ pub enum ScreenshotDemo {
     /// entities (bold/italic/underline/strikethrough/spoiler/code/pre, incl.
     /// nested runs) plus a photo whose caption carries entities (Phase 4.1).
     ReadyTextEntities,
+    /// Poll demo (injected, no live Telegram): an open regular poll with a
+    /// voted option (percentage bars + counts, tapping an option flips the
+    /// chosen mark locally) and a closed poll (results, no voting
+    /// affordance) (Phase 4.2).
+    ReadyPoll,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -792,6 +853,15 @@ impl QuillApp {
                     AuthorizationState::Ready,
                 )
             }
+            Some(ScreenshotDemo::ReadyPoll) => {
+                demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
+                (
+                    ConnectUiStatus::DemoReadyChats,
+                    None,
+                    "screenshot demo — polls: voted + closed".into(),
+                    AuthorizationState::Ready,
+                )
+            }
             None => bootstrap_connect(credentials),
         };
 
@@ -896,6 +966,7 @@ impl QuillApp {
             pending_video_play: None,
             sponsored_demo: false,
             spoiler_revealed: HashSet::new(),
+            poll_dialog: None,
         };
         if matches!(demo, Some(ScreenshotDemo::ReadyChatsComposer)) {
             app.composer.update(cx, |input, cx| {
@@ -1141,6 +1212,13 @@ impl QuillApp {
                 apply_ready_text_entities(session, &app.demo_sink, &app.demo_seq);
             }
             app.status_note = "screenshot demo — text entities".into();
+        }
+        if matches!(demo, Some(ScreenshotDemo::ReadyPoll)) {
+            if let Some(session) = app.demo_session.as_mut() {
+                app.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_poll(session, &app.demo_sink, &app.demo_seq);
+            }
+            app.status_note = "screenshot demo — polls: voted + closed".into();
         }
         if matches!(demo, Some(ScreenshotDemo::ReadySponsored)) {
             if let Some(session) = app.demo_session.as_mut() {
@@ -1832,6 +1910,7 @@ impl QuillApp {
                         MessageContent::Audio(audio) => audio.caption = text.to_string(),
                         MessageContent::VideoNote(_)
                         | MessageContent::Sticker(_)
+                        | MessageContent::Poll(_)
                         | MessageContent::Unsupported { .. } => {}
                     }
                 }
@@ -2397,6 +2476,10 @@ impl QuillApp {
     }
 
     fn cancel_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.poll_dialog.is_some() {
+            self.close_poll_dialog(cx);
+            return;
+        }
         if self.voice_capture.is_some() {
             self.cancel_voice_recording(cx);
             return;
@@ -3624,6 +3707,160 @@ impl QuillApp {
         }
     }
 
+    /// Phase 4.2: poll option tap → `setPollAnswer` through the live driver
+    /// (same guard style as the other send methods). In screenshot demos the
+    /// tap flips the chosen marks locally (no live Telegram); the fixture
+    /// already carries voted counts.
+    fn vote_on_poll(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        option_index: usize,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(live) = self.live.as_mut() {
+            let result = live
+                .driver
+                .send_poll_answer(chat_id, message_id, option_index);
+            self.status_note = match result {
+                Ok(_) => "voting…".into(),
+                Err(_) => "could not vote".into(),
+            };
+            cx.notify();
+            return;
+        }
+        if self.demo_session.is_some() {
+            self.apply_demo_poll_vote(chat_id, message_id, option_index);
+            self.status_note = "vote updated (demo)".into();
+            cx.notify();
+        }
+    }
+
+    /// Demo-only vote: resolve the tap with the same `poll_answer_for_tap`
+    /// semantics as the live driver, then flip the chosen marks in place
+    /// (counts stay as the fixture set them).
+    fn apply_demo_poll_vote(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        option_index: usize,
+    ) {
+        let Some(session) = self.demo_session.as_mut() else {
+            return;
+        };
+        let answer = session
+            .histories
+            .get(&chat_id.0)
+            .and_then(|history| history.messages.get(&message_id.0))
+            .and_then(|message| match &message.content {
+                MessageContent::Poll(poll) => Some(poll.poll.clone()),
+                _ => None,
+            })
+            .and_then(|poll| quill::poll::poll_answer_for_tap(&poll, option_index));
+        let Some(answer) = answer else {
+            return;
+        };
+        if let Some(history) = session.histories.get_mut(&chat_id.0)
+            && let Some(message) = history.messages.get_mut(&message_id.0)
+            && let MessageContent::Poll(poll_content) = &mut message.content
+        {
+            let chosen: HashSet<i32> = answer.into_iter().collect();
+            for (index, option) in poll_content.poll.options.iter_mut().enumerate() {
+                option.is_chosen = chosen.contains(&(index as i32));
+            }
+        }
+    }
+
+    /// Phase 4.2: open the poll creation dialog above the composer.
+    fn open_poll_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.poll_dialog = Some(PollDialog::new(window, cx));
+        if let Some(dialog) = &self.poll_dialog {
+            dialog
+                .question_input
+                .update(cx, |input, cx| input.focus(window, cx));
+        }
+        cx.notify();
+    }
+
+    fn close_poll_dialog(&mut self, cx: &mut Context<Self>) {
+        self.poll_dialog = None;
+        cx.notify();
+    }
+
+    fn add_poll_option_row(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(dialog) = self.poll_dialog.as_mut() else {
+            return;
+        };
+        if dialog.option_inputs.len() >= POLL_OPTIONS_MAX {
+            return;
+        }
+        let index = dialog.option_inputs.len();
+        dialog.option_inputs.push(cx.new(|cx| {
+            TextareaState::new(window, cx)
+                .placeholder(format!("Option {}", index + 1))
+                .auto_grow(1, 2)
+                .submit_on_enter(false)
+        }));
+        cx.notify();
+    }
+
+    fn remove_poll_option_row(&mut self, index: usize, cx: &mut Context<Self>) {
+        let Some(dialog) = self.poll_dialog.as_mut() else {
+            return;
+        };
+        if dialog.option_inputs.len() <= POLL_OPTIONS_MIN || index >= dialog.option_inputs.len() {
+            return;
+        }
+        dialog.option_inputs.remove(index);
+        cx.notify();
+    }
+
+    /// Phase 4.2: freeze the dialog, validate, and send `inputMessagePoll`
+    /// through the driver (same `sendMessage` path as the composer). The
+    /// pending reply (if any) is attached like a normal send.
+    fn submit_poll_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let draft = match self.poll_dialog.as_ref() {
+            Some(dialog) => dialog.draft(cx),
+            None => return,
+        };
+        if let Some(reason) = draft.validate() {
+            self.status_note = reason.to_string();
+            cx.notify();
+            return;
+        }
+        let plan = self.session().and_then(|session| {
+            let chat_id = session.open_chat?;
+            let chat = session.chats.get(&chat_id.0)?;
+            chat.can_post().then_some(chat_id)
+        });
+        let Some(chat_id) = plan else {
+            self.status_note = "select a chat to send".into();
+            cx.notify();
+            return;
+        };
+        let reply_to = self.pending_reply.as_ref().map(|reply| reply.message_id);
+        if let Some(live) = self.live.as_mut() {
+            let result = live.driver.send_poll_draft(chat_id, &draft, reply_to);
+            match result {
+                Ok(_) => {
+                    self.poll_dialog = None;
+                    self.pending_reply = None;
+                    self.status_note = "sending poll…".into();
+                }
+                Err(_) => {
+                    self.status_note = "could not send poll".into();
+                }
+            }
+            cx.notify();
+            return;
+        }
+        // Screenshot demos have no live driver; close the dialog honestly.
+        let _ = window;
+        self.poll_dialog = None;
+        self.status_note = "polls need a live connection (demo)".into();
+        cx.notify();
+    }
+
     fn toggle_pin_message(
         &mut self,
         chat_id: ChatId,
@@ -4849,6 +5086,111 @@ impl QuillApp {
             )
     }
 
+    /// Phase 4.2: the poll creation dialog, rendered above the composer.
+    /// Question field, dynamic option rows (2–10), anonymous / multiple-answers
+    /// toggles, Create / Cancel. Quiz correct-option marking stays out of this
+    /// slice (documented in DECISIONS.md).
+    fn poll_dialog_panel(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let dialog = self.poll_dialog.as_ref()?;
+        let mut panel = div()
+            .id("poll-dialog")
+            .flex()
+            .flex_col()
+            .gap_2()
+            .p_3()
+            .rounded_md()
+            .border_1()
+            .border_color(rgb(0x58a6ff))
+            .bg(rgb(0x161b22))
+            .child(div().text_sm().font_semibold().child("New poll"))
+            .child(Textarea::new(&dialog.question_input).h(px(64.)));
+        for (index, input) in dialog.option_inputs.iter().enumerate() {
+            let mut row = div()
+                .id(("poll-dialog-option", index as u64))
+                .flex()
+                .items_center()
+                .gap_2()
+                .child(div().flex_1().child(Textarea::new(input).h(px(40.))));
+            if dialog.option_inputs.len() > POLL_OPTIONS_MIN {
+                row = row.child(
+                    Button::new(format!("poll-remove-option-{index}"))
+                        .label("✕")
+                        .ghost()
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.remove_poll_option_row(index, cx);
+                        })),
+                );
+            }
+            panel = panel.child(row);
+        }
+        if dialog.option_inputs.len() < POLL_OPTIONS_MAX {
+            panel = panel.child(
+                Button::new("poll-add-option")
+                    .label("Add option")
+                    .ghost()
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.add_poll_option_row(window, cx);
+                    })),
+            );
+        }
+        let anonymous = dialog.is_anonymous;
+        let multiple = dialog.allows_multiple_answers;
+        panel =
+            panel
+                .child(
+                    div()
+                        .flex()
+                        .gap_2()
+                        .child(
+                            Button::new("poll-toggle-anonymous")
+                                .label(if anonymous {
+                                    "☑ Anonymous voting"
+                                } else {
+                                    "☐ Anonymous voting"
+                                })
+                                .ghost()
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    if let Some(dialog) = this.poll_dialog.as_mut() {
+                                        dialog.is_anonymous = !dialog.is_anonymous;
+                                    }
+                                    cx.notify();
+                                })),
+                        )
+                        .child(
+                            Button::new("poll-toggle-multiple")
+                                .label(if multiple {
+                                    "☑ Multiple answers"
+                                } else {
+                                    "☐ Multiple answers"
+                                })
+                                .ghost()
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    if let Some(dialog) = this.poll_dialog.as_mut() {
+                                        dialog.allows_multiple_answers =
+                                            !dialog.allows_multiple_answers;
+                                    }
+                                    cx.notify();
+                                })),
+                        ),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .gap_2()
+                        .child(Button::new("poll-create").label("Create poll").on_click(
+                            cx.listener(|this, _, window, cx| {
+                                this.submit_poll_dialog(window, cx);
+                            }),
+                        ))
+                        .child(Button::new("poll-cancel").label("Cancel").ghost().on_click(
+                            cx.listener(|this, _, _, cx| {
+                                this.close_poll_dialog(cx);
+                            }),
+                        )),
+                );
+        Some(panel.into_any_element())
+    }
+
     fn forward_success_banner(
         &self,
         result: &ForwardResult,
@@ -5907,6 +6249,11 @@ impl QuillApp {
                                                 this.attach_local(AttachmentKind::VideoNote, cx);
                                             })),
                                     )
+                                    .child(Button::new("open-poll-dialog").label("Poll").on_click(
+                                        cx.listener(|this, _, window, cx| {
+                                            this.open_poll_dialog(window, cx);
+                                        }),
+                                    ))
                                     .child(
                                         Button::new("open-gifs")
                                             .label(if self.gif_panel_open() {
@@ -5997,6 +6344,8 @@ impl QuillApp {
                         .when_some(self.pending_reply.clone(), |this, reply| {
                             this.child(self.composer_reply_banner(&reply, cx))
                         })
+                        // Phase 4.2: poll creation dialog above the composer.
+                        .when_some(self.poll_dialog_panel(cx), |this, panel| this.child(panel))
                         // Phase 3.3: `/` command menu above the composer.
                         .when_some(self.command_menu_dropdown(cx), |this, panel| {
                             this.child(panel)
@@ -6946,6 +7295,100 @@ fn apply_ready_text_entities(session: &mut Session, sink: &Arc<MemorySink>, seq:
     );
 
     for json in [text_message, photo_message] {
+        if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
+            session.apply(owned);
+        }
+    }
+}
+
+/// `ReadyPoll` fixture (Phase 4.2): open a dedicated "Demo polls" chat
+/// (id 15) with two injected `messagePoll` messages through the normal
+/// reducer — an open regular poll with a voted option (percentage bars +
+/// counts, the chosen option marked) and a closed quiz poll (results only,
+/// no voting affordance, correct answer marked).
+fn apply_ready_poll(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let chat_id = 15;
+    let chat_json = format!(
+        r#"{{"@type":"updateNewChat","chat":{{"id":{chat_id},"title":"Demo polls","type":{{"@type":"chatTypePrivate","user_id":{chat_id}}},"unread_count":0}}}}"#
+    );
+    let position_json = format!(
+        r#"{{"@type":"updateChatPosition","chat_id":{chat_id},"position":{{"@type":"chatPosition","list":{{"@type":"chatListMain"}},"order":"50","is_pinned":false}}}}"#
+    );
+    for json in [chat_json, position_json] {
+        if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
+            session.apply(owned);
+        }
+    }
+    session.open_chat(ChatId(chat_id));
+
+    let formatted = |text: &str| -> String {
+        let text_json = serde_json::to_string(text).unwrap();
+        format!(r#"{{"@type":"formattedText","text":{text_json},"entities":[]}}"#)
+    };
+    let option = |id: &str, text: &str, voter_count: i32, vote_percentage: i32, is_chosen: bool| {
+        let text_json = formatted(text);
+        format!(
+            r#"{{"@type":"pollOption","id":"{id}","text":{text_json},"voter_count":{voter_count},"vote_percentage":{vote_percentage},"is_chosen":{is_chosen}}}"#
+        )
+    };
+    let poll_message = |message_id: i32,
+                        poll_id: i64,
+                        question: &str,
+                        options: &str,
+                        total_voter_count: i32,
+                        is_anonymous: bool,
+                        allows_multiple_answers: bool,
+                        allows_revoting: bool,
+                        is_closed: bool,
+                        poll_type: &str| {
+        let question_json = formatted(question);
+        format!(
+            r#"{{"@type":"updateNewMessage","message":{{"id":{message_id},"chat_id":{chat_id},"is_outgoing":false,"content":{{"@type":"messagePoll","poll":{{"@type":"poll","id":{poll_id},"question":{question_json},"options":[{options}],"total_voter_count":{total_voter_count},"is_anonymous":{is_anonymous},"allows_multiple_answers":{allows_multiple_answers},"allows_revoting":{allows_revoting},"is_closed":{is_closed},"type":{poll_type}}},"description":{{"@type":"formattedText","text":"","entities":[]}},"can_add_option":false}}}}}}"#
+        )
+    };
+
+    // Open regular poll: the user voted for "Sushi place" (is_chosen).
+    let open_options = [
+        option("opt-sushi", "Sushi place", 12, 55, true),
+        option("opt-pizza", "Pizza", 7, 32, false),
+        option("opt-tacos", "Tacos", 3, 13, false),
+    ]
+    .join(",");
+    let open_poll = poll_message(
+        106,
+        9001,
+        "Where should we eat lunch?",
+        &open_options,
+        22,
+        true,
+        false,
+        true,
+        false,
+        r#"{"@type":"pollTypeRegular"}"#,
+    );
+
+    // Closed quiz poll: correct answer is "Mars" (index 0), user answered
+    // "Venus" (is_chosen) — results only, no voting affordance.
+    let closed_options = [
+        option("opt-mars", "Mars", 18, 72, false),
+        option("opt-venus", "Venus", 7, 28, true),
+    ]
+    .join(",");
+    let closed_poll = poll_message(
+        107,
+        9002,
+        "Which planet is known as the Red Planet?",
+        &closed_options,
+        25,
+        true,
+        false,
+        false,
+        true,
+        r#"{"@type":"pollTypeQuiz","correct_option_ids":[0],"explanation":{"@type":"formattedText","text":"","entities":[]}}"#,
+    );
+
+    for json in [open_poll, closed_poll] {
         if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
             session.apply(owned);
         }
@@ -8485,6 +8928,151 @@ fn button_tooltip(button: &InlineKeyboardButton) -> &'static str {
     }
 }
 
+/// Phase 4.2: `messagePoll` row — the question, one tappable option row per
+/// option with a percentage bar and voter count, chosen option(s) marked;
+/// closed polls render results without voting affordance. Vote taps go
+/// through `setPollAnswer` (`QuillApp::vote_on_poll`); counts refresh live
+/// via `updatePoll`.
+fn poll_body(
+    chat_id: ChatId,
+    message_id: MessageId,
+    content: &PollContent,
+    cx: &mut Context<QuillApp>,
+) -> AnyElement {
+    let poll = &content.poll;
+    let kind_label = match &poll.poll_type {
+        PollType::Quiz { .. } => "Quiz",
+        PollType::Regular => "Poll",
+    };
+    let mut body = div()
+        .id(("poll", message_id.0 as u64))
+        .flex()
+        .flex_col()
+        .gap_1()
+        .mt_1()
+        .child(div().text_sm().font_semibold().child(poll.question.clone()));
+    if !content.description.is_empty() {
+        body = body.child(
+            div()
+                .text_xs()
+                .text_color(rgb(0x8b949e))
+                .child(content.description.clone()),
+        );
+    }
+    body = body.child(div().text_xs().text_color(rgb(0x8b949e)).child(format!(
+        "{} · {} · {}",
+        kind_label,
+        voter_count_label(poll.total_voter_count),
+        if poll.is_closed {
+            "closed"
+        } else if poll.is_anonymous {
+            "anonymous"
+        } else {
+            "public"
+        },
+    )));
+    for (index, option) in poll.options.iter().enumerate() {
+        body = body.child(poll_option_row(
+            chat_id, message_id, index, option, poll, cx,
+        ));
+    }
+    body.into_any_element()
+}
+
+/// One poll option: text + percentage, a bar split by `flex_grow`
+/// (no percentage widths in GPUI), the per-option voter count, and the
+/// chosen / quiz-correct marks. Tappable while the poll is open.
+fn poll_option_row(
+    chat_id: ChatId,
+    message_id: MessageId,
+    index: usize,
+    option: &PollOption,
+    poll: &quill::telegram::Poll,
+    cx: &mut Context<QuillApp>,
+) -> AnyElement {
+    let fill = poll_bar_fraction(option.vote_percentage);
+    let chosen = option.is_chosen;
+    let votable = poll.can_vote();
+    let quiz_correct = poll.is_closed
+        && matches!(&poll.poll_type, PollType::Quiz { correct_option_ids }
+            if correct_option_ids.contains(&(index as i32)));
+    let option_label = if chosen {
+        format!("✓ {}", option.text)
+    } else {
+        option.text.clone()
+    };
+    let option_label = if quiz_correct {
+        format!("{option_label} · correct answer")
+    } else {
+        option_label
+    };
+    let stats = if option.voter_count > 0 {
+        format!(
+            "{}% · {} {}",
+            option.vote_percentage,
+            option.voter_count,
+            if option.voter_count == 1 {
+                "vote"
+            } else {
+                "votes"
+            },
+        )
+    } else {
+        format!("{}%", option.vote_percentage)
+    };
+    let mut row = div()
+        .id(("poll-option", message_id.0 as u64 * 64 + index as u64))
+        .flex()
+        .flex_col()
+        .gap_0p5()
+        .px_3()
+        .py_1p5()
+        .rounded_md()
+        .border_1()
+        .border_color(if chosen { rgb(0x58a6ff) } else { rgb(0x30363d) })
+        .bg(rgb(0x161b22))
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .justify_between()
+                .child(
+                    div()
+                        .text_sm()
+                        .text_color(if quiz_correct {
+                            rgb(0x3fb950)
+                        } else {
+                            rgb(0xe6edf3)
+                        })
+                        .child(option_label),
+                )
+                .child(div().text_sm().text_color(rgb(0x8b949e)).child(stats)),
+        )
+        .child(
+            div()
+                .flex()
+                .flex_row()
+                .h(px(6.))
+                .rounded_md()
+                .overflow_hidden()
+                .bg(rgb(0x0d1117))
+                .child(
+                    div()
+                        .flex_grow(fill)
+                        .bg(if chosen { rgb(0x1f6feb) } else { rgb(0x30363d) }),
+                )
+                .child(div().flex_grow(1.0 - fill)),
+        );
+    if votable {
+        row = row
+            .cursor_pointer()
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.vote_on_poll(chat_id, message_id, index, cx);
+            }));
+    }
+    row.into_any_element()
+}
+
 fn session_history_row(
     message: &HistoryMessage,
     files: &HashMap<i32, ParsedFile>,
@@ -8756,6 +9344,7 @@ fn session_history_row(
             video_frame.as_deref(),
             cx,
         )),
+        MessageContent::Poll(poll) => Some(poll_body(message.chat_id, message.id, poll, cx)),
         MessageContent::Text(_) | MessageContent::Unsupported { .. } => None,
     };
     let keyboard = inline_keyboard(message, cx);

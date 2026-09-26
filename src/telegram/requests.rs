@@ -839,6 +839,96 @@ pub fn send_document(
     .to_string()
 }
 
+/// `setPollAnswer` (TDLib 1.8.67, `schema/td_api.tl:12932`): `option_ids` are
+/// 0-based indexes into the poll's option list (not the `pollOption.id`
+/// strings). Response is `ok`; the new counts arrive via `updatePoll`.
+pub fn set_poll_answer(
+    extra: RequestId,
+    chat_id: ChatId,
+    message_id: MessageId,
+    option_ids: &[i32],
+) -> String {
+    json!({
+        "@type": "setPollAnswer",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0,
+        "message_id": message_id.0,
+        "option_ids": option_ids,
+    })
+    .to_string()
+}
+
+/// Fields for `inputMessagePoll` (TDLib 1.8.67, `schema/td_api.tl:6193`).
+/// Quiz creation stays out of this slice (Phase 4.2) — polls are created as
+/// `inputPollTypeRegular` (schema line 481) even for quiz-flagged drafts.
+pub struct PollSend<'a> {
+    pub question: &'a str,
+    pub options: &'a [&'a str],
+    pub is_anonymous: bool,
+    pub allows_multiple_answers: bool,
+    pub reply_to: Option<MessageId>,
+}
+
+/// `sendMessage` + `inputMessagePoll` / `inputPollOption` / `inputPollTypeRegular`
+/// (TDLib 1.8.67). Options must already be trimmed and non-empty (2–10);
+/// the question 1–255 chars — validated by `PollDraft::validate` before this
+/// is called. `allows_revoting` is true for regular polls (official clients
+/// let the user change their vote); `members_only`, `country_codes`,
+/// `shuffle_options`, `hide_results_until_closes`, `open_period`,
+/// `close_date` all stay at the zero value.
+pub fn send_poll(extra: RequestId, chat_id: ChatId, poll: PollSend<'_>) -> String {
+    let options: Vec<Value> = poll
+        .options
+        .iter()
+        .map(|text| {
+            json!({
+                "@type": "inputPollOption",
+                "text": {
+                    "@type": "formattedText",
+                    "text": text,
+                    "entities": []
+                },
+                "media": Value::Null
+            })
+        })
+        .collect();
+    json!({
+        "@type": "sendMessage",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0,
+        "topic_id": Value::Null,
+        "reply_to": input_message_reply_to(poll.reply_to),
+        "options": Value::Null,
+        "reply_markup": Value::Null,
+        "input_message_content": {
+            "@type": "inputMessagePoll",
+            "question": {
+                "@type": "formattedText",
+                "text": poll.question,
+                "entities": []
+            },
+            "options": options,
+            "description": Value::Null,
+            "media": Value::Null,
+            "is_anonymous": poll.is_anonymous,
+            "allows_multiple_answers": poll.allows_multiple_answers,
+            "allows_revoting": true,
+            "members_only": false,
+            "country_codes": [],
+            "shuffle_options": false,
+            "hide_results_until_closes": false,
+            "type": {
+                "@type": "inputPollTypeRegular",
+                "allow_adding_options": false
+            },
+            "open_period": 0,
+            "close_date": 0,
+            "is_closed": false
+        }
+    })
+    .to_string()
+}
+
 /// `editMessageText` (TDLib 1.8.67). `reply_markup` null — bots only.
 /// `input_message_content` must be `inputMessageText` (or `inputMessageRichMessage`).
 pub fn edit_message_text(
@@ -1968,5 +2058,74 @@ mod channel_requests_tests {
         assert_eq!(v["@type"], "leaveChat");
         assert_eq!(v["@extra"], "63");
         assert_eq!(v["chat_id"], 13);
+    }
+
+    #[test]
+    fn set_poll_answer_shape_matches_1_8_67() {
+        // `setPollAnswer chat_id:int53 message_id:int53
+        // option_ids:vector<int32> = Ok` (schema 1.8.67 line 12932).
+        // `option_ids` are 0-based option *positions*, not `pollOption.id`
+        // strings (those are `updatePollAnswer.option_ids`, line 11186).
+        let json = set_poll_answer(RequestId(9), ChatId(1), MessageId(42), &[0, 2]);
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "setPollAnswer");
+        assert_eq!(v["@extra"], "9");
+        assert_eq!(v["chat_id"], 1);
+        assert_eq!(v["message_id"], 42);
+        assert_eq!(v["option_ids"], serde_json::json!([0, 2]));
+    }
+
+    #[test]
+    fn set_poll_answer_retract_is_empty_option_ids() {
+        // Retracting a vote sends an empty `option_ids` vector (still a
+        // `setPollAnswer`, not a different constructor).
+        let json = set_poll_answer(RequestId(9), ChatId(1), MessageId(42), &[]);
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "setPollAnswer");
+        assert_eq!(v["option_ids"], serde_json::json!([]));
+    }
+
+    #[test]
+    fn send_poll_shape_matches_1_8_67() {
+        // `inputMessagePoll` (schema 1.8.67 line 6193) wrapped in
+        // `sendMessage`; options are `inputPollOption` (line 462) and the
+        // type is `inputPollTypeRegular` (line 481). Quiz types are not
+        // sent by this slice.
+        let options = ["Sushi place", "Pizza"];
+        let json = send_poll(
+            RequestId(11),
+            ChatId(7),
+            PollSend {
+                question: "Where should we eat lunch?",
+                options: &options,
+                is_anonymous: true,
+                allows_multiple_answers: false,
+                reply_to: Some(MessageId(101)),
+            },
+        );
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "sendMessage");
+        assert_eq!(v["@extra"], "11");
+        assert_eq!(v["chat_id"], 7);
+        assert_eq!(v["reply_to"]["@type"], "inputMessageReplyToMessage");
+        assert_eq!(v["reply_to"]["message_id"], 101);
+        let content = &v["input_message_content"];
+        assert_eq!(content["@type"], "inputMessagePoll");
+        assert_eq!(content["question"]["text"], "Where should we eat lunch?");
+        assert_eq!(content["question"]["entities"], serde_json::json!([]));
+        assert_eq!(content["options"][0]["@type"], "inputPollOption");
+        assert_eq!(content["options"][0]["text"]["text"], "Sushi place");
+        assert!(content["options"][0]["media"].is_null());
+        assert_eq!(content["options"][1]["text"]["text"], "Pizza");
+        assert!(content["description"].is_null());
+        assert!(content["media"].is_null());
+        assert_eq!(content["is_anonymous"], true);
+        assert_eq!(content["allows_multiple_answers"], false);
+        assert_eq!(content["allows_revoting"], true);
+        assert_eq!(content["type"]["@type"], "inputPollTypeRegular");
+        assert_eq!(content["type"]["allow_adding_options"], false);
+        assert_eq!(content["open_period"], 0);
+        assert_eq!(content["close_date"], 0);
+        assert_eq!(content["is_closed"], false);
     }
 }
