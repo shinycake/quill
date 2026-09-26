@@ -1291,6 +1291,21 @@ pub fn pin_chat_message(
     .to_string()
 }
 
+/// `setChatSlowModeDelay` (TDLib 1.8.67, `schema/td_api.tl:13551`).
+/// `slow_mode_delay` must be one of 0, 5, 10, 30, 60, 300, 900, 3600
+/// (0 = off); available only for supergroups and requires the
+/// `can_restrict_members` administrator right. The new delay arrives via
+/// `updateSupergroupFullInfo`.
+pub fn set_chat_slow_mode_delay(extra: RequestId, chat_id: ChatId, slow_mode_delay: i32) -> String {
+    json!({
+        "@type": "setChatSlowModeDelay",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0,
+        "slow_mode_delay": slow_mode_delay,
+    })
+    .to_string()
+}
+
 /// `setChatNotificationSettings` (TDLib 1.8.67). Full settings object; callers
 /// copy the chat's current settings and change only `mute_for`.
 pub fn set_chat_notification_settings(
@@ -2567,6 +2582,19 @@ mod tests {
         assert!(!remove.contains("is_big"));
         assert!(!remove.contains("update_recent_reactions"));
         assert!(!remove.contains("CANARY"));
+    }
+
+    #[test]
+    fn set_chat_slow_mode_delay_shape_matches_1_8_67() {
+        // `setChatSlowModeDelay chat_id:int53 slow_mode_delay:int32 = Ok;`
+        // (schema 1.8.67, line 13551).
+        let json = set_chat_slow_mode_delay(RequestId(44), ChatId(11), 30);
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "setChatSlowModeDelay");
+        assert_eq!(v["@extra"], "44");
+        assert_eq!(v["chat_id"], 11);
+        assert_eq!(v["slow_mode_delay"], 30);
+        assert!(!json.contains("CANARY"));
     }
 
     #[test]
