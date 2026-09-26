@@ -20,7 +20,7 @@ use crate::state::{
 use crate::telegram::client::{LiveTdJson, OwnedEnvelope, ReceiveBridge};
 use crate::telegram::envelope::{
     AuthorizationState, ChatDraft, ChatFolderSpec, ChatKind, ChatNotificationSettings,
-    EnvelopePayload, MUTE_FOREVER, MessageContent,
+    EnvelopePayload, MUTE_FOREVER, MessageContent, StoryContentView,
 };
 use crate::telegram::ffi::{LibraryOrigin, TdJsonError, resolve_tdjson_path};
 use crate::telegram::requests::{
@@ -28,22 +28,23 @@ use crate::telegram::requests::{
     VideoNoteThumbnailSend, VideoSend, add_chat_to_list, add_chat_to_list_value, add_contact,
     add_message_reaction, add_recently_found_chat, check_authentication_code,
     check_authentication_password, click_chat_sponsored_message, close_chat, close_request,
-    close_story, create_chat_folder, delete_chat_folder, delete_messages,
+    close_story, create_chat_folder, delete_chat_folder, delete_messages, delete_story,
     download_file as download_file_request, edit_chat_folder, edit_message_caption,
     edit_message_text, forward_messages, get_authorization_state, get_callback_query_answer,
     get_chat_active_stories, get_chat_folder, get_chat_history, get_chat_lists_to_add_chat,
     get_chat_member, get_chat_sponsored_messages, get_commands, get_contacts, get_forum_topics,
     get_installed_sticker_sets, get_me, get_saved_animations, get_sticker_set, get_story,
-    get_supergroup, get_supergroup_full_info, get_user_full_info, input_message_photo,
-    input_message_video, join_chat, leave_chat, load_active_stories, load_chats, load_chats_list,
-    open_chat, open_message_content, open_story, pin_chat_message, remove_message_reaction,
-    reorder_chat_folders, report_chat_sponsored_message, search_chat_messages, search_chats,
-    search_messages, search_public_chats, search_recently_found_chats, send_animation,
-    send_chat_action, send_chat_action_kind, send_document, send_message_album, send_photo,
-    send_poll, send_sticker, send_text, send_video, send_video_note, send_voice_note,
+    get_story_available_reactions, get_supergroup, get_supergroup_full_info, get_user_full_info,
+    input_message_photo, input_message_video, join_chat, leave_chat, load_active_stories,
+    load_chats, load_chats_list, open_chat, open_message_content, open_story, pin_chat_message,
+    remove_message_reaction, reorder_chat_folders, report_chat_sponsored_message,
+    search_chat_messages, search_chats, search_messages, search_public_chats,
+    search_recently_found_chats, send_animation, send_chat_action, send_chat_action_kind,
+    send_document, send_message_album, send_photo, send_poll, send_sticker, send_text,
+    send_text_story_reply, send_video, send_video_note, send_voice_note,
     set_authentication_phone_number, set_chat_draft_message, set_chat_notification_settings,
-    set_poll_answer, toggle_chat_folder_tags, unpin_chat_message, view_messages,
-    view_sponsored_chat,
+    set_poll_answer, set_story_reaction, toggle_chat_folder_tags, unpin_chat_message,
+    view_messages, view_sponsored_chat,
 };
 use crate::voice::VoiceDraft;
 use std::path::Path;
@@ -2204,6 +2205,155 @@ impl<S: JsonSender> ConnectDriver<S> {
             .send_json(&close_story(extra, chat_id, story_id))
         {
             Ok(()) => Ok(Some(extra)),
+            Err(err) => {
+                self.session.requests.take(extra);
+                Err(err)
+            }
+        }
+    }
+
+    /// Phase 9.2: `getStoryAvailableReactions` (row_size 10, within the
+    /// schema's 5–25 range). The `availableReactions` response feeds the
+    /// story viewer's reaction picker. Deduped while a request is
+    /// in-flight; cached afterwards (`Session::story_available_reactions`).
+    pub fn get_story_available_reactions(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if self.session.story_available_reactions.is_some()
+            || self
+                .session
+                .requests
+                .has_purpose(RequestPurpose::GetStoryAvailableReactions)
+        {
+            return Ok(None);
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::GetStoryAvailableReactions, None);
+        match self
+            .sender
+            .send_json(&get_story_available_reactions(extra, 10))
+        {
+            Ok(()) => Ok(Some(extra)),
+            Err(err) => {
+                self.session.requests.take(extra);
+                Err(err)
+            }
+        }
+    }
+
+    /// Phase 9.2: `setStoryReaction` — set (or with `None`, remove) the
+    /// user's emoji reaction on a story. Gates: the story must be cached
+    /// and must not be live (`setStoryReaction` is not supported for live
+    /// stories, TDLib 1.8.67 `schema/td_api.tl:13809`). The reaction shows
+    /// up via the follow-up `updateStory` (`story.chosen_reaction_type`).
+    pub fn set_story_reaction(
+        &mut self,
+        chat_id: ChatId,
+        story_id: i32,
+        emoji: Option<&str>,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let story = self
+            .session
+            .stories
+            .get(&(chat_id.0, story_id))
+            .ok_or(ConnectSendError::InvalidRequest)?;
+        if matches!(story.content, StoryContentView::Live) {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if emoji.is_some_and(|emoji| emoji.trim().is_empty()) {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let purpose = if emoji.is_some() {
+            RequestPurpose::SetStoryReaction
+        } else {
+            RequestPurpose::RemoveStoryReaction
+        };
+        let extra = self.session.request_for_story(purpose, chat_id, story_id);
+        match self
+            .sender
+            .send_json(&set_story_reaction(extra, chat_id, story_id, emoji))
+        {
+            Ok(()) => Ok(Some(extra)),
+            Err(err) => {
+                self.session.requests.take(extra);
+                Err(err)
+            }
+        }
+    }
+
+    /// Phase 9.2: `deleteStory` — delete a story posted by the current
+    /// user. Gated on `story.can_be_deleted`. The deletion lands as
+    /// `updateStoryDeleted`.
+    pub fn delete_story(
+        &mut self,
+        chat_id: ChatId,
+        story_id: i32,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let deletable = self
+            .session
+            .stories
+            .get(&(chat_id.0, story_id))
+            .is_some_and(|story| story.can_be_deleted);
+        if !deletable {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self
+            .session
+            .request_for_story(RequestPurpose::DeleteStory, chat_id, story_id);
+        match self
+            .sender
+            .send_json(&delete_story(extra, chat_id, story_id))
+        {
+            Ok(()) => Ok(Some(extra)),
+            Err(err) => {
+                self.session.requests.take(extra);
+                Err(err)
+            }
+        }
+    }
+
+    /// Phase 9.2: reply to a story — `sendMessage` to the poster chat with
+    /// `inputMessageReplyToStory`. Gated on `story.can_be_replied` and a
+    /// non-empty message sent to a supported chat.
+    pub fn send_story_reply(
+        &mut self,
+        chat_id: ChatId,
+        story_id: i32,
+        text: &str,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let repliable = self
+            .session
+            .stories
+            .get(&(chat_id.0, story_id))
+            .is_some_and(|story| story.can_be_replied);
+        if !repliable || text.trim().is_empty() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let supported = self
+            .session
+            .chats
+            .get(&chat_id.0)
+            .is_some_and(|chat| chat.supported());
+        if !supported {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra =
+            self.session
+                .request_for_story(RequestPurpose::SendStoryReply, chat_id, story_id);
+        let json = send_text_story_reply(extra, chat_id, chat_id, story_id, text);
+        match self.sender.send_json(&json) {
+            Ok(()) => Ok(extra),
             Err(err) => {
                 self.session.requests.take(extra);
                 Err(err)
@@ -7823,6 +7973,252 @@ mod tests {
             .unwrap();
         assert!(cleared.emoji_reaction_chips().is_empty());
         assert!(!sink.rendered().contains("CANARY"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Phase 9.2: ingest a full `story` object into the driver's session,
+    /// like the `getStory` response would.
+    fn seed_story<S: JsonSender>(
+        driver: &mut ConnectDriver<S>,
+        seq: &AtomicU64,
+        dyn_sink: &Arc<dyn DiagnosticSink>,
+        chat_id: i64,
+        story_id: i32,
+        content_type: &str,
+        flags: &str,
+    ) {
+        let json = format!(
+            r#"{{"@type":"story","id":{story_id},"poster_chat_id":{chat_id},"date":1700000000,"content":{{"@type":"{content_type}"}},{flags}"caption":{{"@type":"formattedText","text":"","entities":[]}}}}"#,
+        );
+        driver
+            .ingest(copy_and_parse(&json, seq, dyn_sink).unwrap())
+            .unwrap();
+    }
+
+    #[test]
+    fn driver_story_reaction_set_remove_and_gates() {
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = Arc::new(RecordingSender::new());
+        let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+        let mut driver =
+            ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+        let seq = AtomicU64::new(0);
+        seed_ready_alice(&mut driver, &seq, &dyn_sink);
+
+        // Unknown story: rejected.
+        assert_eq!(
+            driver.set_story_reaction(ChatId(7), 99, Some("❤")),
+            Err(ConnectSendError::InvalidRequest)
+        );
+
+        seed_story(
+            &mut driver,
+            &seq,
+            &dyn_sink,
+            7,
+            5,
+            "storyContentPhoto",
+            r#""chosen_reaction_type":null,"#,
+        );
+        // Live stories: `setStoryReaction` is not supported for live
+        // stories (schema 1.8.67 line 13809).
+        seed_story(&mut driver, &seq, &dyn_sink, 7, 6, "storyContentLive", "");
+        assert_eq!(
+            driver.set_story_reaction(ChatId(7), 6, Some("❤")),
+            Err(ConnectSendError::InvalidRequest)
+        );
+        // Empty emoji: rejected.
+        assert_eq!(
+            driver.set_story_reaction(ChatId(7), 5, Some("  ")),
+            Err(ConnectSendError::InvalidRequest)
+        );
+
+        let extra = driver
+            .set_story_reaction(ChatId(7), 5, Some("❤"))
+            .unwrap()
+            .expect("react sends");
+        let json = recorder
+            .snapshot()
+            .last()
+            .cloned()
+            .expect("setStoryReaction");
+        let v: Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "setStoryReaction");
+        assert_eq!(v["@extra"], extra.0.to_string());
+        assert_eq!(v["story_poster_chat_id"], 7);
+        assert_eq!(v["story_id"], 5);
+        assert_eq!(v["reaction_type"]["@type"], "reactionTypeEmoji");
+        assert_eq!(v["reaction_type"]["emoji"], "❤");
+        assert_eq!(v["update_recent_reactions"], true);
+
+        // Removing sends `reaction_type: null`.
+        let remove_extra = driver
+            .set_story_reaction(ChatId(7), 5, None)
+            .unwrap()
+            .expect("remove sends");
+        let json = recorder
+            .snapshot()
+            .last()
+            .cloned()
+            .expect("remove reaction");
+        let v: Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "setStoryReaction");
+        assert_eq!(v["@extra"], remove_extra.0.to_string());
+        assert_eq!(v["reaction_type"], Value::Null);
+
+        // `updateStory` with a chosen reaction refreshes the cache (the
+        // viewer reads `chosen_reaction_emoji` live from the cache).
+        seed_story(
+            &mut driver,
+            &seq,
+            &dyn_sink,
+            7,
+            5,
+            "storyContentPhoto",
+            r#""chosen_reaction_type":{"@type":"reactionTypeEmoji","emoji":"👍"},"#,
+        );
+        let story = driver.session.stories.get(&(7, 5)).unwrap();
+        assert_eq!(story.chosen_reaction_emoji.as_deref(), Some("👍"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn driver_delete_story_gated_on_can_be_deleted() {
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = Arc::new(RecordingSender::new());
+        let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+        let mut driver =
+            ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+        let seq = AtomicU64::new(0);
+        seed_ready_alice(&mut driver, &seq, &dyn_sink);
+
+        assert_eq!(
+            driver.delete_story(ChatId(7), 5),
+            Err(ConnectSendError::InvalidRequest)
+        );
+        seed_story(&mut driver, &seq, &dyn_sink, 7, 5, "storyContentPhoto", "");
+        assert_eq!(
+            driver.delete_story(ChatId(7), 5),
+            Err(ConnectSendError::InvalidRequest)
+        );
+        seed_story(
+            &mut driver,
+            &seq,
+            &dyn_sink,
+            7,
+            6,
+            "storyContentPhoto",
+            r#""can_be_deleted":true,"#,
+        );
+        let extra = driver
+            .delete_story(ChatId(7), 6)
+            .unwrap()
+            .expect("delete sends");
+        let json = recorder.snapshot().last().cloned().expect("deleteStory");
+        let v: Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "deleteStory");
+        assert_eq!(v["@extra"], extra.0.to_string());
+        assert_eq!(v["story_poster_chat_id"], 7);
+        assert_eq!(v["story_id"], 6);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn driver_send_story_reply_uses_input_message_reply_to_story() {
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = Arc::new(RecordingSender::new());
+        let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+        let mut driver =
+            ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+        let seq = AtomicU64::new(0);
+        seed_ready_alice(&mut driver, &seq, &dyn_sink);
+
+        seed_story(&mut driver, &seq, &dyn_sink, 7, 5, "storyContentPhoto", "");
+        // Not repliable and empty text are rejected.
+        assert_eq!(
+            driver.send_story_reply(ChatId(7), 5, "hello"),
+            Err(ConnectSendError::InvalidRequest)
+        );
+        seed_story(
+            &mut driver,
+            &seq,
+            &dyn_sink,
+            7,
+            6,
+            "storyContentPhoto",
+            r#""can_be_replied":true,"#,
+        );
+        assert_eq!(
+            driver.send_story_reply(ChatId(7), 6, "   "),
+            Err(ConnectSendError::InvalidRequest)
+        );
+
+        let extra = driver
+            .send_story_reply(ChatId(7), 6, "Nice story!")
+            .unwrap();
+        let json = recorder.snapshot().last().cloned().expect("sendMessage");
+        let v: Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "sendMessage");
+        assert_eq!(v["@extra"], extra.0.to_string());
+        assert_eq!(v["chat_id"], 7);
+        assert_eq!(v["reply_to"]["@type"], "inputMessageReplyToStory");
+        assert_eq!(v["reply_to"]["story_poster_chat_id"], 7);
+        assert_eq!(v["reply_to"]["story_id"], 6);
+        assert_eq!(v["input_message_content"]["text"]["text"], "Nice story!");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn driver_get_story_available_reactions_dedupes_and_caches() {
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = Arc::new(RecordingSender::new());
+        let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+        let mut driver =
+            ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+        let seq = AtomicU64::new(0);
+        seed_ready_alice(&mut driver, &seq, &dyn_sink);
+
+        let extra = driver
+            .get_story_available_reactions()
+            .unwrap()
+            .expect("first call sends");
+        let sent = recorder.snapshot().len();
+        // In-flight duplicate is deduped.
+        assert!(driver.get_story_available_reactions().unwrap().is_none());
+        assert_eq!(recorder.snapshot().len(), sent);
+
+        driver
+            .ingest(
+                copy_and_parse(
+                    &format!(r#"{{"@type":"availableReactions","@extra":"{}","top_reactions":[{{"@type":"availableReaction","type":{{"@type":"reactionTypeEmoji","emoji":"❤"}},"needs_premium":false}}],"recent_reactions":[],"popular_reactions":[],"allow_custom_emoji":false,"are_tags":false,"unavailability_reason":null}}"#, extra.0),
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        let cached = driver.session.story_available_reactions.clone().unwrap();
+        assert_eq!(cached.len(), 1);
+        assert_eq!(cached[0].emoji, "❤");
+        // Cached: no new request.
+        assert!(driver.get_story_available_reactions().unwrap().is_none());
+        assert_eq!(recorder.snapshot().len(), sent);
+
         let _ = std::fs::remove_dir_all(&dir);
     }
 

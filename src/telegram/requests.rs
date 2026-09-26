@@ -1448,6 +1448,103 @@ pub fn close_story(extra: RequestId, chat_id: ChatId, story_id: i32) -> String {
     .to_string()
 }
 
+/// Phase 9.2: `getStoryAvailableReactions` (TDLib 1.8.67,
+/// `schema/td_api.tl:13802`) — emoji reactions the story picker can offer.
+/// `row_size` must be 5–25; the viewer requests 10. Response is
+/// `availableReactions`.
+pub fn get_story_available_reactions(extra: RequestId, row_size: i32) -> String {
+    json!({
+        "@type": "getStoryAvailableReactions",
+        "@extra": extra.as_extra(),
+        "row_size": row_size
+    })
+    .to_string()
+}
+
+/// Phase 9.2: `setStoryReaction` (TDLib 1.8.67, `schema/td_api.tl:13809`) —
+/// changes the user's chosen reaction on a story. `emoji: None` removes the
+/// reaction (`reaction_type: null`); `Some("❤")` sets it. Only
+/// `reactionTypeEmoji` is offered (custom emoji is Premium-only; paid
+/// reactions can't be set — schema comment). `update_recent_reactions: true`
+/// matches the official picker click. Not supported for live stories (the
+/// driver gates that). Response is `ok`.
+pub fn set_story_reaction(
+    extra: RequestId,
+    chat_id: ChatId,
+    story_id: i32,
+    emoji: Option<&str>,
+) -> String {
+    let reaction_type = match emoji {
+        Some(emoji) => reaction_type_emoji(emoji),
+        None => Value::Null,
+    };
+    json!({
+        "@type": "setStoryReaction",
+        "@extra": extra.as_extra(),
+        "story_poster_chat_id": chat_id.0,
+        "story_id": story_id,
+        "reaction_type": reaction_type,
+        "update_recent_reactions": true
+    })
+    .to_string()
+}
+
+/// Phase 9.2: `deleteStory` (TDLib 1.8.67, `schema/td_api.tl:13754`) —
+/// deletes a story posted by the current user (`story.can_be_deleted`
+/// gates the button). Response is `ok`; the deletion lands as
+/// `updateStoryDeleted`.
+pub fn delete_story(extra: RequestId, chat_id: ChatId, story_id: i32) -> String {
+    json!({
+        "@type": "deleteStory",
+        "@extra": extra.as_extra(),
+        "story_poster_chat_id": chat_id.0,
+        "story_id": story_id
+    })
+    .to_string()
+}
+
+/// Phase 9.2: story reply target — `inputMessageReplyToStory` (TDLib 1.8.67,
+/// `schema/td_api.tl:3099`). Replying to a story sends a message to the
+/// story poster quoting the story.
+pub fn input_message_reply_to_story(poster_chat_id: ChatId, story_id: i32) -> Value {
+    json!({
+        "@type": "inputMessageReplyToStory",
+        "story_poster_chat_id": poster_chat_id.0,
+        "story_id": story_id
+    })
+}
+
+/// Phase 9.2: `sendMessage` with `inputMessageReplyToStory` — a reply to a
+/// story, sent to the poster chat (`story.can_be_replied` gates it).
+pub fn send_text_story_reply(
+    extra: RequestId,
+    chat_id: ChatId,
+    poster_chat_id: ChatId,
+    story_id: i32,
+    text: &str,
+) -> String {
+    json!({
+        "@type": "sendMessage",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0,
+        "topic_id": Value::Null,
+        "reply_to": input_message_reply_to_story(poster_chat_id, story_id),
+        "options": Value::Null,
+        "reply_markup": Value::Null,
+        "input_message_content": {
+            "@type": "inputMessageText",
+            "text": {
+                "@type": "formattedText",
+                "text": text,
+                "entities": []
+            },
+            "link_preview_options": Value::Null,
+            "clear_draft": true
+        }
+    })
+    .to_string()
+}
+
 pub fn add_chat_to_list(extra: RequestId, chat_id: ChatId, archive: bool) -> String {
     add_chat_to_list_value(
         extra,
@@ -2627,6 +2724,56 @@ mod channel_requests_tests {
         assert_eq!(v["@type"], "leaveChat");
         assert_eq!(v["@extra"], "63");
         assert_eq!(v["chat_id"], 13);
+    }
+
+    #[test]
+    fn story_request_shapes_match_1_8_67() {
+        // Phase 9.2 story reactions / picker / delete / reply builders.
+        let set = set_story_reaction(RequestId(70), ChatId(11), 7, Some("❤"));
+        let v: serde_json::Value = serde_json::from_str(&set).unwrap();
+        // `setStoryReaction story_poster_chat_id:int53 story_id:int32
+        // reaction_type:ReactionType update_recent_reactions:Bool = Ok`
+        // (schema 1.8.67 line 13809).
+        assert_eq!(v["@type"], "setStoryReaction");
+        assert_eq!(v["@extra"], "70");
+        assert_eq!(v["story_poster_chat_id"], 11);
+        assert_eq!(v["story_id"], 7);
+        assert_eq!(v["reaction_type"]["@type"], "reactionTypeEmoji");
+        assert_eq!(v["reaction_type"]["emoji"], "❤");
+        assert_eq!(v["update_recent_reactions"], true);
+
+        // Removing sends `reaction_type: null` (schema comment, line 13809).
+        let remove = set_story_reaction(RequestId(71), ChatId(11), 7, None);
+        let v: serde_json::Value = serde_json::from_str(&remove).unwrap();
+        assert_eq!(v["@type"], "setStoryReaction");
+        assert_eq!(v["reaction_type"], serde_json::Value::Null);
+
+        // `getStoryAvailableReactions row_size:int32 = AvailableReactions`
+        // (schema 1.8.67 line 13802); row_size 10 is inside 5–25.
+        let avail = get_story_available_reactions(RequestId(72), 10);
+        let v: serde_json::Value = serde_json::from_str(&avail).unwrap();
+        assert_eq!(v["@type"], "getStoryAvailableReactions");
+        assert_eq!(v["row_size"], 10);
+
+        // `deleteStory story_poster_chat_id:int53 story_id:int32 = Ok`
+        // (schema 1.8.67 line 13754).
+        let delete = delete_story(RequestId(73), ChatId(11), 7);
+        let v: serde_json::Value = serde_json::from_str(&delete).unwrap();
+        assert_eq!(v["@type"], "deleteStory");
+        assert_eq!(v["story_poster_chat_id"], 11);
+        assert_eq!(v["story_id"], 7);
+
+        // Story reply: `sendMessage` with `inputMessageReplyToStory
+        // story_poster_chat_id:int53 story_id:int32 = InputMessageReplyTo`
+        // (schema 1.8.67 line 3099).
+        let reply = send_text_story_reply(RequestId(74), ChatId(11), ChatId(11), 7, "Nice!");
+        let v: serde_json::Value = serde_json::from_str(&reply).unwrap();
+        assert_eq!(v["@type"], "sendMessage");
+        assert_eq!(v["chat_id"], 11);
+        assert_eq!(v["reply_to"]["@type"], "inputMessageReplyToStory");
+        assert_eq!(v["reply_to"]["story_poster_chat_id"], 11);
+        assert_eq!(v["reply_to"]["story_id"], 7);
+        assert_eq!(v["input_message_content"]["text"]["text"], "Nice!");
     }
 
     #[test]

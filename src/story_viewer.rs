@@ -8,8 +8,9 @@
 //! `downloadFile` when nothing viewable is local yet.
 //!
 //! Scope: photo and video story content. Live and unsupported stories keep
-//! their item in the list but render a placeholder. Reactions, replies,
-//! and posting are out of scope.
+//! their item in the list but render a placeholder. Reactions and replies
+//! are Phase 9.2 (viewer overlay actions); posting is out of scope (no
+//! `sendStory` in TDLib 1.8.67 — see DECISIONS.md Phase 9.2).
 
 use crate::ids::{ChatId, FileId};
 use crate::telegram::envelope::{ChatActiveStoriesView, ParsedStory, StoryContentView};
@@ -229,6 +230,11 @@ mod tests {
             content: StoryContentView::Photo { sizes },
             caption: caption.to_string(),
             caption_entities: Vec::new(),
+            chosen_reaction_emoji: None,
+            interaction_info: None,
+            can_be_deleted: false,
+            can_be_replied: false,
+            can_get_interactions: false,
         }
     }
 
@@ -252,6 +258,11 @@ mod tests {
             },
             caption: String::new(),
             caption_entities: Vec::new(),
+            chosen_reaction_emoji: None,
+            interaction_info: None,
+            can_be_deleted: false,
+            can_be_replied: false,
+            can_get_interactions: false,
         }
     }
 

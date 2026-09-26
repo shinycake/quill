@@ -1504,3 +1504,92 @@ Research snapshot 2026-09-16, pin recheck **2026-09-17**.
   replies; joining/playing live stories; actual video playback (thumbnail
   only); story albums; story privacy/close-friends management; story
   interaction/view-count UI; the archive-list tray.
+
+## Phase 9.2 — Story reactions, replies, and own-story deletion (2026-09-26)
+
+- **Rationale:** extend the Phase 9.1 story viewer with the interaction
+  affordances Telegram clients show under a story: emoji reactions
+  (quick-react + picker), interaction counters, text replies to the
+  poster, and deleting an own story. Story *posting* stays out — see the
+  schema blocker below.
+- **Schema blocker (verified, not inferred).** The pinned vendored schema
+  (`schema/td_api.tl`, official TDLib commit
+  `d1085f9cebc5a62379991ae1652673954f229c1f`, CMake version 1.8.67) was
+  re-downloaded from the pinned GitHub URL and hash-verified (1,152,505
+  bytes, SHA-256
+  `326b65b41442901ad6bf0ca2f7c356ae54365d6c343956a62e06a8b3cb305e87`):
+  it contains **no `sendStory` constructor** anywhere, even though
+  `inputStoryContentPhoto` (line 6673) exists. There is no posting
+  function that accepts it, so a photo-story composer, caption/privacy
+  selector, and any "post" flow **cannot be built honestly** against the
+  pinned schema/binary — inventing the JSON would diverge from what
+  TDLib 1.8.67 accepts. Posting (composer, caption, privacy, video
+  uploads) is blocked until a TDLib upgrade brings a `sendStory`-like
+  constructor. The repo's rule stands: never mix schema and `tdjson`
+  binary versions.
+- **Schema (1.8.67, verified in `schema/td_api.tl` — no invented
+  constructors/fields):** `reactionTypeEmoji emoji:string =
+  ReactionType` (line 2915); `inputMessageReplyToStory
+  story_poster_chat_id:int53 story_id:int32 = InputMessageReplyTo`
+  (line 3099); `storyInteractionInfo view_count:int32 forward_count:int32
+  reaction_count:int32 recent_viewer_user_ids:vector<int53> =
+  StoryInteractionInfo` (line 6712); `story … interaction_info:StoryInteractionInfo
+  chosen_reaction_type:ReactionType … can_be_deleted:Bool …
+  can_be_replied:Bool … can_get_interactions:Bool … = Story` (line 6742);
+  `availableReaction type:ReactionType needs_premium:Bool =
+  AvailableReaction` (line 7321); `availableReactions … =
+  AvailableReactions` (line 7330); `updateStoryDeleted
+  story_poster_chat_id:int53 story_id:int32 = Update` (line 10898);
+  `updateStoryPostSucceeded story:story old_story_id:int32 = Update`
+  (line 10901); `updateStoryPostFailed story:story error:error
+  error_type:CanPostStoryResult = Update` (line 10907); `deleteStory
+  story_poster_chat_id:int53 story_id:int32 = Ok` (line 13754);
+  `getStoryAvailableReactions row_size:int32 = AvailableReactions`
+  (line 13802); `setStoryReaction story_poster_chat_id:int53
+  story_id:int32 reaction_type:ReactionType update_recent_reactions:Bool
+  = Ok` (line 13809 — `reaction_type: null` removes; the schema comment
+  excludes live stories); `getStoryInteractions story_poster_chat_id:int53
+  story_id:int32 … = StoryInteractions` (line 13819 — detailed viewer
+  list, kept out of this slice).
+- **Parser (`src/telegram/envelope.rs`).** `ParsedStory` gains
+  `chosen_reaction_emoji` (only `reactionTypeEmoji` with a non-empty
+  emoji; custom-emoji/paid/null → `None`), `interaction_info`
+  (`StoryInteractionInfoView` + `any_nonzero()`), and the
+  `can_be_deleted` / `can_be_replied` / `can_get_interactions` gates.
+  New payloads: `UpdateStoryDeleted`, `UpdateStoryPostSucceeded`,
+  `UpdateStoryPostFailed` (diagnostic + tray refresh; kept, not dropped),
+  `StoryAvailableReactions` (emoji-only options; custom-emoji rows
+  dropped). `updateStory` still parses as the ordinary `Story`.
+- **Requests (`src/telegram/requests.rs`).** `get_story_available_reactions`
+  (`row_size` 10, inside the schema's 5–25), `set_story_reaction`
+  (`reaction_type: null` for removal, `update_recent_reactions: true`),
+  `delete_story`, `send_text_story_reply` — the reply is a plain
+  `sendMessage` with `reply_to: inputMessageReplyToStory` and `clear_draft:
+  true`, same call as replying to a message. All shapes asserted against
+  1.8.67 in unit tests.
+- **Driver (`src/connect.rs`).** `get_story_available_reactions`
+  (cache + in-flight dedupe), `set_story_reaction` (rejects unknown or
+  live stories and empty emoji),
+  `delete_story` (gated on cached `can_be_deleted`), `send_story_reply`
+  (gated on cached `can_be_replied`, non-empty text, supported chat).
+  Reducer: delete removes the story from the cache and the poster's tray
+  entry (entry dropped when it has no stories left); post-succeeded
+  upserts the story and queues the poster's tray refresh
+  (`Session::story_tray_refresh`, drained in the UI tick into
+  `getChatActiveStories`); available reactions cached for the picker.
+- **UI (`src/ui/mod.rs`).** Under the viewer caption: interaction counts
+  (`👁 42 · ❤️ 7 · ↩ 3`, only when `can_get_interactions` and non-zero),
+  an action row — ❤️ quick-react (toggles, shows ✓ when chosen),
+  **React…** (picker fed by `getStoryAvailableReactions`), **Reply**
+  (gated on `can_be_replied`, text input + Send), **Delete** (gated on
+  `can_be_deleted`; the viewer closes when its story disappears from the
+  cache). Escape closes the story viewer (resetting picker flags inside
+  `close_story_viewer`). Screenshot proof:
+  `docs/screenshots/ready-story-post.png` (`ready-story-post` demo —
+  picker + reply row open on an own story; its caption states the
+  `sendStory` blocker).
+- **Out of this slice (→ future):** story posting / photo composer /
+  caption + privacy selector (blocked on a TDLib with `sendStory`);
+  video uploads; story albums; privacy/close-friends management beyond
+  the per-story read of `can_be_*`; joining/playing live stories;
+  `getStoryInteractions` detailed viewer list; the archive-list tray.

@@ -14,7 +14,7 @@ use crate::telegram::envelope::{
     MessageContent, MessageForwardInfo, MessageInteractionInfo, MessageOrigin, MessageReaction,
     MessageReplyTo, MessageSender, ParsedChatMember, ParsedFile, ParsedMessage, ParsedStory,
     ParsedUser, Poll, ReportOption, ReportSponsoredResult, SponsoredMessage, StickerFormat,
-    StickerItem, StickerSetInfo, StoryListView,
+    StickerItem, StickerSetInfo, StoryAvailableReactionView, StoryListView,
 };
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
@@ -153,6 +153,21 @@ pub enum RequestPurpose {
     GetStory,
     OpenStory,
     CloseStory,
+    /// Phase 9.2: `getStoryAvailableReactions`. Response is
+    /// `availableReactions`; cached in
+    /// `Session::story_available_reactions` for the viewer picker.
+    GetStoryAvailableReactions,
+    /// Phase 9.2: `setStoryReaction` (set) / removing the chosen reaction.
+    /// Responses are `ok`; the new state arrives via `updateStory`.
+    SetStoryReaction,
+    RemoveStoryReaction,
+    /// Phase 9.2: `deleteStory`. Response is `ok`; the deletion lands as
+    /// `updateStoryDeleted`.
+    DeleteStory,
+    /// Phase 9.2: story reply — `sendMessage` with
+    /// `inputMessageReplyToStory`. Response is `message`; the normal
+    /// message-send updates handle it.
+    SendStoryReply,
     /// Parity slice: `createChatFolder`. Response is `chatFolderInfo`;
     /// upserted into `Session::chat_folders` (`updateChatFolders` stays the
     /// source of truth).
@@ -1602,6 +1617,16 @@ pub struct Session {
     /// updates), keyed by `(poster_chat_id, story_id)`. The viewer
     /// prefetches every story in a tray entry before opening.
     pub stories: HashMap<(i64, i32), ParsedStory>,
+    /// Phase 9.2: emoji reactions the story picker can offer — the
+    /// `getStoryAvailableReactions` response (`availableReactions`,
+    /// `schema/td_api.tl:13802`).
+    pub story_available_reactions: Option<Vec<StoryAvailableReactionView>>,
+    /// Phase 9.2: poster chat ids whose active stories the driver should
+    /// refresh with `getChatActiveStories`. Filled by the reducer on
+    /// `updateStoryPostSucceeded` (a story posted from another client goes
+    /// live — e.g. our own) and drained by the UI each render, like
+    /// `pending_story_open`.
+    pub story_tray_refresh: HashSet<i64>,
     /// Phase 9.1: `loadActiveStories(storyListMain)` was issued. A retry is
     /// allowed (the flag is reset) if the attempt failed.
     pub stories_active_loaded: bool,
@@ -1709,6 +1734,8 @@ impl Session {
             story_tray: HashMap::new(),
             stories: HashMap::new(),
             stories_active_loaded: false,
+            story_available_reactions: None,
+            story_tray_refresh: HashSet::new(),
             diagnostics,
         }
     }
@@ -2172,6 +2199,57 @@ impl Session {
                 // Phase 9.1: `getStory` response or `updateStory` update.
                 self.remember_files(&files);
                 self.stories.insert((story.poster_chat_id, story.id), story);
+            }
+            EnvelopePayload::UpdateStoryDeleted {
+                poster_chat_id,
+                story_id,
+            } => {
+                // Phase 9.2: drop the story from the cache and from the
+                // poster's tray entry. The UI closes the viewer when its
+                // current story disappears from the cache.
+                self.stories.remove(&(poster_chat_id, story_id));
+                let empty = if let Some(tray) = self.story_tray.get_mut(&poster_chat_id) {
+                    tray.stories.retain(|info| info.story_id != story_id);
+                    tray.stories.is_empty()
+                } else {
+                    false
+                };
+                if empty {
+                    self.story_tray.remove(&poster_chat_id);
+                }
+            }
+            EnvelopePayload::UpdateStoryPostSucceeded {
+                story,
+                files,
+                old_story_id: _,
+            } => {
+                // Phase 9.2: a story posted from another client is live —
+                // upsert it and refresh the poster's tray row so an own
+                // story appears in the tray.
+                self.remember_files(&files);
+                let poster_chat_id = story.poster_chat_id;
+                self.stories.insert((story.poster_chat_id, story.id), story);
+                self.story_tray_refresh.insert(poster_chat_id);
+            }
+            EnvelopePayload::UpdateStoryPostFailed { story, error: _ } => {
+                // Phase 9.2: a story failed to post — drop it like a delete
+                // (it never went live). Unreachable without `sendStory`,
+                // which is absent from TDLib 1.8.67.
+                self.stories.remove(&(story.poster_chat_id, story.id));
+                let empty = if let Some(tray) = self.story_tray.get_mut(&story.poster_chat_id) {
+                    tray.stories.retain(|info| info.story_id != story.id);
+                    tray.stories.is_empty()
+                } else {
+                    false
+                };
+                if empty {
+                    self.story_tray.remove(&story.poster_chat_id);
+                }
+            }
+            EnvelopePayload::StoryAvailableReactions { reactions } => {
+                // Phase 9.2: `getStoryAvailableReactions` answer — the
+                // viewer picker options.
+                self.story_available_reactions = Some(reactions);
             }
             EnvelopePayload::UpdateNewMessage(message) => {
                 // Phase 8.1: decide before upserting; the queue is drained by
@@ -6908,6 +6986,63 @@ mod tests {
         );
         assert!(session.ordered_story_tray().is_empty());
         assert!(!session.story_tray.contains_key(&11));
+    }
+
+    #[test]
+    fn update_story_deleted_removes_cache_and_tray() {
+        // Phase 9.2: `updateStoryDeleted` (schema 1.8.67 line 10898).
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &tray_json(11, r#"{"@type":"storyListMain"}"#, 10, 0, &[5]),
+        );
+        session.stories.insert(
+            (11, 5),
+            crate::telegram::envelope::ParsedStory {
+                id: 5,
+                poster_chat_id: 11,
+                date: 1,
+                content: crate::telegram::envelope::StoryContentView::Unsupported,
+                caption: String::new(),
+                caption_entities: Vec::new(),
+                chosen_reaction_emoji: None,
+                interaction_info: None,
+                can_be_deleted: false,
+                can_be_replied: false,
+                can_get_interactions: false,
+            },
+        );
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateStoryDeleted","story_poster_chat_id":11,"story_id":5}"#,
+        );
+        assert!(!session.stories.contains_key(&(11, 5)));
+        // Tray no longer references the deleted story; without an unread
+        // story left, the entry is dropped.
+        assert!(session.ordered_story_tray().is_empty());
+    }
+
+    #[test]
+    fn update_story_post_succeeded_upserts_and_queues_tray_refresh() {
+        // Phase 9.2: `updateStoryPostSucceeded` (schema 1.8.67 line 10901).
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateStoryPostSucceeded","story":{"@type":"story","id":9,"poster_chat_id":11,"date":1,"content":{"@type":"storyContentUnsupported"},"caption":{"@type":"formattedText","text":"","entities":[]}},"old_story_id":8}"#,
+        );
+        let story = session.stories.get(&(11, 9)).expect("story cached");
+        assert_eq!(story.poster_chat_id, 11);
+        // The driver's `tick` drains this into a `getChatActiveStories`
+        // refresh for the poster's tray entry.
+        assert!(session.story_tray_refresh.contains(&11));
     }
 
     #[test]

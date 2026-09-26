@@ -360,6 +360,38 @@ pub enum EnvelopePayload {
         story: ParsedStory,
         files: Vec<ParsedFile>,
     },
+    /// Phase 9.2: `updateStoryDeleted` (TDLib 1.8.67, `schema/td_api.tl:10898`)
+    /// — a story was deleted. The reducer drops it from `Session::stories`
+    /// and from the poster's tray entry.
+    UpdateStoryDeleted {
+        poster_chat_id: i64,
+        story_id: i32,
+    },
+    /// Phase 9.2: `updateStoryPostSucceeded` (TDLib 1.8.67,
+    /// `schema/td_api.tl:10901`) — a story posted from another client is
+    /// live. The reducer upserts it into `Session::stories` and asks the
+    /// driver to refresh the poster's tray (`getChatActiveStories`), so an
+    /// own story appears in the tray.
+    UpdateStoryPostSucceeded {
+        story: ParsedStory,
+        files: Vec<ParsedFile>,
+        old_story_id: i32,
+    },
+    /// Phase 9.2: `updateStoryPostFailed` (TDLib 1.8.67,
+    /// `schema/td_api.tl:10907`) — a story failed to post. The reducer drops
+    /// the failed story from `Session::stories` and the poster's tray entry
+    /// (it never went live). Unreachable without `sendStory` (absent from
+    /// 1.8.67), parsed for schema completeness.
+    UpdateStoryPostFailed {
+        story: ParsedStory,
+        error: TdError,
+    },
+    /// Phase 9.2: `availableReactions` — the `getStoryAvailableReactions`
+    /// response (TDLib 1.8.67, `schema/td_api.tl:13802`). The reducer keeps
+    /// it in `Session::story_available_reactions` for the viewer picker.
+    StoryAvailableReactions {
+        reactions: Vec<StoryAvailableReactionView>,
+    },
     Unknown(UnknownKind),
 }
 
@@ -1248,11 +1280,40 @@ pub enum StoryContentView {
     Unsupported,
 }
 
+/// Phase 9.2: `storyInteractionInfo` — interaction counters on a story
+/// (TDLib 1.8.67, `schema/td_api.tl:6712`). Only populated by TDLib for
+/// stories the current user posted (`story.can_get_interactions`); kept so
+/// the viewer can render view/reaction counts on own stories.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct StoryInteractionInfoView {
+    pub view_count: i32,
+    pub forward_count: i32,
+    pub reaction_count: i32,
+}
+
+impl StoryInteractionInfoView {
+    /// True when at least one counter is nonzero.
+    pub fn any_nonzero(&self) -> bool {
+        self.view_count > 0 || self.forward_count > 0 || self.reaction_count > 0
+    }
+}
+
+/// Phase 9.2: one emoji reaction the story picker can offer —
+/// `availableReaction` (TDLib 1.8.67, `schema/td_api.tl:7321`). Only
+/// `reactionTypeEmoji` entries render; custom-emoji entries are dropped.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StoryAvailableReactionView {
+    pub emoji: String,
+    pub needs_premium: bool,
+}
+
 /// Phase 9.1: `story` — the full story object (TDLib 1.8.67,
-/// `schema/td_api.tl:6742`). Kept: ids, `date`, `content`, `caption`.
-/// Dropped (see DECISIONS.md Phase 9.1): repost/interaction info, chosen
-/// reaction, privacy settings, clickable areas, album ids, and all the
-/// `is_*` / `can_be_*` flags.
+/// `schema/td_api.tl:6742`). Kept: ids, `date`, `content`, `caption`;
+/// Phase 9.2 keeps: `chosen_reaction_type` (the user's own reaction),
+/// `interaction_info` (view/forward/reaction counts), and the
+/// `can_be_deleted` / `can_be_replied` / `can_get_interactions` gates.
+/// Dropped (see DECISIONS.md Phase 9.1): repost info, privacy settings,
+/// clickable areas, album ids, and the other `is_*` / `can_be_*` flags.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParsedStory {
     pub id: i32,
@@ -1261,6 +1322,22 @@ pub struct ParsedStory {
     pub content: StoryContentView,
     pub caption: String,
     pub caption_entities: Vec<TextEntity>,
+    /// Phase 9.2: the user's own reaction on this story (`emoji`), `None`
+    /// when none is chosen or when the chosen reaction is a custom emoji /
+    /// paid reaction (same call as message reactions).
+    pub chosen_reaction_emoji: Option<String>,
+    /// Phase 9.2: `storyInteractionInfo` — counters, meaningful only when
+    /// `can_get_interactions`.
+    pub interaction_info: Option<StoryInteractionInfoView>,
+    /// Phase 9.2: `story.can_be_deleted` — gates the viewer Delete button
+    /// (`deleteStory`, `schema/td_api.tl:13754`).
+    pub can_be_deleted: bool,
+    /// Phase 9.2: `story.can_be_replied` — gates the viewer Reply affordance
+    /// (`inputMessageReplyToStory`, `schema/td_api.tl:3099`).
+    pub can_be_replied: bool,
+    /// Phase 9.2: `story.can_get_interactions` — the interaction counters are
+    /// the user's own.
+    pub can_get_interactions: bool,
 }
 
 fn parse_story_list(value: Option<&Value>) -> Option<StoryListView> {
@@ -1325,9 +1402,76 @@ fn parse_story(value: &Value) -> Option<(ParsedStory, Vec<ParsedFile>)> {
             content,
             caption,
             caption_entities,
+            chosen_reaction_emoji: parse_story_chosen_reaction(value.get("chosen_reaction_type")),
+            interaction_info: parse_story_interaction_info(value.get("interaction_info")),
+            can_be_deleted: value
+                .get("can_be_deleted")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            can_be_replied: value
+                .get("can_be_replied")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            can_get_interactions: value
+                .get("can_get_interactions")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
         },
         files,
     ))
+}
+
+/// Phase 9.2: `chosen_reaction_type` on a `story` — returns the emoji when
+/// the user's chosen reaction is a `reactionTypeEmoji`, else `None` (no
+/// reaction, custom emoji, or paid reaction).
+fn parse_story_chosen_reaction(value: Option<&Value>) -> Option<String> {
+    let reaction_type = value.filter(|value| !value.is_null())?;
+    if reaction_type.get("@type").and_then(Value::as_str) != Some("reactionTypeEmoji") {
+        return None;
+    }
+    reaction_type
+        .get("emoji")
+        .and_then(Value::as_str)
+        .filter(|emoji| !emoji.is_empty())
+        .map(str::to_string)
+}
+
+/// Phase 9.2: `storyInteractionInfo` counters; `None` when the field is
+/// missing or null.
+fn parse_story_interaction_info(value: Option<&Value>) -> Option<StoryInteractionInfoView> {
+    let info = value.filter(|value| !value.is_null())?;
+    Some(StoryInteractionInfoView {
+        view_count: info.get("view_count").and_then(Value::as_i64).unwrap_or(0) as i32,
+        forward_count: info
+            .get("forward_count")
+            .and_then(Value::as_i64)
+            .unwrap_or(0) as i32,
+        reaction_count: info
+            .get("reaction_count")
+            .and_then(Value::as_i64)
+            .unwrap_or(0) as i32,
+    })
+}
+
+/// Phase 9.2: one `availableReaction` row into the picker shape; drops
+/// non-emoji reactions (custom emoji previews stay out of this slice).
+fn parse_story_available_reaction(value: &Value) -> Option<StoryAvailableReactionView> {
+    let reaction = value.get("type")?;
+    if reaction.get("@type").and_then(Value::as_str) != Some("reactionTypeEmoji") {
+        return None;
+    }
+    let emoji = reaction
+        .get("emoji")
+        .and_then(Value::as_str)
+        .filter(|emoji| !emoji.is_empty())?
+        .to_string();
+    Some(StoryAvailableReactionView {
+        emoji,
+        needs_premium: value
+            .get("needs_premium")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+    })
 }
 
 fn parse_story_content(value: Option<&Value>, files: &mut Vec<ParsedFile>) -> StoryContentView {
@@ -2486,6 +2630,46 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
             let story = value.get("story").ok_or(ParseError::MissingField)?;
             let (story, files) = parse_story(story).ok_or(ParseError::MissingField)?;
             Ok(EnvelopePayload::Story { story, files })
+        }
+        "updateStoryDeleted" => Ok(EnvelopePayload::UpdateStoryDeleted {
+            poster_chat_id: int53(value.get("story_poster_chat_id"))?,
+            story_id: value
+                .get("story_id")
+                .and_then(Value::as_i64)
+                .ok_or(ParseError::MissingField)? as i32,
+        }),
+        "updateStoryPostSucceeded" => {
+            let story = value.get("story").ok_or(ParseError::MissingField)?;
+            let (story, files) = parse_story(story).ok_or(ParseError::MissingField)?;
+            Ok(EnvelopePayload::UpdateStoryPostSucceeded {
+                story,
+                files,
+                old_story_id: value
+                    .get("old_story_id")
+                    .and_then(Value::as_i64)
+                    .ok_or(ParseError::MissingField)? as i32,
+            })
+        }
+        "updateStoryPostFailed" => {
+            let story = value.get("story").ok_or(ParseError::MissingField)?;
+            let (story, _files) = parse_story(story).ok_or(ParseError::MissingField)?;
+            Ok(EnvelopePayload::UpdateStoryPostFailed {
+                story,
+                error: parse_error(value.get("error")),
+            })
+        }
+        "availableReactions" => {
+            let reactions = value
+                .get("top_reactions")
+                .and_then(Value::as_array)
+                .map(|items| {
+                    items
+                        .iter()
+                        .filter_map(parse_story_available_reaction)
+                        .collect()
+                })
+                .unwrap_or_default();
+            Ok(EnvelopePayload::StoryAvailableReactions { reactions })
         }
         "updateChatReadInbox" => Ok(EnvelopePayload::UpdateChatReadInbox {
             chat_id: ChatId(int53(value.get("chat_id"))?),
@@ -7215,6 +7399,143 @@ mod channel_envelope_tests {
             EnvelopePayload::ChatActiveStories { active_stories } => {
                 assert_eq!(active_stories.list, None);
                 assert!(!active_stories.has_unread());
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn story_chosen_reaction_interactions_and_flags_parsed() {
+        // Phase 9.2: `chosen_reaction_type` (reactionTypeEmoji), the
+        // `storyInteractionInfo` counters, and the `can_be_deleted` /
+        // `can_be_replied` / `can_get_interactions` gates (schema 1.8.67
+        // lines 6712 / 6742).
+        let size = story_photo_file_json(61, "\"\"", false);
+        let json = format!(
+            r#"{{"@type":"story","id":7,"poster_chat_id":11,"date":1700000000,"content":{{"@type":"storyContentPhoto","photo":{{"@type":"photo","has_stickers":false,"sizes":[{size}]}}}},"chosen_reaction_type":{{"@type":"reactionTypeEmoji","emoji":"❤"}},"interaction_info":{{"@type":"storyInteractionInfo","view_count":42,"forward_count":3,"reaction_count":7,"recent_viewer_user_ids":[]}},"can_be_deleted":true,"can_be_replied":true,"can_get_interactions":true,"caption":{{"@type":"formattedText","text":"","entities":[]}}}}"#,
+        );
+        let env = parse_envelope(&json).unwrap();
+        match env.payload {
+            EnvelopePayload::Story { story, .. } => {
+                assert_eq!(story.chosen_reaction_emoji.as_deref(), Some("❤"));
+                let info = story.interaction_info.expect("interaction_info");
+                assert!(info.any_nonzero());
+                assert_eq!(info.view_count, 42);
+                assert_eq!(info.forward_count, 3);
+                assert_eq!(info.reaction_count, 7);
+                assert!(story.can_be_deleted);
+                assert!(story.can_be_replied);
+                assert!(story.can_get_interactions);
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn story_reaction_absent_or_non_emoji_parses_to_none() {
+        // `chosen_reaction_type: null` and custom-emoji / paid reactions
+        // all parse to `None` — the viewer only renders emoji reactions.
+        let reaction_json = |reaction: &str| {
+            format!(
+                r#"{{"@type":"story","id":7,"poster_chat_id":11,"date":1,"content":{{"@type":"storyContentUnsupported"}},"chosen_reaction_type":{reaction},"caption":{{"@type":"formattedText","text":"","entities":[]}}}}"#,
+            )
+        };
+        for reaction in [
+            "null",
+            r#"{"@type":"reactionTypeCustomEmoji","custom_emoji_id":"123"}"#,
+            r#"{"@type":"reactionTypePaid"}"#,
+            r#"{"@type":"reactionTypeEmoji","emoji":""}"#,
+        ] {
+            let env = parse_envelope(&reaction_json(reaction)).unwrap();
+            match env.payload {
+                EnvelopePayload::Story { story, .. } => {
+                    assert_eq!(story.chosen_reaction_emoji, None, "reaction {reaction}");
+                }
+                other => panic!("{other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn story_interaction_info_absent_stays_none() {
+        let json = r#"{"@type":"story","id":7,"poster_chat_id":11,"date":1,"content":{"@type":"storyContentUnsupported"},"caption":{"@type":"formattedText","text":"","entities":[]}}"#;
+        let env = parse_envelope(json).unwrap();
+        match env.payload {
+            EnvelopePayload::Story { story, .. } => {
+                assert_eq!(story.interaction_info, None);
+                assert!(!story.can_be_deleted);
+                assert!(!story.can_be_replied);
+                assert!(!story.can_get_interactions);
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn update_story_deleted_parsed() {
+        // `updateStoryDeleted` (schema 1.8.67 line 10898).
+        let env = parse_envelope(
+            r#"{"@type":"updateStoryDeleted","story_poster_chat_id":11,"story_id":7}"#,
+        )
+        .unwrap();
+        match env.payload {
+            EnvelopePayload::UpdateStoryDeleted {
+                poster_chat_id,
+                story_id,
+            } => {
+                assert_eq!(poster_chat_id, 11);
+                assert_eq!(story_id, 7);
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn update_story_post_succeeded_parsed() {
+        // `updateStoryPostSucceeded` (schema 1.8.67 line 10901).
+        let json = r#"{"@type":"updateStoryPostSucceeded","story":{"@type":"story","id":7,"poster_chat_id":11,"date":1,"content":{"@type":"storyContentUnsupported"},"caption":{"@type":"formattedText","text":"","entities":[]}},"old_story_id":6}"#;
+        let env = parse_envelope(json).unwrap();
+        match env.payload {
+            EnvelopePayload::UpdateStoryPostSucceeded {
+                story,
+                old_story_id,
+                ..
+            } => {
+                assert_eq!(story.id, 7);
+                assert_eq!(story.poster_chat_id, 11);
+                assert_eq!(old_story_id, 6);
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn update_story_post_failed_parsed() {
+        // `updateStoryPostFailed` (schema 1.8.67 line 10907).
+        let json = r#"{"@type":"updateStoryPostFailed","story":{"@type":"story","id":7,"poster_chat_id":11,"date":1,"content":{"@type":"storyContentUnsupported"},"caption":{"@type":"formattedText","text":"","entities":[]}},"error":{"@type":"error","code":400,"message":"STORY_SEND_FAILED"},"error_type":{"@type":"canPostStoryResultOk"}}"#;
+        let env = parse_envelope(json).unwrap();
+        match env.payload {
+            EnvelopePayload::UpdateStoryPostFailed { story, error } => {
+                assert_eq!(story.id, 7);
+                assert_eq!(story.poster_chat_id, 11);
+                assert_eq!(error.code, 400);
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn available_reactions_parsed_and_custom_emoji_dropped() {
+        // `availableReactions` (schema 1.8.67 line 7330): the story
+        // picker keeps emoji reactions; custom-emoji rows are dropped.
+        let json = r#"{"@type":"availableReactions","top_reactions":[{"@type":"availableReaction","type":{"@type":"reactionTypeEmoji","emoji":"❤"},"needs_premium":false},{"@type":"availableReaction","type":{"@type":"reactionTypeCustomEmoji","custom_emoji_id":"123"},"needs_premium":true},{"@type":"availableReaction","type":{"@type":"reactionTypeEmoji","emoji":"👍"},"needs_premium":false}],"recent_reactions":[],"popular_reactions":[],"allow_custom_emoji":false,"are_tags":false,"unavailability_reason":null}"#;
+        let env = parse_envelope(json).unwrap();
+        match env.payload {
+            EnvelopePayload::StoryAvailableReactions { reactions } => {
+                assert_eq!(reactions.len(), 2);
+                assert_eq!(reactions[0].emoji, "❤");
+                assert!(!reactions[0].needs_premium);
+                assert_eq!(reactions[1].emoji, "👍");
             }
             other => panic!("{other:?}"),
         }
