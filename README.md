@@ -37,6 +37,8 @@ Toolchain: Rust **1.98.1**. UI pin: **gpui-kit 0.6.1**. TDLib schema: **1.8.67**
 - [x] Link previews (`textEntityTypeUrl` / `textEntityTypeTextUrl` + `messageText.link_preview`; card + OS open; injected/replay; live needs tdjson)
 - [ ] VoiceOver pass on macOS
 - [x] Channels (ungated; broadcast posts with view counts; join/leave; admin posting) / bots (Phase 3)
+- [x] Chat folders: tabs + eager `loadChats(chatListFolder)` paging (injected/replay; live needs tdjson)
+- [x] Folder management: create / edit / delete / reorder / tags toggle (`createChatFolder` / `editChatFolder` / `deleteChatFolder` / `reorderChatFolders` / `toggleChatFolderTags`); add/remove chats via `getChatListsToAddChat` + `addChatToList` / `getChatFolder` + `editChatFolder`; manage dialog + per-chat Folders picker (injected/replay; live needs tdjson)
 
 Decisions, pins, and blockers: [DECISIONS.md](DECISIONS.md).  
 What credentials are needed next: [docs/credentials.md](docs/credentials.md).  

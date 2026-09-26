@@ -1449,13 +1449,146 @@ pub fn close_story(extra: RequestId, chat_id: ChatId, story_id: i32) -> String {
 }
 
 pub fn add_chat_to_list(extra: RequestId, chat_id: ChatId, archive: bool) -> String {
+    add_chat_to_list_value(
+        extra,
+        chat_id,
+        json!({ "@type": if archive { "chatListArchive" } else { "chatListMain" } }),
+    )
+}
+
+/// `addChatToList` (TDLib 1.8.67, `schema/td_api.tl:13352`) with an explicit
+/// `ChatList` value. Parity slice: adding a chat to a folder uses
+/// `{"@type":"chatListFolder","chat_folder_id":<id>}` — the schema doc says
+/// "Use getChatListsToAddChat to get suitable chat lists".
+pub fn add_chat_to_list_value(extra: RequestId, chat_id: ChatId, chat_list: Value) -> String {
     json!({
         "@type": "addChatToList",
         "@extra": extra.as_extra(),
         "chat_id": chat_id.0,
-        "chat_list": {
-            "@type": if archive { "chatListArchive" } else { "chatListMain" }
-        }
+        "chat_list": chat_list
+    })
+    .to_string()
+}
+
+/// The `chatFolder` constructor body (TDLib 1.8.67, `schema/td_api.tl:3476`)
+/// for `createChatFolder` / `editChatFolder`. Quill sends `icon: null`
+/// (default icon; `getChatFolderDefaultIconName` is a synchronous TDLib
+/// call clients may use — the null default is what the schema allows),
+/// `color_id: -1` (disabled), `is_shareable: false` — custom-emoji icon
+/// rendering and folder invite links are out of scope. Folder names are
+/// 1–12 characters without line feeds (schema doc on `chatFolderName`).
+pub fn chat_folder_json(spec: &crate::telegram::envelope::ChatFolderSpec) -> Value {
+    json!({
+        "@type": "chatFolder",
+        "name": {
+            "@type": "chatFolderName",
+            "text": { "@type": "formattedText", "text": spec.name, "entities": [] },
+            "animate_custom_emoji": false,
+        },
+        "icon": null,
+        "color_id": -1,
+        "is_shareable": false,
+        "pinned_chat_ids": spec.pinned_chat_ids,
+        "included_chat_ids": spec.included_chat_ids,
+        "excluded_chat_ids": spec.excluded_chat_ids,
+        "exclude_muted": spec.exclude_muted,
+        "exclude_read": spec.exclude_read,
+        "exclude_archived": spec.exclude_archived,
+        "include_contacts": spec.include_contacts,
+        "include_non_contacts": spec.include_non_contacts,
+        "include_bots": spec.include_bots,
+        "include_groups": spec.include_groups,
+        "include_channels": spec.include_channels,
+    })
+}
+
+/// `createChatFolder` (TDLib 1.8.67, `schema/td_api.tl:13358`). Response is
+/// `chatFolderInfo`.
+pub fn create_chat_folder(
+    extra: RequestId,
+    spec: &crate::telegram::envelope::ChatFolderSpec,
+) -> String {
+    json!({
+        "@type": "createChatFolder",
+        "@extra": extra.as_extra(),
+        "folder": chat_folder_json(spec),
+    })
+    .to_string()
+}
+
+/// `editChatFolder` (TDLib 1.8.67, `schema/td_api.tl:13361`). Response is
+/// `chatFolderInfo`.
+pub fn edit_chat_folder(
+    extra: RequestId,
+    folder_id: i32,
+    spec: &crate::telegram::envelope::ChatFolderSpec,
+) -> String {
+    json!({
+        "@type": "editChatFolder",
+        "@extra": extra.as_extra(),
+        "chat_folder_id": folder_id,
+        "folder": chat_folder_json(spec),
+    })
+    .to_string()
+}
+
+/// `deleteChatFolder` (TDLib 1.8.67, `schema/td_api.tl:13364`). Response is
+/// `ok`. `leave_chat_ids` are chats to leave; they must be pinned or
+/// always included in the folder (empty = keep all chats in the main list).
+pub fn delete_chat_folder(extra: RequestId, folder_id: i32, leave_chat_ids: &[i64]) -> String {
+    json!({
+        "@type": "deleteChatFolder",
+        "@extra": extra.as_extra(),
+        "chat_folder_id": folder_id,
+        "leave_chat_ids": leave_chat_ids,
+    })
+    .to_string()
+}
+
+/// `reorderChatFolders` (TDLib 1.8.67, `schema/td_api.tl:13373`). Response
+/// is `ok`. `main_chat_list_position` is always 0 — a non-zero position is
+/// Premium-only per the schema doc, and Quill keeps Main first.
+pub fn reorder_chat_folders(extra: RequestId, folder_ids: &[i32]) -> String {
+    json!({
+        "@type": "reorderChatFolders",
+        "@extra": extra.as_extra(),
+        "chat_folder_ids": folder_ids,
+        "main_chat_list_position": 0,
+    })
+    .to_string()
+}
+
+/// `toggleChatFolderTags` (TDLib 1.8.67, `schema/td_api.tl:13376`).
+/// Response is `ok`.
+pub fn toggle_chat_folder_tags(extra: RequestId, are_tags_enabled: bool) -> String {
+    json!({
+        "@type": "toggleChatFolderTags",
+        "@extra": extra.as_extra(),
+        "are_tags_enabled": are_tags_enabled,
+    })
+    .to_string()
+}
+
+/// `getChatFolder` (TDLib 1.8.67, `schema/td_api.tl:13355`). Response is
+/// the full `chatFolder` spec — used to prefill the edit dialog.
+pub fn get_chat_folder(extra: RequestId, folder_id: i32) -> String {
+    json!({
+        "@type": "getChatFolder",
+        "@extra": extra.as_extra(),
+        "chat_folder_id": folder_id,
+    })
+    .to_string()
+}
+
+/// `getChatListsToAddChat` (TDLib 1.8.67, `schema/td_api.tl:13347`): "Returns
+/// chat lists to which the chat can be added. This is an offline method".
+/// Response is `chatLists`. Drives the per-chat folder picker (and the
+/// archive/unarchive menu) as the schema intends.
+pub fn get_chat_lists_to_add_chat(extra: RequestId, chat_id: ChatId) -> String {
+    json!({
+        "@type": "getChatListsToAddChat",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0,
     })
     .to_string()
 }
@@ -1947,6 +2080,85 @@ mod tests {
         assert_eq!(v["chat_list"]["@type"], "chatListFolder");
         assert_eq!(v["chat_list"]["chat_folder_id"], 3);
         assert_eq!(v["limit"], 100);
+    }
+
+    #[test]
+    fn folder_request_shapes_match_1_8_67() {
+        use crate::telegram::envelope::ChatFolderSpec;
+        let spec = ChatFolderSpec {
+            name: "Work".into(),
+            pinned_chat_ids: vec![11],
+            included_chat_ids: vec![12],
+            excluded_chat_ids: vec![],
+            exclude_muted: true,
+            exclude_read: false,
+            exclude_archived: false,
+            include_contacts: true,
+            include_non_contacts: false,
+            include_bots: false,
+            include_groups: true,
+            include_channels: false,
+        };
+        // `createChatFolder folder:chatFolder = ChatFolderInfo` (line 13358).
+        let v: serde_json::Value =
+            serde_json::from_str(&create_chat_folder(RequestId(30), &spec)).unwrap();
+        assert_eq!(v["@type"], "createChatFolder");
+        assert_eq!(v["folder"]["@type"], "chatFolder");
+        assert_eq!(v["folder"]["name"]["text"]["text"], "Work");
+        assert!(v["folder"]["icon"].is_null());
+        assert_eq!(v["folder"]["color_id"], -1);
+        assert_eq!(v["folder"]["pinned_chat_ids"], json!([11]));
+        assert_eq!(v["folder"]["included_chat_ids"], json!([12]));
+        assert!(v["folder"]["exclude_muted"].as_bool().unwrap());
+        assert!(v["folder"]["include_contacts"].as_bool().unwrap());
+        assert!(v["folder"]["include_groups"].as_bool().unwrap());
+        // `editChatFolder chat_folder_id:int32 folder:chatFolder =
+        // ChatFolderInfo` (line 13361).
+        let v: serde_json::Value =
+            serde_json::from_str(&edit_chat_folder(RequestId(31), 7, &spec)).unwrap();
+        assert_eq!(v["@type"], "editChatFolder");
+        assert_eq!(v["chat_folder_id"], 7);
+        assert_eq!(v["folder"]["@type"], "chatFolder");
+        // `deleteChatFolder chat_folder_id:int32 leave_chat_ids:vector<int53>
+        // = Ok` (line 13364).
+        let v: serde_json::Value =
+            serde_json::from_str(&delete_chat_folder(RequestId(32), 7, &[12])).unwrap();
+        assert_eq!(v["@type"], "deleteChatFolder");
+        assert_eq!(v["chat_folder_id"], 7);
+        assert_eq!(v["leave_chat_ids"], json!([12]));
+        // `reorderChatFolders chat_folder_ids:vector<int32>
+        // main_chat_list_position:int32 = Ok` (line 13373).
+        let v: serde_json::Value =
+            serde_json::from_str(&reorder_chat_folders(RequestId(33), &[2, 1])).unwrap();
+        assert_eq!(v["@type"], "reorderChatFolders");
+        assert_eq!(v["chat_folder_ids"], json!([2, 1]));
+        assert_eq!(v["main_chat_list_position"], 0);
+        // `toggleChatFolderTags are_tags_enabled:Bool = Ok` (line 13376).
+        let v: serde_json::Value =
+            serde_json::from_str(&toggle_chat_folder_tags(RequestId(34), true)).unwrap();
+        assert_eq!(v["@type"], "toggleChatFolderTags");
+        assert!(v["are_tags_enabled"].as_bool().unwrap());
+        // `getChatFolder chat_folder_id:int32 = ChatFolder` (line 13355).
+        let v: serde_json::Value =
+            serde_json::from_str(&get_chat_folder(RequestId(35), 7)).unwrap();
+        assert_eq!(v["@type"], "getChatFolder");
+        assert_eq!(v["chat_folder_id"], 7);
+        // `getChatListsToAddChat chat_id:int53 = ChatLists` (line 13347).
+        let v: serde_json::Value =
+            serde_json::from_str(&get_chat_lists_to_add_chat(RequestId(36), ChatId(12))).unwrap();
+        assert_eq!(v["@type"], "getChatListsToAddChat");
+        assert_eq!(v["chat_id"], 12);
+        // `addChatToList` with `chatListFolder` (line 13352 + 3524).
+        let v: serde_json::Value = serde_json::from_str(&add_chat_to_list_value(
+            RequestId(37),
+            ChatId(12),
+            json!({ "@type": "chatListFolder", "chat_folder_id": 7 }),
+        ))
+        .unwrap();
+        assert_eq!(v["@type"], "addChatToList");
+        assert_eq!(v["chat_id"], 12);
+        assert_eq!(v["chat_list"]["@type"], "chatListFolder");
+        assert_eq!(v["chat_list"]["chat_folder_id"], 7);
     }
 
     #[test]

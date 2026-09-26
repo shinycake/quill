@@ -7,6 +7,7 @@ use crate::composer::{
 };
 use crate::credentials::TelegramCredentials;
 use crate::diagnostics::DiagnosticSink;
+use crate::folders::spec_without_chat;
 use crate::ids::{AccountKey, ChatId, FileId, MessageId, RequestId, TopicId};
 use crate::lifecycle::{RestoreBlocker, plan_restore};
 use crate::platform::{DatabaseKey, KeyDecision, SecretStore, load_or_create_key};
@@ -18,28 +19,31 @@ use crate::state::{
 };
 use crate::telegram::client::{LiveTdJson, OwnedEnvelope, ReceiveBridge};
 use crate::telegram::envelope::{
-    AuthorizationState, ChatDraft, ChatKind, ChatNotificationSettings, EnvelopePayload,
-    MUTE_FOREVER, MessageContent,
+    AuthorizationState, ChatDraft, ChatFolderSpec, ChatKind, ChatNotificationSettings,
+    EnvelopePayload, MUTE_FOREVER, MessageContent,
 };
 use crate::telegram::ffi::{LibraryOrigin, TdJsonError, resolve_tdjson_path};
 use crate::telegram::requests::{
     AnimationSend, PollSend, SetTdlibParameters, StickerSend, VideoNoteSend,
-    VideoNoteThumbnailSend, VideoSend, add_chat_to_list, add_contact, add_message_reaction,
-    add_recently_found_chat, check_authentication_code, check_authentication_password,
-    click_chat_sponsored_message, close_chat, close_request, close_story, delete_messages,
-    download_file as download_file_request, edit_message_caption, edit_message_text,
-    forward_messages, get_authorization_state, get_callback_query_answer, get_chat_active_stories,
-    get_chat_history, get_chat_member, get_chat_sponsored_messages, get_commands, get_contacts,
-    get_forum_topics, get_installed_sticker_sets, get_me, get_saved_animations, get_sticker_set,
-    get_story, get_supergroup, get_supergroup_full_info, get_user_full_info, input_message_photo,
+    VideoNoteThumbnailSend, VideoSend, add_chat_to_list, add_chat_to_list_value, add_contact,
+    add_message_reaction, add_recently_found_chat, check_authentication_code,
+    check_authentication_password, click_chat_sponsored_message, close_chat, close_request,
+    close_story, create_chat_folder, delete_chat_folder, delete_messages,
+    download_file as download_file_request, edit_chat_folder, edit_message_caption,
+    edit_message_text, forward_messages, get_authorization_state, get_callback_query_answer,
+    get_chat_active_stories, get_chat_folder, get_chat_history, get_chat_lists_to_add_chat,
+    get_chat_member, get_chat_sponsored_messages, get_commands, get_contacts, get_forum_topics,
+    get_installed_sticker_sets, get_me, get_saved_animations, get_sticker_set, get_story,
+    get_supergroup, get_supergroup_full_info, get_user_full_info, input_message_photo,
     input_message_video, join_chat, leave_chat, load_active_stories, load_chats, load_chats_list,
     open_chat, open_message_content, open_story, pin_chat_message, remove_message_reaction,
-    report_chat_sponsored_message, search_chat_messages, search_chats, search_messages,
-    search_public_chats, search_recently_found_chats, send_animation, send_chat_action,
-    send_chat_action_kind, send_document, send_message_album, send_photo, send_poll, send_sticker,
-    send_text, send_video, send_video_note, send_voice_note, set_authentication_phone_number,
-    set_chat_draft_message, set_chat_notification_settings, set_poll_answer, unpin_chat_message,
-    view_messages, view_sponsored_chat,
+    reorder_chat_folders, report_chat_sponsored_message, search_chat_messages, search_chats,
+    search_messages, search_public_chats, search_recently_found_chats, send_animation,
+    send_chat_action, send_chat_action_kind, send_document, send_message_album, send_photo,
+    send_poll, send_sticker, send_text, send_video, send_video_note, send_voice_note,
+    set_authentication_phone_number, set_chat_draft_message, set_chat_notification_settings,
+    set_poll_answer, toggle_chat_folder_tags, unpin_chat_message, view_messages,
+    view_sponsored_chat,
 };
 use crate::voice::VoiceDraft;
 use std::path::Path;
@@ -405,6 +409,17 @@ impl<S: JsonSender> ConnectDriver<S> {
             && owned.envelope.extra.is_some_and(|id| {
                 self.session.requests.purpose(id) == Some(RequestPurpose::LoadChats)
             });
+        // Parity slice: a folder `loadChats` page completing with ok pages
+        // on (until a 404 marks the folder exhausted in the reducer).
+        // Captured before `apply` takes the pending request.
+        let folder_load_ok: Option<i32> = match owned.envelope.payload {
+            EnvelopePayload::Ok => owned.envelope.extra.and_then(|id| {
+                (self.session.requests.purpose(id) == Some(RequestPurpose::LoadFolderChats))
+                    .then(|| self.session.requests.folder_id_for(id))
+                    .flatten()
+            }),
+            _ => None,
+        };
         let view_purpose = owned
             .envelope
             .extra
@@ -437,6 +452,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         if became_ready || load_chats_ok {
             self.maybe_load_main_chats()?;
         }
+        if let Some(folder_id) = folder_load_ok {
+            self.maybe_load_folder_chats(folder_id)?;
+        }
+        // Parity slice: queued remove-from-folder edits go out once the
+        // `getChatFolder` spec arrives.
+        self.maybe_finish_folder_removals()?;
         if became_ready {
             // Phase 9.1: the story tray needs `updateChatActiveStories`
             // updates; one `loadActiveStories(storyListMain)` per Ready.
@@ -495,21 +516,372 @@ impl<S: JsonSender> ConnectDriver<S> {
         Ok(Some(extra))
     }
 
-    /// Phase 7.1: single-shot `loadChats(chatListFolder)` when a folder tab
-    /// is selected, so TDLib delivers the folder's chats / positions.
-    /// Unlike the main list, folders are not paged here — one page is
-    /// enough for the folder-tab filter in this slice.
+    /// Phase 7.1 (extended by the parity slice): `loadChats(chatListFolder)`
+    /// when a folder tab is selected, so TDLib delivers the folder's chats /
+    /// positions. Like the main list, folders page eagerly: each `ok`
+    /// re-enters `maybe_load_folder_chats` (via `ingest`) until a 404 marks
+    /// the folder exhausted in the reducer.
     pub fn load_folder_chats(&mut self, folder_id: i32) -> Result<RequestId, ConnectSendError> {
+        self.maybe_load_folder_chats(folder_id)?
+            .ok_or(ConnectSendError::InvalidRequest)
+    }
+
+    /// One `loadChats(chatListFolder)` page, unless the folder is exhausted
+    /// or a page is already in flight for it.
+    pub fn maybe_load_folder_chats(
+        &mut self,
+        folder_id: i32,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
         if !self.chats_path_active() {
-            return Err(ConnectSendError::InvalidRequest);
+            return Ok(None);
         }
-        let extra = self.session.request(RequestPurpose::LoadFolderChats, None);
-        self.sender.send_json(&load_chats_list(
+        if self.session.folder_chats_exhausted.contains(&folder_id) {
+            return Ok(None);
+        }
+        if self
+            .session
+            .requests
+            .has_purpose_for_folder(RequestPurpose::LoadFolderChats, folder_id)
+        {
+            return Ok(None);
+        }
+        let extra = self
+            .session
+            .request_for_folder(RequestPurpose::LoadFolderChats, folder_id);
+        if let Err(err) = self.sender.send_json(&load_chats_list(
             extra,
             serde_json::json!({ "@type": "chatListFolder", "chat_folder_id": folder_id }),
             MAIN_CHAT_LOAD_LIMIT,
-        ))?;
+        )) {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(Some(extra))
+    }
+
+    /// Parity slice: `createChatFolder`. Response is `chatFolderInfo`
+    /// (upserted by the reducer); the full list still arrives via
+    /// `updateChatFolders`.
+    pub fn create_chat_folder(
+        &mut self,
+        spec: &ChatFolderSpec,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self.session.request(RequestPurpose::CreateChatFolder, None);
+        if let Err(err) = self.sender.send_json(&create_chat_folder(extra, spec)) {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
         Ok(extra)
+    }
+
+    /// Parity slice: `editChatFolder`. Response is `chatFolderInfo`
+    /// (upserted by the reducer). Drops the cached spec so the next edit
+    /// refetches.
+    pub fn edit_chat_folder(
+        &mut self,
+        folder_id: i32,
+        spec: &ChatFolderSpec,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        self.session.folder_specs.remove(&folder_id);
+        let extra = self
+            .session
+            .request_for_folder(RequestPurpose::EditChatFolder, folder_id);
+        if let Err(err) = self
+            .sender
+            .send_json(&edit_chat_folder(extra, folder_id, spec))
+        {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(extra)
+    }
+
+    /// Parity slice: `deleteChatFolder`. Response is `ok`; the reducer drops
+    /// the tab on ok. `leave_chat_ids` are chats to leave with the folder
+    /// (empty = keep every chat in the main list).
+    pub fn delete_chat_folder(
+        &mut self,
+        folder_id: i32,
+        leave_chat_ids: &[i64],
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self
+            .session
+            .request_for_folder(RequestPurpose::DeleteChatFolder, folder_id);
+        if let Err(err) =
+            self.sender
+                .send_json(&delete_chat_folder(extra, folder_id, leave_chat_ids))
+        {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(extra)
+    }
+
+    /// Parity slice: `reorderChatFolders` with the full new folder-id order
+    /// (`main_chat_list_position` is always 0 — non-zero is Premium-only).
+    /// The tab order is applied optimistically; `updateChatFolders`
+    /// confirms (or corrects, on error).
+    pub fn reorder_chat_folders(
+        &mut self,
+        folder_ids: &[i32],
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::ReorderChatFolders, None);
+        if let Err(err) = self
+            .sender
+            .send_json(&reorder_chat_folders(extra, folder_ids))
+        {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        let order: std::collections::HashMap<i32, usize> = folder_ids
+            .iter()
+            .enumerate()
+            .map(|(i, id)| (*id, i))
+            .collect();
+        self.session
+            .chat_folders
+            .sort_by_key(|f| order.get(&f.id).copied().unwrap_or(usize::MAX));
+        Ok(extra)
+    }
+
+    /// Parity slice: `toggleChatFolderTags`. Flips
+    /// `are_folder_tags_enabled` optimistically; `updateChatFolders`
+    /// confirms.
+    pub fn toggle_chat_folder_tags(
+        &mut self,
+        enabled: bool,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::ToggleChatFolderTags, None);
+        if let Err(err) = self
+            .sender
+            .send_json(&toggle_chat_folder_tags(extra, enabled))
+        {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        self.session.are_folder_tags_enabled = enabled;
+        Ok(extra)
+    }
+
+    /// Parity slice: `getChatFolder` for the edit dialog prefill (or the
+    /// remove-from-folder chain). The full spec lands in
+    /// `Session::folder_specs`, keyed by folder id. In-flight deduped; the
+    /// response always overwrites the cache.
+    pub fn fetch_chat_folder(
+        &mut self,
+        folder_id: i32,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if self
+            .session
+            .requests
+            .has_purpose_for_folder(RequestPurpose::GetChatFolder, folder_id)
+        {
+            return Ok(None);
+        }
+        let extra = self
+            .session
+            .request_for_folder(RequestPurpose::GetChatFolder, folder_id);
+        if let Err(err) = self.sender.send_json(&get_chat_folder(extra, folder_id)) {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(Some(extra))
+    }
+
+    /// Parity slice: `getChatFolderChatsToLeave` for the delete-confirm
+    /// dialog (schema 1.8.67 line 13367 — chats suggested to leave with the
+    /// folder). In-flight deduped per folder.
+    pub fn fetch_chat_folder_chats_to_leave(
+        &mut self,
+        folder_id: i32,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if self
+            .session
+            .requests
+            .has_purpose_for_folder(RequestPurpose::GetChatFolderChatsToLeave, folder_id)
+        {
+            return Ok(None);
+        }
+        let extra = self
+            .session
+            .request_for_folder(RequestPurpose::GetChatFolderChatsToLeave, folder_id);
+        if let Err(err) = self.sender.send_json(&{
+            serde_json::json!({
+                "@type": "getChatFolderChatsToLeave",
+                "@extra": extra.as_extra(),
+                "chat_folder_id": folder_id,
+            })
+            .to_string()
+        }) {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(Some(extra))
+    }
+
+    /// Parity slice: `getChatListsToAddChat` (schema 1.8.67 line 13347 —
+    /// "Returns chat lists to which the chat can be added. This is an
+    /// offline method"). Drives the per-chat folder picker as the schema
+    /// intends. In-flight deduped per chat.
+    pub fn fetch_chat_lists_to_add_chat(
+        &mut self,
+        chat_id: ChatId,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if self
+            .session
+            .requests
+            .has_purpose_for_chat(RequestPurpose::GetChatListsToAddChat, chat_id)
+        {
+            return Ok(None);
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::GetChatListsToAddChat, Some(chat_id));
+        if let Err(err) = self
+            .sender
+            .send_json(&get_chat_lists_to_add_chat(extra, chat_id))
+        {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(Some(extra))
+    }
+
+    /// Parity slice: `addChatToList` with `chatListFolder` (schema 1.8.67
+    /// lines 13352 + 3524). Membership confirms via `updateChatPosition` /
+    /// added-to-list updates, like archive.
+    pub fn add_chat_to_folder(
+        &mut self,
+        chat_id: ChatId,
+        folder_id: i32,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let supported = self
+            .session
+            .chats
+            .get(&chat_id.0)
+            .is_some_and(|chat| chat.supported());
+        if !supported {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::AddChatToList, Some(chat_id));
+        let json = add_chat_to_list_value(
+            extra,
+            chat_id,
+            serde_json::json!({ "@type": "chatListFolder", "chat_folder_id": folder_id }),
+        );
+        match self.sender.send_json(&json) {
+            Ok(()) => Ok(extra),
+            Err(err) => {
+                self.session.requests.take(extra);
+                Err(err)
+            }
+        }
+    }
+
+    /// Parity slice: remove a chat from a folder. There is no
+    /// `removeChatFromList` in 1.8.67 — removal is `editChatFolder` with the
+    /// chat dropped from the spec (and added to `excluded_chat_ids` when it
+    /// would still match the folder's filter flags). Queues the intent and
+    /// fetches the full spec; `maybe_finish_folder_removals` (called from
+    /// `ingest`) sends the edit once the spec arrives.
+    pub fn remove_chat_from_folder(
+        &mut self,
+        chat_id: ChatId,
+        folder_id: i32,
+    ) -> Result<(), ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if !self
+            .session
+            .folder_remove_queue
+            .contains(&(chat_id, folder_id))
+        {
+            self.session.folder_remove_queue.push((chat_id, folder_id));
+        }
+        // Skip the fetch when the spec is already cached (the edit dialog
+        // keeps it fresh); otherwise the edit waits for `getChatFolder`.
+        if !self.session.folder_specs.contains_key(&folder_id) {
+            self.fetch_chat_folder(folder_id)?;
+        }
+        self.maybe_finish_folder_removals()?;
+        Ok(())
+    }
+
+    /// Send `editChatFolder` for queued remove-from-folder intents whose
+    /// full spec is cached and which have no edit already in flight.
+    fn maybe_finish_folder_removals(&mut self) -> Result<(), ConnectSendError> {
+        let queue = std::mem::take(&mut self.session.folder_remove_queue);
+        let mut still_pending = Vec::new();
+        for (chat_id, folder_id) in queue {
+            let Some(spec) = self.session.folder_specs.get(&folder_id).cloned() else {
+                still_pending.push((chat_id, folder_id));
+                continue;
+            };
+            if self
+                .session
+                .requests
+                .has_purpose_for_folder(RequestPurpose::EditChatFolder, folder_id)
+            {
+                still_pending.push((chat_id, folder_id));
+                continue;
+            }
+            let Some(chat) = self.session.chats.get(&chat_id.0) else {
+                continue;
+            };
+            let user_id = match &chat.kind {
+                ChatKind::Private { user_id } | ChatKind::Secret { user_id, .. } => Some(user_id.0),
+                _ => None,
+            };
+            let user = user_id.and_then(|id| self.session.users.get(&id));
+            let edited = spec_without_chat(&spec, chat, user);
+            let extra = self
+                .session
+                .request_for_folder(RequestPurpose::EditChatFolder, folder_id);
+            if let Err(err) = self
+                .sender
+                .send_json(&edit_chat_folder(extra, folder_id, &edited))
+            {
+                self.session.requests.take(extra);
+                self.session.folder_remove_queue = still_pending;
+                return Err(err);
+            }
+        }
+        self.session.folder_remove_queue = still_pending;
+        Ok(())
     }
 
     /// Select a chat, inform TDLib it is open, and request history.
@@ -3941,7 +4313,7 @@ mod tests {
     }
 
     #[test]
-    fn driver_load_folder_chats_single_shot_chat_list_folder() {
+    fn driver_load_folder_chats_pages_chat_list_folder() {
         let store = MemorySecretStore::new();
         let (dir, prepared) = prepared_tmp(&store);
         let sink = Arc::new(MemorySink::new());
@@ -3984,11 +4356,16 @@ mod tests {
             driver
                 .session
                 .requests
-                .has_purpose(RequestPurpose::LoadFolderChats)
+                .has_purpose_for_folder(RequestPurpose::LoadFolderChats, 2)
         );
 
-        // Single-shot: the ok response must not re-trigger main-list paging.
-        let loads_before = sent.iter().filter(|j| j.contains("loadChats")).count();
+        // Parity slice: the ok response pages on (folder "load more") — a
+        // second `loadChats(chatListFolder)` goes out, not a main-list page.
+        let loads_before = recorder
+            .snapshot()
+            .iter()
+            .filter(|j| j.contains("loadChats"))
+            .count();
         driver
             .ingest(
                 copy_and_parse(
@@ -3999,19 +4376,434 @@ mod tests {
                 .unwrap(),
             )
             .unwrap();
-        let loads_after = recorder
+        let loads: Vec<String> = recorder
             .snapshot()
             .iter()
             .filter(|j| j.contains("loadChats"))
-            .count();
-        assert_eq!(loads_before, loads_after);
-        assert!(
-            !driver
-                .session
-                .requests
-                .has_purpose(RequestPurpose::LoadFolderChats)
+            .cloned()
+            .collect();
+        assert_eq!(loads.len(), loads_before + 1);
+        assert!(loads.last().unwrap().contains("chatListFolder"));
+        assert!(!loads.last().unwrap().contains("chatListMain"));
+        let second_extra = driver
+            .session
+            .requests
+            .pending_extra_for_folder(RequestPurpose::LoadFolderChats, 2)
+            .expect("second page in flight");
+
+        // A 404 marks the folder exhausted: the next ok pages no further.
+        driver
+            .ingest(
+                copy_and_parse(
+                    &format!(
+                        r#"{{"@type":"error","@extra":"{}","code":404,"message":"not found"}}"#,
+                        second_extra.0
+                    ),
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        assert!(driver.session.folder_chats_exhausted.contains(&2));
+        assert_eq!(
+            driver.maybe_load_folder_chats(2).unwrap(),
+            None,
+            "exhausted folder pages no more"
         );
 
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn driver_create_chat_folder_sends_create_chat_folder() {
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = Arc::new(RecordingSender::new());
+        let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+        let mut driver =
+            ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+        let seq = AtomicU64::new(0);
+        seed_ready_alice(&mut driver, &seq, &dyn_sink);
+
+        let mut editor = crate::folders::FolderEditor::new();
+        editor.name = "Work".to_string();
+        editor.include_groups = true;
+        editor.toggle_included(7);
+        let spec = editor.to_spec();
+        let extra = driver.create_chat_folder(&spec).expect("create");
+        let json = recorder.snapshot().last().cloned().expect("sent");
+        let v: Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "createChatFolder");
+        assert_eq!(v["@extra"].as_str().unwrap(), extra.0.to_string());
+        assert_eq!(v["folder"]["@type"], "chatFolder");
+        assert_eq!(v["folder"]["name"]["text"]["text"], "Work");
+        assert_eq!(v["folder"]["included_chat_ids"], serde_json::json!([7]));
+        assert_eq!(v["folder"]["include_groups"], true);
+        assert!(
+            driver
+                .session
+                .requests
+                .has_purpose(RequestPurpose::CreateChatFolder)
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn driver_edit_and_delete_folder_flow() {
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = Arc::new(RecordingSender::new());
+        let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+        let mut driver =
+            ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+        let seq = AtomicU64::new(0);
+        seed_ready_alice(&mut driver, &seq, &dyn_sink);
+        driver
+            .ingest(
+                copy_and_parse(
+                    r#"{"@type":"updateChatFolders","chat_folders":[{"@type":"chatFolderInfo","id":5,"name":{"@type":"chatFolderName","text":{"@type":"formattedText","text":"Work","entities":[]}},"icon":null,"color_id":-1,"is_shareable":false}],"main_chat_list_position":0,"are_tags_enabled":false}"#,
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+
+        // `getChatFolder` response caches the full spec (keyed by folder id).
+        let fetch = driver.fetch_chat_folder(5).unwrap().expect("fetch");
+        assert_eq!(
+            driver.fetch_chat_folder(5).unwrap(),
+            None,
+            "deduped in flight"
+        );
+        driver
+            .ingest(
+                copy_and_parse(
+                    &format!(
+                        r#"{{"@type":"chatFolder","@extra":"{}","name":{{"@type":"chatFolderName","text":{{"@type":"formattedText","text":"Work","entities":[]}}}},"icon":null,"color_id":-1,"is_shareable":false,"pinned_chat_ids":[],"included_chat_ids":[7],"excluded_chat_ids":[],"exclude_muted":false,"exclude_read":false,"exclude_archived":false,"include_contacts":false,"include_non_contacts":true,"include_bots":false,"include_groups":false,"include_channels":false}}"#,
+                        fetch.0
+                    ),
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        let cached = driver.session.folder_specs.get(&5).expect("cached spec");
+        assert_eq!(cached.name, "Work");
+        assert_eq!(cached.included_chat_ids, vec![7]);
+
+        // Edit sends `editChatFolder` with the full spec.
+        let mut edited = cached.clone();
+        edited.name = "Work stuff".to_string();
+        let edit_extra = driver.edit_chat_folder(5, &edited).expect("edit");
+        let json = recorder.snapshot().last().cloned().expect("sent");
+        let v: Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "editChatFolder");
+        assert_eq!(v["chat_folder_id"], 5);
+        assert_eq!(v["folder"]["name"]["text"]["text"], "Work stuff");
+        assert_eq!(v["@extra"].as_str().unwrap(), edit_extra.0.to_string());
+        driver
+            .ingest(
+                copy_and_parse(
+                    &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, edit_extra.0),
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+
+        // Delete sends `deleteChatFolder` with leave ids; ok drops the tab.
+        let delete_extra = driver.delete_chat_folder(5, &[7]).expect("delete");
+        let json = recorder.snapshot().last().cloned().expect("sent");
+        let v: Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "deleteChatFolder");
+        assert_eq!(v["chat_folder_id"], 5);
+        assert_eq!(v["leave_chat_ids"], serde_json::json!([7]));
+        driver
+            .ingest(
+                copy_and_parse(
+                    &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, delete_extra.0),
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        assert!(driver.session.chat_folders.is_empty());
+        assert!(!driver.session.folder_specs.contains_key(&5));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn driver_reorder_chat_folders_optimistic() {
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = Arc::new(RecordingSender::new());
+        let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+        let mut driver =
+            ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+        let seq = AtomicU64::new(0);
+        seed_ready_alice(&mut driver, &seq, &dyn_sink);
+        driver
+            .ingest(
+                copy_and_parse(
+                    r#"{"@type":"updateChatFolders","chat_folders":[{"@type":"chatFolderInfo","id":1,"name":{"@type":"chatFolderName","text":{"@type":"formattedText","text":"A","entities":[]}},"icon":null,"color_id":-1,"is_shareable":false},{"@type":"chatFolderInfo","id":2,"name":{"@type":"chatFolderName","text":{"@type":"formattedText","text":"B","entities":[]}},"icon":null,"color_id":-1,"is_shareable":false}],"main_chat_list_position":0,"are_tags_enabled":false}"#,
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+
+        driver.reorder_chat_folders(&[2, 1]).expect("reorder");
+        let json = recorder.snapshot().last().cloned().expect("sent");
+        let v: Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "reorderChatFolders");
+        assert_eq!(v["chat_folder_ids"], serde_json::json!([2, 1]));
+        assert_eq!(v["main_chat_list_position"], 0);
+        let ids: Vec<i32> = driver.session.chat_folders.iter().map(|f| f.id).collect();
+        assert_eq!(ids, vec![2, 1], "optimistic reorder");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn driver_toggle_chat_folder_tags() {
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = Arc::new(RecordingSender::new());
+        let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+        let mut driver =
+            ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+        let seq = AtomicU64::new(0);
+        seed_ready_alice(&mut driver, &seq, &dyn_sink);
+
+        driver.toggle_chat_folder_tags(true).expect("toggle");
+        let json = recorder.snapshot().last().cloned().expect("sent");
+        let v: Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "toggleChatFolderTags");
+        assert_eq!(v["are_tags_enabled"], true);
+        assert!(driver.session.are_folder_tags_enabled);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn driver_get_chat_lists_to_add_chat_caches() {
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = Arc::new(RecordingSender::new());
+        let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+        let mut driver =
+            ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+        let seq = AtomicU64::new(0);
+        seed_ready_alice(&mut driver, &seq, &dyn_sink);
+
+        let first = driver
+            .fetch_chat_lists_to_add_chat(ChatId(7))
+            .unwrap()
+            .expect("first");
+        assert_eq!(
+            driver.fetch_chat_lists_to_add_chat(ChatId(7)).unwrap(),
+            None,
+            "deduped in flight"
+        );
+        let json = recorder.snapshot().last().cloned().expect("sent");
+        let v: Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "getChatListsToAddChat");
+        assert_eq!(v["chat_id"], 7);
+
+        driver
+            .ingest(
+                copy_and_parse(
+                    &format!(
+                        r#"{{"@type":"chatLists","@extra":"{}","chat_lists":[{{"@type":"chatListMain"}},{{"@type":"chatListFolder","chat_folder_id":5}}]}}"#,
+                        first.0
+                    ),
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        let cached = driver
+            .session
+            .chat_lists_for_add
+            .get(&7)
+            .expect("cached lists");
+        assert!(cached.contains(&crate::telegram::envelope::ChatList::Main));
+        assert!(cached.contains(&crate::telegram::envelope::ChatList::Folder(5)));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn driver_add_chat_to_folder_sends_add_chat_to_list() {
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = Arc::new(RecordingSender::new());
+        let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+        let mut driver =
+            ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+        let seq = AtomicU64::new(0);
+        seed_ready_alice(&mut driver, &seq, &dyn_sink);
+
+        let extra = driver.add_chat_to_folder(ChatId(7), 5).expect("add");
+        let json = recorder.snapshot().last().cloned().expect("sent");
+        let v: Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "addChatToList");
+        assert_eq!(v["chat_id"], 7);
+        assert_eq!(v["chat_list"]["@type"], "chatListFolder");
+        assert_eq!(v["chat_list"]["chat_folder_id"], 5);
+        assert_eq!(v["@extra"].as_str().unwrap(), extra.0.to_string());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn driver_remove_chat_from_folder_edits_spec() {
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = Arc::new(RecordingSender::new());
+        let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+        let mut driver =
+            ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+        let seq = AtomicU64::new(0);
+        seed_ready_alice(&mut driver, &seq, &dyn_sink);
+        driver
+            .ingest(
+                copy_and_parse(
+                    r#"{"@type":"updateChatFolders","chat_folders":[{"@type":"chatFolderInfo","id":5,"name":{"@type":"chatFolderName","text":{"@type":"formattedText","text":"Work","entities":[]}},"icon":null,"color_id":-1,"is_shareable":false}],"main_chat_list_position":0,"are_tags_enabled":false}"#,
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        // Chat 7 (Alice, private, user unknown → non-contact) is explicitly
+        // included; the folder also matches non-contacts by filter, so
+        // removal must both drop it from `included_chat_ids` and add it to
+        // `excluded_chat_ids` (no `removeChatFromList` in 1.8.67).
+        let fetch = driver.fetch_chat_folder(5).unwrap().expect("fetch");
+        driver
+            .ingest(
+                copy_and_parse(
+                    &format!(
+                        r#"{{"@type":"chatFolder","@extra":"{}","name":{{"@type":"chatFolderName","text":{{"@type":"formattedText","text":"Work","entities":[]}}}},"icon":null,"color_id":-1,"is_shareable":false,"pinned_chat_ids":[],"included_chat_ids":[7],"excluded_chat_ids":[],"exclude_muted":false,"exclude_read":false,"exclude_archived":false,"include_contacts":false,"include_non_contacts":true,"include_bots":false,"include_groups":false,"include_channels":false}}"#,
+                        fetch.0
+                    ),
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+
+        driver
+            .remove_chat_from_folder(ChatId(7), 5)
+            .expect("remove");
+        assert!(
+            driver.session.folder_remove_queue.is_empty(),
+            "spec was cached — edit sent immediately"
+        );
+        let json = recorder
+            .snapshot()
+            .iter()
+            .rev()
+            .find(|j| j.contains("editChatFolder"))
+            .cloned()
+            .expect("editChatFolder sent");
+        let v: Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "editChatFolder");
+        assert_eq!(v["chat_folder_id"], 5);
+        assert_eq!(v["folder"]["included_chat_ids"], serde_json::json!([]));
+        assert_eq!(
+            v["folder"]["excluded_chat_ids"],
+            serde_json::json!([7]),
+            "filter-matched chat must be excluded or it would reappear"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn driver_remove_chat_from_folder_waits_for_spec() {
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = Arc::new(RecordingSender::new());
+        let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+        let mut driver =
+            ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+        let seq = AtomicU64::new(0);
+        seed_ready_alice(&mut driver, &seq, &dyn_sink);
+
+        // No cached spec: the intent queues and a `getChatFolder` goes out;
+        // the edit follows once the spec arrives (via `ingest`).
+        driver
+            .remove_chat_from_folder(ChatId(7), 5)
+            .expect("remove");
+        assert_eq!(driver.session.folder_remove_queue, vec![(ChatId(7), 5)]);
+        assert!(
+            recorder
+                .snapshot()
+                .iter()
+                .any(|j| j.contains("getChatFolder")),
+            "fetch sent for uncached folder"
+        );
+        assert!(
+            !recorder
+                .snapshot()
+                .iter()
+                .any(|j| j.contains("editChatFolder")),
+            "no edit before the spec arrives"
+        );
+        let fetch_extra = driver
+            .session
+            .requests
+            .pending_extra_for_folder(RequestPurpose::GetChatFolder, 5)
+            .expect("fetch in flight");
+        driver
+            .ingest(
+                copy_and_parse(
+                    &format!(
+                        r#"{{"@type":"chatFolder","@extra":"{}","name":{{"@type":"chatFolderName","text":{{"@type":"formattedText","text":"Work","entities":[]}}}},"icon":null,"color_id":-1,"is_shareable":false,"pinned_chat_ids":[],"included_chat_ids":[7],"excluded_chat_ids":[],"exclude_muted":false,"exclude_read":false,"exclude_archived":false,"include_contacts":false,"include_non_contacts":false,"include_bots":false,"include_groups":false,"include_channels":false}}"#,
+                        fetch_extra.0
+                    ),
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        assert!(
+            driver.session.folder_remove_queue.is_empty(),
+            "edit completed on spec arrival"
+        );
+        let json = recorder
+            .snapshot()
+            .iter()
+            .rev()
+            .find(|j| j.contains("editChatFolder"))
+            .cloned()
+            .expect("editChatFolder sent after spec");
+        let v: Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["folder"]["included_chat_ids"], serde_json::json!([]));
+        // No filter flags set: the chat does not match, so no exclusion.
+        assert_eq!(v["folder"]["excluded_chat_ids"], serde_json::json!([]));
         let _ = std::fs::remove_dir_all(&dir);
     }
 

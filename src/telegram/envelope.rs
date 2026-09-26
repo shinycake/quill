@@ -290,10 +290,30 @@ pub enum EnvelopePayload {
     /// `updateChatFolders` (TDLib 1.8.67, `schema/td_api.tl:10606`) — the
     /// full ordered folder list. There is no `getChatFolders` function in
     /// 1.8.67; TDLib pushes this update after authorization and whenever
-    /// folders change. `main_chat_list_position` / `are_tags_enabled` are
-    /// dropped (folder reorder and tags are out of scope).
+    /// folders change. `main_chat_list_position` is dropped (folder reorder
+    /// always sends position 0); `are_tags_enabled` is kept (parity slice:
+    /// folder tags UI).
     UpdateChatFolders {
         folders: Vec<ChatFolderInfo>,
+        are_tags_enabled: bool,
+    },
+    /// Parity slice: `chatFolderInfo` as the response of `createChatFolder`
+    /// / `editChatFolder` (TDLib 1.8.67, `schema/td_api.tl:13358` /
+    /// `:13361`). The reducer upserts it into `Session::chat_folders`;
+    /// `updateChatFolders` stays the source of truth.
+    ChatFolderInfo(ChatFolderInfo),
+    /// Parity slice: `chatFolder` as the response of `getChatFolder`
+    /// (TDLib 1.8.67, `schema/td_api.tl:13355`) — the full editable spec
+    /// for the edit dialog prefill / remove-from-folder chain.
+    ChatFolder {
+        spec: ChatFolderSpec,
+    },
+    /// Parity slice: `chatLists` as the response of `getChatListsToAddChat`
+    /// (TDLib 1.8.67, `schema/td_api.tl:13347`) — the chat lists a chat may
+    /// be added to via `addChatToList`. Correlated to the chat by the
+    /// request's `PendingRequest::chat_id`.
+    ChatLists {
+        lists: Vec<ChatList>,
     },
     /// Phase 9.1: `updateChatActiveStories` (TDLib 1.8.67,
     /// `schema/td_api.tl:10911`) — the active stories of a chat changed.
@@ -458,6 +478,29 @@ pub struct ChatFolderInfo {
     pub name: String,
     pub icon_name: String,
     pub color_id: i32,
+}
+
+/// Parity slice: the full editable `chatFolder` spec (TDLib 1.8.67,
+/// `schema/td_api.tl:3476`) behind `createChatFolder` / `editChatFolder`
+/// (`:13358` / `:13361`) and returned by `getChatFolder` (`:13355`).
+/// Quill always sends `icon: null` (default icon) and `color_id: -1`
+/// (disabled) — custom-emoji icon rendering is out of scope — and
+/// `is_shareable: false` (invite links out of scope). The remaining fields
+/// are the create/edit dialog's model.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ChatFolderSpec {
+    pub name: String,
+    pub pinned_chat_ids: Vec<i64>,
+    pub included_chat_ids: Vec<i64>,
+    pub excluded_chat_ids: Vec<i64>,
+    pub exclude_muted: bool,
+    pub exclude_read: bool,
+    pub exclude_archived: bool,
+    pub include_contacts: bool,
+    pub include_non_contacts: bool,
+    pub include_bots: bool,
+    pub include_groups: bool,
+    pub include_channels: bool,
 }
 
 /// tdesktop default mute submenu (`SessionSettings::mutePeriods` when unset /
@@ -2390,7 +2433,14 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
                 .and_then(Value::as_array)
                 .map(|arr| arr.iter().filter_map(parse_chat_folder_info).collect())
                 .unwrap_or_default();
-            Ok(EnvelopePayload::UpdateChatFolders { folders })
+            let are_tags_enabled = value
+                .get("are_tags_enabled")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            Ok(EnvelopePayload::UpdateChatFolders {
+                folders,
+                are_tags_enabled,
+            })
         }
         "updateChatActiveStories" => {
             let active_stories = value
@@ -2499,6 +2549,27 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
         "callbackQueryAnswer" => Ok(EnvelopePayload::CallbackQueryAnswer(
             parse_callback_query_answer(&value),
         )),
+        // Parity slice: `createChatFolder` / `editChatFolder` responses
+        // (TDLib 1.8.67, `schema/td_api.tl:13358` / `:13361`).
+        "chatFolderInfo" => parse_chat_folder_info(&value)
+            .map(EnvelopePayload::ChatFolderInfo)
+            .ok_or(ParseError::MissingField),
+        // Parity slice: `getChatFolder` response (TDLib 1.8.67,
+        // `schema/td_api.tl:13355`) — the full editable folder spec.
+        "chatFolder" => parse_chat_folder(&value)
+            .map(|spec| EnvelopePayload::ChatFolder { spec })
+            .ok_or(ParseError::MissingField),
+        // Parity slice: `getChatListsToAddChat` response (TDLib 1.8.67,
+        // `schema/td_api.tl:13347`) — the chat lists a chat may be added
+        // to via `addChatToList`.
+        "chatLists" => {
+            let lists = value
+                .get("chat_lists")
+                .and_then(Value::as_array)
+                .map(|arr| arr.iter().map(|v| parse_chat_list(Some(v))).collect())
+                .unwrap_or_default();
+            Ok(EnvelopePayload::ChatLists { lists })
+        }
         "error" => Ok(EnvelopePayload::Error(parse_error(Some(&value)))),
         "messages" => {
             let messages = value
@@ -3285,6 +3356,45 @@ fn parse_chat_folder_info(value: &Value) -> Option<ChatFolderInfo> {
         name,
         icon_name,
         color_id: value.get("color_id").and_then(Value::as_i64).unwrap_or(-1) as i32,
+    })
+}
+
+/// Parity slice: parse the full `chatFolder` spec (TDLib 1.8.67,
+/// `schema/td_api.tl:3476`) from a `getChatFolder` response (`:13355`).
+/// `name` carries only CustomEmoji entities per the schema docs, so the
+/// plain text is taken. Returns `None` when `@type` is not `chatFolder`.
+fn parse_chat_folder(value: &Value) -> Option<ChatFolderSpec> {
+    if value.get("@type").and_then(Value::as_str) != Some("chatFolder") {
+        return None;
+    }
+    let name = value
+        .get("name")
+        .and_then(|v| v.get("text"))
+        .and_then(|v| v.get("text"))
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    let ids = |key: &str| {
+        value
+            .get(key)
+            .and_then(Value::as_array)
+            .map(|arr| arr.iter().filter_map(Value::as_i64).collect::<Vec<i64>>())
+            .unwrap_or_default()
+    };
+    let flag = |key: &str| value.get(key).and_then(Value::as_bool).unwrap_or(false);
+    Some(ChatFolderSpec {
+        name,
+        pinned_chat_ids: ids("pinned_chat_ids"),
+        included_chat_ids: ids("included_chat_ids"),
+        excluded_chat_ids: ids("excluded_chat_ids"),
+        exclude_muted: flag("exclude_muted"),
+        exclude_read: flag("exclude_read"),
+        exclude_archived: flag("exclude_archived"),
+        include_contacts: flag("include_contacts"),
+        include_non_contacts: flag("include_non_contacts"),
+        include_bots: flag("include_bots"),
+        include_groups: flag("include_groups"),
+        include_channels: flag("include_channels"),
     })
 }
 
@@ -4892,6 +5002,66 @@ mod tests {
         match env.payload {
             EnvelopePayload::UpdateChatPosition(pos) => {
                 assert_eq!(pos.order, 9223372036854775806);
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn chat_folder_spec_parsed() {
+        // Parity slice: `getChatFolder` response (schema 1.8.67 line 13355)
+        // carries the full `chatFolder` spec (line 3476).
+        let env = parse_envelope(
+            r#"{"@type":"chatFolder","name":{"@type":"chatFolderName","text":{"@type":"formattedText","text":"Work","entities":[]},"animate_custom_emoji":false},"icon":null,"color_id":-1,"is_shareable":false,"pinned_chat_ids":[11],"included_chat_ids":[12,13],"excluded_chat_ids":[14],"exclude_muted":true,"exclude_read":false,"exclude_archived":true,"include_contacts":true,"include_non_contacts":false,"include_bots":true,"include_groups":false,"include_channels":true}"#,
+        )
+        .unwrap();
+        match env.payload {
+            EnvelopePayload::ChatFolder { spec } => {
+                assert_eq!(spec.name, "Work");
+                assert_eq!(spec.pinned_chat_ids, vec![11]);
+                assert_eq!(spec.included_chat_ids, vec![12, 13]);
+                assert_eq!(spec.excluded_chat_ids, vec![14]);
+                assert!(spec.exclude_muted);
+                assert!(!spec.exclude_read);
+                assert!(spec.exclude_archived);
+                assert!(spec.include_contacts);
+                assert!(!spec.include_non_contacts);
+                assert!(spec.include_bots);
+                assert!(!spec.include_groups);
+                assert!(spec.include_channels);
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn chat_folder_info_response_parsed() {
+        // Parity slice: `createChatFolder` / `editChatFolder` responses
+        // (schema 1.8.67 lines 13358 / 13361) are `chatFolderInfo`.
+        let env = parse_envelope(
+            r#"{"@type":"chatFolderInfo","id":5,"name":{"@type":"chatFolderName","text":{"@type":"formattedText","text":"New","entities":[]},"animate_custom_emoji":false},"icon":null,"color_id":-1,"is_shareable":false,"has_my_invite_links":false}"#,
+        )
+        .unwrap();
+        match env.payload {
+            EnvelopePayload::ChatFolderInfo(info) => {
+                assert_eq!(info.id, 5);
+                assert_eq!(info.name, "New");
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn chat_lists_response_parsed() {
+        // Parity slice: `getChatListsToAddChat` response (schema 1.8.67
+        // line 13347) is `chatLists`.
+        let env = parse_envelope(
+            r#"{"@type":"chatLists","chat_lists":[{"@type":"chatListMain"},{"@type":"chatListFolder","chat_folder_id":2}]}"#,
+        )
+        .unwrap();
+        match env.payload {
+            EnvelopePayload::ChatLists { lists } => {
+                assert_eq!(lists, vec![ChatList::Main, ChatList::Folder(2)]);
             }
             other => panic!("{other:?}"),
         }
@@ -6782,8 +6952,12 @@ mod channel_envelope_tests {
         )
         .unwrap();
         match env.payload {
-            EnvelopePayload::UpdateChatFolders { folders } => {
+            EnvelopePayload::UpdateChatFolders {
+                folders,
+                are_tags_enabled,
+            } => {
                 assert_eq!(folders.len(), 2);
+                assert!(!are_tags_enabled);
                 assert_eq!(
                     folders[0],
                     ChatFolderInfo {

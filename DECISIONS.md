@@ -1258,6 +1258,73 @@ Research snapshot 2026-09-16, pin recheck **2026-09-17**.
   paging folder chats beyond one `loadChats` page; `getChatListsToAddChat`
   surfacing in the archive/unarchive menu.
 
+## Phase 7.3 — Folder management (2026-09-26)
+
+- **Rationale:** full folder management toward Telegram parity — create,
+  edit, delete, reorder folders, toggle folder tags, add/remove chats to
+  and from folders, and a manage dialog in the UI. Builds on the Phase 7.1
+  folder-tabs foundation.
+- **Schema (1.8.67, verified in `schema/td_api.tl`):**
+  - `createChatFolder folder:chatFolder = ChatFolderInfo` (line 13358);
+    `editChatFolder chat_folder_id:int32 folder:chatFolder = ChatFolderInfo`
+    (line 13361); `deleteChatFolder chat_folder_id:int32 = Ok`
+    (line 13364); `getChatFolder chat_folder_id:int32 = ChatFolder`
+    (line 13355); `reorderChatFolders chat_folder_ids:vector<int32>
+    main_chat_list_position:int32 = Ok` (line 13373);
+    `toggleChatFolderTags are_tags_enabled:Bool = Ok` (line 13376);
+    `getChatFolderChatsToLeave chat_folder_id:int32 = Chats` (line 13367);
+    `getChatListsToAddChat chat_id:int53 = ChatLists` (line 13347);
+    `addChatToList chat_id:int53 chat_list:ChatList = Ok` (line 13352);
+    `chatFolder` full spec (line 3476).
+  - There is **no `removeChatFromList`** in 1.8.67. Removing a chat from a
+    folder is done by fetching the full spec with `getChatFolder`,
+    dropping the chat from `included_chat_ids`/`pinned_chat_ids` (and
+    adding it to `excluded_chat_ids` when it only matched via filters),
+    and sending the modified spec with `editChatFolder`.
+  - `ChatFolderSpec` (`src/folders.rs::ChatFolderSpec`) mirrors the
+    `chatFolder` constructor: name (1–12 chars per the schema docs),
+    icon (null — custom-emoji icons out of scope), pinned/included/
+    excluded chat ids, exclude_muted / exclude_read / exclude_archived,
+    include_* type filters, color_id (-1), is_shareable (false).
+- **Driver (`src/connect.rs`):** one method per operation
+  (`create_chat_folder`, `edit_chat_folder`, `delete_chat_folder`,
+  `reorder_chat_folders`, `toggle_chat_folder_tags`, `fetch_chat_folder`,
+  `fetch_chat_folder_chats_to_leave`, `fetch_chat_lists_to_add_chat`,
+  `add_chat_to_list`, `remove_chat_from_folder`), with
+  `RequestPurpose::*` variants and per-folder request dedupe
+  (`has_purpose_for_folder`). Folder-load 404s mark
+  `folder_chats_exhausted`; folder paging stays eager (each `loadChats`
+  ok re-enters `maybe_load_folder_chats`), the same pattern as the main
+  list — there is deliberately no user-triggered "Load more".
+- **State (`src/state.rs`):** `updateChatFolders` now keeps
+  `are_folder_tags_enabled`; `folder_specs` caches full specs keyed by
+  folder id (dropped on edit); `chat_lists_for_add` caches
+  `getChatListsToAddChat` results; `folder_chats_to_leave` caches
+  `getChatFolderChatsToLeave` results for the delete-confirm dialog;
+  `folder_remove_queue` holds remove-from-folder edits until the
+  `getChatFolder` spec arrives.
+- **UI (`src/ui/mod.rs`):** a **Folders** manage dialog (open from the
+  folder-tabs row "···" entry) listing folders with chat counts, ↑/↓
+  reorder, Edit, Delete, a "Show folder tags" toggle
+  (`toggleChatFolderTags`), and **New folder**. The create/edit form has
+  a name field (schema-validated), include-type filters, included/excluded
+  chat multi-select, and exclude-muted/read/archived toggles. Delete
+  asks for confirmation and offers to leave the suggested chats
+  (`getChatFolderChatsToLeave`). Chat rows show folder-tag chips when
+  tags are enabled; the conversation header has a **Folders** picker with
+  add destinations (Main / Archive / folders from
+  `getChatListsToAddChat`) and remove rows for current memberships.
+  Demo-local create/edit/delete/reorder helpers back the screenshot
+  demo (no live Telegram).
+- **Screenshot:** `docs/screenshots/ready-folders-manage.png` — the
+  Folders manage dialog over demo chats; driven by
+  `quill --screenshot-demo ready-folders-manage`.
+- **Out of this slice (→ future):** custom-emoji folder icons;
+  folder invite links (`is_shareable` / `has_my_invite_links`);
+  suggested filters (`getChatFolderDefaultIconName`,
+  `getChatFolderNewChats` and friends); richer create/edit parity
+  (per-chat include/exclude search, drag reorder).
+
 ## Phase 8.1 — Desktop notifications (2026-09-26)
 
 - **Rationale:** new incoming messages should surface an OS notification when
