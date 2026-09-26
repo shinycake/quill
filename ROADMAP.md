@@ -87,8 +87,15 @@ handling exists.
   dropped; missing `value` → `Unsupported`. No roll animation, no
   `messageStakeDice`, no dice sending from the composer.
   `docs/screenshots/ready-dice.png`.
-- **4.5 Fullscreen media viewer.** Click a photo/video opens a viewer overlay
-  (from the photo/document "Out of this slice" backlog).
+- **4.5 Fullscreen media viewer.** ✅ 2026-09-26 — Clicking a
+  downloaded/viewable photo or video visual opens a fullscreen viewer
+  overlay (Esc/backdrop/Close): dark backdrop, Prev/Next across the
+  chat's photo+video items (chronological), position counter, caption,
+  and a download CTA when nothing is local yet. Videos show their
+  thumbnail in the viewer (playback stays in the history row); secret
+  and spoiler media are excluded; documents, animations/GIFs, stickers,
+  audio/voice remain unopened.
+  `docs/screenshots/ready-media-viewer.png`.
 - **4.6 Seek bars.** Audio and voice-note rows get scrubbing (backlog).
 
 ## Phase 5 — Supergroups: forum topics

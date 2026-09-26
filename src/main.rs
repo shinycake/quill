@@ -113,9 +113,10 @@ fn parse_screenshot_demo(args: &[String]) -> Option<(ui::ScreenshotDemo, std::pa
                 "ready-poll" => ScreenshotDemo::ReadyPoll,
                 "ready-location" => ScreenshotDemo::ReadyLocation,
                 "ready-dice" => ScreenshotDemo::ReadyDice,
+                "ready-media-viewer" => ScreenshotDemo::ReadyMediaViewer,
                 _ => {
                     eprintln!(
-                        "unknown screenshot demo '{kind}' (expected need-tdjson|wait-phone|wait-code|wait-password|ready-chats|ready-chats-composer|ready-unread|ready-unread-read|ready-media|ready-send-media|ready-search|ready-search-in-chat|ready-reply|ready-edit-delete|ready-forward|ready-reactions|ready-pin|ready-mute-archive|ready-typing|ready-stickers|ready-voice|ready-link-preview|ready-gifs|ready-video|ready-video-note|ready-video-send|ready-video-note-send|ready-drafts|ready-albums|ready-audio|ready-sponsored|ready-channels|ready-channels-admin|ready-bot-chat|ready-bot-keyboard|ready-bot-command-menu|ready-text-entities|ready-poll|ready-location|ready-dice)"
+                        "unknown screenshot demo '{kind}' (expected need-tdjson|wait-phone|wait-code|wait-password|ready-chats|ready-chats-composer|ready-unread|ready-unread-read|ready-media|ready-send-media|ready-search|ready-search-in-chat|ready-reply|ready-edit-delete|ready-forward|ready-reactions|ready-pin|ready-mute-archive|ready-typing|ready-stickers|ready-voice|ready-link-preview|ready-gifs|ready-video|ready-video-note|ready-video-send|ready-video-note-send|ready-drafts|ready-albums|ready-audio|ready-sponsored|ready-channels|ready-channels-admin|ready-bot-chat|ready-bot-keyboard|ready-bot-command-menu|ready-text-entities|ready-poll|ready-location|ready-dice|ready-media-viewer)"
                     );
                     std::process::exit(2);
                 }
@@ -177,6 +178,7 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
         ScreenshotDemo::ReadyPoll => ".quill-ready-ready-poll",
         ScreenshotDemo::ReadyLocation => ".quill-ready-ready-location",
         ScreenshotDemo::ReadyDice => ".quill-ready-ready-dice",
+        ScreenshotDemo::ReadyMediaViewer => ".quill-ready-ready-media-viewer",
     });
     let _ = std::fs::remove_file(&marker);
     let marker_for_spawn = marker.clone();

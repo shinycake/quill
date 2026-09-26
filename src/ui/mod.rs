@@ -21,6 +21,7 @@ use quill::credentials::TelegramCredentials;
 use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::{AccountKey, ChatId, FileId, MessageId};
 use quill::local_path::sandboxed_display_path;
+use quill::media_viewer::{MediaViewer, MediaViewerItem, MediaViewerKind, collect_media_items};
 use quill::platform::live_secret_store;
 use quill::poll::{
     POLL_OPTIONS_MAX, POLL_OPTIONS_MIN, PollDraft, poll_bar_fraction, voter_count_label,
@@ -245,6 +246,8 @@ pub struct QuillApp {
     spoiler_revealed: HashSet<(i64, u64, u64, bool)>,
     /// Phase 4.2: poll creation dialog (open above the composer).
     poll_dialog: Option<PollDialog>,
+    /// Phase 4.5: fullscreen media viewer (photo/video overlay).
+    media_viewer: MediaViewer,
 }
 
 /// Forced UI surfaces for screenshot proof (no live Telegram / no real credentials).
@@ -349,6 +352,10 @@ pub enum ScreenshotDemo {
     /// 🎲 with values 4 / 6 and a 🎯 — showing the large static emoji
     /// face plus the rolled value (Phase 4.4). No roll animation.
     ReadyDice,
+    /// Media viewer demo (injected, no live Telegram): the ReadyMedia
+    /// photo chat with the viewer overlay open on the downloaded photo
+    /// (Phase 4.5).
+    ReadyMediaViewer,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -891,6 +898,15 @@ impl QuillApp {
                     AuthorizationState::Ready,
                 )
             }
+            Some(ScreenshotDemo::ReadyMediaViewer) => {
+                demo_session = Some(seed_ready_media_session(demo_sink.clone()));
+                (
+                    ConnectUiStatus::DemoReadyChats,
+                    None,
+                    "screenshot demo — fullscreen media viewer".into(),
+                    AuthorizationState::Ready,
+                )
+            }
             None => bootstrap_connect(credentials),
         };
 
@@ -996,6 +1012,7 @@ impl QuillApp {
             sponsored_demo: false,
             spoiler_revealed: HashSet::new(),
             poll_dialog: None,
+            media_viewer: MediaViewer::closed(),
         };
         if matches!(demo, Some(ScreenshotDemo::ReadyChatsComposer)) {
             app.composer.update(cx, |input, cx| {
@@ -1262,6 +1279,13 @@ impl QuillApp {
                 apply_ready_dice(session, &app.demo_sink, &app.demo_seq);
             }
             app.status_note = "screenshot demo — dice rolls".into();
+        }
+        if matches!(demo, Some(ScreenshotDemo::ReadyMediaViewer)) {
+            // The Media seed opens chat 11 with a downloaded photo
+            // (message 201, "Loaded photo") and a pending one (202, loading
+            // state); the document (203) is not viewer-openable.
+            app.open_media_viewer(ChatId(11), MessageId(201), cx);
+            app.status_note = "screenshot demo — fullscreen media viewer".into();
         }
         if matches!(demo, Some(ScreenshotDemo::ReadySponsored)) {
             if let Some(session) = app.demo_session.as_mut() {
@@ -2523,6 +2547,10 @@ impl QuillApp {
     }
 
     fn cancel_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.media_viewer.is_open() {
+            self.close_media_viewer(cx);
+            return;
+        }
         if self.poll_dialog.is_some() {
             self.close_poll_dialog(cx);
             return;
@@ -2932,6 +2960,75 @@ impl QuillApp {
         self.pending_react = None;
         self.status_note = "reaction picker closed".into();
         cx.notify();
+    }
+
+    /// Phase 4.5: open the fullscreen media viewer on the clicked message.
+    /// Items are the chat's photo/video messages (oldest first); the clicked
+    /// message becomes the current item. When nothing viewable is local yet
+    /// the viewer shows a loading state and `downloadFile` is triggered —
+    /// the 40ms poll loop re-renders when `updateFile` lands.
+    fn open_media_viewer(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        cx: &mut Context<Self>,
+    ) {
+        let items = self
+            .session()
+            .and_then(|session| session.histories.get(&chat_id.0))
+            .map(|history| {
+                collect_media_items(&history.ordered().into_iter().cloned().collect::<Vec<_>>())
+            })
+            .unwrap_or_default();
+        if items.is_empty() {
+            return;
+        }
+        let index = items
+            .iter()
+            .position(|item| item.message_id == message_id)
+            .unwrap_or(0);
+        self.media_viewer = MediaViewer::open(items, index);
+        self.ensure_viewer_download(cx);
+        cx.notify();
+    }
+
+    fn close_media_viewer(&mut self, cx: &mut Context<Self>) {
+        self.media_viewer.close();
+        cx.notify();
+    }
+
+    fn step_media_viewer(&mut self, delta: i32, cx: &mut Context<Self>) {
+        if delta < 0 {
+            self.media_viewer.prev();
+        } else {
+            self.media_viewer.next();
+        }
+        self.ensure_viewer_download(cx);
+        cx.notify();
+    }
+
+    /// Trigger `downloadFile` for the current viewer item when no display
+    /// candidate is local yet (photo: largest size; video: thumbnail, else
+    /// the clip itself). Reuses `request_media_download`; no live request
+    /// happens in demo mode (it only sets a status note).
+    fn ensure_viewer_download(&mut self, cx: &mut Context<Self>) {
+        let Some(item) = self.media_viewer.current().cloned() else {
+            return;
+        };
+        let roots = self.media_display_roots();
+        let local = self.session().is_some_and(|session| {
+            item.display_file_ids.iter().any(|id| {
+                session
+                    .files
+                    .get(&id.0)
+                    .and_then(|file| file.usable_path())
+                    .and_then(|path| sandboxed_display_path(path, &roots))
+                    .is_some()
+            })
+        });
+        if !local {
+            self.request_media_download(item.download_file_id, None, cx);
+        }
     }
 
     fn start_voice_recording(&mut self, cx: &mut Context<Self>) {
@@ -5336,6 +5433,193 @@ impl QuillApp {
             )
     }
 
+    /// Phase 4.5: fullscreen media viewer overlay. The backdrop is a
+    /// separate sibling painted behind the panel (not an ancestor), so a
+    /// click on the panel never bubbles into the backdrop's close handler —
+    /// "click outside" works regardless of click-bubbling semantics. Esc
+    /// closes through `cancel_search`; the header close button is the third
+    /// path. Videos show their thumbnail (no in-viewer playback — the
+    /// history row's Play path is unchanged); secret/spoiler media never
+    /// reach the viewer (filtered in `collect_media_items`).
+    fn media_viewer_overlay(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let item = self
+            .media_viewer
+            .current()
+            .cloned()
+            .unwrap_or_else(|| MediaViewerItem {
+                chat_id: ChatId(0),
+                message_id: MessageId(0),
+                kind: MediaViewerKind::Photo,
+                display_file_ids: Vec::new(),
+                download_file_id: FileId(0),
+                caption: String::new(),
+                caption_entities: Vec::new(),
+                duration_label: None,
+            });
+        let (position, total) = self.media_viewer.position().unwrap_or((0, 0));
+        let files: HashMap<i32, ParsedFile> =
+            self.session().map(|s| s.files.clone()).unwrap_or_default();
+        let downloading: HashSet<i32> = self
+            .session()
+            .map(|s| s.downloading.clone())
+            .unwrap_or_default();
+        let roots = self.media_display_roots();
+        let path = viewer_display_path(&item, &files, &roots);
+        let row_id = item.message_id.0 as u64;
+        let downloading_now = item
+            .display_file_ids
+            .iter()
+            .chain(std::iter::once(&item.download_file_id))
+            .any(|id| file_is_downloading(*id, &files, &downloading));
+        let kind_label = item.kind.label();
+        let header_label = if total > 1 {
+            format!("{kind_label} {position} of {total}")
+        } else {
+            kind_label.to_string()
+        };
+        let visual: AnyElement = if let Some(path) = path {
+            img(path)
+                .id(("media-viewer-img", row_id))
+                .w(px(720.))
+                .h(px(480.))
+                .rounded_md()
+                .object_fit(ObjectFit::Contain)
+                .bg(rgb(0x0d1117))
+                .with_fallback(move || {
+                    div()
+                        .w(px(720.))
+                        .h(px(480.))
+                        .rounded_md()
+                        .bg(rgb(0x0d1117))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .text_color(rgb(0xffffff))
+                        .child(format!("{kind_label} — could not render"))
+                        .into_any_element()
+                })
+                .into_any_element()
+        } else {
+            let status = if downloading_now {
+                format!("{kind_label} — downloading…")
+            } else {
+                format!("{kind_label} — not downloaded")
+            };
+            let status = match (&item.duration_label, downloading_now) {
+                (Some(duration), _) => format!("Video · {duration} — {status}"),
+                _ => status,
+            };
+            div()
+                .id(("media-viewer-loading", row_id))
+                .w(px(720.))
+                .h(px(480.))
+                .rounded_md()
+                .bg(rgb(0x0d1117))
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(div().text_sm().text_color(rgb(0xffffff)).child(status))
+                .into_any_element()
+        };
+        let caption: Option<AnyElement> = (!item.caption.is_empty()).then(|| {
+            rich_text_line(
+                &item.caption,
+                &item.caption_entities,
+                (item.chat_id.0, row_id),
+                true,
+                &self.spoiler_revealed,
+                cx,
+            )
+        });
+        div()
+            .id("media-viewer-overlay")
+            .absolute()
+            .top_0()
+            .left_0()
+            .right_0()
+            .bottom_0()
+            .flex()
+            .items_center()
+            .justify_center()
+            .child(
+                div()
+                    .id("media-viewer-backdrop")
+                    .absolute()
+                    .top_0()
+                    .left_0()
+                    .right_0()
+                    .bottom_0()
+                    .bg(rgba(0x000000e6))
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.close_media_viewer(cx);
+                    })),
+            )
+            .child(
+                div()
+                    .id("media-viewer-panel")
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .gap_2()
+                    .p_4()
+                    .max_w(px(800.))
+                    .max_h_full()
+                    .child(
+                        div()
+                            .flex()
+                            .w(px(720.))
+                            .items_center()
+                            .justify_between()
+                            .child(
+                                div()
+                                    .font_semibold()
+                                    .text_color(rgb(0xffffff))
+                                    .child(header_label),
+                            )
+                            .child(
+                                div()
+                                    .id("media-viewer-close")
+                                    .cursor_pointer()
+                                    .px_2()
+                                    .py_1()
+                                    .rounded_md()
+                                    .text_color(rgb(0xffffff))
+                                    .child("Close")
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.close_media_viewer(cx);
+                                    })),
+                            ),
+                    )
+                    .child(visual)
+                    .when_some(caption, |this, caption| {
+                        this.child(div().text_color(rgb(0xffffff)).child(caption))
+                    })
+                    .child(
+                        div()
+                            .flex()
+                            .gap_2()
+                            .child(
+                                Button::new("media-viewer-prev")
+                                    .label("‹ Prev")
+                                    .ghost()
+                                    .disabled(position <= 1)
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.step_media_viewer(-1, cx);
+                                    })),
+                            )
+                            .child(
+                                Button::new("media-viewer-next")
+                                    .label("Next ›")
+                                    .ghost()
+                                    .disabled(position >= total)
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.step_media_viewer(1, cx);
+                                    })),
+                            ),
+                    ),
+            )
+    }
+
     fn forward_picker_panel(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let query = self.forward_search_input.read(cx).value().to_string();
         let draft = self.pending_forward.clone();
@@ -6104,6 +6388,7 @@ impl Render for QuillApp {
             .flex()
             .flex_col()
             .size_full()
+            .relative()
             .bg(cx.theme().background)
             .on_action(cx.listener(|this, _: &QuitApp, window, cx| {
                 let _ = this;
@@ -6166,6 +6451,9 @@ impl Render for QuillApp {
                 &self.status_note,
                 cx,
             ))
+            .when(self.media_viewer.is_open(), |this| {
+                this.child(self.media_viewer_overlay(cx))
+            })
     }
 }
 
@@ -8604,6 +8892,7 @@ fn sponsored_message_row(
             downloading,
             media_roots,
             Some((chat_id, message.message_id)),
+            None,
             cx,
         )),
         MessageContent::Animation(animation) => Some(animation_attachment(
@@ -8626,6 +8915,7 @@ fn sponsored_message_row(
             false,
             None,
             Some((chat_id, message.message_id)),
+            None,
             cx,
         )),
         MessageContent::Document(doc) => Some(document_chip(
@@ -9428,6 +9718,7 @@ fn session_history_row(
             downloading,
             media_roots,
             None,
+            Some((message.chat_id, message.id)),
             cx,
         )),
         MessageContent::Document(doc) => Some(document_chip(
@@ -9485,6 +9776,7 @@ fn session_history_row(
             video_playing,
             video_frame.as_deref(),
             None,
+            Some((message.chat_id, message.id)),
             cx,
         )),
         MessageContent::VideoNote(note) => Some(video_note_attachment(
@@ -9973,6 +10265,22 @@ fn photo_display_path(
     None
 }
 
+/// Phase 4.5: resolve the current viewer item's visual — first local
+/// display candidate inside the media allowlist roots, same sandbox rule as
+/// history rows (`sandboxed_display_path`).
+fn viewer_display_path(
+    item: &MediaViewerItem,
+    files: &HashMap<i32, ParsedFile>,
+    roots: &[PathBuf],
+) -> Option<PathBuf> {
+    item.display_file_ids.iter().find_map(|id| {
+        files
+            .get(&id.0)
+            .and_then(|file| file.usable_path())
+            .and_then(|path| sandboxed_display_path(path, roots))
+    })
+}
+
 fn file_is_downloading(
     file_id: FileId,
     files: &HashMap<i32, ParsedFile>,
@@ -9991,6 +10299,10 @@ fn photo_attachment(
     downloading: &std::collections::HashSet<i32>,
     media_roots: &[PathBuf],
     sponsored: Option<(ChatId, i64)>,
+    // Phase 4.5: `(chat_id, message_id)` when a click should open the
+    // fullscreen viewer (history rows only; album tiles and sponsored rows
+    // pass `None`).
+    viewer: Option<(ChatId, MessageId)>,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
     let open_id = photo.open_file_id().unwrap_or(FileId(0));
@@ -10005,6 +10317,12 @@ fn photo_attachment(
             .h(px(140.))
             .rounded_md()
             .object_fit(ObjectFit::Cover)
+            .when_some(viewer, |this, (chat_id, message_id)| {
+                this.cursor_pointer()
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.open_media_viewer(chat_id, message_id, cx);
+                    }))
+            })
             .with_fallback(|| {
                 div()
                     .w(px(240.))
@@ -10038,6 +10356,9 @@ fn photo_attachment(
     } else {
         "Photo — not downloaded".into()
     };
+    let viewable = !photo.is_secret && !photo.has_spoiler;
+    let viewer_open = viewable.then_some(viewer).flatten();
+    let has_viewer_open = viewer_open.is_some();
     div()
         .id(("photo-ph", row_id))
         .mt_2()
@@ -10048,12 +10369,24 @@ fn photo_attachment(
         .flex()
         .items_center()
         .justify_center()
-        .when(photo.click_requests_download(), |this| {
+        // Phase 4.5: viewable photos open the viewer (it triggers the
+        // download when needed); spoiler photos keep the old
+        // click-to-download placeholder, secret photos stay inert.
+        .when_some(viewer_open, |this, (chat_id, message_id)| {
             this.cursor_pointer()
                 .on_click(cx.listener(move |this, _, _, cx| {
-                    this.request_media_download(open_id, sponsored, cx);
+                    this.open_media_viewer(chat_id, message_id, cx);
                 }))
         })
+        .when(
+            !has_viewer_open && photo.click_requests_download(),
+            |this| {
+                this.cursor_pointer()
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.request_media_download(open_id, sponsored, cx);
+                    }))
+            },
+        )
         .child(div().text_xs().text_color(rgb(0xffffff)).child(status))
         .into_any_element()
 }
@@ -10179,6 +10512,10 @@ fn video_attachment(
     playing: bool,
     frame: Option<&std::path::Path>,
     sponsored: Option<(ChatId, i64)>,
+    // Phase 4.5: `(chat_id, message_id)` when a click should open the
+    // fullscreen viewer (history rows only; sponsored rows pass `None`).
+    // Secret/spoiler videos never get the handler.
+    viewer: Option<(ChatId, MessageId)>,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
     let row_id = message_id.0 as u64;
@@ -10251,9 +10588,20 @@ fn video_attachment(
         .flex()
         .flex_col()
         .gap_1()
-        .child(
+        .child({
+            // Phase 4.5: clicking the visual opens the viewer (the viewer
+            // triggers the download when nothing is local yet). The
+            // Play/Pause button below keeps its own handler.
+            let viewer_open = (!blocked).then_some(viewer).flatten();
             div()
+                .id(("video-visual", row_id))
                 .relative()
+                .when_some(viewer_open, |this, (chat_id, message_id)| {
+                    this.cursor_pointer()
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.open_media_viewer(chat_id, message_id, cx);
+                        }))
+                })
                 .child(picture)
                 .child(
                     div()
@@ -10278,8 +10626,8 @@ fn video_attachment(
                         .text_xs()
                         .text_color(rgb(0xffffff))
                         .child(duration),
-                ),
-        )
+                )
+        })
         .child(
             Button::new(format!("video-play-{row_id}"))
                 .label(play_label)

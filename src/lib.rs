@@ -13,6 +13,7 @@ pub mod ids;
 pub mod layout;
 pub mod lifecycle;
 pub mod local_path;
+pub mod media_viewer;
 pub mod pins;
 pub mod platform;
 pub mod poll;
