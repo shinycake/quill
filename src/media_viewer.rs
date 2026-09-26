@@ -379,6 +379,7 @@ mod tests {
             media_album_id: 0,
             reply_markup: None,
             self_destruct: None,
+            auto_delete: None,
         }
     }
 

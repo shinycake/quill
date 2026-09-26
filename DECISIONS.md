@@ -2134,9 +2134,11 @@ are rough (S < 1 day, M = days, L = week+).
   DialogType::User`; `DialogId.h` lists `User` and `SecretChat` as
   distinct `DialogType` values — so "private chats" means 1:1 **cloud**
   chats, **not** secret chats (secret chats likely handle
-  self-destruction through a different mechanism — unverified, no
-  corresponding constructor in the pinned schema — and are out of
-  this slice). `MessageSelfDestructType.cpp` validates the
+  self-destruction through a different mechanism — ~~unverified, no
+  corresponding constructor in the pinned schema~~ **(wrong — corrected
+  in Phase B4: the chat-level timer `setChatMessageAutoDeleteTime` /
+  `chat.message_auto_delete_time`, schema 1.8.67 :13454 / :3616 / :3627)** —
+  and are out of this slice). `MessageSelfDestructType.cpp` validates the
   timer as 1..=60 (`MAX_PRIVATE_MESSAGE_TTL = 60`, "server-side
   limit"). Consequence: this slice ships for **private chats only**;
   the original "secret chats" assumption in the task brief was wrong
@@ -2181,9 +2183,13 @@ are rough (S < 1 day, M = days, L = week+).
   `updateDeleteMessages` removes it and the tick gate goes quiet.
 - **Out of this slice (→ future):** auto-delete timers for regular
   chats (`messageAutoDeleteTime`); screenshot-detection notices;
-  secret-chat-specific notification behavior; secret-chat TTL UI
+  secret-chat-specific notification behavior. ~~Secret-chat TTL UI
   (likely a per-chat timer mechanism distinct from this slice's
-  per-media type — unverified, no constructor in the pinned schema).
+  per-media type — unverified, no constructor in the pinned
+  schema).~~ **Correction (Phase B4, same day):** the mechanism was
+  found — `setChatMessageAutoDeleteTime` (schema 1.8.67 :13454) and
+  `chat.message_auto_delete_time` (:3616/:3627) — and is implemented
+  in Phase B4 below.
 
 ## Phase C1 — 1-on-1 call signaling + call UI (2026-09-26)
 
@@ -2261,3 +2267,87 @@ are rough (S < 1 day, M = days, L = week+).
   calls (`is_video`); group calls / voice chats; `sendCallDebugInformation`
   / `need_debug_information` / `need_log` upload; richer rating
   (comment + `callProblem` checklist).
+
+## Phase B4 — Chat-level auto-delete / self-destruct timer (2026-09-26)
+
+- **Rationale.** Official clients let a user set a chat-wide timer: in
+  secret chats every message self-destructs N seconds after being
+  viewed; in other chats every message is deleted N days after sending.
+  Phase B3 had concluded the secret-chat mechanism was unverified —
+  that was wrong: the mechanism is chat-level, not per-media, and is
+  fully in the pinned schema. This slice implements it.
+- **Schema (1.8.67, verified verbatim in `schema/td_api.tl`):**
+  `setChatMessageAutoDeleteTime chat_id:int53 message_auto_delete_time:int32`
+  (:13454) — secret chats accept arbitrary non-negative seconds;
+  non-secret chats accept 0–365 days and nonzero values must be
+  divisible by 86400; groups/channels require `change_info`
+  (`canChangeInfo`). `chat.message_auto_delete_time` (:3616/:3627 —
+  countdown from view in secret chats, from send date otherwise).
+  `updateChatMessageAutoDeleteTime` (:10549). The timer-change service
+  message `messageChatSetMessageAutoDeleteTime` (:5387). Per-message
+  `message.auto_delete_in` (:3148, `double` seconds, in the message
+  constructor at :3165).
+- **Scope decision.** Secret-chat timers are fully implemented: send
+  path, receive state, live updates, picker UI, service rows,
+  countdown chips. Non-secret (regular) chat timers are implemented
+  through the **state/receive/driver** layers (`ChatSummary`
+  gains `message_auto_delete_time` + `ttl_status_line()` for every
+  chat; the driver validates day-multiples and accepts
+  `updateChatMessageAutoDeleteTime` for any chat) but the **picker
+  UI is secret-chat-only for now**: TDLib requires `change_info`
+  rights in groups/channels and Quill does not yet know whether the
+  viewer holds them. Wiring the regular-chat picker is the immediate
+  follow-up (rights-aware gating), documented rather than half-built.
+- **Send.** `requests::set_chat_message_auto_delete_time(extra,
+  chat_id, seconds)` (shape test); driver method
+  `set_chat_message_auto_delete_time` validates: negative → error;
+  secret chats accept arbitrary non-negative seconds; non-secret
+  chats accept 0 or day-multiples up to 365 days (else error);
+  unknown chat → error. Registers
+  `RequestPurpose::SetChatMessageAutoDeleteTime` and drops the pending
+  request on send failure. Group/channel `change_info` rights gating
+  is not implemented (deferred — see scope decision).
+- **Receive.** `EnvelopePayload::UpdateNewChat` parses
+  `message_auto_delete_time` (default 0 when absent);
+  `EnvelopePayload::UpdateChatMessageAutoDeleteTime` applies live
+  updates. `MessageContent::ChatTtlChanged { secs }` parses
+  `messageChatSetMessageAutoDeleteTime` (`from_user_id` is dropped —
+  the service row needs no attribution). `ParsedMessage.auto_delete`
+  / `HistoryMessage.auto_delete` carry `MessageAutoDelete {
+  expires_in_ms, fetched_at_ms }` (whole milliseconds, keeps `Eq`);
+  unknown future content variants degrade to `None`. Countdown decay
+  mirrors Phase B3's `MessageSelfDestruct` (`remaining_secs`,
+  `div_ceil` round-up, `auto_delete_chip()` label `🗑 … left`).
+  Rows leave via the normal `updateDeleteMessages` path — no special
+  deletion code. Local search propagation included
+  (`SearchMessageHit.auto_delete`).
+- **Formatting.** `format_countdown_secs` (div_ceil); `format_ttl_setting`
+  picks the largest exactly divisible unit (90 s stays `90s`, 604800 →
+  `7d`). `chat_ttl_service_label`: secret → `Self-destruct timer set
+  to 1h`; regular → `Auto-delete timer set to 1d`; 0 → `… timer turned
+  off`. Chat previews stay neutral (no chat-kind context there).
+- **UI.** Open-chat header shows the timer status line (`Self-destruct:
+  1h` / `Auto-delete: 1d`) in all three identity-layout branches;
+  Ready secret chats get a header ⏱ button (`⏱ 1h`) opening a picker
+  panel (Off / 5s / 30s / 1m / 1h / 1d / 1w; current value shown).
+  `ChatTtlChanged` rows render as centered neutral service notices
+  before normal bubble controls. The countdown chip shares the
+  existing 1-second self-destruct render tick (the tick predicate now
+  also detects live auto-delete countdowns). The picker closes on
+  chat switch and Escape. Demo-mode `apply_chat_ttl` mutates state
+  directly (no network).
+- **Screenshot:** `docs/screenshots/ready-chat-ttl.png` —
+  `quill --screenshot-demo ready-chat-ttl`: Ready secret chat with
+  Zed, `message_auto_delete_time` 3600, a message with a live
+  `auto_delete_in` countdown chip, the timer-change service row, and
+  the picker expanded.
+- **Tests.** Envelope: initial chat timer, missing default 0, live
+  update, service-message content, `auto_delete_in` parse,
+  formatting + wording. Driver: validation for secret (arbitrary
+  seconds) and regular (day-multiples, reject 90s/negative/over-365d)
+  plus unknown chat. Replay: initial + live update (incl. regular
+  chat 1d), service row in history, `auto_delete_in` on the row and
+  normal `updateDeleteMessages` removal.
+- **Out of this slice (→ future):** regular-chat picker UI with
+  `change_info` rights gating; screenshot-detection notices;
+  secret-chat-specific notification behavior.

@@ -551,6 +551,32 @@ pub fn send_call_rating(extra: RequestId, call_id: i32, rating: i32) -> String {
     .to_string()
 }
 
+/// Phase B4: `setChatMessageAutoDeleteTime` (TDLib 1.8.67,
+/// `schema/td_api.tl:13454`):
+/// `setChatMessageAutoDeleteTime chat_id:int53
+/// message_auto_delete_time:int32 = Ok;`
+/// "Changes the message auto-delete **or self-destruct (for secret
+/// chats)** time in a chat. Requires change_info administrator right in
+/// basic groups, supergroups and channels."
+/// Value rule (from the schema comment): unless the chat is secret, the
+/// time must be 0 or a multiple of 86400, up to 365 * 86400; secret chats
+/// accept arbitrary second values. 0 disables the timer. The driver
+/// enforces the rule before sending (defense in depth); the new value
+/// arrives back as `updateChatMessageAutoDeleteTime`.
+pub fn set_chat_message_auto_delete_time(
+    extra: RequestId,
+    chat_id: i64,
+    message_auto_delete_time: i32,
+) -> String {
+    json!({
+        "@type": "setChatMessageAutoDeleteTime",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id,
+        "message_auto_delete_time": message_auto_delete_time,
+    })
+    .to_string()
+}
+
 /// Phase 3.3: `getCommands` for a bot's global (default) command scope
 /// (TDLib 1.8.67, `schema/td_api.tl:14953`):
 /// `getCommands scope:BotCommandScope language_code:string = BotCommands;`
@@ -1993,6 +2019,23 @@ pub fn expected_runtime_label() -> String {
 mod tests {
     use super::*;
     use crate::ids::RequestId;
+
+    #[test]
+    fn set_chat_message_auto_delete_time_shape_matches_1_8_67() {
+        // Phase B4: `setChatMessageAutoDeleteTime chat_id:int53
+        // message_auto_delete_time:int32 = Ok` (schema 1.8.67, line
+        // 13454).
+        let json = set_chat_message_auto_delete_time(RequestId(21), 41, 3600);
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "setChatMessageAutoDeleteTime");
+        assert_eq!(v["@extra"], "21");
+        assert_eq!(v["chat_id"], 41);
+        assert_eq!(v["message_auto_delete_time"], 3600);
+
+        let off = set_chat_message_auto_delete_time(RequestId(22), 11, 0);
+        let v: serde_json::Value = serde_json::from_str(&off).unwrap();
+        assert_eq!(v["message_auto_delete_time"], 0);
+    }
 
     #[test]
     fn get_commands_shape_matches_1_8_67() {

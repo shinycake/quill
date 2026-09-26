@@ -110,6 +110,11 @@ pub enum EnvelopePayload {
         /// when the block is absent (the real `chat` object always carries
         /// it); refreshed by `updateChatPermissions`.
         can_send_basic_messages: bool,
+        /// Phase B4: `chat.message_auto_delete_time` (schema 1.8.67,
+        /// lines 3616 / 3627) — the chat-level auto-delete or
+        /// self-destruct (secret chats) timer, in seconds; 0 when
+        /// disabled. Refreshed by `updateChatMessageAutoDeleteTime`.
+        message_auto_delete_time: i32,
     },
     /// `updateChatDraftMessage`. Positions are the new chat-list orders.
     UpdateChatDraftMessage {
@@ -122,6 +127,13 @@ pub enum EnvelopePayload {
     UpdateChatPermissions {
         chat_id: ChatId,
         can_send_basic_messages: bool,
+    },
+    /// Phase B4: `updateChatMessageAutoDeleteTime` (schema 1.8.67,
+    /// line 10549) — the chat-level auto-delete or self-destruct
+    /// (secret chats) timer changed.
+    UpdateChatMessageAutoDeleteTime {
+        chat_id: ChatId,
+        message_auto_delete_time: i32,
     },
     /// `updateUser` — Phase 6 keeps the full parsed user (contacts list,
     /// user info panel) in `Session::users`; the bot bit still drives the
@@ -1608,6 +1620,12 @@ pub struct ParsedMessage {
     /// `messageSelfDestructTypeImmediately` (line 5918); unknown future
     /// variants degrade to `None` (message renders without a timer badge).
     pub self_destruct: Option<MessageSelfDestruct>,
+    /// Phase B4: `message.auto_delete_in` (TDLib 1.8.67,
+    /// `schema/td_api.tl:3148` / `:3165`) — seconds left before the
+    /// chat's `message_auto_delete_time` setting deletes this message;
+    /// `None` when never. Renders as a countdown chip on the row; the
+    /// row itself leaves via `updateDeleteMessages`.
+    pub auto_delete: Option<MessageAutoDelete>,
 }
 
 /// Phase B3: the configured self-destruct mode of a message.
@@ -1706,6 +1724,109 @@ fn parse_self_destruct(
     Some(MessageSelfDestruct {
         kind,
         expires_in_ms,
+        fetched_at_ms: now_ms(),
+    })
+}
+
+/// Phase B4: parsed `message.auto_delete_in` (schema 1.8.67, lines
+/// 3148 / 3165) — "Time left before the message will be automatically
+/// deleted by message_auto_delete_time setting of the chat, in seconds;
+/// 0 if never". Arrives as a double (seconds, possibly fractional);
+/// non-finite or negative values degrade to `None` (the row renders
+/// without a countdown). TDLib removes the row via `updateDeleteMessages`
+/// when it fires — no special deletion code. Whole milliseconds (not
+/// `f64`) so the struct keeps the `Eq` derive that `ParsedMessage` /
+/// `HistoryMessage` require.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MessageAutoDelete {
+    pub expires_in_ms: i64,
+    /// Local clock (ms) when `expires_in_ms` was received, for the local
+    /// countdown decay (same pattern as `MessageSelfDestruct`, Phase B3).
+    pub fetched_at_ms: u64,
+}
+
+impl MessageAutoDelete {
+    /// Locally decayed whole seconds left. The value keeps decaying to 0
+    /// (the row stays until TDLib's `updateDeleteMessages` removes it).
+    pub fn remaining_secs(&self, now_ms: u64) -> u64 {
+        let elapsed_ms = now_ms.saturating_sub(self.fetched_at_ms) as i64;
+        let remaining_ms = self.expires_in_ms - elapsed_ms;
+        if remaining_ms > 0 {
+            ((remaining_ms + 999) / 1000) as u64
+        } else {
+            0
+        }
+    }
+
+    /// Countdown chip label for message rows, e.g. "🗑 59m left".
+    pub fn chip_label(&self, now_ms: u64) -> String {
+        format!(
+            "🗑 {} left",
+            format_countdown_secs(self.remaining_secs(now_ms))
+        )
+    }
+}
+
+/// Compact duration for countdown labels: 45 → "45s", 90 → "2m",
+/// 3600 → "1h", 90000 → "1d". Rounds up like the self-destruct badge.
+pub fn format_countdown_secs(secs: u64) -> String {
+    if secs < 60 {
+        format!("{secs}s")
+    } else if secs < 3600 {
+        format!("{}m", secs.div_ceil(60))
+    } else if secs < 86400 {
+        format!("{}h", secs.div_ceil(3600))
+    } else {
+        format!("{}d", secs.div_ceil(86400))
+    }
+}
+
+/// Phase B4: compact label for a chat-level TTL setting in seconds —
+/// "5s" / "30s" / "1m" / "1h" / "1d" / "7d" for the values the picker
+/// offers, exact units for arbitrary values other clients may set
+/// (90 → "2m" would be wrong; 90s → "90s"). Picks the largest unit that
+/// divides the value evenly.
+pub fn format_ttl_setting(secs: i32) -> String {
+    if secs <= 0 {
+        return "Off".to_string();
+    }
+    if secs % 86400 == 0 {
+        format!("{}d", secs / 86400)
+    } else if secs % 3600 == 0 {
+        format!("{}h", secs / 3600)
+    } else if secs % 60 == 0 {
+        format!("{}m", secs / 60)
+    } else {
+        format!("{secs}s")
+    }
+}
+
+/// Phase B4: service-row label for `messageChatSetMessageAutoDeleteTime`
+/// (schema 1.8.67, line 5387). `secret` selects the official wording:
+/// "Self-destruct timer" in secret chats, "Auto-delete timer" elsewhere.
+pub fn chat_ttl_service_label(secs: i32, secret: bool) -> String {
+    let noun = if secret {
+        "Self-destruct timer"
+    } else {
+        "Auto-delete timer"
+    };
+    if secs > 0 {
+        format!("{noun} set to {}", format_ttl_setting(secs))
+    } else {
+        format!("{noun} turned off")
+    }
+}
+
+/// Parse `message.auto_delete_in` (schema 1.8.67, lines 3148 / 3165).
+/// `None` when the field is absent, null, or 0 (never auto-deleted);
+/// garbage degrades to `None`.
+fn parse_auto_delete_in(value: Option<&Value>) -> Option<MessageAutoDelete> {
+    let secs = value?.as_f64()?;
+    if !secs.is_finite() || secs <= 0.0 {
+        return None;
+    }
+    Some(MessageAutoDelete {
+        expires_in_ms: (secs * 1000.0).round() as i64,
         fetched_at_ms: now_ms(),
     })
 }
@@ -2121,6 +2242,14 @@ pub enum MessageContent {
     Contact(ContactContent),
     /// Phase 4.4: `messageDice` (TDLib 1.8.67, `schema/td_api.tl:5231`).
     Dice(DiceContent),
+    /// Phase B4: `messageChatSetMessageAutoDeleteTime` (TDLib 1.8.67,
+    /// `schema/td_api.tl:5387`) — the chat's auto-delete / self-destruct
+    /// (secret chats) timer was changed; new value in seconds, 0 when
+    /// disabled. Rendered as a centered service row (Quill has no generic
+    /// service-message pipeline; this is the first one).
+    ChatTtlChanged {
+        secs: i32,
+    },
     Unsupported {
         type_name: String,
     },
@@ -2624,6 +2753,16 @@ impl MessageContent {
                 }
             }
             MessageContent::Dice(dice) => dice.label(),
+            // Phase B4: neutral noun — `preview()` has no chat-kind
+            // context; the row renderer (which knows the chat) uses
+            // "Self-destruct"/"Auto-delete" via `chat_ttl_service_label`.
+            MessageContent::ChatTtlChanged { secs } => {
+                if *secs > 0 {
+                    format!("Timer set to {}", format_ttl_setting(*secs))
+                } else {
+                    "Timer turned off".to_string()
+                }
+            }
             MessageContent::Unsupported { type_name } => format!("({type_name})"),
         }
     }
@@ -3364,6 +3503,14 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
                     .and_then(|p| p.get("can_send_basic_messages"))
                     .and_then(Value::as_bool)
                     .unwrap_or(true),
+                // Phase B4: `chat.message_auto_delete_time` (schema 1.8.67,
+                // lines 3616 / 3627). Defaults to 0 (disabled) when
+                // absent — the field is new enough that older TDLib
+                // builds may omit it.
+                message_auto_delete_time: chat
+                    .get("message_auto_delete_time")
+                    .and_then(Value::as_i64)
+                    .unwrap_or(0) as i32,
             })
         }
         "updateChatPermissions" => {
@@ -3376,6 +3523,18 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
                     .and_then(|p| p.get("can_send_basic_messages"))
                     .and_then(Value::as_bool)
                     .unwrap_or(true),
+            })
+        }
+        "updateChatMessageAutoDeleteTime" => {
+            // Phase B4: `updateChatMessageAutoDeleteTime` (schema 1.8.67,
+            // line 10549) — the chat-level auto-delete or self-destruct
+            // timer changed.
+            Ok(EnvelopePayload::UpdateChatMessageAutoDeleteTime {
+                chat_id: ChatId(int53(value.get("chat_id"))?),
+                message_auto_delete_time: value
+                    .get("message_auto_delete_time")
+                    .and_then(Value::as_i64)
+                    .unwrap_or(0) as i32,
             })
         }
         "ok" => Ok(EnvelopePayload::Ok),
@@ -4471,6 +4630,7 @@ fn parse_message(value: &Value) -> Result<ParsedMessage, ParseError> {
             value.get("self_destruct_type"),
             value.get("self_destruct_in"),
         ),
+        auto_delete: parse_auto_delete_in(value.get("auto_delete_in")),
     })
 }
 
@@ -4689,6 +4849,19 @@ fn parse_content(value: Option<&Value>) -> (MessageContent, Vec<ParsedFile>) {
         Some("messageVenue") => parse_message_venue(value),
         Some("messageContact") => parse_message_contact(value),
         Some("messageDice") => parse_message_dice(value),
+        // Phase B4: `messageChatSetMessageAutoDeleteTime` (schema 1.8.67,
+        // line 5387) — the chat's auto-delete / self-destruct timer was
+        // changed. `from_user_id` is not kept (the row is a neutral
+        // service notice, not attributed in the UI).
+        Some("messageChatSetMessageAutoDeleteTime") => (
+            MessageContent::ChatTtlChanged {
+                secs: value
+                    .get("message_auto_delete_time")
+                    .and_then(Value::as_i64)
+                    .unwrap_or(0) as i32,
+            },
+            Vec::new(),
+        ),
         Some(other) => (
             MessageContent::Unsupported {
                 type_name: other.to_string(),
@@ -8449,6 +8622,137 @@ mod channel_envelope_tests {
             }
             other => panic!("{other:?}"),
         }
+    }
+
+    #[test]
+    fn update_new_chat_parses_message_auto_delete_time() {
+        // Phase B4: `chat.message_auto_delete_time` (schema 1.8.67, lines
+        // 3616 / 3627) — chat-level auto-delete / self-destruct timer.
+        let json = r#"{"@type":"updateNewChat","chat":{"id":41,"title":"Zed","type":{"@type":"chatTypeSecret","secret_chat_id":7,"user_id":41},"unread_count":0,"message_auto_delete_time":3600}}"#;
+        let env = parse_envelope(json).unwrap();
+        match env.payload {
+            EnvelopePayload::UpdateNewChat {
+                message_auto_delete_time,
+                ..
+            } => assert_eq!(message_auto_delete_time, 3600),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn update_new_chat_without_auto_delete_time_defaults_to_zero() {
+        let json = r#"{"@type":"updateNewChat","chat":{"id":11,"title":"Demo","type":{"@type":"chatTypePrivate","user_id":11},"unread_count":0}}"#;
+        let env = parse_envelope(json).unwrap();
+        match env.payload {
+            EnvelopePayload::UpdateNewChat {
+                message_auto_delete_time,
+                ..
+            } => assert_eq!(message_auto_delete_time, 0),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn update_chat_message_auto_delete_time_parsed() {
+        // Phase B4: `updateChatMessageAutoDeleteTime` (schema 1.8.67,
+        // line 10549).
+        let json = r#"{"@type":"updateChatMessageAutoDeleteTime","chat_id":41,"message_auto_delete_time":86400}"#;
+        let env = parse_envelope(json).unwrap();
+        match env.payload {
+            EnvelopePayload::UpdateChatMessageAutoDeleteTime {
+                chat_id,
+                message_auto_delete_time,
+            } => {
+                assert_eq!(chat_id.0, 41);
+                assert_eq!(message_auto_delete_time, 86400);
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn service_message_chat_ttl_changed_parsed() {
+        // Phase B4: `messageChatSetMessageAutoDeleteTime` (schema 1.8.67,
+        // line 5387) parses to the service-row variant.
+        let json = r#"{"id":501,"chat_id":41,"is_outgoing":true,"content":{"@type":"messageChatSetMessageAutoDeleteTime","message_auto_delete_time":3600,"from_user_id":999}}"#;
+        let parsed = parse_message(&serde_json::from_str(json).unwrap()).unwrap();
+        assert!(matches!(
+            parsed.content,
+            MessageContent::ChatTtlChanged { secs: 3600 }
+        ));
+        // `from_user_id` is intentionally not kept.
+        assert!(parsed.auto_delete.is_none());
+    }
+
+    #[test]
+    fn service_message_chat_ttl_disabled_parsed() {
+        let json = r#"{"id":502,"chat_id":41,"is_outgoing":false,"content":{"@type":"messageChatSetMessageAutoDeleteTime","message_auto_delete_time":0,"from_user_id":0}}"#;
+        let parsed = parse_message(&serde_json::from_str(json).unwrap()).unwrap();
+        assert!(matches!(
+            parsed.content,
+            MessageContent::ChatTtlChanged { secs: 0 }
+        ));
+    }
+
+    #[test]
+    fn auto_delete_in_parsed_as_countdown() {
+        // Phase B4: `message.auto_delete_in` (schema 1.8.67, line 3148) —
+        // double seconds → whole milliseconds; 0 / absent / garbage →
+        // None.
+        let json = r#"{"id":503,"chat_id":41,"is_outgoing":false,"auto_delete_in":3595.5,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"hi","entities":[]}}}"#;
+        let parsed = parse_message(&serde_json::from_str(json).unwrap()).unwrap();
+        let auto_delete = parsed.auto_delete.expect("auto_delete_in parsed");
+        assert_eq!(auto_delete.expires_in_ms, 3_595_500);
+
+        for json in [
+            r#"{"id":504,"chat_id":41,"is_outgoing":false,"auto_delete_in":0,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"hi","entities":[]}}}"#,
+            r#"{"id":505,"chat_id":41,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"hi","entities":[]}}}"#,
+            r#"{"id":506,"chat_id":41,"is_outgoing":false,"auto_delete_in":-5.0,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"hi","entities":[]}}}"#,
+            r#"{"id":507,"chat_id":41,"is_outgoing":false,"auto_delete_in":"soon","content":{"@type":"messageText","text":{"@type":"formattedText","text":"hi","entities":[]}}}"#,
+        ] {
+            let parsed = parse_message(&serde_json::from_str(json).unwrap()).unwrap();
+            assert!(
+                parsed.auto_delete.is_none(),
+                "auto_delete_in degraded to None: {json}"
+            );
+        }
+    }
+
+    #[test]
+    fn format_ttl_setting_cases() {
+        // Phase B4: exact-unit labels for the picker values and arbitrary
+        // values other clients may set.
+        assert_eq!(format_ttl_setting(0), "Off");
+        assert_eq!(format_ttl_setting(-5), "Off");
+        assert_eq!(format_ttl_setting(5), "5s");
+        assert_eq!(format_ttl_setting(30), "30s");
+        assert_eq!(format_ttl_setting(60), "1m");
+        assert_eq!(format_ttl_setting(90), "90s");
+        assert_eq!(format_ttl_setting(3600), "1h");
+        assert_eq!(format_ttl_setting(86400), "1d");
+        assert_eq!(format_ttl_setting(604800), "7d");
+        assert_eq!(format_ttl_setting(2592000), "30d");
+    }
+
+    #[test]
+    fn chat_ttl_service_label_wording() {
+        // Phase B4: secret chats say "Self-destruct", others "Auto-delete".
+        assert_eq!(
+            chat_ttl_service_label(3600, true),
+            "Self-destruct timer set to 1h"
+        );
+        assert_eq!(
+            chat_ttl_service_label(0, true),
+            "Self-destruct timer turned off"
+        );
+        assert_eq!(
+            chat_ttl_service_label(86400, false),
+            "Auto-delete timer set to 1d"
+        );
+        assert_eq!(
+            chat_ttl_service_label(0, false),
+            "Auto-delete timer turned off"
+        );
     }
 
     #[test]
