@@ -2566,7 +2566,9 @@ clients"). That is outdated:
   (:10862); `signalingDataEmitted` → `sendCallSignalingData` (:14218);
   `setMuteMicrophone`, `setAudioInputDevice` / `setAudioOutputDevice`,
   `setInputVolume` / `setOutputVolume`; `Meta::Versions()` →
-  `["7.0.0","8.0.0","9.0.0","12.0.0","13.0.0"]` and `Meta::MaxLayer()` →
+  `["7.0.0","8.0.0","9.0.0","12.0.0","13.0.0"]` (current master also
+  lists `"14.0.0"` in the v2 compat impl; read the list at runtime) and
+  `Meta::MaxLayer()` →
   `92` (matches the `max_layer: 92` real peers advertise — the honest
   `callProtocol` (:7008) values fall straight out: `udp_p2p` /
   `udp_reflector` per engine config, `min_layer` 65 / `max_layer` 92,
@@ -2579,7 +2581,7 @@ clients"). That is outdated:
   `THIRD_PARTY.md` and the LGPL source offer for the library itself.
   (Static linking would instead trigger LGPL relink obligations —
   avoided by design.)
-- **Build is the blocker.** tgcalls is 81 C++ files but needs a large
+- **Build is the blocker.** tgcalls is 86 C++ files but needs a large
   WebRTC subset (`rtc_base`, `api`, `pc`, `media/base`), abseil, libyuv,
   and boringssl/OpenSSL. Known-good builds: tdesktop's
   `ThirdParty/tgcalls` CMake against `desktop-app/lib_webrtc` (custom
