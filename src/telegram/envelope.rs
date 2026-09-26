@@ -295,6 +295,26 @@ pub enum EnvelopePayload {
     UpdateChatFolders {
         folders: Vec<ChatFolderInfo>,
     },
+    /// Phase 9.1: `updateChatActiveStories` (TDLib 1.8.67,
+    /// `schema/td_api.tl:10911`) — the active stories of a chat changed.
+    /// The reducer keeps it in `Session::story_tray`; only entries with
+    /// `list == Main` are shown in the story tray above the chat list.
+    UpdateChatActiveStories {
+        active_stories: ChatActiveStoriesView,
+    },
+    /// Phase 9.1: `chatActiveStories` — the `getChatActiveStories` response
+    /// (TDLib 1.8.67, `schema/td_api.tl:13768`); handled like the update.
+    ChatActiveStories {
+        active_stories: ChatActiveStoriesView,
+    },
+    /// Phase 9.1: `story` — the `getStory` response (TDLib 1.8.67,
+    /// `schema/td_api.tl:13695`); also the `updateStory` update (line
+    /// 10895). The reducer keeps it in `Session::stories` keyed by
+    /// `(poster_chat_id, id)` for the story viewer.
+    Story {
+        story: ParsedStory,
+        files: Vec<ParsedFile>,
+    },
     Unknown(UnknownKind),
 }
 
@@ -1089,6 +1109,219 @@ fn parse_forum_topic(value: &Value) -> Option<ForumTopic> {
         order,
         last_message_preview,
     })
+}
+
+/// Phase 9.1: a story list identifier — `storyListMain` /
+/// `storyListArchive` (TDLib 1.8.67, `schema/td_api.tl:6684-6690`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StoryListView {
+    Main,
+    Archive,
+}
+
+/// Phase 9.1: `storyInfo` — basic information about one active story
+/// (TDLib 1.8.67, `schema/td_api.tl:6767-6773`). `chatActiveStories.stories`
+/// arrive in chronological order (increasing `story_id`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StoryInfoView {
+    pub story_id: i32,
+    pub date: i32,
+    pub is_for_close_friends: bool,
+    pub is_live: bool,
+}
+
+/// Phase 9.1: `chatActiveStories` — active stories posted by a chat (TDLib
+/// 1.8.67, `schema/td_api.tl:6776-6783`). Only the tray needs are kept:
+/// `list` (null when the stories are not shown in any story list),
+/// `order` (tray sort key), `max_read_story_id` (unread rings), and the
+/// `storyInfo` list. Dropped: `can_be_archived`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChatActiveStoriesView {
+    pub chat_id: i64,
+    pub list: Option<StoryListView>,
+    pub order: i64,
+    pub max_read_story_id: i32,
+    pub stories: Vec<StoryInfoView>,
+}
+
+impl ChatActiveStoriesView {
+    /// True when any active story is newer than `max_read_story_id` — the
+    /// tray ring renders unread.
+    pub fn has_unread(&self) -> bool {
+        self.stories
+            .iter()
+            .any(|story| story.story_id > self.max_read_story_id)
+    }
+}
+
+/// Phase 9.1: story media Quill renders in the viewer: photo and video only.
+/// Live stories and unsupported content keep the story item but render a
+/// placeholder (no group-call join, no RTMP — out of scope).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StoryContentView {
+    Photo {
+        sizes: Vec<PhotoSizeView>,
+    },
+    Video {
+        /// `storyVideo.thumbnail.file` (`thumbnail`, TDLib 1.8.67,
+        /// `schema/td_api.tl:6633`) — the only display candidate; the full
+        /// clip is not renderable by the image element (same call as the
+        /// Phase 4.5 media viewer).
+        thumb_file_id: Option<FileId>,
+        thumb_width: i32,
+        thumb_height: i32,
+        /// `storyVideo.duration:double` — whole seconds for the label.
+        duration_secs: i32,
+        /// `storyVideo.video:file` — downloaded when there is no thumbnail
+        /// so the file lands local.
+        file_id: FileId,
+    },
+    Live,
+    Unsupported,
+}
+
+/// Phase 9.1: `story` — the full story object (TDLib 1.8.67,
+/// `schema/td_api.tl:6742`). Kept: ids, `date`, `content`, `caption`.
+/// Dropped (see DECISIONS.md Phase 9.1): repost/interaction info, chosen
+/// reaction, privacy settings, clickable areas, album ids, and all the
+/// `is_*` / `can_be_*` flags.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParsedStory {
+    pub id: i32,
+    pub poster_chat_id: i64,
+    pub date: i32,
+    pub content: StoryContentView,
+    pub caption: String,
+    pub caption_entities: Vec<TextEntity>,
+}
+
+fn parse_story_list(value: Option<&Value>) -> Option<StoryListView> {
+    match value
+        .and_then(|value| value.get("@type"))
+        .and_then(Value::as_str)
+    {
+        Some("storyListMain") => Some(StoryListView::Main),
+        Some("storyListArchive") => Some(StoryListView::Archive),
+        _ => None,
+    }
+}
+
+fn parse_story_info(value: &Value) -> Option<StoryInfoView> {
+    Some(StoryInfoView {
+        story_id: value.get("story_id")?.as_i64()? as i32,
+        date: value.get("date").and_then(Value::as_i64).unwrap_or(0) as i32,
+        is_for_close_friends: value
+            .get("is_for_close_friends")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        is_live: value
+            .get("is_live")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+    })
+}
+
+fn parse_chat_active_stories(value: &Value) -> Option<ChatActiveStoriesView> {
+    Some(ChatActiveStoriesView {
+        chat_id: int53(value.get("chat_id")).ok()?,
+        list: parse_story_list(value.get("list")),
+        order: int53_or_zero(value.get("order")),
+        max_read_story_id: value
+            .get("max_read_story_id")
+            .and_then(Value::as_i64)
+            .unwrap_or(0) as i32,
+        stories: value
+            .get("stories")
+            .and_then(Value::as_array)
+            .map(|stories| stories.iter().filter_map(parse_story_info).collect())
+            .unwrap_or_default(),
+    })
+}
+
+/// Parse one `story` object. Returns `None` when the required ids are
+/// missing; unknown or missing `content` degrades to `Unsupported` rather
+/// than failing the row. Collects the content's `file`s like the message
+/// content parsers do.
+fn parse_story(value: &Value) -> Option<(ParsedStory, Vec<ParsedFile>)> {
+    let id = value.get("id")?.as_i64()? as i32;
+    let poster_chat_id = int53(value.get("poster_chat_id")).ok()?;
+    let (caption, caption_entities) = parse_caption(value.get("caption"));
+    let mut files = Vec::new();
+    let content = parse_story_content(value.get("content"), &mut files);
+    files.retain(|file| file.id.0 != 0);
+    Some((
+        ParsedStory {
+            id,
+            poster_chat_id,
+            date: value.get("date").and_then(Value::as_i64).unwrap_or(0) as i32,
+            content,
+            caption,
+            caption_entities,
+        },
+        files,
+    ))
+}
+
+fn parse_story_content(value: Option<&Value>, files: &mut Vec<ParsedFile>) -> StoryContentView {
+    let Some(value) = value.filter(|value| !value.is_null()) else {
+        return StoryContentView::Unsupported;
+    };
+    match value.get("@type").and_then(Value::as_str) {
+        Some("storyContentPhoto") => match value.get("photo") {
+            Some(photo) => {
+                let (sizes, mut photo_files) = parse_photo_sizes(photo);
+                files.append(&mut photo_files);
+                StoryContentView::Photo { sizes }
+            }
+            None => StoryContentView::Unsupported,
+        },
+        Some("storyContentVideo") => {
+            let video = value.get("video");
+            let duration_secs = video
+                .and_then(|video| video.get("duration"))
+                .and_then(|duration| {
+                    duration
+                        .as_f64()
+                        .or_else(|| duration.as_i64().map(|d| d as f64))
+                })
+                .unwrap_or(0.0) as i32;
+            let file_id = video
+                .and_then(|video| parse_file(video.get("video")).ok())
+                .map(|file| {
+                    let id = file.id;
+                    files.push(file);
+                    id
+                })
+                .unwrap_or(FileId(0));
+            let thumb = video
+                .and_then(|video| video.get("thumbnail"))
+                .filter(|thumb| !thumb.is_null());
+            let (thumb_file_id, thumb_width, thumb_height) = match thumb {
+                Some(thumb) => (
+                    parse_file(thumb.get("file"))
+                        .ok()
+                        .map(|file| {
+                            let id = file.id;
+                            files.push(file);
+                            id
+                        })
+                        .filter(|id| id.0 != 0),
+                    int53_or_zero(thumb.get("width")) as i32,
+                    int53_or_zero(thumb.get("height")) as i32,
+                ),
+                None => (None, 0, 0),
+            };
+            StoryContentView::Video {
+                thumb_file_id,
+                thumb_width,
+                thumb_height,
+                duration_secs,
+                file_id,
+            }
+        }
+        Some("storyContentLive") => StoryContentView::Live,
+        _ => StoryContentView::Unsupported,
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2158,6 +2391,26 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
                 .map(|arr| arr.iter().filter_map(parse_chat_folder_info).collect())
                 .unwrap_or_default();
             Ok(EnvelopePayload::UpdateChatFolders { folders })
+        }
+        "updateChatActiveStories" => {
+            let active_stories = value
+                .get("active_stories")
+                .ok_or(ParseError::MissingField)?;
+            parse_chat_active_stories(active_stories)
+                .map(|active_stories| EnvelopePayload::UpdateChatActiveStories { active_stories })
+                .ok_or(ParseError::MissingField)
+        }
+        "chatActiveStories" => parse_chat_active_stories(&value)
+            .map(|active_stories| EnvelopePayload::ChatActiveStories { active_stories })
+            .ok_or(ParseError::MissingField),
+        "story" => {
+            let (story, files) = parse_story(&value).ok_or(ParseError::MissingField)?;
+            Ok(EnvelopePayload::Story { story, files })
+        }
+        "updateStory" => {
+            let story = value.get("story").ok_or(ParseError::MissingField)?;
+            let (story, files) = parse_story(story).ok_or(ParseError::MissingField)?;
+            Ok(EnvelopePayload::Story { story, files })
         }
         "updateChatReadInbox" => Ok(EnvelopePayload::UpdateChatReadInbox {
             chat_id: ChatId(int53(value.get("chat_id"))?),
@@ -6568,6 +6821,136 @@ mod channel_envelope_tests {
                 assert_eq!(pos.order, 50);
             }
             other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn update_chat_active_stories_parses_tray_fields() {
+        // `updateChatActiveStories` (schema 1.8.67 line 10911): keeps the
+        // tray sort key and read state; `can_be_archived` is dropped.
+        let json = r#"{"@type":"updateChatActiveStories","active_stories":{"@type":"chatActiveStories","chat_id":11,"list":{"@type":"storyListMain"},"order":"9000","can_be_archived":true,"max_read_story_id":4,"stories":[{"@type":"storyInfo","story_id":5,"date":1700000000,"is_for_close_friends":false,"is_live":false},{"@type":"storyInfo","story_id":3,"date":1699990000,"is_for_close_friends":true,"is_live":false}]}}"#;
+        let env = parse_envelope(json).unwrap();
+        match env.payload {
+            EnvelopePayload::UpdateChatActiveStories { active_stories } => {
+                assert_eq!(active_stories.chat_id, 11);
+                assert_eq!(active_stories.list, Some(StoryListView::Main));
+                assert_eq!(active_stories.order, 9000);
+                assert_eq!(active_stories.max_read_story_id, 4);
+                assert_eq!(active_stories.stories.len(), 2);
+                assert_eq!(active_stories.stories[0].story_id, 5);
+                assert!(active_stories.stories[1].is_for_close_friends);
+                assert!(active_stories.has_unread());
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn chat_active_stories_null_list_and_no_unread() {
+        // `list` may be null (schema line 6778); all stories read.
+        let json = r#"{"@type":"chatActiveStories","chat_id":12,"list":null,"order":"0","can_be_archived":false,"max_read_story_id":9,"stories":[{"@type":"storyInfo","story_id":9,"date":1,"is_for_close_friends":false,"is_live":false}]}"#;
+        let env = parse_envelope(json).unwrap();
+        match env.payload {
+            EnvelopePayload::ChatActiveStories { active_stories } => {
+                assert_eq!(active_stories.list, None);
+                assert!(!active_stories.has_unread());
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    fn story_photo_file_json(id: i32, path: &str, completed: bool) -> String {
+        format!(
+            r#"{{"@type":"photoSize","type":"x","photo":{{"@type":"file","id":{id},"size":24,"expected_size":24,"local":{{"@type":"localFile","path":{path},"can_be_downloaded":true,"can_be_deleted":false,"is_downloading_active":false,"is_downloading_completed":{completed},"download_offset":0,"downloaded_prefix_size":0,"downloaded_size":0}},"remote":{{"@type":"remoteFile","id":"x","unique_id":"u","is_uploading_active":false,"is_uploading_completed":true,"uploaded_size":24}}}},"width":800,"height":600,"progressive_sizes":[]}}"#,
+            path = serde_json::to_string(path).unwrap(),
+            completed = completed,
+        )
+    }
+
+    #[test]
+    fn get_story_photo_parses_content_and_caption() {
+        let size = story_photo_file_json(61, "\"\"", false);
+        let json = format!(
+            r#"{{"@type":"story","id":5,"poster_chat_id":11,"poster_id":null,"date":1700000000,"is_being_posted":false,"is_being_edited":false,"is_edited":false,"is_posted_to_chat_page":false,"is_visible_only_for_self":false,"can_be_added_to_album":false,"can_be_deleted":false,"can_be_edited":false,"can_be_forwarded":true,"can_be_replied":false,"can_set_privacy_settings":false,"can_toggle_is_posted_to_chat_page":false,"can_get_statistics":false,"can_get_interactions":false,"has_expired_viewers":false,"repost_info":null,"interaction_info":null,"chosen_reaction_type":null,"privacy_settings":null,"content":{{"@type":"storyContentPhoto","photo":{{"@type":"photo","has_stickers":false,"sizes":[{size}]}}}},"areas":[],"caption":{{"@type":"formattedText","text":"CANARY_STORY_caption","entities":[]}},"album_ids":[]}}"#,
+        );
+        let env = parse_envelope(&json).unwrap();
+        match env.payload {
+            EnvelopePayload::Story { story, files } => {
+                assert_eq!(story.id, 5);
+                assert_eq!(story.poster_chat_id, 11);
+                assert_eq!(story.date, 1700000000);
+                assert_eq!(story.caption, "CANARY_STORY_caption");
+                match story.content {
+                    StoryContentView::Photo { sizes } => {
+                        assert_eq!(sizes.len(), 1);
+                        assert_eq!(sizes[0].file_id, FileId(61));
+                        assert_eq!(sizes[0].width, 800);
+                    }
+                    other => panic!("{other:?}"),
+                }
+                assert!(files.iter().any(|f| f.id == FileId(61)));
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn get_story_video_parses_thumb_and_duration() {
+        // `storyVideo` (schema 1.8.67 line 6633): `duration` is a double,
+        // the thumbnail is a bare `thumbnail` constructor.
+        let thumb = r#"{"@type":"thumbnail","format":{"@type":"thumbnailFormatJpeg"},"width":320,"height":240,"file":{"@type":"file","id":71,"size":10,"expected_size":10,"local":{"@type":"localFile","path":"","can_be_downloaded":true,"can_be_deleted":false,"is_downloading_active":false,"is_downloading_completed":false,"download_offset":0,"downloaded_prefix_size":0,"downloaded_size":0},"remote":{"@type":"remoteFile","id":"x","unique_id":"u","is_uploading_active":false,"is_uploading_completed":true,"uploaded_size":10}}}"#;
+        let clip = r#"{"@type":"file","id":72,"size":100,"expected_size":100,"local":{"@type":"localFile","path":"","can_be_downloaded":true,"can_be_deleted":false,"is_downloading_active":false,"is_downloading_completed":false,"download_offset":0,"downloaded_prefix_size":0,"downloaded_size":0},"remote":{"@type":"remoteFile","id":"y","unique_id":"v","is_uploading_active":false,"is_uploading_completed":true,"uploaded_size":100}}"#;
+        let json = format!(
+            r#"{{"@type":"story","id":6,"poster_chat_id":11,"date":1700000000,"content":{{"@type":"storyContentVideo","video":{{"@type":"storyVideo","duration":12.4,"width":720,"height":1280,"has_stickers":false,"is_animation":false,"minithumbnail":null,"thumbnail":{thumb},"preload_prefix_size":0,"cover_frame_timestamp":0.0,"video":{clip}}},"alternative_video":null}},"caption":{{"@type":"formattedText","text":"","entities":[]}}}}"#,
+        );
+        let env = parse_envelope(&json).unwrap();
+        match env.payload {
+            EnvelopePayload::Story { story, files } => {
+                match story.content {
+                    StoryContentView::Video {
+                        thumb_file_id,
+                        thumb_width,
+                        thumb_height,
+                        duration_secs,
+                        file_id,
+                    } => {
+                        assert_eq!(thumb_file_id, Some(FileId(71)));
+                        assert_eq!(thumb_width, 320);
+                        assert_eq!(thumb_height, 240);
+                        assert_eq!(duration_secs, 12);
+                        assert_eq!(file_id, FileId(72));
+                    }
+                    other => panic!("{other:?}"),
+                }
+                assert!(files.iter().any(|f| f.id == FileId(71)));
+                assert!(files.iter().any(|f| f.id == FileId(72)));
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn story_live_and_unsupported_degrade_to_placeholder() {
+        for (content, is_live) in [
+            (
+                r#"{"@type":"storyContentLive","group_call_id":7,"is_rtmp_stream":false}"#,
+                true,
+            ),
+            (r#"{"@type":"storyContentUnsupported"}"#, false),
+            (r#"{"@type":"storyContentQuantum"}"#, false),
+        ] {
+            let json = format!(
+                r#"{{"@type":"updateStory","story":{{"@type":"story","id":8,"poster_chat_id":11,"date":1,"content":{content},"caption":{{"@type":"formattedText","text":"","entities":[]}}}}}}"#,
+            );
+            let env = parse_envelope(&json).unwrap();
+            match env.payload {
+                EnvelopePayload::Story { story, .. } => match (&story.content, is_live) {
+                    (StoryContentView::Live, true) => {}
+                    (StoryContentView::Unsupported, false) => {}
+                    (other, _) => panic!("{other:?}"),
+                },
+                other => panic!("{other:?}"),
+            }
         }
     }
 }

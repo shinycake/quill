@@ -1387,6 +1387,67 @@ pub fn open_message_content(extra: RequestId, chat_id: ChatId, message_id: Messa
     .to_string()
 }
 
+/// Phase 9.1: `loadActiveStories` (TDLib 1.8.67, `schema/td_api.tl:13762`).
+/// The loaded stories arrive as `updateChatActiveStories` updates — they
+/// feed the story tray above the chat list.
+pub fn load_active_stories(extra: RequestId) -> String {
+    json!({
+        "@type": "loadActiveStories",
+        "@extra": extra.as_extra(),
+        "story_list": {"@type": "storyListMain"}
+    })
+    .to_string()
+}
+
+/// Phase 9.1: `getChatActiveStories` (TDLib 1.8.67,
+/// `schema/td_api.tl:13768`). Response is `chatActiveStories`; handled like
+/// the `updateChatActiveStories` update.
+pub fn get_chat_active_stories(extra: RequestId, chat_id: ChatId) -> String {
+    json!({
+        "@type": "getChatActiveStories",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0
+    })
+    .to_string()
+}
+
+/// Phase 9.1: `getStory` (TDLib 1.8.67, `schema/td_api.tl:13695`).
+/// `only_local: false` — the viewer wants the full content.
+pub fn get_story(extra: RequestId, chat_id: ChatId, story_id: i32) -> String {
+    json!({
+        "@type": "getStory",
+        "@extra": extra.as_extra(),
+        "story_poster_chat_id": chat_id.0,
+        "story_id": story_id,
+        "only_local": false
+    })
+    .to_string()
+}
+
+/// Phase 9.1: `openStory` (TDLib 1.8.67, `schema/td_api.tl:13794`) — the
+/// user opened a story for viewing. Response is `ok`.
+pub fn open_story(extra: RequestId, chat_id: ChatId, story_id: i32) -> String {
+    json!({
+        "@type": "openStory",
+        "@extra": extra.as_extra(),
+        "story_poster_chat_id": chat_id.0,
+        "story_id": story_id
+    })
+    .to_string()
+}
+
+/// Phase 9.1: `closeStory` (TDLib 1.8.67, `schema/td_api.tl:13799`) — the
+/// user closed a story. Response is `ok`.
+pub fn close_story(extra: RequestId, chat_id: ChatId, story_id: i32) -> String {
+    json!({
+        "@type": "closeStory",
+        "@extra": extra.as_extra(),
+        "story_poster_chat_id": chat_id.0,
+        "story_id": story_id
+    })
+    .to_string()
+}
+
 pub fn add_chat_to_list(extra: RequestId, chat_id: ChatId, archive: bool) -> String {
     json!({
         "@type": "addChatToList",
@@ -2424,5 +2485,43 @@ mod channel_requests_tests {
         assert_eq!(content["open_period"], 0);
         assert_eq!(content["close_date"], 0);
         assert_eq!(content["is_closed"], false);
+    }
+
+    #[test]
+    fn story_requests_match_1_8_67() {
+        // `loadActiveStories story_list:StoryList = Ok` (schema line
+        // 13762); `getChatActiveStories chat_id:int53 = ChatActiveStories`
+        // (line 13768); `getStory story_poster_chat_id:int53 story_id:int32
+        // only_local:Bool = Story` (line 13695); `openStory` / `closeStory`
+        // `story_poster_chat_id:int53 story_id:int32 = Ok` (lines 13794,
+        // 13799).
+        let v: serde_json::Value =
+            serde_json::from_str(&load_active_stories(RequestId(1))).unwrap();
+        assert_eq!(v["@type"], "loadActiveStories");
+        assert_eq!(v["story_list"]["@type"], "storyListMain");
+
+        let v: serde_json::Value =
+            serde_json::from_str(&get_chat_active_stories(RequestId(2), ChatId(11))).unwrap();
+        assert_eq!(v["@type"], "getChatActiveStories");
+        assert_eq!(v["chat_id"], 11);
+
+        let v: serde_json::Value =
+            serde_json::from_str(&get_story(RequestId(3), ChatId(11), 5)).unwrap();
+        assert_eq!(v["@type"], "getStory");
+        assert_eq!(v["story_poster_chat_id"], 11);
+        assert_eq!(v["story_id"], 5);
+        assert_eq!(v["only_local"], false);
+
+        let v: serde_json::Value =
+            serde_json::from_str(&open_story(RequestId(4), ChatId(11), 5)).unwrap();
+        assert_eq!(v["@type"], "openStory");
+        assert_eq!(v["story_poster_chat_id"], 11);
+        assert_eq!(v["story_id"], 5);
+
+        let v: serde_json::Value =
+            serde_json::from_str(&close_story(RequestId(5), ChatId(11), 5)).unwrap();
+        assert_eq!(v["@type"], "closeStory");
+        assert_eq!(v["story_poster_chat_id"], 11);
+        assert_eq!(v["story_id"], 5);
     }
 }
