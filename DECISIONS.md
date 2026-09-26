@@ -1699,19 +1699,41 @@ Research snapshot 2026-09-16, pin recheck **2026-09-17**.
   - Normal rate 8 fps; cache capped at 600 frames; clips longer than
     75 s use an adaptive lower fps (minimum 1 fps).
   - Viewer clock maps elapsed time to the displayed frame; GPUI
-    refresh tick is 125 ms.
+    refresh tick is 125 ms. The frame index is clamped, not wrapped:
+    frames cover `(duration − start_timestamp)`, so the tail of the
+    clock holds the last frame instead of replaying early frames.
   - `ffplay -nodisp -autoexit` provides audio only; if ffplay/audio is
     unavailable, frame playback continues silently.
   - Extraction runs async in normal use (thumbnail + "Loading video…"
     until ready). Viewer frames use a separate cache under
-    `/tmp/quill-viewer-frames/{file_id}`, display-allowlisted.
-  - Closing or stepping the viewer stops audio, clears frames, and
-    removes the cache.
-  - **Known limitation:** GPUI's `img` element caches by element ID
-    and does not reliably reload when the path changes rapidly (every
-    125 ms). The screenshot demo uses a fixed frame index (stable
-    path) to render correctly. Smooth in-viewer animation requires a
-    custom GPUI element or pre-loaded image handles — out of scope.
+    `/tmp/quill-viewer-frames/{file_id}`, display-allowlisted. Stale
+    cache dirs from previous runs are swept at startup
+    (`sweep_stale_viewer_frame_caches`).
+  - Closing or stepping the viewer stops audio, kills the running
+    ffmpeg extraction (published child handle), clears frames, and
+    removes the cache. Completions from killed or superseded runs are
+    dropped by an extraction epoch — silently, with no error note.
+  - Every start path (`maybe_autoplay_viewer_video`, the
+    download-resume in `resume_pending_viewer_video`, and the
+    never-started Play toggle) routes through the pure
+    `decide_viewer_video_start` (`src/media_viewer.rs`, unit-tested): a
+    local clip without cached frames always goes through extraction —
+    never straight to playback with an empty frame cache (previously
+    the resume and toggle paths played the thumbnail forever).
+  - **Rendering mechanism (corrected 2026-09-26 review fix):** the
+    earlier diagnosis ("GPUI `img` caches by element ID") was wrong —
+    the pinned `gpui-pre-0.3.5` `src/elements/img.rs` keys its asset
+    cache by resource (path), and the real failure was that path
+    sources resolve through `window.use_asset::<ImgResourceLoader>`,
+    which loads asynchronously and returns `None` until the fs-read +
+    PNG-decode completes. At 125 ms path churn each frame needed its
+    own async round trip while the tick fired independently →
+    flicker/lag. The fix: frames are pre-decoded (on the background
+    thread) into `Arc<RenderImage>` handles passed as
+    `ImageSource::Render`, whose `use_data` returns
+    `Some(Ok(data.to_owned()))` synchronously — every tick renders the
+    current frame immediately. Genuine animated in-viewer playback, no
+    fixed-frame special case (removed).
 - **Zoom/pan (`src/ui/mod.rs`).** `ViewerZoom`: 1×–8×, factor 1.15,
   center-preserving zoom, clamped drag pan, reset/fit. Controls: mouse
   wheel zoom, drag pan while zoomed, double-click reset, `+`/`-`/Reset
@@ -1729,11 +1751,12 @@ Research snapshot 2026-09-16, pin recheck **2026-09-17**.
   `quill --screenshot-demo ready-video-playback` opens the media
   viewer on a 12 s demo clip (message 204, file 96,
   `docs/screenshots/fixtures/demo-clip-12s.mp4`, ffmpeg `testsrc`
-  320×180 30 fps), extracts 96 frames synchronously (deterministic
-  capture), seeks to 5 s, and shows the decoded frame in-viewer with
-  "❚❚ Pause", "0:06 / 0:12", zoom controls, caption "Demo clip", and
-  Prev/Next navigation. The ffplay subprocess is skipped in the demo.
-- **Out of this slice (→ future):** smooth animated in-viewer
-  playback (GPUI img limitation above); streaming/HLS; storyboard
+  320×180 30 fps), extracts + decodes 96 frames synchronously, seeks
+  to 5 s, and shows the genuinely animated frame in-viewer (captured
+  mid-animation — the clock keeps ticking and each 125 ms refresh
+  renders the frame for the current clock position) with "❚❚ Pause",
+  elapsed / 0:12, zoom controls, caption "Demo clip", and Prev/Next
+  navigation. The ffplay subprocess is skipped in the demo.
+- **Out of this slice (→ future):** streaming/HLS; storyboard
   scrubbing; alternative qualities; opening documents/GIFs/stickers/
   audio in the viewer; mpv IPC.

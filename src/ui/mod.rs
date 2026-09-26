@@ -24,7 +24,8 @@ use quill::folders::FolderEditor;
 use quill::ids::{AccountKey, ChatId, FileId, MessageId};
 use quill::local_path::sandboxed_display_path;
 use quill::media_viewer::{
-    MediaViewer, MediaViewerItem, MediaViewerKind, ViewerZoom, collect_media_items,
+    MediaViewer, MediaViewerItem, MediaViewerKind, ViewerVideoStart, ViewerZoom,
+    collect_media_items, decide_viewer_video_start,
 };
 use quill::notify::QueuedNotification;
 use quill::platform::live_secret_store;
@@ -49,6 +50,7 @@ use quill::telegram::envelope::{
 };
 use quill::text::{TextEntity, styled_runs, utf8_to_utf16_offset};
 use quill::voice::{self, VoiceCapture, format_voice_duration};
+use smallvec::SmallVec;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
@@ -443,8 +445,11 @@ pub struct QuillApp {
     /// Playback clock for the viewer's clip (elapsed/total + pause freeze).
     viewer_clock: Option<PlaybackClock>,
     /// Decoded frames for the viewer's clip, rendered in-place (parity
-    /// slice 5). Empty until extraction finishes; the thumbnail shows meanwhile.
-    viewer_video_frames: Vec<PathBuf>,
+    /// slice 5). Pre-decoded `RenderImage` handles: `img()` resolves
+    /// `ImageSource::Render` synchronously, so the 125 ms tick can cycle
+    /// frames without an async load round trip per frame. Empty until
+    /// extraction + decode finish; the thumbnail shows meanwhile.
+    viewer_video_frames: Vec<Arc<RenderImage>>,
     /// Frame rate of `viewer_video_frames`, for clock → frame-index mapping.
     viewer_video_fps: f64,
     /// File ID whose frames are in `viewer_video_frames` (cache invalidation).
@@ -452,10 +457,17 @@ pub struct QuillApp {
     /// Frame extraction in progress (async); the viewer shows the thumbnail
     /// with a "loading video" hint until frames land.
     viewer_extracting: bool,
+    /// Running ffmpeg viewer-frame extraction, published by the background
+    /// task. Taken and killed when the viewer closes or steps; stale
+    /// completions are dropped by `viewer_extract_epoch`.
+    viewer_extract_child: Option<Arc<Mutex<Option<Child>>>>,
+    /// Generation counter for viewer frame extraction: bumped on every new
+    /// extraction and on cancel, so a late completion from an abandoned run
+    /// is dropped silently (no error note, no playback).
+    viewer_extract_epoch: u64,
     /// Screenshot demo only: skip the async frame extraction in
-    /// `maybe_autoplay_viewer_video` (the demo extracts synchronously), and
-    /// use a fixed frame index (GPUI's `img` doesn't handle rapidly changing
-    /// paths; a stable path renders correctly for the screenshot).
+    /// `maybe_autoplay_viewer_video` (the demo extracts + decodes
+    /// synchronously itself for a deterministic capture).
     viewer_demo_sync_frames: bool,
     /// Guard for the viewer's 250 ms elapsed tick.
     viewer_tick: bool,
@@ -1476,6 +1488,8 @@ impl QuillApp {
             viewer_video_fps: 0.0,
             viewer_frame_cache_file: None,
             viewer_extracting: false,
+            viewer_extract_child: None,
+            viewer_extract_epoch: 0,
             viewer_demo_sync_frames: false,
             story_viewer: StoryViewer::closed(),
             pending_story_open: None,
@@ -1835,11 +1849,13 @@ impl QuillApp {
                 apply_ready_video_viewer(session, &app.demo_sink, &app.demo_seq);
             }
             // The Media seed plus a downloaded 12 s video (204, "Demo clip",
-            // file 96). The demo extracts frames synchronously (blocking
-            // ~2 s) for a deterministic capture — real in-viewer playback,
-            // not faked. `viewer_demo_sync_frames` suppresses the async
-            // extraction that `open_media_viewer` would otherwise start.
-            // The ffplay subprocess is skipped (demo), like the audio slice.
+            // file 96). The demo extracts + decodes frames synchronously
+            // (blocking ~2 s) for a deterministic capture — real in-viewer
+            // playback, not faked: the clock keeps ticking and the 125 ms
+            // refresh shows the frame for the current clock position.
+            // `viewer_demo_sync_frames` suppresses the async extraction that
+            // `open_media_viewer` would otherwise start. The ffplay
+            // subprocess is skipped (demo), like the audio slice.
             app.viewer_demo_sync_frames = true;
             app.open_media_viewer(ChatId(11), MessageId(204), cx);
             if let Some(item) = app.media_viewer.current().cloned()
@@ -1856,8 +1872,9 @@ impl QuillApp {
                     &cache,
                     start_timestamp,
                     duration,
-                ) {
-                    app.viewer_video_frames = viewer_frames.frames;
+                ) && let Ok(decoded) = Self::decode_viewer_frames(&viewer_frames.frames)
+                {
+                    app.viewer_video_frames = decoded;
                     app.viewer_video_fps = viewer_frames.fps;
                     app.viewer_frame_cache_file = Some(file_id);
                     app.play_viewer_video(&item, &path, cx);
@@ -1866,8 +1883,8 @@ impl QuillApp {
                     }
                 }
             }
-            // Keep `viewer_demo_sync_frames` true so the viewer uses a fixed
-            // frame index (stable img path) for the screenshot.
+            // Keep `viewer_demo_sync_frames` true so no background extraction
+            // races the synchronously decoded frames.
             app.status_note = "screenshot demo — in-viewer video playback".into();
         }
         if matches!(demo, Some(ScreenshotDemo::ReadyStories)) {
@@ -3744,13 +3761,13 @@ impl QuillApp {
     }
 
     /// Parity slice 5: in-viewer video playback. The clip's frames are
-    /// extracted with ffmpeg and rendered in-place in the viewer overlay
-    /// (no GPUI video element in this stack — same frame-cycling approach
-    /// as the row video preview, but full-clip); ffplay runs `-nodisp`
-    /// for the audio track only. The overlay keeps Play/Pause and
-    /// elapsed/total; the thumbnail shows until frames are ready.
-    /// Closing or stepping the viewer stops playback and drops the frame cache.
-    /// Closing or stepping the viewer stops playback.
+    /// extracted with ffmpeg, pre-decoded into GPUI image handles, and
+    /// rendered in-place in the viewer overlay (no GPUI video element in
+    /// this stack — same frame-cycling approach as the row video preview,
+    /// but full-clip); ffplay runs `-nodisp` for the audio track only. The
+    /// overlay keeps Play/Pause and elapsed/total; the thumbnail shows
+    /// until frames are ready. Closing or stepping the viewer stops
+    /// playback and drops the frame cache.
     /// Fixed size of the viewer visual container (zoom/pan frame), in px.
     const VIEWER_FRAME: (f32, f32) = (720.0, 480.0);
 
@@ -3770,39 +3787,94 @@ impl QuillApp {
     /// request in `viewer_pending_play` (resumed from the poll loop).
     ///
     /// Parity slice 5: the clip's frames are extracted (async — ffmpeg takes
-    /// ~2 s for a 12 s clip) and rendered in-viewer; ffplay runs `-nodisp`
-    /// for audio only. If frames are already cached for this file (e.g. the
-    /// screenshot demo extracted them synchronously), playback starts at once.
+    /// ~2 s for a 12 s clip), decoded into pre-loaded image handles, and
+    /// rendered in-viewer; ffplay runs `-nodisp` for audio only. If frames
+    /// are already cached for this file (e.g. the screenshot demo decoded
+    /// them synchronously), playback starts at once. Every start path
+    /// routes through `decide_viewer_video_start` so a local clip without
+    /// cached frames always goes through extraction — never straight to
+    /// playback with an empty frame cache.
     fn maybe_autoplay_viewer_video(&mut self, cx: &mut Context<Self>) {
         let Some(item) = self.media_viewer.current().cloned() else {
             return;
         };
-        if item.kind != MediaViewerKind::Video {
-            return;
-        }
-        let Some(path) = self.viewer_clip_path(&item) else {
-            if let Some(play_id) = item.play_file_id {
-                self.viewer_pending_play = Some((item.message_id, play_id));
-                self.request_media_download(play_id, None, cx);
-            }
-            return;
-        };
-        self.viewer_pending_play = None;
         let file_id = item.play_file_id.map(|id| id.0).unwrap_or(0);
-        if self.viewer_frame_cache_file == Some(file_id) && !self.viewer_video_frames.is_empty() {
-            self.play_viewer_video(&item, &path, cx);
-            return;
+        let path = self.viewer_clip_path(&item);
+        let frames_ready =
+            self.viewer_frame_cache_file == Some(file_id) && !self.viewer_video_frames.is_empty();
+        match decide_viewer_video_start(&item, path.is_some(), frames_ready) {
+            ViewerVideoStart::Nothing => {}
+            ViewerVideoStart::ParkDownload => {
+                if let Some(play_id) = item.play_file_id {
+                    self.viewer_pending_play = Some((item.message_id, play_id));
+                    self.request_media_download(play_id, None, cx);
+                }
+            }
+            ViewerVideoStart::PlayNow => {
+                self.viewer_pending_play = None;
+                let path = path.expect("clip checked local by decide_viewer_video_start");
+                self.play_viewer_video(&item, &path, cx);
+            }
+            ViewerVideoStart::ExtractFrames => {
+                self.viewer_pending_play = None;
+                // The screenshot demo extracts + decodes frames synchronously
+                // itself; don't start a redundant background extraction.
+                if self.viewer_demo_sync_frames {
+                    return;
+                }
+                let path = path.expect("clip checked local by decide_viewer_video_start");
+                self.extract_viewer_frames(&item, &path, cx);
+            }
         }
-        // The screenshot demo extracts frames synchronously itself.
-        if self.viewer_demo_sync_frames {
-            return;
-        }
-        self.extract_viewer_frames(&item, &path, cx);
     }
 
-    /// Extract the clip's frames on a background thread, then start playback
-    /// if the viewer is still on the same item. The thumbnail stays visible
-    /// with a loading hint meanwhile.
+    /// Decode extracted viewer frame PNGs into pre-loaded GPUI image handles.
+    ///
+    /// `img()` resolves `ImageSource::Render` synchronously — the pinned
+    /// `gpui-pre-0.3.5` `src/elements/img.rs` `use_data` returns
+    /// `Some(Ok(data.to_owned()))` for `Render` immediately — so cycling
+    /// frames on the 125 ms tick renders without the async fs-read +
+    /// PNG-decode round trip that made path-based (`ImageSource::Resource`)
+    /// sources flicker and lag (each new path re-entered
+    /// `window.use_asset::<ImgResourceLoader>`, which returns `None` until
+    /// the load completes, while the tick fired independently).
+    fn decode_viewer_frames(paths: &[PathBuf]) -> Result<Vec<Arc<RenderImage>>, String> {
+        paths
+            .iter()
+            .map(|path| {
+                let rgba = image::open(path)
+                    .map_err(|err| format!("{}: {err}", path.display()))?
+                    .into_rgba8();
+                Ok(Arc::new(RenderImage::new(SmallVec::from_buf([
+                    image::Frame::new(rgba),
+                ]))))
+            })
+            .collect()
+    }
+
+    /// Kill a running viewer frame extraction (ffmpeg child), if any, and
+    /// invalidate its completion. Called on viewer close/step and before a
+    /// fresh extraction starts, so an abandoned extraction can't run to
+    /// completion on a discarded cache dir.
+    fn kill_viewer_extraction(&mut self) {
+        if let Some(slot) = self.viewer_extract_child.take() {
+            // Take the child out of the lock before kill/wait: the worker
+            // only holds the lock briefly around `try_wait`.
+            let child = slot.lock().ok().and_then(|mut guard| guard.take());
+            drop(slot);
+            if let Some(mut child) = child {
+                let _ = child.kill();
+                let _ = child.wait();
+            }
+        }
+        self.viewer_extract_epoch = self.viewer_extract_epoch.wrapping_add(1);
+    }
+
+    /// Extract the clip's frames on a background thread, decode them into
+    /// pre-loaded image handles, then start playback if the viewer is still
+    /// on the same item. The thumbnail stays visible with a loading hint
+    /// meanwhile. The ffmpeg child is published so close/step can kill it;
+    /// a completion from a killed or superseded run is dropped by epoch.
     fn extract_viewer_frames(
         &mut self,
         item: &MediaViewerItem,
@@ -3820,6 +3892,13 @@ impl QuillApp {
         self.viewer_frame_cache_file = Some(file_id);
         self.viewer_video_frames.clear();
         self.viewer_extracting = true;
+        // A step between two videos goes through `stop_viewer_video` first,
+        // but cancel explicitly anyway: a fresh run must not share the
+        // previous run's slot or epoch.
+        self.kill_viewer_extraction();
+        let epoch = self.viewer_extract_epoch;
+        let slot: Arc<Mutex<Option<Child>>> = Arc::new(Mutex::new(None));
+        self.viewer_extract_child = Some(slot.clone());
         cx.notify();
 
         let cache = quill::video::viewer_frame_cache_dir(file_id);
@@ -3830,21 +3909,44 @@ impl QuillApp {
         let path = path.to_path_buf();
         let item = item.clone();
         let extract_path = path.clone();
+        let task_slot = slot.clone();
         cx.spawn(async move |this, cx| {
             let extracted = cx
                 .background_executor()
                 .spawn(async move {
-                    quill::video::viewer_playback_frames(
+                    let frames = quill::video::viewer_playback_frames_cancelable(
                         &extract_path,
                         &mime,
                         &cache,
                         start_timestamp,
                         duration,
-                    )
+                        &task_slot,
+                    )?;
+                    // Decode on the background thread: the render path needs
+                    // pre-loaded handles, and decoding up to 600 PNGs must
+                    // not block the UI thread.
+                    let decoded = Self::decode_viewer_frames(&frames.frames)?;
+                    Ok::<_, String>((decoded, frames.fps))
                 })
                 .await;
             this.update(cx, |this, cx| {
+                // Stale completion (viewer closed/stepped, or a newer
+                // extraction started): drop silently — no error note, no
+                // playback, and crucially don't clear a newer run's
+                // loading state.
+                if this.viewer_extract_epoch != epoch {
+                    return;
+                }
                 this.viewer_extracting = false;
+                // Drop the slot only if it's still ours (`stop_viewer_video`
+                // may have taken it to kill the child).
+                if this
+                    .viewer_extract_child
+                    .as_ref()
+                    .is_some_and(|current| Arc::ptr_eq(current, &slot))
+                {
+                    this.viewer_extract_child = None;
+                }
                 let still_current = this
                     .media_viewer
                     .current()
@@ -3853,15 +3955,15 @@ impl QuillApp {
                     return;
                 }
                 match extracted {
-                    Ok(viewer_frames) => {
-                        // The screenshot demo extracts synchronously and
-                        // starts playback itself; don't restart it when the
+                    Ok((decoded, fps)) => {
+                        // The screenshot demo extracts + decodes synchronously
+                        // and starts playback itself; don't restart it when the
                         // background extraction lands.
                         let already_playing = this.viewer_video == Some(message_id)
                             && !this.viewer_video_frames.is_empty();
                         if !already_playing {
-                            this.viewer_video_frames = viewer_frames.frames;
-                            this.viewer_video_fps = viewer_frames.fps;
+                            this.viewer_video_frames = decoded;
+                            this.viewer_video_fps = fps;
                             this.play_viewer_video(&item, &path, cx);
                         }
                     }
@@ -3877,6 +3979,10 @@ impl QuillApp {
     }
 
     /// Resume a parked viewer play once `downloadFile` lands the clip.
+    /// Routes through `maybe_autoplay_viewer_video`: it re-derives the
+    /// current item, clears the pending flag, and either reuses cached
+    /// frames or starts async extraction — never straight to playback
+    /// with an empty frame cache.
     fn resume_pending_viewer_video(&mut self, cx: &mut Context<Self>) {
         let Some((message_id, file_id)) = self.viewer_pending_play else {
             return;
@@ -3891,19 +3997,14 @@ impl QuillApp {
         if !ready {
             return;
         }
-        let current = self.media_viewer.current().cloned();
-        let matches = current.as_ref().is_some_and(|item| {
+        let matches = self.media_viewer.current().is_some_and(|item| {
             item.message_id == message_id && item.kind == MediaViewerKind::Video
         });
         if !matches {
             self.viewer_pending_play = None;
             return;
         }
-        let item = current.expect("viewer item checked");
-        if let Some(path) = self.viewer_clip_path(&item) {
-            self.viewer_pending_play = None;
-            self.play_viewer_video(&item, &path, cx);
-        }
+        self.maybe_autoplay_viewer_video(cx);
     }
 
     /// Begin (or restart) viewer playback of `item`'s clip from offset 0.
@@ -4009,22 +4110,17 @@ impl QuillApp {
     }
 
     /// The viewer Play/Pause button: playing → pause, paused → resume,
-    /// never-started → begin from 0 (the clip is local here).
+    /// never-started → begin from 0 (the clip is local here). The
+    /// never-started path routes through `maybe_autoplay_viewer_video` so a
+    /// local clip without extracted frames goes through async extraction
+    /// instead of playing with an empty frame cache.
     fn toggle_viewer_video(&mut self, cx: &mut Context<Self>) {
         let playing = self
             .viewer_clock
             .as_ref()
             .is_some_and(|clock| clock.is_playing());
         if self.viewer_video.is_none() {
-            let item = self.media_viewer.current().cloned();
-            match item {
-                Some(item) if item.kind == MediaViewerKind::Video => {
-                    if let Some(path) = self.viewer_clip_path(&item) {
-                        self.play_viewer_video(&item, &path, cx);
-                    }
-                }
-                _ => {}
-            }
+            self.maybe_autoplay_viewer_video(cx);
             return;
         }
         if playing {
@@ -4034,10 +4130,12 @@ impl QuillApp {
         }
     }
 
-    /// Full stop: kill ffplay and clear all viewer-video state. Called on
-    /// viewer close/step and when any other player starts.
+    /// Full stop: kill ffplay and any running frame extraction, and clear
+    /// all viewer-video state. Called on viewer close/step and when any
+    /// other player starts.
     fn stop_viewer_video(&mut self) {
         self.kill_viewer_player();
+        self.kill_viewer_extraction();
         self.viewer_video = None;
         self.viewer_video_path = None;
         self.viewer_clock = None;
@@ -9091,33 +9189,28 @@ impl QuillApp {
             .unwrap_or_default();
         let roots = self.media_display_roots();
         let thumb_path = viewer_display_path(&item, &files, &roots);
-        // Parity slice 5: when the clip's frames are extracted, the viewer
-        // shows the frame matching the playback clock — real in-viewer video.
-        // Otherwise it falls back to the thumbnail (or the loading status).
-        let frame_path: Option<PathBuf> =
+        // Parity slice 5: when the clip's frames are extracted and decoded,
+        // the viewer shows the pre-loaded frame matching the playback clock
+        // — real in-viewer video (`ImageSource::Render` resolves
+        // synchronously, so the 125 ms tick animates without a per-frame
+        // async load). Otherwise it falls back to the thumbnail (or the
+        // loading status).
+        let frame: Option<Arc<RenderImage>> =
             if item.kind == MediaViewerKind::Video && !self.viewer_video_frames.is_empty() {
-                // In the screenshot demo, use a fixed frame (GPUI img needs a
-                // stable path; rapidly changing paths don't render).
-                let idx = if self.viewer_demo_sync_frames {
-                    40.min(self.viewer_video_frames.len() - 1)
-                } else {
-                    let elapsed = self
-                        .viewer_clock
-                        .as_ref()
-                        .map(|clock| clock.elapsed_secs())
-                        .unwrap_or(0.0);
-                    ((elapsed * self.viewer_video_fps) as usize) % self.viewer_video_frames.len()
-                };
-                self.viewer_video_frames.get(idx).and_then(|frame| {
-                    frame
-                        .to_str()
-                        .and_then(|s| sandboxed_display_path(s, &roots))
-                        .map(|p| p.to_path_buf())
-                })
+                let elapsed = self
+                    .viewer_clock
+                    .as_ref()
+                    .map(|clock| clock.elapsed_secs())
+                    .unwrap_or(0.0);
+                // Clamp, don't wrap: frames cover (duration − start_timestamp),
+                // so the tail of the clock holds the last frame instead of
+                // replaying early frames.
+                let idx = ((elapsed * self.viewer_video_fps) as usize)
+                    .min(self.viewer_video_frames.len() - 1);
+                self.viewer_video_frames.get(idx).cloned()
             } else {
                 None
             };
-        let path = frame_path.or(thumb_path);
         let row_id = item.message_id.0 as u64;
         let downloading_now = item
             .display_file_ids
@@ -9136,43 +9229,51 @@ impl QuillApp {
         let (frame_w, frame_h) = Self::VIEWER_FRAME;
         let (zoom_w, zoom_h) = (frame_w * zoom.zoom, frame_h * zoom.zoom);
         let (pan_x, pan_y) = zoom.pan;
-        let content: AnyElement = if let Some(path) = path {
-            img(path)
-                .id(("media-viewer-img", row_id))
-                .w(px(zoom_w))
-                .h(px(zoom_h))
-                .object_fit(ObjectFit::Contain)
-                .bg(rgb(0x0d1117))
-                .with_fallback(move || {
-                    div()
-                        .w(px(zoom_w))
-                        .h(px(zoom_h))
-                        .bg(rgb(0x0d1117))
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .text_color(rgb(0xffffff))
-                        .child(format!("{kind_label} — could not render"))
-                        .into_any_element()
-                })
-                .into_any_element()
-        } else {
-            let status = match (&item.duration_label, downloading_now) {
-                (Some(duration), true) => format!("Video · {duration} — downloading…"),
-                (Some(duration), false) => format!("Video · {duration} — not downloaded"),
-                (None, true) => format!("{kind_label} — downloading…"),
-                (None, false) => format!("{kind_label} — not downloaded"),
-            };
-            div()
-                .id(("media-viewer-loading", row_id))
-                .w(px(zoom_w))
-                .h(px(zoom_h))
-                .bg(rgb(0x0d1117))
-                .flex()
-                .items_center()
-                .justify_center()
-                .child(div().text_sm().text_color(rgb(0xffffff)).child(status))
-                .into_any_element()
+        let content: AnyElement = {
+            // Pre-decoded video frame and thumbnail both render through
+            // `img`; the frame is an `ImageSource::Render` (synchronous),
+            // the thumbnail a path (async-loaded once, then cached).
+            let source: Option<ImageSource> = frame
+                .map(ImageSource::from)
+                .or_else(|| thumb_path.map(ImageSource::from));
+            if let Some(source) = source {
+                img(source)
+                    .id(("media-viewer-img", row_id))
+                    .w(px(zoom_w))
+                    .h(px(zoom_h))
+                    .object_fit(ObjectFit::Contain)
+                    .bg(rgb(0x0d1117))
+                    .with_fallback(move || {
+                        div()
+                            .w(px(zoom_w))
+                            .h(px(zoom_h))
+                            .bg(rgb(0x0d1117))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .text_color(rgb(0xffffff))
+                            .child(format!("{kind_label} — could not render"))
+                            .into_any_element()
+                    })
+                    .into_any_element()
+            } else {
+                let status = match (&item.duration_label, downloading_now) {
+                    (Some(duration), true) => format!("Video · {duration} — downloading…"),
+                    (Some(duration), false) => format!("Video · {duration} — not downloaded"),
+                    (None, true) => format!("{kind_label} — downloading…"),
+                    (None, false) => format!("{kind_label} — not downloaded"),
+                };
+                div()
+                    .id(("media-viewer-loading", row_id))
+                    .w(px(zoom_w))
+                    .h(px(zoom_h))
+                    .bg(rgb(0x0d1117))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(div().text_sm().text_color(rgb(0xffffff)).child(status))
+                    .into_any_element()
+            }
         };
         let visual = {
             let view = cx.entity().downgrade();
@@ -9241,10 +9342,11 @@ impl QuillApp {
                     }
                 }))
         };
-        // Parity slice 5: video transport under the visual. The clip itself
-        // plays in an ffplay window (no GPUI video element in this stack);
-        // the overlay shows Play/Pause plus elapsed/total, or a download
-        // CTA while the clip is not local.
+        // Parity slice 5: video transport under the visual. ffplay runs
+        // `-nodisp` for audio only (no GPUI video element in this stack);
+        // the decoded video frames render in-viewer above. The overlay
+        // shows Play/Pause plus elapsed/total, or a download CTA while the
+        // clip is not local.
         let video_controls: Option<AnyElement> =
             (item.kind == MediaViewerKind::Video).then(|| {
                 let clip_path = self.viewer_clip_path(&item);

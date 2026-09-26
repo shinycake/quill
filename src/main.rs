@@ -23,6 +23,10 @@ fn main() {
 fn ui_main(args: &[String]) {
     use gpui_kit::*;
 
+    // Parity slice 5: drop leftover viewer frame caches from previous runs
+    // (abandoned extractions, unclean exits) before anything re-creates them.
+    quill::video::sweep_stale_viewer_frame_caches();
+
     if let Some(demo) = parse_screenshot_demo(args) {
         run_screenshot_demo(demo);
         return;
