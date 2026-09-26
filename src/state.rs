@@ -3440,17 +3440,18 @@ impl Session {
     }
 
     /// Parity slice: cache the first active username for a supergroup
-    /// (`updateSupergroup` / `getSupergroup` response). Empty usernames
-    /// clear the entry so a removed username disappears from the header.
+    /// (`updateSupergroup` / `getSupergroup` response). An empty username is
+    /// stored as an empty sentinel (not removed) so `maybe_fetch_supergroup_profile`
+    /// doesn't re-send `getSupergroup` on every re-open of a username-less
+    /// supergroup; server-pushed `updateSupergroup` still refreshes it.
+    /// Render sites must filter empty before display.
     pub fn set_supergroup_username(&mut self, supergroup_id: i64, username: String) {
-        if username.is_empty() {
-            self.supergroup_usernames.remove(&supergroup_id);
-        } else {
-            self.supergroup_usernames.insert(supergroup_id, username);
-        }
+        self.supergroup_usernames.insert(supergroup_id, username);
     }
 
     /// Parity slice: cached first active username for a supergroup, if any.
+    /// May be an empty sentinel when the supergroup has no username —
+    /// callers should filter empty before rendering.
     pub fn supergroup_username(&self, supergroup_id: i64) -> Option<&str> {
         self.supergroup_usernames
             .get(&supergroup_id)
@@ -3494,7 +3495,9 @@ impl Session {
             .supergroup_full_infos
             .get(&supergroup_id)?
             .linked_chat_id;
-        (linked != 0).then_some(linked)
+        // Only offer Discuss when the linked chat is actually known —
+        // unknown ids degrade poorly (no history, no title), so hide it.
+        (linked != 0 && self.chats.contains_key(&linked)).then_some(linked)
     }
 
     /// Server message ids in the open history that have not yet been sent to `viewMessages`.
@@ -6230,14 +6233,16 @@ mod tests {
         assert_eq!(session.discussion_chat_id(ChatId(13)), Some(14));
         // Non-channels never get a "Discuss" affordance, even with a link.
         assert_eq!(session.discussion_chat_id(ChatId(14)), None);
-        // Empty username clears the cache entry.
+        // Empty username stores an empty sentinel (renders as no username,
+        // keeps the dedupe cache filled so re-opens don't refetch).
         apply_json(
             &mut session,
             &seq,
             &sink,
             r#"{"@type":"updateSupergroup","supergroup":{"@type":"supergroup","id":13,"usernames":null,"is_forum":false,"is_channel":true}}"#,
         );
-        assert_eq!(session.supergroup_username(13), None);
+        assert_eq!(session.supergroup_username(13), Some(""));
+        assert!(session.supergroup_usernames.contains_key(&13));
     }
 
     /// Parity slice: `chat_list_photo_file_ids` only returns photos that

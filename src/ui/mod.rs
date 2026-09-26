@@ -5413,6 +5413,7 @@ impl QuillApp {
         let members = info.as_ref().map(|i| i.member_count).unwrap_or(0);
         let username = session
             .and_then(|s| s.supergroup_username(supergroup_id))
+            .filter(|name| !name.is_empty())
             .map(|name| name.to_string());
         // Parity slice: the panel avatar reuses the chat-list avatar (photo
         // or colored initials).
@@ -7100,6 +7101,7 @@ impl QuillApp {
                 .and_then(|path| sandboxed_display_path(path, &roots));
             let username = session
                 .supergroup_username(supergroup_id)
+                .filter(|name| !name.is_empty())
                 .map(|name| name.to_string());
             Some(SupergroupHeaderExtras {
                 is_channel,
