@@ -15,8 +15,8 @@ use crate::platform::{DatabaseKey, KeyDecision, SecretStore, load_or_create_key}
 use crate::poll::{PollDraft, poll_answer_for_tap};
 use crate::settings::{AccountPaths, default_app_root};
 use crate::state::{
-    ChatSearchJumpNeed, ChatStatisticsFetch, ForwardFlight, InfoPanelTarget, RequestPurpose,
-    SearchStatus, Session, ShutdownPhase,
+    ChatSearchJumpNeed, ChatStatisticsFetch, ForwardFlight, InfoPanelTarget, InviteLinkFetch,
+    JoinRequestFetch, RequestPurpose, SearchStatus, Session, ShutdownPhase,
 };
 use crate::telegram::client::{LiveTdJson, OwnedEnvelope, ReceiveBridge};
 use crate::telegram::envelope::{
@@ -32,26 +32,28 @@ use crate::telegram::requests::{
     add_recently_found_chat, check_authentication_code, check_authentication_password,
     click_chat_sponsored_message, close_chat, close_request,
     close_secret_chat as close_secret_chat_request, close_story, create_call, create_chat_folder,
-    create_new_secret_chat, create_video_chat, delete_chat_folder, delete_messages, delete_story,
-    discard_call as discard_call_request, download_file as download_file_request, edit_chat_folder,
+    create_chat_invite_link, create_new_secret_chat, create_video_chat, delete_chat_folder,
+    delete_messages, delete_story, discard_call as discard_call_request,
+    download_file as download_file_request, edit_chat_folder, edit_chat_invite_link,
     edit_message_caption, edit_message_text, end_group_call, forward_messages,
     get_authorization_state, get_callback_query_answer, get_chat_active_stories, get_chat_folder,
-    get_chat_history, get_chat_lists_to_add_chat, get_chat_member, get_chat_sponsored_messages,
-    get_chat_statistics, get_commands, get_contacts, get_forum_topics, get_group_call,
-    get_installed_sticker_sets, get_me, get_saved_animations, get_saved_notification_sounds,
-    get_scope_notification_settings, get_secret_chat, get_sticker_set, get_story,
-    get_story_available_reactions, get_supergroup, get_supergroup_full_info, get_user_full_info,
-    get_video_chat_invite_link, input_message_photo, input_message_video, join_chat,
-    join_video_chat, leave_chat, leave_group_call, load_active_stories, load_chats,
-    load_chats_list, load_group_call_participants, open_chat, open_message_content, open_story,
-    pin_chat_message, remove_message_reaction, reorder_chat_folders, report_chat_sponsored_message,
-    search_chat_messages, search_chats, search_messages, search_public_chats,
-    search_recently_found_chats, send_animation, send_call_rating, send_chat_action,
-    send_chat_action_kind, send_document, send_message_album, send_photo, send_poll, send_sticker,
-    send_text, send_text_story_reply, send_video, send_video_note, send_voice_note,
-    set_authentication_phone_number, set_chat_draft_message, set_chat_message_auto_delete_time,
-    set_chat_notification_settings, set_chat_slow_mode_delay, set_poll_answer,
-    set_scope_notification_settings, set_story_reaction, set_video_chat_title,
+    get_chat_history, get_chat_invite_links, get_chat_join_requests, get_chat_lists_to_add_chat,
+    get_chat_member, get_chat_sponsored_messages, get_chat_statistics, get_commands, get_contacts,
+    get_forum_topics, get_group_call, get_installed_sticker_sets, get_me, get_saved_animations,
+    get_saved_notification_sounds, get_scope_notification_settings, get_secret_chat,
+    get_sticker_set, get_story, get_story_available_reactions, get_supergroup,
+    get_supergroup_full_info, get_user_full_info, get_video_chat_invite_link, input_message_photo,
+    input_message_video, join_chat, join_video_chat, leave_chat, leave_group_call,
+    load_active_stories, load_chats, load_chats_list, load_group_call_participants, open_chat,
+    open_message_content, open_story, pin_chat_message, process_chat_join_request,
+    remove_message_reaction, reorder_chat_folders, report_chat_sponsored_message,
+    revoke_chat_invite_link, search_chat_messages, search_chats, search_messages,
+    search_public_chats, search_recently_found_chats, send_animation, send_call_rating,
+    send_chat_action, send_chat_action_kind, send_document, send_message_album, send_photo,
+    send_poll, send_sticker, send_text, send_text_story_reply, send_video, send_video_note,
+    send_voice_note, set_authentication_phone_number, set_chat_draft_message,
+    set_chat_message_auto_delete_time, set_chat_notification_settings, set_chat_slow_mode_delay,
+    set_poll_answer, set_scope_notification_settings, set_story_reaction, set_video_chat_title,
     toggle_chat_folder_tags, toggle_group_call_is_my_video_enabled,
     toggle_group_call_is_my_video_paused, toggle_group_call_participant_is_hand_raised,
     toggle_group_call_participant_is_muted, toggle_video_chat_mute_new_participants,
@@ -2540,6 +2542,268 @@ impl<S: JsonSender> ConnectDriver<S> {
     ) -> Result<Option<RequestId>, ConnectSendError> {
         self.session.chat_statistics.remove(&chat_id.0);
         self.fetch_chat_statistics(chat_id, is_dark)
+    }
+
+    /// Phase D3a: `getChatInviteLinks` (TDLib 1.8.67, `schema/td_api.tl:14138`).
+    /// Lists active invite links from all creators; only admins with the
+    /// `can_invite_users` right may call it (TDLib errors otherwise).
+    /// Idempotent: a cached `Loaded` result is kept until an explicit
+    /// refresh clears it, and no second request goes out while one is in
+    /// flight. Returns `Ok(None)` when nothing was sent.
+    pub fn fetch_chat_invite_links(
+        &mut self,
+        chat_id: ChatId,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let can_invite = self.session.chat_can_invite_users(chat_id);
+        if !can_invite {
+            return Ok(None);
+        }
+        if matches!(
+            self.session.invite_links.get(&chat_id.0),
+            Some(InviteLinkFetch::Loading | InviteLinkFetch::Loaded(_))
+        ) || self
+            .session
+            .requests
+            .has_purpose_for_chat(RequestPurpose::GetChatInviteLinks, chat_id)
+        {
+            return Ok(None);
+        }
+        self.session
+            .invite_links
+            .insert(chat_id.0, InviteLinkFetch::Loading);
+        let extra = self
+            .session
+            .request(RequestPurpose::GetChatInviteLinks, Some(chat_id));
+        if let Err(err) = self.sender.send_json(&get_chat_invite_links(
+            extra, chat_id.0, 0, false, 0, "", 100,
+        )) {
+            self.session.requests.take(extra);
+            self.session.invite_links.remove(&chat_id.0);
+            return Err(err);
+        }
+        Ok(Some(extra))
+    }
+
+    /// Phase D3a: explicit refresh of `getChatInviteLinks` — clears the
+    /// cached result and re-sends (the plain fetch keeps `Loaded`).
+    pub fn refresh_chat_invite_links(
+        &mut self,
+        chat_id: ChatId,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        self.session.invite_links.remove(&chat_id.0);
+        self.fetch_chat_invite_links(chat_id)
+    }
+
+    /// Phase D3a: `createChatInviteLink` (TDLib 1.8.67,
+    /// `schema/td_api.tl:14097`). Returns `Ok(None)` when the chat cannot
+    /// be managed or another create request is already in flight. The new
+    /// link arrives as the `chatInviteLink` response.
+    pub fn create_chat_invite_link(
+        &mut self,
+        chat_id: ChatId,
+        name: &str,
+        expiration_date: i32,
+        member_limit: i32,
+        creates_join_request: bool,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let can_invite = self.session.chat_can_invite_users(chat_id);
+        if !can_invite {
+            return Ok(None);
+        }
+        if self
+            .session
+            .requests
+            .has_purpose_for_chat(RequestPurpose::CreateChatInviteLink, chat_id)
+        {
+            return Ok(None);
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::CreateChatInviteLink, Some(chat_id));
+        if let Err(err) = self.sender.send_json(&create_chat_invite_link(
+            extra,
+            chat_id.0,
+            name,
+            expiration_date,
+            member_limit,
+            creates_join_request,
+        )) {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(Some(extra))
+    }
+
+    /// Phase D3a: `editChatInviteLink` (TDLib 1.8.67,
+    /// `schema/td_api.tl:14115`). Returns `Ok(None)` when the chat cannot
+    /// be managed or another edit request is already in flight. The
+    /// updated link arrives as the `chatInviteLink` response.
+    pub fn edit_chat_invite_link(
+        &mut self,
+        chat_id: ChatId,
+        invite_link: &str,
+        name: &str,
+        expiration_date: i32,
+        member_limit: i32,
+        creates_join_request: bool,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let can_invite = self.session.chat_can_invite_users(chat_id);
+        if !can_invite {
+            return Ok(None);
+        }
+        if self
+            .session
+            .requests
+            .has_purpose_for_chat(RequestPurpose::EditChatInviteLink, chat_id)
+        {
+            return Ok(None);
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::EditChatInviteLink, Some(chat_id));
+        if let Err(err) = self.sender.send_json(&edit_chat_invite_link(
+            extra,
+            chat_id.0,
+            invite_link,
+            name,
+            expiration_date,
+            member_limit,
+            creates_join_request,
+        )) {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(Some(extra))
+    }
+
+    /// Phase D3a: `revokeChatInviteLink` (TDLib 1.8.67,
+    /// `schema/td_api.tl:14152`). Revocation is the only delete path (no
+    /// `deleteChatInviteLink` in 1.8.67). Returns `Ok(None)` when the chat
+    /// cannot be managed or another revoke request is already in flight.
+    /// The updated list arrives as the `chatInviteLinks` response.
+    pub fn revoke_chat_invite_link(
+        &mut self,
+        chat_id: ChatId,
+        invite_link: &str,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let can_invite = self.session.chat_can_invite_users(chat_id);
+        if !can_invite {
+            return Ok(None);
+        }
+        if self
+            .session
+            .requests
+            .has_purpose_for_chat(RequestPurpose::RevokeChatInviteLink, chat_id)
+        {
+            return Ok(None);
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::RevokeChatInviteLink, Some(chat_id));
+        if let Err(err) =
+            self.sender
+                .send_json(&revoke_chat_invite_link(extra, chat_id.0, invite_link))
+        {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(Some(extra))
+    }
+
+    /// Phase D3a: `getChatJoinRequests` (TDLib 1.8.67,
+    /// `schema/td_api.tl:14174`). Lists pending requests across all invite
+    /// links, unfiltered. Idempotent like `fetch_chat_invite_links`.
+    /// Returns `Ok(None)` when nothing was sent.
+    pub fn fetch_chat_join_requests(
+        &mut self,
+        chat_id: ChatId,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let can_invite = self.session.chat_can_invite_users(chat_id);
+        if !can_invite {
+            return Ok(None);
+        }
+        if matches!(
+            self.session.join_requests.get(&chat_id.0),
+            Some(JoinRequestFetch::Loading | JoinRequestFetch::Loaded(_))
+        ) || self
+            .session
+            .requests
+            .has_purpose_for_chat(RequestPurpose::GetChatJoinRequests, chat_id)
+        {
+            return Ok(None);
+        }
+        self.session
+            .join_requests
+            .insert(chat_id.0, JoinRequestFetch::Loading);
+        let extra = self
+            .session
+            .request(RequestPurpose::GetChatJoinRequests, Some(chat_id));
+        if let Err(err) = self
+            .sender
+            .send_json(&get_chat_join_requests(extra, chat_id.0, "", "", 50))
+        {
+            self.session.requests.take(extra);
+            self.session.join_requests.remove(&chat_id.0);
+            return Err(err);
+        }
+        Ok(Some(extra))
+    }
+
+    /// Phase D3a: explicit refresh of `getChatJoinRequests` — clears the
+    /// cached result and re-sends (the plain fetch keeps `Loaded`).
+    pub fn refresh_chat_join_requests(
+        &mut self,
+        chat_id: ChatId,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        self.session.join_requests.remove(&chat_id.0);
+        self.fetch_chat_join_requests(chat_id)
+    }
+
+    /// Phase D3a: `processChatJoinRequest` (TDLib 1.8.67,
+    /// `schema/td_api.tl:14177`). Approves or declines one pending
+    /// request. Duplicate submissions for the same user and chat are
+    /// suppressed while a request is in flight; the `ok` response drops
+    /// the request from the cached list.
+    pub fn process_chat_join_request(
+        &mut self,
+        chat_id: ChatId,
+        user_id: i64,
+        approve: bool,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let can_invite = self.session.chat_can_invite_users(chat_id);
+        if !can_invite {
+            return Ok(None);
+        }
+        let purpose = RequestPurpose::ProcessChatJoinRequest { user_id };
+        if self.session.requests.has_purpose_for_chat(purpose, chat_id) {
+            return Ok(None);
+        }
+        let extra = self.session.request(purpose, Some(chat_id));
+        if let Err(err) = self.sender.send_json(&process_chat_join_request(
+            extra, chat_id.0, user_id, approve,
+        )) {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(Some(extra))
     }
 
     /// Phase A1: forced `getSupergroupFullInfo` refresh for the slow-mode

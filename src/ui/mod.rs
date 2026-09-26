@@ -37,9 +37,9 @@ use quill::poll::{
 };
 use quill::state::{
     ActiveCall, ActiveGroupCall, CallSummary, ChatSearchJump, ChatStatisticsFetch, ChatSummary,
-    ContactRow, ForwardResult, HistoryMessage, InfoPanelTarget, OutboxReceipt, RequestPurpose,
-    SearchStatus, Session, SponsoredReportFlight, outgoing_status_label, unix_ms_now,
-    unread_badge_text,
+    ContactRow, ForwardResult, HistoryMessage, InfoPanelTarget, InviteLinkFetch, JoinRequestFetch,
+    OutboxReceipt, RequestPurpose, SearchStatus, Session, SponsoredReportFlight,
+    outgoing_status_label, unix_ms_now, unread_badge_text,
 };
 use quill::story_viewer::{StoryViewer, StoryViewerItem, StoryViewerKind, collect_story_items};
 use quill::telegram::client::copy_and_parse;
@@ -213,6 +213,50 @@ impl PollDialog {
                 .collect(),
             is_anonymous: self.is_anonymous,
             allows_multiple_answers: self.allows_multiple_answers,
+        }
+    }
+}
+
+/// Phase D3a: invite-link create dialog above the composer. Fields map
+/// 1:1 to `createChatInviteLink` (schema 1.8.67 line 14097): name,
+/// expiration, member limit, creates-join-request toggle. Expiration is
+/// entered as whole days from now (0 = never); the submit path converts
+/// to a unix timestamp. Editing an existing link stays out of this
+/// slice (documented in DECISIONS.md).
+pub struct InviteLinkDialog {
+    chat_id: ChatId,
+    name_input: Entity<TextareaState>,
+    expiration_days_input: Entity<TextareaState>,
+    member_limit_input: Entity<TextareaState>,
+    creates_join_request: bool,
+}
+
+impl InviteLinkDialog {
+    fn new(window: &mut Window, cx: &mut Context<QuillApp>, chat_id: ChatId) -> Self {
+        let name_input = cx.new(|cx| {
+            TextareaState::new(window, cx)
+                .placeholder("Link name (optional)")
+                .auto_grow(1, 2)
+                .submit_on_enter(false)
+        });
+        let expiration_days_input = cx.new(|cx| {
+            TextareaState::new(window, cx)
+                .placeholder("Expires in days (0 = never)")
+                .auto_grow(1, 1)
+                .submit_on_enter(false)
+        });
+        let member_limit_input = cx.new(|cx| {
+            TextareaState::new(window, cx)
+                .placeholder("Member limit (0 = unlimited)")
+                .auto_grow(1, 1)
+                .submit_on_enter(false)
+        });
+        Self {
+            chat_id,
+            name_input,
+            expiration_days_input,
+            member_limit_input,
+            creates_join_request: false,
         }
     }
 }
@@ -510,6 +554,8 @@ pub struct QuillApp {
     spoiler_revealed: HashSet<(i64, u64, u64, bool)>,
     /// Phase 4.2: poll creation dialog (open above the composer).
     poll_dialog: Option<PollDialog>,
+    /// Phase D3a: invite-link create dialog state.
+    invite_link_dialog: Option<InviteLinkDialog>,
     /// Phase 4.5: fullscreen media viewer (photo/video overlay).
     media_viewer: MediaViewer,
     /// Parity slice 5: zoom/pan of the viewer visual (reset on open/step).
@@ -663,6 +709,11 @@ pub enum ScreenshotDemo {
     /// and a loaded `chatStatisticsChannel` fixture (Phase D2), so the
     /// statistics panel renders directly in the info panel.
     ReadyChannelStats,
+    /// Phase D3a: synthetic invite-links + join-requests surface (no live
+    /// TDLib): the demo channel (id 13) with the viewer as an admin with
+    /// `can_invite_users`, a loaded invite-link list and loaded join
+    /// requests, so the info-panel sections render directly.
+    ReadyInviteLinks,
     /// Bot chat demo (injected, no live Telegram): private chat with a
     /// `userTypeBot` user (id 21), opened with history plus a cached
     /// `botInfo` (description + commands), so the bot panel renders under
@@ -1365,6 +1416,15 @@ impl QuillApp {
                     AuthorizationState::Ready,
                 )
             }
+            Some(ScreenshotDemo::ReadyInviteLinks) => {
+                demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
+                (
+                    ConnectUiStatus::DemoReadyChats,
+                    None,
+                    "screenshot demo — invite links".into(),
+                    AuthorizationState::Ready,
+                )
+            }
             Some(ScreenshotDemo::ReadyBotChat) => {
                 demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
                 (
@@ -1746,6 +1806,7 @@ impl QuillApp {
             sponsored_demo: false,
             spoiler_revealed: HashSet::new(),
             poll_dialog: None,
+            invite_link_dialog: None,
             media_viewer: MediaViewer::closed(),
             viewer_zoom: ViewerZoom::new(),
             viewer_drag: None,
@@ -2324,6 +2385,16 @@ impl QuillApp {
             }
             app.open_info_panel_target(InfoPanelTarget::Statistics(13), window, cx);
             app.status_note = "screenshot demo — channel statistics".into();
+        }
+        // Phase D3a: invite-links fixture, then open the channel info panel
+        // (admin with can_invite_users, seeded by apply_ready_channels_admin).
+        if matches!(demo, Some(ScreenshotDemo::ReadyInviteLinks)) {
+            if let Some(session) = app.demo_session.as_mut() {
+                app.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_invite_links(session, &app.demo_sink, &app.demo_seq);
+            }
+            app.open_info_panel_target(InfoPanelTarget::Supergroup(13), window, cx);
+            app.status_note = "screenshot demo — invite links".into();
         }
         if matches!(demo, Some(ScreenshotDemo::ReadyBotChat)) {
             if let Some(session) = app.demo_session.as_mut() {
@@ -5903,6 +5974,172 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// Phase D3a: re-request the invite-link list (bypasses the
+    /// dedupe cache so the Refresh button always hits the server).
+    fn refresh_invite_links(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            match live.driver.refresh_chat_invite_links(chat_id) {
+                Ok(_) => {}
+                Err(_) => {
+                    self.status_note = "could not refresh invite links".into();
+                }
+            }
+        } else {
+            self.status_note = "invite links need a live connection (demo)".into();
+        }
+        cx.notify();
+    }
+
+    /// Phase D3a: copy an invite-link URL to the clipboard.
+    fn copy_invite_link(&mut self, invite_link: &str, cx: &mut Context<Self>) {
+        cx.write_to_clipboard(ClipboardItem::new_string(invite_link.to_string()));
+        self.status_note = "Invite link copied".into();
+        cx.notify();
+    }
+
+    /// Phase D3a: revoke an invite link (`revokeChatInviteLink`; TDLib
+    /// 1.8.67 has no `deleteChatInviteLink`, so revocation is the only
+    /// removal path).
+    fn revoke_invite_link(&mut self, chat_id: ChatId, invite_link: &str, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            match live.driver.revoke_chat_invite_link(chat_id, invite_link) {
+                Ok(_) => {}
+                Err(_) => {
+                    self.status_note = "could not revoke invite link".into();
+                }
+            }
+        } else {
+            self.status_note = "invite links need a live connection (demo)".into();
+        }
+        cx.notify();
+    }
+
+    /// Phase D3a: re-request the join-request list.
+    fn refresh_join_requests(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            match live.driver.refresh_chat_join_requests(chat_id) {
+                Ok(_) => {}
+                Err(_) => {
+                    self.status_note = "could not refresh join requests".into();
+                }
+            }
+        } else {
+            self.status_note = "join requests need a live connection (demo)".into();
+        }
+        cx.notify();
+    }
+
+    /// Phase D3a: approve (`true`) or decline (`false`) a join request.
+    fn process_join_request(
+        &mut self,
+        chat_id: ChatId,
+        user_id: i64,
+        approve: bool,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(live) = self.live.as_mut() {
+            match live
+                .driver
+                .process_chat_join_request(chat_id, user_id, approve)
+            {
+                Ok(_) => {}
+                Err(_) => {
+                    self.status_note = "could not process join request".into();
+                }
+            }
+        } else {
+            self.status_note = "join requests need a live connection (demo)".into();
+        }
+        cx.notify();
+    }
+
+    /// Phase D3a: open the invite-link create dialog for a chat.
+    fn open_invite_link_dialog(
+        &mut self,
+        chat_id: ChatId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.invite_link_dialog = Some(InviteLinkDialog::new(window, cx, chat_id));
+        cx.notify();
+    }
+
+    /// Phase D3a: close the invite-link create dialog.
+    fn close_invite_link_dialog(&mut self, cx: &mut Context<Self>) {
+        self.invite_link_dialog = None;
+        cx.notify();
+    }
+
+    /// Phase D3a: validate the dialog and send `createChatInviteLink`.
+    fn submit_invite_link_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let (chat_id, name, expiration_date, member_limit, creates_join_request) =
+            match self.invite_link_dialog.as_ref() {
+                Some(dialog) => {
+                    let name = dialog.name_input.read(cx).value().to_string();
+                    let days = dialog.expiration_days_input.read(cx).value().to_string();
+                    let limit = dialog.member_limit_input.read(cx).value().to_string();
+                    let days: i64 = match days.trim().parse() {
+                        Ok(days) if days >= 0 => days,
+                        _ => {
+                            self.status_note =
+                                "expiration must be a non-negative number of days".into();
+                            cx.notify();
+                            return;
+                        }
+                    };
+                    let member_limit: i32 = match limit.trim().parse() {
+                        Ok(limit) if limit >= 0 => limit,
+                        _ => {
+                            self.status_note = "member limit must be a non-negative number".into();
+                            cx.notify();
+                            return;
+                        }
+                    };
+                    let now = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|duration| duration.as_secs() as i64)
+                        .unwrap_or(0);
+                    let expiration_date = if days == 0 {
+                        0
+                    } else {
+                        now.saturating_add(days.saturating_mul(86_400))
+                            .min(i64::from(i32::MAX)) as i32
+                    };
+                    (
+                        dialog.chat_id,
+                        name,
+                        expiration_date,
+                        member_limit,
+                        dialog.creates_join_request,
+                    )
+                }
+                None => return,
+            };
+        if let Some(live) = self.live.as_mut() {
+            match live.driver.create_chat_invite_link(
+                chat_id,
+                &name,
+                expiration_date,
+                member_limit,
+                creates_join_request,
+            ) {
+                Ok(_) => {
+                    self.invite_link_dialog = None;
+                    self.status_note = "creating invite link…".into();
+                }
+                Err(_) => {
+                    self.status_note = "could not create invite link".into();
+                }
+            }
+        } else {
+            // Screenshot demos have no live driver; close the dialog honestly.
+            self.invite_link_dialog = None;
+            self.status_note = "invite links need a live connection (demo)".into();
+        }
+        let _ = window;
+        cx.notify();
+    }
+
     fn kill_shared_player(&mut self) {
         if let Some(mut child) = self.voice_player.take() {
             let _ = child.kill();
@@ -7036,16 +7273,45 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // Phase D3a: resolve the chat for a supergroup info-panel target
+        // before the live driver is borrowed mutably below.
+        let invite_panel_chat_id = match target {
+            InfoPanelTarget::Supergroup(supergroup_id) => self.session().and_then(|session| {
+                session.chats.values().find_map(|chat| match chat.kind {
+                    ChatKind::Supergroup {
+                        supergroup_id: id, ..
+                    } if id == supergroup_id => Some(chat.id),
+                    _ => None,
+                })
+            }),
+            _ => None,
+        };
         if let Some(live) = self.live.as_mut() {
             live.driver.set_info_panel(Some(target));
             let fetch = match target {
                 InfoPanelTarget::User(user_id) => {
                     live.driver.fetch_user_full_info(user_id).map(|_| ())
                 }
-                InfoPanelTarget::Supergroup(supergroup_id) => live
-                    .driver
-                    .fetch_supergroup_full_info(supergroup_id)
-                    .map(|_| ()),
+                InfoPanelTarget::Supergroup(supergroup_id) => {
+                    let mut result = live
+                        .driver
+                        .fetch_supergroup_full_info(supergroup_id)
+                        .map(|_| ());
+                    if let Some(chat_id) = invite_panel_chat_id {
+                        // Phase D3a: invite-link / join-request lists for
+                        // admins; the driver no-ops when the
+                        // `can_invite_users` gate is closed.
+                        for fetch in [
+                            live.driver.fetch_chat_invite_links(chat_id).map(|_| ()),
+                            live.driver.fetch_chat_join_requests(chat_id).map(|_| ()),
+                        ] {
+                            if fetch.is_err() {
+                                result = fetch;
+                            }
+                        }
+                    }
+                    result
+                }
                 // Phase D2: `is_dark` only tints server-rendered graph
                 // images; Quill draws its own sparklines from `json_data`
                 // and the app has no dark-mode concept, so `false`.
@@ -7546,7 +7812,354 @@ impl QuillApp {
                     })),
             );
         }
+        // Phase D3a: invite-link + join-request management (admins with
+        // `can_invite_users` only; the sections no-op otherwise).
+        body = body.child(self.invite_links_section(chat_id, cx));
+        body = body.child(self.join_requests_section(chat_id, cx));
         body.into_any_element()
+    }
+
+    /// Phase D3a: human expiry for an invite link (`expiration_date` is a
+    /// unix timestamp; 0 = never expires).
+    fn invite_link_expiry(expiration_date: i32) -> String {
+        if expiration_date == 0 {
+            return "Never expires".into();
+        }
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|duration| duration.as_secs() as i64)
+            .unwrap_or(0);
+        let remaining = i64::from(expiration_date) - now;
+        if remaining <= 0 {
+            "Expired".into()
+        } else if remaining < 86_400 {
+            "Expires today".into()
+        } else if remaining < 172_800 {
+            "Expires tomorrow".into()
+        } else {
+            format!("Expires in {} days", remaining / 86_400)
+        }
+    }
+
+    /// Phase D3a: invite-link management section for the channel/group
+    /// info panel. Shown only to admins who may manage links
+    /// (`ChatSummary::can_invite_users`). Honest states: loading /
+    /// failed-with-retry / loaded list. Each row shows the link name (or
+    /// "Primary link" / "Invite link" fallback), uses, expiry, a
+    /// join-request badge when `pending_join_request_count` > 0, and
+    /// Copy + Revoke buttons. Revoking is the delete path (TDLib 1.8.67
+    /// has no `deleteChatInviteLink`).
+    fn invite_links_section(&self, chat_id: ChatId, cx: &mut Context<Self>) -> AnyElement {
+        let can_manage = self
+            .session()
+            .is_some_and(|session| session.chat_can_invite_users(chat_id));
+        if !can_manage {
+            return div().into_any_element();
+        }
+        let fetch = self
+            .session()
+            .and_then(|session| session.invite_links.get(&chat_id.0))
+            .cloned();
+        let mut section = div().flex().flex_col().w_full().gap_1().child(
+            div()
+                .flex()
+                .items_center()
+                .w_full()
+                .gap_1()
+                .child(
+                    div()
+                        .text_xs()
+                        .font_semibold()
+                        .text_color(cx.theme().muted_foreground)
+                        .child("Invite links"),
+                )
+                .child(div().flex_1())
+                .child(
+                    Button::new("invite-links-refresh")
+                        .label("Refresh")
+                        .ghost()
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.refresh_invite_links(chat_id, cx);
+                        })),
+                )
+                .child(
+                    Button::new("invite-link-create")
+                        .label("Create")
+                        .ghost()
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            this.open_invite_link_dialog(chat_id, window, cx);
+                        })),
+                ),
+        );
+        match fetch {
+            None | Some(InviteLinkFetch::Loading) => {
+                section = section.child(
+                    div()
+                        .text_sm()
+                        .text_color(cx.theme().muted_foreground)
+                        .child("Loading invite links…"),
+                );
+            }
+            Some(InviteLinkFetch::Failed(message)) => {
+                section = section.child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .w_full()
+                        .gap_1()
+                        .child(
+                            div()
+                                .flex_1()
+                                .text_sm()
+                                .text_color(cx.theme().muted_foreground)
+                                .child(message),
+                        )
+                        .child(
+                            Button::new("invite-links-retry")
+                                .label("Retry")
+                                .ghost()
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.refresh_invite_links(chat_id, cx);
+                                })),
+                        ),
+                );
+            }
+            Some(InviteLinkFetch::Loaded(list)) => {
+                if list.links.is_empty() {
+                    section = section.child(
+                        div()
+                            .text_sm()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("No invite links."),
+                    );
+                } else {
+                    for (index, link) in list.links.into_iter().enumerate() {
+                        let name = if !link.name.is_empty() {
+                            link.name.clone()
+                        } else if link.is_primary {
+                            "Primary link".into()
+                        } else {
+                            "Invite link".into()
+                        };
+                        let uses = if link.member_limit > 0 {
+                            format!("{}/{} uses", link.member_count, link.member_limit)
+                        } else {
+                            format!("{} uses", link.member_count)
+                        };
+                        let expiry = Self::invite_link_expiry(link.expiration_date);
+                        let copy_link = link.invite_link.clone();
+                        let revoke_link = link.invite_link.clone();
+                        let mut row = div()
+                            .id(("invite-link-row", index as u64))
+                            .flex()
+                            .flex_col()
+                            .w_full()
+                            .gap_1()
+                            .child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .w_full()
+                                    .gap_1()
+                                    .child(div().flex_1().text_sm().child(name))
+                                    .child(
+                                        div()
+                                            .text_xs()
+                                            .text_color(cx.theme().muted_foreground)
+                                            .child(format!("{uses} · {expiry}")),
+                                    ),
+                            )
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(link.invite_link),
+                            );
+                        if link.pending_join_request_count > 0 {
+                            row = row.child(
+                                div()
+                                    .text_xs()
+                                    .font_semibold()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(format!(
+                                        "{} pending requests",
+                                        link.pending_join_request_count
+                                    )),
+                            );
+                        }
+                        row = row.child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap_1()
+                                .child(
+                                    Button::new(format!("invite-link-copy-{index}"))
+                                        .label("Copy")
+                                        .ghost()
+                                        .on_click(cx.listener(move |this, _, _, cx| {
+                                            this.copy_invite_link(&copy_link, cx);
+                                        })),
+                                )
+                                .child(
+                                    Button::new(format!("invite-link-revoke-{index}"))
+                                        .label("Revoke")
+                                        .ghost()
+                                        .on_click(cx.listener(move |this, _, _, cx| {
+                                            this.revoke_invite_link(chat_id, &revoke_link, cx);
+                                        })),
+                                ),
+                        );
+                        section = section.child(row);
+                    }
+                }
+            }
+        }
+        section.into_any_element()
+    }
+
+    /// Phase D3a: join-request section. Approve/Decline per request;
+    /// shows the requester's name (falls back to "User <id>") and bio.
+    fn join_requests_section(&self, chat_id: ChatId, cx: &mut Context<Self>) -> AnyElement {
+        let can_manage = self
+            .session()
+            .is_some_and(|session| session.chat_can_invite_users(chat_id));
+        if !can_manage {
+            return div().into_any_element();
+        }
+        let fetch = self
+            .session()
+            .and_then(|session| session.join_requests.get(&chat_id.0))
+            .cloned();
+        let pending_count = match &fetch {
+            Some(JoinRequestFetch::Loaded(list)) => list.total_count,
+            _ => self
+                .session()
+                .and_then(|session| session.pending_join_request_counts.get(&chat_id.0).copied())
+                .unwrap_or(0),
+        };
+        let mut header = div().flex().items_center().w_full().gap_1().child(
+            div()
+                .text_xs()
+                .font_semibold()
+                .text_color(cx.theme().muted_foreground)
+                .child("Join requests"),
+        );
+        if pending_count > 0 {
+            header = header.child(
+                div()
+                    .text_xs()
+                    .font_semibold()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(pending_count.to_string()),
+            );
+        }
+        header = header.child(div().flex_1()).child(
+            Button::new("join-requests-refresh")
+                .label("Refresh")
+                .ghost()
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.refresh_join_requests(chat_id, cx);
+                })),
+        );
+        let mut section = div().flex().flex_col().w_full().gap_1().child(header);
+        match fetch {
+            None | Some(JoinRequestFetch::Loading) => {
+                section = section.child(
+                    div()
+                        .text_sm()
+                        .text_color(cx.theme().muted_foreground)
+                        .child("Loading join requests…"),
+                );
+            }
+            Some(JoinRequestFetch::Failed(message)) => {
+                section = section.child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .w_full()
+                        .gap_1()
+                        .child(
+                            div()
+                                .flex_1()
+                                .text_sm()
+                                .text_color(cx.theme().muted_foreground)
+                                .child(message),
+                        )
+                        .child(
+                            Button::new("join-requests-retry")
+                                .label("Retry")
+                                .ghost()
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.refresh_join_requests(chat_id, cx);
+                                })),
+                        ),
+                );
+            }
+            Some(JoinRequestFetch::Loaded(list)) => {
+                if list.requests.is_empty() {
+                    section = section.child(
+                        div()
+                            .text_sm()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("No pending join requests."),
+                    );
+                } else {
+                    for request in list.requests {
+                        let user_id = request.user_id;
+                        let name = self
+                            .session()
+                            .and_then(|session| session.user(user_id))
+                            .map(|user| {
+                                format!("{} {}", user.first_name, user.last_name)
+                                    .trim()
+                                    .to_owned()
+                            })
+                            .filter(|name| !name.is_empty())
+                            .unwrap_or_else(|| format!("User {user_id}"));
+                        let mut details = div()
+                            .flex()
+                            .flex_col()
+                            .flex_1()
+                            .gap_1()
+                            .child(div().text_sm().child(name));
+                        if !request.bio.is_empty() {
+                            details = details.child(
+                                div()
+                                    .text_xs()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(request.bio),
+                            );
+                        }
+                        section = section.child(
+                            div()
+                                .id(("join-request-row", user_id as u64))
+                                .flex()
+                                .items_center()
+                                .w_full()
+                                .gap_1()
+                                .child(details)
+                                .child(
+                                    Button::new(format!("join-request-approve-{user_id}"))
+                                        .label("Approve")
+                                        .ghost()
+                                        .on_click(cx.listener(move |this, _, _, cx| {
+                                            this.process_join_request(chat_id, user_id, true, cx);
+                                        })),
+                                )
+                                .child(
+                                    Button::new(format!("join-request-decline-{user_id}"))
+                                        .label("Decline")
+                                        .ghost()
+                                        .on_click(cx.listener(move |this, _, _, cx| {
+                                            this.process_join_request(chat_id, user_id, false, cx);
+                                        })),
+                                ),
+                        );
+                    }
+                }
+            }
+        }
+        section.into_any_element()
     }
 
     /// Phase D2: the channel/group statistics view (`getChatStatistics`,
@@ -12620,6 +13233,63 @@ impl QuillApp {
             )
     }
 
+    /// Phase D3a: the invite-link creation dialog, rendered above the
+    /// composer like the poll dialog.
+    fn invite_link_dialog_panel(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let dialog = self.invite_link_dialog.as_ref()?;
+        let creates_join_request = dialog.creates_join_request;
+        let panel = div()
+            .id("invite-link-dialog")
+            .flex()
+            .flex_col()
+            .gap_2()
+            .p_3()
+            .rounded_md()
+            .border_1()
+            .border_color(rgb(0x58a6ff))
+            .bg(rgb(0x161b22))
+            .child(div().text_sm().font_semibold().child("New invite link"))
+            .child(Textarea::new(&dialog.name_input).h(px(40.)))
+            .child(Textarea::new(&dialog.expiration_days_input).h(px(40.)))
+            .child(Textarea::new(&dialog.member_limit_input).h(px(40.)))
+            .child(
+                Button::new("invite-link-dialog-toggle-join-request")
+                    .label(if creates_join_request {
+                        "☑ Approval required to join"
+                    } else {
+                        "☐ Approval required to join"
+                    })
+                    .ghost()
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        if let Some(dialog) = this.invite_link_dialog.as_mut() {
+                            dialog.creates_join_request = !dialog.creates_join_request;
+                        }
+                        cx.notify();
+                    })),
+            )
+            .child(
+                div()
+                    .flex()
+                    .gap_2()
+                    .child(
+                        Button::new("invite-link-dialog-create")
+                            .label("Create link")
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.submit_invite_link_dialog(window, cx);
+                            })),
+                    )
+                    .child(
+                        Button::new("invite-link-dialog-cancel")
+                            .label("Cancel")
+                            .ghost()
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.close_invite_link_dialog(cx);
+                            })),
+                    ),
+            );
+        Some(panel.into_any_element())
+    }
+
     /// Phase 4.2: the poll creation dialog, rendered above the composer.
     /// Question field, dynamic option rows (2–10), anonymous / multiple-answers
     /// toggles, Create / Cancel. Quiz correct-option marking stays out of this
@@ -14865,6 +15535,10 @@ impl QuillApp {
                         })
                         // Phase 4.2: poll creation dialog above the composer.
                         .when_some(self.poll_dialog_panel(cx), |this, panel| this.child(panel))
+                        // Phase D3a: invite-link creation dialog above the composer.
+                        .when_some(self.invite_link_dialog_panel(cx), |this, panel| {
+                            this.child(panel)
+                        })
                         // Phase 3.3: `/` command menu above the composer.
                         .when_some(self.command_menu_dropdown(cx), |this, panel| {
                             this.child(panel)
@@ -17402,6 +18076,51 @@ fn apply_ready_channels_admin(session: &mut Session, sink: &Arc<MemorySink>, seq
         // Live view-count bump on the first post.
         r#"{"@type":"updateMessageInteractionInfo","chat_id":13,"message_id":201,"interaction_info":{"@type":"messageInteractionInfo","view_count":12402,"forward_count":7,"reply_info":null,"reactions":null}}"#
             .to_string(),
+    ];
+    for json in jsons {
+        if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
+            session.apply(owned);
+        }
+    }
+}
+
+/// `ReadyInviteLinks` fixture (Phase D3a): like `apply_ready_channels_admin`
+/// (chat 13, viewer 777 has `can_invite_users`), plus a `chatInviteLinks`
+/// response and a `chatJoinRequests` response through the real reducer
+/// paths, so the info-panel sections render loaded data. Includes a
+/// primary link, a named expiring limited link, and a join-request link
+/// with two pending requests (with `updateUser` names).
+fn apply_ready_invite_links(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
+    apply_ready_channels_admin(session, sink, seq);
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let links_extra = session.request(RequestPurpose::GetChatInviteLinks, Some(ChatId(13)));
+    let requests_extra = session.request(RequestPurpose::GetChatJoinRequests, Some(ChatId(13)));
+    let link = |invite_link: &str,
+                name: &str,
+                expiration_date: i64,
+                member_limit: i32,
+                member_count: i32,
+                pending: i32,
+                join_request: bool,
+                primary: bool| {
+        format!(
+            r#"{{"@type":"chatInviteLink","invite_link":"{invite_link}","name":"{name}","creator_user_id":777,"date":1788000000,"edit_date":0,"expiration_date":{expiration_date},"subscription_pricing":null,"member_limit":{member_limit},"member_count":{member_count},"expired_member_count":0,"pending_join_request_count":{pending},"creates_join_request":{join_request},"is_primary":{primary},"is_revoked":false}}"#
+        )
+    };
+    let jsons = [
+        format!(
+            r#"{{"@type":"chatInviteLinks","@extra":"{}","total_count":3,"invite_links":[{},{},{}]}}"#,
+            links_extra.0,
+            link("https://t.me/+primarylink", "", 0, 0, 1204, 0, false, true),
+            link("https://t.me/+moderatorslink", "Moderators", 1_792_756_800, 25, 8, 0, false, false),
+            link("https://t.me/+joinapprovallink", "Join approval", 0, 0, 0, 2, true, false),
+        ),
+        format!(
+            r#"{{"@type":"chatJoinRequests","@extra":"{}","total_count":2,"requests":[{{"@type":"chatJoinRequest","user_id":7001,"date":1788500000,"bio":"Hi, I would like to join the channel."}},{{"@type":"chatJoinRequest","user_id":7002,"date":1788550000,"bio":"Long-time reader."}}]}}"#,
+            requests_extra.0,
+        ),
+        r#"{"@type":"updateUser","user":{"@type":"user","id":7001,"first_name":"Dana","last_name":"Levi","usernames":null,"phone_number":"","status":null,"profile_photo":null,"is_contact":false,"is_mutual_contact":false,"is_close_friend":false,"is_verified":false,"is_premium":false,"is_support":false,"restriction_reason":"","is_scam":false,"is_fake":false,"is_bot":false,"type":{"@type":"userTypeRegular"}}}"#.to_string(),
+        r#"{"@type":"updateUser","user":{"@type":"user","id":7002,"first_name":"Omar","last_name":"Haddad","usernames":null,"phone_number":"","status":null,"profile_photo":null,"is_contact":false,"is_mutual_contact":false,"is_close_friend":false,"is_verified":false,"is_premium":false,"is_support":false,"restriction_reason":"","is_scam":false,"is_fake":false,"is_bot":false,"type":{"@type":"userTypeRegular"}}}"#.to_string(),
     ];
     for json in jsons {
         if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
