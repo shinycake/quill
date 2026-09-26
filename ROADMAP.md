@@ -73,8 +73,14 @@ handling exists.
   `updatePoll` live refresh; `inputMessagePoll` creation from the
   composer (regular polls: 2–10 options, anonymous/multiple toggles).
   `docs/screenshots/ready-poll.png`.
-- **4.3 Location / venue / contact.** `messageLocation`, `messageVenue`,
-  `messageContact` display rows (map link via OS open for locations).
+- **4.3 Location / venue / contact.** ✅ 2026-09-26 —
+  `messageLocation` / `messageLiveLocation` (live period/expires state),
+  `messageVenue` (title + address + provider), `messageContact` (name +
+  phone + "Telegram user" note) display rows; tappable "Open map" links
+  (OpenStreetMap via OS open); coordinates validated (finite,
+  |lat|≤90, |lon|≤180, else dropped). No map tiles, no live-location
+  re-rendering, no contact add-to-address-book.
+  `docs/screenshots/ready-location.png`.
 - **4.4 Dice.** `messageDice` animated emoji + value display.
 - **4.5 Fullscreen media viewer.** Click a photo/video opens a viewer overlay
   (from the photo/document "Out of this slice" backlog).

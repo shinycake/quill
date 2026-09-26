@@ -338,6 +338,13 @@ pub enum ScreenshotDemo {
     /// chosen mark locally) and a closed poll (results, no voting
     /// affordance) (Phase 4.2).
     ReadyPoll,
+    /// Location / venue / contact demo (injected, no live Telegram): a
+    /// plain `messageLocation` (coordinates + accuracy), a
+    /// `messageLiveLocation` (live-period / expires / heading /
+    /// proximity-alert state), a `messageVenue` (title + address +
+    /// provider), and a `messageContact` (name + phone + vCard +
+    /// `user_id`), each with a tappable "Open map" link (Phase 4.3).
+    ReadyLocation,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -862,6 +869,15 @@ impl QuillApp {
                     AuthorizationState::Ready,
                 )
             }
+            Some(ScreenshotDemo::ReadyLocation) => {
+                demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
+                (
+                    ConnectUiStatus::DemoReadyChats,
+                    None,
+                    "screenshot demo — location / venue / contact".into(),
+                    AuthorizationState::Ready,
+                )
+            }
             None => bootstrap_connect(credentials),
         };
 
@@ -1219,6 +1235,13 @@ impl QuillApp {
                 apply_ready_poll(session, &app.demo_sink, &app.demo_seq);
             }
             app.status_note = "screenshot demo — polls: voted + closed".into();
+        }
+        if matches!(demo, Some(ScreenshotDemo::ReadyLocation)) {
+            if let Some(session) = app.demo_session.as_mut() {
+                app.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_location(session, &app.demo_sink, &app.demo_seq);
+            }
+            app.status_note = "screenshot demo — location / venue / contact".into();
         }
         if matches!(demo, Some(ScreenshotDemo::ReadySponsored)) {
             if let Some(session) = app.demo_session.as_mut() {
@@ -1911,6 +1934,9 @@ impl QuillApp {
                         MessageContent::VideoNote(_)
                         | MessageContent::Sticker(_)
                         | MessageContent::Poll(_)
+                        | MessageContent::Location(_)
+                        | MessageContent::Venue(_)
+                        | MessageContent::Contact(_)
                         | MessageContent::Unsupported { .. } => {}
                     }
                 }
@@ -7395,6 +7421,63 @@ fn apply_ready_poll(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU
     }
 }
 
+/// `ReadyLocation` fixture (Phase 4.3): open a dedicated "Demo places" chat
+/// (id 16) and inject four messages through the normal reducer — a plain
+/// `messageLocation` (coordinates + accuracy), a `messageLiveLocation`
+/// (live period / expires / heading / proximity alert), a `messageVenue`
+/// (title + address + provider), and a `messageContact` (name + phone +
+/// vCard + user_id). All data is synthetic; no live Telegram.
+fn apply_ready_location(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let chat_id = 16;
+    let chat_json = format!(
+        r#"{{"@type":"updateNewChat","chat":{{"id":{chat_id},"title":"Demo places","type":{{"@type":"chatTypePrivate","user_id":{chat_id}}},"unread_count":0}}}}"#
+    );
+    let position_json = format!(
+        r#"{{"@type":"updateChatPosition","chat_id":{chat_id},"position":{{"@type":"chatPosition","list":{{"@type":"chatListMain"}},"order":"50","is_pinned":false}}}}"#
+    );
+    for json in [chat_json, position_json] {
+        if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
+            session.apply(owned);
+        }
+    }
+    session.open_chat(ChatId(chat_id));
+
+    let message = |message_id: i32, content: &str| {
+        format!(
+            r#"{{"@type":"updateNewMessage","message":{{"id":{message_id},"chat_id":{chat_id},"is_outgoing":false,"content":{content}}}}}"#
+        )
+    };
+
+    // Plain location: San Francisco, ±15 m accuracy.
+    let location = message(
+        108,
+        r#"{"@type":"messageLocation","location":{"@type":"location","latitude":37.7749,"longitude":-122.4194,"horizontal_accuracy":15}}"#,
+    );
+    // Live location: Paris, 15-minute live period, 10 minutes left,
+    // heading 90°, 500 m proximity alert.
+    let live_location = message(
+        109,
+        r#"{"@type":"messageLiveLocation","location":{"@type":"liveLocation","location":{"@type":"location","latitude":48.8566,"longitude":2.3522,"horizontal_accuracy":0},"live_period":900,"heading":90,"proximity_alert_radius":500},"expires_in":600}"#,
+    );
+    // Venue: Ferry Building, via foursquare.
+    let venue = message(
+        110,
+        r#"{"@type":"messageVenue","venue":{"@type":"venue","location":{"@type":"location","latitude":37.7955,"longitude":-122.3937,"horizontal_accuracy":0},"title":"Ferry Building","address":"1 Ferry Building, San Francisco","provider":"foursquare","id":"4a1a2b3c","type":"Food"}}}"#,
+    );
+    // Contact: Ada Lovelace with a vCard and a known Telegram user id.
+    let contact = message(
+        111,
+        r#"{"@type":"messageContact","contact":{"@type":"contact","phone_number":"+14155550123","first_name":"Ada","last_name":"Lovelace","vcard":"BEGIN:VCARD\nFN:Ada Lovelace\nEND:VCARD","user_id":123456789}}"#,
+    );
+
+    for json in [location, live_location, venue, contact] {
+        if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
+            session.apply(owned);
+        }
+    }
+}
+
 /// `ReadySponsored` fixture: open the demo channel (id 13, now ungated) and
 /// inject a `sponsoredMessages` response through the same reducer the live
 /// `getChatSponsoredMessages` path uses — one Sponsored row, one Recommended.
@@ -9345,6 +9428,14 @@ fn session_history_row(
             cx,
         )),
         MessageContent::Poll(poll) => Some(poll_body(message.chat_id, message.id, poll, cx)),
+        MessageContent::Location(location) => Some(location_row(
+            message.id.0 as u64,
+            &location.location,
+            location.live.as_ref(),
+            cx,
+        )),
+        MessageContent::Venue(venue) => Some(venue_row(message.id.0 as u64, venue, cx)),
+        MessageContent::Contact(contact) => Some(contact_row(message.id.0 as u64, contact)),
         MessageContent::Text(_) | MessageContent::Unsupported { .. } => None,
     };
     let keyboard = inline_keyboard(message, cx);
@@ -10670,6 +10761,171 @@ fn format_bytes(n: i64) -> String {
     } else {
         format!("{:.1} MB", n as f64 / (1024.0 * 1024.0))
     }
+}
+
+/// Phase 4.3: `messageLocation` / `messageLiveLocation` row. A static map
+/// placeholder chip (no live tiles): pin glyph, coordinate line, live
+/// status when the message is a live location, and a tappable "Open map"
+/// link. The link opens an OpenStreetMap URL through
+/// `platform::open_external_url` (https only, scheme-gated — no `geo:`
+/// or `tel:` schemes). Live re-rendering is out of scope: the
+/// live-period/expires state is a static snapshot from parse time.
+fn location_row(
+    row_id: u64,
+    location: &quill::telegram::envelope::GeoLocation,
+    live: Option<&quill::telegram::envelope::LiveLocationState>,
+    cx: &mut Context<QuillApp>,
+) -> AnyElement {
+    let url = location.open_street_map_url();
+    let header = if live.is_some() {
+        "📍 Live location"
+    } else {
+        "📍 Location"
+    };
+    let mut body = div()
+        .id(("location-row", row_id))
+        .flex()
+        .flex_col()
+        .gap_1()
+        .mt_2()
+        .px_3()
+        .py_2()
+        .rounded_md()
+        .border_1()
+        .border_color(rgb(0x8b949e))
+        .bg(rgb(0x21262d))
+        .child(div().text_sm().font_medium().child(header))
+        .child(
+            div()
+                .text_xs()
+                .text_color(rgb(0xc9d1d9))
+                .child(location.coords_label()),
+        );
+    if let Some(live) = live {
+        body = body.child(
+            div()
+                .text_xs()
+                .text_color(rgb(0x58a6ff))
+                .child(live.status_label()),
+        );
+    } else if location.accuracy_m > 0 {
+        body = body.child(
+            div()
+                .text_xs()
+                .text_color(rgb(0x8b949e))
+                .child(format!("accuracy ±{} m", location.accuracy_m)),
+        );
+    }
+    body.child(
+        div()
+            .id(("location-open-map", row_id))
+            .text_sm()
+            .text_color(rgb(0x58a6ff))
+            .cursor_pointer()
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.open_message_url(&url, cx);
+            }))
+            .child("🗺 Open map"),
+    )
+    .into_any_element()
+}
+
+/// Phase 4.3: `messageVenue` row — venue title, address, optional provider
+/// subtitle, and a tappable "Open map" link on the venue's coordinates
+/// (same OpenStreetMap handling as `location_row`). The provider `id` /
+/// `type` are not kept in the model (see `VenueContent`).
+fn venue_row(
+    row_id: u64,
+    venue: &quill::telegram::envelope::VenueContent,
+    cx: &mut Context<QuillApp>,
+) -> AnyElement {
+    let url = venue.location.open_street_map_url();
+    let title = if venue.title.is_empty() {
+        "Venue".to_string()
+    } else {
+        venue.title.clone()
+    };
+    let mut body = div()
+        .id(("venue-row", row_id))
+        .flex()
+        .flex_col()
+        .gap_1()
+        .mt_2()
+        .px_3()
+        .py_2()
+        .rounded_md()
+        .border_1()
+        .border_color(rgb(0x8b949e))
+        .bg(rgb(0x21262d))
+        .child(div().text_sm().font_medium().child(format!("📍 {title}")));
+    if !venue.address.is_empty() {
+        body = body.child(
+            div()
+                .text_xs()
+                .text_color(rgb(0xc9d1d9))
+                .child(venue.address.clone()),
+        );
+    }
+    let subtitle = if venue.provider.is_empty() {
+        venue.location.coords_label()
+    } else {
+        format!("{} · via {}", venue.location.coords_label(), venue.provider)
+    };
+    body.child(div().text_xs().text_color(rgb(0x8b949e)).child(subtitle))
+        .child(
+            div()
+                .id(("venue-open-map", row_id))
+                .text_sm()
+                .text_color(rgb(0x58a6ff))
+                .cursor_pointer()
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.open_message_url(&url, cx);
+                }))
+                .child("🗺 Open map"),
+        )
+        .into_any_element()
+}
+
+/// Phase 4.3: `messageContact` row — display name, phone number, and a
+/// subtle "Telegram user" note when `user_id` is known. The phone number
+/// is display-only: tapping it must not dial (`tel:` URLs are refused by
+/// `open_external_url`'s scheme gate anyway). The vCard is kept in the
+/// model but not rendered; there is no profile deep-link yet.
+fn contact_row(row_id: u64, contact: &quill::telegram::envelope::ContactContent) -> AnyElement {
+    let name = contact.display_name();
+    let mut body = div()
+        .id(("contact-row", row_id))
+        .flex()
+        .flex_col()
+        .gap_1()
+        .mt_2()
+        .px_3()
+        .py_2()
+        .rounded_md()
+        .border_1()
+        .border_color(rgb(0x8b949e))
+        .bg(rgb(0x21262d))
+        .child(div().text_sm().font_medium().child(format!(
+            "👤 {}",
+            if name.is_empty() { "Contact" } else { &name }
+        )));
+    if !contact.phone_number.is_empty() {
+        body = body.child(
+            div()
+                .text_xs()
+                .text_color(rgb(0xc9d1d9))
+                .child(contact.phone_number.clone()),
+        );
+    }
+    if contact.user_id != 0 {
+        body = body.child(
+            div()
+                .text_xs()
+                .text_color(rgb(0x8b949e))
+                .child("Telegram user"),
+        );
+    }
+    body.into_any_element()
 }
 
 fn auth_action_note(auth: &AuthView, connect_status: &ConnectUiStatus) -> impl IntoElement {
