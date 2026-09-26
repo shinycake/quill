@@ -180,6 +180,9 @@ impl ComposerEdit {
             MessageContent::VideoNote(_)
             | MessageContent::Sticker(_)
             | MessageContent::Poll(_)
+            | MessageContent::Location(_)
+            | MessageContent::Venue(_)
+            | MessageContent::Contact(_)
             | MessageContent::Unsupported { .. } => return None,
         };
         Some(Self {

@@ -111,9 +111,10 @@ fn parse_screenshot_demo(args: &[String]) -> Option<(ui::ScreenshotDemo, std::pa
                 "ready-bot-command-menu" => ScreenshotDemo::ReadyBotCommandMenu,
                 "ready-text-entities" => ScreenshotDemo::ReadyTextEntities,
                 "ready-poll" => ScreenshotDemo::ReadyPoll,
+                "ready-location" => ScreenshotDemo::ReadyLocation,
                 _ => {
                     eprintln!(
-                        "unknown screenshot demo '{kind}' (expected need-tdjson|wait-phone|wait-code|wait-password|ready-chats|ready-chats-composer|ready-unread|ready-unread-read|ready-media|ready-send-media|ready-search|ready-search-in-chat|ready-reply|ready-edit-delete|ready-forward|ready-reactions|ready-pin|ready-mute-archive|ready-typing|ready-stickers|ready-voice|ready-link-preview|ready-gifs|ready-video|ready-video-note|ready-video-send|ready-video-note-send|ready-drafts|ready-albums|ready-audio|ready-sponsored|ready-channels|ready-channels-admin|ready-bot-chat|ready-bot-keyboard|ready-bot-command-menu|ready-text-entities|ready-poll)"
+                        "unknown screenshot demo '{kind}' (expected need-tdjson|wait-phone|wait-code|wait-password|ready-chats|ready-chats-composer|ready-unread|ready-unread-read|ready-media|ready-send-media|ready-search|ready-search-in-chat|ready-reply|ready-edit-delete|ready-forward|ready-reactions|ready-pin|ready-mute-archive|ready-typing|ready-stickers|ready-voice|ready-link-preview|ready-gifs|ready-video|ready-video-note|ready-video-send|ready-video-note-send|ready-drafts|ready-albums|ready-audio|ready-sponsored|ready-channels|ready-channels-admin|ready-bot-chat|ready-bot-keyboard|ready-bot-command-menu|ready-text-entities|ready-poll|ready-location)"
                     );
                     std::process::exit(2);
                 }
@@ -173,11 +174,26 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
         ScreenshotDemo::ReadyBotCommandMenu => ".quill-ready-ready-bot-command-menu",
         ScreenshotDemo::ReadyTextEntities => ".quill-ready-ready-text-entities",
         ScreenshotDemo::ReadyPoll => ".quill-ready-ready-poll",
+        ScreenshotDemo::ReadyLocation => ".quill-ready-ready-location",
     });
     let _ = std::fs::remove_file(&marker);
     let marker_for_spawn = marker.clone();
 
     eprintln!("quill screenshot-demo: {kind:?} → {}", out_dir.display());
+
+    // Demo-only window size override (`QUILL_DEMO_WINDOW_SIZE=1200x1100`)
+    // for slices whose fixture needs more vertical room than the default
+    // 1200x740 (e.g. ready-location's four rows). Unset = unchanged, so
+    // existing captures are unaffected.
+    let (demo_w, demo_h) = std::env::var("QUILL_DEMO_WINDOW_SIZE")
+        .ok()
+        .and_then(|value| {
+            let (w, h) = value.split_once('x')?;
+            let w: f32 = w.parse().ok()?;
+            let h: f32 = h.parse().ok()?;
+            (w > 0.0 && h > 0.0).then_some((w, h))
+        })
+        .unwrap_or((1200.0, 740.0));
 
     gpui_kit::application()
         .with_assets(gpui_kit::assets::Assets)
@@ -189,7 +205,7 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
                     WindowOptions {
                         window_bounds: Some(WindowBounds::Windowed(Bounds {
                             origin: point(px(20.), px(20.)),
-                            size: size(px(1200.), px(740.)),
+                            size: size(px(demo_w), px(demo_h)),
                         })),
                         app_id: Some("org.shinycake.quill".into()),
                         titlebar: Some(TitlebarOptions {

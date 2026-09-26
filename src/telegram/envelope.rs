@@ -859,6 +859,14 @@ pub enum MessageContent {
     Audio(AudioContent),
     /// Phase 4.2: `messagePoll` (TDLib 1.8.67, `schema/td_api.tl:5241`).
     Poll(PollContent),
+    /// Phase 4.3: `messageLocation` (TDLib 1.8.67, `schema/td_api.tl:5214`)
+    /// and `messageLiveLocation` (`schema/td_api.tl:5211`). The latter
+    /// carries `LiveLocation` state; the former sets `live: None`.
+    Location(LocationContent),
+    /// Phase 4.3: `messageVenue` (TDLib 1.8.67, `schema/td_api.tl:5217`).
+    Venue(VenueContent),
+    /// Phase 4.3: `messageContact` (TDLib 1.8.67, `schema/td_api.tl:5220`).
+    Contact(ContactContent),
     Unsupported {
         type_name: String,
     },
@@ -957,6 +965,182 @@ impl Poll {
 pub struct PollContent {
     pub poll: Poll,
     pub description: String,
+}
+
+/// `location` (TDLib 1.8.67, `schema/td_api.tl:646`): `latitude` /
+/// `longitude` in degrees, `horizontal_accuracy` in meters (0 = unknown).
+/// Phase 4.3: coordinates are stored as integer **microdegrees**
+/// (`lat_e6` / `lon_e6`, 10⁻⁶ degrees ≈ 11 cm) so the parsed model keeps
+/// the `Eq` derive used across the envelope types — more than enough for
+/// display and map-link generation. Accuracy is rounded to whole meters
+/// (`accuracy_m`; 0 = unknown, per schema).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GeoLocation {
+    pub lat_e6: i64,
+    pub lon_e6: i64,
+    pub accuracy_m: i32,
+}
+
+impl GeoLocation {
+    /// Latitude in degrees.
+    pub fn latitude(&self) -> f64 {
+        self.lat_e6 as f64 / 1e6
+    }
+
+    /// Longitude in degrees.
+    pub fn longitude(&self) -> f64 {
+        self.lon_e6 as f64 / 1e6
+    }
+
+    /// User-facing coordinate line, e.g. `37.7749, -122.4194`.
+    pub fn coords_label(&self) -> String {
+        format!("{:.4}, {:.4}", self.latitude(), self.longitude())
+    }
+
+    /// OpenStreetMap deep link for the "Open map" row action. The
+    /// coordinates come from the parsed message, so they contain no
+    /// whitespace or control characters and the `https://` scheme passes
+    /// `platform::open_external_url`'s scheme gate.
+    pub fn open_street_map_url(&self) -> String {
+        format!(
+            "https://www.openstreetmap.org/?mlat={:.6}&mlon={:.6}",
+            self.latitude(),
+            self.longitude()
+        )
+    }
+}
+
+/// Safe rule for coordinate parsing (Phase 4.3, documented per
+/// `messageLocation` / `messageVenue`): `latitude` and `longitude` must be
+/// finite numbers with `|lat| <= 90` and `|lon| <= 180`. Anything else —
+/// NaN, infinities, or out-of-range degrees — means corrupt data, and the
+/// location is dropped entirely (the message renders as `Unsupported`)
+/// rather than pinned to a clamped pole or fed to a map link.
+fn geo_location(value: Option<&Value>) -> Option<GeoLocation> {
+    let value = value?;
+    let latitude = value.get("latitude").and_then(Value::as_f64)?;
+    let longitude = value.get("longitude").and_then(Value::as_f64)?;
+    if !latitude.is_finite() || !longitude.is_finite() {
+        return None;
+    }
+    if latitude.abs() > 90.0 || longitude.abs() > 180.0 {
+        return None;
+    }
+    let accuracy = value
+        .get("horizontal_accuracy")
+        .and_then(Value::as_f64)
+        .unwrap_or(0.0);
+    let accuracy_m = if accuracy.is_finite() && accuracy > 0.0 {
+        accuracy.round().clamp(0.0, i32::MAX as f64) as i32
+    } else {
+        0
+    };
+    Some(GeoLocation {
+        lat_e6: (latitude * 1e6).round() as i64,
+        lon_e6: (longitude * 1e6).round() as i64,
+        accuracy_m,
+    })
+}
+
+/// `liveLocation` (TDLib 1.8.67, `schema/td_api.tl:653`): live-period state
+/// attached to a location. `live_period` is relative to the message send
+/// date in seconds (`0x7FFFFFFF` = updates forever); `heading` is 1–360
+/// degrees (0 = unknown); `proximity_alert_radius` is 0–100000 meters
+/// (0 = disabled).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LiveLocationState {
+    pub live_period: i32,
+    pub expires_in: i32,
+    pub heading: i32,
+    pub proximity_alert_radius: i32,
+}
+
+impl LiveLocationState {
+    /// Static status line; live re-rendering is out of this slice, so the
+    /// remaining time is a snapshot from `expires_in` at parse time.
+    pub fn status_label(&self) -> String {
+        if self.expires_in <= 0 {
+            return "Live location ended".into();
+        }
+        let mut parts = vec![format!(
+            "Live · expires in {}",
+            duration_label(self.expires_in)
+        )];
+        if self.heading > 0 {
+            parts.push(format!("heading {}°", self.heading));
+        }
+        if self.proximity_alert_radius > 0 {
+            parts.push(format!(
+                "proximity alert ≤ {}",
+                meters_label(self.proximity_alert_radius)
+            ));
+        }
+        parts.join(" · ")
+    }
+}
+
+/// `mm:ss` or `Xh Ym` for `expires_in`-style second counts.
+fn duration_label(seconds: i32) -> String {
+    let seconds = seconds.max(0) as i64;
+    if seconds >= 3600 {
+        format!("{}h {:02}m", seconds / 3600, (seconds % 3600) / 60)
+    } else {
+        format!("{}:{:02}", seconds / 60, seconds % 60)
+    }
+}
+
+fn meters_label(meters: i32) -> String {
+    if meters >= 1000 {
+        format!("{:.1} km", meters as f64 / 1000.0)
+    } else {
+        format!("{meters} m")
+    }
+}
+
+/// `messageLocation` (`schema/td_api.tl:5214`) / `messageLiveLocation`
+/// (`schema/td_api.tl:5211`, `expires_in` = seconds left for updates,
+/// 0 = can't be updated anymore). For `messageLocation`, `live` is
+/// `None`; for `messageLiveLocation`, it carries the live state. Note the
+/// schema split: `messageLocation` itself carries **no** live fields — the
+/// task's `live_period` / `heading` / `proximity_alert_radius` live on
+/// `liveLocation` (`schema/td_api.tl:653`), which is why both constructors
+/// are parsed here.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LocationContent {
+    pub location: GeoLocation,
+    pub live: Option<LiveLocationState>,
+}
+
+/// `venue` (TDLib 1.8.67, `schema/td_api.tl:663`). `id` and `type` are
+/// provider-database identifiers and are not kept — Quill renders the
+/// human-readable `title` + `address` and the map link from `location`.
+/// `provider` (e.g. "foursquare", "gplaces") is kept for the subtitle.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VenueContent {
+    pub location: GeoLocation,
+    pub title: String,
+    pub address: String,
+    pub provider: String,
+}
+
+/// `contact` (TDLib 1.8.67, `schema/td_api.tl:640`). `vcard` (raw vCard
+/// data, up to 2048 bytes) is kept for future address-book use but not
+/// rendered in this slice; `user_id` is 0 when unknown.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContactContent {
+    pub phone_number: String,
+    pub first_name: String,
+    pub last_name: String,
+    pub vcard: String,
+    pub user_id: i64,
+}
+
+impl ContactContent {
+    /// `first_name` + `last_name`, trimmed; empty when both are empty.
+    pub fn display_name(&self) -> String {
+        let name = format!("{} {}", self.first_name.trim(), self.last_name.trim());
+        name.trim().to_string()
+    }
 }
 
 /// `linkPreview` card. Photo comes from `type` when that constructor carries a `photo`.
@@ -1128,6 +1312,29 @@ impl MessageContent {
                     "Poll".into()
                 } else {
                     question.chars().take(80).collect()
+                }
+            }
+            MessageContent::Location(location) => {
+                if location.live.is_some() {
+                    "📍 Live location".into()
+                } else {
+                    "📍 Location".into()
+                }
+            }
+            MessageContent::Venue(venue) => {
+                let title = venue.title.trim();
+                if title.is_empty() {
+                    "📍 Venue".into()
+                } else {
+                    format!("📍 {}", title.chars().take(76).collect::<String>())
+                }
+            }
+            MessageContent::Contact(contact) => {
+                let name = contact.display_name();
+                if name.is_empty() {
+                    "👤 Contact".into()
+                } else {
+                    format!("👤 {}", name.chars().take(76).collect::<String>())
                 }
             }
             MessageContent::Unsupported { type_name } => format!("({type_name})"),
@@ -2590,6 +2797,10 @@ fn parse_content(value: Option<&Value>) -> (MessageContent, Vec<ParsedFile>) {
         Some("messageVoiceNote") => parse_message_voice_note(value),
         Some("messageAudio") => parse_message_audio(value),
         Some("messagePoll") => parse_message_poll(value),
+        Some("messageLocation") => parse_message_location(value),
+        Some("messageLiveLocation") => parse_message_live_location(value),
+        Some("messageVenue") => parse_message_venue(value),
+        Some("messageContact") => parse_message_contact(value),
         Some(other) => (
             MessageContent::Unsupported {
                 type_name: other.to_string(),
@@ -2738,6 +2949,158 @@ fn parse_message_poll(value: &Value) -> (MessageContent, Vec<ParsedFile>) {
             Vec::new(),
         ),
     }
+}
+
+/// `liveLocation` (TDLib 1.8.67, `schema/td_api.tl:653`). `None` when the
+/// wrapper object itself is missing or null.
+fn parse_live_location_state(value: Option<&Value>) -> Option<LiveLocationState> {
+    let value = value?;
+    if value.is_null() {
+        return None;
+    }
+    Some(LiveLocationState {
+        live_period: value
+            .get("live_period")
+            .and_then(Value::as_i64)
+            .unwrap_or(0) as i32,
+        expires_in: 0,
+        heading: value.get("heading").and_then(Value::as_i64).unwrap_or(0) as i32,
+        proximity_alert_radius: value
+            .get("proximity_alert_radius")
+            .and_then(Value::as_i64)
+            .unwrap_or(0) as i32,
+    })
+}
+
+/// `messageLocation` (TDLib 1.8.67, `schema/td_api.tl:5214`). An invalid
+/// `location` (missing or failing the coordinate rule) yields
+/// `Unsupported` so corrupt data never reaches a map link.
+fn parse_message_location(value: &Value) -> (MessageContent, Vec<ParsedFile>) {
+    match geo_location(value.get("location")) {
+        Some(location) => (
+            MessageContent::Location(LocationContent {
+                location,
+                live: None,
+            }),
+            Vec::new(),
+        ),
+        None => (
+            MessageContent::Unsupported {
+                type_name: "messageLocation".into(),
+            },
+            Vec::new(),
+        ),
+    }
+}
+
+/// `messageLiveLocation` (TDLib 1.8.67, `schema/td_api.tl:5211`).
+/// `expires_in` rides on the message wrapper, `live_period` / `heading` /
+/// `proximity_alert_radius` on the inner `liveLocation`.
+fn parse_message_live_location(value: &Value) -> (MessageContent, Vec<ParsedFile>) {
+    let live_location = value.get("location");
+    match (
+        geo_location(live_location.and_then(|v| v.get("location"))),
+        parse_live_location_state(live_location),
+    ) {
+        (Some(location), Some(mut live)) => {
+            live.expires_in = value.get("expires_in").and_then(Value::as_i64).unwrap_or(0) as i32;
+            (
+                MessageContent::Location(LocationContent {
+                    location,
+                    live: Some(live),
+                }),
+                Vec::new(),
+            )
+        }
+        _ => (
+            MessageContent::Unsupported {
+                type_name: "messageLiveLocation".into(),
+            },
+            Vec::new(),
+        ),
+    }
+}
+
+/// `messageVenue` (TDLib 1.8.67, `schema/td_api.tl:5217`). Provider `id`
+/// and `type` are dropped (see `VenueContent` docs).
+fn parse_message_venue(value: &Value) -> (MessageContent, Vec<ParsedFile>) {
+    let venue = value.get("venue");
+    match geo_location(venue.and_then(|v| v.get("location"))) {
+        Some(location) => (
+            MessageContent::Venue(VenueContent {
+                location,
+                title: venue
+                    .and_then(|v| v.get("title"))
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string(),
+                address: venue
+                    .and_then(|v| v.get("address"))
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string(),
+                provider: venue
+                    .and_then(|v| v.get("provider"))
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string(),
+            }),
+            Vec::new(),
+        ),
+        None => (
+            MessageContent::Unsupported {
+                type_name: "messageVenue".into(),
+            },
+            Vec::new(),
+        ),
+    }
+}
+
+/// `messageContact` (TDLib 1.8.67, `schema/td_api.tl:5220`). `user_id` is
+/// int53 (0 when unknown); the vCard is kept verbatim for future use.
+fn parse_message_contact(value: &Value) -> (MessageContent, Vec<ParsedFile>) {
+    let contact = value.get("contact");
+    let phone_number = contact
+        .and_then(|v| v.get("phone_number"))
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    let first_name = contact
+        .and_then(|v| v.get("first_name"))
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    let last_name = contact
+        .and_then(|v| v.get("last_name"))
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    if contact.is_none_or(Value::is_null)
+        || (phone_number.is_empty() && first_name.is_empty() && last_name.is_empty())
+    {
+        return (
+            MessageContent::Unsupported {
+                type_name: "messageContact".into(),
+            },
+            Vec::new(),
+        );
+    }
+    (
+        MessageContent::Contact(ContactContent {
+            phone_number,
+            first_name,
+            last_name,
+            vcard: contact
+                .and_then(|v| v.get("vcard"))
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string(),
+            user_id: contact
+                .and_then(|v| int53(v.get("user_id")).ok())
+                .unwrap_or(0),
+        }),
+        Vec::new(),
+    )
 }
 
 /// Keep the entity types Quill renders (Phase 4.1): links plus the style
@@ -5127,6 +5490,169 @@ mod channel_envelope_tests {
                 assert_eq!(poll.options[0].vote_percentage, 56);
                 assert!(poll.options[0].is_chosen);
             }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    // Phase 4.3: `messageLocation` (schema 1.8.67 line 5214), `location`
+    // (line 646).
+    #[test]
+    fn message_location_parses_coordinates() {
+        let json = r#"{"@type":"updateNewMessage","message":{"id":108,"chat_id":16,"is_outgoing":false,"content":{"@type":"messageLocation","location":{"@type":"location","latitude":37.7749,"longitude":-122.4194,"horizontal_accuracy":15.6}}}}"#;
+        let env = parse_envelope(json).unwrap();
+        match env.payload {
+            EnvelopePayload::UpdateNewMessage(message) => {
+                let MessageContent::Location(content) = &message.content else {
+                    panic!("{:?}", message.content);
+                };
+                assert!(content.live.is_none());
+                assert_eq!(content.location.lat_e6, 37_774_900);
+                assert_eq!(content.location.lon_e6, -122_419_400);
+                assert_eq!(content.location.accuracy_m, 16);
+                assert_eq!(content.location.coords_label(), "37.7749, -122.4194");
+                assert_eq!(
+                    content.location.open_street_map_url(),
+                    "https://www.openstreetmap.org/?mlat=37.774900&mlon=-122.419400"
+                );
+                assert_eq!(message.content.preview(), "📍 Location");
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    // Phase 4.3: `messageLiveLocation` (schema 1.8.67 line 5211) +
+    // `liveLocation` (line 653). The task's live fields live here, not on
+    // `messageLocation`.
+    #[test]
+    fn message_live_location_parses_live_fields() {
+        let json = r#"{"@type":"updateNewMessage","message":{"id":109,"chat_id":16,"is_outgoing":false,"content":{"@type":"messageLiveLocation","location":{"@type":"liveLocation","location":{"@type":"location","latitude":48.8566,"longitude":2.3522,"horizontal_accuracy":0},"live_period":900,"heading":90,"proximity_alert_radius":500},"expires_in":600}}}"#;
+        let env = parse_envelope(json).unwrap();
+        match env.payload {
+            EnvelopePayload::UpdateNewMessage(message) => {
+                let MessageContent::Location(content) = &message.content else {
+                    panic!("{:?}", message.content);
+                };
+                let live = content.live.expect("live state");
+                assert_eq!(live.live_period, 900);
+                assert_eq!(live.expires_in, 600);
+                assert_eq!(live.heading, 90);
+                assert_eq!(live.proximity_alert_radius, 500);
+                assert_eq!(content.location.lat_e6, 48_856_600);
+                assert_eq!(content.location.lon_e6, 2_352_200);
+                assert_eq!(content.location.accuracy_m, 0);
+                assert_eq!(
+                    live.status_label(),
+                    "Live · expires in 10:00 · heading 90° · proximity alert ≤ 500 m"
+                );
+                assert_eq!(message.content.preview(), "📍 Live location");
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    // Phase 4.3: `messageVenue` (schema 1.8.67 line 5217), `venue` (line
+    // 663). Provider `id` / `type` are dropped by design.
+    #[test]
+    fn message_venue_parses_all_fields() {
+        let json = r#"{"@type":"updateNewMessage","message":{"id":110,"chat_id":16,"is_outgoing":false,"content":{"@type":"messageVenue","venue":{"@type":"venue","location":{"@type":"location","latitude":37.7955,"longitude":-122.3937,"horizontal_accuracy":0},"title":"Ferry Building","address":"1 Ferry Building, San Francisco","provider":"foursquare","id":"4a1a2b3c","type":"Food"}}}}"#;
+        let env = parse_envelope(json).unwrap();
+        match env.payload {
+            EnvelopePayload::UpdateNewMessage(message) => {
+                let MessageContent::Venue(venue) = &message.content else {
+                    panic!("{:?}", message.content);
+                };
+                assert_eq!(venue.title, "Ferry Building");
+                assert_eq!(venue.address, "1 Ferry Building, San Francisco");
+                assert_eq!(venue.provider, "foursquare");
+                assert_eq!(venue.location.coords_label(), "37.7955, -122.3937");
+                assert_eq!(message.content.preview(), "📍 Ferry Building");
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    // Phase 4.3: `messageContact` (schema 1.8.67 line 5220), `contact`
+    // (line 640). The vCard parses without breaking; user_id 0 is
+    // unknown.
+    #[test]
+    fn message_contact_parses_with_vcard() {
+        let json = r#"{"@type":"updateNewMessage","message":{"id":111,"chat_id":16,"is_outgoing":false,"content":{"@type":"messageContact","contact":{"@type":"contact","phone_number":"+14155550123","first_name":"Ada","last_name":"Lovelace","vcard":"BEGIN:VCARD\nFN:Ada Lovelace\nEND:VCARD","user_id":123456789}}}}"#;
+        let env = parse_envelope(json).unwrap();
+        match env.payload {
+            EnvelopePayload::UpdateNewMessage(message) => {
+                let MessageContent::Contact(contact) = &message.content else {
+                    panic!("{:?}", message.content);
+                };
+                assert_eq!(contact.phone_number, "+14155550123");
+                assert_eq!(contact.display_name(), "Ada Lovelace");
+                assert!(contact.vcard.contains("BEGIN:VCARD"));
+                assert_eq!(contact.user_id, 123456789);
+                assert_eq!(message.content.preview(), "👤 Ada Lovelace");
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn message_contact_without_name_or_phone_is_unsupported() {
+        let json = r#"{"@type":"updateNewMessage","message":{"id":112,"chat_id":16,"is_outgoing":false,"content":{"@type":"messageContact","contact":{"@type":"contact","phone_number":"","first_name":"","last_name":"","vcard":"","user_id":0}}}}"#;
+        let env = parse_envelope(json).unwrap();
+        match env.payload {
+            EnvelopePayload::UpdateNewMessage(message) => match &message.content {
+                MessageContent::Unsupported { type_name } => {
+                    assert_eq!(type_name, "messageContact")
+                }
+                other => panic!("{other:?}"),
+            },
+            other => panic!("{other:?}"),
+        }
+    }
+
+    // Phase 4.3 safe rule: coordinates must be finite and in range; the
+    // location is dropped otherwise (the message renders as
+    // `Unsupported`). Note `serde_json` already rejects out-of-range
+    // float literals (`1e999`) at the parse boundary, so infinities
+    // can't reach `geo_location` from text; a huge-but-finite value
+    // still fails the `|lat| <= 90` range check below.
+    #[test]
+    fn location_rejects_non_finite_coordinates() {
+        assert!(
+            serde_json::from_str::<serde_json::Value>(r#"{"latitude":1e999,"longitude":0.0}"#)
+                .is_err()
+        );
+        let value: serde_json::Value =
+            serde_json::from_str(r#"{"latitude":1e308,"longitude":0.0}"#).unwrap();
+        assert!(geo_location(Some(&value)).is_none());
+        assert!(geo_location(None).is_none());
+    }
+
+    #[test]
+    fn location_rejects_out_of_range_coordinates() {
+        assert!(
+            geo_location(Some(
+                &serde_json::json!({"latitude": 95.0, "longitude": 0.0})
+            ))
+            .is_none()
+        );
+        assert!(
+            geo_location(Some(
+                &serde_json::json!({"latitude": 0.0, "longitude": -190.0})
+            ))
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn message_location_with_bad_coordinates_is_unsupported() {
+        let json = r#"{"@type":"updateNewMessage","message":{"id":113,"chat_id":16,"is_outgoing":false,"content":{"@type":"messageLocation","location":{"@type":"location","latitude":95.0,"longitude":200.0,"horizontal_accuracy":0}}}}"#;
+        let env = parse_envelope(json).unwrap();
+        match env.payload {
+            EnvelopePayload::UpdateNewMessage(message) => match &message.content {
+                MessageContent::Unsupported { type_name } => {
+                    assert_eq!(type_name, "messageLocation")
+                }
+                other => panic!("{other:?}"),
+            },
             other => panic!("{other:?}"),
         }
     }

@@ -800,3 +800,62 @@ Research snapshot 2026-09-16, pin recheck **2026-09-17**.
   explanation display; `updatePollAnswer` voter-list detail;
   `pollVoteRestrictionReason` handling (restricted polls currently
   render as votable; the vote fails server-side).
+
+## Phase 4.3 — Location / venue / contact (2026-09-26)
+
+- **Rationale:** `messageLocation`, `messageVenue`, and `messageContact`
+  are everyday first-class content types. This slice adds typed parsing
+  and display rows: coordinates with a tappable OpenStreetMap link for
+  locations, title + address rows for venues, and name + phone rows for
+  contacts.
+- **Schema (1.8.67, verified in `schema/td_api.tl`):**
+  - `messageLocation` (line 5214), `messageVenue` (line 5217),
+    `messageContact` (line 5220)
+  - `location` (line 646): `latitude` / `longitude` doubles, `horizontal_accuracy` meters (0 = unknown)
+  - `liveLocation` (line 653): `location` + `live_period` (int32,
+    `0x7FFFFFFF` = forever), `heading` (1–360, 0 = unknown),
+    `proximity_alert_radius` (0–100000 m, 0 = disabled)
+  - `messageLiveLocation` (line 5211): `location:liveLocation` +
+    `expires_in` (int32, 0 = can't be updated anymore)
+  - `venue` (line 663): `location` + `title`, `address`, `provider`
+    ("foursquare" / "gplaces"), `id`, `type`
+  - `contact` (line 640): `phone_number`, `first_name`, `last_name`,
+    `vcard` (0–2048 bytes), `user_id` (int53, 0 = unknown)
+  - **Correction vs. the task brief:** `live_period`, `heading`, and
+    `proximity_alert_radius` do **not** live on `messageLocation` —
+    they belong to the separate `messageLiveLocation` /
+    `liveLocation` constructors. Both constructors are parsed, with
+    `LocationContent.live: None` for plain locations.
+- **Model (`src/telegram/envelope.rs`):** `GeoLocation` (coordinates as
+  integer microdegrees — 10⁻⁶ degrees ≈ 11 cm — so the model keeps the
+  `Eq` derive; accuracy rounded to whole meters), `LiveLocationState`,
+  `LocationContent { location, live }`, `VenueContent` (provider kept;
+  provider `id` / `type` dropped as internal database identifiers),
+  `ContactContent` (`vcard` kept verbatim but not rendered; `display_name()`
+  joins first + last name), `MessageContent::{Location, Venue, Contact}`.
+  **Safe rule (documented on `geo_location`):** coordinates must be
+  finite with `|lat| <= 90` and `|lon| <= 180`; anything else drops the
+  location (the message renders `Unsupported`) rather than clamping to
+  a pole or feeding a map link corrupt data. Composer edit excludes the
+  three new variants (not text-editable).
+- **Rendering (`location_row`, `venue_row`, `contact_row` in
+  `src/ui/mod.rs`):** static placeholder chips (no live map tiles) —
+  location shows "📍 Location" / coordinates / accuracy (or the live
+  status line: "Live · expires in 10:00 · heading 90° · proximity alert
+  ≤ 500 m") plus a tappable "🗺 Open map" link; venue shows title,
+  address, "coordinates · via provider", and the same map link; contact
+  shows name + phone and a subtle "Telegram user" note when `user_id !=
+  0`. Map links build `https://www.openstreetmap.org/?mlat=…&mlon=…`
+  and go through `platform::open_external_url` (https scheme-gated).
+  The phone number is display-only: tapping it never dials (`tel:` is
+  refused by the scheme gate anyway).
+- **Screenshot:** `docs/screenshots/ready-location.png` — a dedicated
+  "Demo places" chat with a location, a live location, a venue, and a
+  contact (injected JSON through the real reducer), driven by
+  `quill --screenshot-demo ready-location`.
+- **Out of this slice (→ future):** live-location re-rendering as
+  `updateMessageContent` ticks arrive; live-location sharing from the
+  composer; map tiles / static-map preview images; contact
+  add-to-address-book; profile deep-links for `user_id`; venue deep
+  links (Foursquare / Google Places URLs are not opened — provider
+  `id`/`type` are dropped).

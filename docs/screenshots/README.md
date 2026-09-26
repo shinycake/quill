@@ -86,11 +86,17 @@ bash scripts/capture-connect-screenshots.sh
 #   cargo run --features ui -- --screenshot-demo ready-sponsored docs/screenshots
 #   cargo run --features ui -- --screenshot-demo ready-text-entities docs/screenshots
 #   cargo run --features ui -- --screenshot-demo ready-poll docs/screenshots
+#   QUILL_DEMO_WINDOW_SIZE=1200x1100 cargo run --features ui -- --screenshot-demo ready-location docs/screenshots
 ```
 
 Environment used by the script: `DISPLAY`, `LIBGL_ALWAYS_SOFTWARE=1`, `WGPU_BACKEND=vulkan`, `VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json`.
+
+`QUILL_DEMO_WINDOW_SIZE` (e.g. `1200x1100`, default `1200x740`) overrides the
+screenshot-demo window size for fixtures that need more vertical room
+(`ready-location` uses it so all four rows fit in one frame).
 
 VoiceOver was **not** recorded here (no macOS GUI runner). Keyboard shortcuts are listed in the status bar.
 | `ready-bot-command-menu.png` | **Phase 3.3** Same bot chat with the composer `/` menu open above the composer: bot-specific commands (`/start`, `/help`, `/ping` from `botInfo`) plus a **Global** section (`/settings` from an injected `botCommands` response through the real `getCommands` reducer path), first row highlighted. Injected data, no live Telegram. Driven by `quill --screenshot-demo ready-bot-command-menu`. |
 | `ready-text-entities.png` | **Phase 4.1** Dedicated **Demo entities** chat: a `messageText` with mixed nested entities (bold, italic, bold-italic, underline, strikethrough, spoiler chip, inline `code`, URL, `rust` pre block) plus a `messagePhoto` whose caption carries bold + link entities. Injected `updateNewChat` / `updateNewMessage` JSON through the real reducer, no live Telegram. Driven by `quill --screenshot-demo ready-text-entities`. |
 | `ready-poll.png` | **Phase 4.2** Dedicated **Demo polls** chat: an open regular poll ("Where should we eat lunch?", voted for "Sushi place" — blue bar, ✓ mark, 55% · 12 votes) and a closed quiz poll ("Which planet is known as the Red Planet?" — green "· correct answer" on Mars, ✓ on the user's Venus answer, results only). Injected `updateNewChat` / `updateNewMessage` JSON through the real reducer, no live Telegram. Driven by `quill --screenshot-demo ready-poll`. |
+| `ready-location.png` | **Phase 4.3** Dedicated **Demo places** chat: a `messageLocation` (San Francisco coordinates + accuracy, "🗺 Open map" link), a `messageLiveLocation` (live status line — "Live · expires in 10:00 · heading 90° · proximity alert ≤ 500 m"), a `messageVenue` (Ferry Building title + address + "via foursquare" + map link), and a `messageContact` (Ada Lovelace, phone, "Telegram user" note). Injected `updateNewChat` / `updateNewMessage` JSON through the real reducer, no live Telegram. Driven by `quill --screenshot-demo ready-location`. |
