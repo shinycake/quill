@@ -1568,8 +1568,17 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self.session.active_group_call.is_some() || self.session.active_call.is_some() {
+        // Never join while a 1:1 call is active. A tracked group call is
+        // fine to join when it is the same call and not yet joined (the
+        // normal flow: getGroupCall creates the unjoined tracker, then the
+        // overlay's Join button calls this). Reject a different tracked call
+        // or one already joined.
+        if self.session.active_call.is_some() {
             return Err(ConnectSendError::InvalidRequest);
+        }
+        match &self.session.active_group_call {
+            Some(call) if call.id == group_call_id && !call.is_joined => {}
+            _ => return Err(ConnectSendError::InvalidRequest),
         }
         let extra = self
             .session
@@ -10133,6 +10142,61 @@ mod tests {
         assert_eq!(content["options"][0]["text"]["text"], "Sushi");
         assert_eq!(content["type"]["@type"], "inputPollTypeRegular");
         assert!(!sink.rendered().contains("CANARY"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Phase C3a: `join_video_chat` must accept the tracked, unjoined call
+    /// (the normal flow: `getGroupCall` creates the tracker, then the
+    /// overlay's Join button calls this) while rejecting a missing,
+    /// mismatched, or already-joined call.
+    #[test]
+    fn join_video_chat_guard_allows_tracked_unjoined_call() {
+        const UNJOINED_CALL: &str = r#"{"@type":"updateGroupCall","group_call":{"@type":"groupCall","id":555,"unique_id":"999","title":"Demo voice","invite_link":"","paid_message_star_count":0,"scheduled_start_date":0,"enabled_start_notification":false,"is_active":true,"is_video_chat":true,"is_live_story":false,"is_rtmp_stream":false,"is_joined":false,"need_rejoin":false,"is_owned":false,"can_be_managed":true,"participant_count":0,"has_hidden_listeners":false,"loaded_all_participants":false,"message_sender_id":null,"recent_speakers":[],"is_my_video_enabled":false,"is_my_video_paused":false,"can_enable_video":true,"mute_new_participants":false,"can_toggle_mute_new_participants":true,"can_send_messages":true,"are_messages_allowed":true,"can_toggle_are_messages_allowed":false,"can_delete_messages":false,"record_duration":0,"is_video_recorded":false,"duration":0}}"#;
+
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = Arc::new(RecordingSender::new());
+        let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+        let mut driver =
+            ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+        let seq = AtomicU64::new(0);
+        seed_ready_alice(&mut driver, &seq, &dyn_sink);
+
+        // No tracked call: rejected.
+        assert_invalid(driver.join_video_chat(555));
+
+        // Track call 555 unjoined, as `getGroupCall` would: join allowed.
+        driver
+            .ingest(copy_and_parse(UNJOINED_CALL, &seq, &dyn_sink).unwrap())
+            .unwrap();
+        assert!(
+            driver
+                .session
+                .active_group_call
+                .as_ref()
+                .is_some_and(|c| c.id == 555 && !c.is_joined)
+        );
+        let extra = driver
+            .join_video_chat(555)
+            .expect("join tracked unjoined call");
+        let sent = recorder
+            .snapshot()
+            .last()
+            .cloned()
+            .expect("joinVideoChat sent");
+        let v: Value = serde_json::from_str(&sent).unwrap();
+        assert_eq!(v["@type"], "joinVideoChat");
+        assert_eq!(v["@extra"], extra.0.to_string());
+        assert_eq!(v["group_call_id"], 555);
+
+        // A different tracked call id is rejected…
+        assert_invalid(driver.join_video_chat(777));
+        // …and so is the same call once joined.
+        driver.session.active_group_call.as_mut().unwrap().is_joined = true;
+        assert_invalid(driver.join_video_chat(555));
+
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
