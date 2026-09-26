@@ -379,3 +379,77 @@ Research snapshot 2026-09-16, pin recheck **2026-09-17**.
   counts; channel header extras (photo, description, username); chat-list
   avatars for any chat type; comment threading inside channels; admin log;
   boosts/statistics.
+
+## Phase 2.3 — Channel admin posting (2026-09-26)
+
+- **Rationale:** 2.2 ungated channels for reading but hid the composer for
+  everyone, including admins. This slice derives posting rights from own
+  channel membership and shows the composer for admins, completing the
+  channel read/write loop: `getChatMember`/`updateChatMember` already feed
+  `ChatSummary::my_member_status`; now they also feed posting rights, and
+  both the composer gate and the driver send gate read the same predicate.
+- **Official clients (product behavior):** tdesktop and Unigram both render
+  the message input in a channel when the viewer can post (owner/admin with
+  the right); posts appear authored by the channel with live view counts.
+  Non-admins see no input. Quill mirrors this: one `can_post()` predicate
+  drives both the composer visibility and the driver-side send rejection.
+  (Product-level behavior; no new source-line verification was needed for
+  this slice — the schema carries the rights model.)
+- **Schema (1.8.67, verified in `schema/td_api.tl`):**
+  - `chatMemberStatusCreator is_anonymous:Bool is_member:Bool =
+    ChatMemberStatus` — no rights block; the creator always posts
+  - `chatMemberStatusAdministrator can_be_edited:Bool
+    rights:chatAdministratorRights = ChatMemberStatus;` — there is **no**
+    `can_post_messages` on the status itself (nothing invented); the right
+    lives on the nested `chatAdministratorRights`
+  - `chatAdministratorRights can_manage_chat:Bool can_change_info:Bool
+    can_post_messages:Bool can_edit_messages:Bool can_delete_messages:Bool
+    can_invite_users:Bool can_restrict_members:Bool can_pin_messages:Bool
+    can_manage_topics:Bool can_promote_members:Bool can_manage_video_chats:Bool
+    can_post_stories:Bool can_edit_stories:Bool can_delete_stories:Bool
+    can_manage_direct_messages:Bool can_manage_tags:Bool
+    can_send_welcome_messages:Bool is_anonymous:Bool = ChatAdministratorRights;`
+  - `sendMessage chat_id:int53 topic_id:MessageTopic
+    reply_to:InputMessageReplyTo options:messageSendOptions
+    reply_markup:ReplyMarkup input_message_content:InputMessageContent =
+    Message;` — no channel-specific variant exists in this schema; channel
+    semantics come from the chat_id, and the server echoes the post with
+    `message.is_channel_post:Bool` / `sender_id: messageSenderChat`
+- **UX:**
+  - Rights rule: Creator → posts; Administrator → posts unless
+    `rights.can_post_messages` is explicitly false (a rights block that
+    TDLib always sends but a fixture may omit defaults to "no restriction");
+    Member / Restricted / Left / Banned / unknown → no composer, as in 2.2.
+  - The composer, the footer, and the driver all read
+    `ChatSummary::can_post()`; `ParsedChatMember` carries
+    `admin_can_post_messages: Option<bool>` from `getChatMember` /
+    `updateChatMember`, and `set_member_status` stores it atomically with
+    the status.
+  - Footer copy updated: admins/creator with rights see "Posting as
+    {title}."; an admin whose rights lack `can_post_messages` sees "You are
+    an admin, but posting is disabled for you."; member/non-admin copy is
+    unchanged.
+  - Sending reuses the existing `sendMessage` snapshot path (no new
+    request builder); the echo arrives through the 2.2 broadcast pipeline
+    (`is_channel_post`, channel author, `updateMessageInteractionInfo`
+    view-count bumps).
+- **Replay proof:** `tests/replay.rs` gains
+  `replay_channel_admin_sees_composer` (admin + rights → `can_post()`),
+  `replay_channel_non_admin_composer_hidden` (member hidden; admin with
+  `can_post_messages: false` hidden), and
+  `replay_channel_admin_status_change_flips_composer` (`updateChatMember`
+  member → admin → right revoked → left → creator flips the gate each way);
+  the 2.2 `replay_channel_membership_and_join_leave` now expects the admin
+  promotion to show the composer. `src/connect.rs` gains the driver test
+  `channel_admin_send_succeeds_non_admin_send_rejected` (`sendMessage`
+  recorded with the channel chat_id for an admin; `InvalidRequest` for a
+  non-posting channel). `envelope.rs` unit-tests the rights parse
+  (true/false/missing block/non-admin status). Screenshot demo:
+  `quill --screenshot-demo ready-channels-admin` →
+  `docs/screenshots/ready-channels-admin.png`.
+- **Out of this slice (→ 2.4 and beyond):** suggested posts
+  (`suggestedPostInfo`); scheduled channel posts; discussion-group comment
+  links; private-channel invite links and join-request approval UI;
+  subscriber counts; channel header extras (photo, description, username);
+  chat-list avatars for any chat type; comment threading inside channels;
+  admin log; boosts/statistics.

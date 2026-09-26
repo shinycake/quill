@@ -377,10 +377,16 @@ impl ChannelMemberStatus {
 
 /// Typed `chatMember` (TDLib 1.8.67). Only `member_id` and `status` are kept;
 /// `tag` / `inviter_user_id` / `joined_chat_date` stay out of this slice.
+/// `admin_can_post_messages` carries `rights.can_post_messages` from
+/// `chatMemberStatusAdministrator` (schema 1.8.67:
+/// `chatAdministratorRights ... can_post_messages:Bool ...`), driving the
+/// channel-admin composer gate; `None` for every other status or when the
+/// rights block is absent.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ParsedChatMember {
     pub member_id: MessageSender,
     pub status: ChannelMemberStatus,
+    pub admin_can_post_messages: Option<bool>,
 }
 
 /// Typed `ChatJoinResult` — `joinChat` response (TDLib 1.8.67: no
@@ -1766,18 +1772,31 @@ fn parse_message_sender(value: Option<&Value>) -> Result<MessageSender, ParseErr
 }
 
 /// `chatMemberStatus*` (TDLib 1.8.67). Unknown constructors map to `Unknown`;
-/// the field itself stays required.
-fn parse_channel_member_status(value: Option<&Value>) -> Option<ChannelMemberStatus> {
+/// the field itself stays required. Also returns `rights.can_post_messages`
+/// (`Some`) when the status is `chatMemberStatusAdministrator` and the
+/// `rights` block parses; `None` otherwise.
+fn parse_channel_member_status(
+    value: Option<&Value>,
+) -> Option<(ChannelMemberStatus, Option<bool>)> {
     let value = value?;
-    match value.get("@type").and_then(Value::as_str) {
-        Some("chatMemberStatusCreator") => Some(ChannelMemberStatus::Creator),
-        Some("chatMemberStatusAdministrator") => Some(ChannelMemberStatus::Administrator),
-        Some("chatMemberStatusMember") => Some(ChannelMemberStatus::Member),
-        Some("chatMemberStatusRestricted") => Some(ChannelMemberStatus::Restricted),
-        Some("chatMemberStatusLeft") => Some(ChannelMemberStatus::Left),
-        Some("chatMemberStatusBanned") => Some(ChannelMemberStatus::Banned),
-        _ => Some(ChannelMemberStatus::Unknown),
-    }
+    let status = match value.get("@type").and_then(Value::as_str) {
+        Some("chatMemberStatusCreator") => ChannelMemberStatus::Creator,
+        Some("chatMemberStatusAdministrator") => ChannelMemberStatus::Administrator,
+        Some("chatMemberStatusMember") => ChannelMemberStatus::Member,
+        Some("chatMemberStatusRestricted") => ChannelMemberStatus::Restricted,
+        Some("chatMemberStatusLeft") => ChannelMemberStatus::Left,
+        Some("chatMemberStatusBanned") => ChannelMemberStatus::Banned,
+        _ => ChannelMemberStatus::Unknown,
+    };
+    let admin_can_post_messages = if status == ChannelMemberStatus::Administrator {
+        value
+            .get("rights")
+            .and_then(|rights| rights.get("can_post_messages"))
+            .and_then(Value::as_bool)
+    } else {
+        None
+    };
+    Some((status, admin_can_post_messages))
 }
 
 /// `chatMember` (TDLib 1.8.67). Returns `None` when `member_id` or `status`
@@ -1785,8 +1804,12 @@ fn parse_channel_member_status(value: Option<&Value>) -> Option<ChannelMemberSta
 fn parse_chat_member(value: Option<&Value>) -> Option<ParsedChatMember> {
     let value = value.filter(|v| !v.is_null())?;
     let member_id = parse_message_sender(value.get("member_id")).ok()?;
-    let status = parse_channel_member_status(value.get("status"))?;
-    Some(ParsedChatMember { member_id, status })
+    let (status, admin_can_post_messages) = parse_channel_member_status(value.get("status"))?;
+    Some(ParsedChatMember {
+        member_id,
+        status,
+        admin_can_post_messages,
+    })
 }
 
 /// `draftMessage` / `draftMessageContentText`. Other content constructors are
@@ -4108,6 +4131,8 @@ mod channel_envelope_tests {
                 EnvelopePayload::ChatMember { member } => {
                     assert_eq!(member.member_id, MessageSender::User { user_id: 777 });
                     assert_eq!(member.status, expected);
+                    // Bare status constructors carry no rights block.
+                    assert_eq!(member.admin_can_post_messages, None);
                 }
                 other => panic!("{other:?}"),
             }
@@ -4117,6 +4142,46 @@ mod channel_envelope_tests {
         assert!(!ChannelMemberStatus::Member.is_admin());
         assert!(ChannelMemberStatus::Member.is_joined());
         assert!(!ChannelMemberStatus::Left.is_joined());
+    }
+
+    #[test]
+    fn chat_member_administrator_rights_can_post_messages() {
+        // `rights.can_post_messages` rides on `chatMemberStatusAdministrator`
+        // (schema 1.8.67: `chatMemberStatusAdministrator can_be_edited:Bool
+        // rights:chatAdministratorRights`), not on the status itself.
+        for (can_post, expected) in [(true, Some(true)), (false, Some(false))] {
+            let json = format!(
+                r#"{{"@type":"chatMember","member_id":{{"@type":"messageSenderUser","user_id":777}},"status":{{"@type":"chatMemberStatusAdministrator","can_be_edited":true,"rights":{{"@type":"chatAdministratorRights","can_post_messages":{can_post}}}}}}}"#,
+            );
+            let env = parse_envelope(&json).unwrap();
+            match env.payload {
+                EnvelopePayload::ChatMember { member } => {
+                    assert_eq!(member.status, ChannelMemberStatus::Administrator);
+                    assert_eq!(member.admin_can_post_messages, expected);
+                }
+                other => panic!("{other:?}"),
+            }
+        }
+        // Missing rights block: no posting-right claim either way.
+        let json = r#"{"@type":"chatMember","member_id":{"@type":"messageSenderUser","user_id":777},"status":{"@type":"chatMemberStatusAdministrator"}}"#;
+        let env = parse_envelope(json).unwrap();
+        match env.payload {
+            EnvelopePayload::ChatMember { member } => {
+                assert_eq!(member.status, ChannelMemberStatus::Administrator);
+                assert_eq!(member.admin_can_post_messages, None);
+            }
+            other => panic!("{other:?}"),
+        }
+        // Non-admin statuses never carry the right, even with a rights block.
+        let json = r#"{"@type":"chatMember","member_id":{"@type":"messageSenderUser","user_id":777},"status":{"@type":"chatMemberStatusMember","rights":{"@type":"chatAdministratorRights","can_post_messages":true}}}"#;
+        let env = parse_envelope(json).unwrap();
+        match env.payload {
+            EnvelopePayload::ChatMember { member } => {
+                assert_eq!(member.status, ChannelMemberStatus::Member);
+                assert_eq!(member.admin_can_post_messages, None);
+            }
+            other => panic!("{other:?}"),
+        }
     }
 
     #[test]

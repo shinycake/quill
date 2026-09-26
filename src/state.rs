@@ -458,6 +458,11 @@ pub struct ChatSummary {
     /// `updateChatMember`). `None` until the first fetch completes; drives the
     /// composer gate and the join/leave affordance.
     pub my_member_status: Option<ChannelMemberStatus>,
+    /// `rights.can_post_messages` from `chatMemberStatusAdministrator`
+    /// (TDLib 1.8.67). `Some` only when the status is Administrator and the
+    /// rights block parsed; `None` means "no explicit restriction" — a bare
+    /// admin still posts.
+    pub my_admin_can_post_messages: Option<bool>,
 }
 
 impl ChatSummary {
@@ -470,18 +475,43 @@ impl ChatSummary {
         self.kind.is_channel()
     }
 
-    /// Whether the composer is shown for this chat. In 2.2 the composer stays
-    /// hidden in every broadcast channel (admin posting lands in 2.3); all
-    /// other supported chats keep the composer.
+    /// Whether the composer is shown for this chat. In 2.3 admins get the
+    /// composer in broadcast channels (derived from own membership, see
+    /// `channel_admin_can_post`); everyone else in a channel keeps it hidden.
+    /// All other supported chats keep the composer.
     pub fn can_post(&self) -> bool {
-        self.supported() && !self.is_channel()
+        if self.is_channel() {
+            return self.channel_admin_can_post();
+        }
+        self.supported()
+    }
+
+    /// 2.3: channel posting rights derive from own membership. The creator
+    /// always posts; an administrator posts unless their
+    /// `rights.can_post_messages` is explicitly false. Unknown/absent
+    /// membership (or any other status) keeps the composer hidden.
+    pub fn channel_admin_can_post(&self) -> bool {
+        match self.my_member_status {
+            Some(ChannelMemberStatus::Creator) => true,
+            Some(ChannelMemberStatus::Administrator) => {
+                self.my_admin_can_post_messages.unwrap_or(true)
+            }
+            _ => false,
+        }
     }
 
     /// Record own channel membership (`getChatMember` / `updateChatMember` /
-    /// join/leave responses). Returns true when the status changed.
-    pub fn set_member_status(&mut self, status: ChannelMemberStatus) -> bool {
+    /// join/leave responses). `admin_can_post_messages` is the parsed
+    /// `rights.can_post_messages` for an administrator, `None` otherwise.
+    /// Returns true when the status changed.
+    pub fn set_member_status(
+        &mut self,
+        status: ChannelMemberStatus,
+        admin_can_post_messages: Option<bool>,
+    ) -> bool {
         let changed = self.my_member_status != Some(status);
         self.my_member_status = Some(status);
+        self.my_admin_can_post_messages = admin_can_post_messages;
         changed
     }
 
@@ -559,6 +589,7 @@ fn placeholder_chat(chat_id: ChatId) -> ChatSummary {
         typing_senders: Vec::new(),
         draft: None,
         my_member_status: None,
+        my_admin_can_post_messages: None,
     }
 }
 
@@ -1741,7 +1772,7 @@ impl Session {
                 {
                     // Optimistic: `updateChatMember` confirms. TDLib errors
                     // keep the old status (Error arm below does not touch it).
-                    chat.set_member_status(ChannelMemberStatus::Left);
+                    chat.set_member_status(ChannelMemberStatus::Left, None);
                 }
                 if pending.is_some_and(|p| is_auth_submit(p.purpose)) {
                     self.last_auth_error = None;
@@ -2163,7 +2194,7 @@ impl Session {
             return;
         }
         if let Some(chat) = self.chats.get_mut(&chat_id.0) {
-            chat.set_member_status(member.status);
+            chat.set_member_status(member.status, member.admin_can_post_messages);
         }
     }
 
@@ -2174,7 +2205,7 @@ impl Session {
         match result {
             ChatJoinResult::Success { .. } => {
                 if let Some(chat) = self.chats.get_mut(&chat_id.0) {
-                    chat.set_member_status(ChannelMemberStatus::Member);
+                    chat.set_member_status(ChannelMemberStatus::Member, None);
                 }
             }
             other => {
