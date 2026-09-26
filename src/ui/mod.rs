@@ -16,7 +16,8 @@ use quill::composer::{
 };
 use quill::connect::{
     ChatSearchQueryOutcome, ConnectBlocker, ConnectGate, DraftSaveOutcome, LiveConnect,
-    SEARCH_DEBOUNCE, SearchQueryOutcome, USER_DOWNLOAD_PRIORITY, evaluate_gate, start_live_connect,
+    SEARCH_DEBOUNCE, SearchQueryOutcome, SoundResolution, USER_DOWNLOAD_PRIORITY, evaluate_gate,
+    start_live_connect,
 };
 use quill::credentials::TelegramCredentials;
 use quill::diagnostics::{DiagnosticSink, MemorySink};
@@ -27,7 +28,7 @@ use quill::media_viewer::{
     MediaViewer, MediaViewerItem, MediaViewerKind, ViewerVideoStart, ViewerZoom,
     collect_media_items, decide_viewer_video_start,
 };
-use quill::notify::QueuedNotification;
+use quill::notify::{NotificationSoundKind, QueuedNotification};
 use quill::platform::live_secret_store;
 use quill::playback::PlaybackClock;
 use quill::poll::{
@@ -45,8 +46,9 @@ use quill::telegram::envelope::{
     ChatFolderInfo, ChatFolderSpec, ChatKind, ChatList, ChatNotificationSettings,
     DEFAULT_EMOJI_REACTIONS, ForumTopic, InlineKeyboardButton, InlineKeyboardButtonStyle,
     InlineKeyboardButtonType, MUTE_FOR_1_HOUR, MUTE_FOR_2_DAYS, MUTE_FOR_8_HOURS, MUTE_FOREVER,
-    MessageContent, MessageInteractionInfo, ParsedFile, ParsedStory, PollContent, PollOption,
-    PollType, SponsoredMessage, toggle_chosen_emoji_reaction,
+    MessageContent, MessageInteractionInfo, NotificationSettingsScope, NotificationSound,
+    ParsedFile, ParsedStory, PollContent, PollOption, PollType, ScopeNotificationSettings,
+    SponsoredMessage, toggle_chosen_emoji_reaction,
 };
 use quill::text::{TextEntity, styled_runs, utf8_to_utf16_offset};
 use quill::voice::{self, VoiceCapture, format_voice_duration};
@@ -92,6 +94,26 @@ actions!(
 /// Phase 8.1: cap on concurrent OS-notification worker threads (`notify-send
 /// --wait` blocks until dismissal). Excess bursts are dropped, not stacked.
 const MAX_OS_NOTIFICATION_THREADS: usize = 8;
+/// Parity slice: cap for concurrent `quill-sound` player threads.
+const MAX_OS_NOTIFICATION_SOUND_THREADS: usize = 2;
+
+/// Parity slice: which settings object a sound-picker choice applies to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SoundPickerTarget {
+    Chat(ChatId),
+    Scope(NotificationSettingsScope),
+}
+
+/// Parity slice: a sound choice in the picker UI.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SoundChoice {
+    /// App default tone (chat `use_default_sound`, scope `sound_id = -1`).
+    Default,
+    /// No sound (chat/scope `sound_id = 0`).
+    Disabled,
+    /// A saved notification sound id.
+    Custom(i64),
+}
 
 pub fn bind_keys(cx: &mut App) {
     cx.bind_keys([
@@ -373,6 +395,16 @@ pub struct QuillApp {
     pending_react: Option<(ChatId, MessageId)>,
     /// tdesktop Mute submenu (1 hour / 8 hours / 2 days / Forever).
     mute_menu_open: bool,
+    /// Parity slice: the notifications panel's sound picker sub-view is open.
+    notif_sound_picker_open: bool,
+    /// Parity slice: scope-default notification settings dialog is open.
+    notification_defaults_open: bool,
+    /// Parity slice: which scope section's sound picker is expanded in the
+    /// defaults dialog (`None` = all collapsed).
+    defaults_sound_picker: Option<NotificationSettingsScope>,
+    /// Parity slice: in-flight notification-sound workers; capped so a
+    /// message burst cannot stack players.
+    notify_sound_inflight: Arc<AtomicUsize>,
     /// tdesktop `VoiceRecordBar` (click mic to record; Esc / Cancel discards).
     voice_capture: Option<VoiceCapture>,
     voice_tick: bool,
@@ -669,6 +701,11 @@ pub enum ScreenshotDemo {
     /// header photo, @username, subscriber count, description snippet, and
     /// a "Discuss" link to the injected discussion group (id 16).
     ReadyChatAvatars,
+    /// Notification settings demo (injected, no live Telegram): the open
+    /// chat has a custom notification sound (`getSavedNotificationSounds`
+    /// fixture) and the per-chat notifications panel is open with the sound
+    /// picker expanded (parity slice: notification sounds).
+    ReadyNotificationSound,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1062,6 +1099,16 @@ impl QuillApp {
                     AuthorizationState::Ready,
                 )
             }
+            Some(ScreenshotDemo::ReadyNotificationSound) => {
+                demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
+                (
+                    ConnectUiStatus::DemoReadyChats,
+                    None,
+                    "screenshot demo — notification sounds + settings (injected saved sounds + chat/scope settings)"
+                        .into(),
+                    AuthorizationState::Ready,
+                )
+            }
             Some(ScreenshotDemo::ReadyTyping) => {
                 demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
                 (
@@ -1451,6 +1498,10 @@ impl QuillApp {
             forward_result: None,
             pending_react: None,
             mute_menu_open: false,
+            notif_sound_picker_open: false,
+            notification_defaults_open: false,
+            defaults_sound_picker: None,
+            notify_sound_inflight: Arc::new(AtomicUsize::new(0)),
             voice_capture: None,
             voice_tick: false,
             playing_voice: None,
@@ -1616,6 +1667,16 @@ impl QuillApp {
             }
             app.mute_menu_open = true;
             app.status_note = "screenshot demo — mute presets · muted icon · archive".into();
+        }
+        if matches!(demo, Some(ScreenshotDemo::ReadyNotificationSound)) {
+            if let Some(session) = app.demo_session.as_mut() {
+                app.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_notification_sound(session, &app.demo_sink, &app.demo_seq);
+            }
+            app.mute_menu_open = true;
+            app.notif_sound_picker_open = true;
+            app.status_note =
+                "screenshot demo — notification sounds · per-chat panel · scope defaults".into();
         }
         if matches!(demo, Some(ScreenshotDemo::ReadyTyping)) {
             if let Some(session) = app.demo_session.as_mut() {
@@ -2111,7 +2172,66 @@ impl QuillApp {
             .map(|live| std::mem::take(&mut live.driver.session.pending_notifications))
             .unwrap_or_default();
         for queued in queued {
+            if let Some(kind) = queued.sound {
+                self.play_notification_sound(kind);
+            }
             self.spawn_os_notification(queued);
+        }
+        // Parity slice: custom sounds whose downloads just completed.
+        let plays: Vec<PathBuf> = self
+            .live
+            .as_mut()
+            .map(|live| std::mem::take(&mut live.driver.session.pending_sound_plays))
+            .unwrap_or_default();
+        for path in plays {
+            if let Some(command) = quill::notify::file_sound_command(&path.to_string_lossy()) {
+                self.spawn_sound_command(command);
+            }
+        }
+    }
+
+    /// Parity slice: resolve a notification sound and play it. `Default`
+    /// plays the synthesized tone; a saved sound plays its MP3 once
+    /// downloaded (a pending download plays on completion via
+    /// `pending_sound_plays`). Silent when the chat's sound is disabled —
+    /// the reducer never queues a sound for those.
+    fn play_notification_sound(&mut self, kind: NotificationSoundKind) {
+        let command = match self.live.as_mut() {
+            Some(live) => match live.driver.resolve_notification_sound(kind) {
+                SoundResolution::DefaultTone => quill::notify::default_tone_command(),
+                SoundResolution::FilePath(path) => {
+                    quill::notify::file_sound_command(&path.to_string_lossy())
+                }
+                SoundResolution::Pending => None,
+            },
+            // No live driver (screenshot demo): the tone is the honest
+            // stand-in — no TDLib file is reachable.
+            None => quill::notify::default_tone_command(),
+        };
+        if let Some(command) = command {
+            self.spawn_sound_command(command);
+        }
+    }
+
+    /// Parity slice: play one notification sound on a worker thread. A
+    /// player failure (missing ffplay, vanished file) is silent by design —
+    /// a notification must never surface an error dialog.
+    fn spawn_sound_command(&mut self, command: quill::notify::SoundCommand) {
+        if self.notify_sound_inflight.fetch_add(1, Ordering::SeqCst)
+            >= MAX_OS_NOTIFICATION_SOUND_THREADS
+        {
+            self.notify_sound_inflight.fetch_sub(1, Ordering::SeqCst);
+            return;
+        }
+        let inflight = self.notify_sound_inflight.clone();
+        let spawn = std::thread::Builder::new()
+            .name("quill-sound".to_string())
+            .spawn(move || {
+                quill::notify::play_sound_command(&command);
+                inflight.fetch_sub(1, Ordering::SeqCst);
+            });
+        if spawn.is_err() {
+            self.notify_sound_inflight.fetch_sub(1, Ordering::SeqCst);
         }
     }
 
@@ -3287,6 +3407,12 @@ impl QuillApp {
         }
         if self.sticker_panel_open() {
             self.close_sticker_panel(cx);
+            return;
+        }
+        if self.notification_defaults_open {
+            self.notification_defaults_open = false;
+            self.defaults_sound_picker = None;
+            cx.notify();
             return;
         }
         if self.mute_menu_open {
@@ -7220,6 +7346,7 @@ impl QuillApp {
 
     fn close_mute_menu(&mut self, cx: &mut Context<Self>) {
         self.mute_menu_open = false;
+        self.notif_sound_picker_open = false;
         cx.notify();
     }
 
@@ -7247,7 +7374,13 @@ impl QuillApp {
             return;
         }
         if self.demo_session.is_some() {
-            self.apply_demo_notification(chat_id, mute_for);
+            self.apply_demo_notification_settings(
+                chat_id,
+                |settings| {
+                    *settings = settings.clone().with_mute_for(mute_for);
+                },
+                cx,
+            );
             self.status_note = if mute_for == 0 {
                 "unmuted".into()
             } else {
@@ -7257,25 +7390,34 @@ impl QuillApp {
         }
     }
 
-    fn apply_demo_notification(&mut self, chat_id: ChatId, mute_for: i32) {
+    /// Parity slice: apply arbitrary notification-settings edits to the demo
+    /// session (screenshot demos have no TDLib), via the same
+    /// `updateChatNotificationSettings` reducer path live updates take.
+    fn apply_demo_notification_settings(
+        &mut self,
+        chat_id: ChatId,
+        edit: impl FnOnce(&mut ChatNotificationSettings),
+        cx: &mut Context<Self>,
+    ) {
         let Some(session) = self.demo_session.as_mut() else {
             return;
         };
-        let current = session
+        let mut current = session
             .chats
             .get(&chat_id.0)
             .map(|chat| chat.notification_settings.clone())
             .unwrap_or_default();
-        let settings = current.with_mute_for(mute_for);
+        edit(&mut current);
         let json = format!(
             r#"{{"@type":"updateChatNotificationSettings","chat_id":{},"notification_settings":{}}}"#,
             chat_id.0,
-            notification_settings_json(&settings)
+            notification_settings_json(&current)
         );
         let dyn_sink: Arc<dyn DiagnosticSink> = self.demo_sink.clone();
         if let Some(owned) = copy_and_parse(&json, &self.demo_seq, &dyn_sink) {
             session.apply(owned);
         }
+        cx.notify();
     }
 
     fn toggle_archive(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
@@ -8185,28 +8327,65 @@ impl QuillApp {
             })
     }
 
+    /// Parity slice: the tdesktop "Mute" submenu is now a per-chat
+    /// notification settings panel — mute presets, message-preview toggle,
+    /// notification-sound picker (`getSavedNotificationSounds`), and a link
+    /// to the scope defaults dialog. Current state shows in the summary line.
     fn mute_menu_panel(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let chat_id = self.session().and_then(|session| session.open_chat);
+        let session = self.session();
+        let open_chat = session.as_ref().and_then(|s| s.open_chat);
+        let open_chat_summary: Option<&ChatSummary> =
+            open_chat.and_then(|id| session.as_ref()?.chats.get(&id.0));
+        let chat_settings: ChatNotificationSettings = open_chat_summary
+            .map(|chat| chat.notification_settings.clone())
+            .unwrap_or_default();
+        let muted = open_chat_summary
+            .and_then(|chat| session.as_ref().map(|s| s.effective_muted(chat)))
+            .unwrap_or_else(|| chat_settings.is_muted());
+        let preview_on = open_chat_summary
+            .and_then(|chat| session.as_ref().map(|s| s.effective_preview_allowed(chat)))
+            .unwrap_or(chat_settings.use_default_show_preview || chat_settings.show_preview);
+        let sound_label = self.notification_sound_label(&chat_settings);
+        let saved_sounds: Vec<NotificationSound> = session
+            .as_ref()
+            .map(|s| s.saved_notification_sounds.clone())
+            .unwrap_or_default();
+        let status = format!(
+            "{} \u{b7} Sound: {} \u{b7} Previews: {}",
+            if muted {
+                if chat_settings.is_muted_forever() {
+                    "Muted forever"
+                } else {
+                    "Muted"
+                }
+            } else {
+                "Unmuted"
+            },
+            sound_label,
+            if preview_on { "on" } else { "off" },
+        );
+
         let presets = [
             ("1 hour", MUTE_FOR_1_HOUR),
             ("8 hours", MUTE_FOR_8_HOURS),
             ("2 days", MUTE_FOR_2_DAYS),
             ("Forever", MUTE_FOREVER),
         ];
-        let mut row = div().id("mute-presets").flex().flex_wrap().gap_1();
+        let mut preset_row = div().id("mute-presets").flex().flex_wrap().gap_1();
         for (label, seconds) in presets {
-            row = row.child(
+            preset_row = preset_row.child(
                 Button::new(format!("mute-for-{seconds}"))
                     .label(label)
                     .ghost()
                     .on_click(cx.listener(move |this, _, _, cx| {
-                        if let Some(chat_id) = chat_id {
+                        if let Some(chat_id) = open_chat {
                             this.apply_chat_mute(chat_id, seconds, cx);
                         }
                     })),
             );
         }
-        div()
+
+        let mut panel = div()
             .id("mute-menu")
             .flex()
             .flex_col()
@@ -8221,7 +8400,7 @@ impl QuillApp {
                     .flex()
                     .items_center()
                     .justify_between()
-                    .child(div().font_semibold().child("Mute for"))
+                    .child(div().font_semibold().child("Notifications"))
                     .child(
                         Button::new("close-mute-menu")
                             .label("Close")
@@ -8235,9 +8414,720 @@ impl QuillApp {
                 div()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
-                    .child("1 hour, 8 hours, 2 days, or forever."),
+                    .child(status),
             )
-            .child(row)
+            .child(
+                div()
+                    .text_xs()
+                    .font_semibold()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("Mute for"),
+            )
+            .child(preset_row)
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .gap_2()
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("Show message preview in notifications"),
+                    )
+                    .child(
+                        Button::new("notif-preview-toggle")
+                            .label(if preview_on { "On" } else { "Off" })
+                            .ghost()
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                if let Some(chat_id) = open_chat {
+                                    this.apply_chat_preview(chat_id, !preview_on, cx);
+                                }
+                            })),
+                    ),
+            )
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .gap_2()
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(format!("Notification sound: {sound_label}")),
+                    )
+                    .child(
+                        Button::new("notif-sound-picker-toggle")
+                            .label(if self.notif_sound_picker_open {
+                                "Hide"
+                            } else {
+                                "Change"
+                            })
+                            .ghost()
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.notif_sound_picker_open = !this.notif_sound_picker_open;
+                                if this.notif_sound_picker_open
+                                    && let Some(live) = this.live.as_mut()
+                                {
+                                    let _ = live.driver.maybe_fetch_notification_sounds();
+                                }
+                                cx.notify();
+                            })),
+                    ),
+            );
+        if self.notif_sound_picker_open
+            && let Some(chat_id) = open_chat
+        {
+            let current = if chat_settings.use_default_sound {
+                SoundChoice::Default
+            } else if chat_settings.sound_id == 0 {
+                SoundChoice::Disabled
+            } else {
+                SoundChoice::Custom(chat_settings.sound_id)
+            };
+            panel = panel.child(self.notification_sound_picker(
+                cx,
+                SoundPickerTarget::Chat(chat_id),
+                current,
+                &saved_sounds,
+            ));
+        }
+        panel.child(
+            Button::new("notif-open-defaults")
+                .label("Defaults for all chats\u{2026}")
+                .ghost()
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.notification_defaults_open = true;
+                    if let Some(live) = this.live.as_mut() {
+                        let _ = live.driver.maybe_fetch_scope_notification_settings();
+                        let _ = live.driver.maybe_fetch_notification_sounds();
+                    }
+                    cx.notify();
+                })),
+        )
+    }
+
+    /// Parity slice: current sound choice for a chat, for the notifications
+    /// panel summary and picker checkmarks.
+    fn notification_sound_label(&self, settings: &ChatNotificationSettings) -> String {
+        if settings.use_default_sound {
+            return "Default".to_string();
+        }
+        if settings.sound_id == 0 {
+            return "None".to_string();
+        }
+        self.session()
+            .and_then(|s| {
+                s.saved_notification_sounds
+                    .iter()
+                    .find(|sound| sound.id == settings.sound_id)
+                    .map(|sound| sound.title.clone())
+            })
+            .unwrap_or_else(|| "Custom".to_string())
+    }
+
+    /// Parity slice: apply a sound choice to the open chat
+    /// (`setChatNotificationSettings`).
+    fn apply_chat_sound(
+        &mut self,
+        chat_id: ChatId,
+        use_default_sound: bool,
+        sound_id: i64,
+        cx: &mut Context<Self>,
+    ) {
+        self.notif_sound_picker_open = false;
+        if self.live.is_some() {
+            let result = self.live.as_mut().expect("live").driver.set_chat_sound(
+                chat_id,
+                use_default_sound,
+                sound_id,
+            );
+            self.status_note = match result {
+                Ok(_) => "sound updated…".into(),
+                Err(_) => "could not change sound".into(),
+            };
+            cx.notify();
+            return;
+        }
+        if self.demo_session.is_some() {
+            self.apply_demo_notification_settings(
+                chat_id,
+                |settings| {
+                    settings.use_default_sound = use_default_sound;
+                    settings.sound_id = sound_id;
+                },
+                cx,
+            );
+            self.status_note = "sound updated".into();
+            cx.notify();
+        }
+    }
+
+    /// Parity slice: apply a message-preview exception to the open chat
+    /// (`setChatNotificationSettings`).
+    fn apply_chat_preview(&mut self, chat_id: ChatId, show_preview: bool, cx: &mut Context<Self>) {
+        if self.live.is_some() {
+            let result = self
+                .live
+                .as_mut()
+                .expect("live")
+                .driver
+                .set_chat_show_preview(chat_id, show_preview);
+            self.status_note = match result {
+                Ok(_) => "preview setting updated…".into(),
+                Err(_) => "could not change preview".into(),
+            };
+            cx.notify();
+            return;
+        }
+        if self.demo_session.is_some() {
+            self.apply_demo_notification_settings(
+                chat_id,
+                |settings| {
+                    settings.use_default_show_preview = false;
+                    settings.show_preview = show_preview;
+                },
+                cx,
+            );
+            self.status_note = "preview setting updated".into();
+            cx.notify();
+        }
+    }
+
+    /// Parity slice: preview a saved notification sound immediately — play
+    /// the MP3 when local, otherwise download it and play on completion
+    /// (via `Session::pending_sound_plays`).
+    fn preview_saved_sound(&mut self, sound_id: i64) {
+        if let Some(live) = self.live.as_mut() {
+            match live
+                .driver
+                .resolve_notification_sound(NotificationSoundKind::Custom(sound_id))
+            {
+                SoundResolution::DefaultTone => {
+                    if let Some(command) = quill::notify::default_tone_command() {
+                        self.spawn_sound_command(command);
+                    }
+                }
+                SoundResolution::FilePath(path) => {
+                    if let Some(command) =
+                        quill::notify::file_sound_command(&path.to_string_lossy())
+                    {
+                        self.spawn_sound_command(command);
+                    }
+                }
+                SoundResolution::Pending => {}
+            }
+        } else if let Some(command) = quill::notify::default_tone_command() {
+            // Screenshot demo: no TDLib files exist — the tone stands in.
+            self.spawn_sound_command(command);
+        }
+    }
+
+    /// Parity slice: the saved-sound picker shared by the per-chat panel and
+    /// the scope defaults dialog. `getSavedNotificationSounds` says: "If a
+    /// sound isn't in the list, then default sound needs to be used" — so
+    /// Default / None are always offered first.
+    fn notification_sound_picker(
+        &self,
+        cx: &mut Context<Self>,
+        target: SoundPickerTarget,
+        current: SoundChoice,
+        saved_sounds: &[NotificationSound],
+    ) -> AnyElement {
+        let list_id = match target {
+            SoundPickerTarget::Chat(_) => "notif-sound-list".to_string(),
+            SoundPickerTarget::Scope(scope) => format!("scope-sound-list-{scope:?}"),
+        };
+        let mut list = div().id(list_id).flex().flex_col().gap_1().py_1();
+        list = list.child(self.sound_picker_row(
+            cx,
+            target,
+            SoundChoice::Default,
+            current,
+            "Default",
+            "Telegram default tone",
+            None,
+        ));
+        list = list.child(self.sound_picker_row(
+            cx,
+            target,
+            SoundChoice::Disabled,
+            current,
+            "None",
+            "No sound",
+            None,
+        ));
+        for sound in saved_sounds {
+            let subtitle = format!("{} ({}s)", sound.title, sound.duration.max(0));
+            list = list.child(self.sound_picker_row(
+                cx,
+                target,
+                SoundChoice::Custom(sound.id),
+                current,
+                &sound.title,
+                &subtitle,
+                Some(sound.id),
+            ));
+        }
+        list.into_any_element()
+    }
+
+    /// Parity slice: one row of the sound picker. The `▶` preview button
+    /// plays the sound without selecting it.
+    fn sound_picker_row(
+        &self,
+        cx: &mut Context<Self>,
+        target: SoundPickerTarget,
+        choice: SoundChoice,
+        current: SoundChoice,
+        title: &str,
+        subtitle: &str,
+        preview_sound_id: Option<i64>,
+    ) -> AnyElement {
+        let selected = choice == current;
+        let row_id = match (target, choice) {
+            (SoundPickerTarget::Chat(_), SoundChoice::Default) => "sound-pick-chat-default",
+            (SoundPickerTarget::Chat(_), SoundChoice::Disabled) => "sound-pick-chat-none",
+            (SoundPickerTarget::Chat(_), SoundChoice::Custom(_)) => "sound-pick-chat-custom",
+            (SoundPickerTarget::Scope(_), SoundChoice::Default) => "sound-pick-scope-default",
+            (SoundPickerTarget::Scope(_), SoundChoice::Disabled) => "sound-pick-scope-none",
+            (SoundPickerTarget::Scope(_), SoundChoice::Custom(_)) => "sound-pick-scope-custom",
+        };
+        let mut row = div()
+            .id(format!("{row_id}-row"))
+            .flex()
+            .items_center()
+            .justify_between()
+            .gap_2()
+            .px_2()
+            .py_1()
+            .rounded_md()
+            .cursor_pointer()
+            .hover(|style| style.bg(cx.theme().accent.opacity(0.08)))
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .child(div().text_sm().child(format!(
+                        "{}{}",
+                        if selected { "✓ " } else { "" },
+                        title
+                    )))
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(subtitle.to_string()),
+                    ),
+            );
+        if let Some(sound_id) = preview_sound_id {
+            row = row.child(
+                Button::new((row_id, sound_id as u64))
+                    .label("▶")
+                    .ghost()
+                    .on_click(cx.listener(move |this, _, _, _| {
+                        this.preview_saved_sound(sound_id);
+                    })),
+            );
+        }
+        row.on_click(cx.listener(move |this, _, _, cx| {
+            this.apply_sound_choice(target, choice, cx);
+        }))
+        .into_any_element()
+    }
+
+    /// Parity slice: apply a picker choice to its target.
+    fn apply_sound_choice(
+        &mut self,
+        target: SoundPickerTarget,
+        choice: SoundChoice,
+        cx: &mut Context<Self>,
+    ) {
+        match target {
+            SoundPickerTarget::Chat(chat_id) => {
+                let (use_default_sound, sound_id) = match choice {
+                    SoundChoice::Default => (true, 0),
+                    SoundChoice::Disabled => (false, 0),
+                    SoundChoice::Custom(id) => (false, id),
+                };
+                self.apply_chat_sound(chat_id, use_default_sound, sound_id, cx);
+            }
+            SoundPickerTarget::Scope(scope) => {
+                let sound_id = match choice {
+                    // Scope `-1` = app-dependent default (schema line 3368).
+                    SoundChoice::Default => -1,
+                    SoundChoice::Disabled => 0,
+                    SoundChoice::Custom(id) => id,
+                };
+                self.apply_scope_sound(scope, sound_id, cx);
+            }
+        }
+    }
+
+    /// Parity slice: apply a scope's sound default
+    /// (`setScopeNotificationSettings`).
+    fn apply_scope_sound(
+        &mut self,
+        scope: NotificationSettingsScope,
+        sound_id: i64,
+        cx: &mut Context<Self>,
+    ) {
+        self.defaults_sound_picker = None;
+        if let Some(live) = self.live.as_mut() {
+            // Guard: never send schema-defaults as current state — if the
+            // scope's settings haven't arrived yet, wait for the fetch
+            // instead (the dialog already shows "Loading…" per scope).
+            let Some(mut settings) = live
+                .driver
+                .session
+                .scope_notification_settings
+                .get(&scope)
+                .cloned()
+            else {
+                self.status_note = "defaults still loading…".into();
+                cx.notify();
+                return;
+            };
+            settings.sound_id = sound_id;
+            let result = live
+                .driver
+                .send_scope_notification_settings(scope, &settings);
+            self.status_note = match result {
+                Ok(_) => "default sound updated…".into(),
+                Err(_) => "could not change default sound".into(),
+            };
+        } else if let Some(session) = self.demo_session.as_mut() {
+            // Screenshot demo: apply locally so the dialog reflects it.
+            let mut settings = session
+                .scope_notification_settings
+                .get(&scope)
+                .cloned()
+                .unwrap_or_default();
+            settings.sound_id = sound_id;
+            session.scope_notification_settings.insert(scope, settings);
+            self.status_note = "default sound updated".into();
+        }
+        cx.notify();
+    }
+
+    /// Parity slice: apply a scope's mute default.
+    fn apply_scope_mute(
+        &mut self,
+        scope: NotificationSettingsScope,
+        mute_for: i32,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(live) = self.live.as_mut() {
+            // Guard: never send schema-defaults as current state — if the
+            // scope's settings haven't arrived yet, wait for the fetch
+            // instead (the dialog already shows "Loading…" per scope).
+            let Some(mut settings) = live
+                .driver
+                .session
+                .scope_notification_settings
+                .get(&scope)
+                .cloned()
+            else {
+                self.status_note = "defaults still loading…".into();
+                cx.notify();
+                return;
+            };
+            settings.mute_for = mute_for;
+            let result = live
+                .driver
+                .send_scope_notification_settings(scope, &settings);
+            self.status_note = match result {
+                Ok(_) if mute_for == 0 => "default unmuted…".into(),
+                Ok(_) => "default mute updated…".into(),
+                Err(_) => "could not change default mute".into(),
+            };
+        } else if let Some(session) = self.demo_session.as_mut() {
+            let mut settings = session
+                .scope_notification_settings
+                .get(&scope)
+                .cloned()
+                .unwrap_or_default();
+            settings.mute_for = mute_for;
+            session.scope_notification_settings.insert(scope, settings);
+            self.status_note = "default mute updated".into();
+        }
+        cx.notify();
+    }
+
+    /// Parity slice: apply a scope's preview default.
+    fn apply_scope_preview(
+        &mut self,
+        scope: NotificationSettingsScope,
+        show_preview: bool,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(live) = self.live.as_mut() {
+            // Guard: never send schema-defaults as current state — if the
+            // scope's settings haven't arrived yet, wait for the fetch
+            // instead (the dialog already shows "Loading…" per scope).
+            let Some(mut settings) = live
+                .driver
+                .session
+                .scope_notification_settings
+                .get(&scope)
+                .cloned()
+            else {
+                self.status_note = "defaults still loading…".into();
+                cx.notify();
+                return;
+            };
+            settings.show_preview = show_preview;
+            let result = live
+                .driver
+                .send_scope_notification_settings(scope, &settings);
+            self.status_note = match result {
+                Ok(_) => "default preview updated…".into(),
+                Err(_) => "could not change default preview".into(),
+            };
+        } else if let Some(session) = self.demo_session.as_mut() {
+            let mut settings = session
+                .scope_notification_settings
+                .get(&scope)
+                .cloned()
+                .unwrap_or_default();
+            settings.show_preview = show_preview;
+            session.scope_notification_settings.insert(scope, settings);
+            self.status_note = "default preview updated".into();
+        }
+        cx.notify();
+    }
+
+    /// Parity slice: the scope-defaults dialog overlay (private chats /
+    /// groups / channels), each with mute presets, a preview toggle, and a
+    /// sound picker. Entry point: "Defaults for all chats…" in the per-chat
+    /// notifications panel.
+    fn notification_defaults_overlay(&self, cx: &mut Context<Self>) -> AnyElement {
+        let session = self.session();
+        let saved_sounds: Vec<NotificationSound> = session
+            .as_ref()
+            .map(|s| s.saved_notification_sounds.clone())
+            .unwrap_or_default();
+        let mut body = div().flex().flex_col().gap_3();
+        for scope in NotificationSettingsScope::ALL {
+            body = body.child(self.scope_settings_section(cx, scope, &saved_sounds));
+        }
+        div()
+            .id("notif-defaults-overlay")
+            .absolute()
+            .top_0()
+            .left_0()
+            .right_0()
+            .bottom_0()
+            .flex()
+            .items_center()
+            .justify_center()
+            .child(
+                div()
+                    .id("notif-defaults-backdrop")
+                    .absolute()
+                    .top_0()
+                    .left_0()
+                    .right_0()
+                    .bottom_0()
+                    .bg(rgba(0x000000e6))
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.notification_defaults_open = false;
+                        this.defaults_sound_picker = None;
+                        cx.notify();
+                    })),
+            )
+            .child(
+                div()
+                    .id("notif-defaults-dialog")
+                    .flex()
+                    .flex_col()
+                    .gap_2()
+                    .px_4()
+                    .py_3()
+                    .rounded_lg()
+                    .bg(cx.theme().sidebar)
+                    .border_1()
+                    .border_color(cx.theme().border)
+                    .min_w(px(420.))
+                    .max_w(px(560.))
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .justify_between()
+                            .child(div().font_semibold().child("Notification defaults"))
+                            .child(
+                                Button::new("close-notif-defaults")
+                                    .label("Close")
+                                    .ghost()
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.notification_defaults_open = false;
+                                        this.defaults_sound_picker = None;
+                                        cx.notify();
+                                    })),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(
+                                "Used when a chat keeps the default setting. \
+                                 Changes apply via setScopeNotificationSettings.",
+                            ),
+                    )
+                    .child(body),
+            )
+            .into_any_element()
+    }
+
+    /// Parity slice: one scope's section in the defaults dialog.
+    fn scope_settings_section(
+        &self,
+        cx: &mut Context<Self>,
+        scope: NotificationSettingsScope,
+        saved_sounds: &[NotificationSound],
+    ) -> AnyElement {
+        let settings: ScopeNotificationSettings = self
+            .session()
+            .and_then(|s| s.scope_notification_settings.get(&scope).cloned())
+            .unwrap_or_default();
+        let loaded = self
+            .session()
+            .is_some_and(|s| s.scope_notification_settings.contains_key(&scope));
+        let muted = settings.mute_for > 0;
+        let sound_label = match settings.sound_id {
+            -1 => "Default".to_string(),
+            0 => "None".to_string(),
+            id => saved_sounds
+                .iter()
+                .find(|s| s.id == id)
+                .map(|s| s.title.clone())
+                .unwrap_or_else(|| "Custom".to_string()),
+        };
+        let current_choice = match settings.sound_id {
+            -1 => SoundChoice::Default,
+            0 => SoundChoice::Disabled,
+            id => SoundChoice::Custom(id),
+        };
+
+        let presets = [
+            ("Unmute", 0),
+            ("1 hour", MUTE_FOR_1_HOUR),
+            ("8 hours", MUTE_FOR_8_HOURS),
+            ("2 days", MUTE_FOR_2_DAYS),
+            ("Forever", MUTE_FOREVER),
+        ];
+        let mut preset_row = div().flex().flex_wrap().gap_1();
+        for (label, seconds) in presets {
+            preset_row = preset_row.child(
+                Button::new(format!("scope-mute-{scope:?}-{seconds}"))
+                    .label(label)
+                    .ghost()
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.apply_scope_mute(scope, seconds, cx);
+                    })),
+            );
+        }
+
+        let mut section = div()
+            .id(format!("scope-section-{:?}", scope))
+            .flex()
+            .flex_col()
+            .gap_1()
+            .px_3()
+            .py_2()
+            .rounded_md()
+            .border_1()
+            .border_color(cx.theme().border)
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .child(div().font_semibold().text_sm().child(scope.label()))
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(if loaded {
+                                if muted { "Muted" } else { "Not muted" }.to_string()
+                            } else {
+                                "Loading…".to_string()
+                            }),
+                    ),
+            )
+            .child(preset_row)
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .gap_2()
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("Show message preview"),
+                    )
+                    .child(
+                        Button::new(format!("scope-preview-{:?}", scope))
+                            .label(if settings.show_preview { "On" } else { "Off" })
+                            .ghost()
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                let current = this
+                                    .session()
+                                    .and_then(|s| {
+                                        s.scope_notification_settings.get(&scope).cloned()
+                                    })
+                                    .unwrap_or_default();
+                                this.apply_scope_preview(scope, !current.show_preview, cx);
+                            })),
+                    ),
+            )
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .gap_2()
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(format!("Sound: {sound_label}")),
+                    )
+                    .child(
+                        Button::new(format!("scope-sound-{:?}", scope))
+                            .label(if self.defaults_sound_picker == Some(scope) {
+                                "Hide"
+                            } else {
+                                "Change"
+                            })
+                            .ghost()
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.defaults_sound_picker =
+                                    if this.defaults_sound_picker == Some(scope) {
+                                        None
+                                    } else {
+                                        Some(scope)
+                                    };
+                                cx.notify();
+                            })),
+                    ),
+            );
+        if self.defaults_sound_picker == Some(scope) {
+            section = section.child(self.notification_sound_picker(
+                cx,
+                SoundPickerTarget::Scope(scope),
+                current_choice,
+                saved_sounds,
+            ));
+        }
+        section.into_any_element()
     }
 
     /// Parity slice: per-chat folder picker below the header. Destinations
@@ -10901,6 +11791,10 @@ impl Render for QuillApp {
             // everything else.
             .when_some(self.folder_overlays(cx), |this, overlay| {
                 this.child(overlay)
+            })
+            // Parity slice: scope-default notification settings dialog.
+            .when(self.notification_defaults_open, |this| {
+                this.child(self.notification_defaults_overlay(cx))
             })
     }
 }
@@ -13728,6 +14622,61 @@ fn apply_ready_mute_archive(session: &mut Session, sink: &Arc<MemorySink>, seq: 
         r#"{"@type":"updateChatAddedToList","chat_id":12,"chat_list":{"@type":"chatListArchive"}}"#
             .to_string(),
     ];
+    for json in jsons {
+        if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
+            session.apply(owned);
+        }
+    }
+}
+
+/// Parity slice: notification-sounds screenshot fixture — saved sounds
+/// (`getSavedNotificationSounds` answer), all three scope defaults
+/// (`getScopeNotificationSettings` answers, correlated via
+/// `request_for_scope`), and chat 11 on a custom saved sound.
+fn apply_ready_notification_sound(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let sound_path = demo_media_allowlist()
+        .join("demo-voice.ogg")
+        .to_string_lossy()
+        .into_owned();
+    let sound_json = |id: i64, file_id: i32, title: &str, duration: i32| {
+        format!(
+            r#"{{"@type":"notificationSound","id":{id},"duration":{duration},"date":0,"title":{title},"data":"","sound":{file}}}"#,
+            file = demo_file_json(file_id, &sound_path, true),
+            title = serde_json::to_string(title).unwrap(),
+        )
+    };
+    let sounds_extra = session.request(RequestPurpose::GetSavedNotificationSounds, None);
+    let mut jsons = vec![
+        format!(
+            r#"{{"@type":"notificationSounds","notification_sounds":[{a},{b}],"@extra":"{extra}"}}"#,
+            a = sound_json(1, 91, "Ding", 2),
+            b = sound_json(2, 92, "Chime", 3),
+            extra = sounds_extra.0,
+        ),
+        {
+            let chat_settings = ChatNotificationSettings {
+                use_default_mute_for: true,
+                mute_for: 0,
+                use_default_sound: false,
+                sound_id: 1,
+                use_default_show_preview: false,
+                show_preview: true,
+                ..Default::default()
+            };
+            format!(
+                r#"{{"@type":"updateChatNotificationSettings","chat_id":11,"notification_settings":{}}}"#,
+                notification_settings_json(&chat_settings)
+            )
+        },
+    ];
+    for scope in NotificationSettingsScope::ALL {
+        let extra = session.request_for_scope(RequestPurpose::GetScopeNotificationSettings, scope);
+        jsons.push(format!(
+            r#"{{"@type":"scopeNotificationSettings","mute_for":0,"sound_id":"-1","show_preview":true,"use_default_mute_stories":true,"mute_stories":false,"use_default_story_sound":true,"story_sound_id":"-1","use_default_show_story_poster":true,"show_story_poster":true,"use_default_disable_pinned_message_notifications":true,"disable_pinned_message_notifications":false,"use_default_disable_mention_notifications":true,"disable_mention_notifications":false,"@extra":"{extra}"}}"#,
+            extra = extra.0,
+        ));
+    }
     for json in jsons {
         if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
             session.apply(owned);

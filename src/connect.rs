@@ -10,6 +10,7 @@ use crate::diagnostics::DiagnosticSink;
 use crate::folders::spec_without_chat;
 use crate::ids::{AccountKey, ChatId, FileId, MessageId, RequestId, TopicId};
 use crate::lifecycle::{RestoreBlocker, plan_restore};
+use crate::notify::NotificationSoundKind;
 use crate::platform::{DatabaseKey, KeyDecision, SecretStore, load_or_create_key};
 use crate::poll::{PollDraft, poll_answer_for_tap};
 use crate::settings::{AccountPaths, default_app_root};
@@ -20,7 +21,8 @@ use crate::state::{
 use crate::telegram::client::{LiveTdJson, OwnedEnvelope, ReceiveBridge};
 use crate::telegram::envelope::{
     AuthorizationState, ChatDraft, ChatFolderSpec, ChatKind, ChatNotificationSettings,
-    EnvelopePayload, MUTE_FOREVER, MessageContent, StoryContentView,
+    EnvelopePayload, MUTE_FOREVER, MessageContent, NotificationSettingsScope,
+    ScopeNotificationSettings, StoryContentView,
 };
 use crate::telegram::ffi::{LibraryOrigin, TdJsonError, resolve_tdjson_path};
 use crate::telegram::requests::{
@@ -33,23 +35,36 @@ use crate::telegram::requests::{
     edit_message_text, forward_messages, get_authorization_state, get_callback_query_answer,
     get_chat_active_stories, get_chat_folder, get_chat_history, get_chat_lists_to_add_chat,
     get_chat_member, get_chat_sponsored_messages, get_commands, get_contacts, get_forum_topics,
-    get_installed_sticker_sets, get_me, get_saved_animations, get_sticker_set, get_story,
-    get_story_available_reactions, get_supergroup, get_supergroup_full_info, get_user_full_info,
-    input_message_photo, input_message_video, join_chat, leave_chat, load_active_stories,
-    load_chats, load_chats_list, open_chat, open_message_content, open_story, pin_chat_message,
-    remove_message_reaction, reorder_chat_folders, report_chat_sponsored_message,
-    search_chat_messages, search_chats, search_messages, search_public_chats,
-    search_recently_found_chats, send_animation, send_chat_action, send_chat_action_kind,
-    send_document, send_message_album, send_photo, send_poll, send_sticker, send_text,
-    send_text_story_reply, send_video, send_video_note, send_voice_note,
-    set_authentication_phone_number, set_chat_draft_message, set_chat_notification_settings,
-    set_poll_answer, set_story_reaction, toggle_chat_folder_tags, unpin_chat_message,
-    view_messages, view_sponsored_chat,
+    get_installed_sticker_sets, get_me, get_saved_animations, get_saved_notification_sounds,
+    get_scope_notification_settings, get_sticker_set, get_story, get_story_available_reactions,
+    get_supergroup, get_supergroup_full_info, get_user_full_info, input_message_photo,
+    input_message_video, join_chat, leave_chat, load_active_stories, load_chats, load_chats_list,
+    open_chat, open_message_content, open_story, pin_chat_message, remove_message_reaction,
+    reorder_chat_folders, report_chat_sponsored_message, search_chat_messages, search_chats,
+    search_messages, search_public_chats, search_recently_found_chats, send_animation,
+    send_chat_action, send_chat_action_kind, send_document, send_message_album, send_photo,
+    send_poll, send_sticker, send_text, send_text_story_reply, send_video, send_video_note,
+    send_voice_note, set_authentication_phone_number, set_chat_draft_message,
+    set_chat_notification_settings, set_poll_answer, set_scope_notification_settings,
+    set_story_reaction, toggle_chat_folder_tags, unpin_chat_message, view_messages,
+    view_sponsored_chat,
 };
 use crate::voice::VoiceDraft;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+
+/// How a [`NotificationSoundKind`] resolves to something playable
+/// (parity slice: notification sounds).
+pub enum SoundResolution {
+    /// Play the app default tone (ffplay-synthesized).
+    DefaultTone,
+    /// Play this downloaded MP3.
+    FilePath(std::path::PathBuf),
+    /// The sound file is being downloaded; it plays on completion via
+    /// `Session::pending_sound_plays`.
+    Pending,
+}
 
 /// Unigram `OutputChatActionManager` default delay and `ChatTextBox` keystroke
 /// gap before another `SendChatAction` (`chatActionTyping`). tdesktop resends
@@ -463,7 +478,15 @@ impl<S: JsonSender> ConnectDriver<S> {
             // Phase 9.1: the story tray needs `updateChatActiveStories`
             // updates; one `loadActiveStories(storyListMain)` per Ready.
             self.maybe_load_active_stories()?;
+            // Parity slice: saved notification sounds (picker + custom-sound
+            // playback) and per-scope default settings (`use_default_*`
+            // fallback), once per Ready.
+            let _ = self.maybe_fetch_notification_sounds();
+            let _ = self.maybe_fetch_scope_notification_settings();
         }
+        // Parity slice: `updateSavedNotificationSounds` may have marked the
+        // list stale between ingests.
+        let _ = self.refresh_notification_sounds_if_stale();
         if view_after {
             self.maybe_view_open_messages()?;
         }
@@ -3455,6 +3478,182 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
     }
 
+    /// Parity slice: set the chat's notification-sound exception.
+    /// `use_default_sound = true` keeps the scope default; `sound_id = 0`
+    /// disables sound (schema line 3350).
+    pub fn set_chat_sound(
+        &mut self,
+        chat_id: ChatId,
+        use_default_sound: bool,
+        sound_id: i64,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let Some(chat) = self.session.chats.get(&chat_id.0) else {
+            return Err(ConnectSendError::InvalidRequest);
+        };
+        if !chat.supported() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let mut settings = chat.notification_settings.clone();
+        settings.use_default_sound = use_default_sound;
+        settings.sound_id = sound_id;
+        self.send_notification_settings(chat_id, &settings)
+    }
+
+    /// Parity slice: set the chat's message-preview exception.
+    pub fn set_chat_show_preview(
+        &mut self,
+        chat_id: ChatId,
+        show_preview: bool,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let Some(chat) = self.session.chats.get(&chat_id.0) else {
+            return Err(ConnectSendError::InvalidRequest);
+        };
+        if !chat.supported() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let mut settings = chat.notification_settings.clone();
+        settings.use_default_show_preview = false;
+        settings.show_preview = show_preview;
+        self.send_notification_settings(chat_id, &settings)
+    }
+
+    /// Parity slice: `getSavedNotificationSounds` once per Ready (guarded by
+    /// loaded / in-flight). Drives the sound picker and custom-sound
+    /// playback.
+    pub fn maybe_fetch_notification_sounds(
+        &mut self,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if self.session.saved_sounds_loaded
+            || self
+                .session
+                .requests
+                .has_purpose(RequestPurpose::GetSavedNotificationSounds)
+        {
+            return Ok(None);
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::GetSavedNotificationSounds, None);
+        match self.sender.send_json(&get_saved_notification_sounds(extra)) {
+            Ok(()) => Ok(Some(extra)),
+            Err(err) => {
+                self.session.requests.take(extra);
+                Err(err)
+            }
+        }
+    }
+
+    /// Parity slice: refetch the saved-sound list after
+    /// `updateSavedNotificationSounds` marked it stale.
+    pub fn refresh_notification_sounds_if_stale(
+        &mut self,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.session.saved_sounds_stale {
+            return Ok(None);
+        }
+        self.session.saved_sounds_loaded = false;
+        self.maybe_fetch_notification_sounds()
+    }
+
+    /// Parity slice: `getScopeNotificationSettings` for the scopes not yet
+    /// loaded and not in flight — once per Ready.
+    pub fn maybe_fetch_scope_notification_settings(&mut self) -> Result<(), ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        for scope in NotificationSettingsScope::ALL {
+            if self
+                .session
+                .scope_notification_settings
+                .contains_key(&scope)
+                || self.session.scope_settings_loading.contains(&scope)
+                || self
+                    .session
+                    .requests
+                    .has_purpose_for_scope(RequestPurpose::GetScopeNotificationSettings, scope)
+            {
+                continue;
+            }
+            let extra = self
+                .session
+                .request_for_scope(RequestPurpose::GetScopeNotificationSettings, scope);
+            self.session.scope_settings_loading.insert(scope);
+            if let Err(err) = self
+                .sender
+                .send_json(&get_scope_notification_settings(extra, scope))
+            {
+                self.session.requests.take(extra);
+                self.session.scope_settings_loading.remove(&scope);
+                return Err(err);
+            }
+        }
+        Ok(())
+    }
+
+    /// Parity slice: `setScopeNotificationSettings` for one scope (full
+    /// object; callers copy the current scope settings and change one
+    /// field). The new values arrive as `updateScopeNotificationSettings`.
+    pub fn send_scope_notification_settings(
+        &mut self,
+        scope: NotificationSettingsScope,
+        settings: &ScopeNotificationSettings,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self
+            .session
+            .request_for_scope(RequestPurpose::SetScopeNotificationSettings, scope);
+        match self
+            .sender
+            .send_json(&set_scope_notification_settings(extra, scope, settings))
+        {
+            Ok(()) => Ok(extra),
+            Err(err) => {
+                self.session.requests.take(extra);
+                Err(err)
+            }
+        }
+    }
+
+    /// Parity slice: resolve a notification sound to a playable form.
+    /// A custom id missing from the saved list falls back to the default
+    /// tone (per the `getSavedNotificationSounds` schema comment).
+    pub fn resolve_notification_sound(&mut self, kind: NotificationSoundKind) -> SoundResolution {
+        use SoundResolution as R;
+        let sound_id = match kind {
+            NotificationSoundKind::Default => return R::DefaultTone,
+            NotificationSoundKind::Custom(id) => id,
+        };
+        let Some(entry) = self
+            .session
+            .saved_notification_sounds
+            .iter()
+            .find(|s| s.id == sound_id)
+        else {
+            return R::DefaultTone;
+        };
+        let file_id = entry.sound.id;
+        if let Some(path) = self.session.file(file_id).and_then(|f| f.usable_path()) {
+            return R::FilePath(path.into());
+        }
+        // Not local yet: mark the file as a notification sound, request
+        // playback on completion, and start the download (deduped).
+        self.session.sound_file_ids.insert(file_id.0, sound_id);
+        self.session.pending_sound_downloads.insert(sound_id);
+        let _ = self.download_file(file_id, USER_DOWNLOAD_PRIORITY);
+        R::Pending
+    }
+
     /// Move the chat to `chatListArchive` (`addChatToList`).
     pub fn archive_chat(&mut self, chat_id: ChatId) -> Result<RequestId, ConnectSendError> {
         self.send_add_chat_to_list(chat_id, true)
@@ -4409,7 +4608,10 @@ mod tests {
 
         let sent = recorder.snapshot();
         // Phase 9.1: `loadActiveStories(storyListMain)` follows `loadChats`
-        // after Ready (feeds the story tray).
+        // after Ready (feeds the story tray). Parity slice: the notification
+        // slice then fetches the saved-sound list and the three scope
+        // defaults (`getSavedNotificationSounds`,
+        // `getScopeNotificationSettings` × 3).
         let types: Vec<&str> = sent
             .iter()
             .map(|json| {
@@ -4417,12 +4619,26 @@ mod tests {
                     "loadChats"
                 } else if json.contains(r#""@type":"loadActiveStories""#) {
                     "loadActiveStories"
+                } else if json.contains(r#""@type":"getSavedNotificationSounds""#) {
+                    "getSavedNotificationSounds"
+                } else if json.contains(r#""@type":"getScopeNotificationSettings""#) {
+                    "getScopeNotificationSettings"
                 } else {
                     "other"
                 }
             })
             .collect();
-        assert_eq!(types, vec!["loadChats", "loadActiveStories"]);
+        assert_eq!(
+            types,
+            vec![
+                "loadChats",
+                "loadActiveStories",
+                "getSavedNotificationSounds",
+                "getScopeNotificationSettings",
+                "getScopeNotificationSettings",
+                "getScopeNotificationSettings",
+            ]
+        );
         let load = &sent[0];
         assert!(load.contains("chatListMain"));
         assert!(load.contains(&format!("\"limit\":{MAIN_CHAT_LOAD_LIMIT}")));
