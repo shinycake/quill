@@ -902,3 +902,47 @@ Research snapshot 2026-09-16, pin recheck **2026-09-17**.
   `DiceStickers` initial → final animation); rendering
   `messageStakeDice`; sending dice from the composer (the animated
   🎲 emoji); `updateMessageContent` live-update of a roll.
+
+## Phase 4.5 — Fullscreen media viewer (2026-09-26)
+
+- **Rationale:** clicking a photo/video in history opened nothing; the
+  natural next step (from the photo slice's "Out of this slice" backlog)
+  is a fullscreen viewer for already-fetched media, without inventing
+  any new TDLib requests.
+- **Schema refs:** no new TDLib constructors or fields. The viewer
+  reuses the already-parsed `messagePhoto` (line 1392 area of
+  `src/telegram/envelope.rs`), `messageVideo` (line 1649 area),
+  `photo` / `photoSize` / `file` / `localFile` fields consumed by
+  `parse_message_photo` / `parse_message_video`. The only network
+  operation is the existing `downloadFile` path
+  (`request_media_download`), never a new constructor.
+- **Model (`src/media_viewer.rs`, pure, no GPUI):** `MediaViewerKind`
+  (`Photo` / `Video`); `MediaViewerItem` (chat/message ids, kind,
+  `display_file_ids` largest-first, `download_file_id`, caption/entities,
+  optional duration). `MediaViewer` is an open/closed state machine:
+  `open(items, index)`, `current()`, `position()`, `prev()` / `next()`
+  clamped at the ends, `close()`. `collect_media_items()` filters a
+  chat's ordered history to photo/video only, excluding documents,
+  animations/GIFs, stickers, audio/voice, secret media, and spoiler
+  media. Photos target the largest size for both display and download;
+  videos show their thumbnail in the viewer (playback stays in the
+  history row — `src/video.rs` frame extraction was deliberately not
+  re-piped for this slice).
+- **Rendering (`src/ui/mod.rs`):** `QuillApp.media_viewer` holds the
+  state; history photo and video visuals get click handlers that collect
+  the chat's viewer items and open on the clicked message. The overlay
+  is a fullscreen absolute panel appended after the status bar: dark
+  backdrop (click closes), Close button, Prev/Next buttons, `n / total`
+  counter, caption via the existing `rich_text_line`, a loading/CTA
+  state when no local file exists yet (the CTA and the auto-open both
+  reuse `request_media_download`; the existing poll loop re-renders on
+  `updateFile`). Esc closes the viewer first via the extended
+  `CancelSearch` binding. Sponsored, secret, and spoiler media keep
+  their old behavior (no viewer).
+- **Screenshot:** `docs/screenshots/ready-media-viewer.png` — the Ready
+  media session with the viewer opened on the first photo, driven by
+  `quill --screenshot-demo ready-media-viewer`.
+- **Out of this slice (→ future):** in-viewer video playback (full-file
+  frame rendering); zoom/pan; opening documents, GIFs, stickers, or
+  audio from the viewer; keyboard left/right navigation; opening the
+  viewer from album mosaics.

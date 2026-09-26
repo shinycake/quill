@@ -2315,3 +2315,56 @@ fn replay_photo_caption_carries_entities() {
     assert_eq!(link.href.as_deref(), Some("https://example.com/x"));
     assert!(!sink.rendered().contains("CANARY_REMOTE"));
 }
+
+#[test]
+fn replay_click_photo_opens_viewer_with_largest_file_id() {
+    // Phase 4.5: clicking a photo message opens the viewer on the clicked
+    // message's item, with the largest size's file id as the
+    // download/display target.
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn quill::diagnostics::DiagnosticSink> = sink.clone();
+    let mut session = Session::new(AccountKey::primary(), dyn_sink);
+    let seq = AtomicU64::new(0);
+    let file = |id: i32| {
+        format!(
+            r#"{{"@type":"file","id":{id},"size":10,"expected_size":10,"local":{{"@type":"localFile","path":"","can_be_downloaded":true,"can_be_deleted":false,"is_downloading_active":false,"is_downloading_completed":false,"download_offset":0,"downloaded_prefix_size":0,"downloaded_size":0}},"remote":{{"@type":"remoteFile","id":"CANARY_REMOTE","unique_id":"u","is_uploading_active":false,"is_uploading_completed":true,"uploaded_size":10}}}}"#
+        )
+    };
+    let sizes = format!(
+        "{{\"@type\":\"photoSize\",\"type\":\"m\",\"photo\":{thumb},\"width\":320,\"height\":240,\"progressive_sizes\":[]}},{{\"@type\":\"photoSize\",\"type\":\"x\",\"photo\":{full},\"width\":1280,\"height\":960,\"progressive_sizes\":[]}}",
+        thumb = file(1),
+        full = file(2),
+    );
+    let photo_message = format!(
+        "{{\"@type\":\"updateNewMessage\",\"message\":{{\"id\":20,\"chat_id\":7,\"is_outgoing\":false,\"content\":{{\"@type\":\"messagePhoto\",\"photo\":{{\"@type\":\"photo\",\"has_stickers\":false,\"sizes\":[{sizes}]}},\"caption\":{{\"@type\":\"formattedText\",\"text\":\"CANARY_REPLAY_viewer\",\"entities\":[]}},\"has_spoiler\":false,\"is_secret\":false}}}}}}",
+    );
+    apply_all_seq(
+        &mut session,
+        &sink,
+        &seq,
+        &[
+            r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+            r#"{"@type":"updateNewChat","chat":{"id":7,"title":"Alice","type":{"@type":"chatTypePrivate","user_id":7},"unread_count":0}}"#,
+            &photo_message,
+        ],
+    );
+    let history = session.histories.get(&7).expect("chat history");
+    let messages: Vec<quill::state::HistoryMessage> =
+        history.ordered().into_iter().cloned().collect();
+    // The click handler builds the viewer list from the chat's media
+    // messages, then opens on the clicked message's index.
+    let items = quill::media_viewer::collect_media_items(&messages);
+    assert_eq!(items.len(), 1);
+    let index = items
+        .iter()
+        .position(|item| item.message_id == quill::ids::MessageId(20))
+        .expect("clicked photo is in the viewer list");
+    let viewer = quill::media_viewer::MediaViewer::open(items, index);
+    let current = viewer.current().expect("viewer is open");
+    assert_eq!(current.download_file_id, quill::ids::FileId(2));
+    assert_eq!(current.display_file_ids[0], quill::ids::FileId(2));
+    assert!(current.display_file_ids.contains(&quill::ids::FileId(1)));
+    assert_eq!(current.caption, "CANARY_REPLAY_viewer");
+    assert!(!sink.rendered().contains("CANARY_REPLAY"));
+    assert!(!sink.rendered().contains("CANARY_REMOTE"));
+}
