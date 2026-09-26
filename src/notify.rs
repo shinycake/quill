@@ -282,6 +282,7 @@ mod tests {
             is_outgoing: outgoing,
             is_pinned: false,
             media_album_id: 0,
+            topic_id: None,
             content: MessageContent::Text(TextContent::plain(text)),
             files: Vec::new(),
             reply_to: None,

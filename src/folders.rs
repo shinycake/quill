@@ -219,6 +219,7 @@ mod tests {
             my_admin_can_post_messages: None,
             is_forum: None,
             photo_file_id: None,
+            can_send_basic_messages: true,
         }
     }
 

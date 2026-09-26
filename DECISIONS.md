@@ -1593,3 +1593,84 @@ Research snapshot 2026-09-16, pin recheck **2026-09-17**.
   video uploads; story albums; privacy/close-friends management beyond
   the per-story read of `can_be_*`; joining/playing live stories;
   `getStoryInteractions` detailed viewer list; the archive-list tray.
+
+## Parity slice — Forum-topic posting (2026-09-26)
+
+- **Rationale:** Phase 5.1 made forum topics read-only (composer hidden
+  with a read-only note). This slice completes the loop: the composer is
+  live inside an open topic and sends route to the selected topic; it is
+  hidden/disabled for closed topics and for chats where the user may not
+  post.
+- **Schema (1.8.67, verified in `schema/td_api.tl` — no invented
+  constructors/fields):**
+  - `messageTopicForum forum_topic_id:int32 = MessageTopic` (line 3004);
+    `message.topic_id:MessageTopic` (line 3165).
+  - `sendMessage chat_id:int53 topic_id:MessageTopic …` (line 12200) —
+    the dedicated `topic_id` field carries the send; **not** a reply-to
+    field and **not** an invented `message_thread_id` (the schema has
+    none; guarded by `send_message_uses_topic_id_field_in_schema`).
+  - `sendMessageAlbum … topic_id:MessageTopic …` (line 12209);
+    `setChatDraftMessage … topic_id:MessageTopic …` (line 13493);
+    `sendChatAction chat_id:int53 topic_id:MessageTopic …` (line 13191).
+  - `chatPermissions.can_send_basic_messages` (line 1070);
+    `chat.permissions` (line 3627);
+    `updateChatPermissions chat_id:int53 permissions:chatPermissions =
+    Update` (line 10500).
+  - Management constructors exist but are not used here:
+    `createForumTopic` (line 12665), `editForumTopic` (line 12674),
+    `toggleForumTopicIsClosed` (line 12713),
+    `toggleForumTopicIsPinned` (line 12725), `deleteForumTopic`
+    (line 12736).
+- **Parser (`src/telegram/envelope.rs`).** `ParsedMessage.topic_id:
+  Option<i32>` — `parse_message_topic` keeps only
+  `messageTopicForum.forum_topic_id`; other `MessageTopic` variants and
+  null map to `None`. `UpdateNewChat` gains `can_send_basic_messages`
+  (parsed from `chat.permissions`, defaulting to `true` when the block
+  is absent — lenient like other permission reads); new
+  `EnvelopePayload::UpdateChatPermissions`.
+- **Reducer (`src/state.rs`).** `ChatSummary.can_send_basic_messages`
+  (default `true` for placeholder chats), refreshed by `updateNewChat`
+  and `updateChatPermissions`. `TopicHistory::{upsert, replace_id}`;
+  `upsert_message` stores the message in the chat's main history as
+  before and additionally in an *already-loaded* topic history when
+  `topic_id` is a forum topic (never creates a history for an unloaded
+  topic — paging stays fetch-owned).
+  `updateMessageSendSucceeded` / `updateMessageSendFailed` replace
+  pending rows in both histories, so outgoing
+  pending/success/failure rows show in the topic view.
+- **Requests (`src/telegram/requests.rs`).** Private
+  `message_topic_value(Option<i32>)` renders
+  `{"@type":"messageTopicForum","forum_topic_id":N}` or null; threaded
+  through text, photo, document, video, video note, media album, voice
+  note, poll, sticker, and saved-animation sends. Non-topic callers pass
+  `None` (null preserved). `StickerSend` / `AnimationSend` / `PollSend`
+  gain `topic_id`; voice-note params bundled into new `VoiceNoteSend`
+  (keeps the constructor under clippy's argument limit; `VideoNoteSend`
+  already existed for round video notes). Story replies stay null-topic
+  by design. `sendChatAction` stays null-topic (typing indicator, not
+  message posting).
+- **Driver (`src/connect.rs`).** `send_topic(chat_id)` returns the
+  selected topic only when `chat_id` is the open chat; the driver is the
+  source of truth and overwrites the UI request structs' `topic_id:
+  None`. `topic_send_is_closed(chat_id)` rejects sends into closed
+  topics (guards a stale-snapshot race); closed checks on
+  text/media/album/voice/poll/sticker/GIF paths.
+- **UI (`src/ui/mod.rs`).** The composer is visible in an open forum
+  topic when the chat can post, `can_send_basic_messages` is true, and
+  the topic is not closed. Hidden-composer notes: closed — "This topic
+  is closed — new messages are disabled."; no permission — "You don't
+  have permission to post in this topic."; topic info not yet loaded —
+  "Loading topic…". The Phase 5.1 read-only note is removed. The `‹
+  Topics` strip, topic selection, history, and paging are untouched.
+- **Screenshot:** `docs/screenshots/ready-topic-post.png` —
+  `quill --screenshot-demo ready-topic-post` opens forum chat 16,
+  selects the General topic, injects a two-message topic history
+  carrying `messageTopicForum`, and pre-fills the composer with
+  "Posting into the General topic…".
+- **Out of this slice (→ future):** per-topic drafts (draft state is
+  chat-keyed; clean support needs topic-keyed local + remote drafts via
+  `setChatDraftMessage.topic_id`); topic management UI
+  (create/edit/close/pin/delete — constructors verified above, unused);
+  threading `sendChatAction` typing into the open topic; General-topic
+  main-history special-casing; per-topic notification/unread behavior;
+  topic-list pagination beyond 100; richer topic icons.

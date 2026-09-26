@@ -693,6 +693,11 @@ pub struct ChatSummary {
     /// 1.8.67 line 762). `None` when the chat has no photo. Updated by
     /// `updateChatPhoto`; the file itself lives in `Session::files`.
     pub photo_file_id: Option<i32>,
+    /// Parity slice 4: `chat.permissions.can_send_basic_messages`
+    /// (`chatPermissions`, schema 1.8.67 line 1070), refreshed by
+    /// `updateChatPermissions` (line 10500). Gates the topic composer
+    /// alongside `ForumTopic.is_closed`.
+    pub can_send_basic_messages: bool,
 }
 
 impl ChatSummary {
@@ -827,6 +832,10 @@ fn placeholder_chat(chat_id: ChatId) -> ChatSummary {
         my_admin_can_post_messages: None,
         is_forum: None,
         photo_file_id: None,
+        // Parity slice 4: lenient default true — the real `chat` object
+        // always carries `permissions`; only `updateNewChat` /
+        // `updateChatPermissions` ever set it to false.
+        can_send_basic_messages: true,
     }
 }
 
@@ -1266,6 +1275,21 @@ impl Default for TopicHistory {
 impl TopicHistory {
     pub fn ordered(&self) -> Vec<&HistoryMessage> {
         self.messages.values().collect()
+    }
+
+    /// Parity slice 4: live topic messages (incoming updates and own
+    /// sends) land here when the topic is loaded. Entries are only ever
+    /// created by the `GetTopicHistory` fetch — upserting into a missing
+    /// topic would corrupt the paging cursor.
+    fn upsert(&mut self, message: HistoryMessage) {
+        self.messages.insert(message.id.0, message);
+    }
+
+    /// Parity slice 4: `updateMessageSendSucceeded` / `Failed` replace the
+    /// pending row, mirroring `HistoryState::replace_id`.
+    fn replace_id(&mut self, old: MessageId, new_message: HistoryMessage) {
+        self.messages.remove(&old.0);
+        self.upsert(new_message);
     }
 }
 
@@ -1931,6 +1955,7 @@ impl Session {
                 notification_settings,
                 draft,
                 photo,
+                can_send_basic_messages,
             } => {
                 // Parity slice: keep the chat photo (`chatPhotoInfo.small`)
                 // file id so the chat list can render avatars. The file
@@ -1951,6 +1976,7 @@ impl Session {
                 chat.last_read_outbox_message_id = last_read_outbox_message_id;
                 chat.notification_settings = notification_settings;
                 chat.photo_file_id = photo_file_id;
+                chat.can_send_basic_messages = can_send_basic_messages;
                 if !self.draft_dirty.contains(&chat_id.0) {
                     chat.draft = draft;
                 }
@@ -1966,6 +1992,15 @@ impl Session {
                     .entry(chat_id.0)
                     .or_insert_with(|| placeholder_chat(chat_id))
                     .photo_file_id = photo_file_id;
+            }
+            EnvelopePayload::UpdateChatPermissions {
+                chat_id,
+                can_send_basic_messages,
+            } => {
+                self.chats
+                    .entry(chat_id.0)
+                    .or_insert_with(|| placeholder_chat(chat_id))
+                    .can_send_basic_messages = can_send_basic_messages;
             }
             EnvelopePayload::UpdateChatDraftMessage {
                 chat_id,
@@ -2265,9 +2300,20 @@ impl Session {
                 old_message_id,
             } => {
                 let chat_id = message.chat_id;
+                let topic_id = message.topic_id;
                 self.remember_files(&message.files);
-                let history = self.histories.entry(message.chat_id.0).or_default();
-                history.replace_id(old_message_id, history_message(message, false));
+                let row = history_message(message, false);
+                let history = self.histories.entry(chat_id.0).or_default();
+                history.replace_id(old_message_id, row.clone());
+                // Parity slice 4: the pending row in the topic's history
+                // resolves the same way (the succeeded message carries its
+                // topic).
+                if let Some(topic_id) = topic_id
+                    && let Some(topic_history) =
+                        self.topic_histories.get_mut(&(chat_id.0, topic_id))
+                {
+                    topic_history.replace_id(old_message_id, row);
+                }
                 self.draft_clears.push(chat_id);
             }
             EnvelopePayload::UpdateMessageSendFailed {
@@ -2275,9 +2321,20 @@ impl Session {
                 old_message_id,
                 ..
             } => {
+                let chat_id = message.chat_id;
+                let topic_id = message.topic_id;
                 self.remember_files(&message.files);
-                let history = self.histories.entry(message.chat_id.0).or_default();
-                history.replace_id(old_message_id, history_message(message, true));
+                let row = history_message(message, true);
+                let history = self.histories.entry(chat_id.0).or_default();
+                history.replace_id(old_message_id, row.clone());
+                // Parity slice 4: the failed pending row shows in the topic
+                // view too.
+                if let Some(topic_id) = topic_id
+                    && let Some(topic_history) =
+                        self.topic_histories.get_mut(&(chat_id.0, topic_id))
+                {
+                    topic_history.replace_id(old_message_id, row);
+                }
             }
             EnvelopePayload::UpdateMessageSendAcknowledged { .. } => {
                 // Not success. Keep the pending row until Succeeded/Failed.
@@ -2985,8 +3042,20 @@ impl Session {
 
     fn upsert_message(&mut self, message: ParsedMessage, pending: bool) {
         self.remember_files(&message.files);
-        let history = self.histories.entry(message.chat_id.0).or_default();
-        history.upsert(history_message(message, pending));
+        let chat_id = message.chat_id;
+        let topic_id = message.topic_id;
+        let row = history_message(message, pending);
+        let history = self.histories.entry(chat_id.0).or_default();
+        history.upsert(row.clone());
+        // Parity slice 4: a message addressed to a forum topic also lands
+        // in that topic's history when the topic is loaded (the topic view
+        // reads `topic_histories`, never the chat's main history). Missing
+        // entries are left alone so the paging cursor stays fetch-owned.
+        if let Some(topic_id) = topic_id
+            && let Some(topic_history) = self.topic_histories.get_mut(&(chat_id.0, topic_id))
+        {
+            topic_history.upsert(row);
+        }
     }
 
     fn remember_files(&mut self, files: &[ParsedFile]) {
@@ -6469,6 +6538,139 @@ mod tests {
         let history = session.topic_histories.get(&(16, 2)).unwrap();
         assert!(history.loaded_complete);
         assert_eq!(history.messages.len(), 3);
+    }
+
+    /// Parity slice 4: replay — an `updateNewMessage` carrying
+    /// `topic_id = messageTopicForum` lands in the loaded topic's history
+    /// (and still in the chat's main history). A topic with no loaded
+    /// history gets no entry — the paging cursor stays fetch-owned.
+    #[test]
+    fn topic_message_update_lands_in_loaded_topic_history() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        session.open_chat(ChatId(16));
+        let extra = session.request_for_topic(RequestPurpose::GetTopicHistory, Some(ChatId(16)), 2);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                "{{\"@type\":\"foundChatMessages\",\"@extra\":\"{}\",{}}}",
+                extra.0,
+                r#""total_count":1,"next_from_message_id":0,"messages":[{"id":50,"chat_id":16,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"seed","entities":[]}}}]"#
+            ),
+        );
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateNewMessage","message":{"id":51,"chat_id":16,"is_outgoing":false,"topic_id":{"@type":"messageTopicForum","forum_topic_id":2},"content":{"@type":"messageText","text":{"@type":"formattedText","text":"CANARY_TOPIC_live","entities":[]}}}}"#,
+        );
+        let topic = session.topic_histories.get(&(16, 2)).unwrap();
+        assert!(topic.messages.values().any(|m| m.id == MessageId(51)));
+        // Still in the main history (unchanged behavior).
+        assert!(session.histories.get(&16).unwrap().contains(MessageId(51)));
+        // Unloaded topic: no entry is created.
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateNewMessage","message":{"id":52,"chat_id":16,"is_outgoing":false,"topic_id":{"@type":"messageTopicForum","forum_topic_id":9},"content":{"@type":"messageText","text":{"@type":"formattedText","text":"unloaded","entities":[]}}}}"#,
+        );
+        assert!(!session.topic_histories.contains_key(&(16, 9)));
+        assert!(session.histories.get(&16).unwrap().contains(MessageId(52)));
+        // A message with no topic stays a plain chat message.
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateNewMessage","message":{"id":53,"chat_id":16,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"plain","entities":[]}}}}"#,
+        );
+        assert!(session.histories.get(&16).unwrap().contains(MessageId(53)));
+    }
+
+    /// Parity slice 4: replay — a topic send's pending row (from the
+    /// `sendMessage` response) resolves in the topic history on
+    /// `updateMessageSendSucceeded`, mirroring the main history.
+    #[test]
+    fn topic_send_succeeded_replaces_pending_row_in_topic_history() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        session.open_chat(ChatId(16));
+        let extra = session.request_for_topic(RequestPurpose::GetTopicHistory, Some(ChatId(16)), 2);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                "{{\"@type\":\"foundChatMessages\",\"@extra\":\"{}\",{}}}",
+                extra.0, r#""total_count":0,"next_from_message_id":0,"messages":[]"#
+            ),
+        );
+        // The `sendMessage` response: pending outgoing message with a
+        // temporary (negative) id and the forum topic attached.
+        let send_extra = session.request(RequestPurpose::SendMessage, Some(ChatId(16)));
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                "{{\"@type\":\"message\",\"@extra\":\"{}\",{}}}",
+                send_extra.0,
+                r#""id":-1,"chat_id":16,"is_outgoing":true,"topic_id":{"@type":"messageTopicForum","forum_topic_id":2},"content":{"@type":"messageText","text":{"@type":"formattedText","text":"CANARY_TOPIC_send","entities":[]}}"#
+            ),
+        );
+        assert!(
+            session
+                .topic_histories
+                .get(&(16, 2))
+                .unwrap()
+                .messages
+                .contains_key(&-1)
+        );
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateMessageSendSucceeded","message":{"id":60,"chat_id":16,"is_outgoing":true,"topic_id":{"@type":"messageTopicForum","forum_topic_id":2},"content":{"@type":"messageText","text":{"@type":"formattedText","text":"CANARY_TOPIC_send","entities":[]}}},"old_message_id":-1}"#,
+        );
+        let topic = session.topic_histories.get(&(16, 2)).unwrap();
+        assert!(!topic.messages.contains_key(&-1));
+        assert!(topic.messages.contains_key(&60));
+    }
+
+    /// Parity slice 4: replay — `chat.permissions.can_send_basic_messages`
+    /// (schema 1.8.67, line 1070) feeds the topic-composer gate, and
+    /// `updateChatPermissions` (line 10500) refreshes it.
+    #[test]
+    fn chat_permissions_gate_topic_composer() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        let permissions = r#""permissions":{"@type":"chatPermissions","can_send_basic_messages":false,"can_send_audios":true,"can_send_documents":true,"can_send_photos":true,"can_send_videos":true,"can_send_video_notes":true,"can_send_voice_notes":true,"can_send_polls":true,"can_send_other_messages":true,"can_add_link_previews":true,"can_react_to_messages":true,"can_edit_tag":false,"can_change_info":false,"can_invite_users":true,"can_pin_messages":false,"can_create_topics":false}"#;
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                "{{\"@type\":\"updateNewChat\",\"chat\":{{\"id\":16,\"title\":\"Demo forum\",\"type\":{{\"@type\":\"chatTypeSupergroup\",\"supergroup_id\":16,\"is_channel\":false}},{permissions},\"unread_count\":0}}}}",
+                permissions = permissions
+            ),
+        );
+        assert!(!session.chats.get(&16).unwrap().can_send_basic_messages);
+        let permissions_on = permissions.replace(
+            "\"can_send_basic_messages\":false",
+            "\"can_send_basic_messages\":true",
+        );
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                "{{\"@type\":\"updateChatPermissions\",\"chat_id\":16,{}}}",
+                permissions_on
+            ),
+        );
+        assert!(session.chats.get(&16).unwrap().can_send_basic_messages);
     }
 
     // Phase 6: `updateUser` upserts the user directory (contacts list /

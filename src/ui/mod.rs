@@ -566,6 +566,11 @@ pub enum ScreenshotDemo {
     /// with a last-message preview, Random closed), shown as the topic
     /// list (Phase 5.1).
     ReadyForumTopics,
+    /// Topic-posting demo (injected, no live Telegram): the forum's General
+    /// topic is open with an injected two-message history and the composer
+    /// enabled — posting routes `sendMessage` with
+    /// `topic_id = messageTopicForum` (parity slice 4).
+    ReadyTopicPost,
     /// Contacts demo (injected, no live Telegram): the sidebar shows the
     /// **Contacts** tab (three injected contacts: Ada online, Zed last
     /// seen within a week, Noor recently) and the user info panel is open
@@ -1222,6 +1227,15 @@ impl QuillApp {
                     AuthorizationState::Ready,
                 )
             }
+            Some(ScreenshotDemo::ReadyTopicPost) => {
+                demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
+                (
+                    ConnectUiStatus::DemoReadyChats,
+                    None,
+                    "screenshot demo — posting to a forum topic".into(),
+                    AuthorizationState::Ready,
+                )
+            }
             Some(ScreenshotDemo::ReadyContacts) => {
                 demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
                 (
@@ -1595,6 +1609,16 @@ impl QuillApp {
                 apply_ready_forum_topics(session, &app.demo_sink, &app.demo_seq);
             }
             app.status_note = "screenshot demo — forum topics list".into();
+        }
+        if matches!(demo, Some(ScreenshotDemo::ReadyTopicPost)) {
+            if let Some(session) = app.demo_session.as_mut() {
+                app.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_topic_post(session, &app.demo_sink, &app.demo_seq);
+            }
+            app.composer.update(cx, |input, cx| {
+                input.set_value("Posting into the General topic…", window, cx);
+            });
+            app.status_note = "screenshot demo — posting to a forum topic".into();
         }
         if matches!(demo, Some(ScreenshotDemo::ReadyContacts)) {
             if let Some(session) = app.demo_session.as_mut() {
@@ -4796,6 +4820,9 @@ impl QuillApp {
                     width,
                     height,
                     reply_to: reply,
+                    // Parity slice 4: the driver addresses the open topic
+                    // from the session; the UI passes no topic.
+                    topic_id: None,
                 },
             ) {
                 Ok(_) => "sending GIF".into(),
@@ -4893,6 +4920,9 @@ impl QuillApp {
                     height,
                     thumb,
                     reply_to: reply,
+                    // Parity slice 4: the driver addresses the open topic
+                    // from the session; the UI passes no topic.
+                    topic_id: None,
                 },
             ) {
                 Ok(_) => "sticker sent".into(),
@@ -10002,15 +10032,22 @@ impl QuillApp {
             PaneMode::Ready => {
                 let session = self.session();
                 let open = session.and_then(|s| s.open_chat);
-                // Phase 5.1: posting into a topic is out of scope — the
-                // topic view is read-only.
+                let chat = open.and_then(|id| session.and_then(|s| s.chats.get(&id.0)));
+                // Parity slice 4: posting into a forum topic is supported —
+                // `sendMessage` carries `topic_id = messageTopicForum`
+                // (schema 1.8.67, lines 12200 / 3004). Closed topics and
+                // chats without the basic send permission keep the composer
+                // hidden.
+                let topic = open.and_then(|id| session.and_then(|s| s.open_topic_info(id)));
                 let in_topic = session.is_some_and(|s| s.open_topic.is_some());
-                let can_post = !in_topic
-                    && open
-                        .and_then(|id| {
-                            session.and_then(|s| s.chats.get(&id.0).map(|c| c.can_post()))
-                        })
-                        .unwrap_or(false);
+                let can_post = match (chat, topic) {
+                    (Some(c), Some(t)) => c.can_post() && !t.is_closed && c.can_send_basic_messages,
+                    // In a topic whose info hasn't loaded yet: hide the
+                    // composer until it arrives (the note says "Loading
+                    // topic…").
+                    (Some(c), None) if !in_topic => c.can_post(),
+                    _ => false,
+                };
                 if can_post { Some(true) } else { None }
             }
         };
@@ -10028,10 +10065,27 @@ impl QuillApp {
                     // The join/leave footer replaces the plain note for channels.
                     None
                 } else if in_topic {
-                    // Phase 5.1: topic view is read-only.
-                    Some(
-                        "Topic view is read-only in this phase — posting to a topic is out of scope.",
-                    )
+                    // Parity slice 4: closed topics and a missing send
+                    // permission hide the composer with an explanatory note.
+                    let topic_closed = open.is_some_and(|id| {
+                        self.session()
+                            .and_then(|s| s.open_topic_info(id))
+                            .is_some_and(|t| t.is_closed)
+                    });
+                    let send_allowed = open.is_some_and(|id| {
+                        self.session()
+                            .and_then(|s| s.chats.get(&id.0))
+                            .is_some_and(|c| c.can_post() && c.can_send_basic_messages)
+                    });
+                    if topic_closed {
+                        Some("This topic is closed — new messages are disabled.")
+                    } else if !send_allowed {
+                        Some("You don't have permission to post in this topic.")
+                    } else {
+                        // The topic's info hasn't loaded yet; the composer
+                        // appears once it arrives.
+                        Some("Loading topic…")
+                    }
                 } else if open.is_none() {
                     Some("Select a supported cloud chat to send.")
                 } else {
@@ -11872,12 +11926,12 @@ fn apply_ready_sponsored(session: &mut Session, sink: &Arc<MemorySink>, seq: &At
     }
 }
 
-/// `ReadyForumTopics` fixture: add a forum supergroup (id 16) through
-/// `updateNewChat` + `updateChatPosition`, mark it a forum via
-/// `updateSupergroup`, then inject a `getForumTopics` response with three
-/// topics through the same reducer the live path uses. The demo opens the
-/// forum with no topic selected, so the topic list shows.
-fn apply_ready_forum_topics(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
+/// Shared seed for the forum-topics screenshot fixtures: forum supergroup
+/// (id 16) via `updateNewChat` + `updateChatPosition`, marked a forum via
+/// `updateSupergroup`, with a three-topic `getForumTopics` response
+/// (General pinned + unread, Announcements with a preview, Random closed)
+/// injected through the same reducer the live path uses.
+fn seed_forum_chat_16(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
     let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
     let topic_json = |id: i32,
                       name: &str,
@@ -11945,7 +11999,32 @@ fn apply_ready_forum_topics(session: &mut Session, sink: &Arc<MemorySink>, seq: 
     if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
         session.apply(owned);
     }
+}
+
+/// `ReadyForumTopics` fixture: the demo opens the forum with no topic
+/// selected, so the topic list shows.
+fn apply_ready_forum_topics(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
+    seed_forum_chat_16(session, sink, seq);
     session.open_chat(ChatId(16));
+}
+
+/// `ReadyTopicPost` fixture (parity slice 4): the forum's General topic is
+/// open with a two-message injected history and the composer enabled — the
+/// composer now posts into the topic via `sendMessage` with
+/// `topic_id = messageTopicForum`.
+fn apply_ready_topic_post(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
+    seed_forum_chat_16(session, sink, seq);
+    session.open_chat(ChatId(16));
+    session.select_topic(ChatId(16), 1);
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let extra = session.request_for_topic(RequestPurpose::GetTopicHistory, Some(ChatId(16)), 1);
+    let json = format!(
+        r#"{{"@type":"foundChatMessages","@extra":"{}","total_count":2,"next_from_message_id":0,"messages":[{{"id":101,"chat_id":16,"is_outgoing":false,"topic_id":{{"@type":"messageTopicForum","forum_topic_id":1}},"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"Welcome to General — say hello!","entities":[]}}}}}},{{"id":102,"chat_id":16,"is_outgoing":true,"topic_id":{{"@type":"messageTopicForum","forum_topic_id":1}},"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"Hello from the new topic composer.","entities":[]}}}}}}]}}"#,
+        extra.0,
+    );
+    if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
+        session.apply(owned);
+    }
 }
 
 /// `ReadyContacts` fixture: inject three users via `updateUser` (Ada online
