@@ -750,8 +750,8 @@ Research snapshot 2026-09-16, pin recheck **2026-09-17**.
 - **Rationale:** `messagePoll` is a first-class Telegram message content
   type. This slice adds poll display (question, per-option bars with
   percentages and voter counts, chosen/correct marks, open/closed and
-  anonymous state), voting via `setPollAnswer`, live `updatePoll` /
-  `updatePollAnswer` refresh, and regular-poll creation from the
+  anonymous state), voting via `setPollAnswer`, live `updatePoll`
+  refresh, and regular-poll creation from the
   composer.
 - **Schema (1.8.67, verified in `schema/td_api.tl`):**
   - `pollOption` (line 456), `inputPollOption` (462),
@@ -774,9 +774,9 @@ Research snapshot 2026-09-16, pin recheck **2026-09-17**.
     `poll_answer_for_tap` which toggles membership for multiple-answer
     polls and replaces for single-answer polls.
   - When `allows_revoting == false`, any tap that changes the current
-    vote is a local no-op (TDLib rejects with "Can't retract vote in
-    the poll" / "Can't revote in a quiz"); only re-tapping the exact
-    current selection is forwarded.
+    vote is a local no-op once a vote exists — including re-tapping the
+    current selection (TDLib would reject with "Can't retract vote in
+    the poll" / "Can't revote in a quiz").
   - Optimistic local `chosen` state, corrected by `updatePoll`
     broadcasts (`Session::apply_update_poll` scans loaded histories by
     `poll.id`).
@@ -797,4 +797,6 @@ Research snapshot 2026-09-16, pin recheck **2026-09-17**.
   `quill --screenshot-demo ready-poll`.
 - **Out of this slice (→ future):** quiz creation with correct-option
   authoring; media polls / scheduled polls; poll editing; quiz
-  explanation display; `updatePollAnswer` voter-list detail.
+  explanation display; `updatePollAnswer` voter-list detail;
+  `pollVoteRestrictionReason` handling (restricted polls currently
+  render as votable; the vote fails server-side).

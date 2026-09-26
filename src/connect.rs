@@ -2137,12 +2137,17 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         let option_ids =
             poll_answer_for_tap(&poll, option_index).ok_or(ConnectSendError::InvalidRequest)?;
+        // Capture the previous chosen marks: the optimistic flip below is
+        // rolled back if the send fails (the server's `updatePoll` corrects
+        // counts/percentages in place on success).
+        let mut previous: Vec<bool> = Vec::new();
         if let Some(history) = self.session.histories.get_mut(&chat_id.0)
             && let Some(message) = history.messages.get_mut(&message_id.0)
             && let MessageContent::Poll(poll_content) = &mut message.content
         {
             let chosen: std::collections::HashSet<i32> = option_ids.iter().copied().collect();
             for (index, option) in poll_content.poll.options.iter_mut().enumerate() {
+                previous.push(option.is_chosen);
                 option.is_chosen = chosen.contains(&(index as i32));
             }
         }
@@ -2154,6 +2159,17 @@ impl<S: JsonSender> ConnectDriver<S> {
             Ok(()) => Ok(extra),
             Err(err) => {
                 self.session.requests.take(extra);
+                // The vote never left the client: restore the previous marks.
+                if let Some(history) = self.session.histories.get_mut(&chat_id.0)
+                    && let Some(message) = history.messages.get_mut(&message_id.0)
+                    && let MessageContent::Poll(poll_content) = &mut message.content
+                {
+                    for (option, &was_chosen) in
+                        poll_content.poll.options.iter_mut().zip(previous.iter())
+                    {
+                        option.is_chosen = was_chosen;
+                    }
+                }
                 Err(err)
             }
         }
