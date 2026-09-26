@@ -13,7 +13,8 @@ use crate::platform::{DatabaseKey, KeyDecision, SecretStore, load_or_create_key}
 use crate::poll::{PollDraft, poll_answer_for_tap};
 use crate::settings::{AccountPaths, default_app_root};
 use crate::state::{
-    ChatSearchJumpNeed, ForwardFlight, RequestPurpose, SearchStatus, Session, ShutdownPhase,
+    ChatSearchJumpNeed, ForwardFlight, InfoPanelTarget, RequestPurpose, SearchStatus, Session,
+    ShutdownPhase,
 };
 use crate::telegram::client::{LiveTdJson, OwnedEnvelope, ReceiveBridge};
 use crate::telegram::envelope::{
@@ -23,21 +24,21 @@ use crate::telegram::envelope::{
 use crate::telegram::ffi::{LibraryOrigin, TdJsonError, resolve_tdjson_path};
 use crate::telegram::requests::{
     AnimationSend, PollSend, SetTdlibParameters, StickerSend, VideoNoteSend,
-    VideoNoteThumbnailSend, VideoSend, add_chat_to_list, add_message_reaction,
+    VideoNoteThumbnailSend, VideoSend, add_chat_to_list, add_contact, add_message_reaction,
     add_recently_found_chat, check_authentication_code, check_authentication_password,
     click_chat_sponsored_message, close_chat, close_request, delete_messages,
     download_file as download_file_request, edit_message_caption, edit_message_text,
     forward_messages, get_authorization_state, get_callback_query_answer, get_chat_history,
-    get_chat_member, get_chat_sponsored_messages, get_commands, get_forum_topics,
+    get_chat_member, get_chat_sponsored_messages, get_commands, get_contacts, get_forum_topics,
     get_installed_sticker_sets, get_me, get_saved_animations, get_sticker_set, get_supergroup,
-    get_user_full_info, input_message_photo, input_message_video, join_chat, leave_chat,
-    load_chats, open_chat, open_message_content, pin_chat_message, remove_message_reaction,
-    report_chat_sponsored_message, search_chat_messages, search_chats, search_messages,
-    search_recently_found_chats, send_animation, send_chat_action, send_chat_action_kind,
-    send_document, send_message_album, send_photo, send_poll, send_sticker, send_text, send_video,
-    send_video_note, send_voice_note, set_authentication_phone_number, set_chat_draft_message,
-    set_chat_notification_settings, set_poll_answer, unpin_chat_message, view_messages,
-    view_sponsored_chat,
+    get_supergroup_full_info, get_user_full_info, input_message_photo, input_message_video,
+    join_chat, leave_chat, load_chats, open_chat, open_message_content, pin_chat_message,
+    remove_message_reaction, report_chat_sponsored_message, search_chat_messages, search_chats,
+    search_messages, search_recently_found_chats, send_animation, send_chat_action,
+    send_chat_action_kind, send_document, send_message_album, send_photo, send_poll, send_sticker,
+    send_text, send_video, send_video_note, send_voice_note, set_authentication_phone_number,
+    set_chat_draft_message, set_chat_notification_settings, set_poll_answer, unpin_chat_message,
+    view_messages, view_sponsored_chat,
 };
 use crate::voice::VoiceDraft;
 use std::path::Path;
@@ -1137,6 +1138,155 @@ impl<S: JsonSender> ConnectDriver<S> {
                 Err(err)
             }
         }
+    }
+
+    /// Phase 6: open/close the contacts info panel. Live and demo sessions
+    /// both keep the target in `Session`; the UI then fetches the panel
+    /// data through the driver.
+    pub fn set_info_panel(&mut self, target: Option<InfoPanelTarget>) {
+        self.session.open_info_panel = target;
+    }
+
+    /// Phase 6: `getContacts` for the contacts tab. Fires once per list
+    /// (deduped by a settled `Session::contacts` + in-flight purpose); a
+    /// failed attempt clears its error flag on retry. The `users` response
+    /// lands the id list; user objects arrive via `updateUser`.
+    pub fn fetch_contacts(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if self.session.contacts.is_some()
+            || self
+                .session
+                .requests
+                .has_purpose(RequestPurpose::GetContacts)
+        {
+            return Ok(None);
+        }
+        self.session.contacts_error = false;
+        let extra = self.session.request(RequestPurpose::GetContacts, None);
+        if let Err(err) = self.sender.send_json(&get_contacts(extra)) {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(Some(extra))
+    }
+
+    /// Phase 6: user-scoped `getUserFullInfo` for the user info panel
+    /// (opened from the contacts list, where there is no chat to resolve
+    /// through). Deduped by the bio cache + in-flight user id; the id-less
+    /// response correlates via `PendingRequest::user_id`.
+    pub fn fetch_user_full_info(
+        &mut self,
+        user_id: i64,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if self.session.user_full_infos.contains_key(&user_id)
+            || self
+                .session
+                .requests
+                .has_purpose_for_user(RequestPurpose::GetUserFullInfo, user_id)
+        {
+            return Ok(None);
+        }
+        let extra = self
+            .session
+            .request_for_user(RequestPurpose::GetUserFullInfo, user_id);
+        if let Err(err) = self.sender.send_json(&get_user_full_info(extra, user_id)) {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(Some(extra))
+    }
+
+    /// Phase 6: `getSupergroupFullInfo` for the group info panel. Deduped
+    /// by cache + in-flight supergroup id; the id-less response correlates
+    /// via `PendingRequest::supergroup_id`.
+    pub fn fetch_supergroup_full_info(
+        &mut self,
+        supergroup_id: i64,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if self
+            .session
+            .supergroup_full_infos
+            .contains_key(&supergroup_id)
+            || self
+                .session
+                .requests
+                .has_purpose_for_supergroup(RequestPurpose::GetSupergroupFullInfo, supergroup_id)
+        {
+            return Ok(None);
+        }
+        let extra = self
+            .session
+            .request_for_supergroup(RequestPurpose::GetSupergroupFullInfo, supergroup_id);
+        if let Err(err) = self
+            .sender
+            .send_json(&get_supergroup_full_info(extra, supergroup_id))
+        {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(Some(extra))
+    }
+
+    /// Phase 6: `addContact` from the add-contact dialog. The reducer
+    /// invalidates the contacts list on `ok`; the new contact row arrives
+    /// via `updateUser`. `share_phone_number` stays `false` — sharing the
+    /// user's own number is a privacy decision the dialog does not ask
+    /// for (documented in DECISIONS.md).
+    pub fn add_contact(
+        &mut self,
+        user_id: i64,
+        phone_number: &str,
+        first_name: &str,
+        last_name: &str,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self
+            .session
+            .request_for_user(RequestPurpose::AddContact, user_id);
+        if let Err(err) = self.sender.send_json(&add_contact(
+            extra,
+            user_id,
+            phone_number,
+            first_name,
+            last_name,
+        )) {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(Some(extra))
+    }
+
+    /// Phase 6: download the small profile photo for the user info panel
+    /// (thumb priority). No-op when the user has no photo, or the file is
+    /// already local / in flight.
+    pub fn download_user_photo(
+        &mut self,
+        user_id: i64,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        // Prefer the photo from the cached `userFullInfo` (fetched for the
+        // panel); fall back to the `user.profile_photo.small` file id.
+        let file_id = self
+            .session
+            .user_full_info(user_id)
+            .and_then(|info| info.photo_file_id)
+            .map(FileId)
+            .unwrap_or_else(|| {
+                self.session
+                    .user(user_id)
+                    .map(|user| FileId(user.photo_small_file_id))
+                    .unwrap_or(FileId(0))
+            });
+        self.download_file(file_id, THUMB_DOWNLOAD_PRIORITY)
     }
 
     /// Load another page of history for the open chat (`from_message_id` = oldest, or 0).
@@ -3775,6 +3925,210 @@ mod tests {
         // A regular private chat never triggers the fetch.
         driver.select_chat(ChatId(22)).unwrap();
         assert_eq!(info_fetches().len(), 1);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Phase 6: ready driver with no chats (contacts tests don't need any).
+    fn ready_driver(
+        recorder: &Arc<RecordingSender>,
+        prepared: PreparedConnect,
+        dyn_sink: &Arc<dyn DiagnosticSink>,
+        seq: &AtomicU64,
+    ) -> ConnectDriver<Arc<RecordingSender>> {
+        let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+        let mut driver =
+            ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+        driver
+            .ingest(
+                copy_and_parse(
+                    r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+                    seq,
+                    dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        driver
+    }
+
+    #[test]
+    fn contacts_fetched_once_for_tab() {
+        // Phase 6: `fetch_contacts` sends `getContacts` once; a second
+        // call while the fetch is in flight or after the `users` response
+        // lands sends nothing new.
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = Arc::new(RecordingSender::new());
+        let seq = AtomicU64::new(0);
+        let mut driver = ready_driver(&recorder, prepared, &dyn_sink, &seq);
+        let extra = driver.fetch_contacts().unwrap().expect("getContacts sent");
+        let sent = recorder.snapshot();
+        let get = sent
+            .iter()
+            .find(|j| j.contains(r#""@type":"getContacts""#))
+            .expect("getContacts in outbox");
+        assert!(get.contains(&format!(r#""@extra":"{}""#, extra.0)));
+        // In flight → no-op.
+        assert_eq!(driver.fetch_contacts().unwrap(), None);
+        assert_eq!(recorder.snapshot().len(), sent.len());
+        // The `users` response settles the list; further calls stay quiet.
+        driver
+            .ingest(
+                copy_and_parse(
+                    &format!(
+                        r#"{{"@type":"users","@extra":"{}","total_count":1,"user_ids":[31]}}"#,
+                        extra.0,
+                    ),
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        assert_eq!(driver.session.contacts.as_deref(), Some([31].as_slice()));
+        assert_eq!(driver.fetch_contacts().unwrap(), None);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn user_full_info_fetched_once_per_user() {
+        // Phase 6: `fetch_user_full_info` sends `getUserFullInfo` once per
+        // user; the `userFullInfo` response (correlated by
+        // `PendingRequest::user_id`, not by chat) caches the bio and
+        // suppresses refetches.
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = Arc::new(RecordingSender::new());
+        let seq = AtomicU64::new(0);
+        let mut driver = ready_driver(&recorder, prepared, &dyn_sink, &seq);
+        let extra = driver
+            .fetch_user_full_info(31)
+            .unwrap()
+            .expect("getUserFullInfo sent");
+        let sent = recorder.snapshot();
+        let info_json = sent
+            .iter()
+            .find(|j| j.contains(r#""@type":"getUserFullInfo""#))
+            .expect("getUserFullInfo in outbox");
+        assert!(info_json.contains(r#""user_id":31"#));
+        // In flight → no-op.
+        assert_eq!(driver.fetch_user_full_info(31).unwrap(), None);
+        assert_eq!(recorder.snapshot().len(), sent.len());
+        // The response caches the bio; further fetches stay quiet.
+        driver
+            .ingest(
+                copy_and_parse(
+                    &format!(
+                        r#"{{"@type":"userFullInfo","@extra":"{}","bio":{{"@type":"formattedText","text":"CANARY_bio","entities":[]}},"bot_info":null}}"#,
+                        extra.0,
+                    ),
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        assert_eq!(
+            driver.session.user_full_info(31).map(|i| i.bio.as_str()),
+            Some("CANARY_bio")
+        );
+        assert_eq!(driver.fetch_user_full_info(31).unwrap(), None);
+        // A different user still fetches.
+        assert!(driver.fetch_user_full_info(32).unwrap().is_some());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn supergroup_full_info_fetched_once() {
+        // Phase 6: `fetch_supergroup_full_info` sends `getSupergroupFullInfo`
+        // once per supergroup; the id-less `supergroupFullInfo` response
+        // (correlated by `PendingRequest::supergroup_id`) caches the
+        // description + member count.
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = Arc::new(RecordingSender::new());
+        let seq = AtomicU64::new(0);
+        let mut driver = ready_driver(&recorder, prepared, &dyn_sink, &seq);
+        let extra = driver
+            .fetch_supergroup_full_info(77)
+            .unwrap()
+            .expect("getSupergroupFullInfo sent");
+        let sent = recorder.snapshot();
+        let info_json = sent
+            .iter()
+            .find(|j| j.contains(r#""@type":"getSupergroupFullInfo""#))
+            .expect("getSupergroupFullInfo in outbox");
+        assert!(info_json.contains(r#""supergroup_id":77"#));
+        assert_eq!(driver.fetch_supergroup_full_info(77).unwrap(), None);
+        assert_eq!(recorder.snapshot().len(), sent.len());
+        driver
+            .ingest(
+                copy_and_parse(
+                    &format!(
+                        r#"{{"@type":"supergroupFullInfo","@extra":"{}","description":"CANARY_desc","member_count":4321}}"#,
+                        extra.0,
+                    ),
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        let info = driver.session.supergroup_full_info(77).expect("cached");
+        assert_eq!(info.description, "CANARY_desc");
+        assert_eq!(info.member_count, 4321);
+        assert_eq!(driver.fetch_supergroup_full_info(77).unwrap(), None);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn add_contact_sends_imported_contact() {
+        // Phase 6: `add_contact` sends `addContact` with the
+        // `importedContact` shape; the `ok` answer invalidates the contacts
+        // list so the tab refetches it.
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = Arc::new(RecordingSender::new());
+        let seq = AtomicU64::new(0);
+        let mut driver = ready_driver(&recorder, prepared, &dyn_sink, &seq);
+        driver.session.contacts = Some(Vec::new());
+        let extra = driver
+            .add_contact(31, "+15550131", "Ada", "Lovelace")
+            .unwrap()
+            .expect("addContact sent");
+        let sent = recorder.snapshot();
+        let add = sent
+            .iter()
+            .find(|j| j.contains(r#""@type":"addContact""#))
+            .expect("addContact in outbox");
+        assert!(add.contains(r#""user_id":31"#));
+        assert!(add.contains(r#""@type":"importedContact""#));
+        assert!(add.contains(r#""phone_number":"+15550131""#));
+        assert!(add.contains(r#""first_name":"Ada""#));
+        assert!(add.contains(r#""last_name":"Lovelace""#));
+        driver
+            .ingest(
+                copy_and_parse(
+                    &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        assert!(driver.session.contacts.is_none());
 
         let _ = std::fs::remove_dir_all(&dir);
     }

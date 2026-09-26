@@ -11,8 +11,8 @@ use crate::telegram::envelope::{
     ChatNotificationSettings, ChatPositionUpdate, ConnectionState, EnvelopePayload, ErrorClass,
     ForumTopic, InlineKeyboard, MessageContent, MessageForwardInfo, MessageInteractionInfo,
     MessageOrigin, MessageReaction, MessageReplyTo, MessageSender, ParsedChatMember, ParsedFile,
-    ParsedMessage, Poll, ReportOption, ReportSponsoredResult, SponsoredMessage, StickerFormat,
-    StickerItem, StickerSetInfo,
+    ParsedMessage, ParsedUser, Poll, ReportOption, ReportSponsoredResult, SponsoredMessage,
+    StickerFormat, StickerItem, StickerSetInfo,
 };
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
@@ -123,6 +123,15 @@ pub enum RequestPurpose {
     /// `foundChatMessages`; correlated via
     /// `PendingRequest::forum_topic_id`.
     GetTopicHistory,
+    /// Phase 6: `getContacts`. Response is `users`; the user ids land in
+    /// `Session::contacts`, the user objects via `updateUser`.
+    GetContacts,
+    /// Phase 6: `addContact`. Response is `ok`; the contact row refreshes
+    /// via `updateUser` (and the contacts list is invalidated for refetch).
+    AddContact,
+    /// Phase 6: `getSupergroupFullInfo`. Response is `supergroupFullInfo`;
+    /// correlated via `PendingRequest::supergroup_id`.
+    GetSupergroupFullInfo,
     Close,
     LogOut,
     Other,
@@ -259,6 +268,13 @@ pub struct PendingRequest {
     /// Phase 5.1: `forum_topic_id` for `GetTopicHistory` requests so the
     /// `foundChatMessages` response lands in the right topic history.
     pub forum_topic_id: Option<i32>,
+    /// Phase 6: `user_id` for `GetUserFullInfo` (panel opened from the
+    /// contacts list, where there is no chat) and `AddContact` requests so
+    /// id-less responses (`userFullInfo`) land on the right user.
+    pub user_id: Option<i64>,
+    /// Phase 6: `supergroup_id` for `GetSupergroupFullInfo` requests so the
+    /// id-less `supergroupFullInfo` response lands on the right group.
+    pub supergroup_id: Option<i64>,
 }
 
 #[derive(Debug, Default)]
@@ -289,6 +305,8 @@ impl RequestRegistry {
                 search_generation: None,
                 around_message_id: None,
                 forum_topic_id: None,
+                user_id: None,
+                supergroup_id: None,
             },
         );
         id
@@ -314,6 +332,8 @@ impl RequestRegistry {
                 search_generation: Some(search_generation),
                 around_message_id: None,
                 forum_topic_id: None,
+                user_id: None,
+                supergroup_id: None,
             },
         );
         id
@@ -340,6 +360,8 @@ impl RequestRegistry {
                 search_generation: Some(search_generation),
                 around_message_id: None,
                 forum_topic_id: None,
+                user_id: None,
+                supergroup_id: None,
             },
         );
         id
@@ -366,6 +388,8 @@ impl RequestRegistry {
                 search_generation: None,
                 around_message_id: Some(around_message_id),
                 forum_topic_id: None,
+                user_id: None,
+                supergroup_id: None,
             },
         );
         id
@@ -390,6 +414,8 @@ impl RequestRegistry {
                 search_generation: None,
                 around_message_id: None,
                 forum_topic_id: None,
+                user_id: None,
+                supergroup_id: None,
             },
         );
         id
@@ -423,6 +449,22 @@ impl RequestRegistry {
         self.pending
             .values()
             .any(|p| p.purpose == purpose && p.chat_id == Some(chat_id))
+    }
+
+    /// Phase 6: an in-flight request for a purpose/user pair (user-scoped
+    /// `GetUserFullInfo` / `AddContact`).
+    pub fn has_purpose_for_user(&self, purpose: RequestPurpose, user_id: i64) -> bool {
+        self.pending
+            .values()
+            .any(|p| p.purpose == purpose && p.user_id == Some(user_id))
+    }
+
+    /// Phase 6: an in-flight request for a purpose/supergroup pair
+    /// (`GetSupergroupFullInfo`).
+    pub fn has_purpose_for_supergroup(&self, purpose: RequestPurpose, supergroup_id: i64) -> bool {
+        self.pending
+            .values()
+            .any(|p| p.purpose == purpose && p.supergroup_id == Some(supergroup_id))
     }
 
     /// The in-flight request id for a purpose/chat pair (test hook; the live
@@ -1347,7 +1389,58 @@ pub struct Session {
     /// Own user id from `getMe` (TDLib 1.8.67). `None` until the first
     /// `getMe` response; needed to resolve `getChatMember` ownership.
     pub my_user_id: Option<i64>,
+    /// Phase 6: user directory from `updateUser`, keyed by user id. Feeds
+    /// the contacts list and the user info panel.
+    pub users: HashMap<i64, ParsedUser>,
+    /// Phase 6: `getContacts` result — user ids, in server order. `None`
+    /// until the first `users` response; `contacts_error` records a failed
+    /// fetch so the UI can offer a retry.
+    pub contacts: Option<Vec<i64>>,
+    pub contacts_error: bool,
+    /// Phase 6: cached `getUserFullInfo` bios, keyed by user id. Presence
+    /// records "fetched" so the driver never refetches.
+    pub user_full_infos: HashMap<i64, UserFullInfoData>,
+    /// Phase 6: cached `getSupergroupFullInfo`, keyed by supergroup id.
+    /// Presence records "fetched".
+    pub supergroup_full_infos: HashMap<i64, SupergroupFullInfoData>,
+    /// Phase 6: the open user / supergroup info panel, if any.
+    pub open_info_panel: Option<InfoPanelTarget>,
     diagnostics: Arc<dyn DiagnosticSink>,
+}
+
+/// Phase 6: which info panel is open in the side panel.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InfoPanelTarget {
+    User(i64),
+    Supergroup(i64),
+}
+
+/// Phase 6: cached `userFullInfo` subset (schema 1.8.67, line 2468) — the
+/// bio and the preferred profile-photo file from `photo:chatPhoto`
+/// (parsed in `EnvelopePayload::UserFullInfo`).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct UserFullInfoData {
+    pub bio: String,
+    /// File id of the preferred `chatPhoto` size (`None` = no photo).
+    /// The `ParsedFile` is cached in `Session::files` by the apply arm.
+    pub photo_file_id: Option<i32>,
+}
+
+/// Phase 6: cached `supergroupFullInfo` subset (schema 1.8.67, line 2792).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct SupergroupFullInfoData {
+    pub description: String,
+    pub member_count: i32,
+}
+
+/// Phase 6: one rendered contacts-list row.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContactRow {
+    pub user_id: i64,
+    pub name: String,
+    pub status_text: String,
+    pub is_online: bool,
+    pub is_contact: bool,
 }
 
 impl Session {
@@ -1393,6 +1486,12 @@ impl Session {
             sponsored_report_target: None,
             last_sponsored_report: None,
             my_user_id: None,
+            users: HashMap::new(),
+            contacts: None,
+            contacts_error: false,
+            user_full_infos: HashMap::new(),
+            supergroup_full_infos: HashMap::new(),
+            open_info_panel: None,
             diagnostics,
         }
     }
@@ -1429,6 +1528,78 @@ impl Session {
         self.bot_user_id_for_chat(chat_id)
             .and_then(|user_id| self.bot_info.get(&user_id))
             .and_then(|info| info.as_ref())
+    }
+
+    /// Phase 6: the user id behind any private chat (bot or not).
+    pub fn private_chat_user_id(&self, chat_id: ChatId) -> Option<i64> {
+        let chat = self.chats.get(&chat_id.0)?;
+        match chat.kind {
+            ChatKind::Private { user_id } => Some(user_id.0),
+            _ => None,
+        }
+    }
+
+    /// Phase 6: info-panel target for a chat header — the peer user for a
+    /// private chat, the supergroup for a group/channel chat, `None` for
+    /// basic groups, secret chats and unknown kinds.
+    pub fn info_panel_target_for_chat(&self, chat_id: ChatId) -> Option<InfoPanelTarget> {
+        let chat = self.chats.get(&chat_id.0)?;
+        match chat.kind {
+            ChatKind::Private { user_id } => Some(InfoPanelTarget::User(user_id.0)),
+            ChatKind::Supergroup { supergroup_id, .. } => {
+                Some(InfoPanelTarget::Supergroup(supergroup_id))
+            }
+            _ => None,
+        }
+    }
+
+    /// Phase 6: cached user object, if an `updateUser` has been seen.
+    pub fn user(&self, user_id: i64) -> Option<&ParsedUser> {
+        self.users.get(&user_id)
+    }
+
+    /// Phase 6: cached `userFullInfo` bio, if fetched.
+    pub fn user_full_info(&self, user_id: i64) -> Option<&UserFullInfoData> {
+        self.user_full_infos.get(&user_id)
+    }
+
+    /// Phase 6: cached `supergroupFullInfo`, if fetched.
+    pub fn supergroup_full_info(&self, supergroup_id: i64) -> Option<&SupergroupFullInfoData> {
+        self.supergroup_full_infos.get(&supergroup_id)
+    }
+
+    /// Phase 6: contacts-list rows in server order with a name/status view
+    /// model, sorted case-insensitively by display name. Users not yet
+    /// seen via `updateUser` are skipped (their rows fill in when the
+    /// updates arrive).
+    pub fn contact_rows(&self) -> Vec<ContactRow> {
+        let mut rows: Vec<ContactRow> = self
+            .contacts
+            .as_deref()
+            .unwrap_or(&[])
+            .iter()
+            .filter_map(|id| self.users.get(id))
+            .map(|user| ContactRow {
+                user_id: user.id,
+                name: user.display_name(),
+                status_text: user.status.display(),
+                is_online: user.status.is_online(),
+                is_contact: user.is_contact,
+            })
+            .collect();
+        rows.sort_by(|a, b| {
+            a.name
+                .to_lowercase()
+                .cmp(&b.name.to_lowercase())
+                .then_with(|| a.user_id.cmp(&b.user_id))
+        });
+        rows
+    }
+
+    /// Phase 6: `true` once a `users` answer (or a failed attempt) settled —
+    /// the contacts tab shows rows, an error, or a loading state.
+    pub fn contacts_settled(&self) -> bool {
+        self.contacts.is_some() || self.contacts_error
     }
 
     /// Phase 3.3: merged `/`-menu rows for the open chat's bot — the
@@ -1545,14 +1716,52 @@ impl Session {
                 self.replace_main_list_from_positions(chat_id, &positions);
                 self.rebuild_main_order();
             }
-            EnvelopePayload::UpdateUser { user_id, is_bot } => {
-                if is_bot {
+            EnvelopePayload::UpdateUser { user_id, user } => {
+                // Phase 6: keep the full user object for the contacts list
+                // and info panels.
+                self.users.insert(user_id.0, user.clone());
+                if user.is_bot {
                     self.bot_user_ids.insert(user_id.0);
                 } else {
                     // No longer a bot: drop any cached bot info so the panel
                     // cannot show stale description/commands (Phase 3.1).
                     self.bot_user_ids.remove(&user_id.0);
                     self.bot_info.remove(&user_id.0);
+                }
+            }
+            EnvelopePayload::UpdateUserStatus { user_id, status } => {
+                // Phase 6: live online / last-seen for the contacts list.
+                if let Some(user) = self.users.get_mut(&user_id.0) {
+                    user.status = status;
+                }
+            }
+            EnvelopePayload::Users { user_ids } => {
+                // Phase 6: `getContacts` answer — only answers to our own
+                // fetch are accepted (matched by `@extra`); the user
+                // objects themselves arrive via `updateUser`.
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetContacts) {
+                    self.contacts = Some(user_ids);
+                    self.contacts_error = false;
+                }
+            }
+            EnvelopePayload::SupergroupFullInfo {
+                description,
+                member_count,
+            } => {
+                // Phase 6: `getSupergroupFullInfo` answer — the response
+                // carries no id, so it is correlated via the pending
+                // request's `supergroup_id`.
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetSupergroupFullInfo)
+                    && let Some(pending) = pending
+                    && let Some(supergroup_id) = pending.supergroup_id
+                {
+                    self.supergroup_full_infos.insert(
+                        supergroup_id,
+                        SupergroupFullInfoData {
+                            description,
+                            member_count,
+                        },
+                    );
                 }
             }
             EnvelopePayload::UpdateChatNotificationSettings {
@@ -1990,20 +2199,57 @@ impl Session {
                     self.accept_own_chat_member(chat_id, member);
                 }
             }
-            EnvelopePayload::UserFullInfo { bot_info } => {
-                // `getUserFullInfo` response: resolve the bot user id from
-                // the pending request's private chat. Responses for chats
-                // that stopped being bot chats are dropped.
+            EnvelopePayload::UserFullInfo {
+                bot_info,
+                bio,
+                photo,
+            } => {
+                // `getUserFullInfo` response: resolve the user id from the
+                // pending request's explicit `user_id` (contacts-panel
+                // fetch) or its private chat (chat-header fetch). Responses
+                // for chats that stopped being private chats are dropped.
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetUserFullInfo)
                     && let Some(pending) = pending
-                    && let Some(chat_id) = pending.chat_id
-                    && let Some(user_id) = self.bot_user_id_for_chat(chat_id)
                 {
-                    self.bot_info.insert(user_id, bot_info);
+                    let user_id = pending.user_id.or_else(|| {
+                        pending
+                            .chat_id
+                            .and_then(|chat_id| self.private_chat_user_id(chat_id))
+                    });
+                    if let Some(user_id) = user_id {
+                        let photo_file_id = photo.map(|file| {
+                            let id = file.id.0;
+                            self.upsert_file(file, false);
+                            id
+                        });
+                        self.user_full_infos
+                            .insert(user_id, UserFullInfoData { bio, photo_file_id });
+                        if let Some(bot_id) = pending
+                            .chat_id
+                            .and_then(|chat_id| self.bot_user_id_for_chat(chat_id))
+                        {
+                            self.bot_info.insert(bot_id, bot_info);
+                        } else if pending.user_id.is_some() && self.bot_user_ids.contains(&user_id)
+                        {
+                            self.bot_info.insert(user_id, bot_info);
+                        }
+                    }
                 }
             }
-            EnvelopePayload::UpdateUserFullInfo { user_id, bot_info } => {
+            EnvelopePayload::UpdateUserFullInfo {
+                user_id,
+                bot_info,
+                bio,
+                photo,
+            } => {
                 self.bot_info.insert(user_id.0, bot_info);
+                let photo_file_id = photo.map(|file| {
+                    let id = file.id.0;
+                    self.upsert_file(file, false);
+                    id
+                });
+                self.user_full_infos
+                    .insert(user_id.0, UserFullInfoData { bio, photo_file_id });
             }
             EnvelopePayload::BotCommands {
                 bot_user_id,
@@ -2058,6 +2304,13 @@ impl Session {
                     // keep the old status (Error arm below does not touch it).
                     chat.set_member_status(ChannelMemberStatus::Left, None);
                 }
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::AddContact) {
+                    // Phase 6: the new contact arrives via `updateUser`
+                    // (`is_contact` flips); invalidate the list so the
+                    // contacts tab refetches it.
+                    self.contacts = None;
+                    self.contacts_error = false;
+                }
                 if pending.is_some_and(|p| is_auth_submit(p.purpose)) {
                     self.last_auth_error = None;
                 }
@@ -2066,6 +2319,11 @@ impl Session {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::LoadChats) && err.code == 404
                 {
                     self.chats_exhausted = true;
+                }
+                // Phase 6: a failed `getContacts` surfaces a retry in the
+                // contacts tab instead of a stuck spinner.
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetContacts) {
+                    self.contacts_error = true;
                 }
                 // Phase 3.3: `getCommands` failed — on a user session the
                 // method is annotated "for bots only" (schema 1.8.67 line
@@ -2825,6 +3083,32 @@ impl Session {
         let id = self.request(purpose, chat_id);
         if let Some(pending) = self.requests.pending.get_mut(&id.0) {
             pending.forum_topic_id = Some(forum_topic_id);
+        }
+        id
+    }
+
+    /// Phase 6: like `request`, but stamps the user id for user-scoped
+    /// requests (`GetUserFullInfo` from the contacts panel, `AddContact`)
+    /// so id-less responses correlate (`PendingRequest::user_id`).
+    pub fn request_for_user(&mut self, purpose: RequestPurpose, user_id: i64) -> RequestId {
+        let id = self.request(purpose, None);
+        if let Some(pending) = self.requests.pending.get_mut(&id.0) {
+            pending.user_id = Some(user_id);
+        }
+        id
+    }
+
+    /// Phase 6: like `request`, but stamps the supergroup id for
+    /// `GetSupergroupFullInfo` correlation
+    /// (`PendingRequest::supergroup_id`).
+    pub fn request_for_supergroup(
+        &mut self,
+        purpose: RequestPurpose,
+        supergroup_id: i64,
+    ) -> RequestId {
+        let id = self.request(purpose, None);
+        if let Some(pending) = self.requests.pending.get_mut(&id.0) {
+            pending.supergroup_id = Some(supergroup_id);
         }
         id
     }
@@ -5237,5 +5521,239 @@ mod tests {
         let history = session.topic_histories.get(&(16, 2)).unwrap();
         assert!(history.loaded_complete);
         assert_eq!(history.messages.len(), 3);
+    }
+
+    // Phase 6: `updateUser` upserts the user directory (contacts list /
+    // info panel source of names + status).
+    #[test]
+    fn update_user_populates_user_directory() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateUser","user":{"id":31,"first_name":"Ada","last_name":"Lovelace","phone_number":"+15550131","status":{"@type":"userStatusOnline","expires":1},"type":{"@type":"userTypeRegular"},"is_contact":true}}"#,
+        );
+        let user = session.user(31).expect("user cached");
+        assert_eq!(user.display_name(), "Ada Lovelace");
+        assert!(user.is_contact);
+        assert!(!user.is_bot);
+        assert!(user.status.is_online());
+    }
+
+    // Phase 6: `updateUserStatus` refreshes the cached status.
+    #[test]
+    fn update_user_status_refreshes_cached_status() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateUser","user":{"id":31,"first_name":"Ada","type":{"@type":"userTypeRegular"},"status":{"@type":"userStatusOnline","expires":1}}}"#,
+        );
+        assert!(session.user(31).unwrap().status.is_online());
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateUserStatus","user_id":31,"status":{"@type":"userStatusLastWeek","by_my_privacy_settings":false}}"#,
+        );
+        let user = session.user(31).unwrap();
+        assert!(!user.status.is_online());
+        assert_eq!(user.status.display(), "last seen within a week");
+    }
+
+    // Phase 6: `getContacts` → `users` lands the id list only when it
+    // answers our own fetch; `contact_rows` sorts by name and skips users
+    // not yet seen via `updateUser`.
+    #[test]
+    fn get_contacts_accepts_matching_response() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        assert!(!session.contacts_settled());
+        let extra = session.request(RequestPurpose::GetContacts, None);
+        // A stray `users` payload without our `@extra` is ignored.
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"users","total_count":1,"user_ids":[99]}"#,
+        );
+        assert!(!session.contacts_settled());
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateUser","user":{"id":32,"first_name":"Zed","type":{"@type":"userTypeRegular"},"status":{"@type":"userStatusRecently","by_my_privacy_settings":false}}}"#,
+        );
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateUser","user":{"id":31,"first_name":"Ada","type":{"@type":"userTypeRegular"},"status":{"@type":"userStatusOnline","expires":1}}}"#,
+        );
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"users","@extra":"{}","total_count":3,"user_ids":[31,32,33]}}"#,
+                extra.0
+            ),
+        );
+        assert!(session.contacts_settled());
+        assert_eq!(session.contacts.as_deref(), Some([31, 32, 33].as_slice()));
+        // User 33 never arrived via `updateUser` → no row yet.
+        let rows = session.contact_rows();
+        assert_eq!(rows.len(), 2);
+        // Sorted by name: Ada before Zed, regardless of server order.
+        assert_eq!(rows[0].user_id, 31);
+        assert_eq!(rows[0].name, "Ada");
+        assert!(rows[0].is_online);
+        assert_eq!(rows[1].user_id, 32);
+        assert_eq!(rows[1].status_text, "last seen recently");
+        assert!(!rows[1].is_online);
+    }
+
+    // Phase 6: a failed `getContacts` marks `contacts_error` so the tab can
+    // offer a retry instead of a stuck spinner.
+    #[test]
+    fn get_contacts_error_surfaces_retry() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        let extra = session.request(RequestPurpose::GetContacts, None);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"error","@extra":"{}","code":500,"message":"boom"}}"#,
+                extra.0
+            ),
+        );
+        assert!(session.contacts_error);
+        assert!(session.contacts_settled());
+    }
+
+    // Phase 6: `userFullInfo` bio lands on the right user both for a
+    // user-scoped fetch (contacts panel) and a chat-scoped fetch (private
+    // chat header).
+    #[test]
+    fn user_full_info_bio_resolves_user() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        // User-scoped fetch (no chat).
+        let extra = session.request_for_user(RequestPurpose::GetUserFullInfo, 31);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"userFullInfo","@extra":"{}","bio":{{"@type":"formattedText","text":"CANARY bio","entities":[]}},"bot_info":null}}"#,
+                extra.0
+            ),
+        );
+        assert_eq!(
+            session.user_full_info(31).map(|i| i.bio.as_str()),
+            Some("CANARY bio")
+        );
+        // Chat-scoped fetch for a private chat.
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateNewChat","chat":{"id":41,"title":"Ada","type":{"@type":"chatTypePrivate","user_id":32},"unread_count":0}}"#,
+        );
+        let chat_extra = session.request(RequestPurpose::GetUserFullInfo, Some(ChatId(41)));
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"userFullInfo","@extra":"{}","bio":{{"@type":"formattedText","text":"chat bio","entities":[]}},"bot_info":null}}"#,
+                chat_extra.0
+            ),
+        );
+        assert_eq!(
+            session.user_full_info(32).map(|i| i.bio.as_str()),
+            Some("chat bio")
+        );
+        // `updateUserFullInfo` refreshes the same cache.
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateUserFullInfo","user_id":31,"user_full_info":{"@type":"userFullInfo","bio":{"@type":"formattedText","text":"refreshed","entities":[]},"bot_info":null}}"#,
+        );
+        assert_eq!(
+            session.user_full_info(31).map(|i| i.bio.as_str()),
+            Some("refreshed")
+        );
+    }
+
+    // Phase 6: `getSupergroupFullInfo` → `supergroupFullInfo` correlates via
+    // the pending request's `supergroup_id` (the response has no id).
+    #[test]
+    fn supergroup_full_info_resolves_supergroup() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        let extra = session.request_for_supergroup(RequestPurpose::GetSupergroupFullInfo, 77);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"supergroupFullInfo","@extra":"{}","description":"CANARY desc","member_count":4321}}"#,
+                extra.0
+            ),
+        );
+        let info = session.supergroup_full_info(77).expect("cached");
+        assert_eq!(info.description, "CANARY desc");
+        assert_eq!(info.member_count, 4321);
+        assert!(session.supergroup_full_info(78).is_none());
+    }
+
+    // Phase 6: `addContact` ok invalidates the contacts list for refetch.
+    #[test]
+    fn add_contact_ok_invalidates_contacts() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        let list_extra = session.request(RequestPurpose::GetContacts, None);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"users","@extra":"{}","total_count":0,"user_ids":[]}}"#,
+                list_extra.0
+            ),
+        );
+        assert!(session.contacts.is_some());
+        let add_extra = session.request_for_user(RequestPurpose::AddContact, 55);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, add_extra.0),
+        );
+        assert!(session.contacts.is_none());
+    }
+
+    // Phase 6: info-panel open/close state.
+    #[test]
+    fn info_panel_open_close() {
+        let (mut session, _sink) = session();
+        assert!(session.open_info_panel.is_none());
+        session.open_info_panel = Some(InfoPanelTarget::User(31));
+        assert_eq!(session.open_info_panel, Some(InfoPanelTarget::User(31)));
+        session.open_info_panel = Some(InfoPanelTarget::Supergroup(77));
+        assert_eq!(
+            session.open_info_panel,
+            Some(InfoPanelTarget::Supergroup(77))
+        );
+        session.open_info_panel = None;
+        assert!(session.open_info_panel.is_none());
     }
 }
