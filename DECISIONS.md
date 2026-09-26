@@ -812,10 +812,10 @@ Research snapshot 2026-09-16, pin recheck **2026-09-17**.
   - `messageLocation` (line 5214), `messageVenue` (line 5217),
     `messageContact` (line 5220)
   - `location` (line 646): `latitude` / `longitude` doubles, `horizontal_accuracy` meters (0 = unknown)
-  - `liveLocation` (line 652): `location` + `live_period` (int32,
+  - `liveLocation` (line 653): `location` + `live_period` (int32,
     `0x7FFFFFFF` = forever), `heading` (1–360, 0 = unknown),
     `proximity_alert_radius` (0–100000 m, 0 = disabled)
-  - `messageLiveLocation` (line 5212): `location:liveLocation` +
+  - `messageLiveLocation` (line 5211): `location:liveLocation` +
     `expires_in` (int32, 0 = can't be updated anymore)
   - `venue` (line 663): `location` + `title`, `address`, `provider`
     ("foursquare" / "gplaces"), `id`, `type`

@@ -860,7 +860,7 @@ pub enum MessageContent {
     /// Phase 4.2: `messagePoll` (TDLib 1.8.67, `schema/td_api.tl:5241`).
     Poll(PollContent),
     /// Phase 4.3: `messageLocation` (TDLib 1.8.67, `schema/td_api.tl:5214`)
-    /// and `messageLiveLocation` (`schema/td_api.tl:5212`). The latter
+    /// and `messageLiveLocation` (`schema/td_api.tl:5211`). The latter
     /// carries `LiveLocation` state; the former sets `live: None`.
     Location(LocationContent),
     /// Phase 4.3: `messageVenue` (TDLib 1.8.67, `schema/td_api.tl:5217`).
@@ -1042,7 +1042,7 @@ fn geo_location(value: Option<&Value>) -> Option<GeoLocation> {
     })
 }
 
-/// `liveLocation` (TDLib 1.8.67, `schema/td_api.tl:652`): live-period state
+/// `liveLocation` (TDLib 1.8.67, `schema/td_api.tl:653`): live-period state
 /// attached to a location. `live_period` is relative to the message send
 /// date in seconds (`0x7FFFFFFF` = updates forever); `heading` is 1–360
 /// degrees (0 = unknown); `proximity_alert_radius` is 0–100000 meters
@@ -1098,12 +1098,12 @@ fn meters_label(meters: i32) -> String {
 }
 
 /// `messageLocation` (`schema/td_api.tl:5214`) / `messageLiveLocation`
-/// (`schema/td_api.tl:5212`, `expires_in` = seconds left for updates,
+/// (`schema/td_api.tl:5211`, `expires_in` = seconds left for updates,
 /// 0 = can't be updated anymore). For `messageLocation`, `live` is
 /// `None`; for `messageLiveLocation`, it carries the live state. Note the
 /// schema split: `messageLocation` itself carries **no** live fields — the
 /// task's `live_period` / `heading` / `proximity_alert_radius` live on
-/// `liveLocation` (`schema/td_api.tl:652`), which is why both constructors
+/// `liveLocation` (`schema/td_api.tl:653`), which is why both constructors
 /// are parsed here.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LocationContent {
@@ -2951,7 +2951,7 @@ fn parse_message_poll(value: &Value) -> (MessageContent, Vec<ParsedFile>) {
     }
 }
 
-/// `liveLocation` (TDLib 1.8.67, `schema/td_api.tl:652`). `None` when the
+/// `liveLocation` (TDLib 1.8.67, `schema/td_api.tl:653`). `None` when the
 /// wrapper object itself is missing or null.
 fn parse_live_location_state(value: Option<&Value>) -> Option<LiveLocationState> {
     let value = value?;
@@ -2993,7 +2993,7 @@ fn parse_message_location(value: &Value) -> (MessageContent, Vec<ParsedFile>) {
     }
 }
 
-/// `messageLiveLocation` (TDLib 1.8.67, `schema/td_api.tl:5212`).
+/// `messageLiveLocation` (TDLib 1.8.67, `schema/td_api.tl:5211`).
 /// `expires_in` rides on the message wrapper, `live_period` / `heading` /
 /// `proximity_alert_radius` on the inner `liveLocation`.
 fn parse_message_live_location(value: &Value) -> (MessageContent, Vec<ParsedFile>) {
@@ -5520,8 +5520,8 @@ mod channel_envelope_tests {
         }
     }
 
-    // Phase 4.3: `messageLiveLocation` (schema 1.8.67 line 5212) +
-    // `liveLocation` (line 652). The task's live fields live here, not on
+    // Phase 4.3: `messageLiveLocation` (schema 1.8.67 line 5211) +
+    // `liveLocation` (line 653). The task's live fields live here, not on
     // `messageLocation`.
     #[test]
     fn message_live_location_parses_live_fields() {
