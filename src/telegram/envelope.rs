@@ -3811,9 +3811,22 @@ pub enum MessageContent {
         discard_reason: CallDiscardReason,
         duration: i32,
     },
+    /// Phase S1: `messageScreenshotTaken` (TDLib 1.8.67,
+    /// `schema/td_api.tl:5375`) — a screenshot of a message in the chat
+    /// has been taken. No fields; attribution comes from
+    /// `message.is_outgoing` at render time.
+    ScreenshotTaken,
     Unsupported {
         type_name: String,
     },
+}
+
+/// `formattedText` plus optional `messageText.link_preview` (TDLib 1.8.67).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TextContent {
+    pub text: String,
+    pub entities: Vec<TextEntity>,
+    pub link_preview: Option<LinkPreview>,
 }
 
 /// Phase C2i: service-row label for a `messageCall`, following
@@ -3866,14 +3879,6 @@ fn format_duration(total_secs: i32) -> String {
     } else {
         format!("{m}:{s:02}")
     }
-}
-
-/// `formattedText` plus optional `messageText.link_preview` (TDLib 1.8.67).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TextContent {
-    pub text: String,
-    pub entities: Vec<TextEntity>,
-    pub link_preview: Option<LinkPreview>,
 }
 
 impl TextContent {
@@ -4400,6 +4405,9 @@ impl MessageContent {
                 )
             }
             MessageContent::Unsupported { type_name } => format!("({type_name})"),
+            // Phase S1: chat-list preview for `messageScreenshotTaken`
+            // (TGX ChatContentScreenshot).
+            MessageContent::ScreenshotTaken => "Took a screenshot".to_string(),
         }
     }
 
@@ -6886,6 +6894,12 @@ fn parse_content(value: Option<&Value>) -> (MessageContent, Vec<ParsedFile>) {
         Some("messageVenue") => parse_message_venue(value),
         Some("messageContact") => parse_message_contact(value),
         Some("messageDice") => parse_message_dice(value),
+        // Phase S1: `messageScreenshotTaken` (schema 1.8.67, line 5375) —
+        // no fields; the row renderer attributes it via
+        // `message.is_outgoing` ("You took a screenshot" /
+        // "{name} took a screenshot", TGX YouTookAScreenshot /
+        // XTookAScreenshot).
+        Some("messageScreenshotTaken") => (MessageContent::ScreenshotTaken, Vec::new()),
         // Phase B4: `messageChatSetMessageAutoDeleteTime` (schema 1.8.67,
         // line 5387) — the chat's auto-delete / self-destruct timer was
         // changed. `from_user_id` is not kept (the row is a neutral
@@ -10985,6 +10999,69 @@ mod channel_envelope_tests {
     }
 
     #[test]
+    fn service_message_screenshot_taken_parsed() {
+        // Phase S1: `messageScreenshotTaken` (schema 1.8.67, line 5375)
+        // parses to the service-row variant; no fields are kept.
+        let json = r#"{"id":503,"chat_id":41,"is_outgoing":false,"content":{"@type":"messageScreenshotTaken"}}"#;
+        let parsed = parse_message(&serde_json::from_str(json).unwrap()).unwrap();
+        assert!(matches!(parsed.content, MessageContent::ScreenshotTaken));
+        assert_eq!(parsed.content.preview(), "Took a screenshot");
+    }
+
+    /// Phase C2i: `call_entry_label` follows Telegram X's
+    /// `TD.getCallName` short form — missed/declined are
+    /// distinguishable by direction; answered calls show direction +
+    /// duration.
+    #[test]
+    fn call_entry_labels_match_telegram_x_convention() {
+        use CallDiscardReason::*;
+        assert_eq!(call_entry_label(false, &Missed, 0, false), "Missed call");
+        assert_eq!(call_entry_label(false, &Missed, 0, true), "Cancelled call");
+        assert_eq!(
+            call_entry_label(false, &Declined, 0, false),
+            "Declined call"
+        );
+        assert_eq!(call_entry_label(false, &Declined, 0, true), "Busy call");
+        assert_eq!(
+            call_entry_label(true, &HungUp, 372, false),
+            "Incoming video call · 6:12"
+        );
+        assert_eq!(
+            call_entry_label(false, &HungUp, 65, true),
+            "Outgoing call · 1:05"
+        );
+        assert_eq!(
+            call_entry_label(false, &Disconnected, 0, false),
+            "Incoming call"
+        );
+    }
+
+    /// Phase C2i: `messageCall` parses (schema 1.8.67 :5277) — the
+    /// service-row data for the Calls tab and in-chat rows.
+    #[test]
+    fn message_call_parses() {
+        let json = r#"{"@type":"message","id":901,"chat_id":71,"is_outgoing":false,"date":1700000000,"content":{"@type":"messageCall","unique_id":901,"is_video":true,"discard_reason":{"@type":"callDiscardReasonHungUp"},"duration":372}}"#;
+        let env = parse_envelope(json).unwrap();
+        match env.payload {
+            EnvelopePayload::Message(message) => {
+                assert_eq!(
+                    message.content,
+                    MessageContent::Call {
+                        is_video: true,
+                        discard_reason: CallDiscardReason::HungUp,
+                        duration: 372,
+                    }
+                );
+                assert_eq!(
+                    call_entry_label(true, &CallDiscardReason::HungUp, 372, false),
+                    "Incoming video call · 6:12"
+                );
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+
+    #[test]
     fn service_message_chat_ttl_changed_parsed() {
         // Phase B4: `messageChatSetMessageAutoDeleteTime` (schema 1.8.67,
         // line 5387) parses to the service-row variant.
@@ -12702,58 +12779,5 @@ mod notification_sound_tests {
                 join_payload: "tgcalls-payload".to_string(),
             }
         );
-    }
-
-    /// Phase C2i: `call_entry_label` follows Telegram X's
-    /// `TD.getCallName` short form — missed/declined are
-    /// distinguishable by direction; answered calls show direction +
-    /// duration.
-    #[test]
-    fn call_entry_labels_match_telegram_x_convention() {
-        use CallDiscardReason::*;
-        assert_eq!(call_entry_label(false, &Missed, 0, false), "Missed call");
-        assert_eq!(call_entry_label(false, &Missed, 0, true), "Cancelled call");
-        assert_eq!(
-            call_entry_label(false, &Declined, 0, false),
-            "Declined call"
-        );
-        assert_eq!(call_entry_label(false, &Declined, 0, true), "Busy call");
-        assert_eq!(
-            call_entry_label(true, &HungUp, 372, false),
-            "Incoming video call · 6:12"
-        );
-        assert_eq!(
-            call_entry_label(false, &HungUp, 65, true),
-            "Outgoing call · 1:05"
-        );
-        assert_eq!(
-            call_entry_label(false, &Disconnected, 0, false),
-            "Incoming call"
-        );
-    }
-
-    /// Phase C2i: `messageCall` parses (schema 1.8.67 :5277) — the
-    /// service-row data for the Calls tab and in-chat rows.
-    #[test]
-    fn message_call_parses() {
-        let json = r#"{"@type":"message","id":901,"chat_id":71,"is_outgoing":false,"date":1700000000,"content":{"@type":"messageCall","unique_id":901,"is_video":true,"discard_reason":{"@type":"callDiscardReasonHungUp"},"duration":372}}"#;
-        let env = parse_envelope(json).unwrap();
-        match env.payload {
-            EnvelopePayload::Message(message) => {
-                assert_eq!(
-                    message.content,
-                    MessageContent::Call {
-                        is_video: true,
-                        discard_reason: CallDiscardReason::HungUp,
-                        duration: 372,
-                    }
-                );
-                assert_eq!(
-                    call_entry_label(true, &CallDiscardReason::HungUp, 372, false),
-                    "Incoming video call · 6:12"
-                );
-            }
-            other => panic!("unexpected {other:?}"),
-        }
     }
 }

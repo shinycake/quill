@@ -5868,7 +5868,17 @@ impl<S: JsonSender> ConnectDriver<S> {
                     send_video_note(extra, chat_id, topic_id, path, &note, reply_to)
                 }
             },
-            (None, None) => send_text(extra, chat_id, topic_id, caption, reply_to),
+            (None, None) => {
+                // Phase S1: secret chats never get link previews (TGX
+                // default-off; previews are generated on Telegram servers,
+                // which can't see E2E content).
+                let is_secret = self
+                    .session
+                    .chats
+                    .get(&chat_id.0)
+                    .is_some_and(|chat| matches!(chat.kind, ChatKind::Secret { .. }));
+                send_text(extra, chat_id, topic_id, caption, reply_to, is_secret)
+            }
             _ => {
                 self.session.requests.take(extra);
                 return Err(ConnectSendError::InvalidRequest);
