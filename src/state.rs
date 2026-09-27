@@ -19,12 +19,13 @@ use crate::telegram::envelope::{
     MessageSender, NotificationSettingsScope, NotificationSound, ParsedCall, ParsedChatEvent,
     ParsedChatInviteLink, ParsedChatJoinRequest, ParsedChatMember, ParsedFile, ParsedGroupCall,
     ParsedGroupCallMessage, ParsedGroupCallParticipant, ParsedMessage, ParsedSecretChat,
-    ParsedStory, ParsedUser, ParsedVideoChat, Poll, ReportOption, ReportSponsoredResult,
-    ScopeNotificationSettings, SecretChatState, SponsoredMessage, StickerFormat, StickerItem,
-    StickerSetInfo, StorageStats, StoryAvailableReactionView, StoryListView, TdError,
+    ParsedStory, ParsedUser, ParsedVideoChat, ParsedWelcomeMessage, Poll, ReportOption,
+    ReportSponsoredResult, ScopeNotificationSettings, SecretChatState, SponsoredMessage,
+    StickerFormat, StickerItem, StickerSetInfo, StorageStats, StoryAvailableReactionView,
+    StoryListView, TdError,
 };
 use crate::telegram::envelope::{CallState, ReadyParams};
-use crate::telegram::requests::{CallPrivacySetting, PrivacyWho};
+use crate::telegram::requests::{CallPrivacySetting, ChatEventLogFilterSet, PrivacyWho};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Instant;
@@ -342,6 +343,70 @@ pub enum RequestPurpose {
     SetChatMemberTag {
         user_id: i64,
     },
+    /// Slice G2: `toggleSupergroupSignMessages` (schema 1.8.67, line
+    /// 15175). Response is `ok`; `updateSupergroup` carries the new
+    /// `sign_messages` / `show_message_sender`. Applied optimistically;
+    /// a TDLib error restores the previous flags via
+    /// `PendingRequest::rollback`.
+    ToggleSupergroupSignMessages,
+    /// Slice G2: `toggleSupergroupHasAggressiveAntiSpamEnabled` (schema
+    /// 1.8.67, line 15212). Response is `ok`;
+    /// `updateSupergroupFullInfo` carries the new
+    /// `has_aggressive_anti_spam_enabled`. Applied optimistically; a
+    /// TDLib error restores the previous flag via
+    /// `PendingRequest::rollback`.
+    ToggleSupergroupAggressiveAntiSpam,
+    /// Slice G2: forum topic management (schema 1.8.67, lines
+    /// 12665/12674/12713/12725/12736/12718). `createForumTopic`
+    /// answers `forumTopicInfo`; the rest answer `ok`. The topic list is
+    /// refetched on success; `updateForumTopicInfo` keeps it fresh
+    /// otherwise.
+    CreateForumTopic,
+    EditForumTopic {
+        forum_topic_id: i32,
+    },
+    ToggleForumTopicClosed {
+        forum_topic_id: i32,
+    },
+    ToggleForumTopicPinned {
+        forum_topic_id: i32,
+    },
+    DeleteForumTopic {
+        forum_topic_id: i32,
+    },
+    ToggleGeneralForumTopicHidden,
+    /// Slice G2: `getMessageThreadHistory` (schema 1.8.67, line 11839)
+    /// — the channel-comments viewer. Response is `messages`;
+    /// `message_id` identifies the channel post, correlated to the chat
+    /// via `PendingRequest::chat_id`.
+    GetMessageThreadHistory {
+        message_id: i64,
+    },
+    /// Slice G2: `getChatBoostStatus` (schema 1.8.67, line 13917).
+    /// Response is `chatBoostStatus`; correlated via
+    /// `PendingRequest::chat_id`.
+    GetChatBoostStatus,
+    /// Slice G2: `getAvailableChatBoostSlots` as the first half of the
+    /// boost action (schema 1.8.67, line 13914). Response is
+    /// `chatBoostSlots`; the driver chains `boostChat` with the first
+    /// slot id. Correlated via `PendingRequest::chat_id`.
+    GetBoostSlotsForBoost,
+    /// Slice G2: `boostChat` (schema 1.8.67, line 13922). Response is
+    /// `chatBoostSlots`; the boost status is refetched afterwards.
+    BoostChat,
+    /// Slice G2: `loadChatWelcomeMessages` (schema 1.8.67, line 12630).
+    /// The pack arrives as `updateChatWelcomeMessages`.
+    LoadChatWelcomeMessages,
+    /// Slice G2: `addChatWelcomeMessage` / `editChatWelcomeMessage` /
+    /// `deleteChatWelcomeMessage` (schema 1.8.67, lines 12639/12646/
+    /// 12651). Responses are `ok`; the pack is reloaded on success.
+    AddChatWelcomeMessage,
+    EditChatWelcomeMessage {
+        welcome_message_id: i32,
+    },
+    DeleteChatWelcomeMessage {
+        welcome_message_id: i32,
+    },
     /// Slice G1: `deleteChat` (schema 1.8.67, line 11850). Response is
     /// `ok`. The chat is dropped locally; it deletes the chat for all
     /// members and releases the username.
@@ -629,6 +694,20 @@ pub enum RequestRollback {
     SupergroupUsername {
         supergroup_id: i64,
         previous: Option<String>,
+    },
+    /// Slice G2: `toggleSupergroupSignMessages`: the previous
+    /// `sign_messages` / `show_message_sender` flags (`None` = unknown).
+    SignMessages {
+        supergroup_id: i64,
+        previous_sign: Option<bool>,
+        previous_show: Option<bool>,
+    },
+    /// Slice G2: `toggleSupergroupHasAggressiveAntiSpamEnabled`: the
+    /// previous `has_aggressive_anti_spam_enabled` flag (`None` =
+    /// unknown).
+    AntiSpam {
+        supergroup_id: i64,
+        previous: Option<bool>,
     },
 }
 
@@ -1020,6 +1099,12 @@ impl RequestRegistry {
         self.pending.get(&id.0).map(|p| p.purpose)
     }
 
+    /// Slice G2: non-destructive view of a pending request, so the
+    /// driver can capture mutation context before `apply` takes it.
+    pub fn get(&self, id: RequestId) -> Option<&PendingRequest> {
+        self.pending.get(&id.0)
+    }
+
     pub fn has_purpose(&self, purpose: RequestPurpose) -> bool {
         self.pending.values().any(|p| p.purpose == purpose)
     }
@@ -1215,6 +1300,19 @@ pub struct ChatSummary {
     /// every other status or an absent rights block. Gates the invite-link
     /// / join-request management UI.
     pub my_admin_can_invite_users: Option<bool>,
+    /// Slice G2: `rights.can_change_info` from
+    /// `chatMemberStatusAdministrator` (TDLib 1.8.67,
+    /// `chatAdministratorRights`, schema line 1092). `Some` only when the
+    /// status is Administrator and the rights block parsed; `None` for
+    /// every other status or an absent rights block. Gates
+    /// `toggleSupergroupSignMessages` in channels (schema line 15175).
+    pub my_admin_can_change_info: Option<bool>,
+    /// Slice G2: `rights.can_send_welcome_messages` from
+    /// `chatMemberStatusAdministrator` (TDLib 1.8.67,
+    /// `chatAdministratorRights`, schema line 1090). `Some` only when the
+    /// status is Administrator and the rights block parsed. Gates
+    /// welcome-message management in channels.
+    pub my_admin_can_send_welcome_messages: Option<bool>,
     /// Phase D3b: `rights.can_promote_members` from
     /// `chatMemberStatusAdministrator` (TDLib 1.8.67,
     /// `chatAdministratorRights`, schema line 1092). `Some` only when the
@@ -1357,6 +1455,44 @@ impl ChatSummary {
     /// statuses or an absent rights block).
     pub fn set_admin_can_invite_users(&mut self, can_invite_users: Option<bool>) {
         self.my_admin_can_invite_users = can_invite_users;
+    }
+
+    /// Slice G2: record `rights.can_change_info` (`None` for non-admin
+    /// statuses or an absent rights block).
+    pub fn set_admin_can_change_info(&mut self, can_change_info: Option<bool>) {
+        self.my_admin_can_change_info = can_change_info;
+    }
+
+    /// Slice G2: whether the current user may change this chat's info.
+    /// The creator always can; an administrator needs the explicit
+    /// `can_change_info` right.
+    pub fn can_change_info(&self) -> bool {
+        match self.my_member_status {
+            Some(ChannelMemberStatus::Creator) => true,
+            Some(ChannelMemberStatus::Administrator) => {
+                self.my_admin_can_change_info.unwrap_or(false)
+            }
+            _ => false,
+        }
+    }
+
+    /// Slice G2: record `rights.can_send_welcome_messages` (`None` for
+    /// non-admin statuses or an absent rights block).
+    pub fn set_admin_can_send_welcome_messages(&mut self, can_send: Option<bool>) {
+        self.my_admin_can_send_welcome_messages = can_send;
+    }
+
+    /// Slice G2: whether the current user may manage this chat's welcome
+    /// messages. The creator always can; an administrator needs the
+    /// explicit `can_send_welcome_messages` right.
+    pub fn can_send_welcome_messages(&self) -> bool {
+        match self.my_member_status {
+            Some(ChannelMemberStatus::Creator) => true,
+            Some(ChannelMemberStatus::Administrator) => {
+                self.my_admin_can_send_welcome_messages.unwrap_or(false)
+            }
+            _ => false,
+        }
     }
 
     /// Phase D3b: whether the current user may manage this chat's
@@ -1533,6 +1669,8 @@ fn placeholder_chat(chat_id: ChatId) -> ChatSummary {
         my_member_status: None,
         my_admin_can_post_messages: None,
         my_admin_can_invite_users: None,
+        my_admin_can_change_info: None,
+        my_admin_can_send_welcome_messages: None,
         my_admin_can_promote_members: None,
         my_admin_can_restrict_members: None,
         is_forum: None,
@@ -2851,6 +2989,58 @@ pub struct Session {
     pub pending_join_request_counts: HashMap<i64, i32>,
     /// Phase D3c: `getChatEventLog` fetch state, keyed by chat id.
     pub event_logs: HashMap<i64, ChatEventLogFetch>,
+    /// Slice G2: per-chat event-log filters (`chatEventLogFilters`,
+    /// schema 1.8.67, line 7956). Absent = all event types (the schema's
+    /// `null`).
+    pub event_log_filters: HashMap<i64, ChatEventLogFilterSet>,
+    /// Slice G2: per-chat event-log text search (the `query` parameter of
+    /// `getChatEventLog`, schema 1.8.67, line 15252). Absent = no search.
+    pub event_log_queries: HashMap<i64, String>,
+    /// Slice G2: `supergroup.sign_messages` (schema 1.8.67, line 2746),
+    /// keyed by supergroup id. Drives the channel "Sign messages" toggle.
+    pub supergroup_sign_messages: HashMap<i64, bool>,
+    /// Slice G2: `supergroup.show_message_sender` (schema 1.8.67, line
+    /// 2746), keyed by supergroup id. Drives the "Show authors" toggle.
+    pub supergroup_show_message_sender: HashMap<i64, bool>,
+    /// Slice G2: `supergroupFullInfo.has_aggressive_anti_spam_enabled`
+    /// (schema 1.8.67, line 2792), keyed by supergroup id.
+    pub supergroup_anti_spam_enabled: HashMap<i64, bool>,
+    /// Slice G2: `supergroupFullInfo.can_toggle_aggressive_anti_spam`
+    /// (schema 1.8.67, line 2792), keyed by supergroup id. Gates the
+    /// anti-spam toggle.
+    pub supergroup_can_toggle_anti_spam: HashMap<i64, bool>,
+    /// Slice G2: the viewer's `rights.can_manage_topics` per supergroup
+    /// (schema 1.8.67, line 1092). Gates forum topic management.
+    pub supergroup_manage_topics_right: HashMap<i64, bool>,
+    /// Slice G2: the viewer's `rights.can_change_info` per supergroup
+    /// (schema 1.8.67, line 1092). `toggleSupergroupSignMessages`
+    /// requires this right.
+    pub supergroup_change_info_right: HashMap<i64, bool>,
+    /// Slice G2: the viewer's `rights.can_send_welcome_messages` per
+    /// supergroup (schema 1.8.67, line 1090). Gates welcome-message
+    /// management.
+    pub supergroup_send_welcome_right: HashMap<i64, bool>,
+    /// Slice G2: `chat.has_welcome_messages` (schema 1.8.67, line 3627)
+    /// / `updateChatHasWelcomeMessages` (line 10600), keyed by chat id.
+    pub chat_has_welcome_messages: HashMap<i64, bool>,
+    /// Slice G2: the welcome-message pack per chat
+    /// (`updateChatWelcomeMessages`, schema 1.8.67, line 10649).
+    pub welcome_messages: HashMap<i64, Vec<ParsedWelcomeMessage>>,
+    /// Slice G2: `loadChatWelcomeMessages` fetch state, keyed by chat id.
+    pub welcome_message_fetches: HashMap<i64, WelcomeMessagesFetch>,
+    /// Slice G2: `(level, boost_count)` from `getChatBoostStatus`
+    /// (schema 1.8.67, lines 13917/6943), keyed by chat id.
+    pub chat_boost_status: HashMap<i64, (i32, i32)>,
+    /// Slice G2: available boost slot ids from `getAvailableChatBoostSlots`
+    /// (schema 1.8.67, line 13914), keyed by chat id. The driver consumes
+    /// them to chain `boostChat` once per boost intent.
+    pub boost_slots_by_chat: HashMap<i64, Vec<i32>>,
+    /// Slice G2: the chat id of a pending user boost intent — set by
+    /// `request_chat_boost`, consumed by the driver's `boostChat` chain.
+    pub boost_intent: Option<i64>,
+    /// Slice G2: channel-comments viewer — the latest
+    /// `getMessageThreadHistory` result (channel post → comment thread).
+    pub comment_thread: Option<CommentThreadFetch>,
     /// Parity slice: first active username per supergroup (`supergroup`
     /// object / `updateSupergroup`, schema 1.8.67 line 2746), keyed by
     /// supergroup id. Feeds the channel/supergroup header's @username.
@@ -3123,6 +3313,44 @@ pub struct ChatEventLogPage {
     pub has_more: bool,
 }
 
+impl ChatEventLogPage {
+    /// Slice G2: distinct admin user ids (first-seen order) from a loaded
+    /// page; drives the per-admin filter chips in the info panel. Chat
+    /// senders (`MessageSender::Chat`) are not admins and are skipped.
+    pub fn admin_user_ids(&self) -> Vec<i64> {
+        let mut admins = Vec::new();
+        for event in &self.events {
+            if let MessageSender::User { user_id } = event.member_id
+                && !admins.contains(&user_id)
+            {
+                admins.push(user_id);
+            }
+        }
+        admins
+    }
+}
+
+/// Slice G2: fetch state for one chat's welcome-message pack
+/// (`loadChatWelcomeMessages`, schema 1.8.67, line 12630). `Loading` is
+/// the in-flight guard — the driver never sends a second request while
+/// one is outstanding.
+#[derive(Debug, Clone, PartialEq)]
+pub enum WelcomeMessagesFetch {
+    Loading,
+    Loaded,
+    Failed(String),
+}
+
+/// Slice G2: the channel-comments viewer result — the latest
+/// `getMessageThreadHistory` answer for one channel post.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CommentThreadFetch {
+    pub chat_id: ChatId,
+    pub message_id: MessageId,
+    pub messages: Vec<ParsedMessage>,
+    pub failed: Option<String>,
+}
+
 /// Phase D3c: relative timestamp for admin-log rows. The log only
 /// covers the last 48 hours (schema 1.8.67, line 15252), so relative
 /// forms are always meaningful; no date crate is pulled in for this.
@@ -3281,6 +3509,22 @@ impl Session {
             join_requests: HashMap::new(),
             pending_join_request_counts: HashMap::new(),
             event_logs: HashMap::new(),
+            event_log_filters: HashMap::new(),
+            event_log_queries: HashMap::new(),
+            supergroup_sign_messages: HashMap::new(),
+            supergroup_show_message_sender: HashMap::new(),
+            supergroup_anti_spam_enabled: HashMap::new(),
+            supergroup_can_toggle_anti_spam: HashMap::new(),
+            supergroup_manage_topics_right: HashMap::new(),
+            supergroup_change_info_right: HashMap::new(),
+            supergroup_send_welcome_right: HashMap::new(),
+            chat_has_welcome_messages: HashMap::new(),
+            welcome_messages: HashMap::new(),
+            welcome_message_fetches: HashMap::new(),
+            chat_boost_status: HashMap::new(),
+            boost_slots_by_chat: HashMap::new(),
+            boost_intent: None,
+            comment_thread: None,
             supergroup_usernames: HashMap::new(),
             supergroup_member_status: HashMap::new(),
             supergroup_restrict_right: HashMap::new(),
@@ -3483,6 +3727,142 @@ impl Session {
             ChatKind::BasicGroup { .. } => self.chat_is_owner(chat_id),
             _ => false,
         }
+    }
+
+    /// Slice G2: whether the viewer holds `can_manage_topics` in a
+    /// supergroup — creator, or an admin with the right (schema 1.8.67,
+    /// line 1092). Gates forum topic management.
+    pub fn chat_can_manage_topics(&self, chat_id: ChatId) -> bool {
+        let Some(chat) = self.chats.get(&chat_id.0) else {
+            return false;
+        };
+        match chat.kind {
+            ChatKind::Supergroup {
+                supergroup_id,
+                is_channel: false,
+            } => {
+                self.supergroup_own_status(supergroup_id) == Some(ChannelMemberStatus::Creator)
+                    || self
+                        .supergroup_manage_topics_right
+                        .get(&supergroup_id)
+                        .copied()
+                        .unwrap_or(false)
+            }
+            _ => false,
+        }
+    }
+
+    /// Slice G2: whether the viewer may change a channel's info —
+    /// creator, or an admin with `can_change_info` (schema 1.8.67, line
+    /// 15175: `toggleSupergroupSignMessages` requires it). The
+    /// `ChatSummary` path covers channels (own membership probed via
+    /// `getChatMember`); supergroups carry the right on the
+    /// `updateSupergroup` / `getSupergroup` status block.
+    pub fn chat_can_change_info(&self, chat_id: ChatId) -> bool {
+        let Some(chat) = self.chats.get(&chat_id.0) else {
+            return false;
+        };
+        if chat.can_change_info() {
+            return true;
+        }
+        match chat.kind {
+            ChatKind::Supergroup { supergroup_id, .. } => {
+                self.supergroup_own_status(supergroup_id) == Some(ChannelMemberStatus::Creator)
+                    || self
+                        .supergroup_change_info_right
+                        .get(&supergroup_id)
+                        .copied()
+                        .unwrap_or(false)
+            }
+            _ => false,
+        }
+    }
+
+    /// Slice G2: whether the viewer may manage welcome messages —
+    /// creator, or an admin with `can_send_welcome_messages` (schema
+    /// 1.8.67, line 1090). Same two paths as `chat_can_change_info`.
+    pub fn chat_can_send_welcome_messages(&self, chat_id: ChatId) -> bool {
+        let Some(chat) = self.chats.get(&chat_id.0) else {
+            return false;
+        };
+        if chat.can_send_welcome_messages() {
+            return true;
+        }
+        match chat.kind {
+            ChatKind::Supergroup { supergroup_id, .. } => {
+                self.supergroup_own_status(supergroup_id) == Some(ChannelMemberStatus::Creator)
+                    || self
+                        .supergroup_send_welcome_right
+                        .get(&supergroup_id)
+                        .copied()
+                        .unwrap_or(false)
+            }
+            _ => false,
+        }
+    }
+
+    /// Slice G2: cached `supergroup.sign_messages` (schema 1.8.67, line
+    /// 2746). Absent = unknown → shown off.
+    pub fn chat_sign_messages(&self, chat_id: ChatId) -> bool {
+        self.chat_supergroup(chat_id).is_some_and(|id| {
+            self.supergroup_sign_messages
+                .get(&id)
+                .copied()
+                .unwrap_or(false)
+        })
+    }
+
+    /// Slice G2: cached `supergroup.show_message_sender` (schema 1.8.67,
+    /// line 2746).
+    pub fn chat_show_message_sender(&self, chat_id: ChatId) -> bool {
+        self.chat_supergroup(chat_id).is_some_and(|id| {
+            self.supergroup_show_message_sender
+                .get(&id)
+                .copied()
+                .unwrap_or(false)
+        })
+    }
+
+    /// Slice G2: cached
+    /// `supergroupFullInfo.has_aggressive_anti_spam_enabled` (schema
+    /// 1.8.67, line 2792).
+    pub fn chat_anti_spam_enabled(&self, chat_id: ChatId) -> bool {
+        self.chat_supergroup(chat_id).is_some_and(|id| {
+            self.supergroup_anti_spam_enabled
+                .get(&id)
+                .copied()
+                .unwrap_or(false)
+        })
+    }
+
+    /// Slice G2: cached
+    /// `supergroupFullInfo.can_toggle_aggressive_anti_spam` (schema
+    /// 1.8.67, line 2792) — the only gate for the anti-spam toggle.
+    pub fn chat_can_toggle_anti_spam(&self, chat_id: ChatId) -> bool {
+        self.chat_supergroup(chat_id).is_some_and(|id| {
+            self.supergroup_can_toggle_anti_spam
+                .get(&id)
+                .copied()
+                .unwrap_or(false)
+        })
+    }
+
+    /// Slice G2: cached `chat.has_welcome_messages` (schema 1.8.67, line
+    /// 3627).
+    pub fn chat_has_welcome_messages_flag(&self, chat_id: ChatId) -> bool {
+        self.chat_has_welcome_messages
+            .get(&chat_id.0)
+            .copied()
+            .unwrap_or(false)
+    }
+
+    /// Slice G2: supergroup id for any supergroup-kind chat (channels
+    /// included); `None` for basic groups and other kinds.
+    fn chat_supergroup(&self, chat_id: ChatId) -> Option<i64> {
+        self.chats.get(&chat_id.0).and_then(|chat| match chat.kind {
+            ChatKind::Supergroup { supergroup_id, .. } => Some(supergroup_id),
+            _ => None,
+        })
     }
 
     /// Phase D3a: invite-link / join-request gate for a chat. The
@@ -3809,6 +4189,7 @@ impl Session {
                 can_be_deleted_for_all_users,
                 message_auto_delete_time,
                 video_chat,
+                has_welcome_messages,
             } => {
                 // Parity slice: keep the chat photo (`chatPhotoInfo.small`)
                 // file id so the chat list can render avatars. The file
@@ -3843,6 +4224,10 @@ impl Session {
                     group_call_id: v.group_call_id,
                     has_participants: v.has_participants,
                 });
+                // Slice G2: `chat.has_welcome_messages` (schema 1.8.67,
+                // line 3627).
+                self.chat_has_welcome_messages
+                    .insert(chat_id.0, has_welcome_messages);
                 // Phase B1: secret chats — `updateSecretChat` arrives before
                 // `updateNewChat` (schema 1.8.67, line 10740), so a state
                 // may already be recorded; otherwise the driver fetches it
@@ -3939,6 +4324,8 @@ impl Session {
                 my_boost_count,
                 unrestrict_boost_count,
                 can_get_statistics,
+                has_aggressive_anti_spam_enabled,
+                can_toggle_aggressive_anti_spam,
             } => {
                 // Phase 6: `getSupergroupFullInfo` answer — the response
                 // carries no id, so it is correlated via the pending
@@ -3965,6 +4352,12 @@ impl Session {
                             can_get_statistics,
                         },
                     );
+                    // Slice G2: anti-spam state for the manage-dialog
+                    // toggle.
+                    self.supergroup_anti_spam_enabled
+                        .insert(supergroup_id, has_aggressive_anti_spam_enabled);
+                    self.supergroup_can_toggle_anti_spam
+                        .insert(supergroup_id, can_toggle_aggressive_anti_spam);
                 }
             }
             // Parity slice: `updateSupergroupFullInfo` — the update carries
@@ -3980,6 +4373,8 @@ impl Session {
                 my_boost_count,
                 unrestrict_boost_count,
                 can_get_statistics,
+                has_aggressive_anti_spam_enabled,
+                can_toggle_aggressive_anti_spam,
             } => {
                 self.supergroup_full_infos.insert(
                     supergroup_id,
@@ -3995,6 +4390,55 @@ impl Session {
                         can_get_statistics,
                     },
                 );
+                // Slice G2: anti-spam state for the manage-dialog toggle.
+                self.supergroup_anti_spam_enabled
+                    .insert(supergroup_id, has_aggressive_anti_spam_enabled);
+                self.supergroup_can_toggle_anti_spam
+                    .insert(supergroup_id, can_toggle_aggressive_anti_spam);
+            }
+            // Slice G2: welcome-message pack (`updateChatWelcomeMessages`,
+            // schema 1.8.67, line 10649) — the full pack replaces the
+            // cache; the welcome dialog renders it.
+            EnvelopePayload::UpdateChatWelcomeMessages { chat_id, messages } => {
+                self.welcome_messages.insert(chat_id, messages);
+                self.welcome_message_fetches
+                    .insert(chat_id, WelcomeMessagesFetch::Loaded);
+            }
+            // Slice G2: `updateChatHasWelcomeMessages` (schema 1.8.67,
+            // line 10600).
+            EnvelopePayload::UpdateChatHasWelcomeMessages {
+                chat_id,
+                has_welcome_messages,
+            } => {
+                self.chat_has_welcome_messages
+                    .insert(chat_id, has_welcome_messages);
+            }
+            // Slice G2: `getChatBoostStatus` answer (schema 1.8.67, line
+            // 13917) — correlated via the pending request's `chat_id`.
+            EnvelopePayload::ChatBoostStatus { level, boost_count } => {
+                if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
+                    self.chat_boost_status
+                        .insert(chat_id.0, (level, boost_count));
+                }
+            }
+            // Slice G2: `chatBoostSlots` (schema 1.8.67, line 6968) — the
+            // `getAvailableChatBoostSlots` answer. Stashed per chat so the
+            // driver's `boostChat` chain can consume it (see
+            // `maybe_continue_boost` in connect.rs).
+            EnvelopePayload::ChatBoostSlots { slots } => {
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetBoostSlotsForBoost)
+                    && let Some(chat_id) = pending.and_then(|p| p.chat_id)
+                {
+                    self.boost_slots_by_chat.insert(chat_id.0, slots);
+                }
+                // Slice G2: `boostChat` answers `chatBoostSlots` as well
+                // (schema 1.8.67, line 13922) — drop the cached status so
+                // the dialog refetches it.
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::BoostChat)
+                    && let Some(chat_id) = pending.and_then(|p| p.chat_id)
+                {
+                    self.chat_boost_status.remove(&chat_id.0);
+                }
             }
             // Phase D2: `getChatStatistics` answer — the response carries
             // no chat id, so it is correlated via the pending request's
@@ -4918,8 +5362,13 @@ impl Session {
                 can_invite_users,
                 can_promote_members,
                 can_manage_tags,
+                can_manage_topics,
+                can_change_info,
+                can_send_welcome_messages,
                 join_by_request,
                 is_broadcast_group,
+                sign_messages,
+                show_message_sender,
             } => {
                 self.set_supergroup_forum(supergroup_id, is_forum);
                 self.set_supergroup_username(supergroup_id, username);
@@ -4941,6 +5390,14 @@ impl Session {
                 // changes for other members.
                 self.supergroup_manage_tags_right
                     .insert(supergroup_id, can_manage_tags.unwrap_or(false));
+                // Slice G2: forum-topic / sign-messages / welcome-message
+                // rights; absent = unknown → treated as lacking.
+                self.supergroup_manage_topics_right
+                    .insert(supergroup_id, can_manage_topics.unwrap_or(false));
+                self.supergroup_change_info_right
+                    .insert(supergroup_id, can_change_info.unwrap_or(false));
+                self.supergroup_send_welcome_right
+                    .insert(supergroup_id, can_send_welcome_messages.unwrap_or(false));
                 // Slice G1: `supergroup.join_by_request` (schema 1.8.67,
                 // lines 2733/2746) drives the "Approve new members"
                 // toggle; `supergroup.is_broadcast_group` (lines
@@ -4949,6 +5406,12 @@ impl Session {
                     .insert(supergroup_id, join_by_request);
                 self.supergroup_is_broadcast
                     .insert(supergroup_id, is_broadcast_group);
+                // Slice G2: `supergroup.sign_messages` /
+                // `show_message_sender` (schema 1.8.67, lines 2731/2746).
+                self.supergroup_sign_messages
+                    .insert(supergroup_id, sign_messages);
+                self.supergroup_show_message_sender
+                    .insert(supergroup_id, show_message_sender);
             }
             EnvelopePayload::Supergroup {
                 supergroup_id,
@@ -4959,8 +5422,13 @@ impl Session {
                 can_invite_users,
                 can_promote_members,
                 can_manage_tags,
+                can_manage_topics,
+                can_change_info,
+                can_send_welcome_messages,
                 join_by_request,
                 is_broadcast_group,
+                sign_messages,
+                show_message_sender,
             } => {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetSupergroup) {
                     self.set_supergroup_forum(supergroup_id, is_forum);
@@ -4980,12 +5448,26 @@ impl Session {
                     // changes for other members.
                     self.supergroup_manage_tags_right
                         .insert(supergroup_id, can_manage_tags.unwrap_or(false));
+                    // Slice G2: forum-topic / sign-messages /
+                    // welcome-message rights.
+                    self.supergroup_manage_topics_right
+                        .insert(supergroup_id, can_manage_topics.unwrap_or(false));
+                    self.supergroup_change_info_right
+                        .insert(supergroup_id, can_change_info.unwrap_or(false));
+                    self.supergroup_send_welcome_right
+                        .insert(supergroup_id, can_send_welcome_messages.unwrap_or(false));
                     // Slice G1: join-by-request + broadcast flags (schema
                     // 1.8.67, lines 2733/2736/2746).
                     self.supergroup_join_by_request
                         .insert(supergroup_id, join_by_request);
                     self.supergroup_is_broadcast
                         .insert(supergroup_id, is_broadcast_group);
+                    // Slice G2: sign/show flags (schema 1.8.67, lines
+                    // 2731/2746).
+                    self.supergroup_sign_messages
+                        .insert(supergroup_id, sign_messages);
+                    self.supergroup_show_message_sender
+                        .insert(supergroup_id, show_message_sender);
                 }
             }
             // Phase 5.1: `getForumTopics` response — cache the first page
@@ -4998,6 +5480,13 @@ impl Session {
                     && let Some(chat_id) = pending.and_then(|p| p.chat_id)
                 {
                     self.forum_topics.insert(chat_id.0, topics);
+                }
+            }
+            // Slice G2: `createForumTopic` answers `forumTopicInfo` —
+            // drop the cached topic list so the UI refetches it.
+            EnvelopePayload::ForumTopic { chat_id } => {
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::CreateForumTopic) {
+                    self.forum_topics.remove(&chat_id);
                 }
             }
             EnvelopePayload::Messages(messages) => {
@@ -5020,6 +5509,20 @@ impl Session {
                     && pending.purpose == RequestPurpose::ForwardMessages
                 {
                     self.finish_forward(pending, &messages, false);
+                    return;
+                }
+                // Slice G2: channel-comments viewer — cache the thread
+                // history for the requesting channel post.
+                if let Some(pending) = pending
+                    && let RequestPurpose::GetMessageThreadHistory { message_id } = pending.purpose
+                    && let Some(chat_id) = pending.chat_id
+                {
+                    self.comment_thread = Some(CommentThreadFetch {
+                        chat_id,
+                        message_id: MessageId(message_id),
+                        messages: messages.to_vec(),
+                        failed: None,
+                    });
                     return;
                 }
                 if let Some(pending) = pending
@@ -5409,6 +5912,31 @@ impl Session {
                             tracked.invite_link = None;
                         }
                     }
+                    // Slice G2: forum-topic mutations confirmed — drop
+                    // the cached topic list so the UI refetches it.
+                    Some(
+                        RequestPurpose::EditForumTopic { .. }
+                        | RequestPurpose::ToggleForumTopicClosed { .. }
+                        | RequestPurpose::ToggleForumTopicPinned { .. }
+                        | RequestPurpose::DeleteForumTopic { .. }
+                        | RequestPurpose::ToggleGeneralForumTopicHidden,
+                    ) => {
+                        if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
+                            self.forum_topics.remove(&chat_id.0);
+                        }
+                    }
+                    // Slice G2: welcome-message mutations confirmed —
+                    // drop the cached pack so the dialog refetches it.
+                    Some(
+                        RequestPurpose::AddChatWelcomeMessage
+                        | RequestPurpose::EditChatWelcomeMessage { .. }
+                        | RequestPurpose::DeleteChatWelcomeMessage { .. },
+                    ) => {
+                        if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
+                            self.welcome_messages.remove(&chat_id.0);
+                            self.welcome_message_fetches.remove(&chat_id.0);
+                        }
+                    }
                     _ => {}
                 }
                 // Phase C2i: `sendCallLog` confirmed — the log upload for
@@ -5574,6 +6102,43 @@ impl Session {
                         }
                         None => {
                             self.supergroup_usernames.remove(&supergroup_id);
+                        }
+                    },
+                    // Slice G2: restore the pre-toggle sign/show flags.
+                    Some(RequestRollback::SignMessages {
+                        supergroup_id,
+                        previous_sign,
+                        previous_show,
+                    }) => {
+                        match previous_sign {
+                            Some(flag) => {
+                                self.supergroup_sign_messages.insert(supergroup_id, flag);
+                            }
+                            None => {
+                                self.supergroup_sign_messages.remove(&supergroup_id);
+                            }
+                        }
+                        match previous_show {
+                            Some(flag) => {
+                                self.supergroup_show_message_sender
+                                    .insert(supergroup_id, flag);
+                            }
+                            None => {
+                                self.supergroup_show_message_sender.remove(&supergroup_id);
+                            }
+                        }
+                    }
+                    // Slice G2: restore the pre-toggle anti-spam flag.
+                    Some(RequestRollback::AntiSpam {
+                        supergroup_id,
+                        previous,
+                    }) => match previous {
+                        Some(flag) => {
+                            self.supergroup_anti_spam_enabled
+                                .insert(supergroup_id, flag);
+                        }
+                        None => {
+                            self.supergroup_anti_spam_enabled.remove(&supergroup_id);
                         }
                     },
                     None => {}
@@ -6034,6 +6599,39 @@ impl Session {
                 {
                     self.finish_forward(pending, &[], true);
                 }
+                // Slice G2: failed welcome-message pack fetch — mark it so
+                // the dialog shows an error, not a spinner.
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::LoadChatWelcomeMessages)
+                    && let Some(chat_id) = pending.and_then(|p| p.chat_id)
+                {
+                    self.welcome_message_fetches.insert(
+                        chat_id.0,
+                        WelcomeMessagesFetch::Failed(call_request_error_line(
+                            &err,
+                            "Could not load welcome messages",
+                        )),
+                    );
+                }
+                // Slice G2: failed thread-history fetch — mark the comment
+                // viewer so it shows an error.
+                if let Some(RequestPurpose::GetMessageThreadHistory { message_id }) =
+                    pending.map(|p| p.purpose)
+                    && let Some(chat_id) = pending.and_then(|p| p.chat_id)
+                {
+                    self.comment_thread = Some(CommentThreadFetch {
+                        chat_id,
+                        message_id: MessageId(message_id),
+                        messages: Vec::new(),
+                        failed: Some(call_request_error_line(&err, "Could not load comments")),
+                    });
+                }
+                // Slice G2: the slots half of a boost failed — the chain
+                // cannot continue; drop the intent.
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetBoostSlotsForBoost) {
+                    self.boost_intent = None;
+                }
+                // Slice G2: `boostChat` failed — the status is refetched on
+                // success only, so nothing to roll back.
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetInstalledStickerSets) {
                     self.stickers.loading_sets = false;
                     self.stickers.failed = true;
@@ -6507,6 +7105,12 @@ impl Session {
             chat.set_admin_can_promote_members(member.admin_rights.map(|r| r.can_promote_members));
             chat.set_admin_can_restrict_members(
                 member.admin_rights.map(|r| r.can_restrict_members),
+            );
+            // Slice G2: sign-messages + welcome-message rights for the
+            // channel path.
+            chat.set_admin_can_change_info(member.admin_rights.map(|r| r.can_change_info));
+            chat.set_admin_can_send_welcome_messages(
+                member.admin_rights.map(|r| r.can_send_welcome_messages),
             );
         }
     }
@@ -7964,6 +8568,7 @@ mod tests {
     use super::*;
     use crate::diagnostics::MemorySink;
     use crate::telegram::client::copy_and_parse;
+    use crate::telegram::envelope::ChatEventAction;
     use crate::telegram::envelope::LocalFileState;
     use std::sync::atomic::AtomicU64;
 
@@ -13316,5 +13921,367 @@ mod tests {
             Some(PrivacyWho::Everybody)
         );
         assert_eq!(session.call_privacy_p2p, Some(PrivacyWho::Everybody));
+    }
+
+    #[test]
+    fn g2_update_supergroup_caches_sign_flags_and_rights() {
+        // Slice G2: `updateSupergroup` carries `sign_messages` /
+        // `show_message_sender` plus the new admin rights; the session
+        // maps feed the channel manage dialog and its gates.
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateNewChat","chat":{"id":13,"title":"g","type":{"@type":"chatTypeSupergroup","supergroup_id":25,"is_channel":false},"unread_count":0}}"#,
+        );
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateSupergroup","supergroup":{"@type":"supergroup","id":25,"sign_messages":true,"show_message_sender":true,"status":{"@type":"chatMemberStatusAdministrator","rights":{"@type":"chatAdministratorRights","can_change_info":true,"can_manage_topics":true,"can_send_welcome_messages":true}}}}"#,
+        );
+        assert_eq!(session.supergroup_sign_messages.get(&25), Some(&true));
+        assert_eq!(session.supergroup_show_message_sender.get(&25), Some(&true));
+        assert_eq!(session.supergroup_manage_topics_right.get(&25), Some(&true));
+        assert_eq!(session.supergroup_change_info_right.get(&25), Some(&true));
+        assert_eq!(session.supergroup_send_welcome_right.get(&25), Some(&true));
+        assert!(session.chat_can_manage_topics(ChatId(13)));
+        assert!(session.chat_can_change_info(ChatId(13)));
+        assert!(session.chat_can_send_welcome_messages(ChatId(13)));
+        assert!(session.chat_sign_messages(ChatId(13)));
+        assert!(session.chat_show_message_sender(ChatId(13)));
+        // A member without the rights is gated out.
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateSupergroup","supergroup":{"@type":"supergroup","id":25,"status":{"@type":"chatMemberStatusMember"}}}"#,
+        );
+        assert!(!session.chat_can_manage_topics(ChatId(13)));
+        assert!(!session.chat_can_change_info(ChatId(13)));
+    }
+
+    #[test]
+    fn g2_update_supergroup_full_info_caches_anti_spam() {
+        // Slice G2: `updateSupergroupFullInfo` carries the anti-spam
+        // state + capability; the toggle is gated on the capability.
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateNewChat","chat":{"id":13,"title":"g","type":{"@type":"chatTypeSupergroup","supergroup_id":25,"is_channel":false},"unread_count":0}}"#,
+        );
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateSupergroupFullInfo","supergroup_id":25,"supergroup_full_info":{"@type":"supergroupFullInfo","has_aggressive_anti_spam_enabled":true,"can_toggle_aggressive_anti_spam":true}}"#,
+        );
+        assert!(session.chat_anti_spam_enabled(ChatId(13)));
+        assert!(session.chat_can_toggle_anti_spam(ChatId(13)));
+    }
+
+    #[test]
+    fn g2_welcome_pack_and_flag_cached() {
+        // Slice G2: the welcome pack and the `has_welcome_messages` flag
+        // land in their caches (pack via the spontaneous update, flag
+        // via both the update and `updateNewChat`).
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateChatWelcomeMessages","chat_id":13,"messages":[{"id":7,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"welcome","entities":[]}}}]}"#,
+        );
+        let pack = session.welcome_messages.get(&13).expect("welcome pack");
+        assert_eq!(pack.len(), 1);
+        assert_eq!(pack[0].id, 7);
+        assert_eq!(
+            session.welcome_message_fetches.get(&13),
+            Some(&WelcomeMessagesFetch::Loaded)
+        );
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateChatHasWelcomeMessages","chat_id":13,"has_welcome_messages":true}"#,
+        );
+        assert!(session.chat_has_welcome_messages_flag(ChatId(13)));
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateNewChat","chat":{"id":14,"title":"g","type":{"@type":"chatTypeSupergroup","supergroup_id":26,"is_channel":false},"unread_count":0,"has_welcome_messages":true}}"#,
+        );
+        assert!(session.chat_has_welcome_messages_flag(ChatId(14)));
+    }
+
+    #[test]
+    fn g2_chat_boost_status_cached() {
+        // Slice G2: the `getChatBoostStatus` answer is cached per chat.
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        let extra = session.request(RequestPurpose::GetChatBoostStatus, Some(ChatId(13)));
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"chatBoostStatus","@extra":"{}","level":3,"boost_count":42}}"#,
+                extra.0
+            ),
+        );
+        assert_eq!(session.chat_boost_status.get(&13), Some(&(3, 42)));
+    }
+
+    #[test]
+    fn g2_boost_slots_stashed_for_chain() {
+        // Slice G2: the slots answer is stashed per chat so the driver
+        // can chain `boostChat`.
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        let extra = session.request(RequestPurpose::GetBoostSlotsForBoost, Some(ChatId(13)));
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"chatBoostSlots","@extra":"{}","slots":[{{"slot_id":3}},{{"slot_id":7}}]}}"#,
+                extra.0
+            ),
+        );
+        assert_eq!(session.boost_slots_by_chat.get(&13), Some(&vec![3, 7]));
+    }
+
+    #[test]
+    fn g2_thread_history_cached_and_failed() {
+        // Slice G2: `getMessageThreadHistory` success caches the thread;
+        // failure marks it failed (the viewer shows an error, not a
+        // spinner).
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        let extra = session.request(
+            RequestPurpose::GetMessageThreadHistory { message_id: 99 },
+            Some(ChatId(13)),
+        );
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"messages","@extra":"{}","messages":[],"total_count":0}}"#,
+                extra.0
+            ),
+        );
+        let thread = session.comment_thread.as_ref().expect("comment thread");
+        assert_eq!(thread.chat_id, ChatId(13));
+        assert_eq!(thread.message_id, MessageId(99));
+        assert_eq!(thread.failed, None);
+        let extra = session.request(
+            RequestPurpose::GetMessageThreadHistory { message_id: 100 },
+            Some(ChatId(13)),
+        );
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"error","@extra":"{}","code":400,"message":"MESSAGE_NOT_MODIFIED"}}"#,
+                extra.0
+            ),
+        );
+        let thread = session.comment_thread.as_ref().expect("comment thread");
+        assert_eq!(thread.message_id, MessageId(100));
+        assert!(
+            thread
+                .failed
+                .as_ref()
+                .unwrap()
+                .contains("Could not load comments")
+        );
+    }
+
+    #[test]
+    fn g2_sign_toggle_error_rolls_back() {
+        // Slice G2: the optimistic sign-messages toggle restores the
+        // previous flags when TDLib answers `error`.
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        session.supergroup_sign_messages.insert(25, false);
+        session.supergroup_show_message_sender.insert(25, false);
+        let extra = session.request(
+            RequestPurpose::ToggleSupergroupSignMessages,
+            Some(ChatId(13)),
+        );
+        session
+            .requests
+            .pending_mut(extra)
+            .expect("pending")
+            .rollback = Some(RequestRollback::SignMessages {
+            supergroup_id: 25,
+            previous_sign: Some(false),
+            previous_show: Some(false),
+        });
+        session.supergroup_sign_messages.insert(25, true);
+        session.supergroup_show_message_sender.insert(25, true);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"error","@extra":"{}","code":400,"message":"CHAT_ADMIN_REQUIRED"}}"#,
+                extra.0
+            ),
+        );
+        assert_eq!(session.supergroup_sign_messages.get(&25), Some(&false));
+        assert_eq!(
+            session.supergroup_show_message_sender.get(&25),
+            Some(&false)
+        );
+    }
+
+    #[test]
+    fn g2_anti_spam_toggle_error_rolls_back() {
+        // Slice G2: the optimistic anti-spam toggle restores the previous
+        // flag when TDLib answers `error`.
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        session.supergroup_anti_spam_enabled.insert(25, false);
+        let extra = session.request(
+            RequestPurpose::ToggleSupergroupAggressiveAntiSpam,
+            Some(ChatId(13)),
+        );
+        session
+            .requests
+            .pending_mut(extra)
+            .expect("pending")
+            .rollback = Some(RequestRollback::AntiSpam {
+            supergroup_id: 25,
+            previous: Some(false),
+        });
+        session.supergroup_anti_spam_enabled.insert(25, true);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"error","@extra":"{}","code":400,"message":"CHAT_ADMIN_REQUIRED"}}"#,
+                extra.0
+            ),
+        );
+        assert_eq!(session.supergroup_anti_spam_enabled.get(&25), Some(&false));
+    }
+
+    #[test]
+    fn g2_welcome_fetch_error_marks_failed() {
+        // Slice G2: a failed `loadChatWelcomeMessages` marks the fetch
+        // failed so the dialog shows an error, not a spinner.
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        let extra = session.request(RequestPurpose::LoadChatWelcomeMessages, Some(ChatId(13)));
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"error","@extra":"{}","code":400,"message":"CHAT_ADMIN_REQUIRED"}}"#,
+                extra.0
+            ),
+        );
+        assert!(matches!(
+            session.welcome_message_fetches.get(&13),
+            Some(WelcomeMessagesFetch::Failed(_))
+        ));
+    }
+
+    #[test]
+    fn g2_create_forum_topic_answer_invalidates_topics() {
+        // Slice G2: the `createForumTopic` answer (`forumTopicInfo`)
+        // drops the cached topic list so the UI refetches it.
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        session.forum_topics.insert(13, Vec::new());
+        let extra = session.request(RequestPurpose::CreateForumTopic, Some(ChatId(13)));
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"forumTopicInfo","@extra":"{}","chat_id":13,"forum_topic_id":5,"name":"new"}}"#,
+                extra.0
+            ),
+        );
+        assert!(!session.forum_topics.contains_key(&13));
+    }
+
+    #[test]
+    fn g2_forum_mutation_ok_drops_topic_cache() {
+        // Slice G2: a confirmed forum-topic mutation (`ok`) drops the
+        // cached topic list so the UI refetches it.
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        session.forum_topics.insert(13, Vec::new());
+        let extra = session.request(
+            RequestPurpose::DeleteForumTopic { forum_topic_id: 5 },
+            Some(ChatId(13)),
+        );
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
+        );
+        assert!(!session.forum_topics.contains_key(&13));
+    }
+
+    #[test]
+    fn g2_welcome_delete_ok_drops_pack() {
+        // Slice G2: a confirmed welcome-message deletion (`ok`) drops
+        // the cached pack so the dialog refetches it.
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        session.welcome_messages.insert(13, Vec::new());
+        session
+            .welcome_message_fetches
+            .insert(13, WelcomeMessagesFetch::Loaded);
+        let extra = session.request(
+            RequestPurpose::DeleteChatWelcomeMessage {
+                welcome_message_id: 7,
+            },
+            Some(ChatId(13)),
+        );
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
+        );
+        assert!(!session.welcome_messages.contains_key(&13));
+        assert!(!session.welcome_message_fetches.contains_key(&13));
+    }
+
+    #[test]
+    fn event_log_admin_ids_dedupes_and_skips_chat_senders() {
+        let event = |id: i64, member_id: MessageSender| ParsedChatEvent {
+            id,
+            date: 1_700_000_000,
+            member_id,
+            action: ChatEventAction::MemberJoined,
+        };
+        let page = ChatEventLogPage {
+            events: vec![
+                event(1, MessageSender::User { user_id: 7 }),
+                event(2, MessageSender::Chat { chat_id: 13 }),
+                event(3, MessageSender::User { user_id: 9 }),
+                event(4, MessageSender::User { user_id: 7 }),
+            ],
+            has_more: false,
+        };
+        assert_eq!(page.admin_user_ids(), vec![7, 9]);
     }
 }
