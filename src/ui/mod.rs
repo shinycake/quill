@@ -54,8 +54,9 @@ use quill::telegram::envelope::{
     MessageContent, MessageInteractionInfo, MessageSender, NotificationSettingsScope,
     NotificationSound, ParsedChatEvent, ParsedFile, ParsedGroupCallParticipant, ParsedMessage,
     ParsedSecretChat, ParsedStory, PollContent, PollOption, PollType, ScopeNotificationSettings,
-    SecretChatState, SponsoredMessage, StatisticalGraph, StatisticalValue, call_entry_label,
-    chat_ttl_service_label, format_ttl_setting, toggle_chosen_emoji_reaction,
+    SecretChatState, SponsoredMessage, StatisticalGraph, StatisticalValue, StorageFileTypeStats,
+    StorageStats, call_entry_label, chat_ttl_service_label, format_ttl_setting,
+    toggle_chosen_emoji_reaction,
 };
 use quill::telegram::requests::SelfDestructSend;
 use quill::telegram::requests::{CallPrivacySetting, PrivacyWho};
@@ -751,6 +752,16 @@ pub struct QuillApp {
     /// Phase B1: pending "Close secret chat" confirm for the open chat
     /// (`closeSecretChat`, schema 1.8.67 line 15242).
     pending_close_secret_chat: Option<ChatId>,
+    /// Phase S2: pending inline-bot warning for a `SwitchInline` press in
+    /// a secret chat (TGX `SecretChatContextBotAlert`) — the stashed
+    /// query is inserted on Confirm.
+    pending_inline_bot_alert: Option<String>,
+    /// Phase S2: the inline-bot warning has been confirmed once this
+    /// session (TGX `TUTORIAL_INLINE_SEARCH_SECRECY`, which persists;
+    /// Quill keeps it per session — documented divergence).
+    inline_bot_alert_shown: bool,
+    /// Phase S2: storage-usage overlay (TGX Settings → Data and Storage).
+    storage_usage_open: bool,
     /// Phase S1: "New secret chat" contact-picker overlay (sidebar).
     new_secret_picker_open: bool,
     /// tdesktop `Data::ForwardDraft` / history multi-select.
@@ -1161,6 +1172,14 @@ pub enum ScreenshotDemo {
     /// `session.contacts` is assigned directly (the fixture equivalent
     /// of a `getContacts` answer) so the picker has eligible rows.
     ReadySecretPicker,
+    /// Phase S2: inline-bot warning banner (injected, no live Telegram)
+    /// — the Ready secret chat fixture with a pending
+    /// `SwitchInline` alert above the composer.
+    ReadySecretBotAlert,
+    /// Phase S2: storage-usage overlay (injected, no live Telegram) —
+    /// fixture `getStorageStatistics` stats with the "Secret media and
+    /// files" category, dialog open.
+    ReadyStorageUsage,
     /// Phase B3: self-destructing media (injected, no live Telegram) —
     /// a Ready *private* (1:1 cloud) chat with Zed: an incoming photo
     /// with a live 60s `messageSelfDestructTypeTimer` countdown, an
@@ -2023,6 +2042,27 @@ impl QuillApp {
                     AuthorizationState::Ready,
                 )
             }
+            // Phase S2: inline-bot warning fixture (injected, no live
+            // Telegram).
+            Some(ScreenshotDemo::ReadySecretBotAlert) => {
+                demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
+                (
+                    ConnectUiStatus::DemoReadyChats,
+                    None,
+                    "screenshot demo — inline-bot warning (injected, no live Telegram)".into(),
+                    AuthorizationState::Ready,
+                )
+            }
+            // Phase S2: storage-usage fixture (injected, no live Telegram).
+            Some(ScreenshotDemo::ReadyStorageUsage) => {
+                demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
+                (
+                    ConnectUiStatus::DemoReadyChats,
+                    None,
+                    "screenshot demo — storage usage (injected, no live Telegram)".into(),
+                    AuthorizationState::Ready,
+                )
+            }
             // Phase B2: key verification UI fixture (injected, no live
             // Telegram).
             Some(ScreenshotDemo::ReadyKeyVerification) => {
@@ -2242,6 +2282,9 @@ impl QuillApp {
             saved_edit_reply: None,
             pending_delete: None,
             pending_close_secret_chat: None,
+            pending_inline_bot_alert: None,
+            inline_bot_alert_shown: false,
+            storage_usage_open: false,
             new_secret_picker_open: false,
             pending_forward: None,
             forward_picker_open: false,
@@ -2625,6 +2668,29 @@ impl QuillApp {
             }
             app.new_secret_picker_open = true;
             app.status_note = "screenshot demo — new secret chat picker".into();
+        }
+        // Phase S2: inline-bot warning fixture — the Ready secret chat
+        // with a stashed `SwitchInline` query, so the warning banner
+        // renders above the composer (injected, no live Telegram).
+        if matches!(demo, Some(ScreenshotDemo::ReadySecretBotAlert)) {
+            if let Some(session) = app.demo_session.as_mut() {
+                app.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_secret_chat(session, &app.demo_sink, &app.demo_seq);
+            }
+            app.pending_inline_bot_alert = Some("@gif cats".to_string());
+            app.status_note = "screenshot demo — inline-bot warning in secret chat".into();
+        }
+        // Phase S2: storage-usage fixture — fixture stats (including the
+        // secret category) with the overlay open (injected, no live
+        // Telegram).
+        if matches!(demo, Some(ScreenshotDemo::ReadyStorageUsage)) {
+            if let Some(session) = app.demo_session.as_mut() {
+                app.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                session.storage_stats = Some(demo_storage_stats());
+                session.storage_stats_loading = false;
+            }
+            app.storage_usage_open = true;
+            app.status_note = "screenshot demo — storage usage".into();
         }
         // Phase B2: key verification fixture — the Ready secret chat with
         // a real 36-byte key_hash and Zed's info panel open on the
@@ -4114,17 +4180,105 @@ impl QuillApp {
     /// Phase 3.2: insert a `switchInline` query into the current chat's
     /// composer. `targetChatChosen` / `targetChatInternalLink` (no chat
     /// picker in this slice) use the current chat, same as `targetChatCurrent`.
+    ///
+    /// Phase S2: in a secret chat the insertion is gated on the one-time
+    /// inline-bot warning (TGX `SecretChatContextBotAlert`,
+    /// `InlineSearchContext.java:792-800`): a `SwitchInline` press is
+    /// Quill's only inline-bot invocation point, so the alert fires here
+    /// before the query text lands in the composer.
     fn insert_switch_inline_query(
         &mut self,
         query: &str,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if !self.inline_bot_alert_shown && self.open_chat_is_secret() {
+            self.pending_inline_bot_alert = Some(query.to_string());
+            cx.notify();
+            return;
+        }
         self.composer.update(cx, |input, cx| {
             let next = quill::composer::insert_switch_inline_text(&input.value(), query);
             input.set_value(next, window, cx);
         });
         self.sync_command_menu(cx);
+    }
+
+    /// Phase S2: confirm the secret-chat inline-bot warning (TGX's single
+    /// `Confirm`, `ALERT_NO_CANCEL`) — insert the stashed `SwitchInline`
+    /// query and don't ask again this session.
+    fn confirm_inline_bot_alert(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(query) = self.pending_inline_bot_alert.take() else {
+            return;
+        };
+        self.inline_bot_alert_shown = true;
+        self.composer.update(cx, |input, cx| {
+            let next = quill::composer::insert_switch_inline_text(&input.value(), &query);
+            input.set_value(next, window, cx);
+        });
+        self.sync_command_menu(cx);
+        cx.notify();
+    }
+
+    /// Phase S2: the open chat is a secret chat (TGX's
+    /// `ChatId.isSecret` check in the alert trigger).
+    fn open_chat_is_secret(&self) -> bool {
+        let session = self.session();
+        session
+            .as_ref()
+            .and_then(|s| s.open_chat)
+            .and_then(|id| session.as_ref()?.chats.get(&id.0))
+            .is_some_and(|chat| matches!(chat.kind, ChatKind::Secret { .. }))
+    }
+
+    /// Phase S2: the inline-bot warning banner shown above the composer
+    /// before a `SwitchInline` query is inserted in a secret chat. TGX's
+    /// `SecretChatContextBotAlert` copy verbatim
+    /// (`app/src/main/res/values/strings.xml:2638`); single Confirm, no
+    /// Cancel (TGX `ALERT_NO_CANCEL`).
+    fn inline_bot_alert_banner(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .id("inline-bot-alert")
+            .flex()
+            .items_center()
+            .justify_between()
+            .gap_2()
+            .px_3()
+            .py_2()
+            .rounded_md()
+            .border_1()
+            .border_color(rgb(0xf0b429))
+            .bg(rgb(0x2a2318))
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .min_w_0()
+                    .child(
+                        div()
+                            .text_xs()
+                            .font_medium()
+                            .text_color(rgb(0xf0b429))
+                            .child("Quill"),
+                    )
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_color(rgb(0xc9d1d9))
+                            .child(
+                                "Please note that inline bots are provided by third-party developers. \
+                                 For the bot to work, the symbols you type after the bot's username \
+                                 are sent to the respective developer.",
+                            ),
+                    ),
+            )
+            .child(
+                Button::new("confirm-inline-bot-alert")
+                    .label("Confirm")
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.confirm_inline_bot_alert(window, cx);
+                    })),
+            )
     }
 
     /// Phase 3.3: recompute the `/` command menu from the composer text.
@@ -16242,6 +16396,142 @@ impl QuillApp {
             .into_any_element()
     }
 
+    /// Phase S2: storage-usage overlay (TGX `SettingsCacheController`):
+    /// total plus per-file-type categories in TGX's category order,
+    /// including "Secret media and files" (TGX `SecretFiles`, verbatim)
+    /// for `fileTypeSecret`. Live: `getStorageStatistics` via the
+    /// driver; demo: injected fixture stats.
+    fn storage_usage_overlay(&self, cx: &mut Context<Self>) -> AnyElement {
+        let session = self.session();
+        let stats = session.as_ref().and_then(|s| s.storage_stats.clone());
+        let loading = session.is_some_and(|s| s.storage_stats_loading);
+        let mut body = div().flex().flex_col().gap_2();
+        match stats {
+            None => {
+                body = body.child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(if loading {
+                            "Loading…"
+                        } else {
+                            "No storage data yet."
+                        }),
+                );
+            }
+            Some(stats) => {
+                body = body.child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .child(div().font_semibold().text_sm().child("Total"))
+                        .child(div().text_sm().child(format_bytes(stats.total_size))),
+                );
+                for (label, size, count) in storage_category_rows(&stats) {
+                    body = body.child(
+                        div()
+                            .id(format!("storage-row-{label}"))
+                            .flex()
+                            .items_center()
+                            .justify_between()
+                            .gap_2()
+                            .child(div().text_sm().child(label))
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(format!("{count} files · {}", format_bytes(size))),
+                            ),
+                    );
+                }
+            }
+        }
+        div()
+            .id("storage-usage-overlay")
+            .absolute()
+            .top_0()
+            .left_0()
+            .right_0()
+            .bottom_0()
+            .flex()
+            .items_center()
+            .justify_center()
+            .child(
+                div()
+                    .id("storage-usage-backdrop")
+                    .absolute()
+                    .top_0()
+                    .left_0()
+                    .right_0()
+                    .bottom_0()
+                    .bg(rgba(0x000000e6))
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.storage_usage_open = false;
+                        cx.notify();
+                    })),
+            )
+            .child(
+                div()
+                    .id("storage-usage-dialog")
+                    .flex()
+                    .flex_col()
+                    .gap_2()
+                    .px_4()
+                    .py_3()
+                    .rounded_lg()
+                    .bg(cx.theme().sidebar)
+                    .border_1()
+                    .border_color(cx.theme().border)
+                    .min_w(px(360.))
+                    .max_w(px(480.))
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .justify_between()
+                            .child(div().font_semibold().child("Storage usage"))
+                            .child(
+                                div()
+                                    .flex()
+                                    .gap_2()
+                                    .child(
+                                        Button::new("storage-refresh")
+                                            .label("Refresh")
+                                            .ghost()
+                                            .on_click(cx.listener(|this, _, _, cx| {
+                                                this.refresh_storage_usage(cx);
+                                            })),
+                                    )
+                                    .child(
+                                        Button::new("close-storage-usage")
+                                            .label("Close")
+                                            .ghost()
+                                            .on_click(cx.listener(|this, _, _, cx| {
+                                                this.storage_usage_open = false;
+                                                cx.notify();
+                                            })),
+                                    ),
+                            ),
+                    )
+                    .child(body),
+            )
+            .into_any_element()
+    }
+
+    /// Phase S2: refetch the storage stats. Live: drop the cache so the
+    /// guarded fetch fires again. Demo: re-inject the fixture stats.
+    fn refresh_storage_usage(&mut self, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            live.driver.refresh_storage_statistics();
+            let _ = live.driver.maybe_fetch_storage_statistics();
+        } else if let Some(session) = self.demo_session.as_mut() {
+            session.storage_stats = Some(demo_storage_stats());
+            session.storage_stats_loading = false;
+        }
+        cx.notify();
+    }
+
     /// Parity slice: one scope's section in the defaults dialog.
     fn scope_settings_section(
         &self,
@@ -19652,6 +19942,10 @@ impl Render for QuillApp {
             .when(self.notification_defaults_open, |this| {
                 this.child(self.notification_defaults_overlay(cx))
             })
+            // Phase S2: storage usage overlay.
+            .when(self.storage_usage_open, |this| {
+                this.child(self.storage_usage_overlay(cx))
+            })
             // Phase C1: call overlay above everything else.
             .when_some(self.call_overlay(cx), |this, overlay| this.child(overlay))
             // Phase C3a: group-call (voice chat) overlay above the call
@@ -19946,6 +20240,10 @@ impl QuillApp {
                         // Phase B1: close-secret-chat confirm banner.
                         .when_some(self.pending_close_secret_chat, |this, _| {
                             this.child(self.close_secret_chat_confirm_banner(cx))
+                        })
+                        // Phase S2: inline-bot warning banner for secret chats.
+                        .when_some(self.pending_inline_bot_alert.clone(), |this, _| {
+                            this.child(self.inline_bot_alert_banner(cx))
                         })
                         .when_some(self.pending_edit.clone(), |this, edit| {
                             this.child(self.composer_edit_banner(&edit, cx))
@@ -21124,6 +21422,22 @@ impl QuillApp {
                     if self.new_secret_picker_open {
                         list = list.child(self.new_secret_picker_panel(cx));
                     }
+                    // Phase S2: storage-usage overlay entry (TGX Settings →
+                    // Data and Storage → Storage Usage). Quill has no
+                    // settings screen, so it sits next to the secret-chat
+                    // entry; it fetches `getStorageStatistics` on open
+                    // (guarded: once per Ready).
+                    list = list.child(
+                        Button::new("storage-usage")
+                            .label("💾 Storage usage")
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.storage_usage_open = true;
+                                if let Some(live) = this.live.as_mut() {
+                                    let _ = live.driver.maybe_fetch_storage_statistics();
+                                }
+                                cx.notify();
+                            })),
+                    );
                     // Phase 9.1: tdesktop-style active-stories tray above the
                     // chat rows; omitted for the contacts tab.
                     if let Some(tray) = self.story_tray(cx) {
@@ -26961,6 +27275,112 @@ fn format_bytes(n: i64) -> String {
         format!("{} KB", n / 1024)
     } else {
         format!("{:.1} MB", n as f64 / (1024.0 * 1024.0))
+    }
+}
+
+/// Phase S2: storage-usage category order, matching TGX
+/// `SettingsCacheController`'s `switch` over `TGStorageStats` file
+/// types.
+const STORAGE_CATEGORY_ORDER: &[&str] = &[
+    "fileTypePhoto",
+    "fileTypeVideo",
+    "fileTypeVoiceNote",
+    "fileTypeVideoNote",
+    "fileTypeDocument",
+    "fileTypeAudio",
+    "fileTypeAnimation",
+    "fileTypeSecret",
+    "fileTypeThumbnail",
+    "fileTypeSticker",
+    "fileTypeProfilePhoto",
+    "fileTypeWallpaper",
+];
+
+/// Phase S2: storage-usage category labels (TGX copy; `fileTypeSecret`
+/// → `SecretFiles` "Secret media and files",
+/// `app/src/main/res/values/strings.xml:1679`). Unknown types fold
+/// into "Other" (TGX buckets `fileTypeSecretThumbnail` in its
+/// internal database entry — "Other" is the honest minimal
+/// equivalent).
+fn storage_category_label(file_type: &str) -> &'static str {
+    match file_type {
+        "fileTypePhoto" => "Photos",
+        "fileTypeVideo" => "Videos",
+        "fileTypeVoiceNote" => "Voice messages",
+        "fileTypeVideoNote" => "Video messages",
+        "fileTypeDocument" => "Files",
+        "fileTypeAudio" => "Music",
+        "fileTypeAnimation" => "GIFs",
+        "fileTypeSecret" => "Secret media and files",
+        "fileTypeThumbnail" => "Thumbnails",
+        "fileTypeSticker" => "Stickers",
+        "fileTypeProfilePhoto" => "Profile photos",
+        "fileTypeWallpaper" => "Wallpapers",
+        _ => "Other",
+    }
+}
+
+/// Phase S2: category rows for the storage overlay in TGX order,
+/// skipping empty categories (TGX skips zero-size entries). Leftovers
+/// (unknown types, `fileTypeSecretThumbnail`) aggregate into "Other".
+fn storage_category_rows(stats: &StorageStats) -> Vec<(&'static str, i64, i32)> {
+    let mut rows = Vec::new();
+    for file_type in STORAGE_CATEGORY_ORDER {
+        if let Some(entry) = stats
+            .by_file_type
+            .iter()
+            .find(|e| e.file_type == *file_type)
+            && entry.size > 0
+        {
+            rows.push((storage_category_label(file_type), entry.size, entry.count));
+        }
+    }
+    let (other_size, other_count) = stats
+        .by_file_type
+        .iter()
+        .filter(|e| !STORAGE_CATEGORY_ORDER.contains(&e.file_type.as_str()))
+        .fold((0i64, 0i32), |(size, count), e| {
+            (size.saturating_add(e.size), count.saturating_add(e.count))
+        });
+    if other_size > 0 || other_count > 0 {
+        rows.push(("Other", other_size, other_count));
+    }
+    rows
+}
+
+/// Phase S2: storage-stats fixture for the screenshot demo (injected,
+/// no live Telegram) — includes a nonzero `fileTypeSecret` entry so
+/// the "Secret media and files" category is visible.
+fn demo_storage_stats() -> StorageStats {
+    StorageStats {
+        total_size: 1_234_567_890,
+        by_file_type: vec![
+            StorageFileTypeStats {
+                file_type: "fileTypePhoto".to_string(),
+                size: 800_000_000,
+                count: 1200,
+            },
+            StorageFileTypeStats {
+                file_type: "fileTypeVideo".to_string(),
+                size: 300_000_000,
+                count: 45,
+            },
+            StorageFileTypeStats {
+                file_type: "fileTypeSecret".to_string(),
+                size: 96_000_000,
+                count: 210,
+            },
+            StorageFileTypeStats {
+                file_type: "fileTypeDocument".to_string(),
+                size: 30_000_000,
+                count: 88,
+            },
+            StorageFileTypeStats {
+                file_type: "fileTypeSticker".to_string(),
+                size: 8_000_000,
+                count: 640,
+            },
+        ],
     }
 }
 

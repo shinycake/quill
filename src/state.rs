@@ -20,7 +20,7 @@ use crate::telegram::envelope::{
     ParsedChatMember, ParsedFile, ParsedGroupCall, ParsedGroupCallMessage,
     ParsedGroupCallParticipant, ParsedMessage, ParsedSecretChat, ParsedStory, ParsedUser,
     ParsedVideoChat, Poll, ReportOption, ReportSponsoredResult, ScopeNotificationSettings,
-    SecretChatState, SponsoredMessage, StickerFormat, StickerItem, StickerSetInfo,
+    SecretChatState, SponsoredMessage, StickerFormat, StickerItem, StickerSetInfo, StorageStats,
     StoryAvailableReactionView, StoryListView, TdError,
 };
 use crate::telegram::envelope::{CallState, ReadyParams};
@@ -480,6 +480,11 @@ pub enum RequestPurpose {
     /// new timer arrives as `updateChatMessageAutoDeleteTime` (plus a
     /// `messageChatSetMessageAutoDeleteTime` service message in history).
     SetChatMessageAutoDeleteTime,
+    /// Phase S2: `getStorageStatistics`. Response is `storageStatistics`;
+    /// aggregated by file type into `Session::storage_stats` (TGX
+    /// `SettingsCacheController` / `TGStorageStats` style, including the
+    /// "Secret media and files" category for `fileTypeSecret`).
+    GetStorageStatistics,
     Close,
     LogOut,
     Other,
@@ -2427,6 +2432,12 @@ pub struct Session {
     pub scope_notification_settings: HashMap<NotificationSettingsScope, ScopeNotificationSettings>,
     /// Parity slice: scopes with a `getScopeNotificationSettings` in flight.
     pub scope_settings_loading: HashSet<NotificationSettingsScope>,
+    /// Phase S2: cached `getStorageStatistics` answer (aggregated by file
+    /// type, TGX `TGStorageStats` style); drives the storage-usage overlay,
+    /// including the "Secret media and files" category.
+    pub storage_stats: Option<StorageStats>,
+    /// Phase S2: a `getStorageStatistics` round trip is in flight.
+    pub storage_stats_loading: bool,
     /// Parity slice: downloaded-file id → notification sound id, for files
     /// fetched as notification sounds.
     pub sound_file_ids: HashMap<i32, i64>,
@@ -2925,6 +2936,8 @@ impl Session {
             saved_sounds_stale: false,
             scope_notification_settings: HashMap::new(),
             scope_settings_loading: HashSet::new(),
+            storage_stats: None,
+            storage_stats_loading: false,
             sound_file_ids: HashMap::new(),
             pending_sound_downloads: HashSet::new(),
             pending_sound_plays: Vec::new(),
@@ -4753,6 +4766,20 @@ impl Session {
                 // The list changed server-side; refetch on the next ingest.
                 self.saved_sounds_stale = true;
             }
+            EnvelopePayload::StorageStatistics {
+                total_size,
+                by_file_type,
+            } => {
+                // Phase S2: `getStorageStatistics` answer — only our own
+                // in-flight request writes the cache (matched by `@extra`).
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetStorageStatistics) {
+                    self.storage_stats = Some(StorageStats {
+                        total_size,
+                        by_file_type,
+                    });
+                    self.storage_stats_loading = false;
+                }
+            }
             EnvelopePayload::ScopeNotificationSettings { settings, .. } => {
                 // Parity slice: `getScopeNotificationSettings` answer; the
                 // scope is correlated via the pending request (the response
@@ -5248,6 +5275,12 @@ impl Session {
                                 )),
                             );
                         }
+                    }
+                    // Phase S2: a failed `getStorageStatistics` clears the
+                    // in-flight flag so the overlay shows "No storage data
+                    // yet." instead of spinning forever.
+                    Some(RequestPurpose::GetStorageStatistics) => {
+                        self.storage_stats_loading = false;
                     }
                     _ => {}
                 }
@@ -7937,6 +7970,69 @@ mod tests {
         assert!(session.pending_sound_plays.is_empty());
         // The file→sound mapping itself stays (the list refetch prunes it).
         assert_eq!(session.sound_file_ids.get(&91), Some(&7));
+    }
+
+    /// Phase S2: a `storageStatistics` answer lands in
+    /// `Session::storage_stats` only when it answers our own in-flight
+    /// `GetStorageStatistics` request (matched by `@extra`).
+    #[test]
+    fn storage_statistics_answer_cached_by_purpose() {
+        let (mut with_purpose, sink) = session();
+        let (mut without_purpose, sink2) = session();
+        let seq = AtomicU64::new(0);
+        let extra = with_purpose.request(RequestPurpose::GetStorageStatistics, None);
+        with_purpose.storage_stats_loading = true;
+        apply_json(
+            &mut with_purpose,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"storageStatistics","size":6000,"count":2,"by_chat":[{{"chat_id":0,"size":6000,"count":2,"by_file_type":[{{"file_type":{{"@type":"fileTypeSecret"}},"size":4000,"count":1}},{{"file_type":{{"@type":"fileTypePhoto"}},"size":2000,"count":1}}]}}],"@extra":"{}"}}"#,
+                extra.0
+            ),
+        );
+        let stats = with_purpose.storage_stats.expect("stats cached");
+        assert_eq!(stats.total_size, 6000);
+        assert!(
+            stats
+                .by_file_type
+                .iter()
+                .any(|t| t.file_type == "fileTypeSecret" && t.size == 4000 && t.count == 1),
+            "secret category present"
+        );
+        assert!(!with_purpose.storage_stats_loading);
+
+        // A stray `storageStatistics` (no matching purpose) is ignored.
+        let seq2 = AtomicU64::new(0);
+        apply_json(
+            &mut without_purpose,
+            &seq2,
+            &sink2,
+            r#"{"@type":"storageStatistics","size":1,"count":1,"by_chat":[]}"#,
+        );
+        assert!(without_purpose.storage_stats.is_none());
+    }
+
+    /// Phase S2: a TDLib `error` answer to `getStorageStatistics`
+    /// clears the in-flight flag so the overlay shows an honest empty
+    /// state instead of a spinner.
+    #[test]
+    fn storage_statistics_error_clears_loading() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        let extra = session.request(RequestPurpose::GetStorageStatistics, None);
+        session.storage_stats_loading = true;
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"error","@extra":"{}","code":400,"message":"STORAGE_STATS_FAILED"}}"#,
+                extra.0
+            ),
+        );
+        assert!(session.storage_stats.is_none());
+        assert!(!session.storage_stats_loading);
     }
 
     /// Nit regression: a `getSavedNotificationSounds` refetch evicts

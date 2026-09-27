@@ -806,6 +806,23 @@ pub fn toggle_session_can_accept_secret_chats(
     .to_string()
 }
 
+/// Phase S2: `getStorageStatistics` (TDLib 1.8.67,
+/// `schema/td_api.tl:15781`):
+/// `getStorageStatistics chat_limit:int32 = StorageStatistics;`
+/// Drives the storage-usage overlay, including the "Secret media and
+/// files" category (`fileTypeSecret`, td_api.tl:9728 — "The file was
+/// sent to a secret chat (the file type is not known to the server)").
+/// `chat_limit` 0 is honest here: the overlay aggregates by file type
+/// across chats, so per-chat splits are not needed.
+pub fn get_storage_statistics(extra: RequestId, chat_limit: i32) -> String {
+    json!({
+        "@type": "getStorageStatistics",
+        "@extra": extra.as_extra(),
+        "chat_limit": chat_limit,
+    })
+    .to_string()
+}
+
 /// Phase C1: the `callProtocol` Quill advertises for signaling-only
 /// calls (TDLib 1.8.67, `schema/td_api.tl:7008`):
 /// `callProtocol udp_p2p:Bool udp_reflector:Bool min_layer:int32
@@ -3279,6 +3296,17 @@ mod tests {
         let off = toggle_session_can_accept_secret_chats(RequestId(32), 123456789, false);
         let v: serde_json::Value = serde_json::from_str(&off).unwrap();
         assert_eq!(v["can_accept_secret_chats"], false);
+    }
+
+    #[test]
+    fn get_storage_statistics_shape_matches_1_8_67() {
+        // Phase S2: `getStorageStatistics chat_limit:int32 =
+        // StorageStatistics` (schema 1.8.67, line 15781).
+        let json = get_storage_statistics(RequestId(41), 0);
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "getStorageStatistics");
+        assert_eq!(v["@extra"], "41");
+        assert_eq!(v["chat_limit"], 0);
     }
 
     #[test]

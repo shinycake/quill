@@ -427,6 +427,14 @@ pub enum EnvelopePayload {
     NotificationSounds {
         sounds: Vec<NotificationSound>,
     },
+    /// `storageStatistics` — `getStorageStatistics` response (Phase S2).
+    /// Aggregated by file type across chats; stored in
+    /// `Session::storage_stats` when the pending purpose is
+    /// `GetStorageStatistics`.
+    StorageStatistics {
+        total_size: i64,
+        by_file_type: Vec<StorageFileTypeStats>,
+    },
     /// `updateSavedNotificationSounds` — the saved-sound list changed;
     /// the reducer marks the cached list stale (schema line 10947).
     UpdateSavedNotificationSounds {
@@ -2131,6 +2139,32 @@ pub struct NotificationSound {
     /// `sound:file` — downloaded on demand with `downloadFile` when a
     /// notification needs it.
     pub sound: ParsedFile,
+}
+
+/// Phase S2: one aggregated file-type entry of a `getStorageStatistics`
+/// answer. `storageStatisticsByFileType file_type:FileType size:int53
+/// count:int32 = StorageStatisticsByFileType;` (schema 1.8.67, line
+/// 9780), summed across the `by_chat` entries (schema line 9787), TGX
+/// `TGStorageStats.Entry` style. `fileTypeSecret` (line 9728, "The file
+/// was sent to a secret chat (the file type is not known to the
+/// server)") is kept as its own entry so the UI can show TGX's
+/// "Secret media and files" category.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StorageFileTypeStats {
+    /// The `fileType` constructor name, e.g. `fileTypeSecret`.
+    pub file_type: String,
+    pub size: i64,
+    pub count: i32,
+}
+
+/// Phase S2: aggregated `getStorageStatistics` answer (`storageStatistics
+/// size:int53 count:int32 by_chat:vector<storageStatisticsByChat> =
+/// StorageStatistics;`, schema 1.8.67, line 9793). Entries are unordered;
+/// the UI orders by its fixed category list.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct StorageStats {
+    pub total_size: i64,
+    pub by_file_type: Vec<StorageFileTypeStats>,
 }
 
 /// `NotificationSettingsScope` (TDLib 1.8.67, lines 3337–3343).
@@ -5584,6 +5618,56 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
                 .map(|list| list.iter().filter_map(parse_notification_sound).collect())
                 .unwrap_or_default();
             Ok(EnvelopePayload::NotificationSounds { sounds })
+        }
+        // Phase S2: `storageStatistics` — aggregate `by_chat[].by_file_type[]`
+        // into per-`fileType` totals (TGX `TGStorageStats` aggregates the
+        // same way; schema 1.8.67 lines 9780/9787/9793). Zero-size entries
+        // are kept: the UI orders by a fixed category list, not by size.
+        "storageStatistics" => {
+            let total_size = int53_or_zero(value.get("size"));
+            let mut totals: Vec<StorageFileTypeStats> = Vec::new();
+            for chat in value
+                .get("by_chat")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+            {
+                for entry in chat
+                    .get("by_file_type")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                {
+                    let Some(file_type) = entry
+                        .get("file_type")
+                        .and_then(|t| t.get("@type"))
+                        .and_then(Value::as_str)
+                    else {
+                        continue;
+                    };
+                    let size = int53_or_zero(entry.get("size"));
+                    let count = entry
+                        .get("count")
+                        .and_then(Value::as_i64)
+                        .unwrap_or(0)
+                        .clamp(0, i32::MAX as i64) as i32;
+                    match totals.iter_mut().find(|t| t.file_type == file_type) {
+                        Some(existing) => {
+                            existing.size = existing.size.saturating_add(size);
+                            existing.count = existing.count.saturating_add(count);
+                        }
+                        None => totals.push(StorageFileTypeStats {
+                            file_type: file_type.to_string(),
+                            size,
+                            count,
+                        }),
+                    }
+                }
+            }
+            Ok(EnvelopePayload::StorageStatistics {
+                total_size,
+                by_file_type: totals,
+            })
         }
         "updateSavedNotificationSounds" => Ok(EnvelopePayload::UpdateSavedNotificationSounds {
             sound_ids: value
@@ -12017,6 +12101,56 @@ mod notification_sound_tests {
             "addSavedNotificationSound sound:InputFile = NotificationSound;",
             "removeSavedNotificationSound notification_sound_id:int64 = Ok;",
             "fileTypeNotificationSound = FileType;",
+        ] {
+            assert!(
+                schema.lines().any(|l| l == line),
+                "schema pin missing: {line}"
+            );
+        }
+    }
+
+    /// Phase S2: `getStorageStatistics` answer (schema 1.8.67 lines
+    /// 9780/9787/9793) — per-chat `by_file_type` entries aggregate into
+    /// one entry per `fileType` constructor, including `fileTypeSecret`
+    /// (line 9728).
+    #[test]
+    fn storage_statistics_aggregates_by_file_type() {
+        let json = r#"{"@type":"storageStatistics","size":7000,"count":3,"by_chat":[{"chat_id":11,"size":5000,"count":2,"by_file_type":[{"file_type":{"@type":"fileTypeSecret"},"size":4000,"count":1},{"file_type":{"@type":"fileTypePhoto"},"size":1000,"count":1}]},{"chat_id":0,"size":2000,"count":1,"by_file_type":[{"file_type":{"@type":"fileTypeSecret"},"size":2000,"count":1}]}]}"#;
+        let env = parse_envelope(json).unwrap();
+        match env.payload {
+            EnvelopePayload::StorageStatistics {
+                total_size,
+                by_file_type,
+            } => {
+                assert_eq!(total_size, 7000);
+                let secret = by_file_type
+                    .iter()
+                    .find(|t| t.file_type == "fileTypeSecret")
+                    .expect("secret category present");
+                assert_eq!(secret.size, 6000);
+                assert_eq!(secret.count, 2);
+                let photo = by_file_type
+                    .iter()
+                    .find(|t| t.file_type == "fileTypePhoto")
+                    .expect("photo category present");
+                assert_eq!(photo.size, 1000);
+                assert_eq!(photo.count, 1);
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+
+    /// Phase S2: every storage-statistics constructor the slice relies
+    /// on must exist verbatim in the pinned schema (1.8.67).
+    #[test]
+    fn schema_pins_storage_statistics_constructors() {
+        let schema = include_str!("../../schema/td_api.tl");
+        for line in [
+            "fileTypeSecret = FileType;",
+            "storageStatisticsByFileType file_type:FileType size:int53 count:int32 = StorageStatisticsByFileType;",
+            "storageStatisticsByChat chat_id:int53 size:int53 count:int32 by_file_type:vector<storageStatisticsByFileType> = StorageStatisticsByChat;",
+            "storageStatistics size:int53 count:int32 by_chat:vector<storageStatisticsByChat> = StorageStatistics;",
+            "getStorageStatistics chat_limit:int32 = StorageStatistics;",
         ] {
             assert!(
                 schema.lines().any(|l| l == line),
