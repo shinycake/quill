@@ -369,12 +369,12 @@ This is the comprehensive Telegram-parity checklist: one checkbox per user-visib
 - [ ] Group video paused indicator (partial: `is_paused` parsed from video_info, not shown on tiles) <!-- parity:calls-group-video-pause -->
 - [ ] Local camera preview tile in group calls (partial: remote tiles render; local capture frames are dropped at the native callback, so the self tile stays an avatar) <!-- parity:calls-group-video-self -->
 - [x] Auto-rejoin group call after network loss (auto-rejoin on `need_rejoin`, max 3 attempts, manual retry resets) <!-- parity:calls-rejoin -->
-- [ ] Record group call <!-- parity:calls-recording -->
-- [ ] RTMP stream key for video chat <!-- parity:calls-rtmp -->
-- [ ] Set / rename video chat title (partial: GroupCallTitleDialog struct exists, ui/mod.rs:419) <!-- parity:calls-title -->
-- [ ] Schedule video chat for later (partial: createVideoChat request only, requests.rs:1036) <!-- parity:calls-schedule -->
-- [ ] Video chat invite link <!-- parity:calls-invite-link -->
-- [ ] In-call chat messages for group calls <!-- parity:calls-group-messages -->
+- [x] Record group call (`startGroupCallRecording` video / `endGroupCallRecording`, `can_be_managed`-gated; REC indicator with duration; code + demo only, live recording unverified) <!-- parity:calls-recording -->
+- [x] RTMP stream key for video chat (`getVideoChatRtmpUrl` / `replaceVideoChatRtmpUrl`, fetch admin-gated, regenerate owner-gated; code + demo only, live unverified) <!-- parity:calls-rtmp -->
+- [x] Set / rename video chat title (`setVideoChatTitle`, 1-64 chars, `can_be_managed`-gated; code + demo only, live unverified) <!-- parity:calls-title -->
+- [x] Schedule video chat for later (`createVideoChat` start_date with 10s–8d validation; scheduled card shows start time, Join appears only once TDLib activates the call — no `startGroupCall` exists in the schema; code + demo only, live activation unverified) <!-- parity:calls-schedule -->
+- [x] Video chat invite link (`getVideoChatInviteLink` with Copy, `revokeGroupCallInviteLink`; code + demo only, live unverified) <!-- parity:calls-invite-link -->
+- [x] In-call chat messages for group calls (`sendGroupCallMessage` + live `updateNewGroupCallMessage` feed with composer, gated on `can_send_messages`/`are_messages_allowed`; no history getter exists in the schema, so live feed only; code + demo only, live unverified) <!-- parity:calls-group-messages -->
 
 ### Stickers, emoji & GIFs
 
