@@ -32,29 +32,30 @@ use crate::telegram::envelope::{
 };
 use crate::telegram::ffi::{LibraryOrigin, TdJsonError, resolve_tdjson_path};
 use crate::telegram::requests::{
-    AnimationSend, GroupCallJoinParams, MessageSenderRef, PollSend, SetTdlibParameters,
-    StickerSend, VideoNoteSend, VideoNoteThumbnailSend, VideoSend, VoiceNoteSend,
-    accept_call_with_protocol, add_chat_to_list, add_chat_to_list_value, add_contact,
-    add_message_reaction, add_recently_found_chat, chat_member_status_administrator_json,
-    chat_member_status_member_json, check_authentication_code, check_authentication_password,
-    click_chat_sponsored_message, close_chat, close_request,
-    close_secret_chat as close_secret_chat_request, close_story, create_call_with_protocol,
-    create_chat_folder, create_chat_invite_link, create_new_secret_chat, create_video_chat,
-    delete_chat_folder, delete_messages, delete_story, discard_call as discard_call_request,
-    download_file as download_file_request, edit_chat_folder, edit_chat_invite_link,
-    edit_message_caption, edit_message_text, end_group_call, forward_messages,
-    get_authorization_state, get_callback_query_answer, get_chat_active_stories,
-    get_chat_administrators, get_chat_event_log, get_chat_folder, get_chat_history,
-    get_chat_invite_links, get_chat_join_requests, get_chat_lists_to_add_chat, get_chat_member,
-    get_chat_sponsored_messages, get_chat_statistics, get_commands, get_contacts, get_forum_topics,
-    get_group_call, get_installed_sticker_sets, get_me, get_saved_animations,
+    AnimationSend, GroupCallJoinParams, InputGroupCallRef, MessageSenderRef, PollSend,
+    SetTdlibParameters, StickerSend, VideoNoteSend, VideoNoteThumbnailSend, VideoSend,
+    VoiceNoteSend, accept_call_with_protocol, add_chat_to_list, add_chat_to_list_value,
+    add_contact, add_message_reaction, add_recently_found_chat, ban_group_call_participants,
+    chat_member_status_administrator_json, chat_member_status_member_json,
+    check_authentication_code, check_authentication_password, click_chat_sponsored_message,
+    close_chat, close_request, close_secret_chat as close_secret_chat_request, close_story,
+    create_call_with_protocol, create_chat_folder, create_chat_invite_link, create_new_secret_chat,
+    create_video_chat, decline_group_call_invitation, delete_chat_folder, delete_messages,
+    delete_story, discard_call as discard_call_request, download_file as download_file_request,
+    edit_chat_folder, edit_chat_invite_link, edit_message_caption, edit_message_text,
+    end_group_call, forward_messages, get_authorization_state, get_callback_query_answer,
+    get_chat_active_stories, get_chat_administrators, get_chat_event_log, get_chat_folder,
+    get_chat_history, get_chat_invite_links, get_chat_join_requests, get_chat_lists_to_add_chat,
+    get_chat_member, get_chat_sponsored_messages, get_chat_statistics, get_commands, get_contacts,
+    get_forum_topics, get_group_call, get_installed_sticker_sets, get_me, get_saved_animations,
     get_saved_notification_sounds, get_scope_notification_settings, get_secret_chat,
     get_sticker_set, get_story, get_story_available_reactions, get_supergroup,
     get_supergroup_full_info, get_supergroup_members, get_user_full_info,
-    get_video_chat_invite_link, input_message_photo, input_message_video, join_chat,
-    join_video_chat, leave_chat, leave_group_call, load_active_stories, load_chats,
-    load_chats_list, load_group_call_participants, open_chat, open_message_content, open_story,
-    pin_chat_message, process_chat_join_request, remove_message_reaction, reorder_chat_folders,
+    get_video_chat_invite_link, input_message_photo, input_message_video,
+    invite_group_call_participant, join_chat, join_group_call, join_video_chat, leave_chat,
+    leave_group_call, load_active_stories, load_chats, load_chats_list,
+    load_group_call_participants, open_chat, open_message_content, open_story, pin_chat_message,
+    process_chat_join_request, remove_message_reaction, reorder_chat_folders,
     report_chat_sponsored_message, revoke_chat_invite_link, search_chat_messages, search_chats,
     search_messages, search_public_chats, search_recently_found_chats, send_animation,
     send_call_debug_information, send_call_rating, send_call_signaling_data, send_chat_action,
@@ -62,12 +63,13 @@ use crate::telegram::requests::{
     send_text, send_text_story_reply, send_video, send_video_note, send_voice_note,
     set_authentication_phone_number, set_chat_draft_message, set_chat_member_status,
     set_chat_message_auto_delete_time, set_chat_notification_settings, set_chat_slow_mode_delay,
-    set_poll_answer, set_scope_notification_settings, set_story_reaction, set_video_chat_title,
-    supergroup_members_filter_recent_json, supergroup_members_filter_search_json,
-    toggle_chat_folder_tags, toggle_group_call_is_my_video_enabled,
-    toggle_group_call_is_my_video_paused, toggle_group_call_participant_is_hand_raised,
-    toggle_group_call_participant_is_muted, toggle_video_chat_mute_new_participants,
-    unpin_chat_message, view_messages, view_sponsored_chat,
+    set_group_call_participant_volume_level, set_poll_answer, set_scope_notification_settings,
+    set_story_reaction, set_video_chat_title, supergroup_members_filter_recent_json,
+    supergroup_members_filter_search_json, toggle_chat_folder_tags,
+    toggle_group_call_is_my_video_enabled, toggle_group_call_is_my_video_paused,
+    toggle_group_call_participant_is_hand_raised, toggle_group_call_participant_is_muted,
+    toggle_video_chat_mute_new_participants, unpin_chat_message, view_messages,
+    view_sponsored_chat,
 };
 use crate::voice::VoiceDraft;
 use std::collections::{HashMap, VecDeque};
@@ -779,6 +781,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         // Phase C3a: freshly created voice chats get their full
         // `groupCall` via `getGroupCall`.
         let _ = self.maybe_fetch_group_calls();
+        // Phase C2f: a dropped group call (`need_rejoin`) auto-rejoins
+        // with the C2d attempt discipline (max 3).
+        let _ = self.maybe_auto_rejoin_group_call();
         self.maybe_load_selected_sticker_set()?;
         self.maybe_refresh_saved_animations()?;
         if chat_search_hits {
@@ -2283,19 +2288,28 @@ impl<S: JsonSender> ConnectDriver<S> {
         Ok(())
     }
 
-    /// Phase C3a: rejoin after `need_rejoin` (schema 1.8.67, line 7154
+    /// Phase C2f: rejoin after `need_rejoin` (schema 1.8.67, line 7154
     /// docs: "user was kicked from the call because of network loss and
-    /// the call needs to be rejoined"). Clears the `reconnecting` flag
-    /// and re-issues `joinVideoChat` with the current self-mute state.
-    pub fn rejoin_group_call(&mut self) -> Result<RequestId, ConnectSendError> {
+    /// the call needs to be rejoined"). Same attempt discipline as the
+    /// C2d 1:1 reconnect: at most 3 attempts with identical join params
+    /// (current self-mute state, honest no-device). A failed attempt
+    /// re-arms `reconnecting` via the `JoinVideoChat` error arm so the
+    /// driver's auto-rejoin retries; `manual` (the UI Rejoin button)
+    /// resets the counter — explicit user intent starts the attempts
+    /// over.
+    pub fn rejoin_group_call(&mut self, manual: bool) -> Result<RequestId, ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
+        if manual && let Some(call) = self.session.active_group_call.as_mut() {
+            call.rejoin_attempts = 0;
+        }
         let (group_call_id, is_muted) = match &self.session.active_group_call {
-            Some(call) if call.reconnecting => (call.id, call.is_muted_self),
+            Some(call) if call.reconnecting && call.rejoin_attempts < 3 => {
+                (call.id, call.is_muted_self)
+            }
             _ => return Err(ConnectSendError::InvalidRequest),
         };
-        self.session.clear_group_call_reconnecting();
         let extra = self
             .session
             .request(RequestPurpose::JoinVideoChat { group_call_id }, None);
@@ -2306,9 +2320,34 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .send_json(&join_video_chat(extra, group_call_id, None, &params, ""))
         {
             self.session.requests.take(extra);
+            // The attempt never went out: re-arm so the next ingest
+            // retries instead of stranding the call.
+            if let Some(call) = self.session.active_group_call.as_mut() {
+                call.reconnecting = true;
+            }
             return Err(err);
         }
+        if let Some(call) = self.session.active_group_call.as_mut() {
+            call.rejoin_attempts += 1;
+            call.reconnecting = false;
+        }
         Ok(extra)
+    }
+
+    /// Phase C2f: auto-rejoin a dropped group call (`need_rejoin`) —
+    /// one attempt per ingest tick while the tracked call still wants
+    /// reconnecting and attempts remain (the `rejoin_group_call`
+    /// guard caps at 3, the C2d discipline).
+    fn maybe_auto_rejoin_group_call(&mut self) -> Result<(), ConnectSendError> {
+        let wants = self
+            .session
+            .active_group_call
+            .as_ref()
+            .is_some_and(|call| call.reconnecting && call.rejoin_attempts < 3);
+        if wants {
+            let _ = self.rejoin_group_call(false);
+        }
+        Ok(())
     }
 
     /// Phase C3a: `leaveGroupCall` (schema 1.8.67, :14458). Drops the
@@ -2489,6 +2528,166 @@ impl<S: JsonSender> ConnectDriver<S> {
                 &sender_ref,
                 raise,
             ))
+        {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(extra)
+    }
+
+    /// Phase C2f: `inviteGroupCallParticipant` (schema 1.8.67,
+    /// :14375). `is_video` follows the tracked call's `is_video_chat`.
+    pub fn invite_group_call_participant(
+        &mut self,
+        user_id: i64,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let (group_call_id, is_video) = match &self.session.active_group_call {
+            Some(call) => (call.id, call.is_video_chat),
+            None => return Err(ConnectSendError::InvalidRequest),
+        };
+        let extra = self.session.request(
+            RequestPurpose::InviteGroupCallParticipant { group_call_id },
+            None,
+        );
+        if let Err(err) = self.sender.send_json(&invite_group_call_participant(
+            extra,
+            group_call_id,
+            user_id,
+            is_video,
+        )) {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(extra)
+    }
+
+    /// Phase C2f: `banGroupCallParticipants` (schema 1.8.67, :14385)
+    /// for a single participant. Takes `user_ids` (int64 user ids —
+    /// `messageSenderChat` participants cannot be banned); requires
+    /// `groupCall.is_owned` — the owner can ban, not `can_be_managed`
+    /// admins (that's "for video chats and live stories only").
+    pub fn ban_group_call_participant(
+        &mut self,
+        user_id: i64,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let group_call_id = match &self.session.active_group_call {
+            Some(call) if call.is_owned => call.id,
+            _ => return Err(ConnectSendError::InvalidRequest),
+        };
+        let extra = self.session.request(
+            RequestPurpose::BanGroupCallParticipants { group_call_id },
+            None,
+        );
+        if let Err(err) = self.sender.send_json(&ban_group_call_participants(
+            extra,
+            group_call_id,
+            &[user_id],
+        )) {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(extra)
+    }
+
+    /// Phase C2f: `setGroupCallParticipantVolumeLevel` (schema 1.8.67,
+    /// :14438). Clamps to the schema's 1-20000 (hundreds of percents)
+    /// before sending.
+    pub fn set_group_call_participant_volume(
+        &mut self,
+        participant_id: MessageSender,
+        volume_level: i32,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let group_call_id = match &self.session.active_group_call {
+            Some(call) => call.id,
+            None => return Err(ConnectSendError::InvalidRequest),
+        };
+        let sender_ref = match participant_id {
+            MessageSender::User { user_id } => MessageSenderRef::User(user_id),
+            MessageSender::Chat { chat_id } => MessageSenderRef::Chat(chat_id),
+        };
+        let extra = self.session.request(
+            RequestPurpose::SetGroupCallParticipantVolumeLevel { group_call_id },
+            None,
+        );
+        if let Err(err) = self
+            .sender
+            .send_json(&set_group_call_participant_volume_level(
+                extra,
+                group_call_id,
+                &sender_ref,
+                volume_level.clamp(1, 20000),
+            ))
+        {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(extra)
+    }
+
+    /// Phase C2f: accept a `messageGroupCall` invitation via
+    /// `joinGroupCall` (schema 1.8.67, line 5288: "Use joinGroupCall
+    /// to accept the call"). Refuses while a 1:1 call is active, like
+    /// the chat-bound join; the joined call is tracked via
+    /// `updateGroupCall`.
+    pub fn accept_group_call_invitation(
+        &mut self,
+        chat_id: i64,
+        message_id: i64,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if self.session.active_call.is_some() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::JoinGroupCallInvitation, None);
+        let input = InputGroupCallRef::Message {
+            chat_id,
+            message_id,
+        };
+        let params = GroupCallJoinParams::honest_no_device();
+        if let Err(err) = self
+            .sender
+            .send_json(&join_group_call(extra, &input, &params))
+        {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(extra)
+    }
+
+    /// Phase C2f: `declineGroupCallInvitation` (schema 1.8.67,
+    /// :14380) — declines (or cancels, for the sender) a
+    /// `messageGroupCall` invitation.
+    pub fn decline_group_call_invitation(
+        &mut self,
+        chat_id: i64,
+        message_id: i64,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self.session.request(
+            RequestPurpose::DeclineGroupCallInvitation {
+                chat_id,
+                message_id,
+            },
+            None,
+        );
+        if let Err(err) = self
+            .sender
+            .send_json(&decline_group_call_invitation(extra, chat_id, message_id))
         {
             self.session.requests.take(extra);
             return Err(err);
@@ -6469,6 +6668,7 @@ mod tests {
     };
     use crate::diagnostics::MemorySink;
     use crate::platform::MemorySecretStore;
+    use crate::state::{ActiveCall, ActiveGroupCall};
     use crate::telegram::client::copy_and_parse;
     use crate::telegram::envelope::ChannelMemberStatus;
     use serde_json::Value;
@@ -12614,5 +12814,343 @@ mod tests {
         );
         assert!(driver.latest_video_frame(77, false).is_none());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+    fn group_call_test_driver() -> (
+        std::path::PathBuf,
+        Arc<RecordingSender>,
+        ConnectDriver<Arc<RecordingSender>>,
+        AtomicU64,
+    ) {
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = Arc::new(RecordingSender::new());
+        let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+        let mut driver =
+            ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+        let seq = AtomicU64::new(0);
+        driver
+            .ingest(
+                copy_and_parse(
+                    r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        (dir, recorder, driver, seq)
+    }
+
+    fn tracked_group_call(
+        need_rejoin: bool,
+        can_be_managed: bool,
+        is_owned: bool,
+    ) -> ActiveGroupCall {
+        ActiveGroupCall {
+            id: 77,
+            title: "Team voice".into(),
+            is_video_chat: false,
+            is_joined: true,
+            need_rejoin,
+            reconnecting: false,
+            rejoin_attempts: 0,
+            can_be_managed,
+            is_owned,
+            participant_count: 1,
+            loaded_all_participants: false,
+            participants: Vec::new(),
+            recent_speaker_order: Vec::new(),
+            is_muted_self: true,
+            is_my_video_enabled: false,
+            is_my_video_paused: false,
+            can_enable_video: false,
+            mute_new_participants: false,
+            can_toggle_mute_new_participants: false,
+            verification: None,
+            join_payload: String::new(),
+            invite_link: None,
+        }
+    }
+
+    /// Phase C2f: participant-management request shapes and gates
+    /// (schema 1.8.67 — inviteGroupCallParticipant :14375,
+    /// banGroupCallParticipants :14385,
+    /// setGroupCallParticipantVolumeLevel :14438,
+    /// declineGroupCallInvitation :14380, joinGroupCall :14285).
+    #[test]
+    fn driver_group_call_participant_management_shapes_and_gates() {
+        let (dir, recorder, mut driver, _seq) = group_call_test_driver();
+        let last_sent =
+            || serde_json::from_str::<Value>(recorder.snapshot().last().unwrap()).unwrap();
+
+        // Gates with no active group call.
+        assert_eq!(
+            driver.invite_group_call_participant(7),
+            Err(ConnectSendError::InvalidRequest)
+        );
+        assert_eq!(
+            driver.ban_group_call_participant(7),
+            Err(ConnectSendError::InvalidRequest)
+        );
+        assert_eq!(
+            driver.set_group_call_participant_volume(MessageSender::User { user_id: 7 }, 10000),
+            Err(ConnectSendError::InvalidRequest)
+        );
+        // Decline needs no active call.
+        driver
+            .decline_group_call_invitation(3, 42)
+            .expect("decline sends without an active call");
+        let sent = last_sent();
+        assert_eq!(sent["@type"], "declineGroupCallInvitation");
+        assert_eq!(sent["chat_id"], 3);
+        assert_eq!(sent["message_id"], 42);
+
+        driver.session.active_group_call = Some(tracked_group_call(false, true, false));
+
+        // Invite: shape follows schema 1.8.67 :14375; `is_video`
+        // follows the tracked call.
+        driver
+            .invite_group_call_participant(7)
+            .expect("invite sends");
+        let sent = last_sent();
+        assert_eq!(sent["@type"], "inviteGroupCallParticipant");
+        assert_eq!(sent["group_call_id"], 77);
+        assert_eq!(sent["user_id"], 7);
+        assert_eq!(sent["is_video"], false);
+
+        // Ban: schema :14385 takes `user_ids:vector<int64>` (the
+        // plural constructor), owner-gated on `groupCall.is_owned` —
+        // `can_be_managed` is "for video chats and live stories only"
+        // and does NOT grant ban rights in a voice chat.
+        driver.session.active_group_call = Some(tracked_group_call(false, true, false));
+        assert_eq!(
+            driver.ban_group_call_participant(9),
+            Err(ConnectSendError::InvalidRequest),
+            "can_be_managed=true but is_owned=false must refuse"
+        );
+        driver.session.active_group_call = Some(tracked_group_call(false, false, true));
+        driver
+            .ban_group_call_participant(9)
+            .expect("ban sends for owner");
+        let sent = last_sent();
+        assert_eq!(sent["@type"], "banGroupCallParticipants");
+        assert_eq!(sent["group_call_id"], 77);
+        assert_eq!(sent["user_ids"], serde_json::json!([9]));
+        driver.session.active_group_call = Some(tracked_group_call(false, true, true));
+
+        // Volume: schema :14438, 1-20000 (hundreds of percents).
+        driver
+            .set_group_call_participant_volume(MessageSender::User { user_id: 7 }, 5000)
+            .expect("volume sends");
+        let sent = last_sent();
+        assert_eq!(sent["@type"], "setGroupCallParticipantVolumeLevel");
+        assert_eq!(sent["group_call_id"], 77);
+        assert_eq!(sent["volume_level"], 5000);
+        assert_eq!(sent["participant_id"]["@type"], "messageSenderUser");
+        assert_eq!(sent["participant_id"]["user_id"], 7);
+        // Out-of-range levels clamp to the schema's 1-20000.
+        driver
+            .set_group_call_participant_volume(MessageSender::User { user_id: 7 }, 0)
+            .expect("volume 0 clamps");
+        assert_eq!(last_sent()["volume_level"], 1);
+        driver
+            .set_group_call_participant_volume(MessageSender::User { user_id: 7 }, 30_000)
+            .expect("volume 30000 clamps");
+        assert_eq!(last_sent()["volume_level"], 20000);
+
+        // Accept: `joinGroupCall` with `inputGroupCallMessage`
+        // (schema line 5288: accept via joinGroupCall). Refuses while
+        // a 1:1 call is active.
+        driver
+            .accept_group_call_invitation(3, 42)
+            .expect("accept sends without an active call");
+        let sent = last_sent();
+        assert_eq!(sent["@type"], "joinGroupCall");
+        assert_eq!(sent["input_group_call"]["@type"], "inputGroupCallMessage");
+        assert_eq!(sent["input_group_call"]["chat_id"], 3);
+        assert_eq!(sent["input_group_call"]["message_id"], 42);
+        driver.session.active_call = Some(ActiveCall {
+            id: 5,
+            user_id: 11,
+            is_outgoing: true,
+            is_video: false,
+            state: CallState::Pending {
+                is_created: true,
+                is_received: false,
+            },
+            started_at: std::time::Instant::now(),
+            ready_at: None,
+            ready: None,
+            transport: None,
+            transport_error: None,
+            signaling_queue: Vec::new(),
+            signaling_dropped: 0,
+            muted: false,
+            camera_on: false,
+            remote_video: RemoteVideoState::Inactive,
+        });
+        assert_eq!(
+            driver.accept_group_call_invitation(3, 42),
+            Err(ConnectSendError::InvalidRequest)
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Phase C2f: `joinGroupCall` success (`groupCallInfo`, schema
+    /// 1.8.67 :7190) triggers a `getGroupCall` fetch so the accepted
+    /// call gets tracked; the join payload is stored like the
+    /// `joinVideoChat` Text arm.
+    #[test]
+    fn driver_group_call_invitation_accept_starts_tracking() {
+        let (dir, recorder, mut driver, seq) = group_call_test_driver();
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        driver
+            .accept_group_call_invitation(3, 42)
+            .expect("accept sends");
+        let sent: Value = serde_json::from_str(recorder.snapshot().last().unwrap()).unwrap();
+        let extra = sent["@extra"].as_str().unwrap().to_string();
+        driver
+            .ingest(
+                copy_and_parse(
+                    &format!(
+                        r#"{{"@type":"groupCallInfo","group_call_id":555,"join_payload":"payload-1","@extra":"{extra}"}}"#
+                    ),
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        // The fetch queue is drained by `maybe_fetch_group_calls`
+        // during ingest — assert the `getGroupCall` went out.
+        let sent: Value = serde_json::from_str(recorder.snapshot().last().unwrap()).unwrap();
+        assert_eq!(sent["@type"], "getGroupCall");
+        assert_eq!(sent["group_call_id"], 555);
+        assert_eq!(driver.session.group_call_error, None);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Phase C2f: auto-rejoin discipline — a `need_rejoin` group call
+    /// rejoins automatically (max 3 attempts, retaining the join
+    /// parameters and self-mute); a clean joined `updateGroupCall`
+    /// resets the counter; manual retry resets it too.
+    #[test]
+    fn driver_auto_rejoin_group_call_discipline() {
+        let (dir, recorder, mut driver, seq) = group_call_test_driver();
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let join_sends = || {
+            recorder
+                .snapshot()
+                .into_iter()
+                .filter(|json| json.contains("\"joinVideoChat\""))
+                .count()
+        };
+        let fail_last_join = |driver: &mut ConnectDriver<Arc<RecordingSender>>| {
+            let sent: Value = serde_json::from_str(recorder.snapshot().last().unwrap()).unwrap();
+            let extra = sent["@extra"].as_str().unwrap().to_string();
+            driver
+                .ingest(
+                    copy_and_parse(
+                        &format!(
+                            r#"{{"@type":"error","code":500,"message":"BOOM","@extra":"{extra}"}}"#
+                        ),
+                        &seq,
+                        &dyn_sink,
+                    )
+                    .unwrap(),
+                )
+                .unwrap();
+        };
+
+        // No tracked call: nothing to rejoin.
+        assert!(driver.maybe_auto_rejoin_group_call().is_ok());
+        assert_eq!(join_sends(), 0);
+
+        driver.session.active_group_call = Some(tracked_group_call(true, false, false));
+        driver
+            .session
+            .active_group_call
+            .as_mut()
+            .unwrap()
+            .reconnecting = true;
+
+        // Three attempts, each followed by a TDLib join failure that
+        // re-arms the reconnecting banner (the C2d discipline).
+        for attempt in 1..=3 {
+            driver.maybe_auto_rejoin_group_call().expect("rejoin sends");
+            assert_eq!(join_sends(), attempt);
+            let sent: Value = serde_json::from_str(recorder.snapshot().last().unwrap()).unwrap();
+            assert_eq!(sent["@type"], "joinVideoChat");
+            assert_eq!(sent["group_call_id"], 77);
+            // Honest no-device params, retaining the self-mute.
+            assert_eq!(sent["join_parameters"]["audio_source_id"], 0);
+            assert_eq!(sent["join_parameters"]["is_muted"], true);
+            assert_eq!(
+                driver
+                    .session
+                    .active_group_call
+                    .as_ref()
+                    .unwrap()
+                    .rejoin_attempts,
+                attempt
+            );
+            fail_last_join(&mut driver);
+        }
+        // Exhausted: the error line is honest and no more attempts go
+        // out — the banner + manual Rejoin remain the way out.
+        assert_eq!(
+            driver.session.group_call_error.as_deref(),
+            Some("Reconnect attempts exhausted.")
+        );
+        assert!(driver.maybe_auto_rejoin_group_call().is_ok());
+        assert_eq!(join_sends(), 3);
+
+        // A clean joined `updateGroupCall` resets the counter, clears
+        // the banner, and drops the stale error line.
+        driver
+            .ingest(
+                copy_and_parse(
+                    r#"{"@type":"updateGroupCall","group_call":{"@type":"groupCall","id":77,"title":"Team voice","is_active":true,"is_video_chat":false,"is_joined":true,"need_rejoin":false,"can_be_managed":false,"is_owned":false,"participant_count":1,"loaded_all_participants":false,"recent_speakers":[],"is_my_video_enabled":false,"is_my_video_paused":false,"can_enable_video":false,"mute_new_participants":false,"can_toggle_mute_new_participants":false,"can_change_title":false,"can_change_desc":false,"can_change_emoji":false,"scheduled_start_date":0,"title":"","description":"","emoji":""}}"#,
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        let call = driver.session.active_group_call.as_ref().unwrap();
+        assert_eq!(call.rejoin_attempts, 0);
+        assert!(!call.reconnecting);
+        assert_eq!(driver.session.group_call_error, None);
+
+        // Manual retry resets the counter: with `need_rejoin` back,
+        // three fresh auto attempts are allowed after
+        // `rejoin_group_call(true)`.
+        call_state_for_rejoin(&mut driver);
+        driver.rejoin_group_call(true).expect("manual retry sends");
+        assert_eq!(
+            driver
+                .session
+                .active_group_call
+                .as_ref()
+                .unwrap()
+                .rejoin_attempts,
+            1
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn call_state_for_rejoin(driver: &mut ConnectDriver<Arc<RecordingSender>>) {
+        let call = tracked_group_call(true, false, false);
+        driver.session.active_group_call = Some(call);
+        driver
+            .session
+            .active_group_call
+            .as_mut()
+            .unwrap()
+            .reconnecting = true;
     }
 }

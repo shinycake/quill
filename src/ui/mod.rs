@@ -647,6 +647,8 @@ pub struct QuillApp {
     ttl_picker_open: bool,
     /// Phase C3a: voice-chat title rename dialog (`setVideoChatTitle`).
     group_call_title_dialog: Option<GroupCallTitleDialog>,
+    /// Phase C2f: voice-chat invite picker overlay (contacts list).
+    group_call_invite_open: bool,
     /// Parity slice: the notifications panel's sound picker sub-view is open.
     notif_sound_picker_open: bool,
     /// Parity slice: scope-default notification settings dialog is open.
@@ -1054,6 +1056,15 @@ pub enum ScreenshotDemo {
     /// emojis, self controls, admin controls, and the always-visible
     /// honest note "No audio yet — voice transport ships in Phase C2."
     ReadyGroupCall,
+    /// Phase C2f: group-call invite picker — the Ready voice chat with
+    /// the invite panel open (two contacts seeded), per-participant
+    /// volume steppers and owner-gated Ban buttons (injected, no live
+    /// Telegram).
+    ReadyGroupCallInvite,
+    /// Phase C2f: incoming `messageGroupCall` invitation in a Ready
+    /// group chat's history, with Accept / Decline (injected, no live
+    /// Telegram).
+    ReadyGroupCallInvitation,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1894,6 +1905,26 @@ impl QuillApp {
                     AuthorizationState::Ready,
                 )
             }
+            Some(ScreenshotDemo::ReadyGroupCallInvite) => {
+                demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
+                (
+                    ConnectUiStatus::DemoReadyChats,
+                    None,
+                    "screenshot demo — group voice chat invite picker (injected, no live Telegram)"
+                        .into(),
+                    AuthorizationState::Ready,
+                )
+            }
+            Some(ScreenshotDemo::ReadyGroupCallInvitation) => {
+                demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
+                (
+                    ConnectUiStatus::DemoReadyChats,
+                    None,
+                    "screenshot demo — incoming voice-chat invitation (injected, no live Telegram)"
+                        .into(),
+                    AuthorizationState::Ready,
+                )
+            }
             None => bootstrap_connect(credentials),
         };
 
@@ -2001,6 +2032,7 @@ impl QuillApp {
             mute_menu_open: false,
             ttl_picker_open: false,
             group_call_title_dialog: None,
+            group_call_invite_open: false,
             notif_sound_picker_open: false,
             notification_defaults_open: false,
             defaults_sound_picker: None,
@@ -2496,6 +2528,25 @@ impl QuillApp {
             }
             app.status_note =
                 "screenshot demo — group voice chat (injected, no live Telegram)".into();
+        }
+        if matches!(demo, Some(ScreenshotDemo::ReadyGroupCallInvite)) {
+            if let Some(session) = app.demo_session.as_mut() {
+                app.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_group_call_invite(session, &app.demo_sink, &app.demo_seq);
+            }
+            app.group_call_invite_open = true;
+            app.status_note =
+                "screenshot demo — group voice chat invite picker (injected, no live Telegram)"
+                    .into();
+        }
+        if matches!(demo, Some(ScreenshotDemo::ReadyGroupCallInvitation)) {
+            if let Some(session) = app.demo_session.as_mut() {
+                app.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_group_call_invitation(session, &app.demo_sink, &app.demo_seq);
+            }
+            app.status_note =
+                "screenshot demo — incoming voice-chat invitation (injected, no live Telegram)"
+                    .into();
         }
         if matches!(demo, Some(ScreenshotDemo::ReadyVideoSend)) {
             app.composer.update(cx, |input, cx| {
@@ -3623,6 +3674,7 @@ impl QuillApp {
                         | MessageContent::Venue(_)
                         | MessageContent::Contact(_)
                         | MessageContent::Dice(_)
+                        | MessageContent::GroupCallInvitation { .. }
                         | MessageContent::ChatTtlChanged { .. }
                         | MessageContent::Unsupported { .. } => {}
                     }
@@ -10469,7 +10521,7 @@ impl QuillApp {
             badges.push("🖥 sharing".to_string());
         }
         let mut tile = div()
-            .w(px(150.))
+            .w(px(124.))
             .flex()
             .flex_col()
             .items_center()
@@ -10479,7 +10531,7 @@ impl QuillApp {
             .border_1()
             .border_color(cx.theme().border)
             .bg(cx.theme().background)
-            .child(initials_avatar(&name, 56.))
+            .child(initials_avatar(&name, 48.))
             .child(
                 div()
                     .text_xs()
@@ -10499,12 +10551,15 @@ impl QuillApp {
             );
         }
         // Phase C3a: admin participant controls, gated on the actual
-        // TDLib flags — mute for all, lower a raised hand.
+        // TDLib flags — mute for all, lower a raised hand. One wrapped
+        // row keeps tiles short (the grid scrolls past 320px).
         let sender = participant.participant_id.clone();
         if call.can_be_managed && !participant.is_current_user {
+            let mut admin_row = div().flex().flex_wrap().justify_center().gap_1();
+            let mut admin_count = 0;
             if participant.is_hand_raised {
                 let sender2 = sender.clone();
-                tile = tile.child(
+                admin_row = admin_row.child(
                     Button::new(format!("gc-lower-hand-{sender2:?}"))
                         .label("Lower hand")
                         .ghost()
@@ -10512,11 +10567,12 @@ impl QuillApp {
                             this.toggle_group_call_participant_hand(sender2.clone(), false, cx);
                         })),
                 );
+                admin_count += 1;
             }
             if participant.can_be_muted_for_all_users || participant.can_be_unmuted_for_all_users {
                 let mute = !participant.is_muted_for_all_users;
                 let sender2 = sender.clone();
-                tile = tile.child(
+                admin_row = admin_row.child(
                     Button::new(format!("gc-mute-participant-{sender2:?}"))
                         .label(if mute { "Mute" } else { "Unmute" })
                         .ghost()
@@ -10524,7 +10580,66 @@ impl QuillApp {
                             this.toggle_group_call_participant_muted(sender2.clone(), mute, cx);
                         })),
                 );
+                admin_count += 1;
             }
+            if admin_count > 0 {
+                tile = tile.child(admin_row);
+            }
+        }
+        // Phase C2f: ban (`banGroupCallParticipants` takes user ids
+        // only — `messageSenderChat` participants have no button).
+        // Owner-gated: schema requires `groupCall.is_owned`
+        // (`can_be_managed` is "for video chats and live stories
+        // only"), so this is its own block, not part of the admin row.
+        if call.is_owned && !participant.is_current_user {
+            if let MessageSender::User { user_id } = participant.participant_id {
+                tile = tile.child(
+                    div().flex().flex_wrap().justify_center().gap_1().child(
+                        Button::new(format!("gc-ban-participant-{user_id}"))
+                            .label("Ban")
+                            .ghost()
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.ban_group_call_participant(user_id, cx);
+                            })),
+                    ),
+                );
+            }
+        }
+        // Phase C2f: per-participant volume stepper
+        // (`setGroupCallParticipantVolumeLevel`; 1-20000 in hundreds
+        // of percents, stepped ±10%). Local playback volume — no
+        // admin right needed; self has no button.
+        if !participant.is_current_user {
+            let sender_down = sender;
+            let sender_up = sender;
+            tile = tile.child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_1()
+                    .child(
+                        Button::new(format!("gc-vol-down-{sender_down:?}"))
+                            .label("−")
+                            .ghost()
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.adjust_group_call_participant_volume(sender_down, -1000, cx);
+                            })),
+                    )
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(format!("🔊 {}%", participant.volume_level / 100)),
+                    )
+                    .child(
+                        Button::new(format!("gc-vol-up-{sender_up:?}"))
+                            .label("+")
+                            .ghost()
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.adjust_group_call_participant_volume(sender_up, 1000, cx);
+                            })),
+                    ),
+            );
         }
         tile
     }
@@ -10538,7 +10653,8 @@ impl QuillApp {
             .gap_3()
             .p_6()
             .w(px(600.))
-            .max_h(px(640.))
+            .max_h(px(720.))
+            .overflow_y_scroll()
             .rounded_lg()
             .border_1()
             .border_color(cx.theme().border)
@@ -10566,6 +10682,32 @@ impl QuillApp {
                         if call.participant_count == 1 { "" } else { "s" }
                     )),
             );
+
+        // Phase C2f: group-call request failures (`group_call_error`)
+        // were write-only before — surface them on the overlay with a
+        // dismiss, so invite/ban/volume/rejoin failures are honest.
+        if let Some(error) = self.session().and_then(|s| s.group_call_error.clone()) {
+            card = card.child(
+                div()
+                    .w_full()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .gap_2()
+                    .p_2()
+                    .rounded_md()
+                    .bg(rgb(0x3a1414))
+                    .child(div().text_sm().text_color(rgb(0xff8a8a)).child(error))
+                    .child(
+                        Button::new("group-call-error-dismiss")
+                            .label("Dismiss")
+                            .ghost()
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.dismiss_group_call_error(cx);
+                            })),
+                    ),
+            );
+        }
 
         if !call.is_joined {
             card = card.child(self.group_call_join_prompt(call, cx));
@@ -10646,6 +10788,8 @@ impl QuillApp {
 
         // Participant grid. Scrolls internally so the self/admin
         // controls below never clip when the roster is tall.
+        // `flex_shrink_0`: inside the scrolling card the grid must keep
+        // its own height instead of collapsing.
         let mut grid = div()
             .id("group-call-participants")
             .w_full()
@@ -10654,6 +10798,7 @@ impl QuillApp {
             .justify_center()
             .gap_2()
             .max_h(px(320.))
+            .flex_shrink_0()
             .overflow_y_scroll();
         for participant in &call.participants {
             grid = grid.child(self.group_call_participant_tile(call, participant, cx));
@@ -10727,6 +10872,14 @@ impl QuillApp {
                 this.leave_active_group_call(cx);
             }),
         ));
+        // Phase C2f: invite participants (`inviteGroupCallParticipant`).
+        controls = controls.child(
+            Button::new("group-call-invite-participant")
+                .label("Invite")
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.open_group_call_invite(cx);
+                })),
+        );
         card = card.child(controls);
         card = card.child(
             div()
@@ -10827,7 +10980,175 @@ impl QuillApp {
             );
         }
 
+        // Phase C2f: invite picker — contacts not already in the call.
+        if self.group_call_invite_open {
+            card = card.child(self.group_call_invite_panel(call, cx));
+        }
+
         card
+    }
+
+    /// Phase C2f: the invite picker panel — contact rows with Invite
+    /// buttons (`inviteGroupCallParticipant`); contacts already in the
+    /// call are excluded.
+    fn group_call_invite_panel(
+        &self,
+        call: &ActiveGroupCall,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let in_call: std::collections::HashSet<i64> = call
+            .participants
+            .iter()
+            .filter_map(|p| match p.participant_id {
+                MessageSender::User { user_id } => Some(user_id),
+                _ => None,
+            })
+            .collect();
+        let mut panel = div()
+            .id("group-call-invite-panel")
+            .w_full()
+            .flex()
+            .flex_col()
+            .gap_2()
+            .p_3()
+            .rounded_md()
+            .border_1()
+            .border_color(cx.theme().border)
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .child(
+                        div()
+                            .text_sm()
+                            .font_semibold()
+                            .child("Invite to voice chat"),
+                    )
+                    .child(
+                        Button::new("group-call-invite-close")
+                            .label("Close")
+                            .ghost()
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.group_call_invite_open = false;
+                                cx.notify();
+                            })),
+                    ),
+            );
+        let contacts = self
+            .session()
+            .and_then(|s| s.contacts.clone())
+            .unwrap_or_default();
+        let mut rows = div()
+            .id("group-call-invite-rows")
+            .flex()
+            .flex_col()
+            .gap_1()
+            .max_h(px(200.))
+            .overflow_y_scroll();
+        let mut shown = 0;
+        for user_id in contacts.iter().filter(|id| !in_call.contains(id)).take(30) {
+            let name = self
+                .session()
+                .and_then(|s| s.user(*user_id))
+                .map(|u| u.display_name())
+                .unwrap_or_else(|| format!("User {user_id}"));
+            let uid = *user_id;
+            rows = rows.child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .child(div().text_sm().child(name))
+                    .child(
+                        Button::new(format!("gc-invite-{uid}"))
+                            .label("Invite")
+                            .ghost()
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.invite_group_call_participant(uid, cx);
+                            })),
+                    ),
+            );
+            shown += 1;
+        }
+        if shown == 0 {
+            panel = panel.child(
+                div()
+                    .text_sm()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("No contacts to invite."),
+            );
+        } else {
+            panel = panel.child(rows);
+        }
+        panel
+    }
+
+    /// Phase C2f: `messageGroupCall` invitation service row (schema
+    /// 1.8.67, line 5288). Incoming and pending: Accept / Decline.
+    /// Anything else (own sent, missed, active) is a neutral service
+    /// notice — TDLib updates refresh the row when the call starts or
+    /// ends. Free function: `session_history_row` is not a method.
+    fn group_call_invitation_row(
+        message: &HistoryMessage,
+        is_active: bool,
+        was_missed: bool,
+        is_video: bool,
+        cx: &mut Context<QuillApp>,
+    ) -> impl IntoElement {
+        let kind = if is_video { "video chat" } else { "voice chat" };
+        let mut inner = div().flex().flex_col().items_center().gap_2();
+        if !message.is_outgoing && !is_active && !was_missed {
+            let chat_id = message.chat_id;
+            let message_id = message.id;
+            inner = inner
+                .child(
+                    div()
+                        .text_sm()
+                        .font_semibold()
+                        .child(format!("📞 Incoming {kind} invitation")),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .gap_2()
+                        .child(
+                            Button::new(format!("gc-invite-accept-{}", message_id.0))
+                                .label("Accept")
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.accept_group_call_invitation(chat_id, message_id, cx);
+                                })),
+                        )
+                        .child(
+                            Button::new(format!("gc-invite-decline-{}", message_id.0))
+                                .label("Decline")
+                                .ghost()
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.decline_group_call_invitation(chat_id, message_id, cx);
+                                })),
+                        ),
+                );
+        } else {
+            let state = if was_missed {
+                " · missed"
+            } else if is_active {
+                " · in progress"
+            } else {
+                ""
+            };
+            inner = inner.child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(format!("📞 {kind} invitation{state}")),
+            );
+        }
+        div()
+            .id(("gc-invitation-row", message.id.0 as u64))
+            .flex()
+            .justify_center()
+            .py_1()
+            .child(inner)
     }
 
     // ── Phase C3a: group-call action handlers ──
@@ -10912,7 +11233,7 @@ impl QuillApp {
     /// Phase C3a: rejoin after `need_rejoin`.
     fn rejoin_active_group_call(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            self.status_note = match live.driver.rejoin_group_call() {
+            self.status_note = match live.driver.rejoin_group_call(true) {
                 Ok(_) => "Rejoining voice chat…".into(),
                 Err(_) => "Couldn't rejoin the voice chat.".into(),
             };
@@ -11037,6 +11358,150 @@ impl QuillApp {
             };
         } else {
             self.status_note = "Hand controls need a live connection.".into();
+        }
+        cx.notify();
+    }
+
+    /// Phase C2f: open the invite picker; fetch contacts first when
+    /// the cache is empty.
+    fn open_group_call_invite(&mut self, cx: &mut Context<Self>) {
+        self.group_call_invite_open = true;
+        if let Some(live) = self.live.as_mut()
+            && live.driver.session.contacts.is_none()
+        {
+            let _ = live.driver.fetch_contacts();
+        }
+        cx.notify();
+    }
+
+    /// Phase C2f: `inviteGroupCallParticipant` for a picked contact.
+    /// The `InviteGroupCallParticipantResult` answer lands in
+    /// `group_call_error` (shown on the overlay) when it is not a
+    /// success.
+    fn invite_group_call_participant(&mut self, user_id: i64, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            self.status_note = match live.driver.invite_group_call_participant(user_id) {
+                Ok(_) => "Invitation sent…".into(),
+                Err(_) => "Couldn't invite to the voice chat.".into(),
+            };
+        } else if self.demo_session.is_some() {
+            self.status_note =
+                "screenshot demo — invitation sent (injected, no live Telegram)".into();
+        } else {
+            self.status_note = "Invites need a live connection.".into();
+        }
+        cx.notify();
+    }
+
+    /// Phase C2f: `banGroupCallParticipants` for one participant
+    /// (owner-gated by the driver on `groupCall.is_owned`).
+    fn ban_group_call_participant(&mut self, user_id: i64, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            self.status_note = match live.driver.ban_group_call_participant(user_id) {
+                Ok(_) => "Banning participant…".into(),
+                Err(_) => "Couldn't ban the participant.".into(),
+            };
+        } else if self.demo_session.is_some() {
+            self.status_note =
+                "screenshot demo — participant banned (injected, no live Telegram)".into();
+        } else {
+            self.status_note = "Ban needs a live connection.".into();
+        }
+        cx.notify();
+    }
+
+    /// Phase C2f: `setGroupCallParticipantVolumeLevel`, stepped by
+    /// `delta` (hundreds of percents) from the participant's current
+    /// level.
+    fn adjust_group_call_participant_volume(
+        &mut self,
+        sender: MessageSender,
+        delta: i32,
+        cx: &mut Context<Self>,
+    ) {
+        let current = self
+            .session()
+            .and_then(|s| s.active_group_call.as_ref())
+            .and_then(|call| {
+                call.participants
+                    .iter()
+                    .find(|p| p.participant_id == sender)
+            })
+            .map(|p| p.volume_level)
+            .unwrap_or(10000);
+        let level = (current + delta).clamp(1, 20000);
+        if let Some(live) = self.live.as_mut() {
+            self.status_note = match live.driver.set_group_call_participant_volume(sender, level) {
+                Ok(_) => format!("Volume {}%.", level / 100),
+                Err(_) => "Couldn't change the participant volume.".into(),
+            };
+        } else if self.demo_session.is_some() {
+            self.status_note = format!(
+                "screenshot demo — volume {}% (injected, no live Telegram)",
+                level / 100
+            );
+        } else {
+            self.status_note = "Volume needs a live connection.".into();
+        }
+        cx.notify();
+    }
+
+    /// Phase C2f: accept a `messageGroupCall` invitation via
+    /// `joinGroupCall` (schema 1.8.67, line 5288).
+    fn accept_group_call_invitation(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(live) = self.live.as_mut() {
+            self.status_note = match live
+                .driver
+                .accept_group_call_invitation(chat_id.0, message_id.0)
+            {
+                Ok(_) => "Joining voice chat…".into(),
+                Err(_) => "Couldn't join the voice chat.".into(),
+            };
+        } else if self.demo_session.is_some() {
+            self.status_note =
+                "screenshot demo — invitation accepted (injected, no live Telegram)".into();
+        } else {
+            self.status_note = "Voice chats need a live connection.".into();
+        }
+        cx.notify();
+    }
+
+    /// Phase C2f: decline a `messageGroupCall` invitation via
+    /// `declineGroupCallInvitation`.
+    fn decline_group_call_invitation(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(live) = self.live.as_mut() {
+            self.status_note = match live
+                .driver
+                .decline_group_call_invitation(chat_id.0, message_id.0)
+            {
+                Ok(_) => "Invitation declined.".into(),
+                Err(_) => "Couldn't decline the invitation.".into(),
+            };
+        } else if self.demo_session.is_some() {
+            self.status_note =
+                "screenshot demo — invitation declined (injected, no live Telegram)".into();
+        } else {
+            self.status_note = "Voice chats need a live connection.".into();
+        }
+        cx.notify();
+    }
+
+    /// Phase C2f: dismiss the group-call error line on the overlay.
+    fn dismiss_group_call_error(&mut self, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            live.driver.session.group_call_error = None;
+        } else if let Some(session) = self.demo_session.as_mut() {
+            session.group_call_error = None;
         }
         cx.notify();
     }
@@ -18830,7 +19295,9 @@ fn apply_ready_call_video(session: &mut Session, sink: &Arc<MemorySink>, seq: &A
 /// demo user (777), with Zed speaking, Mia's hand raised, and one
 /// muted participant, plus E2E verification emojis. The overlay
 /// renders its participant grid, controls, and the honest no-audio
-/// note. Injected, no live Telegram, no media.
+/// note. The demo user OWNS the chat (`is_owned: true`) so the
+/// owner-gated Ban buttons render. Injected, no live Telegram, no
+/// media.
 fn apply_ready_group_call(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
     let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
     let chat_id = 51i64;
@@ -18857,7 +19324,7 @@ fn apply_ready_group_call(session: &mut Session, sink: &Arc<MemorySink>, seq: &A
             r#"{{"@type":"updateChatVideoChat","chat_id":{chat_id},"video_chat":{{"@type":"videoChat","group_call_id":{call_id},"has_participants":true,"default_participant_id":null}}}}"#
         ),
         format!(
-            r#"{{"@type":"updateGroupCall","group_call":{{"@type":"groupCall","id":{call_id},"unique_id":"999","title":"Weekly design sync","invite_link":"","paid_message_star_count":0,"scheduled_start_date":0,"enabled_start_notification":false,"is_active":true,"is_video_chat":true,"is_live_story":false,"is_rtmp_stream":false,"is_joined":true,"need_rejoin":false,"is_owned":false,"can_be_managed":true,"participant_count":4,"has_hidden_listeners":false,"loaded_all_participants":true,"message_sender_id":null,"recent_speakers":[{{"@type":"groupCallRecentSpeaker","participant_id":{{"@type":"messageSenderUser","user_id":41}},"is_speaking":true}}],"is_my_video_enabled":false,"is_my_video_paused":false,"can_enable_video":true,"mute_new_participants":false,"can_toggle_mute_new_participants":true,"can_send_messages":true,"are_messages_allowed":true,"can_toggle_are_messages_allowed":false,"can_delete_messages":false,"record_duration":0,"is_video_recorded":false,"duration":0}}}}"#
+            r#"{{"@type":"updateGroupCall","group_call":{{"@type":"groupCall","id":{call_id},"unique_id":"999","title":"Weekly design sync","invite_link":"","paid_message_star_count":0,"scheduled_start_date":0,"enabled_start_notification":false,"is_active":true,"is_video_chat":true,"is_live_story":false,"is_rtmp_stream":false,"is_joined":true,"need_rejoin":false,"is_owned":true,"can_be_managed":true,"participant_count":4,"has_hidden_listeners":false,"loaded_all_participants":true,"message_sender_id":null,"recent_speakers":[{{"@type":"groupCallRecentSpeaker","participant_id":{{"@type":"messageSenderUser","user_id":41}},"is_speaking":true}}],"is_my_video_enabled":false,"is_my_video_paused":false,"can_enable_video":true,"mute_new_participants":false,"can_toggle_mute_new_participants":true,"can_send_messages":true,"are_messages_allowed":true,"can_toggle_are_messages_allowed":false,"can_delete_messages":false,"record_duration":0,"is_video_recorded":false,"duration":0}}}}"#
         ),
         participant(777, r#","is_current_user":true"#, "a4"),
         participant(41, r#","is_speaking":true"#, "a3"),
@@ -18875,6 +19342,56 @@ fn apply_ready_group_call(session: &mut Session, sink: &Arc<MemorySink>, seq: &A
     session.open_chat(ChatId(chat_id));
 }
 
+/// Phase C2f: invite-picker fixture — the Ready group voice chat plus
+/// two extra contacts (Lena, Omar) not in the call; `session.contacts`
+/// is seeded so the invite picker lists them (Zed is already in the
+/// call, so the picker excludes him).
+fn apply_ready_group_call_invite(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
+    apply_ready_group_call(session, sink, seq);
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let user = |id: i64, first: &str, last: &str| {
+        format!(
+            r#"{{"@type":"updateUser","user":{{"id":{id},"first_name":"{first}","last_name":"{last}","type":{{"@type":"userTypeRegular"}}}}}}"#
+        )
+    };
+    for json in [user(44, "Lena", "Katz"), user(45, "Omar", "Reyes")] {
+        if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
+            session.apply(owned);
+        }
+    }
+    session.contacts = Some(vec![44, 45, 41]);
+}
+
+/// Phase C2f: incoming `messageGroupCall` invitation fixture — a Ready
+/// group chat ("Design voice") opened on an incoming, pending
+/// voice-chat invitation from Priya; the history row renders
+/// Accept / Decline.
+fn apply_ready_group_call_invitation(
+    session: &mut Session,
+    sink: &Arc<MemorySink>,
+    seq: &AtomicU64,
+) {
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let chat_id = 52i64;
+    let user_id = 46i64;
+    let jsons = [
+        format!(
+            r#"{{"@type":"updateUser","user":{{"id":{user_id},"first_name":"Priya","last_name":"Nair","type":{{"@type":"userTypeRegular"}}}}}}"#
+        ),
+        format!(
+            r#"{{"@type":"updateNewChat","chat":{{"id":{chat_id},"title":"Design voice","type":{{"@type":"chatTypeSupergroup","supergroup_id":{chat_id},"is_channel":false}},"unread_count":1}}}}"#
+        ),
+        format!(
+            r#"{{"@type":"updateNewMessage","message":{{"id":701,"chat_id":{chat_id},"sender_id":{{"@type":"messageSenderUser","user_id":{user_id}}},"is_outgoing":false,"date":1700000100,"content":{{"@type":"messageGroupCall","unique_id":"123456789","is_active":false,"was_missed":false,"is_video":false,"duration":0,"other_participant_ids":[]}}}}}}"#
+        ),
+    ];
+    for json in jsons {
+        if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
+            session.apply(owned);
+        }
+    }
+    session.open_chat(ChatId(chat_id));
+}
 /// Phase B2: key verification UI fixture — the Ready secret chat (id 41)
 /// with Zed (user 41), but with a real deterministic 36-byte `key_hash`
 /// (base64; the B1 fixture left it empty), opened with E2E history, and
@@ -22262,6 +22779,24 @@ fn session_history_row(
             )
             .into_any_element();
     }
+    // Phase C2f: `messageGroupCall` invitation service row (schema
+    // 1.8.67, line 5288) — incoming and pending: Accept / Decline.
+    if let MessageContent::GroupCallInvitation {
+        is_active,
+        was_missed,
+        is_video,
+        ..
+    } = &message.content
+    {
+        return QuillApp::group_call_invitation_row(
+            message,
+            *is_active,
+            *was_missed,
+            *is_video,
+            cx,
+        )
+        .into_any_element();
+    }
     let quote = message.reply_to.as_ref().and_then(|reply| {
         let preview = quote_preview.clone()?;
         Some(reply_quote_strip(message.id, reply.message_id, preview, cx))
@@ -22544,6 +23079,7 @@ fn session_history_row(
         MessageContent::Contact(contact) => Some(contact_row(message.id.0 as u64, contact)),
         MessageContent::Dice(dice) => Some(dice_row(message.id.0 as u64, dice)),
         MessageContent::Text(_)
+        | MessageContent::GroupCallInvitation { .. }
         | MessageContent::ChatTtlChanged { .. }
         | MessageContent::Unsupported { .. } => None,
     };

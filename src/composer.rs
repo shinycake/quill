@@ -187,6 +187,8 @@ impl ComposerEdit {
             | MessageContent::Dice(_)
             // Phase B4: timer-change service rows are not editable.
             | MessageContent::ChatTtlChanged { .. }
+            // Phase C2f: group-call invitations are not editable.
+            | MessageContent::GroupCallInvitation { .. }
             | MessageContent::Unsupported { .. } => return None,
         };
         Some(Self {
