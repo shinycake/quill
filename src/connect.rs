@@ -76,7 +76,7 @@ use crate::telegram::requests::{
     load_group_call_participants, open_chat, open_message_content, open_story, pin_chat_message,
     process_chat_join_request, read_chat_list, recognize_speech, remove_message_reaction,
     reorder_chat_folders, replace_primary_chat_invite_link, replace_video_chat_rtmp_url,
-    report_chat_sponsored_message, resend_messages, revoke_chat_invite_link,
+    report_chat, report_chat_sponsored_message, resend_messages, revoke_chat_invite_link,
     revoke_group_call_invite_link, search_call_messages, search_chat_messages, search_chats,
     search_messages, search_public_chats, search_recently_found_chats, send_animation,
     send_call_debug_information, send_call_log, send_call_rating_detail, send_call_signaling_data,
@@ -86,8 +86,8 @@ use crate::telegram::requests::{
     set_archive_chat_list_settings, set_authentication_phone_number, set_chat_draft_message,
     set_chat_member_status, set_chat_member_tag, set_chat_message_auto_delete_time,
     set_chat_notification_settings, set_chat_permissions, set_chat_slow_mode_delay,
-    set_group_call_participant_volume_level, set_pinned_chats, set_poll_answer,
-    set_scope_notification_settings, set_story_reaction, set_supergroup_username,
+    set_group_call_participant_volume_level, set_message_sender_block_list, set_pinned_chats,
+    set_poll_answer, set_scope_notification_settings, set_story_reaction, set_supergroup_username,
     set_user_privacy_setting_rules, set_video_chat_title, start_group_call_recording,
     start_group_call_screen_sharing, start_scheduled_video_chat,
     supergroup_members_filter_administrators_json, supergroup_members_filter_banned_json,
@@ -7010,6 +7010,72 @@ impl<S: JsonSender> ConnectDriver<S> {
         Ok(Some(extra))
     }
 
+    /// Slice CL3: `reportChat` (TDLib 1.8.67, schema line 15693) — the
+    /// simple spam-report flow (empty option_id/message_ids/text,
+    /// schema:3667). Returns `Ok(None)` when the chat is missing or
+    /// `can_be_reported` is false; the `ReportChatResult` outcome
+    /// surfaces via `Session::report_chat_outcome`.
+    pub fn report_chat(&mut self, chat_id: ChatId) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let reportable = self
+            .session
+            .chats
+            .get(&chat_id.0)
+            .is_some_and(|chat| chat.can_be_reported);
+        if !reportable {
+            return Ok(None);
+        }
+        let purpose = RequestPurpose::ReportChat;
+        if self.session.requests.has_purpose_for_chat(purpose, chat_id) {
+            return Ok(None);
+        }
+        let extra = self.session.request(purpose, Some(chat_id));
+        if let Err(err) = self.sender.send_json(&report_chat(extra, chat_id.0)) {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(Some(extra))
+    }
+
+    /// Slice CL3: `setMessageSenderBlockList` (TDLib 1.8.67, schema line
+    /// 14492) for a private/secret chat's peer (schema:3674); `block =
+    /// false` passes null `block_list` to unblock (TGX
+    /// `Tdlib.unblockSender`). Returns `Ok(None)` when the chat isn't a
+    /// private/secret chat or is the user's own chat. The new state
+    /// arrives via `updateChatBlockList`.
+    pub fn set_chat_user_blocked(
+        &mut self,
+        chat_id: ChatId,
+        block: bool,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let user_id = match self.session.chats.get(&chat_id.0).map(|chat| &chat.kind) {
+            Some(ChatKind::Private { user_id }) | Some(ChatKind::Secret { user_id, .. }) => {
+                user_id.0
+            }
+            _ => return Ok(None),
+        };
+        if self.session.my_user_id.is_some_and(|me| me == user_id) {
+            return Ok(None);
+        }
+        let purpose = RequestPurpose::SetMessageSenderBlockList;
+        if self.session.requests.has_purpose_for_chat(purpose, chat_id) {
+            return Ok(None);
+        }
+        let extra = self.session.request(purpose, Some(chat_id));
+        if let Err(err) = self
+            .sender
+            .send_json(&set_message_sender_block_list(extra, user_id, block))
+        {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(Some(extra))
+    }
     /// Phase A1: forced `getSupergroupFullInfo` refresh for the slow-mode
     /// gate. Unlike `fetch_supergroup_full_info` it ignores the "already
     /// fetched" cache: the schema (1.8.67, line 2759) warns no

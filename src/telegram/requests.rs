@@ -2697,6 +2697,40 @@ pub fn report_chat_sponsored_message(
     .to_string()
 }
 
+/// Slice CL3: `reportChat` (TDLib 1.8.67, `schema/td_api.tl:15693`):
+/// `reportChat chat_id:int53 option_id:bytes message_ids:vector<int53>
+/// text:string = ReportChatResult;`
+/// The simple spam-report flow uses empty option_id/message_ids/text
+/// (schema:3667: "The chat can be reported as spam using the method
+/// reportChat with an empty option_id and message_ids").
+pub fn report_chat(extra: RequestId, chat_id: i64) -> String {
+    json!({
+        "@type": "reportChat",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id,
+        "option_id": "",
+        "message_ids": [],
+        "text": "",
+    })
+    .to_string()
+}
+
+/// Slice CL3: `setMessageSenderBlockList` (TDLib 1.8.67,
+/// `schema/td_api.tl:14492`):
+/// `setMessageSenderBlockList sender_id:MessageSender
+/// block_list:BlockList = Ok;`
+/// `block = false` passes null `block_list` to unblock the sender (TGX
+/// `Tdlib.unblockSender`).
+pub fn set_message_sender_block_list(extra: RequestId, user_id: i64, block: bool) -> String {
+    json!({
+        "@type": "setMessageSenderBlockList",
+        "@extra": extra.as_extra(),
+        "sender_id": { "@type": "messageSenderUser", "user_id": user_id },
+        "block_list": if block { json!({ "@type": "blockListMain" }) } else { Value::Null },
+    })
+    .to_string()
+}
+
 /// `viewSponsoredChat` (TDLib 1.8.67). `unique_id` is the `sponsoredChat`
 /// unique id (from sponsored search results).
 pub fn view_sponsored_chat(extra: RequestId, sponsored_chat_unique_id: i64) -> String {
@@ -7405,5 +7439,41 @@ mod channel_requests_tests {
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(v["@type"], "deleteChatWelcomeMessage");
         assert_eq!(v["welcome_message_id"], 5);
+    }
+
+    #[test]
+    fn cl3_report_chat_shape_matches_1_8_67() {
+        // Slice CL3: `reportChat chat_id:int53 option_id:bytes
+        // message_ids:vector<int53> text:string = ReportChatResult;`
+        // (schema 1.8.67, line 15693) — the simple spam-report flow
+        // sends empty option_id/message_ids/text (schema:3667).
+        let json = report_chat(RequestId(61), 11);
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "reportChat");
+        assert_eq!(v["@extra"], "61");
+        assert_eq!(v["chat_id"], 11);
+        assert_eq!(v["option_id"], "");
+        assert_eq!(v["message_ids"], serde_json::json!([]));
+        assert_eq!(v["text"], "");
+    }
+
+    #[test]
+    fn cl3_set_message_sender_block_list_shapes_match_1_8_67() {
+        // Slice CL3: `setMessageSenderBlockList sender_id:MessageSender
+        // block_list:BlockList = Ok;` (schema 1.8.67, line 14492) —
+        // block uses `blockListMain` (line 9692); unblock passes null
+        // `block_list` (TGX `Tdlib.unblockSender`).
+        let json = set_message_sender_block_list(RequestId(62), 11, true);
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "setMessageSenderBlockList");
+        assert_eq!(v["@extra"], "62");
+        assert_eq!(v["sender_id"]["@type"], "messageSenderUser");
+        assert_eq!(v["sender_id"]["user_id"], 11);
+        assert_eq!(v["block_list"]["@type"], "blockListMain");
+
+        let json = set_message_sender_block_list(RequestId(63), 11, false);
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "setMessageSenderBlockList");
+        assert!(v["block_list"].is_null());
     }
 }
