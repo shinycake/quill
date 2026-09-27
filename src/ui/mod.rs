@@ -598,6 +598,14 @@ pub struct QuillApp {
     /// when the newest frame changes.
     call_remote_image: Option<(u64, Arc<RenderImage>)>,
     call_local_image: Option<(u64, Arc<RenderImage>)>,
+    /// Phase C2g: group-call video tiles cached by
+    /// `(group_call_id, user_id, is_screen)` → `(frame seq, image)`,
+    /// rebuilt only when that slot's frame sequence changes.
+    group_video_images: HashMap<(i32, i64, bool), (u64, Arc<RenderImage>)>,
+    /// Phase C2g: synthetic per-participant frames injected by the
+    /// ready-group-call demo fixture, keyed `(user_id, is_screen)`.
+    /// Injected demo data, not real media.
+    demo_group_frames: HashMap<(i64, bool), quill::calls::engine::VideoFrame>,
     demo_seq: AtomicU64,
     demo_sink: Arc<MemorySink>,
     /// Phase 8.1: chat ids whose OS notification was clicked (set by the
@@ -1054,7 +1062,7 @@ pub enum ScreenshotDemo {
     /// Telegram) — the overlay renders the title, participant grid
     /// (speaking / muted / hand-raised badges), E2E verification
     /// emojis, self controls, admin controls, and the always-visible
-    /// honest note "No audio yet — voice transport ships in Phase C2."
+    /// honest audio-state note (Phase C2g: transport-aware).
     ReadyGroupCall,
     /// Phase C2f: group-call invite picker — the Ready voice chat with
     /// the invite panel open (two contacts seeded), per-participant
@@ -2012,6 +2020,8 @@ impl QuillApp {
             demo_selected_camera: None,
             call_remote_image: None,
             call_local_image: None,
+            group_video_images: HashMap::new(),
+            demo_group_frames: HashMap::new(),
             demo_seq: AtomicU64::new(0),
             demo_sink,
             notify_clicks: Arc::new(Mutex::new(Vec::new())),
@@ -2525,6 +2535,10 @@ impl QuillApp {
             if let Some(session) = app.demo_session.as_mut() {
                 app.demo_seq.store(session.last_seq, Ordering::SeqCst);
                 apply_ready_group_call(session, &app.demo_sink, &app.demo_seq);
+                // Phase C2g: synthetic per-participant video frames for
+                // the demo tiles (camera for Zed, screen share for Mia).
+                // Injected demo data, not real media.
+                app.demo_group_frames = demo_group_video_frames();
             }
             app.status_note =
                 "screenshot demo — group voice chat (injected, no live Telegram)".into();
@@ -5205,6 +5219,67 @@ impl QuillApp {
         let image = Self::video_render_image(frame)?;
         *slot = Some((frame.seq, image.clone()));
         Some(image)
+    }
+
+    /// Phase C2g: cached decoded tile for one group participant's video
+    /// slot, rebuilt only when that slot's frame sequence changed.
+    fn cached_group_video_image(
+        &mut self,
+        call_id: i32,
+        user_id: i64,
+        screen: bool,
+        frame: &quill::calls::engine::VideoFrame,
+    ) -> Option<Arc<RenderImage>> {
+        let key = (call_id, user_id, screen);
+        if self
+            .group_video_images
+            .get(&key)
+            .is_some_and(|(seq, _)| *seq == frame.seq)
+        {
+            return self
+                .group_video_images
+                .get(&key)
+                .map(|(_, image)| image.clone());
+        }
+        let image = Self::video_render_image(frame)?;
+        self.group_video_images
+            .insert(key, (frame.seq, image.clone()));
+        Some(image)
+    }
+
+    /// Phase C2g: newest frame for one group participant slot. Live
+    /// mode reads the driver's retained slot; demo mode reads the
+    /// fixture's synthetic frames. Prefers the screen-sharing slot when
+    /// the participant is sharing and a screen frame exists, otherwise
+    /// the camera slot. `None` when the participant isn't sending
+    /// video or no frame arrived yet.
+    fn group_participant_frame(
+        &self,
+        call_id: i32,
+        participant: &quill::telegram::envelope::ParsedGroupCallParticipant,
+    ) -> Option<(i64, bool, quill::calls::engine::VideoFrame)> {
+        let MessageSender::User { user_id } = participant.participant_id else {
+            return None;
+        };
+        let slot = |screen: bool| {
+            if let Some(live) = self.live.as_ref() {
+                live.driver
+                    .latest_group_video_frame(call_id, user_id, screen)
+            } else {
+                self.demo_group_frames.get(&(user_id, screen)).cloned()
+            }
+        };
+        if participant.screen_sharing_enabled
+            && let Some(frame) = slot(true)
+        {
+            return Some((user_id, true, frame));
+        }
+        if participant.video_enabled
+            && let Some(frame) = slot(false)
+        {
+            return Some((user_id, false, frame));
+        }
+        None
     }
 
     /// Kill a running viewer frame extraction (ffmpeg child), if any, and
@@ -10477,7 +10552,7 @@ impl QuillApp {
     /// everything else. **Signaling only**: no audio/video transport
     /// exists yet (Phase C2), so the card always carries the honest
     /// no-transport note.
-    fn group_call_overlay(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+    fn group_call_overlay(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let call = self.session()?.active_group_call.clone()?;
         Some(self.group_call_card(&call, cx).into_any_element())
     }
@@ -10498,7 +10573,7 @@ impl QuillApp {
     }
 
     fn group_call_participant_tile(
-        &self,
+        &mut self,
         call: &ActiveGroupCall,
         participant: &ParsedGroupCallParticipant,
         cx: &mut Context<Self>,
@@ -10520,6 +10595,22 @@ impl QuillApp {
         if participant.screen_sharing_enabled {
             badges.push("🖥 sharing".to_string());
         }
+        // Phase C2g: live video tile when a frame is retained for this
+        // participant (camera, or screen share preferred when sharing);
+        // the avatar placeholder stays for everyone else.
+        let video_or_avatar: AnyElement = match self.group_participant_frame(call.id, participant) {
+            Some((user_id, screen, frame)) => {
+                match self.cached_group_video_image(call.id, user_id, screen, &frame) {
+                    Some(image) => img(ImageSource::from(image))
+                        .w_full()
+                        .h(px(90.))
+                        .object_fit(ObjectFit::Contain)
+                        .into_any_element(),
+                    None => div().child(initials_avatar(&name, 56.)).into_any_element(),
+                }
+            }
+            None => div().child(initials_avatar(&name, 56.)).into_any_element(),
+        };
         let mut tile = div()
             .w(px(124.))
             .flex()
@@ -10532,6 +10623,16 @@ impl QuillApp {
             .border_color(cx.theme().border)
             .bg(cx.theme().background)
             .child(initials_avatar(&name, 48.))
+            .child(
+                div()
+                    .w_full()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .rounded_md()
+                    .bg(rgb(0x161616))
+                    .child(video_or_avatar),
+            )
             .child(
                 div()
                     .text_xs()
@@ -10644,7 +10745,11 @@ impl QuillApp {
         tile
     }
 
-    fn group_call_card(&self, call: &ActiveGroupCall, cx: &mut Context<Self>) -> impl IntoElement {
+    fn group_call_card(
+        &mut self,
+        call: &ActiveGroupCall,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
         let mut card = div()
             .id("group-call-card")
             .flex()
@@ -10742,7 +10847,7 @@ impl QuillApp {
     /// Phase C3a: the joined voice-chat card body — reconnect banner,
     /// verification emojis, participant grid, self/admin controls.
     fn group_call_joined_card(
-        &self,
+        &mut self,
         mut card: Stateful<Div>,
         call: &ActiveGroupCall,
         cx: &mut Context<Self>,
@@ -10815,17 +10920,32 @@ impl QuillApp {
             );
         }
 
-        // The always-visible honest note — exact wording required.
+        // The always-visible audio state note — honest about the
+        // native group transport (Phase C2g connects it on the
+        // `joinVideoChat` answer).
+        let audio_note = if call.transport_ready {
+            "Voice connected."
+        } else if call.transport_error.is_some() {
+            "Voice failed to connect."
+        } else if self
+            .live
+            .as_ref()
+            .is_some_and(|live| live.driver.group_call_engine_available())
+        {
+            "Connecting voice…"
+        } else {
+            "No audio — call engine unavailable."
+        };
         card = card.child(
             div()
                 .text_xs()
                 .text_color(cx.theme().muted_foreground)
-                .child("No audio yet — voice transport ships in Phase C2."),
+                .child(audio_note),
         );
 
         // Self controls. Self mute is local-only: TDLib group calls
-        // have no "mute self" outside the join parameters, and no
-        // audio path exists yet — the label says so.
+        // have no "mute self" outside the join parameters, so the flag
+        // rides on the next join — the label says so.
         let self_muted = call.is_muted_self;
         let self_video = call.is_my_video_enabled;
         let self_hand = call
@@ -10867,6 +10987,34 @@ impl QuillApp {
                     })),
             );
         }
+        // Phase C2g: screen sharing toggle, gated on an enumerated
+        // screen-capture source — without one the honest note shows
+        // instead of a dead button.
+        let screen_source = self
+            .live
+            .as_ref()
+            .is_some_and(|live| live.driver.group_call_screen_source_available());
+        let sharing = call.screen_sharing || call.screen_share_pending;
+        if screen_source {
+            controls = controls.child(
+                Button::new("group-call-share-screen")
+                    .label(if sharing {
+                        "Stop sharing"
+                    } else {
+                        "Share screen"
+                    })
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.toggle_group_call_screen_share(cx);
+                    })),
+            );
+        } else {
+            controls = controls.child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("No screen source available."),
+            );
+        }
         controls = controls.child(Button::new("group-call-leave").label("Leave").on_click(
             cx.listener(|this, _, _, cx| {
                 this.leave_active_group_call(cx);
@@ -10885,7 +11033,7 @@ impl QuillApp {
             div()
                 .text_xs()
                 .text_color(cx.theme().muted_foreground)
-                .child("Mute is local-only: no audio path exists to mute yet."),
+                .child("Mute is local-only: it applies on your next join."),
         );
 
         // Admin controls, gated on the actual TDLib flags.
@@ -11301,16 +11449,40 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// Phase C3a: `toggleGroupCallIsMyVideoEnabled` (live only —
-    /// signaling-only, no camera).
+    /// Phase C3a: `toggleGroupCallIsMyVideoEnabled` (live only). Phase
+    /// C2g applies the flag to the native camera capture in the driver
+    /// pump once the transport is connected.
     fn toggle_group_call_video(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             self.status_note = match live.driver.toggle_group_call_my_video() {
-                Ok(_) => "Toggling video (signaling only).".into(),
+                Ok(_) => "Toggling video…".into(),
                 Err(_) => "Couldn't toggle video.".into(),
             };
         } else {
             self.status_note = "Video needs a live connection.".into();
+        }
+        cx.notify();
+    }
+
+    /// Phase C2g: start/stop group-call screen sharing (live only).
+    /// The driver runs the presentation handshake
+    /// (`ntg_init_presentation` + `startGroupCallScreenSharing`);
+    /// stopping pairs `endGroupCallScreenSharing` with
+    /// `ntg_stop_presentation`.
+    fn toggle_group_call_screen_share(&mut self, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            self.status_note = match live.driver.toggle_group_call_screen_share() {
+                Ok(_) => "Toggling screen sharing…".into(),
+                Err(_) => {
+                    if live.driver.group_call_screen_source_available() {
+                        "Couldn't toggle screen sharing.".into()
+                    } else {
+                        "No screen source available.".into()
+                    }
+                }
+            };
+        } else {
+            self.status_note = "Screen sharing needs a live connection.".into();
         }
         cx.notify();
     }
@@ -11627,7 +11799,7 @@ impl QuillApp {
                 div()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
-                    .child("No audio yet — voice transport ships in Phase C2."),
+                    .child("Join to connect voice."),
             )
             .child(
                 Button::new("group-call-join-btn")
@@ -19269,6 +19441,8 @@ fn demo_video_frame(is_local: bool) -> quill::calls::engine::VideoFrame {
         height: H as u16,
         rgba,
         is_local,
+        participant_user_id: None,
+        is_screen: false,
     }
 }
 
@@ -19307,9 +19481,14 @@ fn apply_ready_group_call(session: &mut Session, sink: &Arc<MemorySink>, seq: &A
             r#"{{"@type":"updateUser","user":{{"id":{id},"first_name":"{first}","last_name":"{last}","type":{{"@type":"userTypeRegular"}}}}}}"#
         )
     };
-    let participant = |id: i64, flags: &str, order: &str| {
+    let video_info = |endpoint: &str, source_id: u32| {
         format!(
-            r#"{{"@type":"updateGroupCallParticipant","group_call_id":{call_id},"participant":{{"@type":"groupCallParticipant","participant_id":{{"@type":"messageSenderUser","user_id":{id}}},"audio_source_id":0,"screen_sharing_audio_source_id":0,"video_info":null,"screen_sharing_video_info":null,"bio":"","is_current_user":false,"is_speaking":false,"is_hand_raised":false,"can_be_muted_for_all_users":true,"can_be_unmuted_for_all_users":true,"can_be_muted_for_current_user":true,"can_be_unmuted_for_current_user":true,"is_muted_for_all_users":false,"is_muted_for_current_user":false,"can_unmute_self":false,"volume_level":10000,"order":"{order}"{flags}}}}}"#
+            r#"{{"@type":"groupCallParticipantVideoInfo","source_groups":[{{"@type":"groupCallVideoSourceGroup","semantics":"SIM","source_ids":[{source_id}]}}],"endpoint_id":"{endpoint}","is_paused":false}}"#
+        )
+    };
+    let participant = |id: i64, flags: &str, order: &str, video: &str, screen: &str| {
+        format!(
+            r#"{{"@type":"updateGroupCallParticipant","group_call_id":{call_id},"participant":{{"@type":"groupCallParticipant","participant_id":{{"@type":"messageSenderUser","user_id":{id}}},"audio_source_id":0,"screen_sharing_audio_source_id":0,"video_info":{video},"screen_sharing_video_info":{screen},"bio":"","is_current_user":false,"is_speaking":false,"is_hand_raised":false,"can_be_muted_for_all_users":true,"can_be_unmuted_for_all_users":true,"can_be_muted_for_current_user":true,"can_be_unmuted_for_current_user":true,"is_muted_for_all_users":false,"is_muted_for_current_user":false,"can_unmute_self":false,"volume_level":10000,"order":"{order}"{flags}}}}}"#
         )
     };
     let jsons = [
@@ -19326,10 +19505,28 @@ fn apply_ready_group_call(session: &mut Session, sink: &Arc<MemorySink>, seq: &A
         format!(
             r#"{{"@type":"updateGroupCall","group_call":{{"@type":"groupCall","id":{call_id},"unique_id":"999","title":"Weekly design sync","invite_link":"","paid_message_star_count":0,"scheduled_start_date":0,"enabled_start_notification":false,"is_active":true,"is_video_chat":true,"is_live_story":false,"is_rtmp_stream":false,"is_joined":true,"need_rejoin":false,"is_owned":true,"can_be_managed":true,"participant_count":4,"has_hidden_listeners":false,"loaded_all_participants":true,"message_sender_id":null,"recent_speakers":[{{"@type":"groupCallRecentSpeaker","participant_id":{{"@type":"messageSenderUser","user_id":41}},"is_speaking":true}}],"is_my_video_enabled":false,"is_my_video_paused":false,"can_enable_video":true,"mute_new_participants":false,"can_toggle_mute_new_participants":true,"can_send_messages":true,"are_messages_allowed":true,"can_toggle_are_messages_allowed":false,"can_delete_messages":false,"record_duration":0,"is_video_recorded":false,"duration":0}}}}"#
         ),
-        participant(777, r#","is_current_user":true"#, "a4"),
-        participant(41, r#","is_speaking":true"#, "a3"),
-        participant(42, r#","is_hand_raised":true"#, "a2"),
-        participant(43, r#","is_muted_for_all_users":true"#, "a1"),
+        participant(777, r#","is_current_user":true"#, "a4", "null", "null"),
+        participant(
+            41,
+            r#","is_speaking":true"#,
+            "a3",
+            &video_info("ep-41", 111),
+            "null",
+        ),
+        participant(
+            42,
+            r#","is_hand_raised":true"#,
+            "a2",
+            "null",
+            &video_info("ep-42-screen", 222),
+        ),
+        participant(
+            43,
+            r#","is_muted_for_all_users":true"#,
+            "a1",
+            "null",
+            "null",
+        ),
         format!(
             r#"{{"@type":"updateGroupCallVerificationState","group_call_id":{call_id},"generation":7,"emojis":["🍎","🍌"]}}"#
         ),
@@ -19392,6 +19589,46 @@ fn apply_ready_group_call_invitation(
     }
     session.open_chat(ChatId(chat_id));
 }
+
+/// Phase C2g: synthetic per-participant frames for the ready-group-call
+/// demo fixture — a camera frame for Zed (user 41) and a screen-share
+/// frame for Mia (user 42), keyed `(user_id, is_screen)`. Deterministic
+/// test-pattern pixels, not real media. Injected demo data.
+fn demo_group_video_frames() -> HashMap<(i64, bool), quill::calls::engine::VideoFrame> {
+    fn pattern(width: u16, height: u16, base: [u8; 3]) -> Vec<u8> {
+        let mut rgba = Vec::with_capacity(width as usize * height as usize * 4);
+        for y in 0..height {
+            for x in 0..width {
+                let stripe = (((x / 16 + y / 16) % 2) * 40) as u8;
+                rgba.push(base[0].saturating_add(stripe));
+                rgba.push(base[1].saturating_add(stripe));
+                rgba.push(base[2].saturating_add(stripe));
+                rgba.push(255);
+            }
+        }
+        rgba
+    }
+    let camera = quill::calls::engine::VideoFrame {
+        seq: 1,
+        width: 96,
+        height: 72,
+        rgba: pattern(96, 72, [60, 120, 200]),
+        is_local: false,
+        participant_user_id: Some(41),
+        is_screen: false,
+    };
+    let screen = quill::calls::engine::VideoFrame {
+        seq: 1,
+        width: 128,
+        height: 72,
+        rgba: pattern(128, 72, [200, 170, 60]),
+        is_local: false,
+        participant_user_id: Some(42),
+        is_screen: true,
+    };
+    HashMap::from([((41i64, false), camera), ((42i64, true), screen)])
+}
+
 /// Phase B2: key verification UI fixture — the Ready secret chat (id 41)
 /// with Zed (user 41), but with a real deterministic 36-byte `key_hash`
 /// (base64; the B1 fixture left it empty), opened with E2E history, and

@@ -349,7 +349,7 @@ This is the comprehensive Telegram-parity checklist: one checkbox per user-visib
 - [x] Switch camera during video call (camera on/off toggle drives `set_camera_enabled`; camera picker re-applies the selected device on the active call) <!-- parity:calls-camera-switch -->
 - [x] Camera device selection (Camera picker row with radio selection; "No camera found." when the engine reports none) <!-- parity:calls-camera-select -->
 - [ ] 1:1 call verification emojis (partial: parsed and shown only for group calls) <!-- parity:calls-verify-emoji -->
-- [ ] Share screen in a call (partial: screen-sharing participants are detected and flagged, ui/mod.rs:10150; no start request) <!-- parity:calls-screen-share -->
+- [ ] Share screen in a call (partial: screen-sharing participants are detected and flagged, ui/mod.rs:10150; 1:1 share UI not started — see group screen-share item below) <!-- parity:calls-screen-share -->
 - [x] Join group voice chat <!-- parity:calls-join --> (group-call-join button ui/mod.rs:10817; join_group_call requests.rs:1101)
 - [x] Leave group voice chat <!-- parity:calls-leave --> ("Leave" button ui/mod.rs:10407; leave_group_call connect.rs:2161)
 - [x] Participant list with live speaking indicators <!-- parity:calls-participants --> (ui/mod.rs:10144)
@@ -363,8 +363,11 @@ This is the comprehensive Telegram-parity checklist: one checkbox per user-visib
 - [x] Group call invitation UI: incoming `messageGroupCall` row with Accept (`joinGroupCall`) / Decline (`declineGroupCallInvitation`) <!-- parity:calls-decline-invite -->
 - [x] Ban participant from group call (`banGroupCallParticipants`, owner-gated, per schema) <!-- parity:calls-ban -->
 - [x] Group call verification emojis <!-- parity:calls-group-verify-emoji --> (ui/mod.rs:10325; state.rs:2043)
-- [x] Toggle my video in group video chat (partial: signaling only, no video frames rendered) <!-- parity:calls-group-video-toggle --> (toggle_group_call_video ui/mod.rs:10667)
-- [ ] Group video tiles show live video (partial: participant grid renders, no frames) <!-- parity:calls-video-tiles -->
+- [x] Toggle my video in group video chat (drives the native group camera via `set_group_camera`, not just signaling; live camera unverified) <!-- parity:calls-group-video-toggle --> (toggle_group_call_video ui/mod.rs:10667)
+- [ ] Group video tiles show live video (partial: engine→tile path implemented + mock-tested + demo screenshot; live group call never exercised — no ntgcalls runtime on this VM) <!-- parity:calls-video-tiles -->
+- [ ] Share screen in a group call (partial: startGroupCallScreenSharing/endGroupCallScreenSharing + native presentation handshake implemented; screen-source availability gate added; native screen source unverified — no ntgcalls runtime on this VM) <!-- parity:calls-group-screen-share -->
+- [ ] Group video paused indicator (partial: `is_paused` parsed from video_info, not shown on tiles) <!-- parity:calls-group-video-pause -->
+- [ ] Local camera preview tile in group calls (partial: remote tiles render; local capture frames are dropped at the native callback, so the self tile stays an avatar) <!-- parity:calls-group-video-self -->
 - [x] Auto-rejoin group call after network loss (auto-rejoin on `need_rejoin`, max 3 attempts, manual retry resets) <!-- parity:calls-rejoin -->
 - [ ] Record group call <!-- parity:calls-recording -->
 - [ ] RTMP stream key for video chat <!-- parity:calls-rtmp -->

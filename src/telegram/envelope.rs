@@ -1281,11 +1281,82 @@ fn parse_group_call(value: Option<&Value>) -> Option<ParsedGroupCall> {
     })
 }
 
+/// Phase C2g: `groupCallVideoSourceGroup` (TDLib 1.8.67,
+/// `schema/td_api.tl:7157`):
+/// `groupCallVideoSourceGroup semantics:string source_ids:vector<int32>
+/// = GroupCallVideoSourceGroup;`
+/// The `source_ids` are the RTP synchronization sources of one video
+/// channel; ntgcalls' `ntg_add_incoming_video` subscribes by endpoint +
+/// these groups, and incoming frames are attributed to the participant
+/// by matching `ntg_frame.ssrc` against them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GroupCallVideoSourceGroup {
+    pub semantics: String,
+    pub source_ids: Vec<u32>,
+}
+
+/// Phase C2g: `groupCallParticipantVideoInfo` (TDLib 1.8.67,
+/// `schema/td_api.tl:7163`):
+/// `groupCallParticipantVideoInfo source_groups:vector<groupCallVideoSourceGroup>
+/// endpoint_id:string is_paused:Bool = GroupCallParticipantVideoInfo;`
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GroupCallVideoInfo {
+    pub endpoint_id: String,
+    pub is_paused: bool,
+    pub source_groups: Vec<GroupCallVideoSourceGroup>,
+}
+
+fn parse_group_call_video_info(value: Option<&Value>) -> Option<GroupCallVideoInfo> {
+    let value = value?;
+    if value.is_null() {
+        return None;
+    }
+    let source_groups = value
+        .get("source_groups")
+        .and_then(Value::as_array)
+        .map(|groups| {
+            groups
+                .iter()
+                .map(|group| GroupCallVideoSourceGroup {
+                    semantics: group
+                        .get("semantics")
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .to_string(),
+                    source_ids: group
+                        .get("source_ids")
+                        .and_then(Value::as_array)
+                        .map(|ids| {
+                            ids.iter()
+                                .filter_map(Value::as_i64)
+                                .map(|id| id as u32)
+                                .collect()
+                        })
+                        .unwrap_or_default(),
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    Some(GroupCallVideoInfo {
+        endpoint_id: value
+            .get("endpoint_id")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string(),
+        is_paused: value
+            .get("is_paused")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        source_groups,
+    })
+}
+
 /// Phase C3a: `groupCallParticipant` subset (TDLib 1.8.67,
 /// `schema/td_api.tl:7184`). Video info fields
-/// (`video_info`/`screen_sharing_video_info`) are skipped — no media
-/// transport until Phase C2. An empty `order` means the participant
-/// must be removed from the list (schema note on `order`).
+/// (`video_info`/`screen_sharing_video_info`) are parsed in Phase C2g
+/// and drive the engine's incoming-video subscriptions. An empty
+/// `order` means the participant must be removed from the list
+/// (schema note on `order`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParsedGroupCallParticipant {
     pub participant_id: MessageSender,
@@ -1306,6 +1377,12 @@ pub struct ParsedGroupCallParticipant {
     /// null` (schema 1.8.67, line 7184).
     pub video_enabled: bool,
     pub screen_sharing_enabled: bool,
+    /// Phase C2g: the parsed `video_info` / `screen_sharing_video_info`
+    /// channels; `None` matches the `*_enabled` flags above. The engine
+    /// subscribes to `video_info` endpoints via
+    /// `ntg_add_incoming_video`.
+    pub video_info: Option<GroupCallVideoInfo>,
+    pub screen_sharing_video_info: Option<GroupCallVideoInfo>,
 }
 
 fn parse_group_call_participant(value: Option<&Value>) -> Option<ParsedGroupCallParticipant> {
@@ -1340,6 +1417,10 @@ fn parse_group_call_participant(value: Option<&Value>) -> Option<ParsedGroupCall
         screen_sharing_enabled: value
             .get("screen_sharing_video_info")
             .is_some_and(|info| !info.is_null()),
+        video_info: parse_group_call_video_info(value.get("video_info")),
+        screen_sharing_video_info: parse_group_call_video_info(
+            value.get("screen_sharing_video_info"),
+        ),
     })
 }
 
@@ -10986,6 +11067,34 @@ mod channel_envelope_tests {
                 assert!(!participant.is_speaking);
                 assert!(participant.can_be_muted_for_all_users);
                 assert_eq!(participant.order, "zz9");
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn update_group_call_participant_video_info_parsed() {
+        // Phase C2g: `groupCallParticipantVideoInfo` /
+        // `groupCallVideoSourceGroup` (TDLib 1.8.67,
+        // `schema/td_api.tl:7157` / `:7163`).
+        let json = r#"{"@type":"updateGroupCallParticipant","group_call_id":555,"participant":{"@type":"groupCallParticipant","participant_id":{"@type":"messageSenderUser","user_id":42},"audio_source_id":0,"screen_sharing_audio_source_id":0,"video_info":{"@type":"groupCallParticipantVideoInfo","source_groups":[{"@type":"groupCallVideoSourceGroup","semantics":"SIM","source_ids":[111,112]}],"endpoint_id":"ep-42","is_paused":false},"screen_sharing_video_info":{"@type":"groupCallParticipantVideoInfo","source_groups":[{"@type":"groupCallVideoSourceGroup","semantics":"SIM","source_ids":[222]}],"endpoint_id":"ep-42-screen","is_paused":true},"bio":"","is_current_user":false,"is_speaking":false,"is_hand_raised":false,"can_be_muted_for_all_users":false,"can_be_unmuted_for_all_users":false,"can_be_muted_for_current_user":false,"can_be_unmuted_for_current_user":false,"is_muted_for_all_users":false,"is_muted_for_current_user":false,"can_unmute_self":false,"volume_level":10000,"order":"a2"}}"#;
+        let env = parse_envelope(json).unwrap();
+        match env.payload {
+            EnvelopePayload::UpdateGroupCallParticipant { participant, .. } => {
+                assert!(participant.video_enabled);
+                assert!(participant.screen_sharing_enabled);
+                let camera = participant.video_info.expect("camera video info");
+                assert_eq!(camera.endpoint_id, "ep-42");
+                assert!(!camera.is_paused);
+                assert_eq!(camera.source_groups.len(), 1);
+                assert_eq!(camera.source_groups[0].semantics, "SIM");
+                assert_eq!(camera.source_groups[0].source_ids, vec![111, 112]);
+                let screen = participant
+                    .screen_sharing_video_info
+                    .expect("screen video info");
+                assert_eq!(screen.endpoint_id, "ep-42-screen");
+                assert!(screen.is_paused);
+                assert_eq!(screen.source_groups[0].source_ids, vec![222]);
             }
             other => panic!("{other:?}"),
         }

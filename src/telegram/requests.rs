@@ -1001,10 +1001,10 @@ pub struct GroupCallJoinParams {
 }
 
 impl GroupCallJoinParams {
-    /// The honest signaling-only join: Quill has no audio device and no
-    /// tgcalls engine yet (Phase C2), so `audio_source_id` is 0 and
-    /// `payload` is empty. TDLib accepts these; the call joins muted
-    /// only in the signaling sense — there is no audio path at all.
+    /// The honest no-device join: `audio_source_id` is 0 and `payload`
+    /// is empty. Used when no call engine is available or the native
+    /// offer fails — TDLib accepts these and the join still goes out;
+    /// Phase C2g normally replaces this with the real tgcalls offer.
     pub fn honest_no_device() -> Self {
         GroupCallJoinParams {
             audio_source_id: 0,
@@ -1178,6 +1178,42 @@ pub fn leave_group_call(extra: RequestId, group_call_id: i32) -> String {
 pub fn end_group_call(extra: RequestId, group_call_id: i32) -> String {
     json!({
         "@type": "endGroupCall",
+        "@extra": extra.as_extra(),
+        "group_call_id": group_call_id,
+    })
+    .to_string()
+}
+
+/// Phase C2g: `startGroupCallScreenSharing` (TDLib 1.8.67,
+/// `schema/td_api.tl:14303`):
+/// `startGroupCallScreenSharing group_call_id:int32 audio_source_id:int32
+/// payload:string = Text;`
+/// "Starts screen sharing in a group call". The `payload` is the
+/// presentation offer from `ntg_init_presentation`; the returned `Text`
+/// is the answer for `ntg_connect(..., is_presentation=true)`. No
+/// separate screen audio source exists in this slice (`audio_source_id`
+/// is 0).
+pub fn start_group_call_screen_sharing(
+    extra: RequestId,
+    group_call_id: i32,
+    payload: &str,
+) -> String {
+    json!({
+        "@type": "startGroupCallScreenSharing",
+        "@extra": extra.as_extra(),
+        "group_call_id": group_call_id,
+        "audio_source_id": 0,
+        "payload": payload,
+    })
+    .to_string()
+}
+
+/// Phase C2g: `endGroupCallScreenSharing` (TDLib 1.8.67,
+/// `schema/td_api.tl:14309`): `endGroupCallScreenSharing
+/// group_call_id:int32 = Ok;` "Ends screen sharing in a group call".
+pub fn end_group_call_screen_sharing(extra: RequestId, group_call_id: i32) -> String {
+    json!({
+        "@type": "endGroupCallScreenSharing",
         "@extra": extra.as_extra(),
         "group_call_id": group_call_id,
     })

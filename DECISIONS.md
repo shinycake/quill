@@ -3593,3 +3593,117 @@ device list renders honestly.
 - **Not verifiable without a live Telegram group call:** the actual TDLib request/response round-trips (`inviteGroupCallParticipant` result variants, ban, volume, accept/decline, rejoin `joinVideoChat` acceptance), `updateGroupCallParticipants` behavior after a ban, and the incoming `messageGroupCall` → `joinGroupCall` accept flow against a real active call. Tested instead: request shapes + gates + volume clamping (driver unit tests), the full auto-rejoin discipline incl. exhaustion and reset (driver unit tests with injected `error` envelopes), and envelope parsing of `messageGroupCall` + all four invite-result variants.
 - **Postscript (same day):** the `joinGroupCall` success shape was missing — `groupCallInfo` (`group_call_id:int32 join_payload:string`, schema :7190) had no parser, so invitation acceptance sent the request but dropped the answer. Added `EnvelopePayload::GroupCallInfo` + a reducer arm mirroring the `GroupCallId`/`createVideoChat` pattern: for `JoinGroupCallInvitation` it queues a `getGroupCall` fetch (tracking starts even if `updateGroupCall` lags), stores the tgcalls join payload, and clears the error. `updateGroupCall` remains the source of truth for `is_joined`.
 - **Out of this slice:** live group video frames, screen-share start, recording/RTMP, title/schedule/invite-link UI, in-call group messages.
+
+## Phase C2g — group video tiles + group-call screen sharing (2026-09-27)
+
+- **Built:** TDLib parsing (`src/telegram/envelope.rs`).
+  `GroupCallVideoSourceGroup { semantics, source_ids }` and
+  `GroupCallVideoInfo { endpoint_id, is_paused, source_groups }` parse
+  `groupCallParticipantVideoInfo`; `ParsedGroupCallParticipant` retains
+  `video_info` / `screen_sharing_video_info` alongside the existing
+  `video_enabled` / `screen_sharing_enabled` booleans.
+- **Built:** engine API (`src/calls/engine.rs`). `VideoFrame` gains
+  `participant_user_id: Option<i64>` + `is_screen: bool`; new
+  `GroupVideoSource { user_id, endpoint, ssrc_groups }` /
+  `GroupVideoSourceGroup { semantics, ssrcs }`; pure
+  `group_offer_audio_source_id` (first `a=ssrc:` line of the audio `m=`
+  section, 0 when absent — the join is never blocked). `CallEngine`
+  gains `create_group_call` / `connect_group_call` / `sync_group_video`
+  / `set_group_camera` / `start_screen_share` / `connect_screen_share`
+  / `stop_screen_share` / `leave_group_call`; `MockEngine` records all
+  of them. The native `NtgcallsEngine` keys group state by TDLib group
+  call id (internally the ntgcalls chat id): `ntg_create_call`,
+  `ntg_connect(..., false)`, `ntg_add_incoming_video` /
+  `ntg_remove_incoming_video` (returned sink kept per endpoint for the
+  ssrc->user callback map), `ntg_init_presentation` +
+  `ntg_connect(..., true)` + `ntg_set_stream_sources` with
+  `NTG_MEDIA_SOURCE_DESKTOP` (NULL input = default display) for screen
+  sharing, `ntg_stop_presentation`, `ntg_stop`. Group camera capture
+  re-issues capture sources like the 1:1 path. The frame callback routes
+  group frames (native chat id -> group call id, frame ssrc -> user id,
+  `NTG_STREAM_DEVICE_SCREEN` -> `is_screen`) into the driver's group
+  slots; P2P routing is untouched.
+- **Built:** driver (`src/connect.rs`). `join_video_chat` /
+  `rejoin_group_call` share `group_join_params`, which resolves the chat
+  id through `chat.video_chat.group_call_id` (the schema's `groupCall`
+  carries no chat id), creates the native context first, and sends the
+  real offer + parsed audio SSRC — degrading to the honest no-device
+  params when no engine is available or the offer fails (the join is
+  never blocked). `pump_group_call_transport` runs after every reducer
+  update: finishes `ntg_connect` when the `joinVideoChat` `Text` answer
+  lands (exactly once; `transport_ready`), re-issues the camera on flag
+  changes, reconciles incoming subscriptions from the participants'
+  video info on every pump (the engine diffs add/remove), finishes the
+  presentation handshake when the `startGroupCallScreenSharing` answer
+  lands, and tears the transport + frame slots down when the tracked
+  call ends or is replaced. Frames live in `group_video_frame_slots`
+  keyed `(group_call_id, user_id, is_screen)`; `latest_group_video_frame`
+  serves the UI; leave/end clear eagerly. `ActiveGroupCall` gains
+  `transport_ready` / `transport_error` / `screen_share_pending` /
+  `screen_sharing` / `screen_share_answer`; new `RequestPurpose`s
+  `StartGroupCallScreenSharing` / `EndGroupCallScreenSharing` with the
+  `Text`/`Ok` reducer handling (failures clear the flags and surface an
+  honest `group_call_error`). `toggle_group_call_screen_share` is gated
+  on an enumerated `MediaDeviceKind::Screen` device (refreshed on group
+  connect) — without one the toggle is rejected and the UI shows "No
+  screen source available." instead of a dead button.
+- **Built:** UI (`src/ui/mod.rs`). Participant tiles render the latest
+  retained frame (screen share preferred when sharing, else camera)
+  through the existing `video_render_image` path with a per-slot
+  `(call_id, user_id, is_screen)` seq cache; the avatar placeholder
+  stays when no frame exists. "Share screen" / "Stop sharing" sits next
+  to the group video controls (gated on the screen-source check).
+  `group_call_overlay` / `group_call_card` / `group_call_joined_card` /
+  `group_call_participant_tile` changed `&self` -> `&mut self` for the
+  image cache. The ready-group-call demo fixture gives Zed (41) a camera
+  `video_info` and Mia (42) a `screen_sharing_video_info` plus synthetic
+  test-pattern frames (injected demo data, labeled as such).
+- **Schema citations (TDLib 1.8.67, verified in `schema/td_api.tl`):**
+  `groupCallJoinParameters.audio_source_id` "received from tgcalls" at
+  `:7085`; `groupCallVideoSourceGroup` at `:7157`;
+  `groupCallParticipantVideoInfo` at `:7163`; participant camera +
+  screen-sharing info fields at `:7184`; `startGroupCallScreenSharing`
+  at `:14303`; `endGroupCallScreenSharing` at `:14309`;
+  `joinVideoChat` returning `Text` (unchanged from C3a).
+- **ntgcalls findings (v3.0.0 bindings, compile-time only):**
+  `create(chatId)` returns the WebRTC SDP offer, `connect(..., false)`
+  consumes Telegram's normal answer, and `init_presentation` +
+  `connect(..., true)` is the documented screen-sharing sequence
+  (corroborated by the ntgcalls N-API docs: `api-reference.md`,
+  `quick-start.md`). The C++ source confirms `add_incoming_video` is a
+  `GroupCall`-only method (see the C2e-session-2 note above) — the
+  per-endpoint sink it returns feeds the ssrc->user callback map, so one
+  endpoint's removal never drops another endpoint of the same user.
+- **Not verifiable without a live group call:** the full native path —
+  real `ntg_create_call` offer generation, `ntg_connect` against
+  Telegram's answer, `ntg_add_incoming_video` subscription behavior,
+  actual frame delivery/ssrc attribution, desktop capture availability
+  on a real display. **No `libntgcalls.so` exists on this VM**, so even
+  the bindings are compile-time only here. Tested instead: SDP SSRC
+  parsing (pure), video-info parsing, the offer/answer/subscription/
+  frame-slot/presentation lifecycle against `MockEngine` (8 new driver
+  tests + 2 engine tests + 1 envelope test, all green), and the
+  synthetic-frame screenshot below (`docs/screenshots/ready-group-call.png`
+  — generated test-pattern pixels, NOT real video).
+- **Review fixes (same slice):** `sync_group_video` bookkeeping
+  hardened — the endpoints map now stores the full `GroupVideoSource`
+  (was endpoint->user only), so removing one endpoint drops only its
+  own ssrcs (a camera unpublish no longer kills the same user's screen
+  share), changed ssrc groups re-subscribe instead of going stale, and
+  the callback ssrc-map prune keeps other group calls' entries
+  (keys are `(chat_id, ssrc)`). The ignored `ntg_add_incoming_video`
+  sink is deliberate: routing is ssrc-keyed and removal is
+  endpoint-keyed; no binding consumes the sink. The driver pump now
+  reconciles the native presentation against the tracked flags via
+  `presentation_active`, so a failed `startGroupCallScreenSharing`
+  request or a bad answer can't leave a stray initialized presentation.
+  The toggle is gated on an enumerated `MediaDeviceKind::Screen` device
+  ("No screen source available." when absent) — feasibility of real
+  desktop capture is unverifiable on this VM (no `libntgcalls.so`).
+- **Out of this slice:** recording/RTMP, video-chat title/schedule/
+  invite-link UI, in-call group messages, 1:1 screen sharing
+  (`parity:calls-screen-share` stays unchecked — group screen sharing is
+  a separate new item below), per-participant volume, group-call
+  invites/bans, the local-user camera preview tile (frames are dropped
+  at the native callback; see `parity:calls-group-video-self`), E2E
+  testing against a live group call.

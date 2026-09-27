@@ -3,18 +3,18 @@
 use ntgcalls_sys::{
     Loader, NTG_CONNECTION_STATE_CLOSED, NTG_CONNECTION_STATE_CONNECTED,
     NTG_CONNECTION_STATE_CONNECTING, NTG_CONNECTION_STATE_FAILED, NTG_CONNECTION_STATE_TIMEOUT,
-    NTG_ERR_INVALID_PARAMS, NTG_MEDIA_SOURCE_DEVICE, NTG_OK, NTG_STREAM_DEVICE_CAMERA,
-    NTG_STREAM_MODE_CAPTURE, NTG_STREAM_MODE_PLAYBACK, NTG_STREAM_STATUS_ACTIVE,
-    NTG_STREAM_STATUS_PAUSED, NTG_VIDEO_ROTATION_VIDEO_ROTATION_90,
-    NTG_VIDEO_ROTATION_VIDEO_ROTATION_180, NTG_VIDEO_ROTATION_VIDEO_ROTATION_270,
-    ntg_audio_description, ntg_connection_info, ntg_device_info, ntg_frame, ntg_instance,
-    ntg_media_description, ntg_media_devices, ntg_protocol, ntg_remote_source, ntg_rtc_server,
-    ntg_stream_device, ntg_stream_mode, ntg_stream_status, ntg_video_description,
-    ntg_video_rotation,
+    NTG_ERR_INVALID_PARAMS, NTG_MEDIA_SOURCE_DESKTOP, NTG_MEDIA_SOURCE_DEVICE, NTG_OK,
+    NTG_STREAM_DEVICE_CAMERA, NTG_STREAM_DEVICE_SCREEN, NTG_STREAM_MODE_CAPTURE,
+    NTG_STREAM_MODE_PLAYBACK, NTG_STREAM_STATUS_ACTIVE, NTG_STREAM_STATUS_PAUSED,
+    NTG_VIDEO_ROTATION_VIDEO_ROTATION_90, NTG_VIDEO_ROTATION_VIDEO_ROTATION_180,
+    NTG_VIDEO_ROTATION_VIDEO_ROTATION_270, ntg_audio_description, ntg_connection_info,
+    ntg_device_info, ntg_frame, ntg_instance, ntg_media_description, ntg_media_devices,
+    ntg_protocol, ntg_remote_source, ntg_rtc_server, ntg_ssrc_group, ntg_stream_device,
+    ntg_stream_mode, ntg_stream_status, ntg_video_description, ntg_video_rotation,
 };
 use serde_json::{Value, json};
 use std::collections::HashMap;
-use std::ffi::{CStr, CString, c_void};
+use std::ffi::{CStr, CString, c_char, c_void};
 use std::marker::PhantomData;
 use std::ptr::{NonNull, null_mut};
 use std::rc::Rc;
@@ -38,6 +38,10 @@ pub enum RemoteVideoState {
 /// Phase C2e: one decoded video frame. `rgba` is RGBA8 row-major with the
 /// frame rotation already applied; `is_local` marks the local camera
 /// preview, `false` marks the peer's camera.
+/// Phase C2g: group-call frames carry `participant_user_id` (the TDLib
+/// user id the frame's ssrc was subscribed for); `None` for 1:1 calls
+/// and the local preview. `is_screen` marks frames from a participant's
+/// screen-share stream (`NTG_STREAM_DEVICE_SCREEN`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VideoFrame {
     pub seq: u64,
@@ -45,11 +49,54 @@ pub struct VideoFrame {
     pub height: u16,
     pub rgba: Vec<u8>,
     pub is_local: bool,
+    pub participant_user_id: Option<i64>,
+    pub is_screen: bool,
 }
 
 pub type VideoFrameCallback = Arc<dyn Fn(i32, VideoFrame) + Send + Sync + 'static>;
 
 pub type RemoteVideoStateCallback = Arc<dyn Fn(i32, RemoteVideoState) + Send + Sync + 'static>;
+
+/// Phase C2g: extract the audio channel SSRC from ntgcalls' group join
+/// offer (a raw SDP offer per the ntgcalls API docs: `create(chatId)`
+/// "returns a WebRTC offer (SDP)"). TDLib's `groupCallJoinParameters`
+/// carries it as `audio_source_id` ("received from tgcalls",
+/// `schema/td_api.tl:7085`). The SSRC is the first `a=ssrc:` line of
+/// the audio `m=` section; 0 when absent (honest fallback — the join
+/// still goes out, only audio attribution is missing, and this slice
+/// has no group audio transport anyway).
+pub fn group_offer_audio_source_id(offer: &str) -> i32 {
+    let mut in_audio = false;
+    for line in offer.lines().map(str::trim) {
+        if let Some(kind) = line.strip_prefix("m=") {
+            in_audio = kind.starts_with("audio");
+            continue;
+        }
+        if in_audio && let Some(rest) = line.strip_prefix("a=ssrc:") {
+            let digits: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
+            if let Ok(ssrc) = digits.parse::<u32>() {
+                return ssrc as i32;
+            }
+        }
+    }
+    0
+}
+/// Phase C2g: one participant video channel to subscribe to, built from
+/// TDLib's `groupCallParticipantVideoInfo` (schema 1.8.67, line 7163).
+/// `endpoint` + `ssrc_groups` feed `ntg_add_incoming_video` verbatim;
+/// frames are attributed back to `user_id` by ssrc.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GroupVideoSourceGroup {
+    pub semantics: String,
+    pub ssrcs: Vec<u32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GroupVideoSource {
+    pub user_id: i64,
+    pub endpoint: String,
+    pub ssrc_groups: Vec<GroupVideoSourceGroup>,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TransportState {
@@ -211,6 +258,75 @@ pub trait CallEngine {
         camera: Option<&str>,
     ) -> Result<(), EngineError>;
 
+    /// Phase C2g: app -> engine; create the ntgcalls group context keyed
+    /// by TDLib chat id and return the WebRTC offer that `joinVideoChat`
+    /// carries as its `payload` (`schema/td_api.tl:14292`). The answer
+    /// (`Text` response) goes back through `connect_group_call`.
+    fn create_group_call(
+        &mut self,
+        group_call_id: i32,
+        chat_id: i64,
+    ) -> Result<String, EngineError>;
+
+    /// Phase C2g: app -> engine; finish the group handshake with the
+    /// `joinVideoChat` answer, then issue capture sources (camera only
+    /// when `video_enabled` — there is no group audio transport in this
+    /// slice). Idempotent per group call id.
+    fn connect_group_call(
+        &mut self,
+        group_call_id: i32,
+        answer_payload: &str,
+        video_enabled: bool,
+    ) -> Result<(), EngineError>;
+
+    /// Phase C2g: app -> engine; reconcile the engine's incoming-video
+    /// subscriptions with the desired participant set (add new endpoints,
+    /// remove stale ones). Frames for subscribed endpoints arrive on the
+    /// video frame hook with `participant_user_id` set.
+    fn sync_group_video(
+        &mut self,
+        group_call_id: i32,
+        sources: &[GroupVideoSource],
+    ) -> Result<(), EngineError>;
+
+    /// Phase C2g: app -> engine; toggle the outgoing group camera by
+    /// re-issuing capture sources (mirrors the 1:1 `set_camera_enabled`).
+    fn set_group_camera(
+        &mut self,
+        group_call_id: i32,
+        enabled: bool,
+        camera: Option<&str>,
+    ) -> Result<(), EngineError>;
+
+    /// Phase C2g: app -> engine; begin screen sharing: `ntg_init_presentation`
+    /// returns the offer that `startGroupCallScreenSharing`
+    /// (`schema/td_api.tl:14303`) carries as its `payload`.
+    fn start_screen_share(&mut self, group_call_id: i32) -> Result<String, EngineError>;
+
+    /// Phase C2g: app -> engine; finish the presentation handshake with
+    /// the `startGroupCallScreenSharing` answer and attach the desktop
+    /// capture source.
+    fn connect_screen_share(
+        &mut self,
+        group_call_id: i32,
+        answer_payload: &str,
+    ) -> Result<(), EngineError>;
+
+    /// Phase C2g: app -> engine; stop the presentation transport
+    /// (`ntg_stop_presentation`); pair with `endGroupCallScreenSharing`
+    /// (`schema/td_api.tl:14309`).
+    fn stop_screen_share(&mut self, group_call_id: i32) -> Result<(), EngineError>;
+
+    /// Phase C2g: whether the native side has a presentation transport
+    /// (initialized or connected). The driver reconciles this against
+    /// the tracked screen-share flags, so a failed handshake never
+    /// leaves a stray native presentation.
+    fn presentation_active(&self, group_call_id: i32) -> bool;
+
+    /// Phase C2g: app -> engine; tear down the group transport
+    /// (`ntg_stop` on the chat id). Unknown group call ids succeed.
+    fn leave_group_call(&mut self, group_call_id: i32) -> Result<(), EngineError>;
+
     fn connect(&mut self, call_id: i32, params: &ConnectParams) -> Result<(), EngineError>;
 
     fn select_devices(
@@ -260,6 +376,18 @@ struct MockInner {
     frame_seq: u64,
     connects: Vec<(i32, ConnectParams)>,
     device_selections: Vec<(i32, Option<String>, Option<String>)>,
+    /// Phase C2g: group transport recording for driver tests.
+    group_offers: Vec<(i32, i64)>,
+    group_connects: Vec<(i32, String, bool)>,
+    group_video_syncs: Vec<(i32, Vec<GroupVideoSource>)>,
+    group_camera_changes: Vec<(i32, bool, Option<String>)>,
+    screen_share_offers: Vec<i32>,
+    screen_share_connects: Vec<(i32, String)>,
+    screen_share_stops: Vec<i32>,
+    /// Phase C2g: group call ids with a live native presentation
+    /// (initialized via `start_screen_share`, cleared by `stop_screen_share`).
+    presentations: Vec<i32>,
+    group_leaves: Vec<i32>,
 }
 
 /// Phase C2b: deterministic in-memory engine used by driver tests.
@@ -364,6 +492,71 @@ impl MockEngine {
             .lock()
             .expect("mock call engine")
             .camera_changes
+            .clone()
+    }
+
+    /// Phase C2g: recorded group transport calls for driver tests.
+    pub fn group_offers(&self) -> Vec<(i32, i64)> {
+        self.inner
+            .lock()
+            .expect("mock call engine")
+            .group_offers
+            .clone()
+    }
+
+    pub fn group_connects(&self) -> Vec<(i32, String, bool)> {
+        self.inner
+            .lock()
+            .expect("mock call engine")
+            .group_connects
+            .clone()
+    }
+
+    pub fn group_video_syncs(&self) -> Vec<(i32, Vec<GroupVideoSource>)> {
+        self.inner
+            .lock()
+            .expect("mock call engine")
+            .group_video_syncs
+            .clone()
+    }
+
+    pub fn group_camera_changes(&self) -> Vec<(i32, bool, Option<String>)> {
+        self.inner
+            .lock()
+            .expect("mock call engine")
+            .group_camera_changes
+            .clone()
+    }
+
+    pub fn screen_share_offers(&self) -> Vec<i32> {
+        self.inner
+            .lock()
+            .expect("mock call engine")
+            .screen_share_offers
+            .clone()
+    }
+
+    pub fn screen_share_connects(&self) -> Vec<(i32, String)> {
+        self.inner
+            .lock()
+            .expect("mock call engine")
+            .screen_share_connects
+            .clone()
+    }
+
+    pub fn screen_share_stops(&self) -> Vec<i32> {
+        self.inner
+            .lock()
+            .expect("mock call engine")
+            .screen_share_stops
+            .clone()
+    }
+
+    pub fn group_leaves(&self) -> Vec<i32> {
+        self.inner
+            .lock()
+            .expect("mock call engine")
+            .group_leaves
             .clone()
     }
 
@@ -578,6 +771,121 @@ impl CallEngine for MockEngine {
         Ok(())
     }
 
+    fn create_group_call(
+        &mut self,
+        group_call_id: i32,
+        chat_id: i64,
+    ) -> Result<String, EngineError> {
+        let mut inner = self.inner.lock().expect("mock call engine");
+        if !inner.available {
+            return Err(EngineError::Unavailable);
+        }
+        inner.group_offers.push((group_call_id, chat_id));
+        Ok(format!("mock-group-offer-{group_call_id}"))
+    }
+
+    fn connect_group_call(
+        &mut self,
+        group_call_id: i32,
+        answer_payload: &str,
+        video_enabled: bool,
+    ) -> Result<(), EngineError> {
+        let mut inner = self.inner.lock().expect("mock call engine");
+        if !inner.available {
+            return Err(EngineError::Unavailable);
+        }
+        inner
+            .group_connects
+            .push((group_call_id, answer_payload.to_owned(), video_enabled));
+        Ok(())
+    }
+
+    fn sync_group_video(
+        &mut self,
+        group_call_id: i32,
+        sources: &[GroupVideoSource],
+    ) -> Result<(), EngineError> {
+        let mut inner = self.inner.lock().expect("mock call engine");
+        if !inner.available {
+            return Err(EngineError::Unavailable);
+        }
+        inner
+            .group_video_syncs
+            .push((group_call_id, sources.to_vec()));
+        Ok(())
+    }
+
+    fn set_group_camera(
+        &mut self,
+        group_call_id: i32,
+        enabled: bool,
+        camera: Option<&str>,
+    ) -> Result<(), EngineError> {
+        let mut inner = self.inner.lock().expect("mock call engine");
+        if !inner.available {
+            return Err(EngineError::Unavailable);
+        }
+        inner
+            .group_camera_changes
+            .push((group_call_id, enabled, camera.map(str::to_owned)));
+        Ok(())
+    }
+
+    fn start_screen_share(&mut self, group_call_id: i32) -> Result<String, EngineError> {
+        let mut inner = self.inner.lock().expect("mock call engine");
+        if !inner.available {
+            return Err(EngineError::Unavailable);
+        }
+        inner.screen_share_offers.push(group_call_id);
+        if !inner.presentations.contains(&group_call_id) {
+            inner.presentations.push(group_call_id);
+        }
+        Ok(format!("mock-presentation-offer-{group_call_id}"))
+    }
+
+    fn connect_screen_share(
+        &mut self,
+        group_call_id: i32,
+        answer_payload: &str,
+    ) -> Result<(), EngineError> {
+        let mut inner = self.inner.lock().expect("mock call engine");
+        if !inner.available {
+            return Err(EngineError::Unavailable);
+        }
+        inner
+            .screen_share_connects
+            .push((group_call_id, answer_payload.to_owned()));
+        Ok(())
+    }
+
+    fn stop_screen_share(&mut self, group_call_id: i32) -> Result<(), EngineError> {
+        let mut inner = self.inner.lock().expect("mock call engine");
+        if !inner.available {
+            return Err(EngineError::Unavailable);
+        }
+        inner.screen_share_stops.push(group_call_id);
+        inner.presentations.retain(|id| *id != group_call_id);
+        Ok(())
+    }
+
+    fn presentation_active(&self, group_call_id: i32) -> bool {
+        self.inner
+            .lock()
+            .expect("mock call engine")
+            .presentations
+            .contains(&group_call_id)
+    }
+
+    fn leave_group_call(&mut self, group_call_id: i32) -> Result<(), EngineError> {
+        let mut inner = self.inner.lock().expect("mock call engine");
+        if !inner.available {
+            return Err(EngineError::Unavailable);
+        }
+        inner.group_leaves.push(group_call_id);
+        inner.presentations.retain(|id| *id != group_call_id);
+        Ok(())
+    }
+
     fn media_devices(&self) -> Result<Vec<MediaDevice>, EngineError> {
         let inner = self.inner.lock().expect("mock call engine");
         if !inner.available {
@@ -606,6 +914,11 @@ struct CallbackShared {
     frame_hook: Mutex<Option<VideoFrameCallback>>,
     remote_video_hook: Mutex<Option<RemoteVideoStateCallback>>,
     frame_seq: AtomicU64,
+    /// Phase C2g: group-call callback routing: native `chat_id` -> the
+    /// TDLib group call id the driver assigned, and the ssrc map that
+    /// attributes incoming frames to participants.
+    group_chat_to_call: Mutex<HashMap<i64, i32>>,
+    group_video_ssrc_to_user: Mutex<HashMap<(i64, u32), i64>>,
 }
 
 /// Phase C2e: retained per-call media configuration; the engine re-issues
@@ -618,6 +931,27 @@ struct CallMediaConfig {
     camera: Option<String>,
 }
 
+/// Phase C2g: retained per-group-call media state for the ntgcalls
+/// group transport (keyed by TDLib group call id).
+#[derive(Clone, Default)]
+struct GroupCallMedia {
+    chat_id: i64,
+    camera_enabled: bool,
+    camera: Option<String>,
+    /// endpoint -> full source, mirroring the engine's subscriptions.
+    /// Storing the source (not just the user id) lets resubscription
+    /// drop only one endpoint's ssrcs and detect changed ssrc groups.
+    endpoints: HashMap<String, GroupVideoSource>,
+    /// (chat_id, ssrc) -> user id; attributed to incoming frames.
+    ssrc_to_user: HashMap<(i64, u32), i64>,
+    connected: bool,
+    screen_sharing: bool,
+    /// Phase C2g: `ntg_init_presentation` ran but the answer handshake
+    /// has not connected yet. Tracked so the driver can reconcile and
+    /// stop a stray presentation after a failed handshake.
+    presentation_initialized: bool,
+}
+
 /// Phase C2b: safe driver-thread adapter over the runtime-loaded C ABI.
 ///
 /// `Rc` in the marker intentionally keeps this type `!Send`: the native
@@ -628,6 +962,8 @@ pub struct NtgcallsEngine {
     protocol: EngineProtocol,
     call_to_user: HashMap<i32, i64>,
     call_media: HashMap<i32, CallMediaConfig>,
+    /// Phase C2g: native group transport per TDLib group call id.
+    group_calls: HashMap<i32, GroupCallMedia>,
     callback: Arc<CallbackShared>,
     _driver_thread_only: PhantomData<Rc<()>>,
 }
@@ -665,6 +1001,7 @@ impl NtgcallsEngine {
             protocol,
             call_to_user: HashMap::new(),
             call_media: HashMap::new(),
+            group_calls: HashMap::new(),
             callback: Arc::new(CallbackShared {
                 user_to_call: Mutex::new(HashMap::new()),
                 hook: Mutex::new(None),
@@ -672,6 +1009,8 @@ impl NtgcallsEngine {
                 frame_hook: Mutex::new(None),
                 remote_video_hook: Mutex::new(None),
                 frame_seq: AtomicU64::new(0),
+                group_chat_to_call: Mutex::new(HashMap::new()),
+                group_video_ssrc_to_user: Mutex::new(HashMap::new()),
             }),
             _driver_thread_only: PhantomData,
         })
@@ -781,6 +1120,102 @@ impl NtgcallsEngine {
     /// is present only while video is enabled; NULL removes the camera
     /// reader and ntgcalls tells the peer via media_state video_stopped).
     /// Playback carries the speaker only.
+    /// Phase C2g: (re)issue the group call's capture sources from the
+    /// retained config. Group calls carry no audio transport in this
+    /// slice — only the camera, and only while it is enabled.
+    fn issue_group_sources(&mut self, group_call_id: i32) -> Result<(), EngineError> {
+        let media = self
+            .group_calls
+            .get(&group_call_id)
+            .cloned()
+            .ok_or(EngineError::NoSuchCall(group_call_id))?;
+        let instance = self.ensure_instance()?;
+        let camera = native_input(media.camera.as_deref())?;
+        let mut camera_video = ntg_video_description {
+            media_source: NTG_MEDIA_SOURCE_DEVICE,
+            // Telegram's group video default.
+            width: 640,
+            height: 480,
+            fps: 30,
+            input: camera
+                .as_ref()
+                .map_or(null_mut(), |value| value.as_ptr().cast_mut()),
+            keep_open: false,
+        };
+        let capture = ntg_media_description {
+            microphone: null_mut(),
+            speaker: null_mut(),
+            camera: if media.camera_enabled {
+                &mut camera_video
+            } else {
+                null_mut()
+            },
+            screen: null_mut(),
+        };
+        // SAFETY: `instance` is live and the descriptions are stack-local
+        // for the duration of this synchronous C call.
+        let rc = unsafe {
+            (self.api.ntg_set_stream_sources)(
+                instance.as_ptr(),
+                media.chat_id,
+                NTG_STREAM_MODE_CAPTURE,
+                capture,
+            )
+        };
+        if rc != NTG_OK {
+            return Err(EngineError::Engine {
+                op: "ntg_set_stream_sources",
+                code: rc,
+            });
+        }
+        Ok(())
+    }
+
+    /// Phase C2g: attach desktop capture to the presentation transport
+    /// after `ntg_connect(..., is_presentation=true)`. The presentation
+    /// carries only the screen track; the main group transport is
+    /// untouched.
+    fn issue_presentation_sources(&mut self, group_call_id: i32) -> Result<(), EngineError> {
+        let media = self
+            .group_calls
+            .get(&group_call_id)
+            .cloned()
+            .ok_or(EngineError::NoSuchCall(group_call_id))?;
+        let instance = self.ensure_instance()?;
+        let mut screen_video = ntg_video_description {
+            media_source: NTG_MEDIA_SOURCE_DESKTOP,
+            width: 1920,
+            height: 1080,
+            fps: 15,
+            // NULL input selects the default display.
+            input: null_mut(),
+            keep_open: false,
+        };
+        let capture = ntg_media_description {
+            microphone: null_mut(),
+            speaker: null_mut(),
+            camera: null_mut(),
+            screen: &mut screen_video,
+        };
+        // SAFETY: `instance` is live and the descriptions are stack-local
+        // for the duration of this synchronous C call.
+        let rc = unsafe {
+            (self.api.ntg_set_stream_sources)(
+                instance.as_ptr(),
+                media.chat_id,
+                NTG_STREAM_MODE_CAPTURE,
+                capture,
+            )
+        };
+        if rc != NTG_OK {
+            return Err(EngineError::Engine {
+                op: "ntg_set_stream_sources",
+                code: rc,
+            });
+        }
+        Ok(())
+    }
+
     fn set_media_sources(&self, call_id: i32) -> Result<(), EngineError> {
         let config = self
             .call_media
@@ -919,7 +1354,7 @@ impl CallEngine for NtgcallsEngine {
         if data.is_empty() {
             return Ok(());
         }
-        let instance = self.instance.ok_or(EngineError::NullInstance)?;
+        let instance = self.ensure_instance()?;
         // SAFETY: `instance` is live and `data` remains valid for the duration
         // of this synchronous C call.
         let rc = unsafe {
@@ -1080,7 +1515,7 @@ impl CallEngine for NtgcallsEngine {
 
     fn set_muted(&mut self, call_id: i32, muted: bool) -> Result<(), EngineError> {
         let user_id = self.user_id(call_id)?;
-        let instance = self.instance.ok_or(EngineError::NullInstance)?;
+        let instance = self.ensure_instance()?;
         let mut state = false;
         // SAFETY: the instance and output pointer are valid for the duration
         // of this synchronous C call.
@@ -1126,6 +1561,366 @@ impl CallEngine for NtgcallsEngine {
             config.camera = previous_camera;
             return Err(err);
         }
+        Ok(())
+    }
+
+    fn create_group_call(
+        &mut self,
+        group_call_id: i32,
+        chat_id: i64,
+    ) -> Result<String, EngineError> {
+        let instance = self.ensure_instance()?;
+        let mut out: *mut c_char = null_mut();
+        // SAFETY: `out` is a valid writable C output; ntgcalls allocates the
+        // returned join-payload string on success.
+        let rc = unsafe { (self.api.ntg_create_call)(instance.as_ptr(), chat_id, &mut out) };
+        if rc != NTG_OK {
+            return Err(EngineError::Engine {
+                op: "ntg_create_call",
+                code: rc,
+            });
+        }
+        if out.is_null() {
+            return Err(EngineError::Engine {
+                op: "ntg_create_call",
+                code: NTG_ERR_INVALID_PARAMS,
+            });
+        }
+        // SAFETY: `out` points at a NUL-terminated string allocated by the
+        // call above; copy it then free with the matching free function.
+        let offer = unsafe { CStr::from_ptr(out) }
+            .to_string_lossy()
+            .into_owned();
+        unsafe { (self.api.ntg_string_free)(out) };
+        self.group_calls.insert(
+            group_call_id,
+            GroupCallMedia {
+                chat_id,
+                ..GroupCallMedia::default()
+            },
+        );
+        self.callback
+            .group_chat_to_call
+            .lock()
+            .expect("ntgcalls group call map")
+            .insert(chat_id, group_call_id);
+        Ok(offer)
+    }
+
+    fn connect_group_call(
+        &mut self,
+        group_call_id: i32,
+        answer_payload: &str,
+        video_enabled: bool,
+    ) -> Result<(), EngineError> {
+        let (chat_id, already) = {
+            let media = self
+                .group_calls
+                .get(&group_call_id)
+                .ok_or(EngineError::NoSuchCall(group_call_id))?;
+            (media.chat_id, media.connected)
+        };
+        if already {
+            return Ok(());
+        }
+        let instance = self.ensure_instance()?;
+        let params = CString::new(answer_payload).map_err(|_| EngineError::Engine {
+            op: "ntg_connect",
+            code: NTG_ERR_INVALID_PARAMS,
+        })?;
+        // SAFETY: instance is live and `params` is a valid C string; the
+        // TDLib answer is the `Text` from `joinVideoChat`.
+        let rc =
+            unsafe { (self.api.ntg_connect)(instance.as_ptr(), chat_id, params.as_ptr(), false) };
+        if rc != NTG_OK {
+            return Err(EngineError::Engine {
+                op: "ntg_connect",
+                code: rc,
+            });
+        }
+        // Group calls have no audio transport in this slice; the capture
+        // sources carry only the camera when it is enabled.
+        let media = self
+            .group_calls
+            .get_mut(&group_call_id)
+            .ok_or(EngineError::NoSuchCall(group_call_id))?;
+        media.connected = true;
+        media.camera_enabled = video_enabled;
+        self.issue_group_sources(group_call_id)
+    }
+
+    fn sync_group_video(
+        &mut self,
+        group_call_id: i32,
+        sources: &[GroupVideoSource],
+    ) -> Result<(), EngineError> {
+        let instance = self.ensure_instance()?;
+        let chat_id = self
+            .group_calls
+            .get(&group_call_id)
+            .ok_or(EngineError::NoSuchCall(group_call_id))?
+            .chat_id;
+        // Add new endpoints first so the video never blips on reorder.
+        let mut desired: HashMap<&str, &GroupVideoSource> = HashMap::new();
+        for source in sources {
+            desired.insert(source.endpoint.as_str(), source);
+        }
+        let stale: Vec<String> = {
+            let media = self
+                .group_calls
+                .get(&group_call_id)
+                .ok_or(EngineError::NoSuchCall(group_call_id))?;
+            media
+                .endpoints
+                .keys()
+                .filter(|endpoint| !desired.contains_key(endpoint.as_str()))
+                .cloned()
+                .collect()
+        };
+        for source in sources {
+            let stored = self
+                .group_calls
+                .get(&group_call_id)
+                .and_then(|media| media.endpoints.get(&source.endpoint))
+                .cloned();
+            match stored {
+                // Subscription matches; nothing to do.
+                Some(existing) if existing == *source => continue,
+                // Ssrc groups changed; drop the stale subscription so the
+                // add below re-issues it with the fresh groups.
+                Some(_) => {
+                    self.remove_group_video_endpoint(group_call_id, chat_id, &source.endpoint)?;
+                }
+                None => {}
+            }
+            let endpoint =
+                CString::new(source.endpoint.as_str()).map_err(|_| EngineError::Engine {
+                    op: "ntg_add_incoming_video",
+                    code: NTG_ERR_INVALID_PARAMS,
+                })?;
+            let groups: Vec<ntg_ssrc_group> = source
+                .ssrc_groups
+                .iter()
+                .map(|group| ntg_ssrc_group {
+                    semantics: CString::new(group.semantics.as_str())
+                        .map(|s| s.into_raw())
+                        .unwrap_or(null_mut()),
+                    ssrcs: group.ssrcs.as_ptr().cast_mut(),
+                    ssrcs_len: group.ssrcs.len(),
+                })
+                .collect();
+            let mut sink: u32 = 0;
+            // SAFETY: instance is live; `endpoint` and the group metadata
+            // are valid for this call; `sink` is a valid C output.
+            let rc = unsafe {
+                (self.api.ntg_add_incoming_video)(
+                    instance.as_ptr(),
+                    chat_id,
+                    source.user_id,
+                    endpoint.as_ptr(),
+                    groups.as_ptr(),
+                    groups.len(),
+                    &mut sink,
+                )
+            };
+            // The semantics C strings were `into_raw` above; reclaim them.
+            for group in &groups {
+                if !group.semantics.is_null() {
+                    let _ = unsafe { CString::from_raw(group.semantics) };
+                }
+            }
+            if rc != NTG_OK {
+                return Err(EngineError::Engine {
+                    op: "ntg_add_incoming_video",
+                    code: rc,
+                });
+            }
+            {
+                let media = self
+                    .group_calls
+                    .get_mut(&group_call_id)
+                    .ok_or(EngineError::NoSuchCall(group_call_id))?;
+                media
+                    .endpoints
+                    .insert(source.endpoint.clone(), source.clone());
+                for group in &source.ssrc_groups {
+                    for ssrc in &group.ssrcs {
+                        media.ssrc_to_user.insert((chat_id, *ssrc), source.user_id);
+                    }
+                }
+            }
+            self.callback
+                .group_video_ssrc_to_user
+                .lock()
+                .expect("ntgcalls group ssrc map")
+                .extend(
+                    source
+                        .ssrc_groups
+                        .iter()
+                        .flat_map(|group| group.ssrcs.iter())
+                        .map(|ssrc| ((chat_id, *ssrc), source.user_id)),
+                );
+        }
+        for endpoint in stale {
+            self.remove_group_video_endpoint(group_call_id, chat_id, &endpoint)?;
+        }
+        // Prune the callback ssrc map of entries for removed endpoints.
+        // Keys are (chat_id, ssrc), so entries for other group calls
+        // (other chat ids) are left untouched.
+        {
+            let media = self
+                .group_calls
+                .get(&group_call_id)
+                .ok_or(EngineError::NoSuchCall(group_call_id))?;
+            let live = media.ssrc_to_user.clone();
+            self.callback
+                .group_video_ssrc_to_user
+                .lock()
+                .expect("ntgcalls group ssrc map")
+                .retain(|key, user| key.0 != chat_id || live.get(key) == Some(user));
+        }
+        Ok(())
+    }
+
+    fn set_group_camera(
+        &mut self,
+        group_call_id: i32,
+        enabled: bool,
+        camera: Option<&str>,
+    ) -> Result<(), EngineError> {
+        let media = self
+            .group_calls
+            .get_mut(&group_call_id)
+            .ok_or(EngineError::NoSuchCall(group_call_id))?;
+        media.camera_enabled = enabled;
+        media.camera = camera.map(str::to_owned);
+        self.issue_group_sources(group_call_id)
+    }
+
+    fn start_screen_share(&mut self, group_call_id: i32) -> Result<String, EngineError> {
+        let instance = self.ensure_instance()?;
+        let chat_id = self
+            .group_calls
+            .get(&group_call_id)
+            .ok_or(EngineError::NoSuchCall(group_call_id))?
+            .chat_id;
+        let mut out: *mut c_char = null_mut();
+        // SAFETY: `out` is a valid writable C output; ntgcalls allocates
+        // the returned presentation offer on success.
+        let rc = unsafe { (self.api.ntg_init_presentation)(instance.as_ptr(), chat_id, &mut out) };
+        if rc != NTG_OK {
+            return Err(EngineError::Engine {
+                op: "ntg_init_presentation",
+                code: rc,
+            });
+        }
+        if out.is_null() {
+            return Err(EngineError::Engine {
+                op: "ntg_init_presentation",
+                code: NTG_ERR_INVALID_PARAMS,
+            });
+        }
+        // SAFETY: as in `create_group_call`.
+        let offer = unsafe { CStr::from_ptr(out) }
+            .to_string_lossy()
+            .into_owned();
+        unsafe { (self.api.ntg_string_free)(out) };
+        if let Some(media) = self.group_calls.get_mut(&group_call_id) {
+            media.presentation_initialized = true;
+        }
+        Ok(offer)
+    }
+
+    fn connect_screen_share(
+        &mut self,
+        group_call_id: i32,
+        answer_payload: &str,
+    ) -> Result<(), EngineError> {
+        let media = self
+            .group_calls
+            .get_mut(&group_call_id)
+            .ok_or(EngineError::NoSuchCall(group_call_id))?;
+        if media.screen_sharing {
+            return Ok(());
+        }
+        let chat_id = media.chat_id;
+        let instance = self.ensure_instance()?;
+        let params = CString::new(answer_payload).map_err(|_| EngineError::Engine {
+            op: "ntg_connect",
+            code: NTG_ERR_INVALID_PARAMS,
+        })?;
+        // SAFETY: instance is live and `params` is valid; the answer is the
+        // `Text` from `startGroupCallScreenSharing`.
+        let rc =
+            unsafe { (self.api.ntg_connect)(instance.as_ptr(), chat_id, params.as_ptr(), true) };
+        if rc != NTG_OK {
+            return Err(EngineError::Engine {
+                op: "ntg_connect",
+                code: rc,
+            });
+        }
+        self.group_calls
+            .get_mut(&group_call_id)
+            .ok_or(EngineError::NoSuchCall(group_call_id))?
+            .screen_sharing = true;
+        self.issue_presentation_sources(group_call_id)
+    }
+
+    fn stop_screen_share(&mut self, group_call_id: i32) -> Result<(), EngineError> {
+        let (instance, chat_id) = (
+            self.instance.ok_or(EngineError::NullInstance)?,
+            self.group_calls
+                .get(&group_call_id)
+                .ok_or(EngineError::NoSuchCall(group_call_id))?
+                .chat_id,
+        );
+        // SAFETY: instance is live; `chat_id` is this group's chat.
+        let rc = unsafe { (self.api.ntg_stop_presentation)(instance.as_ptr(), chat_id) };
+        if rc != NTG_OK {
+            return Err(EngineError::Engine {
+                op: "ntg_stop_presentation",
+                code: rc,
+            });
+        }
+        if let Some(media) = self.group_calls.get_mut(&group_call_id) {
+            media.screen_sharing = false;
+            media.presentation_initialized = false;
+        }
+        Ok(())
+    }
+
+    fn presentation_active(&self, group_call_id: i32) -> bool {
+        self.group_calls
+            .get(&group_call_id)
+            .is_some_and(|media| media.screen_sharing || media.presentation_initialized)
+    }
+
+    fn leave_group_call(&mut self, group_call_id: i32) -> Result<(), EngineError> {
+        // Unknown group call ids succeed: leave is cleanup, never an error.
+        let Some(media) = self.group_calls.remove(&group_call_id) else {
+            return Ok(());
+        };
+        if let Some(instance) = self.instance {
+            // SAFETY: instance is live; `media.chat_id` is this group's chat.
+            let rc = unsafe { (self.api.ntg_stop)(instance.as_ptr(), media.chat_id) };
+            if rc != NTG_OK {
+                return Err(EngineError::Engine {
+                    op: "ntg_stop",
+                    code: rc,
+                });
+            }
+        }
+        let mut maps = self
+            .callback
+            .group_chat_to_call
+            .lock()
+            .expect("ntgcalls group call map");
+        maps.remove(&media.chat_id);
+        self.callback
+            .group_video_ssrc_to_user
+            .lock()
+            .expect("ntgcalls group ssrc map")
+            .retain(|(chat_id, _), _| *chat_id != media.chat_id);
         Ok(())
     }
 
@@ -1176,6 +1971,56 @@ impl CallEngine for NtgcallsEngine {
 
     fn is_available(&self) -> bool {
         true
+    }
+}
+
+impl NtgcallsEngine {
+    /// Phase C2g: remove one group video endpoint subscription. Only
+    /// that endpoint's ssrcs leave the attribution maps, so another
+    /// endpoint of the same user keeps receiving frames.
+    fn remove_group_video_endpoint(
+        &mut self,
+        group_call_id: i32,
+        chat_id: i64,
+        endpoint: &str,
+    ) -> Result<(), EngineError> {
+        let instance = self.ensure_instance()?;
+        let native_endpoint = CString::new(endpoint).map_err(|_| EngineError::Engine {
+            op: "ntg_remove_incoming_video",
+            code: NTG_ERR_INVALID_PARAMS,
+        })?;
+        let mut removed: bool = false;
+        // SAFETY: instance is live; `native_endpoint` is valid for this
+        // call; `removed` is a valid C output.
+        let rc = unsafe {
+            (self.api.ntg_remove_incoming_video)(
+                instance.as_ptr(),
+                chat_id,
+                native_endpoint.as_ptr(),
+                &mut removed,
+            )
+        };
+        if rc != NTG_OK {
+            return Err(EngineError::Engine {
+                op: "ntg_remove_incoming_video",
+                code: rc,
+            });
+        }
+        let media = self
+            .group_calls
+            .get_mut(&group_call_id)
+            .ok_or(EngineError::NoSuchCall(group_call_id))?;
+        if let Some(stored) = media.endpoints.remove(endpoint) {
+            let ssrcs: Vec<u32> = stored
+                .ssrc_groups
+                .iter()
+                .flat_map(|group| group.ssrcs.iter().copied())
+                .collect();
+            for ssrc in ssrcs {
+                media.ssrc_to_user.remove(&(chat_id, ssrc));
+            }
+        }
+        Ok(())
     }
 }
 
@@ -1281,6 +2126,10 @@ unsafe extern "C" fn connection_trampoline(
 /// Phase C2e: ntgcalls emits decoded video frames here. Incoming peer camera
 /// frames arrive as PLAYBACK, local camera preview frames as CAPTURE; the
 /// newest frame of a batch is delivered.
+/// Phase C2g: group-call frames arrive keyed by chat id (the native
+/// `user_id` parameter doubles as chat id for groups); the participant
+/// is resolved per frame from the ssrc subscribed via
+/// `ntg_add_incoming_video`.
 unsafe extern "C" fn frames_trampoline(
     _instance: *mut ntg_instance,
     user_id: i64,
@@ -1293,15 +2142,56 @@ unsafe extern "C" fn frames_trampoline(
     if user_data.is_null() || frames.is_null() || frames_len == 0 {
         return;
     }
-    let is_local = mode == NTG_STREAM_MODE_CAPTURE && device == NTG_STREAM_DEVICE_CAMERA;
-    if !is_local && !(mode == NTG_STREAM_MODE_PLAYBACK && device == NTG_STREAM_DEVICE_CAMERA) {
-        // Screen sharing is a later slice; audio frames never reach this path.
-        return;
-    }
     // SAFETY: registration passes an Arc-owned `CallbackShared` pointer and
     // Drop unregisters the callback before releasing the Arc; ntgcalls
     // guarantees the frames array for the duration of this call.
     let shared = unsafe { &*user_data.cast::<CallbackShared>() };
+    // Phase C2g: group-chat routing is checked first; the native callback
+    // key is the chat id for group calls and the user id for P2P.
+    let (call_id, participant_user_id, is_local, is_screen) = if let Some(group_call_id) = shared
+        .group_chat_to_call
+        .lock()
+        .expect("ntgcalls group call map")
+        .get(&user_id)
+        .copied()
+    {
+        // Screen frames arrive as PLAYBACK+SCREEN; camera as
+        // PLAYBACK+CAMERA.
+        let is_screen = device == NTG_STREAM_DEVICE_SCREEN;
+        if mode != NTG_STREAM_MODE_PLAYBACK || (!is_screen && device != NTG_STREAM_DEVICE_CAMERA) {
+            // Group capture (local preview) has no tile yet; drop rather
+            // than misattribute.
+            return;
+        }
+        // SAFETY: frames_len > 0 was checked above.
+        let ssrc = unsafe { &*frames.add(frames_len - 1) }.ssrc as u32;
+        let Some(participant) = shared
+            .group_video_ssrc_to_user
+            .lock()
+            .expect("ntgcalls group ssrc map")
+            .get(&(user_id, ssrc))
+            .copied()
+        else {
+            return;
+        };
+        (group_call_id, Some(participant), false, is_screen)
+    } else {
+        let is_local = mode == NTG_STREAM_MODE_CAPTURE && device == NTG_STREAM_DEVICE_CAMERA;
+        if !is_local && !(mode == NTG_STREAM_MODE_PLAYBACK && device == NTG_STREAM_DEVICE_CAMERA) {
+            // Screen sharing is a later slice; audio frames never reach this path.
+            return;
+        }
+        let Some(call_id) = shared
+            .user_to_call
+            .lock()
+            .expect("ntgcalls callback map")
+            .get(&user_id)
+            .copied()
+        else {
+            return;
+        };
+        (call_id, None, is_local, false)
+    };
     let frame = unsafe { &*frames.add(frames_len - 1) };
     let bytes = if frame.data.is_null() || frame.data_len == 0 {
         Vec::new()
@@ -1325,18 +2215,12 @@ unsafe extern "C" fn frames_trampoline(
         }
         _ => (frame.frame_data.width, frame.frame_data.height),
     };
-    let call_id = shared
-        .user_to_call
-        .lock()
-        .expect("ntgcalls callback map")
-        .get(&user_id)
-        .copied();
     let hook = shared
         .frame_hook
         .lock()
         .expect("ntgcalls video frame hook")
         .clone();
-    if let (Some(call_id), Some(hook)) = (call_id, hook) {
+    if let Some(hook) = hook {
         let seq = shared.frame_seq.fetch_add(1, Ordering::Relaxed);
         hook(
             call_id,
@@ -1346,6 +2230,8 @@ unsafe extern "C" fn frames_trampoline(
                 height,
                 rgba,
                 is_local,
+                participant_user_id,
+                is_screen,
             },
         );
     }
@@ -1586,6 +2472,29 @@ fn c_string(value: *mut std::ffi::c_char) -> String {
 mod tests {
     use super::*;
     use ntgcalls_sys::{NTG_STREAM_STATUS_IDLING, NTG_VIDEO_ROTATION_VIDEO_ROTATION_0};
+
+    /// Phase C2g: the audio SSRC is the first `a=ssrc:` line of the
+    /// audio `m=` section; video sections are ignored, and 0 is the
+    /// honest fallback (the join still goes out).
+    #[test]
+    fn group_offer_audio_source_id_parses_first_audio_ssrc() {
+        let offer = "v=0\r\n\
+            m=audio 9 UDP/TLS/RTP/SAVPF 111\r\n\
+            a=ssrc:12345 cname:audio\r\n\
+            a=ssrc:12346 cname:audio\r\n\
+            m=video 9 UDP/TLS/RTP/SAVPF 96\r\n\
+            a=ssrc:99999 cname:video\r\n";
+        assert_eq!(group_offer_audio_source_id(offer), 12345);
+    }
+
+    #[test]
+    fn group_offer_audio_source_id_zero_without_audio_ssrc() {
+        assert_eq!(
+            group_offer_audio_source_id("v=0\r\nm=video 9 UDP/TLS/RTP/SAVPF 96\r\n"),
+            0
+        );
+        assert_eq!(group_offer_audio_source_id(""), 0);
+    }
 
     #[test]
     fn mock_engine_lifecycle_and_protocol() {
@@ -1898,6 +2807,8 @@ mod tests {
             height: 2,
             rgba: vec![1, 2, 3, 255, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
             is_local: true,
+            participant_user_id: None,
+            is_screen: false,
         };
         engine.emit_video_frame(77, frame.clone());
         let second = Arc::new(Mutex::new(Vec::new()));
