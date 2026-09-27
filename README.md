@@ -343,11 +343,11 @@ This is the comprehensive Telegram-parity checklist: one checkbox per user-visib
 - [ ] Less data for calls setting <!-- parity:calls-less-data -->
 - [ ] Use proxy for calls setting <!-- parity:calls-proxy -->
 - [ ] Echo cancellation / noise suppression toggles (partial: ntgcalls defaults only, no settings UI) <!-- parity:calls-audio-fx -->
-- [ ] Start video call with working video (partial: call starts with is_video flag but no media transport yet) <!-- parity:calls-start-video -->
-- [ ] Camera preview (local video tile) in video call (partial: placeholder tile, ui/mod.rs:9711) <!-- parity:calls-camera-preview -->
-- [ ] Remote video frames in video call (partial: placeholder tile "No video — ships in a later slice") <!-- parity:calls-remote-video -->
-- [ ] Switch camera during video call <!-- parity:calls-camera-switch -->
-- [ ] Camera device selection (partial: MediaDeviceKind::Camera exists in calls/engine.rs:865, no UI) <!-- parity:calls-camera-select -->
+- [x] Start video call with working video (video negotiated when a camera exists via `video_wanted`; peer frames flow through the engine callbacks to the video stage — verified in code + screenshot; real camera/peer still unverified) <!-- parity:calls-start-video -->
+- [x] Camera preview (local video tile) in video call (renders latest driver frame as a 160x120 PiP; "Starting camera…" / "Camera off" states when no frame) <!-- parity:calls-camera-preview -->
+- [x] Remote video frames in video call (peer camera as the main tile; Connecting/paused/off state text from `RemoteVideoState`) <!-- parity:calls-remote-video -->
+- [x] Switch camera during video call (camera on/off toggle drives `set_camera_enabled`; camera picker re-applies the selected device on the active call) <!-- parity:calls-camera-switch -->
+- [x] Camera device selection (Camera picker row with radio selection; "No camera found." when the engine reports none) <!-- parity:calls-camera-select -->
 - [ ] 1:1 call verification emojis (partial: parsed and shown only for group calls) <!-- parity:calls-verify-emoji -->
 - [ ] Share screen in a call (partial: screen-sharing participants are detected and flagged, ui/mod.rs:10150; no start request) <!-- parity:calls-screen-share -->
 - [x] Join group voice chat <!-- parity:calls-join --> (group-call-join button ui/mod.rs:10817; join_group_call requests.rs:1101)

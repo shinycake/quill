@@ -1,5 +1,5 @@
 use crate::auth::{AuthView, view_for};
-use crate::calls::engine::TransportState;
+use crate::calls::engine::{RemoteVideoState, TransportState};
 use crate::composer::{CommandMenuItem, merge_command_menu_items};
 use crate::diagnostics::{Diagnostic, DiagnosticSink};
 use crate::ids::{
@@ -1997,6 +1997,14 @@ pub struct ActiveCall {
     /// Phase C1b: local-only mute toggle state. Tracked but a no-op
     /// without media transport (C2) — the UI labels it honestly.
     pub muted: bool,
+    /// Phase C2e: local camera intent (UI toggle). Initialized from
+    /// `is_video` — a video call starts with the camera on, a voice
+    /// call with it off. The engine picks it up through
+    /// `set_camera_enabled`.
+    pub camera_on: bool,
+    /// Phase C2e: peer camera state from the engine hook; `Inactive`
+    /// until the first state callback arrives.
+    pub remote_video: RemoteVideoState,
 }
 
 /// Phase C1: summary of the most recently ended call, driving the
@@ -3617,6 +3625,8 @@ impl Session {
                         // stashed in the request purpose.
                         is_video,
                         muted: false,
+                        camera_on: is_video,
+                        remote_video: RemoteVideoState::Inactive,
                         state: CallState::Pending {
                             is_created: true,
                             is_received: false,
@@ -5403,6 +5413,8 @@ impl Session {
             signaling_queue: Vec::new(),
             signaling_dropped: 0,
             muted: false,
+            camera_on: call.is_video,
+            remote_video: RemoteVideoState::Inactive,
         });
         self.call_summary = None;
         self.call_error = None;

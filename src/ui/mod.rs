@@ -588,6 +588,16 @@ pub struct QuillApp {
     /// reported none.
     demo_call_devices: Option<Vec<quill::calls::engine::MediaDevice>>,
     demo_selected_devices: (Option<String>, Option<String>),
+    /// Phase C2e: synthetic demo video frames for the screenshot
+    /// fixture only — live frames come from the driver, never these.
+    demo_remote_frame: Option<quill::calls::engine::VideoFrame>,
+    demo_local_frame: Option<quill::calls::engine::VideoFrame>,
+    /// Phase C2e: demo-mode camera pick (live picks go to the driver).
+    demo_selected_camera: Option<String>,
+    /// Phase C2e: decoded video tiles cached by frame seq, rebuilt only
+    /// when the newest frame changes.
+    call_remote_image: Option<(u64, Arc<RenderImage>)>,
+    call_local_image: Option<(u64, Arc<RenderImage>)>,
     demo_seq: AtomicU64,
     demo_sink: Arc<MemorySink>,
     /// Phase 8.1: chat ids whose OS notification was clicked (set by the
@@ -1966,6 +1976,11 @@ impl QuillApp {
             demo_session,
             demo_call_devices: None,
             demo_selected_devices: (None, None),
+            demo_remote_frame: None,
+            demo_local_frame: None,
+            demo_selected_camera: None,
+            call_remote_image: None,
+            call_local_image: None,
             demo_seq: AtomicU64::new(0),
             demo_sink,
             notify_clicks: Arc::new(Mutex::new(Vec::new())),
@@ -2379,10 +2394,29 @@ impl QuillApp {
         // overlay renders the video-stage placeholder grid (remote +
         // local tiles), the 📹 kind line, duration clock, Mute / Hang
         // up, and the honest no-video-transport note.
+        // Phase C2e: now with synthetic video — an injected camera
+        // device, the peer streaming (Active), and two distinct
+        // generated test patterns (remote: teal + circle; local: warm +
+        // crosshair). NOT a real camera: generated in code, demo only.
         if matches!(demo, Some(ScreenshotDemo::ReadyCallVideo)) {
             if let Some(session) = app.demo_session.as_mut() {
                 app.demo_seq.store(session.last_seq, Ordering::SeqCst);
                 apply_ready_call_video(session, &app.demo_sink, &app.demo_seq);
+            }
+            app.demo_call_devices = Some(vec![quill::calls::engine::MediaDevice {
+                id: "demo-cam".into(),
+                name: "Demo Camera (synthetic)".into(),
+                kind: quill::calls::engine::MediaDeviceKind::Camera,
+            }]);
+            app.demo_remote_frame = Some(demo_video_frame(false));
+            app.demo_local_frame = Some(demo_video_frame(true));
+            if let Some(call) = app
+                .demo_session
+                .as_mut()
+                .and_then(|session| session.active_call.as_mut())
+            {
+                call.remote_video = quill::calls::engine::RemoteVideoState::Active;
+                call.transport = Some(quill::calls::engine::TransportState::Connected);
             }
             app.status_note =
                 "screenshot demo — connected video call with Zed (injected, no live Telegram)"
@@ -4508,6 +4542,38 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// Phase C2e: camera on/off toggle for a video call. Live: flips the
+    /// camera intent and pushes it to the engine; an engine error
+    /// surfaces in the status note without flipping the flag (driver
+    /// contract). Demo: flips the flag only, no live Telegram.
+    fn toggle_call_camera(&mut self, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            let Some(call) = live.driver.session.active_call.as_ref() else {
+                return;
+            };
+            let (call_id, camera_on) = (call.id, !call.camera_on);
+            let ready = live.driver.call_video_ready();
+            self.status_note = match live.driver.set_call_camera(call_id, camera_on && ready) {
+                Ok(()) => {
+                    if camera_on {
+                        "camera on".into()
+                    } else {
+                        "camera off".into()
+                    }
+                }
+                Err(err) => format!("could not change camera state: {err}"),
+            };
+        } else if let Some(call) = self
+            .demo_session
+            .as_mut()
+            .and_then(|session| session.active_call.as_mut())
+        {
+            call.camera_on = !call.camera_on;
+            self.status_note = "demo: camera toggle (no live Telegram)".into();
+        }
+        cx.notify();
+    }
+
     fn select_call_device(
         &mut self,
         kind: quill::calls::engine::MediaDeviceKind,
@@ -4515,6 +4581,17 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if let Some(live) = self.live.as_mut() {
+            // Phase C2e: camera selection goes to the driver, which
+            // stores it and re-applies the camera on the active call.
+            if kind == quill::calls::engine::MediaDeviceKind::Camera {
+                self.status_note = match live.driver.select_call_camera(Some(device_id.to_string()))
+                {
+                    Ok(()) => "camera selected".into(),
+                    Err(err) => format!("could not select camera: {err}"),
+                };
+                cx.notify();
+                return;
+            }
             let (microphone, speaker) = live.driver.selected_call_devices();
             let (microphone, speaker) = match kind {
                 quill::calls::engine::MediaDeviceKind::Microphone => {
@@ -4536,6 +4613,9 @@ impl QuillApp {
                 }
                 quill::calls::engine::MediaDeviceKind::Speaker => {
                     self.demo_selected_devices.1 = Some(device_id.into())
+                }
+                quill::calls::engine::MediaDeviceKind::Camera => {
+                    self.demo_selected_camera = Some(device_id.into())
                 }
                 _ => return,
             }
@@ -5033,6 +5113,41 @@ impl QuillApp {
                 ]))))
             })
             .collect()
+    }
+
+    /// Phase C2e: decode a `VideoFrame`'s RGBA8 bytes into a GPUI image
+    /// handle, exactly like `decode_viewer_frames`. `None` on malformed
+    /// bytes — never render garbage.
+    fn video_render_image(frame: &quill::calls::engine::VideoFrame) -> Option<Arc<RenderImage>> {
+        let rgba = image::RgbaImage::from_raw(
+            u32::from(frame.width),
+            u32::from(frame.height),
+            frame.rgba.clone(),
+        )?;
+        Some(Arc::new(RenderImage::new(SmallVec::from_buf([
+            image::Frame::new(rgba),
+        ]))))
+    }
+
+    /// Phase C2e: cached decoded tile for a video frame, rebuilt only
+    /// when the frame sequence changed. `local` picks the preview slot,
+    /// otherwise the peer slot.
+    fn cached_video_image(
+        &mut self,
+        local: bool,
+        frame: &quill::calls::engine::VideoFrame,
+    ) -> Option<Arc<RenderImage>> {
+        let slot = if local {
+            &mut self.call_local_image
+        } else {
+            &mut self.call_remote_image
+        };
+        if slot.as_ref().is_some_and(|(seq, _)| *seq == frame.seq) {
+            return slot.as_ref().map(|(_, image)| image.clone());
+        }
+        let image = Self::video_render_image(frame)?;
+        *slot = Some((frame.seq, image.clone()));
+        Some(image)
     }
 
     /// Kill a running viewer frame extraction (ffmpeg child), if any, and
@@ -6259,7 +6374,12 @@ impl QuillApp {
         self.call_tick_active = true;
         cx.spawn(async move |this, cx| {
             loop {
-                cx.background_executor().timer(Duration::from_secs(1)).await;
+                // Phase C2e: video calls tick at 100ms so incoming
+                // frames reach the tiles; everything else stays at 1s.
+                let interval = this
+                    .update(cx, |this, _| this.call_tick_interval())
+                    .unwrap_or(Duration::from_secs(1));
+                cx.background_executor().timer(interval).await;
                 let cont = this
                     .update(cx, |this, cx| {
                         let still_active = this.session().is_some_and(|s| s.active_call.is_some());
@@ -6281,6 +6401,38 @@ impl QuillApp {
             });
         })
         .detach();
+    }
+
+    /// Phase C2e: tick interval for the call overlay — 100ms while a
+    /// video call is Ready and a video feed is live (peer streaming or
+    /// local camera on), 1s otherwise.
+    fn call_tick_interval(&self) -> Duration {
+        let fast = self
+            .session()
+            .and_then(|s| s.active_call.as_ref())
+            .is_some_and(|call| {
+                call.is_video
+                    && matches!(call.state, CallState::Ready)
+                    && (call.remote_video != quill::calls::engine::RemoteVideoState::Inactive
+                        || self.call_camera_effective(call))
+            });
+        if fast {
+            Duration::from_millis(100)
+        } else {
+            Duration::from_secs(1)
+        }
+    }
+
+    /// Phase C2e: the local camera actually contributes a feed — the
+    /// intent is on and video can run (live: driver ready; demo:
+    /// fixtures carry the frames).
+    fn call_camera_effective(&self, call: &ActiveCall) -> bool {
+        call.camera_on
+            && (self.live.is_none()
+                || self
+                    .live
+                    .as_ref()
+                    .is_some_and(|live| live.driver.call_video_ready()))
     }
 
     /// Phase A1: whether the viewer may change slow mode in a supergroup:
@@ -9617,7 +9769,7 @@ impl QuillApp {
     /// call UI above everything else. **Signaling only**: when a call
     /// would need media, the card says so honestly (audio transport is
     /// the C2 libtgvoip spike, not faked here).
-    fn call_overlay(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+    fn call_overlay(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let session = self.session()?;
         if session.active_call.is_none()
             && session.call_summary.is_none()
@@ -9640,7 +9792,7 @@ impl QuillApp {
             .unwrap_or_else(|| format!("User {user_id}"))
     }
 
-    fn call_card(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    fn call_card(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
         let session = self.session();
         let active = session.and_then(|s| s.active_call.clone());
         let summary = session.and_then(|s| s.call_summary.clone());
@@ -9702,54 +9854,129 @@ impl QuillApp {
             .child(card)
     }
 
-    /// Phase C1: the live-call card (ringing / connecting / connected).
-    /// Phase C1b: video calls show a 📹 indicator on the kind line and
-    /// a video-stage placeholder grid once connected — honest dark
-    /// tiles, never a fake live picture. The backdrop is not clickable
-    /// — only the call buttons act.
-    fn call_video_stage(&self, name: &str) -> Div {
-        // Phase C1b: remote tile + local preview tile for a connected
-        // video call. No camera frames exist without the Phase C2
-        // media transport, so both tiles are placeholders and say so.
-        let tile = |label: String, sub: &str| {
+    /// Phase C2e: the video stage for a connected video call — the peer's
+    /// camera as the main tile, the local preview as a 160x120 PiP
+    /// anchored bottom-right. Frames come from the driver (live) or the
+    /// demo fixture (screenshot mode); both tiles degrade to honest
+    /// status text when a feed is missing, and decoded tiles are cached
+    /// by frame seq so re-renders don't re-decode.
+    fn call_video_stage(&mut self, call: &ActiveCall, name: &str) -> Div {
+        let (remote_frame, local_frame): (
+            Option<quill::calls::engine::VideoFrame>,
+            Option<quill::calls::engine::VideoFrame>,
+        ) = if let Some(live) = self.live.as_ref() {
+            (
+                live.driver.latest_video_frame(call.id, false),
+                live.driver.latest_video_frame(call.id, true),
+            )
+        } else {
+            (
+                self.demo_remote_frame.clone(),
+                self.demo_local_frame.clone(),
+            )
+        };
+
+        let status_text = |text: &str| {
             div()
-                .flex_1()
-                .h(px(104.))
                 .flex()
                 .flex_col()
                 .items_center()
                 .justify_center()
                 .gap_1()
-                .rounded_md()
-                .bg(rgb(0x161616))
                 .child(div().text_2xl().child("📹"))
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(rgb(0x9a9a9a))
+                        .child(text.to_string()),
+                )
+        };
+        let video_img = |image: Arc<RenderImage>| {
+            img(ImageSource::from(image))
+                .w_full()
+                .h_full()
+                .object_fit(ObjectFit::Contain)
+        };
+
+        let remote: AnyElement = match (call.remote_video, remote_frame.as_ref()) {
+            (quill::calls::engine::RemoteVideoState::Active, Some(frame)) => {
+                match self.cached_video_image(false, frame) {
+                    Some(image) => video_img(image).into_any_element(),
+                    None => status_text("Couldn't decode the peer's video").into_any_element(),
+                }
+            }
+            (quill::calls::engine::RemoteVideoState::Active, None) => {
+                status_text("Connecting video…").into_any_element()
+            }
+            (quill::calls::engine::RemoteVideoState::Paused, _) => {
+                status_text("Video paused by peer").into_any_element()
+            }
+            (quill::calls::engine::RemoteVideoState::Inactive, _) => div()
+                .flex()
+                .flex_col()
+                .items_center()
+                .justify_center()
+                .gap_1()
+                .child(initials_avatar(name, 48.))
                 .child(
                     div()
                         .text_xs()
                         .font_semibold()
                         .text_color(rgb(0xffffff))
-                        .child(label),
+                        .child(name.to_string()),
                 )
                 .child(
                     div()
                         .text_xs()
                         .text_color(rgb(0x9a9a9a))
-                        .child(sub.to_string()),
+                        .child("Peer's camera is off"),
                 )
+                .into_any_element(),
         };
+
+        let camera_on = self.call_camera_effective(call);
+        let local: AnyElement = match (camera_on, local_frame.as_ref()) {
+            (true, Some(frame)) => match self.cached_video_image(true, frame) {
+                Some(image) => video_img(image).into_any_element(),
+                None => status_text("Couldn't decode the camera preview").into_any_element(),
+            },
+            (true, None) => status_text("Starting camera…").into_any_element(),
+            (false, _) => status_text("Camera off").into_any_element(),
+        };
+
         div()
             .w_full()
-            .flex()
-            .gap_2()
-            .child(tile(name.to_string(), "No video — ships in a later slice"))
-            .child(tile(
-                "You".to_string(),
-                "No preview — ships in a later slice",
-            ))
+            .relative()
+            .child(
+                div()
+                    .w_full()
+                    .h(px(240.))
+                    .rounded_md()
+                    .bg(rgb(0x161616))
+                    .overflow_hidden()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(remote),
+            )
+            .child(
+                div()
+                    .absolute()
+                    .bottom_2()
+                    .right_2()
+                    .w(px(160.))
+                    .h(px(120.))
+                    .rounded_md()
+                    .bg(rgb(0x161616))
+                    .overflow_hidden()
+                    .border_1()
+                    .border_color(rgb(0x333333))
+                    .child(local),
+            )
     }
 
     fn call_active_card(
-        &self,
+        &mut self,
         card: Stateful<Div>,
         call: &ActiveCall,
         error: Option<&str>,
@@ -9800,11 +10027,11 @@ impl QuillApp {
             CallState::Discarded { .. } | CallState::Error { .. } => ("Ending…".to_string(), None),
         };
         let mut card = card;
-        // Phase C1b: a connected video call shows the video-stage
-        // placeholder grid (remote + local preview tiles) instead of
-        // the avatar; every other state keeps the avatar.
+        // Phase C2e: a connected video call shows the video stage
+        // (peer's camera as the main tile, local preview as a PiP);
+        // every other state keeps the avatar.
         if call.is_video && matches!(call.state, CallState::Ready) {
-            card = card.child(self.call_video_stage(&name));
+            card = card.child(self.call_video_stage(call, &name));
         } else {
             card = card.child(initials_avatar(&name, 72.));
         }
@@ -9831,8 +10058,20 @@ impl QuillApp {
             CallState::Ready | CallState::ExchangingKeys | CallState::Pending { .. }
         );
         if no_transport_note {
+            // Phase C2e: video is real once the driver is ready (engine
+            // + camera); otherwise say exactly what's missing instead of
+            // the old "ships in a later slice" note.
+            let video_ready = self
+                .live
+                .as_ref()
+                .is_some_and(|live| live.driver.call_video_ready())
+                || self.live.is_none();
             let note = if call.is_video {
-                "Video transport ships in a later slice; audio may be real."
+                if video_ready {
+                    "Video connecting — tiles fill in as cameras stream."
+                } else {
+                    "Video unavailable — no camera found."
+                }
             } else if call.transport == Some(quill::calls::engine::TransportState::Connected) {
                 "Audio connected"
             } else {
@@ -9944,6 +10183,50 @@ impl QuillApp {
                         );
                     }
                 }
+                // Phase C2e: camera picker, video calls only. When the
+                // engine reported other devices but no camera, the row
+                // says so honestly instead of vanishing.
+                if call.is_video {
+                    let camera_selected: Option<&str> = if let Some(live) = self.live.as_ref() {
+                        live.driver.selected_call_camera()
+                    } else {
+                        self.demo_selected_camera.as_deref()
+                    };
+                    pickers =
+                        pickers.child(div().text_xs().font_semibold().child("Camera".to_string()));
+                    let mut any_camera = false;
+                    for device in devices.iter().filter(|device| {
+                        device.kind == quill::calls::engine::MediaDeviceKind::Camera
+                    }) {
+                        any_camera = true;
+                        let device_id = device.id.clone();
+                        let chosen = Some(device.id.as_str()) == camera_selected;
+                        pickers = pickers.child(
+                            Button::new(format!("call-device-Camera-{}", device.id))
+                                .label(format!(
+                                    "{} {}",
+                                    if chosen { "●" } else { "○" },
+                                    device.name
+                                ))
+                                .ghost()
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.select_call_device(
+                                        quill::calls::engine::MediaDeviceKind::Camera,
+                                        &device_id,
+                                        cx,
+                                    );
+                                })),
+                        );
+                    }
+                    if !any_camera {
+                        pickers = pickers.child(
+                            div()
+                                .text_xs()
+                                .text_color(cx.theme().muted_foreground)
+                                .child("No camera found."),
+                        );
+                    }
+                }
                 card = card.child(pickers);
             }
         }
@@ -9979,23 +10262,53 @@ impl QuillApp {
             CallState::Ready | CallState::Unknown(_) => {
                 // Phase C1b: mute toggle — local-only state, no-op
                 // without media transport (the card says so above).
-                buttons = buttons
-                    .child(
-                        Button::new("call-mute")
-                            .label(if call.muted { "Unmute" } else { "Mute" })
-                            .ghost()
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.toggle_call_mute(cx);
-                            })),
-                    )
-                    .child(
-                        Button::new("call-hangup")
-                            .label("Hang up")
-                            .danger()
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.hang_up_call(cx);
-                            })),
-                    );
+                buttons = buttons.child(
+                    Button::new("call-mute")
+                        .label(if call.muted { "Unmute" } else { "Mute" })
+                        .ghost()
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.toggle_call_mute(cx);
+                        })),
+                );
+                // Phase C2e: camera toggle for video calls — shown only
+                // when video can actually run (live: driver ready; demo:
+                // fixtures). Otherwise an honest "No camera available".
+                if call.is_video {
+                    let video_ready = self
+                        .live
+                        .as_ref()
+                        .is_some_and(|live| live.driver.call_video_ready())
+                        || self.live.is_none();
+                    if video_ready {
+                        buttons = buttons.child(
+                            Button::new("call-camera")
+                                .label(if call.camera_on {
+                                    "Camera off"
+                                } else {
+                                    "Camera on"
+                                })
+                                .ghost()
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.toggle_call_camera(cx);
+                                })),
+                        );
+                    } else {
+                        buttons = buttons.child(
+                            div()
+                                .text_xs()
+                                .text_color(cx.theme().muted_foreground)
+                                .child("No camera available"),
+                        );
+                    }
+                }
+                buttons = buttons.child(
+                    Button::new("call-hangup")
+                        .label("Hang up")
+                        .danger()
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.hang_up_call(cx);
+                        })),
+                );
             }
             CallState::HangingUp | CallState::Discarded { .. } | CallState::Error { .. } => {}
         }
@@ -18437,6 +18750,58 @@ fn apply_ready_call(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU
 /// call goes pending → exchanging keys → ready, so the call overlay
 /// renders the video-stage placeholder grid. Injected, no live
 /// Telegram, no media.
+/// Phase C2e: synthetic video-call fixture frames — 320x240 RGBA test
+/// patterns generated in code so the two feeds are visually distinct
+/// (remote: teal gradient + circle; local: warm gradient + crosshair).
+/// NOT a real camera: screenshot demos only.
+fn demo_video_frame(is_local: bool) -> quill::calls::engine::VideoFrame {
+    const W: usize = 320;
+    const H: usize = 240;
+    let mut rgba = Vec::with_capacity(W * H * 4);
+    for y in 0..H {
+        for x in 0..W {
+            let fx = x as f32 / (W - 1) as f32;
+            let fy = y as f32 / (H - 1) as f32;
+            let (mut r, mut g, mut b) = if is_local {
+                // Warm gradient.
+                (
+                    (200.0 + 55.0 * fx) as u8,
+                    (110.0 + 60.0 * fy) as u8,
+                    (60.0 + 40.0 * fx) as u8,
+                )
+            } else {
+                // Teal gradient.
+                (
+                    (20.0 + 40.0 * fx) as u8,
+                    (120.0 + 80.0 * fy) as u8,
+                    (140.0 + 60.0 * fx) as u8,
+                )
+            };
+            if is_local {
+                // Crosshair.
+                if (x as i32 - W as i32 / 2).abs() <= 2 || (y as i32 - H as i32 / 2).abs() <= 2 {
+                    (r, g, b) = (255, 255, 255);
+                }
+            } else {
+                // Circle.
+                let dx = x as i32 - W as i32 / 2;
+                let dy = y as i32 - H as i32 / 2;
+                if dx * dx + dy * dy < 50 * 50 {
+                    (r, g, b) = (170, 240, 240);
+                }
+            }
+            rgba.extend_from_slice(&[r, g, b, 255]);
+        }
+    }
+    quill::calls::engine::VideoFrame {
+        seq: 0,
+        width: W as u16,
+        height: H as u16,
+        rgba,
+        is_local,
+    }
+}
+
 fn apply_ready_call_video(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
     let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
     let user_id = 41i64;

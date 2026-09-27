@@ -3495,3 +3495,88 @@ device list renders honestly.
   `parity:calls-start-video`, `parity:calls-camera-preview`,
   `parity:calls-remote-video`, `parity:calls-camera-switch`, and
   `parity:calls-camera-select` — no README boxes touched in this slice.
+
+## Phase C2e — 1:1 video transport, session 2: driver + UI (2026-09-27)
+
+- **Built:** driver wiring (`src/connect.rs`). `ConnectDriver` registers
+  the session-1 `VideoFrameCallback` / `RemoteVideoStateCallback` hooks in
+  `set_call_engine`, draining peer camera states into
+  `ActiveCall::remote_video` in `pump_call_engine` behind the same
+  active-call gate as transport, and keeping only the latest frame per
+  (call id, is_local) in `video_frame_slots` (cleared when the tracked
+  call ends, so the UI can never render a stale picture). The connect
+  path already refreshes the device cache before `call_connect_params`,
+  which now opts into video via the session-1 pure helper
+  `video_wanted`: `video_enabled` + `camera_input` from the first
+  enumerated camera, overridden by the user's `selected_camera`. New
+  driver controls: `set_call_camera(call_id, enabled)` (engine-first
+  error contract mirroring `set_call_muted` — a failed native call never
+  flips the flag), `select_call_camera` (stores the pick and re-applies
+  the camera on the active call), `selected_call_camera`,
+  `latest_video_frame(call_id, is_local)`, and the honest
+  `call_video_ready()` (active video call + available engine + a camera
+  exists) that the UI uses for disabled states instead of guessing.
+  `ActiveCall` gains `camera_on` (initialized from `is_video` at both
+  reducer construction sites) and `remote_video` (default `Inactive`).
+- **Built:** UI (`src/ui/mod.rs`). `call_video_stage` renders the peer's
+  camera as the main tile and the local preview as a 160x120 PiP anchored
+  bottom-right (absolute positioning, mirroring the existing
+  `#call-backdrop` usage). Frames decode through `video_render_image`
+  (`RgbaImage::from_raw` -> `image::Frame::new` -> `RenderImage::new`,
+  exactly the `decode_viewer_frames` pattern; malformed bytes -> `None`,
+  never garbage) and are cached by frame seq so re-renders don't
+  re-decode. Tiles degrade honestly: peer "Connecting video…" /
+  "Video paused by peer" / "Peer's camera is off" (name + initials
+  placeholder), local "Starting camera…" / "Camera off". The Ready
+  video-call button row gains the camera on/off toggle — shown only when
+  `call_video_ready()` (live) or in demo mode, otherwise the muted text
+  "No camera available". The device pickers gain a Camera row with radio
+  selection for video calls ("No camera found." when the engine reported
+  other devices but no camera); demo mode drives the same tiles from
+  injected synthetic frames. The call tick drops to 100ms while a video
+  call is Ready with a live feed (peer streaming or camera effectively
+  on), 1s otherwise. `call_overlay` / `call_card` / `call_active_card`
+  changed `&self` -> `&mut self` for the image cache; verified the call
+  sites sit inside render methods.
+- **Schema citations (no new TDLib calls):** `call.is_video` at
+  `schema/td_api.tl:7287`; `callStateReady` at `:7068`; `updateCall` at
+  `:10816`; `updateNewCallSignalingData` at `:10862`;
+  `createCall`/`sendCallSignalingData` at `:14211`/`:14218`. A
+  concept-level search (td_api.tl + raw telegram_api.tl + TDLib source)
+  found no video-frame/state constructors beyond `is_video` — established
+  in session 1, unchanged in session 2.
+- **`ntg_add_incoming_video` negative claim (carried from session 1):**
+  search strategy was C++ source inspection of the pinned ntgcalls
+  v3.0.0 tree: the method is declared only on `GroupCall`
+  (`include/ntgcalls/instances/group_call.hpp:32-34`); the public
+  `NTgCalls::add_incoming_video` casts via `safe_call` to `GroupCall`,
+  which throws on a P2P call; `P2PCall::connect` auto-adds the incoming
+  camera track, so 1:1 peer frames arrive unsolicited through
+  `ntg_on_frames_callback` (mode=PLAYBACK, device=CAMERA). Never called
+  on this path.
+- **References:** peer camera state mirrors Telegram X's `VideoState`
+  annotation (`INACTIVE=0, PAUSED=1, ACTIVE=2`, verified at
+  `~/workspace/telegram-x/app/src/main/java/org/thunderdog/challegram/voip/annotation/VideoState.java`);
+  frames are I420 planar converted to RGBA8 in session 1 (full-range
+  BT.601, rotation already applied); camera toggle re-issues CAPTURE
+  sources with the camera description present/absent (`ntg_pause` /
+  `ntg_resume` are global and never used for the camera); the camera
+  description is `NTG_MEDIA_SOURCE_DEVICE` 640x480@30, the conventional
+  tgvoip P2P default.
+- **Deferred:** group-call video, screen sharing, camera selection
+  persistence across calls, external frame injection. 1:1 verification
+  emojis are still parsed and shown only for group calls, so
+  `parity:calls-verify-emoji` stays unchecked.
+- **Not verifiable without a live peer:** the full native path — real
+  camera enumeration on the user's machine, `ntg_set_stream_sources`
+  accepting the camera description, peer MediaState -> stream status,
+  actual frame delivery and rotation handedness against a real camera.
+  Tested instead: driver outbox/slot plumbing against `MockEngine` (7 new
+  tests, all green), pure `video_wanted` (session 1), and the
+  synthetic-frame screenshot below
+  (`docs/screenshots/ready-call-video.png`, frames generated in code —
+  NOT a real camera).
+- **Out of this slice:** E2E testing against a real peer (CI has no live
+  Telegram), 1:1 verification-emoji UI, screen sharing, group-call video,
+  call recording, camera selection persistence across calls, per-peer
+  video quality controls.
