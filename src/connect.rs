@@ -2608,6 +2608,14 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request(RequestPurpose::JoinVideoChat { group_call_id }, None);
+        // Review fix: the new native context starts unconnected, and
+        // `create_group_call` below replaces the old media entry — a
+        // live presentation would be orphaned (still capturing on the
+        // native side). Snapshot it before the entry is replaced.
+        let orphaned_presentation = self
+            .call_engine
+            .as_ref()
+            .is_some_and(|engine| engine.presentation_active(group_call_id));
         let params = self.group_join_params(group_call_id, is_muted);
         if let Err(err) =
             self.sender
@@ -2621,9 +2629,21 @@ impl<S: JsonSender> ConnectDriver<S> {
             }
             return Err(err);
         }
+        if orphaned_presentation && let Some(engine) = self.call_engine.as_deref_mut() {
+            let _ = engine.stop_screen_share(group_call_id);
+        }
         if let Some(call) = self.session.active_group_call.as_mut() {
             call.rejoin_attempts += 1;
             call.reconnecting = false;
+            // Review fix: the fresh native context must run the join
+            // handshake again — reset the transport gate, the stale
+            // answer, and the stale screen-share state so the pump
+            // doesn't drop the new `joinVideoChat` answer.
+            call.transport_ready = false;
+            call.join_payload.clear();
+            call.screen_sharing = false;
+            call.screen_share_pending = false;
+            call.screen_share_answer.clear();
         }
         Ok(extra)
     }
@@ -13729,6 +13749,85 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// Phase C2g (review fix): a rejoin resets the transport handshake —
+    /// the new `joinVideoChat` answer reconnects the fresh native context
+    /// instead of being dropped by the pump's `transport_ready` filter,
+    /// and an orphaned presentation is stopped.
+    #[test]
+    fn group_rejoin_answer_reconnects_native_transport() {
+        let (dir, mut driver, recorder, mut handle, sink, seq) = ready_group_call_driver();
+        let need_rejoin = r#"{"@type":"updateGroupCall","group_call":{"@type":"groupCall","id":555,"unique_id":"999","title":"Design voice","invite_link":"","paid_message_star_count":0,"scheduled_start_date":0,"enabled_start_notification":false,"is_active":true,"is_video_chat":true,"is_live_story":false,"is_rtmp_stream":false,"is_joined":true,"need_rejoin":true,"is_owned":false,"can_be_managed":true,"participant_count":0,"has_hidden_listeners":false,"loaded_all_participants":false,"message_sender_id":null,"recent_speakers":[],"is_my_video_enabled":false,"is_my_video_paused":false,"can_enable_video":true,"mute_new_participants":false,"can_toggle_mute_new_participants":true,"can_send_messages":true,"are_messages_allowed":true,"can_toggle_are_messages_allowed":false,"can_delete_messages":false,"record_duration":0,"is_video_recorded":false,"duration":0}}"#;
+        // Join → answer → the native transport is connected.
+        let extra = driver.join_video_chat(555).expect("join tracked call");
+        ingest_call_json(
+            &mut driver,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"text","text":"join-answer","@extra":{}}}"#,
+                extra.0
+            ),
+        );
+        assert!(
+            driver
+                .session
+                .active_group_call
+                .as_ref()
+                .is_some_and(|call| call.transport_ready)
+        );
+        assert_eq!(handle.group_connects().len(), 1);
+        // A live presentation plus tracked screen-share state: the
+        // rejoin must stop the orphaned native presentation and clear
+        // the stale flags.
+        handle.start_screen_share(555).expect("mock presentation");
+        driver
+            .session
+            .active_group_call
+            .as_mut()
+            .expect("tracked call")
+            .screen_sharing = true;
+        driver
+            .session
+            .active_group_call
+            .as_mut()
+            .expect("tracked call")
+            .screen_share_answer = "old-answer".into();
+        // `need_rejoin` auto-rejoins with a fresh offer and a reset
+        // handshake gate.
+        ingest_call_json(&mut driver, &seq, &sink, need_rejoin);
+        assert_eq!(handle.group_offers().len(), 2);
+        assert_eq!(handle.screen_share_stops(), vec![555]);
+        let call = driver
+            .session
+            .active_group_call
+            .as_ref()
+            .expect("tracked call");
+        assert!(!call.transport_ready);
+        assert!(call.join_payload.is_empty());
+        assert!(!call.screen_sharing && !call.screen_share_pending);
+        assert!(call.screen_share_answer.is_empty());
+        // The new answer reconnects the fresh native context.
+        let extra = sent_request(&recorder, "joinVideoChat")["@extra"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        ingest_call_json(
+            &mut driver,
+            &seq,
+            &sink,
+            &format!(r#"{{"@type":"text","text":"rejoin-answer","@extra":"{extra}"}}"#),
+        );
+        assert_eq!(handle.group_connects().len(), 2);
+        assert!(
+            driver
+                .session
+                .active_group_call
+                .as_ref()
+                .is_some_and(|call| call.transport_ready)
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// Phase C2g: participant `video_info` / `screen_sharing_video_info`
     /// become engine subscriptions; paused endpoints and the local user
     /// are skipped.
@@ -13816,7 +13915,7 @@ mod tests {
     /// retained frames.
     #[test]
     fn group_call_leave_tears_down_transport_and_frames() {
-        let (dir, mut driver, _recorder, handle, _sink, _seq) = ready_group_call_driver();
+        let (dir, mut driver, _recorder, mut handle, _sink, _seq) = ready_group_call_driver();
         handle.emit_video_frame(
             555,
             VideoFrame {
@@ -13830,8 +13929,12 @@ mod tests {
             },
         );
         assert!(driver.latest_group_video_frame(555, 42, false).is_some());
+        // Review fix: a live presentation is stopped before the call
+        // (privacy — capture ends first).
+        handle.start_screen_share(555).expect("mock presentation");
         driver.leave_group_call().expect("leave");
         assert_eq!(handle.group_leaves(), vec![555]);
+        assert_eq!(handle.screen_share_stops(), vec![555]);
         assert!(driver.latest_group_video_frame(555, 42, false).is_none());
         let _ = std::fs::remove_dir_all(&dir);
     }

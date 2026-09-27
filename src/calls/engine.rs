@@ -882,6 +882,11 @@ impl CallEngine for MockEngine {
             return Err(EngineError::Unavailable);
         }
         inner.group_leaves.push(group_call_id);
+        // Mirror the real engine: a live presentation is stopped first
+        // (privacy — capture ends before the call).
+        if inner.presentations.contains(&group_call_id) {
+            inner.screen_share_stops.push(group_call_id);
+        }
         inner.presentations.retain(|id| *id != group_call_id);
         Ok(())
     }
@@ -1868,7 +1873,7 @@ impl CallEngine for NtgcallsEngine {
 
     fn stop_screen_share(&mut self, group_call_id: i32) -> Result<(), EngineError> {
         let (instance, chat_id) = (
-            self.instance.ok_or(EngineError::NullInstance)?,
+            self.ensure_instance()?,
             self.group_calls
                 .get(&group_call_id)
                 .ok_or(EngineError::NoSuchCall(group_call_id))?
@@ -1901,6 +1906,19 @@ impl CallEngine for NtgcallsEngine {
             return Ok(());
         };
         if let Some(instance) = self.instance {
+            // Privacy: tear a live presentation down FIRST so screen
+            // capture stops before the call itself.
+            if media.screen_sharing || media.presentation_initialized {
+                // SAFETY: instance is live; `media.chat_id` is this group's chat.
+                let rc =
+                    unsafe { (self.api.ntg_stop_presentation)(instance.as_ptr(), media.chat_id) };
+                if rc != NTG_OK {
+                    return Err(EngineError::Engine {
+                        op: "ntg_stop_presentation",
+                        code: rc,
+                    });
+                }
+            }
             // SAFETY: instance is live; `media.chat_id` is this group's chat.
             let rc = unsafe { (self.api.ntg_stop)(instance.as_ptr(), media.chat_id) };
             if rc != NTG_OK {

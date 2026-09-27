@@ -10622,7 +10622,6 @@ impl QuillApp {
             .border_1()
             .border_color(cx.theme().border)
             .bg(cx.theme().background)
-            .child(initials_avatar(&name, 48.))
             .child(
                 div()
                     .w_full()
@@ -10920,27 +10919,29 @@ impl QuillApp {
             );
         }
 
-        // The always-visible audio state note — honest about the
+        // The always-visible transport state note — honest about the
         // native group transport (Phase C2g connects it on the
-        // `joinVideoChat` answer).
-        let audio_note = if call.transport_ready {
-            "Voice connected."
+        // `joinVideoChat` answer). The slice carries no audio
+        // (microphone/speaker sources are null), so the copy says
+        // video, not voice.
+        let transport_note = if call.transport_ready {
+            "Video connected."
         } else if call.transport_error.is_some() {
-            "Voice failed to connect."
+            "Video failed to connect."
         } else if self
             .live
             .as_ref()
             .is_some_and(|live| live.driver.group_call_engine_available())
         {
-            "Connecting voice…"
+            "Connecting…"
         } else {
-            "No audio — call engine unavailable."
+            "Video unavailable — call engine unavailable."
         };
         card = card.child(
             div()
                 .text_xs()
                 .text_color(cx.theme().muted_foreground)
-                .child(audio_note),
+                .child(transport_note),
         );
 
         // Self controls. Self mute is local-only: TDLib group calls
@@ -11799,7 +11800,7 @@ impl QuillApp {
                 div()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
-                    .child("Join to connect voice."),
+                    .child("Join to connect video."),
             )
             .child(
                 Button::new("group-call-join-btn")

@@ -3614,8 +3614,10 @@ device list renders honestly.
   of them. The native `NtgcallsEngine` keys group state by TDLib group
   call id (internally the ntgcalls chat id): `ntg_create_call`,
   `ntg_connect(..., false)`, `ntg_add_incoming_video` /
-  `ntg_remove_incoming_video` (returned sink kept per endpoint for the
-  ssrc->user callback map), `ntg_init_presentation` +
+  `ntg_remove_incoming_video` (the returned sink is deliberately
+  ignored — routing is ssrc-keyed, removal is endpoint-keyed via the
+  endpoints map, so one endpoint's removal never drops another endpoint
+  of the same user), `ntg_init_presentation` +
   `ntg_connect(..., true)` + `ntg_set_stream_sources` with
   `NTG_MEDIA_SOURCE_DESKTOP` (NULL input = default display) for screen
   sharing, `ntg_stop_presentation`, `ntg_stop`. Group camera capture
@@ -3672,7 +3674,8 @@ device list renders honestly.
   (corroborated by the ntgcalls N-API docs: `api-reference.md`,
   `quick-start.md`). The C++ source confirms `add_incoming_video` is a
   `GroupCall`-only method (see the C2e-session-2 note above) — the
-  per-endpoint sink it returns feeds the ssrc->user callback map, so one
+  per-endpoint sink it returns is deliberately ignored: routing is
+  ssrc-keyed and removal is endpoint-keyed via the endpoints map, so one
   endpoint's removal never drops another endpoint of the same user.
 - **Not verifiable without a live group call:** the full native path —
   real `ntg_create_call` offer generation, `ntg_connect` against
@@ -3700,6 +3703,37 @@ device list renders honestly.
   The toggle is gated on an enumerated `MediaDeviceKind::Screen` device
   ("No screen source available." when absent) — feasibility of real
   desktop capture is unverifiable on this VM (no `libntgcalls.so`).
+- **Review fixes (second pass, 2026-09-27):**
+  1. Participant tile rendered the initials avatar twice (once above the
+     video/avatar area, once as the avatar fallback) — the redundant
+     outer avatar is deleted; `docs/screenshots/ready-group-call.png`
+     was regenerated after the fix.
+  2. `rejoin_group_call` replaced the native context via
+     `create_group_call` but never reset `transport_ready`, so the pump's
+     join-answer filter dropped the new `joinVideoChat` answer and the
+     transport never reconnected. The rejoin now resets
+     `transport_ready`/`join_payload`, clears the screen-share flags,
+     and stops an orphaned presentation before the media entry is
+     replaced. Covered by
+     `connect::tests::group_rejoin_answer_reconnects_native_transport`
+     (verified to fail without the reset).
+  3. `NtgcallsEngine::leave_group_call` called `ntg_stop` but never
+     `ntg_stop_presentation` — a live presentation now stops first
+     (privacy: capture ends before the call). Mock mirrors it via
+     `screen_share_stops`; the leave driver test asserts it.
+  4. The joined-card transport note claimed voice ("Voice connected.")
+     while this slice carries no audio (mic/speaker sources are null) —
+     reworded to video/transport copy ("Video connected." /
+     "Connecting…" / "Video failed to connect."), and "Join to connect
+     voice." became "Join to connect video." "Voice chat" as the chat
+     entity name is kept.
+  Nits: `stop_screen_share` now uses `ensure_instance()`; `sink`
+  findings wording corrected (ignored, not fed into the callback map).
+- **`calls-group-video-pause` gap:** `group_video_sources` skips
+  `is_paused` endpoints entirely, so the schema's "ignore `is_paused`
+  if new video frames are received" (td_api.tl:7162) can't be honored —
+  a paused endpoint never subscribes, so frames can't arrive to
+  override it. Kept as a gap.
 - **Out of this slice:** recording/RTMP, video-chat title/schedule/
   invite-link UI, in-call group messages, 1:1 screen sharing
   (`parity:calls-screen-share` stays unchecked — group screen sharing is
