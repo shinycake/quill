@@ -3548,7 +3548,7 @@ device list renders honestly.
 - **`ntg_add_incoming_video` negative claim (carried from session 1):**
   search strategy was C++ source inspection of the pinned ntgcalls
   v3.0.0 tree: the method is declared only on `GroupCall`
-  (`include/ntgcalls/instances/group_call.hpp:32-34`); the public
+  (`ntgcalls/include/ntgcalls/instances/group_call.hpp:32-34`); the public
   `NTgCalls::add_incoming_video` casts via `safe_call` to `GroupCall`,
   which throws on a P2P call; `P2PCall::connect` auto-adds the incoming
   camera track, so 1:1 peer frames arrive unsolicited through

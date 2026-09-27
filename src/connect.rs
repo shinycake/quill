@@ -554,11 +554,14 @@ impl<S: JsonSender> ConnectDriver<S> {
             .filter(|engine| engine.is_available())
             .map(|engine| engine.protocol().library_versions)
             .unwrap_or_default();
-        let is_video = self
-            .session
-            .active_call
-            .as_ref()
-            .is_some_and(|call| call.is_video);
+        let is_video = self.session.active_call.as_ref().is_some_and(|call| {
+            // A camera toggle before the transport existed is stored in
+            // `camera_on` and must survive into the connect params (a
+            // camera-off toggle means the call is negotiated without
+            // video). At initial connect `camera_on == is_video`, so
+            // nothing changes there.
+            call.is_video && call.camera_on
+        });
         let (video_enabled, default_camera) = video_wanted(is_video, &self.call_devices_cache);
         let camera_input = video_enabled
             .then(|| self.selected_camera.clone().or(default_camera))
@@ -629,8 +632,8 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// Phase C2e: camera toggle through the native engine. The engine is
     /// called first and its error propagates *without* flipping the
-    /// session flag (mirrors `set_call_muted`); a missing or unavailable
-    /// engine stores the intent so the toggle stays honest.
+    /// session flag (mirrors `set_call_muted`); without a connected
+    /// transport the intent is only stored (it applies on connect).
     pub fn set_call_camera(&mut self, call_id: i32, enabled: bool) -> Result<(), EngineError> {
         let Some(call) = self.session.active_call.as_mut() else {
             return Err(EngineError::NoActiveCall);
@@ -638,7 +641,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         if call.id != call_id {
             return Err(EngineError::NoSuchCall(call_id));
         }
-        if let Some(engine) = self.call_engine.as_deref_mut()
+        if call.transport.is_some()
+            && let Some(engine) = self.call_engine.as_deref_mut()
             && engine.is_available()
         {
             engine.set_camera_enabled(call.id, enabled, self.selected_camera.as_deref())?;
@@ -648,10 +652,10 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     /// Phase C2e: pick the camera device id (`None` = engine default).
-    /// The selection is always stored; it is forwarded to the native
-    /// engine (with the current camera intent) whenever a call is
-    /// tracked, and a failed forward propagates before the stored
-    /// selection changes.
+    /// The selection is stored (so it applies on connect) and forwarded
+    /// to the native engine with the current camera intent only when a
+    /// transport is already connected; a failed forward propagates
+    /// before the stored selection changes.
     pub fn select_call_camera(&mut self, camera: Option<String>) -> Result<(), EngineError> {
         let camera_on = self
             .session
@@ -659,6 +663,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .as_ref()
             .is_some_and(|call| call.camera_on);
         if let Some(call) = self.session.active_call.as_ref()
+            && call.transport.is_some()
             && let Some(engine) = self.call_engine.as_deref_mut()
             && engine.is_available()
         {
@@ -12447,17 +12452,38 @@ mod tests {
     }
 
     /// Phase C2e: the UI camera toggle reaches the engine with the
-    /// call id, the new state, and the selected camera.
+    /// call id, the new state, and the selected camera — but only
+    /// once a transport exists; before that the intent is stored
+    /// cleanly (the real engine errors on an untracked call) so it
+    /// can apply on connect.
     #[test]
-    fn set_call_camera_drives_engine() {
-        let (dir, mut driver, handle, _sink, _seq) = ready_call_driver();
+    fn set_call_camera_gates_engine_on_transport() {
+        let (dir, mut driver, handle, sink, seq) = ready_call_driver();
+        // No transport yet: intent stored, engine untouched.
         assert!(driver.set_call_camera(77, false).is_ok());
-        assert_eq!(handle.camera_changes(), vec![(77, false, None)]);
+        assert!(handle.camera_changes().is_empty());
         assert!(!driver.session.active_call.as_ref().unwrap().camera_on);
+        // Transport connected: the toggle drives the engine.
+        ingest_call_json(&mut driver, &seq, &sink, READY_CALL_JSON);
+        assert!(driver.set_call_camera(77, true).is_ok());
+        assert_eq!(handle.camera_changes(), vec![(77, true, None)]);
+        assert!(driver.session.active_call.as_ref().unwrap().camera_on);
         assert_eq!(
             driver.set_call_camera(999, true),
             Err(crate::calls::engine::EngineError::NoSuchCall(999))
         );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Phase C2e: picking a camera before the transport exists stores
+    /// the selection cleanly without error and without an engine
+    /// forward.
+    #[test]
+    fn select_call_camera_without_transport_stores_selection() {
+        let (dir, mut driver, handle, _sink, _seq) = ready_call_driver();
+        assert!(driver.select_call_camera(Some("cam-1".into())).is_ok());
+        assert!(handle.camera_changes().is_empty());
+        assert_eq!(driver.selected_call_camera(), Some("cam-1"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -12467,6 +12493,44 @@ mod tests {
     fn connect_params_video_honors_no_camera() {
         let (dir, mut driver, handle, sink, seq) = ready_call_driver();
         driver.refresh_call_devices();
+        ingest_call_json(&mut driver, &seq, &sink, &ready_video_call_json());
+        let connects = handle.connects();
+        assert_eq!(connects.len(), 1);
+        assert!(!connects[0].1.video_enabled);
+        assert_eq!(connects[0].1.camera_input, None);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Phase C2e: a camera-off toggle set before the transport exists
+    /// survives into the connect params — the call is negotiated
+    /// without video even though a camera is available.
+    #[test]
+    fn connect_params_camera_off_intent_survives_pre_connect() {
+        let (dir, mut driver, _recorder, sink, seq) = call_driver();
+        let mock = MockEngine::new();
+        mock.set_devices(vec![MediaDevice {
+            id: "cam-1".into(),
+            name: "Test Cam".into(),
+            kind: MediaDeviceKind::Camera,
+        }]);
+        let handle = mock.clone();
+        driver.set_call_engine(Box::new(mock));
+        ingest_call_json(
+            &mut driver,
+            &seq,
+            &sink,
+            r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+        );
+        ingest_call_json(
+            &mut driver,
+            &seq,
+            &sink,
+            r#"{"@type":"updateCall","call":{"@type":"call","id":77,"unique_id":"99","user_id":41,"is_outgoing":true,"is_video":true,"state":{"@type":"callStatePending","is_created":true,"is_received":false}}}"#,
+        );
+        // Camera toggled off before the transport exists: stores the
+        // intent without an engine forward.
+        assert!(driver.set_call_camera(77, false).is_ok());
+        assert!(handle.camera_changes().is_empty());
         ingest_call_json(&mut driver, &seq, &sink, &ready_video_call_json());
         let connects = handle.connects();
         assert_eq!(connects.len(), 1);

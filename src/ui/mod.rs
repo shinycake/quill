@@ -5119,11 +5119,16 @@ impl QuillApp {
     /// handle, exactly like `decode_viewer_frames`. `None` on malformed
     /// bytes — never render garbage.
     fn video_render_image(frame: &quill::calls::engine::VideoFrame) -> Option<Arc<RenderImage>> {
-        let rgba = image::RgbaImage::from_raw(
+        let mut rgba = image::RgbaImage::from_raw(
             u32::from(frame.width),
             u32::from(frame.height),
             frame.rgba.clone(),
         )?;
+        // GPUI holds RenderImage pixels in BGRA (its own decoder swaps
+        // R<->B after into_rgba8); the engine delivers RGBA, so swap here.
+        for pixel in rgba.chunks_exact_mut(4) {
+            pixel.swap(0, 2);
+        }
         Some(Arc::new(RenderImage::new(SmallVec::from_buf([
             image::Frame::new(rgba),
         ]))))
