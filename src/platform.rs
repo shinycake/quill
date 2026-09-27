@@ -341,23 +341,54 @@ pub fn open_external_url(url: &str) -> bool {
         return false;
     }
     let url = url.trim();
-    let mut command = external_open_command(url);
+    let mut command = external_open_command(std::ffi::OsStr::new(url));
     command.spawn().is_ok()
 }
 
-fn external_open_command(url: &str) -> std::process::Command {
+fn external_open_command(target: &std::ffi::OsStr) -> std::process::Command {
     if cfg!(target_os = "macos") {
         let mut command = std::process::Command::new("open");
-        command.arg(url);
+        command.arg(target);
         command
     } else if cfg!(target_os = "windows") {
         let mut command = std::process::Command::new("cmd");
-        command.args(["/C", "start", "", url]);
+        command.args(["/C", "start", ""]);
+        command.arg(target);
         command
     } else {
         let mut command = std::process::Command::new("xdg-open");
-        command.arg(url);
+        command.arg(target);
         command
+    }
+}
+
+/// MED3: open a downloaded file with the system viewer (`xdg-open` /
+/// `open`). Reuses the same OS-open mechanism as URLs, without the
+/// http-scheme gate (a local path is the point here). No shell involved.
+pub fn open_local_file(path: &std::path::Path) -> bool {
+    external_open_command(path.as_os_str()).spawn().is_ok()
+}
+
+/// MED3: reveal a file in the file manager — macOS `open -R` (selects the
+/// file in Finder), Windows `explorer /select,`, Linux opens the parent
+/// directory with `xdg-open` (no portable select-file equivalent).
+pub fn reveal_in_file_manager(path: &std::path::Path) -> bool {
+    if cfg!(target_os = "macos") {
+        let mut command = std::process::Command::new("open");
+        return command.args(["-R"]).arg(path).spawn().is_ok();
+    }
+    if cfg!(target_os = "windows") {
+        let mut command = std::process::Command::new("explorer");
+        let mut select = std::ffi::OsString::from("/select,");
+        select.push(path.as_os_str());
+        return command.arg(select).spawn().is_ok();
+    }
+    match path.parent() {
+        Some(dir) if !dir.as_os_str().is_empty() => std::process::Command::new("xdg-open")
+            .arg(dir)
+            .spawn()
+            .is_ok(),
+        _ => open_local_file(path),
     }
 }
 

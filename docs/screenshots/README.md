@@ -16,6 +16,7 @@ Captured from a real GPUI window on 2026-09-17 (Linux Xvfb + lavapipe). **Not** 
 | `ready-unread.png` | Unread **badge** on Demo chat A (`unread_count: 3`) while B is selected. Injected updates, no live Telegram. Driven by `quill --screenshot-demo ready-unread`. |
 | `ready-unread-read.png` | Same list **after** `updateChatReadInbox` (badge gone) + outbox receipts (`You · read` / `You · sent`). Driven by `quill --screenshot-demo ready-unread-read`. |
 | `ready-media.png` | Photo thumb (local path complete), honest **not downloaded** photo placeholder, and a **notes.txt** document chip. Injected `messagePhoto` / `messageDocument` / `file`, no live Telegram. Driven by `quill --screenshot-demo ready-media`. |
+| `ready-downloads.png` | **MED3**: open conversation with a mid-download document (`notes.txt`, **42%** progress bar + Cancel), a failed document (`archive.zip`, **Retry** chip), plus the **Downloads** manager panel beside the chat (active download with Cancel, recent `report.pdf` with Open / Show in folder). Injected updates, no live Telegram. Driven by `quill --screenshot-demo ready-downloads`. |
 | `ready-send-media.png` | Composer **Attach** chip (`demo-notes.txt`) plus outgoing photo thumb and document chip in history. Injected send path; no live Telegram. Driven by `quill --screenshot-demo ready-send-media`. |
 | `ready-search.png` | Ready sidebar **Search** (`hello`) with **Chats** + **Messages** hits. Injected `chats` / `foundMessages`, no live Telegram. Driven by `quill --screenshot-demo ready-search`. |
 | `ready-search-in-chat.png` | Ready chat open, **Find in chat** (`hello`) with hits + jumped message. Injected `foundChatMessages`, no live Telegram. Driven by `quill --screenshot-demo ready-search-in-chat`. |
@@ -89,6 +90,7 @@ bash scripts/capture-connect-screenshots.sh
 #   cargo run --features ui -- --screenshot-demo ready-unread docs/screenshots
 #   cargo run --features ui -- --screenshot-demo ready-unread-read docs/screenshots
 #   cargo run --features ui -- --screenshot-demo ready-media docs/screenshots
+#   cargo run --features ui -- --screenshot-demo ready-downloads docs/screenshots
 #   cargo run --features ui -- --screenshot-demo ready-send-media docs/screenshots
 #   cargo run --features ui -- --screenshot-demo ready-search docs/screenshots
 #   cargo run --features ui -- --screenshot-demo ready-search-in-chat docs/screenshots

@@ -63,6 +63,21 @@ pub fn save_call_prefs(paths: &AccountPaths, prefs: &CallPrefs) -> std::io::Resu
     std::fs::write(path, bytes)
 }
 
+/// MED3: auto-download bitflags per media type, mirroring TGX
+/// `TdlibFilesManager` (`settings_autodownload` key, per-chat-type shifts):
+/// PHOTO=0x01, VOICE=0x02, VIDEO=0x04, FILE=0x08, MUSIC=0x10, GIF=0x20,
+/// VIDEO_NOTE=0x40. TGX defaults: PHOTO|VOICE|GIF|VIDEO_NOTE in every
+/// chat kind.
+pub const AUTO_DOWNLOAD_PHOTO: u8 = 0x01;
+pub const AUTO_DOWNLOAD_VOICE: u8 = 0x02;
+pub const AUTO_DOWNLOAD_VIDEO: u8 = 0x04;
+pub const AUTO_DOWNLOAD_FILE: u8 = 0x08;
+pub const AUTO_DOWNLOAD_MUSIC: u8 = 0x10;
+pub const AUTO_DOWNLOAD_GIF: u8 = 0x20;
+pub const AUTO_DOWNLOAD_VIDEO_NOTE: u8 = 0x40;
+pub const AUTO_DOWNLOAD_DEFAULT: u8 =
+    AUTO_DOWNLOAD_PHOTO | AUTO_DOWNLOAD_VOICE | AUTO_DOWNLOAD_GIF | AUTO_DOWNLOAD_VIDEO_NOTE;
+
 /// MED1: local-only media preferences, persisted as JSON next to the
 /// account root (`media_prefs.json`). Client-side only (no TDLib setting):
 /// - `remember_media_grouping`: when true, the composer's "group media"
@@ -73,12 +88,47 @@ pub fn save_call_prefs(paths: &AccountPaths, prefs: &CallPrefs) -> std::io::Resu
 ///   `UseHqRoundVideos`): capture round video notes at 480px instead of 280px;
 /// - `prefer_video_mode`: MED2 — the record button's mode (TGX
 ///   `preferVideoMode`); right-click on the record button flips it.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+/// - `data_saver`: MED3 — pause-all auto-downloads (TGX `settings_datasaver`
+///   master bit). User-initiated downloads are unaffected.
+/// - `auto_download_private` / `auto_download_groups` /
+///   `auto_download_channels`: MED3 — per-chat-kind media-type bitfields
+///   (TGX `settings_autodownload` per-chat-type shifts 8/16/24). Desktop
+///   has no mobile/wifi/roaming distinction, so TGX's per-connection
+///   limits collapse to this single per-kind grid (Telegram Desktop's
+///   own auto-download dialog is the same grid).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct MediaPrefs {
     pub remember_media_grouping: bool,
     pub group_media: bool,
     pub hq_round_videos: bool,
     pub prefer_video_mode: bool,
+    #[serde(default)]
+    pub data_saver: bool,
+    #[serde(default = "auto_download_default")]
+    pub auto_download_private: u8,
+    #[serde(default = "auto_download_default")]
+    pub auto_download_groups: u8,
+    #[serde(default = "auto_download_default")]
+    pub auto_download_channels: u8,
+}
+
+fn auto_download_default() -> u8 {
+    AUTO_DOWNLOAD_DEFAULT
+}
+
+impl Default for MediaPrefs {
+    fn default() -> Self {
+        Self {
+            remember_media_grouping: false,
+            group_media: false,
+            hq_round_videos: false,
+            prefer_video_mode: false,
+            data_saver: false,
+            auto_download_private: AUTO_DOWNLOAD_DEFAULT,
+            auto_download_groups: AUTO_DOWNLOAD_DEFAULT,
+            auto_download_channels: AUTO_DOWNLOAD_DEFAULT,
+        }
+    }
 }
 
 impl MediaPrefs {
@@ -206,6 +256,7 @@ mod tests {
             group_media: false,
             hq_round_videos: true,
             prefer_video_mode: true,
+            ..Default::default()
         };
         save_media_prefs(&paths, &prefs).expect("save works");
         assert_eq!(load_media_prefs(&paths), prefs);
@@ -219,6 +270,34 @@ mod tests {
         assert!(prefs.default_grouping());
         std::fs::write(dir.join("accounts/primary/media_prefs.json"), b"not json").unwrap();
         assert_eq!(load_media_prefs(&paths), MediaPrefs::default());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn auto_download_defaults_match_tgx_and_old_files_still_load() {
+        // MED3: TGX defaults (PHOTO|VOICE|GIF|VIDEO_NOTE) in every chat
+        // kind; data saver off.
+        let defaults = MediaPrefs::default();
+        assert!(!defaults.data_saver);
+        assert_eq!(defaults.auto_download_private, AUTO_DOWNLOAD_DEFAULT);
+        assert_eq!(defaults.auto_download_groups, AUTO_DOWNLOAD_DEFAULT);
+        assert_eq!(defaults.auto_download_channels, AUTO_DOWNLOAD_DEFAULT);
+        // A media_prefs.json written before MED3 (no new fields) loads
+        // with the new fields defaulted — old prefs are preserved.
+        let dir =
+            std::env::temp_dir().join(format!("quill-media-prefs-old-{}", std::process::id()));
+        let paths = AccountPaths::for_root(&dir, &AccountKey::primary());
+        std::fs::create_dir_all(dir.join("accounts/primary")).unwrap();
+        std::fs::write(
+            dir.join("accounts/primary/media_prefs.json"),
+            br#"{"remember_media_grouping":true,"group_media":true,"hq_round_videos":true,"prefer_video_mode":false}"#,
+        )
+        .unwrap();
+        let loaded = load_media_prefs(&paths);
+        assert!(loaded.remember_media_grouping);
+        assert!(loaded.hq_round_videos);
+        assert!(!loaded.data_saver);
+        assert_eq!(loaded.auto_download_private, AUTO_DOWNLOAD_DEFAULT);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

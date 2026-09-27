@@ -184,13 +184,14 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Music rows with title/performer/album-cover art and play/pause (ui/mod.rs:844) <!-- parity:media-music-row -->
 - [x] GIF/animation frame playback in history (ui/mod.rs:688-690, 5838) <!-- parity:media-gif-playback -->
 - [x] Document rows with file name and mime type, click-to-download (envelope.rs:4025, ui/mod.rs:16933) <!-- parity:media-document-row -->
-- [ ] Open downloaded document with the system app / reveal in file manager <!-- parity:media-document-open -->
+- [x] Open downloaded document with the system app / reveal in file manager (MED3: open via existing OS-open path; "Show in folder" = `open -R` / `explorer /select,` / parent `xdg-open`) <!-- parity:media-document-open -->
 - [x] On-demand `downloadFile` with priority and auto-download of thumbnails in the open chat (requests.rs:1491, connect.rs:2820) <!-- parity:media-download -->
-- [ ] Download progress display on history rows (partial: in-flight download state tracked, no progress bar/percent, ui/mod.rs:866) <!-- parity:media-download-progress -->
-- [ ] Pause / cancel an in-flight download (schema has `cancelDownloadFile`; Quill never calls it) <!-- parity:media-download-cancel -->
-- [ ] Retry a failed download <!-- parity:media-download-retry -->
-- [ ] Downloads manager screen listing active/completed downloads (TGX Downloads, NoDownloadFilesFound) <!-- parity:media-downloads-manager -->
-- [ ] Automatic media download settings incl. data-saver pause-all mode (partial: thumb auto-download is hardcoded, connect.rs:2820) <!-- parity:media-auto-download-settings -->
+- [x] Download progress display on history rows (MED3: real percent from `localFile.downloaded_size` + determinate progress bar; media viewer shows percent too) <!-- parity:media-download-progress -->
+- [x] Cancel an in-flight download (MED3: `cancelDownloadFile(only_if_pending:false)`; works from history chip and manager) <!-- parity:media-download-cancel -->
+- [ ] Pause / resume a download (schema: pause exists only for the persistent file-download list — `toggleDownloadIsPaused`; MED3 uses one-shot `downloadFile`, so pause is out of slice, see DECISIONS.md) <!-- parity:media-downloads-pause -->
+- [x] Retry a failed download (MED3: failed state from `downloadFile` errors + stalled active→idle transitions; "Retry" re-issues the request) <!-- parity:media-download-retry -->
+- [x] Downloads manager screen listing active/completed downloads (MED3: right-side panel — active with progress/cancel, recent completed with open/reveal, failed with retry) <!-- parity:media-downloads-manager -->
+- [x] Automatic media download settings incl. data-saver pause-all mode (MED3: TGX-compatible per-chat-kind × media-type bitmask + data saver; `media_prefs.json`; desktop collapses TGX's mobile/wifi/roaming grids into one; enabled types auto-download full media in the open chat, secret/spoiler excluded) <!-- parity:media-auto-download-settings -->
 - [x] Link preview cards render on messages with site, title, description, and thumbnail (ui/mod.rs:22426) <!-- parity:media-link-preview -->
 - [ ] Send-time link preview controls: disable, force small/large media, show above text (partial: `link_preview_options` always null on send, requests.rs:1529) <!-- parity:media-link-preview-send-options -->
 - [ ] Instant View reader with auto-open setting (None / Telegram / All links) (partial: `instant_view_version` only passed through) <!-- parity:media-instant-view -->

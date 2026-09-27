@@ -44,9 +44,10 @@ use crate::telegram::requests::{
     accept_call_with_protocol, add_chat_member, add_chat_members, add_chat_to_list,
     add_chat_to_list_value, add_chat_welcome_message, add_contact, add_message_reaction,
     add_recently_found_chat, ban_group_call_participants, boost_chat,
-    chat_member_status_administrator_json, chat_member_status_banned_json,
-    chat_member_status_member_json, chat_member_status_restricted_json, check_authentication_code,
-    check_authentication_password, click_chat_sponsored_message, close_chat, close_request,
+    cancel_download_file as cancel_download_file_request, chat_member_status_administrator_json,
+    chat_member_status_banned_json, chat_member_status_member_json,
+    chat_member_status_restricted_json, check_authentication_code, check_authentication_password,
+    click_chat_sponsored_message, close_chat, close_request,
     close_secret_chat as close_secret_chat_request, close_story, create_call_with_protocol,
     create_chat_folder, create_chat_invite_link, create_forum_topic, create_new_basic_group_chat,
     create_new_secret_chat, create_new_supergroup_chat, create_video_chat,
@@ -125,6 +126,10 @@ pub const MAIN_CHAT_LOAD_LIMIT: i32 = 100;
 pub const HISTORY_PAGE_SIZE: i32 = 50;
 /// `downloadFile.priority` for automatic photo thumbs (schema: 1–32).
 pub const THUMB_DOWNLOAD_PRIORITY: i32 = 1;
+/// `downloadFile.priority` for automatic full-media downloads (MED3: above
+/// thumbs so enabled media actually arrives, far below explicit user
+/// downloads).
+pub const AUTO_MEDIA_DOWNLOAD_PRIORITY: i32 = 4;
 /// `downloadFile.priority` when the user opens media.
 pub const USER_DOWNLOAD_PRIORITY: i32 = 32;
 /// `searchChats.limit` / `searchMessages.limit` (Unigram messages page is 20).
@@ -1024,6 +1029,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         if thumbs_after || self.session.stickers.open || self.session.gifs.open {
             self.maybe_download_open_thumbs()?;
+            self.maybe_download_open_chat_media()?;
         }
         // Parity slice: chat-list avatars download on every ingest; each
         // photo is requested at most once (in-flight / completed dedupe).
@@ -1895,6 +1901,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.maybe_fetch_bot_commands()?;
             self.maybe_view_open_messages()?;
             self.maybe_download_open_thumbs()?;
+            self.maybe_download_open_chat_media()?;
             self.fetch_sponsored_messages(chat_id)?;
             // Phase 5.1: re-selecting an open forum chat also resolves /
             // loads topics (the first select may have raced `is_forum`).
@@ -4269,7 +4276,25 @@ impl<S: JsonSender> ConnectDriver<S> {
         let ids = self.session.thumb_file_ids_to_download();
         let mut extras = Vec::new();
         for file_id in ids {
-            if let Some(extra) = self.download_file(file_id, THUMB_DOWNLOAD_PRIORITY)? {
+            if let Some(extra) = self.download_file(file_id, THUMB_DOWNLOAD_PRIORITY, false)? {
+                extras.push(extra);
+            }
+        }
+        Ok(extras)
+    }
+
+    /// MED3: auto-download full media in the open chat for the media types
+    /// the user enabled per chat kind (TGX auto-download). Runs with
+    /// `user_initiated: false`, so these never enter the downloads manager's
+    /// user lists.
+    pub fn maybe_download_open_chat_media(&mut self) -> Result<Vec<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Ok(Vec::new());
+        }
+        let ids = self.session.auto_download_media_file_ids();
+        let mut extras = Vec::new();
+        for file_id in ids {
+            if let Some(extra) = self.download_file(file_id, AUTO_MEDIA_DOWNLOAD_PRIORITY, false)? {
                 extras.push(extra);
             }
         }
@@ -4285,10 +4310,15 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Ok(Vec::new());
         }
+        // MED3: data saver pauses all automatic downloads (the per-kind
+        // media-type grid governs chat media; avatars are display chrome).
+        if self.session.media_prefs.data_saver {
+            return Ok(Vec::new());
+        }
         let ids = self.session.chat_list_photo_file_ids();
         let mut extras = Vec::new();
         for file_id in ids {
-            if let Some(extra) = self.download_file(file_id, THUMB_DOWNLOAD_PRIORITY)? {
+            if let Some(extra) = self.download_file(file_id, THUMB_DOWNLOAD_PRIORITY, false)? {
                 extras.push(extra);
             }
         }
@@ -4296,10 +4326,14 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     /// Send `downloadFile` (`synchronous: false`). No-op if already local or in flight.
+    /// `user_initiated` marks downloads the user explicitly started (history
+    /// rows, viewer) — those surface in the downloads manager; automatic
+    /// thumbs/avatars/sounds don't.
     pub fn download_file(
         &mut self,
         file_id: FileId,
         priority: i32,
+        user_initiated: bool,
     ) -> Result<Option<RequestId>, ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
@@ -4309,6 +4343,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         let extra = self.session.request_download(file_id);
         self.session.begin_download(file_id);
+        if user_initiated {
+            self.session.user_downloads.insert(file_id.0);
+        }
         match self
             .sender
             .send_json(&download_file_request(extra, file_id, priority))
@@ -4316,7 +4353,44 @@ impl<S: JsonSender> ConnectDriver<S> {
             Ok(()) => Ok(Some(extra)),
             Err(err) => {
                 self.session.requests.take(extra);
+                if user_initiated {
+                    // The request never reached TDLib: record the failure
+                    // like an error response so the row offers Retry.
+                    self.session.failed_downloads.insert(file_id.0);
+                }
                 self.session.abort_download(file_id);
+                Err(err)
+            }
+        }
+    }
+
+    /// MED3: send `cancelDownloadFile` (`only_if_pending: false`) for an
+    /// in-flight download — TGX's cancel button on downloading media.
+    /// TDLib answers `Ok`; the subsequent `updateFile` (active=false)
+    /// unsticks the download too. Returns `Ok(false)` when nothing was
+    /// in flight. Note: `downloadFile` has no pause — pause exists only in
+    /// the downloads-manager API (`addFileToDownloads`), which Quill
+    /// doesn't use for inline media; "pause" is out of slice.
+    pub fn cancel_download(&mut self, file_id: FileId) -> Result<bool, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if file_id.0 == 0 || !self.session.downloading.contains(&file_id.0) {
+            return Ok(false);
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::CancelDownloadFile, None);
+        match self
+            .sender
+            .send_json(&cancel_download_file_request(extra, file_id, false))
+        {
+            Ok(()) => {
+                self.session.abort_download(file_id);
+                Ok(true)
+            }
+            Err(err) => {
+                self.session.requests.take(extra);
                 Err(err)
             }
         }
@@ -6503,7 +6577,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                     .map(|user| FileId(user.photo_small_file_id))
                     .unwrap_or(FileId(0))
             });
-        self.download_file(file_id, THUMB_DOWNLOAD_PRIORITY)
+        self.download_file(file_id, THUMB_DOWNLOAD_PRIORITY, false)
     }
 
     /// Load another page of history for the open chat (`from_message_id` = oldest, or 0).
@@ -8892,7 +8966,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // playback on completion, and start the download (deduped).
         self.session.sound_file_ids.insert(file_id.0, sound_id);
         self.session.pending_sound_downloads.insert(sound_id);
-        let _ = self.download_file(file_id, USER_DOWNLOAD_PRIORITY);
+        let _ = self.download_file(file_id, USER_DOWNLOAD_PRIORITY, false);
         R::Pending
     }
 
@@ -12429,7 +12503,7 @@ mod tests {
     }
 
     #[test]
-    fn photo_history_auto_downloads_thumb_and_user_open_sends_full() {
+    fn photo_history_auto_downloads_thumb_and_full_photo() {
         let store = MemorySecretStore::new();
         let (dir, prepared) = prepared_tmp(&store);
         let sink = Arc::new(MemorySink::new());
@@ -12484,23 +12558,21 @@ mod tests {
         let thumb_json: Value = serde_json::from_str(thumb_req).unwrap();
         assert_eq!(thumb_json["priority"], THUMB_DOWNLOAD_PRIORITY);
         assert_eq!(thumb_json["synchronous"], false);
-        assert!(
-            !sent.iter().any(|j| j.contains("\"file_id\":2")),
-            "must not auto-download the full size"
-        );
-        let user = driver
-            .download_file(FileId(2), USER_DOWNLOAD_PRIORITY)
-            .unwrap()
-            .expect("user download");
-        let last = recorder.snapshot();
-        let user_req = last.last().unwrap();
-        assert!(user_req.contains("downloadFile"));
-        assert!(user_req.contains("\"file_id\":2"));
-        assert!(user_req.contains(&format!("\"@extra\":\"{}\"", user.0)));
-        let user_json: Value = serde_json::from_str(user_req).unwrap();
-        assert_eq!(user_json["priority"], USER_DOWNLOAD_PRIORITY);
+        // MED3: the full photo auto-downloads too when the photo flag is on
+        // (TGX auto-download), at the auto-media priority below explicit
+        // user downloads.
+        let full_req = sent
+            .iter()
+            .rev()
+            .find(|j| j.contains("downloadFile") && j.contains("\"file_id\":2"))
+            .expect("auto full-photo downloadFile");
+        let full_json: Value = serde_json::from_str(full_req).unwrap();
+        assert_eq!(full_json["priority"], AUTO_MEDIA_DOWNLOAD_PRIORITY);
+        assert_eq!(full_json["synchronous"], false);
+        // A user open while the auto download is in flight dedupes instead
+        // of re-requesting.
         assert_eq!(
-            driver.download_file(FileId(2), USER_DOWNLOAD_PRIORITY),
+            driver.download_file(FileId(2), USER_DOWNLOAD_PRIORITY, true),
             Ok(None),
             "in-flight download must not duplicate"
         );
@@ -17795,6 +17867,61 @@ mod tests {
         assert_eq!(value["input_message_content"]["video_note"]["duration"], 5);
         assert_eq!(value["input_message_content"]["video_note"]["length"], 280);
         assert_eq!(value["@extra"], extra.0.to_string());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// MED3: sender that fails every `downloadFile` send with a transport
+    /// error.
+    struct FailDownloadSender {
+        sent: Mutex<Vec<String>>,
+    }
+
+    impl JsonSender for Arc<FailDownloadSender> {
+        fn send_json(&self, request: &str) -> Result<(), ConnectSendError> {
+            if request.contains("downloadFile") {
+                return Err(ConnectSendError::Native);
+            }
+            self.sent
+                .lock()
+                .expect("download sender")
+                .push(request.to_string());
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn download_file_send_failure_marks_failed_download() {
+        // A `downloadFile` transport failure (the request never reached
+        // TDLib) records the failure like an error response, so the row
+        // offers Retry instead of silently returning to "not downloaded".
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+        let sender = Arc::new(FailDownloadSender {
+            sent: Mutex::new(Vec::new()),
+        });
+        let mut driver = ConnectDriver::new(
+            Session::new(AccountKey::primary(), sink.clone()),
+            sender,
+            test_credentials(),
+            prepared,
+        );
+        let seq = AtomicU64::new(0);
+        driver
+            .ingest(
+                copy_and_parse(
+                    r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+                    &seq,
+                    &sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        let err = driver.download_file(FileId(21), 1, true).unwrap_err();
+        assert!(matches!(err, ConnectSendError::Native));
+        assert!(driver.session.failed_downloads.contains(&21));
+        assert!(!driver.session.downloading.contains(&21));
+        assert!(!driver.session.user_downloads.contains(&21));
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

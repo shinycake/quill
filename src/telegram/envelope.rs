@@ -5367,6 +5367,17 @@ impl ParsedFile {
         self.usable_path().is_none() && self.local.can_be_downloaded
     }
 
+    /// Download progress fraction from `local.downloaded_size` over the
+    /// known total (TGX `TD.getFileProgress` semantics: `downloadedSize /
+    /// expectedSize`). `None` when the total is unknown — no percent to show.
+    pub fn download_progress(&self) -> Option<f32> {
+        let total = self.display_size();
+        if total <= 0 {
+            return None;
+        }
+        Some((self.local.downloaded_size as f32 / total as f32).clamp(0.0, 1.0))
+    }
+
     pub fn display_size(&self) -> i64 {
         if self.size > 0 {
             self.size
@@ -5382,6 +5393,11 @@ pub struct LocalFileState {
     pub can_be_downloaded: bool,
     pub is_downloading_active: bool,
     pub is_downloading_completed: bool,
+    /// Total downloaded bytes so far (schema: "can be used only for
+    /// calculating download progress"). `downloaded_prefix_size` is the
+    /// contiguous readable prefix from `download_offset`; progress uses
+    /// this total instead.
+    pub downloaded_size: i64,
 }
 
 impl LocalFileState {
@@ -9220,6 +9236,7 @@ fn parse_file(value: Option<&Value>) -> Result<ParsedFile, ParseError> {
                 .and_then(|l| l.get("is_downloading_completed"))
                 .and_then(Value::as_bool)
                 .unwrap_or(false),
+            downloaded_size: int53_or_zero(local.and_then(|l| l.get("downloaded_size"))),
         },
     })
 }
@@ -10393,6 +10410,35 @@ mod tests {
             other => panic!("{other:?}"),
         }
         assert_eq!(response.extra, Some(crate::ids::RequestId(12)));
+    }
+
+    #[test]
+    fn download_progress_uses_downloaded_size_over_expected_size() {
+        // Schema 1.8.67 localFile :292 — `downloaded_size` is "for
+        // calculating download progress"; TGX divides by expectedSize.
+        let parsed = parse_envelope(
+            r#"{"@type":"file","id":9,"size":0,"expected_size":100,"local":{"@type":"localFile","path":"","can_be_downloaded":true,"can_be_deleted":false,"is_downloading_active":true,"is_downloading_completed":false,"download_offset":0,"downloaded_prefix_size":40,"downloaded_size":42},"remote":{"@type":"remoteFile","id":"x","unique_id":"u","is_uploading_active":false,"is_uploading_completed":true,"uploaded_size":100}}"#,
+        )
+        .unwrap();
+        let EnvelopePayload::File(parsed) = parsed.payload else {
+            panic!("expected File");
+        };
+        assert_eq!(parsed.local.downloaded_size, 42);
+        assert_eq!(parsed.download_progress(), Some(0.42));
+        // Unknown total → no percent (avoids a bogus 0%/100%).
+        let no_total = ParsedFile {
+            id: FileId(10),
+            size: 0,
+            expected_size: 0,
+            local: LocalFileState {
+                path: String::new(),
+                can_be_downloaded: true,
+                is_downloading_active: true,
+                is_downloading_completed: false,
+                downloaded_size: 42,
+            },
+        };
+        assert_eq!(no_total.download_progress(), None);
     }
 
     #[test]

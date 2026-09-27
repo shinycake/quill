@@ -2604,6 +2604,20 @@ pub fn download_file(extra: RequestId, file_id: FileId, priority: i32) -> String
     .to_string()
 }
 
+/// `cancelDownloadFile` (TDLib 1.8.67, schema :13990-13991): "Stops the
+/// downloading of a file. If a file has already been downloaded, does
+/// nothing." `only_if_pending: false` cancels an in-flight download (TGX
+/// `cancelDownloadOrUploadFile`); `true` only stops one that hasn't started.
+pub fn cancel_download_file(extra: RequestId, file_id: FileId, only_if_pending: bool) -> String {
+    json!({
+        "@type": "cancelDownloadFile",
+        "@extra": extra.as_extra(),
+        "file_id": file_id.0,
+        "only_if_pending": only_if_pending,
+    })
+    .to_string()
+}
+
 /// `setChatDraftMessage` (TDLib 1.8.67). `topic_id` null updates the chat itself.
 /// `draft_message` null removes the draft. Text uses `draftMessageContentText`.
 /// `date` 0 and `effect_id` `"0"` match Unigram's `DraftMessage` constructor
@@ -5034,6 +5048,20 @@ mod tests {
         assert_eq!(v["offset"], 0);
         assert_eq!(v["limit"], 0);
         assert_eq!(v["synchronous"], false);
+        assert!(!json.contains("CANARY"));
+    }
+
+    #[test]
+    fn cancel_download_file_shape_matches_1_8_67() {
+        // `cancelDownloadFile file_id:int32 only_if_pending:Bool = Ok;`
+        // (schema 1.8.67, line 13991).
+        let json = cancel_download_file(RequestId(13), FileId(45), false);
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "cancelDownloadFile");
+        assert_eq!(v["@extra"], "13");
+        assert_eq!(v["file_id"], 45);
+        assert_eq!(v["only_if_pending"], false);
+        assert!(v.as_object().unwrap().len() == 4);
         assert!(!json.contains("CANARY"));
     }
 
