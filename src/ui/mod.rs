@@ -36,23 +36,24 @@ use quill::poll::{
     POLL_OPTIONS_MAX, POLL_OPTIONS_MIN, PollDraft, poll_bar_fraction, voter_count_label,
 };
 use quill::state::{
-    ActiveCall, ActiveGroupCall, CallSummary, ChatSearchJump, ChatStatisticsFetch, ChatSummary,
-    ContactRow, ForwardResult, HistoryMessage, InfoPanelTarget, InviteLinkFetch, JoinRequestFetch,
-    OutboxReceipt, RequestPurpose, SearchStatus, Session, SponsoredReportFlight,
-    outgoing_status_label, unix_ms_now, unread_badge_text,
+    ActiveCall, ActiveGroupCall, AdminListFetch, AdminRightsFetch, CallSummary, ChatSearchJump,
+    ChatStatisticsFetch, ChatSummary, ContactRow, ForwardResult, HistoryMessage, InfoPanelTarget,
+    InviteLinkFetch, JoinRequestFetch, OutboxReceipt, RequestPurpose, SearchStatus, Session,
+    SponsoredReportFlight, SupergroupMembersFetch, outgoing_status_label, unix_ms_now,
+    unread_badge_text,
 };
 use quill::story_viewer::{StoryViewer, StoryViewerItem, StoryViewerKind, collect_story_items};
 use quill::telegram::client::copy_and_parse;
 use quill::telegram::envelope::{
-    AuthorizationState, BotInfo, CallState, CallbackQueryAnswer, ChannelMemberStatus, ChatDraft,
-    ChatFolderInfo, ChatFolderSpec, ChatKind, ChatList, ChatNotificationSettings, ChatStatistics,
-    DEFAULT_EMOJI_REACTIONS, ForumTopic, InlineKeyboardButton, InlineKeyboardButtonStyle,
-    InlineKeyboardButtonType, MUTE_FOR_1_HOUR, MUTE_FOR_2_DAYS, MUTE_FOR_8_HOURS, MUTE_FOREVER,
-    MessageContent, MessageInteractionInfo, MessageSender, NotificationSettingsScope,
-    NotificationSound, ParsedFile, ParsedGroupCallParticipant, ParsedSecretChat, ParsedStory,
-    PollContent, PollOption, PollType, ScopeNotificationSettings, SecretChatState,
-    SponsoredMessage, StatisticalGraph, StatisticalValue, chat_ttl_service_label,
-    format_ttl_setting, toggle_chosen_emoji_reaction,
+    AuthorizationState, BotInfo, CallState, CallbackQueryAnswer, ChannelMemberStatus,
+    ChatAdminRights, ChatAdministratorEntry, ChatDraft, ChatFolderInfo, ChatFolderSpec, ChatKind,
+    ChatList, ChatNotificationSettings, ChatStatistics, DEFAULT_EMOJI_REACTIONS, ForumTopic,
+    InlineKeyboardButton, InlineKeyboardButtonStyle, InlineKeyboardButtonType, MUTE_FOR_1_HOUR,
+    MUTE_FOR_2_DAYS, MUTE_FOR_8_HOURS, MUTE_FOREVER, MessageContent, MessageInteractionInfo,
+    MessageSender, NotificationSettingsScope, NotificationSound, ParsedFile,
+    ParsedGroupCallParticipant, ParsedSecretChat, ParsedStory, PollContent, PollOption, PollType,
+    ScopeNotificationSettings, SecretChatState, SponsoredMessage, StatisticalGraph,
+    StatisticalValue, chat_ttl_service_label, format_ttl_setting, toggle_chosen_emoji_reaction,
 };
 use quill::telegram::requests::SelfDestructSend;
 use quill::text::{TextEntity, styled_runs, utf8_to_utf16_offset};
@@ -257,6 +258,156 @@ impl InviteLinkDialog {
             expiration_days_input,
             member_limit_input,
             creates_join_request: false,
+        }
+    }
+}
+
+/// Phase D3b: human labels for the 18 `chatAdministratorRights` fields
+/// (TDLib 1.8.67, `schema/td_api.tl:1092`), in schema field order. The
+/// checkbox dialogs index this array together with
+/// [`admin_right_get`]/[`admin_right_set`].
+pub const ADMIN_RIGHT_LABELS: [&str; 18] = [
+    "Manage chat",
+    "Change info",
+    "Post messages",
+    "Edit messages",
+    "Delete messages",
+    "Invite users",
+    "Restrict members",
+    "Pin messages",
+    "Manage topics",
+    "Promote members",
+    "Manage video chats",
+    "Post stories",
+    "Edit stories",
+    "Delete stories",
+    "Manage direct messages",
+    "Manage tags",
+    "Send welcome messages",
+    "Remain anonymous",
+];
+
+/// Phase D3b: read one right of a [`ChatAdminRights`] by schema-field
+/// index (see [`ADMIN_RIGHT_LABELS`]).
+pub fn admin_right_get(rights: &ChatAdminRights, index: usize) -> bool {
+    match index {
+        0 => rights.can_manage_chat,
+        1 => rights.can_change_info,
+        2 => rights.can_post_messages,
+        3 => rights.can_edit_messages,
+        4 => rights.can_delete_messages,
+        5 => rights.can_invite_users,
+        6 => rights.can_restrict_members,
+        7 => rights.can_pin_messages,
+        8 => rights.can_manage_topics,
+        9 => rights.can_promote_members,
+        10 => rights.can_manage_video_chats,
+        11 => rights.can_post_stories,
+        12 => rights.can_edit_stories,
+        13 => rights.can_delete_stories,
+        14 => rights.can_manage_direct_messages,
+        15 => rights.can_manage_tags,
+        16 => rights.can_send_welcome_messages,
+        17 => rights.is_anonymous,
+        _ => false,
+    }
+}
+
+/// Phase D3b: write one right of a [`ChatAdminRights`] by schema-field
+/// index (see [`ADMIN_RIGHT_LABELS`]).
+pub fn admin_right_set(rights: &mut ChatAdminRights, index: usize, value: bool) {
+    match index {
+        0 => rights.can_manage_chat = value,
+        1 => rights.can_change_info = value,
+        2 => rights.can_post_messages = value,
+        3 => rights.can_edit_messages = value,
+        4 => rights.can_delete_messages = value,
+        5 => rights.can_invite_users = value,
+        6 => rights.can_restrict_members = value,
+        7 => rights.can_pin_messages = value,
+        8 => rights.can_manage_topics = value,
+        9 => rights.can_promote_members = value,
+        10 => rights.can_manage_video_chats = value,
+        11 => rights.can_post_stories = value,
+        12 => rights.can_edit_stories = value,
+        13 => rights.can_delete_stories = value,
+        14 => rights.can_manage_direct_messages = value,
+        15 => rights.can_manage_tags = value,
+        16 => rights.can_send_welcome_messages = value,
+        17 => rights.is_anonymous = value,
+        _ => {}
+    }
+}
+
+/// Phase D3b: short human summary of a rights set, e.g. "7 of 18
+/// rights". Used on the promote picker's selected member and the
+/// edit-rights dialog title.
+pub fn admin_rights_summary(rights: &ChatAdminRights) -> String {
+    let enabled = (0..ADMIN_RIGHT_LABELS.len())
+        .filter(|&i| admin_right_get(rights, i))
+        .count();
+    format!("{enabled} of {} rights", ADMIN_RIGHT_LABELS.len())
+}
+
+/// Phase D3b: admin-management dialog above the composer. Three flows
+/// share one slot:
+/// - `Promote`: member picker (search + member list from
+///   `getSupergroupMembers`) followed by the rights checkboxes; the
+///   checkboxes start with every right enabled (mirrors the official
+///   clients' "all rights" default).
+/// - `EditRights`: rights checkboxes for an existing administrator,
+///   pre-filled from `Session::admin_rights` once the `getChatMember`
+///   lookup lands (`rights` stays `None` until then).
+/// - `DemoteConfirm`: demote confirmation for one administrator.
+pub struct AdminDialog {
+    chat_id: ChatId,
+    kind: AdminDialogKind,
+}
+
+pub enum AdminDialogKind {
+    Promote {
+        search_input: Entity<TextareaState>,
+        rights: ChatAdminRights,
+        selected_user: Option<i64>,
+    },
+    EditRights {
+        user_id: i64,
+        rights: Option<ChatAdminRights>,
+    },
+    DemoteConfirm {
+        user_id: i64,
+    },
+}
+
+impl AdminDialog {
+    fn promote(window: &mut Window, cx: &mut Context<QuillApp>, chat_id: ChatId) -> Self {
+        let search_input = cx.new(|cx| {
+            TextareaState::new(window, cx)
+                .placeholder("Search members")
+                .auto_grow(1, 1)
+                .submit_on_enter(false)
+        });
+        Self {
+            chat_id,
+            kind: AdminDialogKind::Promote {
+                search_input,
+                rights: ChatAdminRights::all(),
+                selected_user: None,
+            },
+        }
+    }
+
+    fn edit_rights(chat_id: ChatId, user_id: i64, rights: Option<ChatAdminRights>) -> Self {
+        Self {
+            chat_id,
+            kind: AdminDialogKind::EditRights { user_id, rights },
+        }
+    }
+
+    fn demote_confirm(chat_id: ChatId, user_id: i64) -> Self {
+        Self {
+            chat_id,
+            kind: AdminDialogKind::DemoteConfirm { user_id },
         }
     }
 }
@@ -556,6 +707,9 @@ pub struct QuillApp {
     poll_dialog: Option<PollDialog>,
     /// Phase D3a: invite-link create dialog state.
     invite_link_dialog: Option<InviteLinkDialog>,
+    /// Phase D3b: admin-management dialog state (promote picker /
+    /// rights editor / demote confirm).
+    admin_dialog: Option<AdminDialog>,
     /// Phase 4.5: fullscreen media viewer (photo/video overlay).
     media_viewer: MediaViewer,
     /// Parity slice 5: zoom/pan of the viewer visual (reset on open/step).
@@ -714,6 +868,13 @@ pub enum ScreenshotDemo {
     /// `can_invite_users`, a loaded invite-link list and loaded join
     /// requests, so the info-panel sections render directly.
     ReadyInviteLinks,
+    /// Phase D3b: synthetic admin-management surface (no live TDLib):
+    /// the demo channel (id 13) with the viewer as an admin with
+    /// `can_promote_members`, a loaded administrator list (owner +
+    /// two editable admins), a loaded member page for the promote
+    /// picker, and the promote dialog open with a member selected, so
+    /// the info-panel section and the rights checkboxes render directly.
+    ReadyAdminManagement,
     /// Bot chat demo (injected, no live Telegram): private chat with a
     /// `userTypeBot` user (id 21), opened with history plus a cached
     /// `botInfo` (description + commands), so the bot panel renders under
@@ -1425,6 +1586,15 @@ impl QuillApp {
                     AuthorizationState::Ready,
                 )
             }
+            Some(ScreenshotDemo::ReadyAdminManagement) => {
+                demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
+                (
+                    ConnectUiStatus::DemoReadyChats,
+                    None,
+                    "screenshot demo — admin management".into(),
+                    AuthorizationState::Ready,
+                )
+            }
             Some(ScreenshotDemo::ReadyBotChat) => {
                 demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
                 (
@@ -1807,6 +1977,7 @@ impl QuillApp {
             spoiler_revealed: HashSet::new(),
             poll_dialog: None,
             invite_link_dialog: None,
+            admin_dialog: None,
             media_viewer: MediaViewer::closed(),
             viewer_zoom: ViewerZoom::new(),
             viewer_drag: None,
@@ -2395,6 +2566,23 @@ impl QuillApp {
             }
             app.open_info_panel_target(InfoPanelTarget::Supergroup(13), window, cx);
             app.status_note = "screenshot demo — invite links".into();
+        }
+        // Phase D3b: admin-management fixture, then open the channel info
+        // panel plus the promote picker (viewer 777 has
+        // can_promote_members, seeded by apply_ready_channels_admin).
+        if matches!(demo, Some(ScreenshotDemo::ReadyAdminManagement)) {
+            if let Some(session) = app.demo_session.as_mut() {
+                app.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_admin_management(session, &app.demo_sink, &app.demo_seq);
+            }
+            app.open_info_panel_target(InfoPanelTarget::Supergroup(13), window, cx);
+            app.admin_dialog = Some(AdminDialog::promote(window, cx, ChatId(13)));
+            if let Some(dialog) = app.admin_dialog.as_mut()
+                && let AdminDialogKind::Promote { selected_user, .. } = &mut dialog.kind
+            {
+                *selected_user = Some(5);
+            }
+            app.status_note = "screenshot demo — admin management".into();
         }
         if matches!(demo, Some(ScreenshotDemo::ReadyBotChat)) {
             if let Some(session) = app.demo_session.as_mut() {
@@ -6053,6 +6241,174 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// Phase D3b: re-request the admin list (bypasses the dedupe cache so
+    /// the Refresh button always hits the server). No-ops when the
+    /// viewer may not manage admins — the gate is deny-by-default.
+    fn refresh_administrators(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            match live.driver.refresh_chat_administrators(chat_id) {
+                Ok(_) => {}
+                Err(_) => {
+                    self.status_note = "could not refresh administrators".into();
+                }
+            }
+        } else {
+            self.status_note = "administrators need a live connection (demo)".into();
+        }
+        cx.notify();
+    }
+
+    /// Phase D3b: open the promote member picker for a chat. Fetches the
+    /// first page of supergroup members; the rights checkboxes start
+    /// with every right enabled.
+    fn open_promote_picker(
+        &mut self,
+        chat_id: ChatId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.admin_dialog = Some(AdminDialog::promote(window, cx, chat_id));
+        if let Some(live) = self.live.as_mut()
+            && live.driver.fetch_supergroup_members(chat_id, "").is_err()
+        {
+            self.status_note = "could not load members".into();
+        }
+        cx.notify();
+    }
+
+    /// Phase D3b: re-run the promote picker's member search with the
+    /// current query text.
+    fn search_promote_members(&mut self, cx: &mut Context<Self>) {
+        let (chat_id, query) = match self.admin_dialog.as_ref() {
+            Some(dialog) => match &dialog.kind {
+                AdminDialogKind::Promote { search_input, .. } => {
+                    (dialog.chat_id, search_input.read(cx).value().to_string())
+                }
+                _ => return,
+            },
+            None => return,
+        };
+        if let Some(live) = self.live.as_mut() {
+            if live
+                .driver
+                .refresh_supergroup_members(chat_id, query.trim())
+                .is_err()
+            {
+                self.status_note = "could not search members".into();
+            }
+        } else {
+            self.status_note = "member search needs a live connection (demo)".into();
+        }
+        cx.notify();
+    }
+
+    /// Phase D3b: open the rights editor for one administrator. The
+    /// dialog reads cached rights once the `getChatMember` lookup lands;
+    /// checkbox toggles are staged locally until Save.
+    fn open_rights_editor(&mut self, chat_id: ChatId, user_id: i64, cx: &mut Context<Self>) {
+        let cached = self
+            .session()
+            .and_then(|session| session.admin_rights.get(&(chat_id.0, user_id)))
+            .and_then(|fetch| match fetch {
+                AdminRightsFetch::Loaded(rights) => Some(*rights),
+                _ => None,
+            });
+        self.admin_dialog = Some(AdminDialog::edit_rights(chat_id, user_id, cached));
+        if let Some(live) = self.live.as_mut()
+            && live.driver.fetch_admin_rights(chat_id, user_id).is_err()
+        {
+            self.status_note = "could not load admin rights".into();
+        }
+        cx.notify();
+    }
+
+    /// Phase D3b: open the demote confirmation for one administrator.
+    fn open_demote_confirm(&mut self, chat_id: ChatId, user_id: i64, cx: &mut Context<Self>) {
+        self.admin_dialog = Some(AdminDialog::demote_confirm(chat_id, user_id));
+        cx.notify();
+    }
+
+    /// Phase D3b: close the admin-management dialog.
+    fn close_admin_dialog(&mut self, cx: &mut Context<Self>) {
+        self.admin_dialog = None;
+        cx.notify();
+    }
+
+    /// Phase D3b: submit the admin dialog — promote / edit-rights /
+    /// demote. In-flight duplicates are deduped by the driver; the
+    /// dialog closes on submit and the lists refresh from the server
+    /// responses (`updateChatMember` + `ok`).
+    fn submit_admin_dialog(&mut self, cx: &mut Context<Self>) {
+        let Some(dialog) = self.admin_dialog.take() else {
+            return;
+        };
+        // (keep_dialog, note): validation errors keep the dialog open so
+        // the user's selection and checkbox state are not lost.
+        let (keep_dialog, note) = match &dialog.kind {
+            AdminDialogKind::Promote {
+                rights,
+                selected_user: Some(user_id),
+                ..
+            } => match self.live.as_mut() {
+                Some(live) => {
+                    match live
+                        .driver
+                        .promote_chat_member(dialog.chat_id, *user_id, rights)
+                    {
+                        Ok(_) => (false, "Member promoted".to_string()),
+                        Err(_) => (true, "could not promote member".to_string()),
+                    }
+                }
+                None => (
+                    true,
+                    "admin actions need a live connection (demo)".to_string(),
+                ),
+            },
+            AdminDialogKind::Promote {
+                selected_user: None,
+                ..
+            } => (true, "select a member first".to_string()),
+            AdminDialogKind::EditRights { user_id, rights } => {
+                let Some(rights) = rights else {
+                    self.admin_dialog = Some(dialog);
+                    self.status_note = "rights are still loading".into();
+                    cx.notify();
+                    return;
+                };
+                match self.live.as_mut() {
+                    Some(live) => {
+                        match live
+                            .driver
+                            .edit_admin_rights(dialog.chat_id, *user_id, rights)
+                        {
+                            Ok(_) => (false, "Admin rights updated".to_string()),
+                            Err(_) => (true, "could not update admin rights".to_string()),
+                        }
+                    }
+                    None => (
+                        true,
+                        "admin actions need a live connection (demo)".to_string(),
+                    ),
+                }
+            }
+            AdminDialogKind::DemoteConfirm { user_id } => match self.live.as_mut() {
+                Some(live) => match live.driver.demote_chat_member(dialog.chat_id, *user_id) {
+                    Ok(_) => (false, "Admin demoted".to_string()),
+                    Err(_) => (true, "could not demote admin".to_string()),
+                },
+                None => (
+                    true,
+                    "admin actions need a live connection (demo)".to_string(),
+                ),
+            },
+        };
+        if keep_dialog {
+            self.admin_dialog = Some(dialog);
+        }
+        self.status_note = note;
+        cx.notify();
+    }
+
     /// Phase D3a: open the invite-link create dialog for a chat.
     fn open_invite_link_dialog(
         &mut self,
@@ -7301,9 +7657,13 @@ impl QuillApp {
                         // Phase D3a: invite-link / join-request lists for
                         // admins; the driver no-ops when the
                         // `can_invite_users` gate is closed.
+                        // Phase D3b: administrator list; the driver
+                        // no-ops unless the viewer may manage admins
+                        // (owner or `can_promote_members`).
                         for fetch in [
                             live.driver.fetch_chat_invite_links(chat_id).map(|_| ()),
                             live.driver.fetch_chat_join_requests(chat_id).map(|_| ()),
+                            live.driver.fetch_chat_administrators(chat_id).map(|_| ()),
                         ] {
                             if fetch.is_err() {
                                 result = fetch;
@@ -7816,6 +8176,9 @@ impl QuillApp {
         // `can_invite_users` only; the sections no-op otherwise).
         body = body.child(self.invite_links_section(chat_id, cx));
         body = body.child(self.join_requests_section(chat_id, cx));
+        // Phase D3b: administrator management (owner / admins with
+        // `can_promote_members` only; the section no-ops otherwise).
+        body = body.child(self.administrators_section(chat_id, cx));
         body.into_any_element()
     }
 
@@ -8160,6 +8523,173 @@ impl QuillApp {
             }
         }
         section.into_any_element()
+    }
+
+    /// Phase D3b: administrator management section for the channel /
+    /// supergroup info panel. Shown only when the viewer may manage
+    /// admins (`Session::chat_can_manage_admins`: owner, or admin with
+    /// `can_promote_members` — deny-by-default otherwise). Honest
+    /// states: loading / failed-with-retry / loaded list. Each row
+    /// shows the admin's name, custom title (a crown badge for the
+    /// owner), and Edit + Remove buttons when the entry is editable
+    /// (`can_be_edited` and not the owner — TDLib rejects edits to the
+    /// creator and to admins it does not allow editing).
+    fn administrators_section(&self, chat_id: ChatId, cx: &mut Context<Self>) -> AnyElement {
+        if !self
+            .session()
+            .is_some_and(|session| session.chat_can_manage_admins(chat_id))
+        {
+            return div().into_any_element();
+        }
+        let fetch = self
+            .session()
+            .and_then(|session| session.admin_lists.get(&chat_id.0))
+            .cloned();
+        let mut section = div().flex().flex_col().w_full().gap_1().child(
+            div()
+                .flex()
+                .items_center()
+                .w_full()
+                .gap_1()
+                .child(
+                    div()
+                        .text_xs()
+                        .font_semibold()
+                        .text_color(cx.theme().muted_foreground)
+                        .child("Administrators"),
+                )
+                .child(div().flex_1())
+                .child(
+                    Button::new("admin-list-refresh")
+                        .label("Refresh")
+                        .ghost()
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.refresh_administrators(chat_id, cx);
+                        })),
+                )
+                .child(
+                    Button::new("admin-promote-open")
+                        .label("Add")
+                        .ghost()
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            this.open_promote_picker(chat_id, window, cx);
+                        })),
+                ),
+        );
+        match fetch {
+            None | Some(AdminListFetch::Loading) => {
+                section = section.child(
+                    div()
+                        .text_sm()
+                        .text_color(cx.theme().muted_foreground)
+                        .child("Loading administrators…"),
+                );
+            }
+            Some(AdminListFetch::Failed(message)) => {
+                section = section.child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .w_full()
+                        .gap_1()
+                        .child(
+                            div()
+                                .flex_1()
+                                .text_sm()
+                                .text_color(cx.theme().muted_foreground)
+                                .child(message),
+                        )
+                        .child(
+                            Button::new("admin-list-retry")
+                                .label("Retry")
+                                .ghost()
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.refresh_administrators(chat_id, cx);
+                                })),
+                        ),
+                );
+            }
+            Some(AdminListFetch::Loaded(list)) => {
+                if list.is_empty() {
+                    section = section.child(
+                        div()
+                            .text_sm()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("No administrators."),
+                    );
+                } else {
+                    for entry in &list {
+                        section = section.child(self.admin_row(chat_id, entry, cx));
+                    }
+                }
+            }
+        }
+        section.into_any_element()
+    }
+
+    /// Phase D3b: one row of the administrators list — name, custom
+    /// title or role badge, Edit + Remove buttons for editable admins.
+    fn admin_row(
+        &self,
+        chat_id: ChatId,
+        entry: &ChatAdministratorEntry,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let name = self
+            .session()
+            .and_then(|session| session.user(entry.user_id))
+            .map(|user| user.display_name())
+            .unwrap_or_else(|| format!("User {}", entry.user_id));
+        let role = if entry.is_owner {
+            "👑 Owner".to_string()
+        } else if entry.custom_title.is_empty() {
+            "Admin".to_string()
+        } else {
+            entry.custom_title.clone()
+        };
+        let mut row = div()
+            .id(("admin-row", entry.user_id as u64))
+            .flex()
+            .items_center()
+            .w_full()
+            .gap_1()
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .flex_1()
+                    .gap_1()
+                    .child(div().text_sm().child(name))
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(role),
+                    ),
+            );
+        // The owner cannot be edited or demoted; non-editable admins
+        // (granted by someone else) are server-rejected too.
+        if entry.can_be_edited && !entry.is_owner {
+            let user_id = entry.user_id;
+            row = row
+                .child(
+                    Button::new(format!("admin-edit-{user_id}"))
+                        .label("Edit")
+                        .ghost()
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.open_rights_editor(chat_id, user_id, cx);
+                        })),
+                )
+                .child(
+                    Button::new(format!("admin-demote-{user_id}"))
+                        .label("Remove")
+                        .ghost()
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.open_demote_confirm(chat_id, user_id, cx);
+                        })),
+                );
+        }
+        row.into_any_element()
     }
 
     /// Phase D2: the channel/group statistics view (`getChatStatistics`,
@@ -13290,6 +13820,441 @@ impl QuillApp {
         Some(panel.into_any_element())
     }
 
+    /// Phase D3b: the admin-management dialog, rendered above the
+    /// composer like the poll / invite-link dialogs. Three flows share
+    /// one slot: the promote member picker (search + member list +
+    /// rights checkboxes), the rights editor for an existing admin, and
+    /// the demote confirmation. All element IDs are namespaced
+    /// `admin-*` so the screenshot/replay harnesses can find them.
+    fn admin_dialog_panel(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let dialog = self.admin_dialog.as_ref()?;
+        match &dialog.kind {
+            AdminDialogKind::Promote {
+                search_input,
+                rights,
+                selected_user,
+            } => Some(self.promote_dialog_panel(
+                dialog.chat_id,
+                search_input,
+                rights,
+                *selected_user,
+                cx,
+            )),
+            AdminDialogKind::EditRights { user_id, rights } => {
+                Some(self.rights_editor_panel(dialog.chat_id, *user_id, *rights, cx))
+            }
+            AdminDialogKind::DemoteConfirm { user_id } => {
+                Some(self.demote_confirm_panel(dialog.chat_id, *user_id, cx))
+            }
+        }
+    }
+
+    /// Phase D3b: 18 rights checkboxes bound to a toggle handler. `id_prefix`
+    /// namespaces the checkbox button IDs (`{id_prefix}-{index}`).
+    /// Phase D3b: 18 rights checkboxes for a dialog's staged rights.
+    /// `id_prefix` namespaces the button IDs (`{id_prefix}-{index}`).
+    fn rights_checkboxes(
+        &self,
+        rights: &ChatAdminRights,
+        id_prefix: &str,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let mut list = div().flex().flex_col().gap_1();
+        let mut row = div().flex().gap_2();
+        for (index, label) in ADMIN_RIGHT_LABELS.iter().enumerate() {
+            let enabled = admin_right_get(rights, index);
+            let prefix = id_prefix.to_string();
+            row = row.child(
+                div().flex_1().child(
+                    Button::new(format!("{prefix}-{index}"))
+                        .label(if enabled {
+                            format!("☑ {label}")
+                        } else {
+                            format!("☐ {label}")
+                        })
+                        .ghost()
+                        .text_color(rgb(0xffffff))
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.toggle_admin_right(prefix.as_str(), index, cx);
+                        })),
+                ),
+            );
+            if index % 2 == 1 {
+                list = list.child(row);
+                row = div().flex().gap_2();
+            }
+        }
+        list.into_any_element()
+    }
+
+    /// Phase D3b: flip one rights checkbox on the open admin dialog. The
+    /// promote dialog owns its staged rights; the rights editor seeds its
+    /// staged copy from the cached `getChatMember` rights on the first
+    /// toggle so edits never mutate the session cache.
+    fn toggle_admin_right(&mut self, prefix: &str, index: usize, cx: &mut Context<Self>) {
+        let seed = match self.admin_dialog.as_ref() {
+            Some(dialog) => match &dialog.kind {
+                AdminDialogKind::EditRights {
+                    user_id,
+                    rights: None,
+                } if prefix == "admin-edit-right" => {
+                    let cached = self
+                        .session()
+                        .and_then(|session| session.admin_rights.get(&(dialog.chat_id.0, *user_id)))
+                        .and_then(|fetch| match fetch {
+                            AdminRightsFetch::Loaded(rights) => Some(*rights),
+                            _ => None,
+                        });
+                    Some((*user_id, cached))
+                }
+                _ => None,
+            },
+            None => None,
+        };
+        if let Some(dialog) = self.admin_dialog.as_mut() {
+            match &mut dialog.kind {
+                AdminDialogKind::Promote { rights, .. } if prefix == "admin-right" => {
+                    let current = admin_right_get(rights, index);
+                    admin_right_set(rights, index, !current);
+                }
+                AdminDialogKind::EditRights {
+                    user_id,
+                    rights: staged,
+                } if prefix == "admin-edit-right" => {
+                    if staged.is_none()
+                        && let Some((seed_user, seed_rights)) = seed
+                        && seed_user == *user_id
+                    {
+                        *staged = seed_rights;
+                    }
+                    if let Some(staged) = staged {
+                        let current = admin_right_get(staged, index);
+                        admin_right_set(staged, index, !current);
+                    }
+                }
+                _ => {}
+            }
+        }
+        cx.notify();
+    }
+
+    /// Phase D3b: the promote member picker — search field, member rows
+    /// (click to select; already-admin members are excluded), rights
+    /// checkboxes, Promote / Cancel.
+    fn promote_dialog_panel(
+        &self,
+        chat_id: ChatId,
+        search_input: &Entity<TextareaState>,
+        rights: &ChatAdminRights,
+        selected_user: Option<i64>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let admin_ids: std::collections::HashSet<i64> = self
+            .session()
+            .and_then(|session| session.admin_lists.get(&chat_id.0))
+            .and_then(|fetch| match fetch {
+                AdminListFetch::Loaded(list) => Some(list),
+                _ => None,
+            })
+            .map(|list| list.iter().map(|entry| entry.user_id).collect())
+            .unwrap_or_default();
+        let members = self
+            .session()
+            .and_then(|session| session.supergroup_members.get(&chat_id.0))
+            .cloned();
+        let mut panel = div()
+            .id("admin-promote-dialog")
+            .flex()
+            .flex_col()
+            .gap_2()
+            .p_3()
+            .rounded_md()
+            .border_1()
+            .border_color(rgb(0x58a6ff))
+            .bg(rgb(0x161b22))
+            .child(
+                div()
+                    .text_sm()
+                    .font_semibold()
+                    .text_color(rgb(0xffffff))
+                    .child("Promote member"),
+            )
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .child(div().flex_1().child(Textarea::new(search_input).h(px(40.))))
+                    .child(
+                        Button::new("admin-promote-search")
+                            .label("Search")
+                            .ghost()
+                            .text_color(rgb(0xffffff))
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.search_promote_members(cx);
+                            })),
+                    ),
+            );
+        match members {
+            None | Some(SupergroupMembersFetch::Loading) => {
+                panel = panel.child(
+                    div()
+                        .text_sm()
+                        .text_color(cx.theme().muted_foreground)
+                        .child("Loading members…"),
+                );
+            }
+            Some(SupergroupMembersFetch::Failed(message)) => {
+                panel = panel.child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap_1()
+                        .child(
+                            div()
+                                .flex_1()
+                                .text_sm()
+                                .text_color(cx.theme().muted_foreground)
+                                .child(message),
+                        )
+                        .child(
+                            Button::new("admin-promote-retry")
+                                .label("Retry")
+                                .ghost()
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.search_promote_members(cx);
+                                })),
+                        ),
+                );
+            }
+            Some(SupergroupMembersFetch::Loaded { members, .. }) => {
+                let mut rows = div().flex().flex_col().gap_1();
+                let mut shown = 0;
+                for user_id in members
+                    .iter()
+                    .filter_map(|member| match member.member_id {
+                        MessageSender::User { user_id } => Some(user_id),
+                        _ => None,
+                    })
+                    .filter(|user_id| !admin_ids.contains(user_id))
+                    .take(30)
+                {
+                    let name = self
+                        .session()
+                        .and_then(|session| session.user(user_id))
+                        .map(|user| user.display_name())
+                        .unwrap_or_else(|| format!("User {user_id}"));
+                    let selected = selected_user == Some(user_id);
+                    rows = rows.child(
+                        Button::new(format!("admin-promote-member-{user_id}"))
+                            .label(if selected {
+                                format!("● {name}")
+                            } else {
+                                format!("○ {name}")
+                            })
+                            .ghost()
+                            .text_color(rgb(0xffffff))
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                if let Some(dialog) = this.admin_dialog.as_mut()
+                                    && let AdminDialogKind::Promote { selected_user, .. } =
+                                        &mut dialog.kind
+                                {
+                                    *selected_user = Some(user_id);
+                                }
+                                cx.notify();
+                            })),
+                    );
+                    shown += 1;
+                }
+                if shown == 0 {
+                    rows = rows.child(
+                        div()
+                            .text_sm()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("No members found."),
+                    );
+                }
+                panel = panel.child(rows);
+            }
+        }
+        let summary = admin_rights_summary(rights);
+        panel = panel
+            .child(
+                div()
+                    .text_xs()
+                    .font_semibold()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(format!("Rights ({summary})")),
+            )
+            .child(self.rights_checkboxes(rights, "admin-right", cx))
+            .child(
+                div()
+                    .flex()
+                    .gap_2()
+                    .child(
+                        Button::new("admin-promote-submit")
+                            .label("Promote")
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.submit_admin_dialog(cx);
+                            })),
+                    )
+                    .child(
+                        Button::new("admin-promote-cancel")
+                            .label("Cancel")
+                            .ghost()
+                            .text_color(rgb(0xffffff))
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.close_admin_dialog(cx);
+                            })),
+                    ),
+            );
+        panel.into_any_element()
+    }
+
+    /// Phase D3b: the rights editor for one administrator. While the
+    /// `getChatMember` lookup is in flight the dialog shows a loading
+    /// row; once rights land (cached or staged in the dialog) the 18
+    /// checkboxes bind to the dialog's staged copy and Save sends
+    /// `setChatMemberStatus`.
+    fn rights_editor_panel(
+        &self,
+        chat_id: ChatId,
+        user_id: i64,
+        staged: Option<ChatAdminRights>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let name = self
+            .session()
+            .and_then(|session| session.user(user_id))
+            .map(|user| user.display_name())
+            .unwrap_or_else(|| format!("User {user_id}"));
+        let cached = self
+            .session()
+            .and_then(|session| session.admin_rights.get(&(chat_id.0, user_id)))
+            .and_then(|fetch| match fetch {
+                AdminRightsFetch::Loaded(rights) => Some(*rights),
+                _ => None,
+            });
+        let rights = staged.or(cached);
+        let mut panel = div()
+            .id("admin-rights-dialog")
+            .flex()
+            .flex_col()
+            .gap_2()
+            .p_3()
+            .rounded_md()
+            .border_1()
+            .border_color(rgb(0x58a6ff))
+            .bg(rgb(0x161b22))
+            .child(
+                div()
+                    .text_sm()
+                    .font_semibold()
+                    .text_color(rgb(0xffffff))
+                    .child(format!("Edit rights — {name}")),
+            );
+        match rights {
+            None => {
+                panel = panel.child(
+                    div()
+                        .text_sm()
+                        .text_color(cx.theme().muted_foreground)
+                        .child("Loading rights…"),
+                );
+            }
+            Some(rights) => {
+                panel = panel
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(admin_rights_summary(&rights)),
+                    )
+                    .child(self.rights_checkboxes(&rights, "admin-edit-right", cx));
+            }
+        }
+        panel = panel.child(
+            div()
+                .flex()
+                .gap_2()
+                .child(
+                    Button::new("admin-rights-save")
+                        .label("Save")
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.submit_admin_dialog(cx);
+                        })),
+                )
+                .child(
+                    Button::new("admin-rights-cancel")
+                        .label("Cancel")
+                        .ghost()
+                        .text_color(rgb(0xffffff))
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.close_admin_dialog(cx);
+                        })),
+                ),
+        );
+        panel.into_any_element()
+    }
+
+    /// Phase D3b: demote confirmation for one administrator.
+    fn demote_confirm_panel(
+        &self,
+        chat_id: ChatId,
+        user_id: i64,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let _ = chat_id;
+        let name = self
+            .session()
+            .and_then(|session| session.user(user_id))
+            .map(|user| user.display_name())
+            .unwrap_or_else(|| format!("User {user_id}"));
+        div()
+            .id("admin-demote-dialog")
+            .flex()
+            .flex_col()
+            .gap_2()
+            .p_3()
+            .rounded_md()
+            .border_1()
+            .border_color(rgb(0x58a6ff))
+            .bg(rgb(0x161b22))
+            .child(
+                div()
+                    .text_sm()
+                    .font_semibold()
+                    .text_color(rgb(0xffffff))
+                    .child(format!("Demote {name}?")),
+            )
+            .child(
+                div()
+                    .text_sm()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("They will become a regular member and lose all admin rights."),
+            )
+            .child(
+                div()
+                    .flex()
+                    .gap_2()
+                    .child(Button::new("admin-demote-submit").label("Demote").on_click(
+                        cx.listener(|this, _, _, cx| {
+                            this.submit_admin_dialog(cx);
+                        }),
+                    ))
+                    .child(
+                        Button::new("admin-demote-cancel")
+                            .label("Cancel")
+                            .ghost()
+                            .text_color(rgb(0xffffff))
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.close_admin_dialog(cx);
+                            })),
+                    ),
+            )
+            .into_any_element()
+    }
+
     /// Phase 4.2: the poll creation dialog, rendered above the composer.
     /// Question field, dynamic option rows (2–10), anonymous / multiple-answers
     /// toggles, Create / Cancel. Quiz correct-option marking stays out of this
@@ -15539,6 +16504,8 @@ impl QuillApp {
                         .when_some(self.invite_link_dialog_panel(cx), |this, panel| {
                             this.child(panel)
                         })
+                        // Phase D3b: admin-management dialog above the composer.
+                        .when_some(self.admin_dialog_panel(cx), |this, panel| this.child(panel))
                         // Phase 3.3: `/` command menu above the composer.
                         .when_some(self.command_menu_dropdown(cx), |this, panel| {
                             this.child(panel)
@@ -18121,6 +19088,45 @@ fn apply_ready_invite_links(session: &mut Session, sink: &Arc<MemorySink>, seq: 
         ),
         r#"{"@type":"updateUser","user":{"@type":"user","id":7001,"first_name":"Dana","last_name":"Levi","usernames":null,"phone_number":"","status":null,"profile_photo":null,"is_contact":false,"is_mutual_contact":false,"is_close_friend":false,"is_verified":false,"is_premium":false,"is_support":false,"restriction_reason":"","is_scam":false,"is_fake":false,"is_bot":false,"type":{"@type":"userTypeRegular"}}}"#.to_string(),
         r#"{"@type":"updateUser","user":{"@type":"user","id":7002,"first_name":"Omar","last_name":"Haddad","usernames":null,"phone_number":"","status":null,"profile_photo":null,"is_contact":false,"is_mutual_contact":false,"is_close_friend":false,"is_verified":false,"is_premium":false,"is_support":false,"restriction_reason":"","is_scam":false,"is_fake":false,"is_bot":false,"type":{"@type":"userTypeRegular"}}}"#.to_string(),
+    ];
+    for json in jsons {
+        if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
+            session.apply(owned);
+        }
+    }
+}
+
+/// `ReadyAdminManagement` fixture (Phase D3b): like
+/// `apply_ready_channels_admin` (chat 13, viewer 777 is an administrator
+/// with `can_promote_members: true`), plus a `chatAdministrators`
+/// response (owner with custom title + two editable admins) and a
+/// `chatMembers` response for the promote picker, all through the real
+/// reducer paths. `updateUser` rows give the admins/members display
+/// names.
+fn apply_ready_admin_management(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
+    apply_ready_channels_admin(session, sink, seq);
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let admins_extra = session.request(RequestPurpose::GetChatAdministrators, Some(ChatId(13)));
+    let members_extra = session.request(RequestPurpose::GetSupergroupMembers, Some(ChatId(13)));
+    let user = |id: i64, first: &str, last: &str| {
+        format!(
+            r#"{{"@type":"updateUser","user":{{"@type":"user","id":{id},"first_name":"{first}","last_name":"{last}","usernames":null,"phone_number":"","status":null,"profile_photo":null,"is_contact":false,"is_mutual_contact":false,"is_close_friend":false,"is_verified":false,"is_premium":false,"is_support":false,"restriction_reason":"","is_scam":false,"is_fake":false,"is_bot":false,"type":{{"@type":"userTypeRegular"}}}}}}"#
+        )
+    };
+    let jsons = [
+        user(1, "Idan", "Founder"),
+        user(2, "Dana", "Levi"),
+        user(777, "Demo", "Admin"),
+        user(5, "Omar", "Haddad"),
+        user(6, "Maya", "Sharon"),
+        format!(
+            r#"{{"@type":"chatAdministrators","@extra":"{}","administrators":[{{"@type":"chatAdministrator","user_id":1,"custom_title":"Founder","is_owner":true,"can_be_edited":false}},{{"@type":"chatAdministrator","user_id":777,"custom_title":"","is_owner":false,"can_be_edited":true}},{{"@type":"chatAdministrator","user_id":2,"custom_title":"Mod","is_owner":false,"can_be_edited":true}}]}}"#,
+            admins_extra.0
+        ),
+        format!(
+            r#"{{"@type":"chatMembers","@extra":"{}","total_count":2,"members":[{{"@type":"chatMember","member_id":{{"@type":"messageSenderUser","user_id":5}},"tag":"","inviter_user_id":0,"joined_chat_date":0,"status":{{"@type":"chatMemberStatusMember"}}}},{{"@type":"chatMember","member_id":{{"@type":"messageSenderUser","user_id":6}},"tag":"","inviter_user_id":0,"joined_chat_date":0,"status":{{"@type":"chatMemberStatusMember"}}}}]}}"#,
+            members_extra.0
+        ),
     ];
     for json in jsons {
         if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
