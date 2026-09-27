@@ -911,6 +911,26 @@ pub fn send_call_rating(extra: RequestId, call_id: i32, rating: i32) -> String {
     .to_string()
 }
 
+/// Phase C2d: `sendCallDebugInformation` (TDLib 1.8.67,
+/// `schema/td_api.tl:14237`) identifies the ended call with
+/// `inputCallDiscarded` (`schema/td_api.tl:7043`).
+pub fn send_call_debug_information(
+    extra: RequestId,
+    call_id: i32,
+    debug_information: &str,
+) -> String {
+    json!({
+        "@type": "sendCallDebugInformation",
+        "@extra": extra.as_extra(),
+        "call_id": {
+            "@type": "inputCallDiscarded",
+            "call_id": call_id,
+        },
+        "debug_information": debug_information,
+    })
+    .to_string()
+}
+
 /// Phase C3a: a `MessageSender` reference for group-call request
 /// fields (e.g. `toggleGroupCallParticipantIsMuted participant_id`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -4441,6 +4461,20 @@ mod channel_requests_tests {
         assert_eq!(v["@type"], "sendCallSignalingData");
         assert_eq!(v["call_id"], 77);
         assert_eq!(v["data"], "c2lnbmFsLWJ5dGVz");
+    }
+
+    #[test]
+    fn send_call_debug_information_shape() {
+        let v: serde_json::Value = serde_json::from_str(&send_call_debug_information(
+            RequestId(8),
+            77,
+            r#"{"transport":"failed"}"#,
+        ))
+        .unwrap();
+        assert_eq!(v["@type"], "sendCallDebugInformation");
+        assert_eq!(v["call_id"]["@type"], "inputCallDiscarded");
+        assert_eq!(v["call_id"]["call_id"], 77);
+        assert_eq!(v["debug_information"], r#"{"transport":"failed"}"#);
     }
 
     /// Phase C3a: group-call request shapes — verified against the

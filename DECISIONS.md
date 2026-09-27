@@ -3405,3 +3405,32 @@ device list renders honestly.
   honestly in the UI); group calls; screen sharing; call recording;
   custom-parameters passthrough to `ntg_connect_p2p`;
   reconnect/backoff on transport failure; stats/debug surface (C2d).
+## Phase C2d — call hardening (2026-09-27)
+
+- **Built:** failed 1:1 audio transports retry the same retained
+  `ConnectParams` at most three times. Each native `Failed`/timeout callback
+  drives one retry through the existing connect path
+  (`ntg_skip_exchange` + `ntg_connect_p2p` + stream sources); there are no
+  timers or background retry loop. `Connected` and a new initial connect reset
+  the counter. Missing engine/parameters, exhausted attempts, and engine errors
+  all remain visible failures. Whether ntgcalls accepts `ntg_connect_p2p` again
+  for a failed live-peer call is unverifiable without a live peer; any rejected
+  reconnect surfaces the engine error honestly.
+- **Built:** the call-end card can upload a compact JSON diagnostic payload made
+  only from real app/OS, engine protocol, ended-call, reconnect, mute, and
+  selected-device state. TDLib 1.8.67 defines
+  `sendCallDebugInformation` at `schema/td_api.tl:14237`; its discarded-call
+  identifier is `inputCallDiscarded` at `schema/td_api.tl:7043`.
+- **Deferred — network type:** the pinned ntgcalls v3.0.0 C header was extracted
+  from `ntgcalls.linux-x86_64-shared_libs.zip` (SHA-256
+  `b28f99eec39ae62a9c612da1e16b2884c5662f32c52effc0d985a6918f2831f0`).
+  `grep -in 'network\|stats' include/ntgcalls.h` returned no matches, so the C
+  API exposes no network-type operation. OS network detection would have no
+  engine consumer and is not built.
+- **Deferred — transport stats/debug surface:** the same pinned-header check
+  exposes no per-call stats API; `ntg_connection_info` contains only `state`
+  and `kind`. Quill does not invent bitrate, RTT, jitter, or loss, and there are
+  no tests for mappings that do not exist.
+- **Out of this slice:** E2E testing against a real peer (CI has no live
+  Telegram), video transport, group calls, screen sharing, call recording, and
+  custom-parameters passthrough.

@@ -318,6 +318,8 @@ pub enum RequestPurpose {
     /// Phase C1: `sendCallRating`. Response is `ok`; sent from the
     /// call-end rating card when `callStateDiscarded.need_rating`.
     SendCallRating,
+    /// Phase C2d: `sendCallDebugInformation` for the ended call.
+    SendCallDebugInformation,
     /// Phase C3a: `createVideoChat`. Response is `groupCallId`; the
     /// chat-bound voice chat's states arrive as `updateGroupCall`.
     CreateVideoChat {
@@ -2019,6 +2021,11 @@ pub struct CallSummary {
     pub need_debug_information: bool,
     pub need_log: bool,
     pub rating_sent: bool,
+    pub debug_information_sent: bool,
+    pub debug_information_error: Option<String>,
+    pub final_transport: Option<TransportState>,
+    pub reconnect_attempts: usize,
+    pub muted: bool,
 }
 
 impl ActiveCall {
@@ -2172,6 +2179,11 @@ impl CallSummary {
             need_debug_information,
             need_log,
             rating_sent: false,
+            debug_information_sent: false,
+            debug_information_error: None,
+            final_transport: None,
+            reconnect_attempts: 0,
+            muted: false,
         }
     }
 }
@@ -4559,6 +4571,15 @@ impl Session {
                         self.call_error =
                             Some(call_request_error_line(&err, "Could not send the rating"));
                     }
+                    Some(RequestPurpose::SendCallDebugInformation) => {
+                        if let Some(summary) = self.call_summary.as_mut() {
+                            summary.debug_information_sent = false;
+                            summary.debug_information_error = Some(call_request_error_line(
+                                &err,
+                                "Could not upload diagnostics",
+                            ));
+                        }
+                    }
                     // Phase C3a: group-call request failures surface on
                     // the group-call overlay (shown and cleared by the
                     // UI). A failed `joinVideoChat` leaves any tracked
@@ -5423,11 +5444,14 @@ impl Session {
             .ready_at
             .map(|t| t.elapsed().as_secs() as i64)
             .unwrap_or(0);
-        self.call_summary = Some(CallSummary::from_terminal(
+        let mut summary = CallSummary::from_terminal(
             call,
             duration_secs,
             active.transport == Some(TransportState::Connected),
-        ));
+        );
+        summary.final_transport = active.transport;
+        summary.muted = active.muted;
+        self.call_summary = Some(summary);
         self.call_busy_decline_queue
             .retain(|(id, _)| *id != call.id);
     }
