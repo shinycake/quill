@@ -27,7 +27,7 @@ use crate::telegram::client::{LiveTdJson, OwnedEnvelope, ReceiveBridge};
 use crate::telegram::envelope::{
     AuthorizationState, CallState, ChatAdminRights, ChatDraft, ChatFolderSpec, ChatKind,
     ChatNotificationSettings, EnvelopePayload, MUTE_FOREVER, MessageContent, MessageSender,
-    NotificationSettingsScope, ScopeNotificationSettings, StoryContentView,
+    NotificationSettingsScope, ReadyParams, ScopeNotificationSettings, StoryContentView,
 };
 use crate::telegram::ffi::{LibraryOrigin, TdJsonError, resolve_tdjson_path};
 use crate::telegram::requests::{
@@ -56,9 +56,9 @@ use crate::telegram::requests::{
     pin_chat_message, process_chat_join_request, remove_message_reaction, reorder_chat_folders,
     report_chat_sponsored_message, revoke_chat_invite_link, search_chat_messages, search_chats,
     search_messages, search_public_chats, search_recently_found_chats, send_animation,
-    send_call_rating, send_call_signaling_data, send_chat_action, send_chat_action_kind,
-    send_document, send_message_album, send_photo, send_poll, send_sticker, send_text,
-    send_text_story_reply, send_video, send_video_note, send_voice_note,
+    send_call_debug_information, send_call_rating, send_call_signaling_data, send_chat_action,
+    send_chat_action_kind, send_document, send_message_album, send_photo, send_poll, send_sticker,
+    send_text, send_text_story_reply, send_video, send_video_note, send_voice_note,
     set_authentication_phone_number, set_chat_draft_message, set_chat_member_status,
     set_chat_message_auto_delete_time, set_chat_notification_settings, set_chat_slow_mode_delay,
     set_poll_answer, set_scope_notification_settings, set_story_reaction, set_video_chat_title,
@@ -368,6 +368,8 @@ pub struct ConnectDriver<S: JsonSender> {
     /// devices are fabricated, so this can legitimately be empty.
     call_devices_cache: Vec<MediaDevice>,
     selected_devices: (Option<String>, Option<String>),
+    call_connect_params: Option<ConnectParams>,
+    reconnect_attempts: usize,
     credentials: TelegramCredentials,
     paths: AccountPaths,
     database_key: DatabaseKey,
@@ -421,6 +423,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             transport_outbox: Arc::new(Mutex::new(VecDeque::new())),
             call_devices_cache: Vec::new(),
             selected_devices: (None, None),
+            call_connect_params: None,
+            reconnect_attempts: 0,
             credentials,
             paths: prepared.paths,
             database_key: prepared.database_key,
@@ -507,6 +511,39 @@ impl<S: JsonSender> ConnectDriver<S> {
             .filter(|engine| engine.is_available())
             .map(|engine| engine.protocol().to_json())
             .unwrap_or_else(crate::telegram::requests::call_protocol)
+    }
+
+    fn call_connect_params(&self, is_outgoing: bool, ready: &ReadyParams) -> ConnectParams {
+        let library_versions = self
+            .call_engine
+            .as_ref()
+            .filter(|engine| engine.is_available())
+            .map(|engine| engine.protocol().library_versions)
+            .unwrap_or_default();
+        ConnectParams {
+            encryption_key: ready.encryption_key.clone(),
+            is_outgoing,
+            servers: ready
+                .servers
+                .iter()
+                .map(|server| RtcServer {
+                    id: server.id,
+                    ipv4: server.ipv4.clone(),
+                    ipv6: server.ipv6.clone(),
+                    port: server.port,
+                    username: server.username.clone(),
+                    password: server.password.clone(),
+                    turn: server.turn,
+                    stun: server.stun,
+                    tcp: server.tcp,
+                    peer_tag: server.peer_tag.clone(),
+                })
+                .collect(),
+            library_versions,
+            p2p_allowed: ready.allow_p2p,
+            mic_input: self.selected_devices.0.clone(),
+            speaker_input: self.selected_devices.1.clone(),
+        }
     }
 
     /// Kick the JSON client so authorization updates start flowing.
@@ -640,6 +677,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             .as_ref()
             .map(|(call_id, _, _, _)| *call_id);
 
+        if tracked_call_id != active_call_before && tracked_call_id.is_some() {
+            self.call_connect_params = None;
+            self.reconnect_attempts = 0;
+        }
+
         if let Some((call_id, user_id, is_outgoing, _)) = &active_call_after
             && Some(*call_id) != active_call_before
             && let Some(engine) = self.call_engine.as_deref_mut()
@@ -654,9 +696,20 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         if tracked_call_id.is_none()
             && let Some(call_id) = active_call_before
-            && let Some(engine) = self.call_engine.as_deref_mut()
         {
-            let _ = engine.hangup(call_id);
+            if let Some(summary) = self
+                .session
+                .call_summary
+                .as_mut()
+                .filter(|summary| summary.call_id == call_id)
+            {
+                summary.reconnect_attempts = self.reconnect_attempts;
+            }
+            if let Some(engine) = self.call_engine.as_deref_mut() {
+                let _ = engine.hangup(call_id);
+            }
+            self.call_connect_params = None;
+            self.reconnect_attempts = 0;
         }
         if let Some((call_id, data)) = bridge_signaling
             && tracked_call_id == Some(call_id)
@@ -693,36 +746,9 @@ impl<S: JsonSender> ConnectDriver<S> {
                 // Refresh devices before connecting so the native engine
                 // sees the current device ids.
                 self.refresh_call_devices();
-                let library_versions = self
-                    .call_engine
-                    .as_ref()
-                    .filter(|engine| engine.is_available())
-                    .map(|engine| engine.protocol().library_versions)
-                    .unwrap_or_default();
-                let params = ConnectParams {
-                    encryption_key: ready.encryption_key.clone(),
-                    is_outgoing,
-                    servers: ready
-                        .servers
-                        .iter()
-                        .map(|server| RtcServer {
-                            id: server.id,
-                            ipv4: server.ipv4.clone(),
-                            ipv6: server.ipv6.clone(),
-                            port: server.port,
-                            username: server.username.clone(),
-                            password: server.password.clone(),
-                            turn: server.turn,
-                            stun: server.stun,
-                            tcp: server.tcp,
-                            peer_tag: server.peer_tag.clone(),
-                        })
-                        .collect(),
-                    library_versions,
-                    p2p_allowed: ready.allow_p2p,
-                    mic_input: self.selected_devices.0.clone(),
-                    speaker_input: self.selected_devices.1.clone(),
-                };
+                let params = self.call_connect_params(is_outgoing, ready);
+                self.call_connect_params = Some(params.clone());
+                self.reconnect_attempts = 0;
                 let result = self
                     .call_engine
                     .as_deref_mut()
@@ -766,17 +792,58 @@ impl<S: JsonSender> ConnectDriver<S> {
             let Some((call_id, state)) = update else {
                 break;
             };
-            if let Some(call) = self
+            if !self
                 .session
                 .active_call
-                .as_mut()
-                .filter(|call| call.id == call_id)
+                .as_ref()
+                .is_some_and(|call| call.id == call_id)
             {
-                call.transport = Some(state);
-                call.transport_error = match state {
-                    TransportState::Failed => Some("Audio transport failed".into()),
-                    _ => None,
+                continue;
+            }
+            if state == TransportState::Failed {
+                let failure = if self.reconnect_attempts >= 3 {
+                    Some("reconnect attempts exhausted".to_string())
+                } else if !self
+                    .call_engine
+                    .as_ref()
+                    .is_some_and(|engine| engine.is_available())
+                {
+                    Some("call engine is unavailable for reconnect".to_string())
+                } else if let Some(params) = self.call_connect_params.as_ref() {
+                    self.reconnect_attempts += 1;
+                    if let Some(call) = self.session.active_call.as_mut() {
+                        call.transport = Some(TransportState::Reconnecting);
+                        call.transport_error = None;
+                    }
+                    match self
+                        .call_engine
+                        .as_deref_mut()
+                        .expect("available engine")
+                        .connect(call_id, params)
+                    {
+                        // The retry is in flight: leave the call in
+                        // `Reconnecting` so the UI can show it. The
+                        // engine's own state callbacks move it to
+                        // `Connecting`/`Connected` (or back to `Failed`)
+                        // when they arrive.
+                        Ok(()) => None,
+                        Err(err) => Some(err.to_string()),
+                    }
+                } else {
+                    Some("no retained call parameters for reconnect".to_string())
                 };
+                if let Some(error) = failure
+                    && let Some(call) = self.session.active_call.as_mut()
+                {
+                    call.transport = Some(TransportState::Failed);
+                    call.transport_error = Some(error);
+                }
+            } else if let Some(call) = self.session.active_call.as_mut() {
+                if state == TransportState::Connected {
+                    self.reconnect_attempts = 0;
+                }
+                call.transport = Some(state);
+                call.transport_error = None;
             }
         }
 
@@ -1859,6 +1926,96 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         if let Some(summary) = self.session.call_summary.as_mut() {
             summary.rating_sent = true;
+        }
+        Ok(extra)
+    }
+
+    fn call_debug_information(&self) -> Result<String, ConnectSendError> {
+        let summary = self
+            .session
+            .call_summary
+            .as_ref()
+            .filter(|summary| summary.need_debug_information && !summary.debug_information_sent)
+            .ok_or(ConnectSendError::InvalidRequest)?;
+        let engine_available = self
+            .call_engine
+            .as_ref()
+            .is_some_and(|engine| engine.is_available());
+        let transport = summary.final_transport.map(|state| match state {
+            TransportState::Connecting => "connecting",
+            TransportState::Reconnecting => "reconnecting",
+            TransportState::Connected => "connected",
+            TransportState::Failed => "failed",
+            TransportState::Closed => "closed",
+        });
+        let mut payload = serde_json::json!({
+            "app": env!("CARGO_PKG_NAME"),
+            "app_version": env!("CARGO_PKG_VERSION"),
+            "os": std::env::consts::OS,
+            "engine_available": engine_available,
+            "call_id": summary.call_id,
+            "duration_secs": summary.duration_secs,
+            "had_audio": summary.had_audio,
+            "final_transport_state": transport,
+            "reconnect_attempts": summary.reconnect_attempts,
+            "muted": summary.muted,
+            "microphone_device_id": self.selected_devices.0,
+            "speaker_device_id": self.selected_devices.1,
+        });
+        if engine_available {
+            let protocol = self
+                .call_engine
+                .as_ref()
+                .expect("available engine")
+                .protocol();
+            payload["engine_protocol"] = serde_json::json!({
+                "udp_p2p": protocol.udp_p2p,
+                "udp_reflector": protocol.udp_reflector,
+                "min_layer": protocol.min_layer,
+                "max_layer": protocol.max_layer,
+                "library_versions": protocol.library_versions,
+            });
+        }
+        Ok(payload.to_string())
+    }
+
+    /// Phase C2d: upload real local call diagnostics for the last discarded
+    /// call (`schema/td_api.tl:14237`).
+    pub fn send_call_debug_information(&mut self) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let call_id = self
+            .session
+            .call_summary
+            .as_ref()
+            .map(|summary| summary.call_id)
+            .ok_or(ConnectSendError::InvalidRequest)?;
+        let debug_information = self.call_debug_information()?;
+        let extra = self
+            .session
+            .request(RequestPurpose::SendCallDebugInformation, None);
+        if let Err(err) = self.sender.send_json(&send_call_debug_information(
+            extra,
+            call_id,
+            &debug_information,
+        )) {
+            self.session.requests.take(extra);
+            if let Some(summary) = self.session.call_summary.as_mut() {
+                summary.debug_information_error = Some(match err {
+                    ConnectSendError::InvalidRequest => {
+                        "Could not upload diagnostics: invalid request".into()
+                    }
+                    ConnectSendError::Native => {
+                        "Could not upload diagnostics: TDLib send failed".into()
+                    }
+                });
+            }
+            return Err(err);
+        }
+        if let Some(summary) = self.session.call_summary.as_mut() {
+            summary.debug_information_sent = true;
+            summary.debug_information_error = None;
         }
         Ok(extra)
     }
@@ -11771,6 +11928,109 @@ mod tests {
         assert_eq!(call.transport, Some(TransportState::Connected));
         assert_eq!(call.transport_error, None);
         assert_eq!(handle.connects().len(), 1);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn call_transport_retries_same_params_three_times_then_stops() {
+        let (dir, mut driver, handle, sink, seq) = ready_call_driver();
+        ingest_call_json(&mut driver, &seq, &sink, READY_CALL_JSON);
+        let original = handle.connects()[0].1.clone();
+
+        for expected_connects in 2..=4 {
+            handle.emit_transport_state(77, TransportState::Failed);
+            ingest_call_json(&mut driver, &seq, &sink, READY_CALL_JSON);
+            assert_eq!(handle.connects().len(), expected_connects);
+            assert_eq!(handle.connects().last().unwrap().1, original);
+            assert_eq!(
+                driver.session.active_call.as_ref().unwrap().transport,
+                Some(TransportState::Reconnecting)
+            );
+        }
+
+        handle.emit_transport_state(77, TransportState::Failed);
+        ingest_call_json(&mut driver, &seq, &sink, READY_CALL_JSON);
+        assert_eq!(handle.connects().len(), 4);
+        let call = driver.session.active_call.as_ref().unwrap();
+        assert_eq!(call.transport, Some(TransportState::Failed));
+        assert_eq!(
+            call.transport_error.as_deref(),
+            Some("reconnect attempts exhausted")
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn call_transport_connected_resets_reconnect_attempts() {
+        let (dir, mut driver, handle, sink, seq) = ready_call_driver();
+        ingest_call_json(&mut driver, &seq, &sink, READY_CALL_JSON);
+        for _ in 0..2 {
+            handle.emit_transport_state(77, TransportState::Failed);
+            ingest_call_json(&mut driver, &seq, &sink, READY_CALL_JSON);
+        }
+        handle.emit_transport_state(77, TransportState::Connected);
+        ingest_call_json(&mut driver, &seq, &sink, READY_CALL_JSON);
+
+        for _ in 0..3 {
+            handle.emit_transport_state(77, TransportState::Failed);
+            ingest_call_json(&mut driver, &seq, &sink, READY_CALL_JSON);
+        }
+        assert_eq!(handle.connects().len(), 6);
+        assert_eq!(
+            driver.session.active_call.as_ref().unwrap().transport,
+            Some(TransportState::Reconnecting)
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn call_transport_reconnect_error_is_reported() {
+        let (dir, mut driver, handle, sink, seq) = ready_call_driver();
+        ingest_call_json(&mut driver, &seq, &sink, READY_CALL_JSON);
+        handle.fail_next_connect();
+        handle.emit_transport_state(77, TransportState::Failed);
+        ingest_call_json(&mut driver, &seq, &sink, READY_CALL_JSON);
+
+        let call = driver.session.active_call.as_ref().unwrap();
+        assert_eq!(call.transport, Some(TransportState::Failed));
+        assert_eq!(
+            call.transport_error.as_deref(),
+            Some("call engine operation connect failed with code -1")
+        );
+        assert_eq!(handle.connects().len(), 2);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn call_debug_information_contains_real_driver_fields() {
+        let (dir, mut driver, handle, sink, seq) = ready_call_driver();
+        driver
+            .select_call_devices(Some("mic-a".into()), Some("spk-a".into()))
+            .unwrap();
+        ingest_call_json(&mut driver, &seq, &sink, READY_CALL_JSON);
+        handle.emit_transport_state(77, TransportState::Connected);
+        ingest_call_json(&mut driver, &seq, &sink, READY_CALL_JSON);
+        ingest_call_json(
+            &mut driver,
+            &seq,
+            &sink,
+            r#"{"@type":"updateCall","call":{"@type":"call","id":77,"unique_id":"99","user_id":41,"is_outgoing":true,"is_video":false,"state":{"@type":"callStateDiscarded","reason":{"@type":"callDiscardReasonHungUp"},"need_rating":false,"need_debug_information":true,"need_log":false}}}"#,
+        );
+
+        let payload: Value =
+            serde_json::from_str(&driver.call_debug_information().unwrap()).unwrap();
+        assert_eq!(payload["app"], "quill");
+        assert_eq!(payload["call_id"], 77);
+        assert_eq!(payload["engine_available"], true);
+        assert_eq!(payload["engine_protocol"]["min_layer"], 92);
+        assert_eq!(
+            payload["engine_protocol"]["library_versions"],
+            serde_json::json!(["8.0.0", "9.0.0", "12.0.0", "13.0.0"])
+        );
+        assert_eq!(payload["final_transport_state"], "connected");
+        assert_eq!(payload["had_audio"], true);
+        assert_eq!(payload["microphone_device_id"], "mic-a");
+        assert_eq!(payload["speaker_device_id"], "spk-a");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

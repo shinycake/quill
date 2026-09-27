@@ -23,6 +23,8 @@ pub type TransportStateCallback = Arc<dyn Fn(i32, TransportState) + Send + Sync 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TransportState {
     Connecting,
+    /// Driver-only state while retrying the retained connect parameters.
+    Reconnecting,
     Connected,
     Failed,
     Closed,
@@ -193,6 +195,8 @@ struct MockInner {
     mute_changes: Vec<(i32, bool)>,
     /// Test-only failure injection for `set_muted`.
     fail_mute: bool,
+    /// Test-only failure injection for the next `connect`.
+    fail_connect: bool,
     devices: Vec<MediaDevice>,
     hook: Option<SignalingEmittedCallback>,
     transport_hook: Option<TransportStateCallback>,
@@ -275,6 +279,10 @@ impl MockEngine {
     /// Test-only: make the next `set_muted` calls fail.
     pub fn fail_mute(&self) {
         self.inner.lock().expect("mock call engine").fail_mute = true;
+    }
+
+    pub fn fail_next_connect(&self) {
+        self.inner.lock().expect("mock call engine").fail_connect = true;
     }
 
     pub fn connects(&self) -> Vec<(i32, ConnectParams)> {
@@ -388,6 +396,13 @@ impl CallEngine for MockEngine {
             return Err(EngineError::NoSuchCall(call_id));
         }
         inner.connects.push((call_id, params.clone()));
+        if inner.fail_connect {
+            inner.fail_connect = false;
+            return Err(EngineError::Engine {
+                op: "connect",
+                code: -1,
+            });
+        }
         Ok(())
     }
 

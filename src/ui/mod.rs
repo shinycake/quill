@@ -1029,6 +1029,8 @@ pub enum ScreenshotDemo {
     ReadyCallVideo,
     /// Phase C2c: connected voice call with microphone/speaker choices.
     ReadyCallDevices,
+    /// Phase C2d: Ready voice call while the audio driver reconnects.
+    ReadyCallReconnecting,
     /// Phase B4: chat-level auto-delete / self-destruct timer (injected,
     /// no live Telegram) — the Ready secret chat with Zed (id 41) with
     /// `message_auto_delete_time` 3600, one message carrying a live
@@ -1854,6 +1856,15 @@ impl QuillApp {
                     AuthorizationState::Ready,
                 )
             }
+            Some(ScreenshotDemo::ReadyCallReconnecting) => {
+                demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
+                (
+                    ConnectUiStatus::DemoReadyChats,
+                    None,
+                    "screenshot demo — reconnecting call audio (injected, no live Telegram)".into(),
+                    AuthorizationState::Ready,
+                )
+            }
             Some(ScreenshotDemo::ReadyChatTtl) => {
                 demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
                 (
@@ -2416,6 +2427,20 @@ impl QuillApp {
             );
             app.status_note =
                 "screenshot demo — real-audio device selection (injected, no live Telegram)".into();
+        }
+        // Phase C2d: reconnecting-audio fixture — a ready voice call
+        // whose driver is retrying the retained connect parameters.
+        if matches!(demo, Some(ScreenshotDemo::ReadyCallReconnecting)) {
+            if let Some(session) = app.demo_session.as_mut() {
+                app.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_call_video(session, &app.demo_sink, &app.demo_seq);
+                if let Some(call) = session.active_call.as_mut() {
+                    call.is_video = false;
+                    call.transport = Some(quill::calls::engine::TransportState::Reconnecting);
+                }
+            }
+            app.status_note =
+                "screenshot demo — reconnecting call audio (injected, no live Telegram)".into();
         }
         // Phase B4: chat TTL fixture — the Ready secret chat with a 1h
         // self-destruct timer, a live `auto_delete_in` countdown on one
@@ -4567,6 +4592,24 @@ impl QuillApp {
             {
                 summary.rating_sent = true;
             }
+        }
+        cx.notify();
+    }
+
+    fn upload_call_diagnostics(&mut self, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            self.status_note = match live.driver.send_call_debug_information() {
+                Ok(_) => "diagnostics upload sent".into(),
+                Err(_) => "could not upload diagnostics".into(),
+            };
+        } else if let Some(summary) = self
+            .demo_session
+            .as_mut()
+            .and_then(|session| session.call_summary.as_mut())
+        {
+            summary.debug_information_sent = true;
+            summary.debug_information_error = None;
+            self.status_note = "demo: diagnostics upload (no live Telegram)".into();
         }
         cx.notify();
     }
@@ -9735,6 +9778,7 @@ impl QuillApp {
                         "Muted - microphone off".to_string()
                     }
                     Some(TransportState::Connected) => "Connected".to_string(),
+                    Some(TransportState::Reconnecting) => "Reconnecting audio…".to_string(),
                     Some(TransportState::Failed) => format!(
                         "Couldn't start audio: {}. The call is up but carries no sound.",
                         call.transport_error.as_deref().unwrap_or("unknown error")
@@ -9994,12 +10038,29 @@ impl QuillApp {
                     "No audio was carried."
                 }),
         );
-        if summary.need_debug_information || summary.need_log {
+        if summary.need_debug_information && !summary.debug_information_sent {
+            card = card.child(
+                Button::new("call-upload-diagnostics")
+                    .label("Upload diagnostics")
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.upload_call_diagnostics(cx);
+                    })),
+            );
+        }
+        if summary.debug_information_sent {
             card = card.child(
                 div()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
-                    .child("Call diagnostics upload isn't implemented yet."),
+                    .child("Diagnostics sent."),
+            );
+        }
+        if let Some(error) = &summary.debug_information_error {
+            card = card.child(
+                div()
+                    .text_xs()
+                    .text_color(rgb(0xe17076))
+                    .child(error.clone()),
             );
         }
         if summary.need_rating && !summary.rating_sent {
