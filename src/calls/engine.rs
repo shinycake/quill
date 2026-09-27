@@ -1027,6 +1027,8 @@ impl CallEngine for NtgcallsEngine {
         }
         // Phase C2e: retain the media config before issuing sources so
         // later toggles and device changes re-issue from the same state.
+        // On failure, drop the retained config so no stale config lingers
+        // until hangup.
         self.call_media.insert(
             call_id,
             CallMediaConfig {
@@ -1036,7 +1038,11 @@ impl CallEngine for NtgcallsEngine {
                 camera: params.camera_input.clone(),
             },
         );
-        self.set_media_sources(call_id)
+        let result = self.set_media_sources(call_id);
+        if result.is_err() {
+            self.call_media.remove(&call_id);
+        }
+        result
     }
 
     fn select_devices(
@@ -1105,9 +1111,22 @@ impl CallEngine for NtgcallsEngine {
             .call_media
             .get_mut(&call_id)
             .ok_or(EngineError::NoSuchCall(call_id))?;
+        let previous_enabled = config.camera_enabled;
+        let previous_camera = config.camera.clone();
         config.camera_enabled = enabled;
         config.camera = camera.map(str::to_owned);
-        self.set_media_sources(call_id)
+        if let Err(err) = self.set_media_sources(call_id) {
+            // Phase C2e: restore the retained config so it can't desync
+            // from ntgcalls when issuance fails.
+            let config = self
+                .call_media
+                .get_mut(&call_id)
+                .ok_or(EngineError::NoSuchCall(call_id))?;
+            config.camera_enabled = previous_enabled;
+            config.camera = previous_camera;
+            return Err(err);
+        }
+        Ok(())
     }
 
     fn media_devices(&self) -> Result<Vec<MediaDevice>, EngineError> {
@@ -1748,6 +1767,8 @@ mod tests {
 
     /// Phase C2e: validates the BT.601 conversion math. Neutral chroma
     /// passes Y straight through, so Y=235 ~ white and Y=16 ~ black.
+    /// A saturated case with no clamping on red pins the 1.402 coefficient:
+    /// Y=64, U=128, V=255 gives R = 64 + 1.402*127 ~ 242.
     #[test]
     fn i420_to_rgba_known_pixels() {
         let white = i420_to_rgba(
@@ -1773,6 +1794,18 @@ mod tests {
         for pixel in pixels {
             assert_pixel_close(pixel, &[16, 16, 16, 255]);
         }
+        // I420 planes: Y(2x2) then U(1x1) then V(1x1).
+        let saturated = i420_to_rgba(
+            2,
+            2,
+            &[64, 64, 64, 64, 128, 255],
+            NTG_VIDEO_ROTATION_VIDEO_ROTATION_0,
+        )
+        .expect("valid 2x2 frame");
+        let (pixels, _) = saturated.as_chunks::<4>();
+        for pixel in pixels {
+            assert_pixel_close(pixel, &[242, 0, 64, 255]);
+        }
     }
 
     fn assert_pixel_close(actual: &[u8], expected: &[u8; 4]) {
@@ -1788,10 +1821,22 @@ mod tests {
     /// Phase C2e: validates we never render garbage bytes.
     #[test]
     fn i420_to_rgba_rejects_bad_sizes() {
-        assert_eq!(i420_to_rgba(2, 2, &[0; 5], 0), None);
-        assert_eq!(i420_to_rgba(2, 2, &[0; 7], 0), None);
-        assert_eq!(i420_to_rgba(0, 2, &[], 0), None);
-        assert_eq!(i420_to_rgba(2, 0, &[], 0), None);
+        assert_eq!(
+            i420_to_rgba(2, 2, &[0; 5], NTG_VIDEO_ROTATION_VIDEO_ROTATION_0),
+            None
+        );
+        assert_eq!(
+            i420_to_rgba(2, 2, &[0; 7], NTG_VIDEO_ROTATION_VIDEO_ROTATION_0),
+            None
+        );
+        assert_eq!(
+            i420_to_rgba(0, 2, &[], NTG_VIDEO_ROTATION_VIDEO_ROTATION_0),
+            None
+        );
+        assert_eq!(
+            i420_to_rgba(2, 0, &[], NTG_VIDEO_ROTATION_VIDEO_ROTATION_0),
+            None
+        );
     }
 
     /// Phase C2e: validates rotation handling. 2x1 with distinct pixels,
