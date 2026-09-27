@@ -449,6 +449,25 @@ pub fn layout_bounds(parts: &[AlbumRect]) -> (i32, i32) {
     (width, height)
 }
 
+/// MED1: the message ids of one album, oldest first, from an unordered
+/// history slice. Drives album pin/unpin (`pinChatMessage` per message —
+/// TGX `MessagePinAlbum` pins each member; TDLib has no album-level pin).
+pub fn album_message_ids(
+    messages: &[crate::state::HistoryMessage],
+    album_id: i64,
+) -> Vec<crate::ids::MessageId> {
+    if album_id == 0 {
+        return Vec::new();
+    }
+    let mut ids: Vec<crate::ids::MessageId> = messages
+        .iter()
+        .filter(|m| m.media_album_id == album_id)
+        .map(|m| m.id)
+        .collect();
+    ids.sort_by_key(|id| id.0);
+    ids
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -495,5 +514,45 @@ mod tests {
         let rows = [(9_i64, false), (9, true)];
         let groups = group_media_albums(&rows, |row| row.0, |row| row.1, |_| true);
         assert_eq!(groups.len(), 2);
+    }
+
+    #[test]
+    fn album_message_ids_collects_sorted_oldest_first() {
+        use crate::ids::{ChatId, MessageId};
+        use crate::state::HistoryMessage;
+        use crate::telegram::envelope::TextContent;
+        let message = |id: i64, album: i64| HistoryMessage {
+            id: MessageId(id),
+            chat_id: ChatId(1),
+            is_outgoing: false,
+            content: crate::telegram::envelope::MessageContent::Text(TextContent::plain("x")),
+            pending: false,
+            reply_to: None,
+            forward_info: None,
+            interaction_info: None,
+            is_pinned: false,
+            media_album_id: album,
+            reply_markup: None,
+            self_destruct: None,
+            auto_delete: None,
+            author_signature: None,
+            failed: false,
+            can_retry: false,
+            ephemeral: None,
+        };
+        let history = vec![
+            message(30, 7),
+            message(10, 7),
+            message(20, 8),
+            message(40, 0),
+            message(25, 7),
+        ];
+        assert_eq!(
+            album_message_ids(&history, 7),
+            vec![MessageId(10), MessageId(25), MessageId(30)]
+        );
+        assert_eq!(album_message_ids(&history, 8), vec![MessageId(20)]);
+        assert!(album_message_ids(&history, 0).is_empty());
+        assert!(album_message_ids(&history, 99).is_empty());
     }
 }
