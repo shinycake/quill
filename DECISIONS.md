@@ -2950,3 +2950,124 @@ Failing cases become regression tests/screenshots in E5.
   management; message statistics (`getMessageStatistics`,
   `getStoryStatistics`); invite-link editing UI; subscription-pricing
   (Stars) link display beyond parsing; `checkChatInviteLink` usage.
+
+## Phase D3b — channel/supergroup admin management (2026-09-26)
+
+- **Rationale.** D3a closed invite links and join requests but explicitly
+  deferred promote/demote and admin-right management. This slice
+  implements the full admin-management loop for channels and
+  supergroups: administrator list, promote a member, edit an
+  administrator's rights, demote to member. All actions are gated on the
+  viewer being the creator or holding the `can_promote_members` admin
+  right (deny-by-default).
+- **Schema (1.8.67, verified verbatim in `schema/td_api.tl`):**
+  `chatAdministratorRights` (:1092, all 18 fields in order:
+  `can_manage_chat`, `can_change_info`, `can_post_messages`,
+  `can_edit_messages`, `can_delete_messages`, `can_invite_users`,
+  `can_restrict_members`, `can_pin_messages`, `can_manage_topics`,
+  `can_promote_members`, `can_manage_video_chats`, `can_post_stories`,
+  `can_edit_stories`, `can_delete_stories`, `can_manage_direct_messages`,
+  `can_manage_tags`, `can_send_welcome_messages`, `is_anonymous`);
+  `chatAdministrator` (:2482, `user_id:int53 custom_title:string
+  is_owner:Bool can_be_edited:Bool` — note: **no rights block** on this
+  constructor, so the list shows names/titles only and per-admin rights
+  are loaded on demand via `getChatMember`); `chatAdministrators`
+  (:2485); `chatMemberStatusCreator` (:2493);
+  `chatMemberStatusAdministrator` (:2500,
+  `can_be_edited:Bool rights:chatAdministratorRights`);
+  `chatMemberStatusMember` (:2504, `member_until_date:int32`);
+  `chatMember` (:2526); `chatMembers` (:2529);
+  `supergroupMembersFilterRecent` (:2559);
+  `supergroupMembersFilterAdministrators` (:2565, verified but unused —
+  the promote picker needs *members*, not admins);
+  `supergroupMembersFilterSearch` (:2568, `query:string`);
+  `messageSenderUser` (:2831); `updateChatMember` (:11202);
+  `setChatMemberStatus` (:13592,
+  `chat_id:int53 member_id:MessageSender status:ChatMemberStatus`);
+  `getChatMember` (:13622); `getChatAdministrators` (:13632);
+  `getSupergroupMembers` (:15238,
+  `supergroup_id:int53 filter:SupergroupMembersFilter offset:int32 limit:int32`).
+- **No custom-title editing in TDLib 1.8.67.** There is **no**
+  `setChatAdministratorCustomTitle` constructor in the pinned schema
+  (verified by absence), so custom titles are display-only: the
+  administrator list renders `custom_title` (or "Admin" / "👑 Owner"),
+  and the promote/edit dialogs do not offer a title field. If a future
+  TDLib adds the setter, it slots into `edit_admin_rights`' dialog.
+- **Promote / edit / demote via one function.**
+  `setChatMemberStatus` takes the full `ChatMemberStatus` value:
+  promote and edit-rights both send
+  `chatMemberStatusAdministrator(can_be_edited=true, rights=<18-field
+  block>)`; demote sends `chatMemberStatusMember`. The driver exposes
+  `promote_chat_member` / `edit_admin_rights` / `demote_chat_member`
+  over a shared `send_set_chat_member_status`, deduped per
+  (chat, user, kind) via `RequestPurpose::SetChatMemberStatus { user_id,
+  kind }` (`MemberStatusChange::{Promote, EditRights, Demote}`).
+- **Rights gating, same two paths as D3a.** Channels: own membership
+  from `getChatMember` / `updateChatMember` →
+  `ChatSummary.my_member_status` + new
+  `ChatSummary.my_admin_can_promote_members` (parsed from
+  `rights.can_promote_members`; absent rights → `None` → denied).
+  Supergroups incl. channels: own rights from the `updateSupergroup` /
+  `getSupergroup` status block → new `Session.supergroup_promote_right`
+  map, mirroring the A1/D3a right-map pattern. The single gate is
+  `Session::chat_can_manage_admins(chat_id)`: creator → always allowed;
+  administrator → requires the explicit right; anything else (incl.
+  unknown) → denied. All driver methods and the info-panel section
+  gate on it; the driver returns `Ok(None)` (no request sent) when the
+  gate is closed. The per-row Edit/Remove buttons additionally require
+  the entry's `can_be_edited` and non-owner (TDLib rejects edits to the
+  creator and to admins granted by someone else).
+- **Fetch / cache / dedupe / invalidation.** Admin list:
+  `getChatAdministrators` cached per chat (`AdminListFetch`), Refresh
+  bypasses. Per-admin rights: `getChatMember` cached per (chat, user)
+  (`AdminRightsFetch`) backing the edit dialog. Member picker:
+  `getSupergroupMembers` (recent filter, empty query; search filter
+  with the query text; offset 0, limit 200) cached per chat
+  (`SupergroupMembersFetch`). In-flight dedupe by `RequestPurpose` per
+  chat plus `Loading` cache states, same as D3a. Invalidation: a
+  successful `setChatMemberStatus` (`ok`) and *any* `updateChatMember`
+  drop the cached admin list so the panel refetches; `updateChatMember`
+  for the viewer refreshes their own rights (gate follows revocation
+  immediately). Errors record `Failed` with the shared
+  `call_request_error_line` label ("Could not load administrators" /
+  "Could not update member status" / "Could not load members" /
+  "Could not load admin rights").
+- **Honest UI.** The info-panel **Administrators** section renders
+  loading / failed-with-retry / loaded / empty states; rows show the
+  admin's display name (or "User \<id\>"), custom title or 👑 Owner
+  badge, and Edit/Remove only for editable non-owner entries. The
+  promote dialog shows the member picker (search + up to 30 rows,
+  already-admin members excluded, click-to-select), the 18 rights
+  checkboxes (all enabled by default, mirroring the official clients),
+  and Promote/Cancel. The edit-rights dialog shows a loading row until
+  the `getChatMember` lookup lands, then the 18 checkboxes bound to a
+  staged copy (toggles never mutate the session cache); Save sends
+  `setChatMemberStatus`. Demote asks for confirmation. Element ids are
+  namespaced (`admin-*`, `admin-promote-*`, `admin-right-*`,
+  `admin-edit-right-*`, `admin-demote-*`).
+- **Screenshot.** `quill --screenshot-demo ready-admin-management`:
+  demo channel 13 (viewer 777 admin with `can_promote_members`), a
+  `chatAdministrators` response (owner "Founder" + two editable
+  admins) and a `chatMembers` response (2 members) plus `updateUser`
+  names through the real reducer paths, info panel open and the
+  promote dialog open with a member selected →
+  `docs/screenshots/ready-admin-management.png`.
+- **Tests.** Request JSON shapes vs schema (admin list, promote with
+  all 18 rights fields asserted against the schema order, demote,
+  member search); envelope: `chatAdministrators` / `chatMembers` /
+  rights round-trip, missing-rights → deny-by-default, exact schema
+  pins, `can_promote_members` parse on both `updateSupergroup` and
+  `supergroup`; state unit: gate matrix (creator / admin with /
+  without / unknown right, channel + group, member, non-admin),
+  list/rights/member caching, invalidation on `ok` and on
+  `updateChatMember`, own-right refresh; replay (4): admin list load
+  + gate via `updateSupergroup`, `ok` invalidates; `updateChatMember`
+  invalidates + own gate opens/closes on right grant/revoke; per-admin
+  rights lookup + demote `ok` invalidates; member picker cache +
+  error marks `Failed`.
+- **Out of this slice (→ D3c/future):** `getChatEventLog` (admin
+  activity log — the natural D3c); custom-title editing if a future
+  TDLib adds the setter; message/story statistics
+  (`getMessageStatistics`, `getStoryStatistics`); channel
+  title/description/photo editing; invite-link editing UI (deferred
+  from D3a).

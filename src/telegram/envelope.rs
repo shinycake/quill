@@ -295,6 +295,11 @@ pub enum EnvelopePayload {
         /// `None` for any other status or a missing rights block.
         /// Invite-link management requires this right (or creator status).
         can_invite_users: Option<bool>,
+        /// Phase D3b: `rights.can_promote_members` from own
+        /// `chatMemberStatusAdministrator` (schema 1.8.67, line 1092);
+        /// `None` for any other status or a missing rights block.
+        /// Admin management requires this right (or creator status).
+        can_promote_members: Option<bool>,
     },
     /// `supergroup` — `getSupergroup` response. Phase A1: also keeps own
     /// `status` (`supergroup.status`, schema 1.8.67 line 2746) for the
@@ -313,6 +318,11 @@ pub enum EnvelopePayload {
         /// `None` for any other status or a missing rights block.
         /// Invite-link management requires this right (or creator status).
         can_invite_users: Option<bool>,
+        /// Phase D3b: `rights.can_promote_members` from own
+        /// `chatMemberStatusAdministrator` (schema 1.8.67, line 1092);
+        /// `None` for any other status or a missing rights block.
+        /// Admin management requires this right (or creator status).
+        can_promote_members: Option<bool>,
     },
     /// `forumTopics` — `getForumTopics` response. Only the first page is
     /// fetched; `next_offset_*` are dropped (see Phase 5.1 DECISIONS).
@@ -476,6 +486,21 @@ pub enum EnvelopePayload {
     ChatJoinRequests {
         total_count: i32,
         requests: Vec<ParsedChatJoinRequest>,
+    },
+    /// Phase D3b: `chatAdministrators` (TDLib 1.8.67, line 2485) — the
+    /// response of `getChatAdministrators` (line 13632). Carries no chat
+    /// id; correlated to the chat by the request's
+    /// `PendingRequest::chat_id`.
+    ChatAdministrators {
+        administrators: Vec<ChatAdministratorEntry>,
+    },
+    /// Phase D3b: `chatMembers` (TDLib 1.8.67, line 2529) — the response
+    /// of `getSupergroupMembers` (line 15238). Drives the promote flow's
+    /// member picker. Carries no supergroup id; correlated by the
+    /// request's `PendingRequest::chat_id`.
+    SupergroupMembers {
+        members: Vec<ParsedChatMember>,
+        total_count: i32,
     },
     /// Phase D3a: `updateNewChatJoinRequest` (TDLib 1.8.67, line 11210) —
     /// a user requested to join the chat. Carries its own `chat_id`.
@@ -1319,6 +1344,145 @@ pub struct ParsedChatMember {
     pub status: ChannelMemberStatus,
     pub admin_can_post_messages: Option<bool>,
     pub admin_can_invite_users: Option<bool>,
+    /// Phase D3b: the full `rights` block from
+    /// `chatMemberStatusAdministrator` (TDLib 1.8.67,
+    /// `chatAdministratorRights`, schema line 1092). `Some` only for an
+    /// administrator with a parsed rights block; `None` for every other
+    /// status or an absent rights block. Drives the promote/edit-rights
+    /// flows and the `can_promote_members` gate.
+    pub admin_rights: Option<ChatAdminRights>,
+}
+
+/// Phase D3b: `chatAdministratorRights` (TDLib 1.8.67,
+/// `schema/td_api.tl:1092`):
+/// `chatAdministratorRights can_manage_chat:Bool can_change_info:Bool
+/// can_post_messages:Bool can_edit_messages:Bool can_delete_messages:Bool
+/// can_invite_users:Bool can_restrict_members:Bool can_pin_messages:Bool
+/// can_manage_topics:Bool can_promote_members:Bool
+/// can_manage_video_chats:Bool can_post_stories:Bool can_edit_stories:Bool
+/// can_delete_stories:Bool can_manage_direct_messages:Bool
+/// can_manage_tags:Bool can_send_welcome_messages:Bool is_anonymous:Bool =
+/// ChatAdministratorRights;`
+/// Fields are declared in schema order. Missing JSON fields parse to
+/// `false` (deny-by-default); TDLib always sends the full block.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ChatAdminRights {
+    pub can_manage_chat: bool,
+    pub can_change_info: bool,
+    pub can_post_messages: bool,
+    pub can_edit_messages: bool,
+    pub can_delete_messages: bool,
+    pub can_invite_users: bool,
+    pub can_restrict_members: bool,
+    pub can_pin_messages: bool,
+    pub can_manage_topics: bool,
+    pub can_promote_members: bool,
+    pub can_manage_video_chats: bool,
+    pub can_post_stories: bool,
+    pub can_edit_stories: bool,
+    pub can_delete_stories: bool,
+    pub can_manage_direct_messages: bool,
+    pub can_manage_tags: bool,
+    pub can_send_welcome_messages: bool,
+    pub is_anonymous: bool,
+}
+
+impl ChatAdminRights {
+    /// All rights granted. A UI convenience for the promote dialog's
+    /// default checkbox state — not a server fact.
+    pub fn all() -> Self {
+        Self {
+            can_manage_chat: true,
+            can_change_info: true,
+            can_post_messages: true,
+            can_edit_messages: true,
+            can_delete_messages: true,
+            can_invite_users: true,
+            can_restrict_members: true,
+            can_pin_messages: true,
+            can_manage_topics: true,
+            can_promote_members: true,
+            can_manage_video_chats: true,
+            can_post_stories: true,
+            can_edit_stories: true,
+            can_delete_stories: true,
+            can_manage_direct_messages: true,
+            can_manage_tags: true,
+            can_send_welcome_messages: true,
+            is_anonymous: true,
+        }
+    }
+
+    /// Serialize as `chatAdministratorRights` JSON for
+    /// `setChatMemberStatus` (schema 1.8.67, lines 2500/1092).
+    pub fn to_json(&self) -> Value {
+        serde_json::json!({
+            "@type": "chatAdministratorRights",
+            "can_manage_chat": self.can_manage_chat,
+            "can_change_info": self.can_change_info,
+            "can_post_messages": self.can_post_messages,
+            "can_edit_messages": self.can_edit_messages,
+            "can_delete_messages": self.can_delete_messages,
+            "can_invite_users": self.can_invite_users,
+            "can_restrict_members": self.can_restrict_members,
+            "can_pin_messages": self.can_pin_messages,
+            "can_manage_topics": self.can_manage_topics,
+            "can_promote_members": self.can_promote_members,
+            "can_manage_video_chats": self.can_manage_video_chats,
+            "can_post_stories": self.can_post_stories,
+            "can_edit_stories": self.can_edit_stories,
+            "can_delete_stories": self.can_delete_stories,
+            "can_manage_direct_messages": self.can_manage_direct_messages,
+            "can_manage_tags": self.can_manage_tags,
+            "can_send_welcome_messages": self.can_send_welcome_messages,
+            "is_anonymous": self.is_anonymous,
+        })
+    }
+}
+
+/// Phase D3b: parse a `chatAdministratorRights` block (TDLib 1.8.67,
+/// schema line 1092); `None` unless `@type` matches or the value is
+/// absent/null.
+pub fn parse_chat_admin_rights(value: Option<&Value>) -> Option<ChatAdminRights> {
+    let value = value.filter(|v| !v.is_null())?;
+    if value.get("@type").and_then(Value::as_str) != Some("chatAdministratorRights") {
+        return None;
+    }
+    let right = |name: &str| value.get(name).and_then(Value::as_bool).unwrap_or(false);
+    Some(ChatAdminRights {
+        can_manage_chat: right("can_manage_chat"),
+        can_change_info: right("can_change_info"),
+        can_post_messages: right("can_post_messages"),
+        can_edit_messages: right("can_edit_messages"),
+        can_delete_messages: right("can_delete_messages"),
+        can_invite_users: right("can_invite_users"),
+        can_restrict_members: right("can_restrict_members"),
+        can_pin_messages: right("can_pin_messages"),
+        can_manage_topics: right("can_manage_topics"),
+        can_promote_members: right("can_promote_members"),
+        can_manage_video_chats: right("can_manage_video_chats"),
+        can_post_stories: right("can_post_stories"),
+        can_edit_stories: right("can_edit_stories"),
+        can_delete_stories: right("can_delete_stories"),
+        can_manage_direct_messages: right("can_manage_direct_messages"),
+        can_manage_tags: right("can_manage_tags"),
+        can_send_welcome_messages: right("can_send_welcome_messages"),
+        is_anonymous: right("is_anonymous"),
+    })
+}
+
+/// Phase D3b: `chatAdministrator` (TDLib 1.8.67, `schema/td_api.tl:2482`):
+/// `chatAdministrator user_id:int53 custom_title:string is_owner:Bool
+/// can_be_edited:Bool = ChatAdministrator;`
+/// One entry of the `chatAdministrators` response. This schema version has
+/// no rights block here (and no `setChatAdministratorCustomTitle`), so
+/// per-admin rights come from `getChatMember` on demand.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChatAdministratorEntry {
+    pub user_id: i64,
+    pub custom_title: String,
+    pub is_owner: bool,
+    pub can_be_edited: bool,
 }
 
 /// `botCommand` (TDLib 1.8.67, `schema/td_api.tl:826`):
@@ -4571,6 +4735,7 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
                     .unwrap_or(ChannelMemberStatus::Unknown),
                 can_restrict_members: parse_restrict_members_right(supergroup.get("status")),
                 can_invite_users: parse_invite_users_right(supergroup.get("status")),
+                can_promote_members: parse_promote_members_right(supergroup.get("status")),
             })
         }
         "supergroup" => Ok(EnvelopePayload::Supergroup {
@@ -4586,6 +4751,7 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
                 .unwrap_or(ChannelMemberStatus::Unknown),
             can_restrict_members: parse_restrict_members_right(value.get("status")),
             can_invite_users: parse_invite_users_right(value.get("status")),
+            can_promote_members: parse_promote_members_right(value.get("status")),
         }),
         // Phase 5.1: `forumTopics` (schema line 3976). Topics keep their
         // response order; the UI sorts by `order` descending per the schema
@@ -4826,6 +4992,33 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
         // (schema 1.8.67, lines 2627/2630/2688/2691/10555/11210). The
         // responses carry no chat id; `Session::apply` correlates them via
         // the pending request. The updates carry their own `chat_id`.
+        // Phase D3b: admin-list / member-list responses (schema 1.8.67,
+        // lines 2485/2529) — same correlation, no chat id on the wire.
+        "chatAdministrators" => Ok(EnvelopePayload::ChatAdministrators {
+            administrators: value
+                .get("administrators")
+                .and_then(Value::as_array)
+                .map(|entries| {
+                    entries
+                        .iter()
+                        .filter_map(|entry| parse_chat_administrator(Some(entry)))
+                        .collect()
+                })
+                .unwrap_or_default(),
+        }),
+        "chatMembers" => Ok(EnvelopePayload::SupergroupMembers {
+            total_count: int53(value.get("total_count")).map(|v| v as i32)?,
+            members: value
+                .get("members")
+                .and_then(Value::as_array)
+                .map(|members| {
+                    members
+                        .iter()
+                        .filter_map(|member| parse_chat_member(Some(member)))
+                        .collect()
+                })
+                .unwrap_or_default(),
+        }),
         "chatInviteLink" => Ok(EnvelopePayload::ChatInviteLink {
             link: parse_chat_invite_link(Some(&value)).ok_or(ParseError::MissingField)?,
         }),
@@ -5119,17 +5312,61 @@ fn parse_invite_users_right(value: Option<&Value>) -> Option<bool> {
         .and_then(Value::as_bool)
 }
 
+/// Phase D3b: `rights.can_promote_members` from a
+/// `chatMemberStatusAdministrator` block (TDLib 1.8.67,
+/// `chatAdministratorRights`, schema line 1092); `None` for any other
+/// status or a missing/absent rights block. Promoting/demoting members
+/// and editing admin rights requires this right (or creator status).
+fn parse_promote_members_right(value: Option<&Value>) -> Option<bool> {
+    let value = value?;
+    if value.get("@type").and_then(Value::as_str) != Some("chatMemberStatusAdministrator") {
+        return None;
+    }
+    value
+        .get("rights")
+        .and_then(|rights| rights.get("can_promote_members"))
+        .and_then(Value::as_bool)
+}
+
 /// `chatMember` (TDLib 1.8.67). Returns `None` when `member_id` or `status`
 /// is missing or unparseable.
 fn parse_chat_member(value: Option<&Value>) -> Option<ParsedChatMember> {
     let value = value.filter(|v| !v.is_null())?;
     let member_id = parse_message_sender(value.get("member_id")).ok()?;
     let (status, admin_can_post_messages) = parse_channel_member_status(value.get("status"))?;
+    let admin_rights = if status == ChannelMemberStatus::Administrator {
+        parse_chat_admin_rights(value.get("status").and_then(|s| s.get("rights")))
+    } else {
+        None
+    };
     Some(ParsedChatMember {
         member_id,
         status,
         admin_can_post_messages,
         admin_can_invite_users: parse_invite_users_right(value.get("status")),
+        admin_rights,
+    })
+}
+
+/// Phase D3b: `chatAdministrator` (TDLib 1.8.67, `schema/td_api.tl:2482`).
+fn parse_chat_administrator(value: Option<&Value>) -> Option<ChatAdministratorEntry> {
+    let value = value.filter(|v| !v.is_null())?;
+    Some(ChatAdministratorEntry {
+        user_id: int53(value.get("user_id")).ok()?,
+
+        custom_title: value
+            .get("custom_title")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string(),
+        is_owner: value
+            .get("is_owner")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        can_be_edited: value
+            .get("can_be_edited")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
     })
 }
 
@@ -7621,10 +7858,13 @@ mod tests {
             EnvelopePayload::UpdateSupergroup {
                 status,
                 can_restrict_members,
+                can_promote_members,
                 ..
             } => {
                 assert_eq!(status, ChannelMemberStatus::Administrator);
                 assert_eq!(can_restrict_members, Some(true));
+                // Phase D3b: `can_promote_members` rides the same rights block.
+                assert_eq!(can_promote_members, Some(false));
             }
             other => panic!("unexpected {other:?}"),
         }
@@ -7662,6 +7902,7 @@ mod tests {
                 status,
                 can_restrict_members,
                 can_invite_users,
+                can_promote_members,
             } => {
                 assert_eq!(supergroup_id, 16);
                 assert!(is_forum);
@@ -7673,6 +7914,8 @@ mod tests {
                 assert_eq!(can_restrict_members, None);
                 // Phase D3a: no invite right either.
                 assert_eq!(can_invite_users, None);
+                // Phase D3b: no promote right either.
+                assert_eq!(can_promote_members, None);
             }
             other => panic!("unexpected {other:?}"),
         }
@@ -7692,6 +7935,7 @@ mod tests {
                 status,
                 can_restrict_members,
                 can_invite_users,
+                can_promote_members,
             } => {
                 assert_eq!(supergroup_id, 18);
                 assert!(!is_forum);
@@ -7700,6 +7944,8 @@ mod tests {
                 assert_eq!(can_restrict_members, None);
                 // Phase D3a: no `status` block → no invite right either.
                 assert_eq!(can_invite_users, None);
+                // Phase D3b: no `status` block → no promote right either.
+                assert_eq!(can_promote_members, None);
             }
             other => panic!("unexpected {other:?}"),
         }
@@ -7717,6 +7963,7 @@ mod tests {
                 status,
                 can_restrict_members,
                 can_invite_users,
+                can_promote_members,
             } => {
                 assert_eq!(supergroup_id, 17);
                 assert!(!is_forum);
@@ -7725,6 +7972,7 @@ mod tests {
                 assert_eq!(can_restrict_members, None);
                 // No `status` block → no admin rights for either gate.
                 assert_eq!(can_invite_users, None);
+                assert_eq!(can_promote_members, None);
             }
             other => panic!("unexpected {other:?}"),
         }
@@ -10928,6 +11176,122 @@ mod notification_sound_tests {
                 .lines()
                 .any(|l| l.starts_with("deleteChatInviteLink ")),
             "deleteChatInviteLink must not exist in 1.8.67"
+        );
+    }
+
+    /// Phase D3b: `chatAdministrators` (line 2485) parses owner +
+    /// administrators with custom titles and `can_be_edited` flags.
+    #[test]
+    fn chat_administrators_list_parses() {
+        let json = r#"{"@type":"chatAdministrators","administrators":[{"@type":"chatAdministrator","user_id":777,"custom_title":"","is_owner":true,"can_be_edited":false},{"@type":"chatAdministrator","user_id":888,"custom_title":"News Desk","is_owner":false,"can_be_edited":true},{"@type":"chatAdministrator","user_id":999,"custom_title":"","is_owner":false,"can_be_edited":false}]}"#;
+        let env = parse_envelope(json).unwrap();
+        match env.payload {
+            EnvelopePayload::ChatAdministrators { administrators } => {
+                assert_eq!(administrators.len(), 3);
+                assert!(administrators[0].is_owner);
+                assert_eq!(administrators[0].user_id, 777);
+                assert_eq!(administrators[1].custom_title, "News Desk");
+                assert!(administrators[1].can_be_edited);
+                assert!(!administrators[2].can_be_edited);
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+
+    /// Phase D3b: `chatMembers` (line 2529) parses, with an administrator
+    /// member carrying the full rights block.
+    #[test]
+    fn chat_members_list_parses_with_admin_rights() {
+        let json = r#"{"@type":"chatMembers","total_count":2,"members":[{"@type":"chatMember","member_id":{"@type":"messageSenderUser","user_id":888},"tag":"","inviter_user_id":777,"joined_chat_date":1700000000,"status":{"@type":"chatMemberStatusAdministrator","can_be_edited":true,"rights":{"@type":"chatAdministratorRights","can_manage_chat":true,"can_change_info":true,"can_post_messages":true,"can_edit_messages":true,"can_delete_messages":true,"can_invite_users":true,"can_restrict_members":true,"can_pin_messages":true,"can_manage_topics":false,"can_promote_members":true,"can_manage_video_chats":true,"can_post_stories":true,"can_edit_stories":true,"can_delete_stories":true,"can_manage_direct_messages":false,"can_manage_tags":false,"can_send_welcome_messages":false,"is_anonymous":false}}},{"@type":"chatMember","member_id":{"@type":"messageSenderUser","user_id":111},"tag":"","inviter_user_id":777,"joined_chat_date":1700000100,"status":{"@type":"chatMemberStatusMember","member_until_date":0}}]}"#;
+        let env = parse_envelope(json).unwrap();
+        match env.payload {
+            EnvelopePayload::SupergroupMembers {
+                members,
+                total_count,
+            } => {
+                assert_eq!(total_count, 2);
+                assert_eq!(members.len(), 2);
+                let admin = &members[0];
+                assert_eq!(admin.status, ChannelMemberStatus::Administrator);
+                let rights = admin.admin_rights.expect("admin rights parsed");
+                assert!(rights.can_promote_members);
+                assert!(rights.can_invite_users);
+                assert!(!rights.can_manage_topics);
+                assert!(!rights.is_anonymous);
+                assert_eq!(admin.admin_can_invite_users, Some(true));
+                assert_eq!(members[1].status, ChannelMemberStatus::Member);
+                assert_eq!(members[1].admin_rights, None);
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+
+    /// Phase D3b: `ChatAdminRights::to_json` round-trips through
+    /// `parse_chat_admin_rights`; missing rights block -> `None`.
+    #[test]
+    fn chat_admin_rights_round_trip() {
+        let rights = ChatAdminRights {
+            can_post_messages: true,
+            can_promote_members: true,
+            is_anonymous: true,
+            ..Default::default()
+        };
+        let json = rights.to_json();
+        let parsed = parse_chat_admin_rights(Some(&json)).expect("rights parse");
+        assert_eq!(parsed, rights);
+        // Wrong @type / absent -> None.
+        assert_eq!(
+            parse_chat_admin_rights(Some(&serde_json::json!({"@type":"chatMemberStatusMember"}))),
+            None
+        );
+        assert_eq!(parse_chat_admin_rights(None), None);
+        // A bare administrator status without rights: no rights claim.
+        let json = r#"{"@type":"chatMember","member_id":{"@type":"messageSenderUser","user_id":888},"status":{"@type":"chatMemberStatusAdministrator","can_be_edited":true}}"#;
+        let env = parse_envelope(json).unwrap();
+        match env.payload {
+            EnvelopePayload::ChatMember { member } => {
+                assert_eq!(member.status, ChannelMemberStatus::Administrator);
+                assert_eq!(member.admin_rights, None);
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+
+    /// Phase D3b: every constructor this slice relies on must exist verbatim
+    /// in the pinned schema (1.8.67) — never invent constructors or fields.
+    /// (`setChatAdministratorCustomTitle` is deliberately absent: custom
+    /// titles are read-only in this schema version.)
+    #[test]
+    fn d3b_schema_pins_exist_verbatim() {
+        let schema = include_str!("../../schema/td_api.tl");
+        for line in [
+            "chatAdministrator user_id:int53 custom_title:string is_owner:Bool can_be_edited:Bool = ChatAdministrator;",
+            "chatAdministrators administrators:vector<chatAdministrator> = ChatAdministrators;",
+            "chatAdministratorRights can_manage_chat:Bool can_change_info:Bool can_post_messages:Bool can_edit_messages:Bool can_delete_messages:Bool can_invite_users:Bool can_restrict_members:Bool can_pin_messages:Bool can_manage_topics:Bool can_promote_members:Bool can_manage_video_chats:Bool can_post_stories:Bool can_edit_stories:Bool can_delete_stories:Bool can_manage_direct_messages:Bool can_manage_tags:Bool can_send_welcome_messages:Bool is_anonymous:Bool = ChatAdministratorRights;",
+            "chatMemberStatusCreator is_anonymous:Bool is_member:Bool = ChatMemberStatus;",
+            "chatMemberStatusAdministrator can_be_edited:Bool rights:chatAdministratorRights = ChatMemberStatus;",
+            "chatMemberStatusMember member_until_date:int32 = ChatMemberStatus;",
+            "chatMember member_id:MessageSender tag:string inviter_user_id:int53 joined_chat_date:int32 status:ChatMemberStatus = ChatMember;",
+            "chatMembers total_count:int32 members:vector<chatMember> = ChatMembers;",
+            "supergroupMembersFilterRecent = SupergroupMembersFilter;",
+            "supergroupMembersFilterSearch query:string = SupergroupMembersFilter;",
+            "messageSenderUser user_id:int53 = MessageSender;",
+            "getChatAdministrators chat_id:int53 = ChatAdministrators;",
+            "setChatMemberStatus chat_id:int53 member_id:MessageSender status:ChatMemberStatus = Ok;",
+            "getChatMember chat_id:int53 member_id:MessageSender = ChatMember;",
+            "getSupergroupMembers supergroup_id:int53 filter:SupergroupMembersFilter offset:int32 limit:int32 = ChatMembers;",
+            "updateChatMember chat_id:int53 actor_user_id:int53 date:int32 invite_link:chatInviteLink via_join_request:Bool via_chat_folder_invite_link:Bool old_chat_member:chatMember new_chat_member:chatMember = Update;",
+        ] {
+            assert!(
+                schema.lines().any(|l| l == line),
+                "schema pin missing: {line}"
+            );
+        }
+        assert!(
+            !schema
+                .lines()
+                .any(|l| l.starts_with("setChatAdministratorCustomTitle ")),
+            "setChatAdministratorCustomTitle must not exist in 1.8.67"
         );
     }
 }

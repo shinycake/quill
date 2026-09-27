@@ -15,49 +15,53 @@ use crate::platform::{DatabaseKey, KeyDecision, SecretStore, load_or_create_key}
 use crate::poll::{PollDraft, poll_answer_for_tap};
 use crate::settings::{AccountPaths, default_app_root};
 use crate::state::{
-    ChatSearchJumpNeed, ChatStatisticsFetch, ForwardFlight, InfoPanelTarget, InviteLinkFetch,
-    JoinRequestFetch, RequestPurpose, SearchStatus, Session, ShutdownPhase,
+    AdminListFetch, AdminRightsFetch, ChatSearchJumpNeed, ChatStatisticsFetch, ForwardFlight,
+    InfoPanelTarget, InviteLinkFetch, JoinRequestFetch, MemberStatusChange, RequestPurpose,
+    SearchStatus, Session, ShutdownPhase, SupergroupMembersFetch,
 };
 use crate::telegram::client::{LiveTdJson, OwnedEnvelope, ReceiveBridge};
 use crate::telegram::envelope::{
-    AuthorizationState, CallState, ChatDraft, ChatFolderSpec, ChatKind, ChatNotificationSettings,
-    EnvelopePayload, MUTE_FOREVER, MessageContent, MessageSender, NotificationSettingsScope,
-    ScopeNotificationSettings, StoryContentView,
+    AuthorizationState, CallState, ChatAdminRights, ChatDraft, ChatFolderSpec, ChatKind,
+    ChatNotificationSettings, EnvelopePayload, MUTE_FOREVER, MessageContent, MessageSender,
+    NotificationSettingsScope, ScopeNotificationSettings, StoryContentView,
 };
 use crate::telegram::ffi::{LibraryOrigin, TdJsonError, resolve_tdjson_path};
 use crate::telegram::requests::{
     AnimationSend, GroupCallJoinParams, MessageSenderRef, PollSend, SetTdlibParameters,
     StickerSend, VideoNoteSend, VideoNoteThumbnailSend, VideoSend, VoiceNoteSend, accept_call,
     add_chat_to_list, add_chat_to_list_value, add_contact, add_message_reaction,
-    add_recently_found_chat, check_authentication_code, check_authentication_password,
-    click_chat_sponsored_message, close_chat, close_request,
-    close_secret_chat as close_secret_chat_request, close_story, create_call, create_chat_folder,
-    create_chat_invite_link, create_new_secret_chat, create_video_chat, delete_chat_folder,
-    delete_messages, delete_story, discard_call as discard_call_request,
-    download_file as download_file_request, edit_chat_folder, edit_chat_invite_link,
-    edit_message_caption, edit_message_text, end_group_call, forward_messages,
-    get_authorization_state, get_callback_query_answer, get_chat_active_stories, get_chat_folder,
-    get_chat_history, get_chat_invite_links, get_chat_join_requests, get_chat_lists_to_add_chat,
-    get_chat_member, get_chat_sponsored_messages, get_chat_statistics, get_commands, get_contacts,
-    get_forum_topics, get_group_call, get_installed_sticker_sets, get_me, get_saved_animations,
+    add_recently_found_chat, chat_member_status_administrator_json, chat_member_status_member_json,
+    check_authentication_code, check_authentication_password, click_chat_sponsored_message,
+    close_chat, close_request, close_secret_chat as close_secret_chat_request, close_story,
+    create_call, create_chat_folder, create_chat_invite_link, create_new_secret_chat,
+    create_video_chat, delete_chat_folder, delete_messages, delete_story,
+    discard_call as discard_call_request, download_file as download_file_request, edit_chat_folder,
+    edit_chat_invite_link, edit_message_caption, edit_message_text, end_group_call,
+    forward_messages, get_authorization_state, get_callback_query_answer, get_chat_active_stories,
+    get_chat_administrators, get_chat_folder, get_chat_history, get_chat_invite_links,
+    get_chat_join_requests, get_chat_lists_to_add_chat, get_chat_member,
+    get_chat_sponsored_messages, get_chat_statistics, get_commands, get_contacts, get_forum_topics,
+    get_group_call, get_installed_sticker_sets, get_me, get_saved_animations,
     get_saved_notification_sounds, get_scope_notification_settings, get_secret_chat,
     get_sticker_set, get_story, get_story_available_reactions, get_supergroup,
-    get_supergroup_full_info, get_user_full_info, get_video_chat_invite_link, input_message_photo,
-    input_message_video, join_chat, join_video_chat, leave_chat, leave_group_call,
-    load_active_stories, load_chats, load_chats_list, load_group_call_participants, open_chat,
-    open_message_content, open_story, pin_chat_message, process_chat_join_request,
-    remove_message_reaction, reorder_chat_folders, report_chat_sponsored_message,
-    revoke_chat_invite_link, search_chat_messages, search_chats, search_messages,
-    search_public_chats, search_recently_found_chats, send_animation, send_call_rating,
-    send_chat_action, send_chat_action_kind, send_document, send_message_album, send_photo,
-    send_poll, send_sticker, send_text, send_text_story_reply, send_video, send_video_note,
-    send_voice_note, set_authentication_phone_number, set_chat_draft_message,
-    set_chat_message_auto_delete_time, set_chat_notification_settings, set_chat_slow_mode_delay,
-    set_poll_answer, set_scope_notification_settings, set_story_reaction, set_video_chat_title,
-    toggle_chat_folder_tags, toggle_group_call_is_my_video_enabled,
-    toggle_group_call_is_my_video_paused, toggle_group_call_participant_is_hand_raised,
-    toggle_group_call_participant_is_muted, toggle_video_chat_mute_new_participants,
-    unpin_chat_message, view_messages, view_sponsored_chat,
+    get_supergroup_full_info, get_supergroup_members, get_user_full_info,
+    get_video_chat_invite_link, input_message_photo, input_message_video, join_chat,
+    join_video_chat, leave_chat, leave_group_call, load_active_stories, load_chats,
+    load_chats_list, load_group_call_participants, open_chat, open_message_content, open_story,
+    pin_chat_message, process_chat_join_request, remove_message_reaction, reorder_chat_folders,
+    report_chat_sponsored_message, revoke_chat_invite_link, search_chat_messages, search_chats,
+    search_messages, search_public_chats, search_recently_found_chats, send_animation,
+    send_call_rating, send_chat_action, send_chat_action_kind, send_document, send_message_album,
+    send_photo, send_poll, send_sticker, send_text, send_text_story_reply, send_video,
+    send_video_note, send_voice_note, set_authentication_phone_number, set_chat_draft_message,
+    set_chat_member_status, set_chat_message_auto_delete_time, set_chat_notification_settings,
+    set_chat_slow_mode_delay, set_poll_answer, set_scope_notification_settings, set_story_reaction,
+    set_video_chat_title, supergroup_members_filter_recent_json,
+    supergroup_members_filter_search_json, toggle_chat_folder_tags,
+    toggle_group_call_is_my_video_enabled, toggle_group_call_is_my_video_paused,
+    toggle_group_call_participant_is_hand_raised, toggle_group_call_participant_is_muted,
+    toggle_video_chat_mute_new_participants, unpin_chat_message, view_messages,
+    view_sponsored_chat,
 };
 use crate::voice::VoiceDraft;
 use std::path::Path;
@@ -2804,6 +2808,260 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(err);
         }
         Ok(Some(extra))
+    }
+
+    /// Phase D3b: `getChatAdministrators` (TDLib 1.8.67,
+    /// `schema/td_api.tl:13632`). Only the owner or admins with
+    /// `can_promote_members` may call it (TDLib errors otherwise).
+    /// Idempotent: a cached `Loaded` result is kept until an explicit
+    /// refresh or a membership change clears it, and no second request
+    /// goes out while one is in flight. Returns `Ok(None)` when nothing
+    /// was sent.
+    pub fn fetch_chat_administrators(
+        &mut self,
+        chat_id: ChatId,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if !self.session.chat_can_manage_admins(chat_id) {
+            return Ok(None);
+        }
+        if matches!(
+            self.session.admin_lists.get(&chat_id.0),
+            Some(AdminListFetch::Loading | AdminListFetch::Loaded(_))
+        ) || self
+            .session
+            .requests
+            .has_purpose_for_chat(RequestPurpose::GetChatAdministrators, chat_id)
+        {
+            return Ok(None);
+        }
+        self.session
+            .admin_lists
+            .insert(chat_id.0, AdminListFetch::Loading);
+        let extra = self
+            .session
+            .request(RequestPurpose::GetChatAdministrators, Some(chat_id));
+        if let Err(err) = self
+            .sender
+            .send_json(&get_chat_administrators(extra, chat_id.0))
+        {
+            self.session.requests.take(extra);
+            self.session.admin_lists.remove(&chat_id.0);
+            return Err(err);
+        }
+        Ok(Some(extra))
+    }
+
+    /// Phase D3b: explicit refresh of `getChatAdministrators` — clears the
+    /// cached result and re-sends (the plain fetch keeps `Loaded`).
+    pub fn refresh_chat_administrators(
+        &mut self,
+        chat_id: ChatId,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        self.session.admin_lists.remove(&chat_id.0);
+        self.fetch_chat_administrators(chat_id)
+    }
+
+    /// Phase D3b: shared `setChatMemberStatus` sender (TDLib 1.8.67,
+    /// `schema/td_api.tl:13592`). Gated on `can_promote_members` and
+    /// deduped per (chat, user, kind). The `ok` response invalidates the
+    /// cached admin list; the member change itself arrives as
+    /// `updateChatMember`.
+    fn send_set_chat_member_status(
+        &mut self,
+        chat_id: ChatId,
+        user_id: i64,
+        kind: MemberStatusChange,
+        status: &serde_json::Value,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if !self.session.chat_can_manage_admins(chat_id) {
+            return Ok(None);
+        }
+        let purpose = RequestPurpose::SetChatMemberStatus { user_id, kind };
+        if self.session.requests.has_purpose_for_chat(purpose, chat_id) {
+            return Ok(None);
+        }
+        let extra = self.session.request(purpose, Some(chat_id));
+        let member_id = MessageSenderRef::User(user_id).to_value();
+        if let Err(err) = self.sender.send_json(&set_chat_member_status(
+            extra, chat_id.0, &member_id, status,
+        )) {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(Some(extra))
+    }
+
+    /// Phase D3b: promote a member to administrator with the given rights
+    /// (`chatMemberStatusAdministrator`, schema 1.8.67, line 2500).
+    pub fn promote_chat_member(
+        &mut self,
+        chat_id: ChatId,
+        user_id: i64,
+        rights: &ChatAdminRights,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        let status = chat_member_status_administrator_json(true, rights);
+        self.send_set_chat_member_status(chat_id, user_id, MemberStatusChange::Promote, &status)
+    }
+
+    /// Phase D3b: edit an administrator's rights (same
+    /// `chatMemberStatusAdministrator` shape as promote).
+    pub fn edit_admin_rights(
+        &mut self,
+        chat_id: ChatId,
+        user_id: i64,
+        rights: &ChatAdminRights,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        let status = chat_member_status_administrator_json(true, rights);
+        self.send_set_chat_member_status(chat_id, user_id, MemberStatusChange::EditRights, &status)
+    }
+
+    /// Phase D3b: demote an administrator to a plain member
+    /// (`chatMemberStatusMember`, schema 1.8.67, line 2504).
+    pub fn demote_chat_member(
+        &mut self,
+        chat_id: ChatId,
+        user_id: i64,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        // Phase D3b: the owner can never be demoted — the UI hides the
+        // action, but enforce it at the driver level too so no future
+        // caller can bypass it. Unknown/unloaded list → allow and let
+        // TDLib reject as the backstop.
+        let is_owner = matches!(
+            self.session.admin_lists.get(&chat_id.0),
+            Some(AdminListFetch::Loaded(list))
+                if list.iter().any(|e| e.user_id == user_id && e.is_owner)
+        );
+        if is_owner {
+            return Ok(None);
+        }
+        let status = chat_member_status_member_json();
+        self.send_set_chat_member_status(chat_id, user_id, MemberStatusChange::Demote, &status)
+    }
+
+    /// Phase D3b: `getChatMember` for one administrator's current rights
+    /// (schema 1.8.67, line 13622), backing the edit-rights dialog.
+    /// Deduped per (chat, user); the answer lands in
+    /// `Session::admin_rights`.
+    pub fn fetch_admin_rights(
+        &mut self,
+        chat_id: ChatId,
+        user_id: i64,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if !self.session.chat_can_manage_admins(chat_id) {
+            return Ok(None);
+        }
+        if matches!(
+            self.session.admin_rights.get(&(chat_id.0, user_id)),
+            Some(AdminRightsFetch::Loading | AdminRightsFetch::Loaded(_))
+        ) {
+            return Ok(None);
+        }
+        let purpose = RequestPurpose::GetAdminRights { user_id };
+        if self.session.requests.has_purpose_for_chat(purpose, chat_id) {
+            return Ok(None);
+        }
+        self.session
+            .admin_rights
+            .insert((chat_id.0, user_id), AdminRightsFetch::Loading);
+        let extra = self.session.request(purpose, Some(chat_id));
+        if let Err(err) = self
+            .sender
+            .send_json(&get_chat_member(extra, chat_id, user_id))
+        {
+            self.session.requests.take(extra);
+            self.session.admin_rights.remove(&(chat_id.0, user_id));
+            return Err(err);
+        }
+        Ok(Some(extra))
+    }
+
+    /// Phase D3b: explicit refresh of one administrator's rights — clears
+    /// the cached result and re-sends (the plain fetch keeps `Loaded`).
+    pub fn refresh_admin_rights(
+        &mut self,
+        chat_id: ChatId,
+        user_id: i64,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        self.session.admin_rights.remove(&(chat_id.0, user_id));
+        self.fetch_admin_rights(chat_id, user_id)
+    }
+
+    /// Phase D3b: `getSupergroupMembers` (TDLib 1.8.67,
+    /// `schema/td_api.tl:15238`) for the promote member picker — recent
+    /// members when `query` is empty, a search filter otherwise (schema
+    /// lines 2559/2568). Only supergroup chats (incl. channels) have
+    /// members to pick. Deduped like the other D3b fetches.
+    pub fn fetch_supergroup_members(
+        &mut self,
+        chat_id: ChatId,
+        query: &str,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if !self.session.chat_can_manage_admins(chat_id) {
+            return Ok(None);
+        }
+        let supergroup_id = match self.session.chats.get(&chat_id.0) {
+            Some(chat) => match chat.kind {
+                ChatKind::Supergroup { supergroup_id, .. } => supergroup_id,
+                _ => return Ok(None),
+            },
+            None => return Ok(None),
+        };
+        if matches!(
+            self.session.supergroup_members.get(&chat_id.0),
+            Some(SupergroupMembersFetch::Loading | SupergroupMembersFetch::Loaded { .. })
+        ) || self
+            .session
+            .requests
+            .has_purpose_for_chat(RequestPurpose::GetSupergroupMembers, chat_id)
+        {
+            return Ok(None);
+        }
+        self.session
+            .supergroup_members
+            .insert(chat_id.0, SupergroupMembersFetch::Loading);
+        let extra = self
+            .session
+            .request(RequestPurpose::GetSupergroupMembers, Some(chat_id));
+        let filter = if query.is_empty() {
+            supergroup_members_filter_recent_json()
+        } else {
+            supergroup_members_filter_search_json(query)
+        };
+        if let Err(err) = self.sender.send_json(&get_supergroup_members(
+            extra,
+            supergroup_id,
+            &filter,
+            0,
+            200,
+        )) {
+            self.session.requests.take(extra);
+            self.session.supergroup_members.remove(&chat_id.0);
+            return Err(err);
+        }
+        Ok(Some(extra))
+    }
+
+    /// Phase D3b: explicit refresh of the member picker — clears the
+    /// cached page and re-sends.
+    pub fn refresh_supergroup_members(
+        &mut self,
+        chat_id: ChatId,
+        query: &str,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        self.session.supergroup_members.remove(&chat_id.0);
+        self.fetch_supergroup_members(chat_id, query)
     }
 
     /// Phase A1: forced `getSupergroupFullInfo` refresh for the slow-mode

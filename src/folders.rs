@@ -218,6 +218,7 @@ mod tests {
             my_member_status: None,
             my_admin_can_post_messages: None,
             my_admin_can_invite_users: None,
+            my_admin_can_promote_members: None,
             is_forum: None,
             photo_file_id: None,
             can_send_basic_messages: true,

@@ -563,6 +563,110 @@ pub fn process_chat_join_request(
     .to_string()
 }
 
+/// Phase D3b: `getChatAdministrators` (TDLib 1.8.67, `schema/td_api.tl:13632`):
+/// `getChatAdministrators chat_id:int53 = ChatAdministrators;`
+/// Returns the chat's administrator list (owner first); the response
+/// carries no chat id, so it is correlated via `PendingRequest::chat_id`.
+pub fn get_chat_administrators(extra: RequestId, chat_id: i64) -> String {
+    json!({
+        "@type": "getChatAdministrators",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id,
+    })
+    .to_string()
+}
+
+/// Phase D3b: `setChatMemberStatus` (TDLib 1.8.67,
+/// `schema/td_api.tl:13592`):
+/// `setChatMemberStatus chat_id:int53 member_id:MessageSender
+/// status:ChatMemberStatus = Ok;`
+/// Promotes, edits, or demotes a member depending on `status`
+/// (`chatMemberStatusAdministrator` / `chatMemberStatusMember`). The
+/// member change itself arrives later as `updateChatMember`.
+pub fn set_chat_member_status(
+    extra: RequestId,
+    chat_id: i64,
+    member_id: &Value,
+    status: &Value,
+) -> String {
+    json!({
+        "@type": "setChatMemberStatus",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id,
+        "member_id": member_id,
+        "status": status,
+    })
+    .to_string()
+}
+
+/// Phase D3b: `chatMemberStatusAdministrator` JSON (TDLib 1.8.67,
+/// `schema/td_api.tl:2500`):
+/// `chatMemberStatusAdministrator can_be_edited:Bool
+/// rights:chatAdministratorRights = ChatMemberStatus;`
+/// Used for both promote and edit-rights `setChatMemberStatus` calls.
+pub fn chat_member_status_administrator_json(
+    can_be_edited: bool,
+    rights: &crate::telegram::envelope::ChatAdminRights,
+) -> Value {
+    json!({
+        "@type": "chatMemberStatusAdministrator",
+        "can_be_edited": can_be_edited,
+        "rights": rights.to_json(),
+    })
+}
+
+/// Phase D3b: `chatMemberStatusMember` JSON (TDLib 1.8.67,
+/// `schema/td_api.tl:2504`):
+/// `chatMemberStatusMember member_until_date:int32 = ChatMemberStatus;`
+/// Demoting an admin is a `setChatMemberStatus` to plain member status.
+pub fn chat_member_status_member_json() -> Value {
+    json!({
+        "@type": "chatMemberStatusMember",
+        "member_until_date": 0,
+    })
+}
+
+/// Phase D3b: `getSupergroupMembers` (TDLib 1.8.67,
+/// `schema/td_api.tl:15238`):
+/// `getSupergroupMembers supergroup_id:int53 filter:SupergroupMembersFilter
+/// offset:int32 limit:int32 = ChatMembers;`
+/// Drives the promote flow's member picker (recent members or a search
+/// filter). The response carries no supergroup id, so it is correlated
+/// via `PendingRequest::chat_id`.
+pub fn get_supergroup_members(
+    extra: RequestId,
+    supergroup_id: i64,
+    filter: &Value,
+    offset: i32,
+    limit: i32,
+) -> String {
+    json!({
+        "@type": "getSupergroupMembers",
+        "@extra": extra.as_extra(),
+        "supergroup_id": supergroup_id,
+        "filter": filter,
+        "offset": offset,
+        "limit": limit,
+    })
+    .to_string()
+}
+
+/// Phase D3b: `supergroupMembersFilterRecent` (TDLib 1.8.67,
+/// `schema/td_api.tl:2559`) — the member picker's default filter.
+pub fn supergroup_members_filter_recent_json() -> Value {
+    json!({ "@type": "supergroupMembersFilterRecent" })
+}
+
+/// Phase D3b: `supergroupMembersFilterSearch` (TDLib 1.8.67,
+/// `schema/td_api.tl:2568`):
+/// `supergroupMembersFilterSearch query:string = SupergroupMembersFilter;`
+pub fn supergroup_members_filter_search_json(query: &str) -> Value {
+    json!({
+        "@type": "supergroupMembersFilterSearch",
+        "query": query,
+    })
+}
+
 /// Phase B1: `createNewSecretChat` (TDLib 1.8.67, `schema/td_api.tl:13340`):
 /// `createNewSecretChat user_id:int53 = Chat;`
 /// "Creates a new secret chat. Returns the newly created chat". The new
@@ -2649,6 +2753,105 @@ mod tests {
         assert_eq!(v["reply_to"]["poll_option_id"], "");
         assert!(!json.contains("inputMessageReplyToExternalMessage"));
         assert!(!json.contains("CANARY"));
+    }
+
+    #[test]
+    fn get_chat_administrators_shape_matches_1_8_67() {
+        // Phase D3b: `getChatAdministrators chat_id:int53 = ChatAdministrators;`
+        // (schema 1.8.67, line 13632).
+        let json = get_chat_administrators(RequestId(71), 13);
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "getChatAdministrators");
+        assert_eq!(v["@extra"], "71");
+        assert_eq!(v["chat_id"], 13);
+        let schema = include_str!("../../schema/td_api.tl");
+        let line = schema
+            .lines()
+            .find(|l| l.starts_with("getChatAdministrators "))
+            .expect("getChatAdministrators in schema");
+        assert_eq!(
+            line,
+            "getChatAdministrators chat_id:int53 = ChatAdministrators;"
+        );
+    }
+
+    #[test]
+    fn set_chat_member_status_promote_shape_matches_1_8_67() {
+        // Phase D3b: promote shape — `setChatMemberStatus` (schema 1.8.67,
+        // line 13592) with `messageSenderUser` (line 2831) and
+        // `chatMemberStatusAdministrator` (line 2500) carrying all 18
+        // `chatAdministratorRights` fields (line 1092).
+        let member_id = MessageSenderRef::User(888).to_value();
+        let rights = crate::telegram::envelope::ChatAdminRights {
+            can_manage_chat: true,
+            can_promote_members: true,
+            ..Default::default()
+        };
+        let status = chat_member_status_administrator_json(true, &rights);
+        let json = set_chat_member_status(RequestId(72), 13, &member_id, &status);
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "setChatMemberStatus");
+        assert_eq!(v["@extra"], "72");
+        assert_eq!(v["chat_id"], 13);
+        assert_eq!(v["member_id"]["@type"], "messageSenderUser");
+        assert_eq!(v["member_id"]["user_id"], 888);
+        assert_eq!(v["status"]["@type"], "chatMemberStatusAdministrator");
+        assert_eq!(v["status"]["can_be_edited"], true);
+        let schema = include_str!("../../schema/td_api.tl");
+        let rights_line = schema
+            .lines()
+            .find(|l| l.starts_with("chatAdministratorRights "))
+            .expect("chatAdministratorRights in schema");
+        // Every schema field of chatAdministratorRights must be present.
+        for field in rights_line
+            .split_whitespace()
+            .skip(1)
+            .take_while(|token| !token.starts_with('='))
+        {
+            let name = field.split(':').next().unwrap();
+            assert!(
+                v["status"]["rights"][name].is_boolean(),
+                "missing rights field {name}"
+            );
+        }
+        assert_eq!(v["status"]["rights"]["@type"], "chatAdministratorRights");
+        assert_eq!(v["status"]["rights"]["can_manage_chat"], true);
+        assert_eq!(v["status"]["rights"]["can_promote_members"], true);
+        assert_eq!(v["status"]["rights"]["can_delete_messages"], false);
+    }
+
+    #[test]
+    fn set_chat_member_status_demote_shape_matches_1_8_67() {
+        // Phase D3b: demote shape — `setChatMemberStatus` to
+        // `chatMemberStatusMember` (schema 1.8.67, line 2504).
+        let member_id = MessageSenderRef::User(888).to_value();
+        let status = chat_member_status_member_json();
+        let json = set_chat_member_status(RequestId(73), 13, &member_id, &status);
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "setChatMemberStatus");
+        assert_eq!(v["status"]["@type"], "chatMemberStatusMember");
+        assert_eq!(v["status"]["member_until_date"], 0);
+    }
+
+    #[test]
+    fn get_supergroup_members_shape_matches_1_8_67() {
+        // Phase D3b: `getSupergroupMembers supergroup_id:int53
+        // filter:SupergroupMembersFilter offset:int32 limit:int32 =
+        // ChatMembers;` (schema 1.8.67, line 15238) with
+        // `supergroupMembersFilterSearch` (line 2568).
+        let filter = supergroup_members_filter_search_json("ada");
+        let json = get_supergroup_members(RequestId(74), 25, &filter, 0, 200);
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "getSupergroupMembers");
+        assert_eq!(v["@extra"], "74");
+        assert_eq!(v["supergroup_id"], 25);
+        assert_eq!(v["filter"]["@type"], "supergroupMembersFilterSearch");
+        assert_eq!(v["filter"]["query"], "ada");
+        assert_eq!(v["offset"], 0);
+        assert_eq!(v["limit"], 200);
+
+        let recent = supergroup_members_filter_recent_json();
+        assert_eq!(recent["@type"], "supergroupMembersFilterRecent");
     }
 
     #[test]

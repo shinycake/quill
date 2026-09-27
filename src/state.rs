@@ -9,13 +9,13 @@ use crate::telegram::client::OwnedEnvelope;
 use crate::telegram::envelope::CallState;
 use crate::telegram::envelope::{
     AnimationItem, AuthorizationState, BotCommand, BotInfo, CallbackQueryAnswer,
-    ChannelMemberStatus, ChatAction, ChatActiveStoriesView, ChatDraft, ChatFolderInfo,
-    ChatFolderSpec, ChatJoinResult, ChatKind, ChatList, ChatNotificationSettings,
-    ChatPositionUpdate, ChatStatistics, ConnectionState, EnvelopePayload, ErrorClass, ForumTopic,
-    InlineKeyboard, MessageAutoDelete, MessageContent, MessageForwardInfo, MessageInteractionInfo,
-    MessageOrigin, MessageReaction, MessageReplyTo, MessageSelfDestruct, MessageSender,
-    NotificationSettingsScope, NotificationSound, ParsedCall, ParsedChatInviteLink,
-    ParsedChatJoinRequest, ParsedChatMember, ParsedFile, ParsedGroupCall,
+    ChannelMemberStatus, ChatAction, ChatActiveStoriesView, ChatAdminRights,
+    ChatAdministratorEntry, ChatDraft, ChatFolderInfo, ChatFolderSpec, ChatJoinResult, ChatKind,
+    ChatList, ChatNotificationSettings, ChatPositionUpdate, ChatStatistics, ConnectionState,
+    EnvelopePayload, ErrorClass, ForumTopic, InlineKeyboard, MessageAutoDelete, MessageContent,
+    MessageForwardInfo, MessageInteractionInfo, MessageOrigin, MessageReaction, MessageReplyTo,
+    MessageSelfDestruct, MessageSender, NotificationSettingsScope, NotificationSound, ParsedCall,
+    ParsedChatInviteLink, ParsedChatJoinRequest, ParsedChatMember, ParsedFile, ParsedGroupCall,
     ParsedGroupCallParticipant, ParsedMessage, ParsedSecretChat, ParsedStory, ParsedUser,
     ParsedVideoChat, Poll, ReportOption, ReportSponsoredResult, ScopeNotificationSettings,
     SecretChatState, SponsoredMessage, StickerFormat, StickerItem, StickerSetInfo,
@@ -24,6 +24,19 @@ use crate::telegram::envelope::{
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Instant;
+
+/// Phase D3b: which admin-management operation a `setChatMemberStatus`
+/// request performs. Correlated on the `SetChatMemberStatus` purpose so
+/// the response handler knows how to refresh the admin list.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MemberStatusChange {
+    /// Member → administrator with a fresh rights block.
+    Promote,
+    /// Administrator → administrator with an edited rights block.
+    EditRights,
+    /// Administrator → plain member (`chatMemberStatusMember`).
+    Demote,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RequestPurpose {
@@ -182,6 +195,25 @@ pub enum RequestPurpose {
     ProcessChatJoinRequest {
         user_id: i64,
     },
+    /// Phase D3b: `getChatAdministrators`. Response is
+    /// `chatAdministrators`; correlated via `PendingRequest::chat_id`.
+    GetChatAdministrators,
+    /// Phase D3b: `setChatMemberStatus`. Response is `ok`; the member
+    /// change itself arrives as `updateChatMember`. `user_id` + `kind`
+    /// identify which admin-management operation was confirmed.
+    SetChatMemberStatus {
+        user_id: i64,
+        kind: MemberStatusChange,
+    },
+    /// Phase D3b: `getChatMember` for one administrator's rights (edit
+    /// dialog). Response is `chatMember`; `user_id` identifies the admin,
+    /// correlated to the chat via `PendingRequest::chat_id`.
+    GetAdminRights {
+        user_id: i64,
+    },
+    /// Phase D3b: `getSupergroupMembers` for the promote member picker.
+    /// Response is `chatMembers`; correlated via `PendingRequest::chat_id`.
+    GetSupergroupMembers,
     /// Phase A1: `setChatSlowModeDelay`. Response is `ok`; the new delay
     /// arrives via `updateSupergroupFullInfo`.
     SetChatSlowModeDelay,
@@ -891,6 +923,13 @@ pub struct ChatSummary {
     /// every other status or an absent rights block. Gates the invite-link
     /// / join-request management UI.
     pub my_admin_can_invite_users: Option<bool>,
+    /// Phase D3b: `rights.can_promote_members` from
+    /// `chatMemberStatusAdministrator` (TDLib 1.8.67,
+    /// `chatAdministratorRights`, schema line 1092). `Some` only when the
+    /// status is Administrator and the rights block parsed; `None` for
+    /// every other status or an absent rights block. Gates admin
+    /// management (promote / demote / edit rights).
+    pub my_admin_can_promote_members: Option<bool>,
     /// Phase 5.1: `supergroup.is_forum` (TDLib 1.8.67). `None` until
     /// `updateSupergroup` / the `getSupergroup` response resolves it; only
     /// meaningful for non-channel supergroups.
@@ -1011,6 +1050,27 @@ impl ChatSummary {
         self.my_admin_can_invite_users = can_invite_users;
     }
 
+    /// Phase D3b: whether the current user may manage this chat's
+    /// administrators (view the admin list, promote/demote members, edit
+    /// admin rights). The creator always can; an administrator needs the
+    /// explicit `can_promote_members` right. An absent rights block keeps
+    /// the gate closed rather than fabricating a right.
+    pub fn can_manage_admins(&self) -> bool {
+        match self.my_member_status {
+            Some(ChannelMemberStatus::Creator) => true,
+            Some(ChannelMemberStatus::Administrator) => {
+                self.my_admin_can_promote_members.unwrap_or(false)
+            }
+            _ => false,
+        }
+    }
+
+    /// Phase D3b: record `rights.can_promote_members` (`None` for
+    /// non-admin statuses or an absent rights block).
+    pub fn set_admin_can_promote_members(&mut self, can_promote_members: Option<bool>) {
+        self.my_admin_can_promote_members = can_promote_members;
+    }
+
     pub fn is_forum_chat(&self) -> bool {
         self.is_forum == Some(true)
     }
@@ -1128,6 +1188,7 @@ fn placeholder_chat(chat_id: ChatId) -> ChatSummary {
         my_member_status: None,
         my_admin_can_post_messages: None,
         my_admin_can_invite_users: None,
+        my_admin_can_promote_members: None,
         is_forum: None,
         photo_file_id: None,
         // Parity slice 4: lenient default true — the real `chat` object
@@ -2296,6 +2357,20 @@ pub struct Session {
     /// 1092). Invite-link management requires this right (or creator
     /// status). Absent = unknown, treated as lacking the right.
     pub supergroup_invite_right: HashMap<i64, bool>,
+    /// Phase D3b: `getChatAdministrators` fetch state, keyed by chat id.
+    pub admin_lists: HashMap<i64, AdminListFetch>,
+    /// Phase D3b: `getSupergroupMembers` fetch state for the promote
+    /// member picker, keyed by chat id.
+    pub supergroup_members: HashMap<i64, SupergroupMembersFetch>,
+    /// Phase D3b: one administrator's parsed `chatAdministratorRights`
+    /// fetch state, keyed by (chat_id, user_id). Filled by `getChatMember`
+    /// (purpose `GetAdminRights`); drives the edit-rights dialog.
+    pub admin_rights: HashMap<(i64, i64), AdminRightsFetch>,
+    /// Phase D3b: the viewer's `rights.can_promote_members` per supergroup
+    /// from own `chatMemberStatusAdministrator` (schema 1.8.67, line
+    /// 1092). Admin management requires this right (or creator status).
+    /// Absent = unknown, treated as lacking the right.
+    pub supergroup_promote_right: HashMap<i64, bool>,
     /// Phase 6: the open user / supergroup info panel, if any.
     pub open_info_panel: Option<InfoPanelTarget>,
     /// Phase 9.1: active stories per chat from `updateChatActiveStories` /
@@ -2438,6 +2513,40 @@ pub struct JoinRequestList {
     pub requests: Vec<ParsedChatJoinRequest>,
 }
 
+/// Phase D3b: fetch state for one administrator's `getChatMember` rights
+/// lookup (schema 1.8.67, line 13622), keyed by (chat_id, user_id).
+/// Drives the edit-rights dialog's loading / error states.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AdminRightsFetch {
+    Loading,
+    Loaded(ChatAdminRights),
+    Failed(String),
+}
+
+/// Phase D3b: fetch state for one chat's `getChatAdministrators` result
+/// (schema 1.8.67, line 13632). Keyed by chat id. `Loading` is the
+/// in-flight guard — the driver never sends a second request while one
+/// is outstanding.
+#[derive(Debug, Clone, PartialEq)]
+pub enum AdminListFetch {
+    Loading,
+    Loaded(Vec<ChatAdministratorEntry>),
+    Failed(String),
+}
+
+/// Phase D3b: fetch state for one chat's `getSupergroupMembers` result
+/// (schema 1.8.67, line 15238) backing the promote member picker. Same
+/// Loading-guard convention.
+#[derive(Debug, Clone, PartialEq)]
+pub enum SupergroupMembersFetch {
+    Loading,
+    Loaded {
+        members: Vec<ParsedChatMember>,
+        total_count: i32,
+    },
+    Failed(String),
+}
+
 /// Phase A1: wall-clock milliseconds. Used to timestamp
 /// `supergroupFullInfo` arrivals so the slow-mode expiry decays locally.
 pub fn unix_ms_now() -> u64 {
@@ -2540,6 +2649,10 @@ impl Session {
             supergroup_member_status: HashMap::new(),
             supergroup_restrict_right: HashMap::new(),
             supergroup_invite_right: HashMap::new(),
+            admin_lists: HashMap::new(),
+            supergroup_members: HashMap::new(),
+            admin_rights: HashMap::new(),
+            supergroup_promote_right: HashMap::new(),
             open_info_panel: None,
             story_tray: HashMap::new(),
             stories: HashMap::new(),
@@ -2684,6 +2797,18 @@ impl Session {
             .unwrap_or(false)
     }
 
+    /// Phase D3b: whether the viewer's own administrator rights in a
+    /// supergroup include `can_promote_members` (schema 1.8.67, line
+    /// 1092), which admin management requires. Creators hold all rights
+    /// implicitly — check `supergroup_own_status` for that. Absent =
+    /// unknown, treated as lacking the right.
+    pub fn supergroup_can_promote_members(&self, supergroup_id: i64) -> bool {
+        self.supergroup_promote_right
+            .get(&supergroup_id)
+            .copied()
+            .unwrap_or(false)
+    }
+
     /// Phase D3a: invite-link / join-request gate for a chat. The
     /// `ChatSummary` path covers channels (own membership probed via
     /// `getChatMember`); non-channel supergroups carry own admin rights
@@ -2702,6 +2827,26 @@ impl Session {
             } => {
                 self.supergroup_own_status(supergroup_id) == Some(ChannelMemberStatus::Creator)
                     || self.supergroup_can_invite_users(supergroup_id)
+            }
+            _ => false,
+        }
+    }
+
+    /// Phase D3b: admin-management gate for a chat. The `ChatSummary`
+    /// path covers channels (own membership probed via `getChatMember`);
+    /// non-channel supergroups carry own admin rights on the
+    /// `updateSupergroup` / `getSupergroup` status block instead.
+    pub fn chat_can_manage_admins(&self, chat_id: ChatId) -> bool {
+        let Some(chat) = self.chats.get(&chat_id.0) else {
+            return false;
+        };
+        if chat.can_manage_admins() {
+            return true;
+        }
+        match chat.kind {
+            ChatKind::Supergroup { supergroup_id, .. } => {
+                self.supergroup_own_status(supergroup_id) == Some(ChannelMemberStatus::Creator)
+                    || self.supergroup_can_promote_members(supergroup_id)
             }
             _ => false,
         }
@@ -3164,6 +3309,36 @@ impl Session {
                             total_count,
                             requests,
                         }),
+                    );
+                }
+            }
+            // Phase D3b: `getChatAdministrators` answer — replaces the
+            // cached admin list.
+            EnvelopePayload::ChatAdministrators { administrators } => {
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetChatAdministrators)
+                    && let Some(pending) = pending
+                    && let Some(chat_id) = pending.chat_id
+                {
+                    self.admin_lists
+                        .insert(chat_id.0, AdminListFetch::Loaded(administrators));
+                }
+            }
+            // Phase D3b: `getSupergroupMembers` answer — replaces the
+            // cached member-picker page.
+            EnvelopePayload::SupergroupMembers {
+                members,
+                total_count,
+            } => {
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetSupergroupMembers)
+                    && let Some(pending) = pending
+                    && let Some(chat_id) = pending.chat_id
+                {
+                    self.supergroup_members.insert(
+                        chat_id.0,
+                        SupergroupMembersFetch::Loaded {
+                            members,
+                            total_count,
+                        },
                     );
                 }
             }
@@ -3753,6 +3928,7 @@ impl Session {
                 status,
                 can_restrict_members,
                 can_invite_users,
+                can_promote_members,
             } => {
                 self.set_supergroup_forum(supergroup_id, is_forum);
                 self.set_supergroup_username(supergroup_id, username);
@@ -3766,6 +3942,10 @@ impl Session {
                 // join-request management; absent = unknown → lacking.
                 self.supergroup_invite_right
                     .insert(supergroup_id, can_invite_users.unwrap_or(false));
+                // Phase D3b: `can_promote_members` gates admin
+                // management; absent = unknown → lacking.
+                self.supergroup_promote_right
+                    .insert(supergroup_id, can_promote_members.unwrap_or(false));
             }
             EnvelopePayload::Supergroup {
                 supergroup_id,
@@ -3774,6 +3954,7 @@ impl Session {
                 status,
                 can_restrict_members,
                 can_invite_users,
+                can_promote_members,
             } => {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetSupergroup) {
                     self.set_supergroup_forum(supergroup_id, is_forum);
@@ -3786,6 +3967,9 @@ impl Session {
                     // join-request management.
                     self.supergroup_invite_right
                         .insert(supergroup_id, can_invite_users.unwrap_or(false));
+                    // Phase D3b: `can_promote_members` gates admin management.
+                    self.supergroup_promote_right
+                        .insert(supergroup_id, can_promote_members.unwrap_or(false));
                 }
             }
             // Phase 5.1: `getForumTopics` response — cache the first page
@@ -3927,6 +4111,17 @@ impl Session {
                 {
                     self.accept_own_chat_member(chat_id, member);
                 }
+                // Phase D3b: `getChatMember` for one administrator's rights
+                // (edit dialog). Only an administrator status carries a
+                // rights block worth caching.
+                if let Some(RequestPurpose::GetAdminRights { user_id }) = pending.map(|p| p.purpose)
+                    && let Some(pending) = pending
+                    && let Some(chat_id) = pending.chat_id
+                    && let Some(rights) = member.admin_rights
+                {
+                    self.admin_rights
+                        .insert((chat_id.0, user_id), AdminRightsFetch::Loaded(rights));
+                }
             }
             EnvelopePayload::UserFullInfo {
                 bot_info,
@@ -3994,6 +4189,17 @@ impl Session {
                 }
             }
             EnvelopePayload::UpdateChatMember { chat_id, member } => {
+                // Phase D3b: any membership change may alter the admin
+                // list — drop the cached list so the info panel refetches
+                // instead of showing stale data. `accept_own_chat_member`
+                // also refreshes the viewer's own rights below.
+                self.admin_lists.remove(&chat_id.0);
+                // Phase D3b: per-admin rights for the changed member are
+                // stale too (e.g. after an edit-rights save) — drop them
+                // so the editor refetches instead of showing old rights.
+                if let MessageSender::User { user_id } = member.member_id {
+                    self.admin_rights.remove(&(chat_id.0, user_id));
+                }
                 self.accept_own_chat_member(chat_id, member);
             }
             EnvelopePayload::JoinChatResult(result) => {
@@ -4107,6 +4313,17 @@ impl Session {
                     && let Some(chat_id) = pending.and_then(|p| p.chat_id)
                 {
                     self.commit_viewed(chat_id);
+                }
+                // Phase D3b: `setChatMemberStatus` confirmed — the member
+                // change itself arrives as `updateChatMember`. Invalidate
+                // the cached admin list so the panel refetches instead of
+                // showing stale data.
+                if matches!(
+                    pending.map(|p| p.purpose),
+                    Some(RequestPurpose::SetChatMemberStatus { .. })
+                ) && let Some(chat_id) = pending.and_then(|p| p.chat_id)
+                {
+                    self.admin_lists.remove(&chat_id.0);
                 }
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::LeaveChat)
                     && let Some(chat_id) = pending.and_then(|p| p.chat_id)
@@ -4288,6 +4505,53 @@ impl Session {
                                 JoinRequestFetch::Failed(call_request_error_line(
                                     &err,
                                     "Could not process join request",
+                                )),
+                            );
+                        }
+                    }
+                    // Phase D3b: failed admin-management requests land in
+                    // the fetch state so the panel shows an honest error
+                    // instead of spinning forever.
+                    Some(RequestPurpose::GetChatAdministrators) => {
+                        if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
+                            self.admin_lists.insert(
+                                chat_id.0,
+                                AdminListFetch::Failed(call_request_error_line(
+                                    &err,
+                                    "Could not load administrators",
+                                )),
+                            );
+                        }
+                    }
+                    Some(RequestPurpose::SetChatMemberStatus { .. }) => {
+                        if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
+                            self.admin_lists.insert(
+                                chat_id.0,
+                                AdminListFetch::Failed(call_request_error_line(
+                                    &err,
+                                    "Could not update member status",
+                                )),
+                            );
+                        }
+                    }
+                    Some(RequestPurpose::GetSupergroupMembers) => {
+                        if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
+                            self.supergroup_members.insert(
+                                chat_id.0,
+                                SupergroupMembersFetch::Failed(call_request_error_line(
+                                    &err,
+                                    "Could not load members",
+                                )),
+                            );
+                        }
+                    }
+                    Some(RequestPurpose::GetAdminRights { user_id }) => {
+                        if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
+                            self.admin_rights.insert(
+                                (chat_id.0, user_id),
+                                AdminRightsFetch::Failed(call_request_error_line(
+                                    &err,
+                                    "Could not load admin rights",
                                 )),
                             );
                         }
@@ -4839,6 +5103,7 @@ impl Session {
         if let Some(chat) = self.chats.get_mut(&chat_id.0) {
             chat.set_member_status(member.status, member.admin_can_post_messages);
             chat.set_admin_can_invite_users(member.admin_can_invite_users);
+            chat.set_admin_can_promote_members(member.admin_rights.map(|r| r.can_promote_members));
         }
     }
 
@@ -10272,5 +10537,251 @@ mod tests {
             .supergroup_member_status
             .insert(16, ChannelMemberStatus::Member);
         assert!(!session.chat_can_invite_users(ChatId(16)));
+    }
+
+    #[test]
+    fn can_manage_admins_gate() {
+        // Phase D3b: admin-management permissions follow channel and
+        // supergroup membership rights; deny-by-default.
+        let (mut session, _) = session();
+
+        assert!(!session.chat_can_manage_admins(ChatId(999)));
+
+        let mut channel = placeholder_chat(ChatId(13));
+        channel.kind = ChatKind::Supergroup {
+            supergroup_id: 13,
+            is_channel: true,
+        };
+        session.chats.insert(13, channel);
+        assert!(!session.chat_can_manage_admins(ChatId(13)));
+
+        session
+            .chats
+            .get_mut(&13)
+            .unwrap()
+            .set_member_status(ChannelMemberStatus::Creator, None);
+        assert!(session.chat_can_manage_admins(ChatId(13)));
+
+        {
+            let channel = session.chats.get_mut(&13).unwrap();
+            channel.set_member_status(ChannelMemberStatus::Administrator, None);
+            channel.set_admin_can_promote_members(Some(true));
+        }
+        assert!(session.chat_can_manage_admins(ChatId(13)));
+
+        session
+            .chats
+            .get_mut(&13)
+            .unwrap()
+            .set_admin_can_promote_members(Some(false));
+        assert!(!session.chat_can_manage_admins(ChatId(13)));
+
+        session
+            .chats
+            .get_mut(&13)
+            .unwrap()
+            .set_admin_can_promote_members(None);
+        assert!(!session.chat_can_manage_admins(ChatId(13)));
+
+        // Non-channel supergroup path: creator always; admin needs the
+        // explicit right from the supergroup status block.
+        let mut creator_group = placeholder_chat(ChatId(14));
+        creator_group.kind = ChatKind::Supergroup {
+            supergroup_id: 14,
+            is_channel: false,
+        };
+        session.chats.insert(14, creator_group);
+        session
+            .supergroup_member_status
+            .insert(14, ChannelMemberStatus::Creator);
+        assert!(session.chat_can_manage_admins(ChatId(14)));
+
+        let mut admin_group = placeholder_chat(ChatId(15));
+        admin_group.kind = ChatKind::Supergroup {
+            supergroup_id: 15,
+            is_channel: false,
+        };
+        session.chats.insert(15, admin_group);
+        session
+            .supergroup_member_status
+            .insert(15, ChannelMemberStatus::Administrator);
+        session.supergroup_promote_right.insert(15, true);
+        assert!(session.chat_can_manage_admins(ChatId(15)));
+
+        session.supergroup_promote_right.insert(15, false);
+        assert!(!session.chat_can_manage_admins(ChatId(15)));
+    }
+
+    #[test]
+    fn admin_list_fetch_caches() {
+        // Phase D3b: `getChatAdministrators` loads and caches the result;
+        // a stale `@extra` is ignored.
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        let extra = session.request(RequestPurpose::GetChatAdministrators, Some(ChatId(13)));
+
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"chatAdministrators","@extra":"{}","administrators":[{{"@type":"chatAdministrator","user_id":777,"custom_title":"","is_owner":true,"can_be_edited":false}},{{"@type":"chatAdministrator","user_id":888,"custom_title":"News Desk","is_owner":false,"can_be_edited":true}}]}}"#,
+                extra.0
+            ),
+        );
+
+        let AdminListFetch::Loaded(admins) = session.admin_lists.get(&13).unwrap() else {
+            panic!("admin list was not loaded");
+        };
+        assert_eq!(admins.len(), 2);
+        assert!(admins[0].is_owner);
+        assert_eq!(admins[1].custom_title, "News Desk");
+        assert!(admins[1].can_be_edited);
+
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"chatAdministrators","@extra":"99999","administrators":[]}"#,
+        );
+        let AdminListFetch::Loaded(admins) = session.admin_lists.get(&13).unwrap() else {
+            panic!("admin list was not loaded");
+        };
+        assert_eq!(admins.len(), 2);
+    }
+
+    #[test]
+    fn set_chat_member_status_ok_invalidates_admin_list() {
+        // Phase D3b: a confirmed promote/demote/edit drops the cached admin
+        // list so the panel refetches; the change itself arrives as
+        // `updateChatMember`.
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        session.admin_lists.insert(
+            13,
+            AdminListFetch::Loaded(vec![ChatAdministratorEntry {
+                user_id: 888,
+                custom_title: String::new(),
+                is_owner: false,
+                can_be_edited: true,
+            }]),
+        );
+        let extra = session.request(
+            RequestPurpose::SetChatMemberStatus {
+                user_id: 888,
+                kind: MemberStatusChange::Demote,
+            },
+            Some(ChatId(13)),
+        );
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
+        );
+        assert!(!session.admin_lists.contains_key(&13));
+    }
+
+    #[test]
+    fn update_chat_member_invalidates_admin_list_and_own_rights() {
+        // Phase D3b: `updateChatMember` (schema 1.8.67, line 11202)
+        // invalidates a cached admin list, and refreshes the viewer's own
+        // `can_promote_members` when the member is the current user.
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        session.my_user_id = Some(777);
+        let mut channel = placeholder_chat(ChatId(13));
+        channel.kind = ChatKind::Supergroup {
+            supergroup_id: 13,
+            is_channel: true,
+        };
+        session.chats.insert(13, channel);
+        session.admin_lists.insert(
+            13,
+            AdminListFetch::Loaded(vec![ChatAdministratorEntry {
+                user_id: 888,
+                custom_title: String::new(),
+                is_owner: false,
+                can_be_edited: true,
+            }]),
+        );
+
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateChatMember","chat_id":13,"actor_user_id":777,"date":1,"invite_link":null,"via_join_request":false,"via_chat_folder_invite_link":false,"old_chat_member":{"@type":"chatMember","member_id":{"@type":"messageSenderUser","user_id":888},"status":{"@type":"chatMemberStatusAdministrator","can_be_edited":true}},"new_chat_member":{"@type":"chatMember","member_id":{"@type":"messageSenderUser","user_id":888},"status":{"@type":"chatMemberStatusMember","member_until_date":0}}}"#,
+        );
+        assert!(!session.admin_lists.contains_key(&13));
+
+        // Own promotion to administrator with the promote right.
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateChatMember","chat_id":13,"actor_user_id":777,"date":1,"invite_link":null,"via_join_request":false,"via_chat_folder_invite_link":false,"old_chat_member":{"@type":"chatMember","member_id":{"@type":"messageSenderUser","user_id":777},"status":{"@type":"chatMemberStatusMember","member_until_date":0}},"new_chat_member":{"@type":"chatMember","member_id":{"@type":"messageSenderUser","user_id":777},"status":{"@type":"chatMemberStatusAdministrator","can_be_edited":true,"rights":{"@type":"chatAdministratorRights","can_promote_members":true}}}}"#,
+        );
+        let chat = session.chats.get(&13).unwrap();
+        assert_eq!(
+            chat.my_member_status,
+            Some(ChannelMemberStatus::Administrator)
+        );
+        assert_eq!(chat.my_admin_can_promote_members, Some(true));
+        assert!(chat.can_manage_admins());
+    }
+
+    #[test]
+    fn get_admin_rights_response_caches_rights() {
+        // Phase D3b: `getChatMember` tagged `GetAdminRights` stores the
+        // administrator's rights for the edit dialog.
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        let extra = session.request(
+            RequestPurpose::GetAdminRights { user_id: 888 },
+            Some(ChatId(13)),
+        );
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"chatMember","@extra":"{}","member_id":{{"@type":"messageSenderUser","user_id":888}},"status":{{"@type":"chatMemberStatusAdministrator","can_be_edited":true,"rights":{{"@type":"chatAdministratorRights","can_promote_members":true,"can_delete_messages":true}}}}}}"#,
+                extra.0
+            ),
+        );
+        let AdminRightsFetch::Loaded(rights) = session.admin_rights.get(&(13, 888)).unwrap() else {
+            panic!("admin rights were not loaded");
+        };
+        assert!(rights.can_promote_members);
+        assert!(rights.can_delete_messages);
+        assert!(!rights.can_pin_messages);
+    }
+
+    #[test]
+    fn supergroup_members_fetch_caches() {
+        // Phase D3b: `getSupergroupMembers` loads the member-picker page.
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        let extra = session.request(RequestPurpose::GetSupergroupMembers, Some(ChatId(13)));
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"chatMembers","@extra":"{}","total_count":2,"members":[{{"@type":"chatMember","member_id":{{"@type":"messageSenderUser","user_id":111}},"tag":"","inviter_user_id":777,"joined_chat_date":1700000000,"status":{{"@type":"chatMemberStatusMember","member_until_date":0}}}},{{"@type":"chatMember","member_id":{{"@type":"messageSenderUser","user_id":222}},"tag":"","inviter_user_id":777,"joined_chat_date":1700000000,"status":{{"@type":"chatMemberStatusAdministrator","can_be_edited":true}}}}]}}"#,
+                extra.0
+            ),
+        );
+        let SupergroupMembersFetch::Loaded {
+            members,
+            total_count,
+        } = session.supergroup_members.get(&13).unwrap()
+        else {
+            panic!("members were not loaded");
+        };
+        assert_eq!(*total_count, 2);
+        assert_eq!(members.len(), 2);
+        assert_eq!(members[0].status, ChannelMemberStatus::Member);
+        assert_eq!(members[1].status, ChannelMemberStatus::Administrator);
     }
 }
