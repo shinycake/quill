@@ -5198,6 +5198,7 @@ dependencies = [
  "gpui-kit",
  "image",
  "libloading",
+ "ntgcalls-sys",
  "pretty_assertions",
  "rand 0.8.8",
  "security-framework",

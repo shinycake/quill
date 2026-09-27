@@ -2720,6 +2720,95 @@ ntgcalls 3.0.0 speaks the call-protocol version TDLib 1.8.67 negotiates
 (min layer 65 / max from `ntg_get_protocol`, `library_versions`) before
 shipping real audio.
 
+## Phase C2b — call engine wiring (signaling bridge, no media) (2026-09-27)
+
+Goal: wire the ntgcalls v3.0.0 sidecar into Quill's call flow with a clean
+engine-trait boundary — TDLib signaling data reaches the engine, and the
+engine's emitted signaling returns as `sendCallSignalingData` — while
+keeping audio/video transport disabled pending Phase C2c.
+
+### Protocol gate (verified by the human, 2026-09-27 — not by the model)
+- Vendored artifact `vendor/ntgcalls/` (checksum-pinned zip from the C2a
+  procurement step; ignored by git) probed directly: `ntg_get_version()` =
+  `"3.0.0"`; `ntg_get_protocol()` = `{min_layer 92, max_layer 92,
+  udp_p2p true, udp_reflector true, library_versions
+  ["8.0.0","9.0.0","12.0.0","13.0.0"]}` — matching the upstream
+  `NTgCalls::get_protocol()` source (`{92, 92, true, true,
+  Signaling::supported_versions()}`).
+- TDLib 1.8.67 schema (`schema/td_api.tl`, human-verified lines):
+  - :7005 "use 65" (min supported API layer), :7006 "use 92" (max),
+    :7007 `library_versions` is the supported tgcalls-version list,
+    :7008 `callProtocol udp_p2p:Bool udp_reflector:Bool min_layer:int32
+    max_layer:int32 library_versions:vector<string> = CallProtocol;`
+  - :10862 `updateNewCallSignalingData call_id:int32 data:bytes = Update;`
+  - :14212 `createCall user_id:int53 protocol:callProtocol is_video:Bool
+    = CallId;`
+  - :14215 `acceptCall call_id:int32 protocol:callProtocol = Ok;`
+  - :14218 `sendCallSignalingData call_id:int32 data:bytes = Ok;`
+- Gate verdict: ntgcalls 3.0.0 speaks layer 92, the top of TDLib's
+  negotiated 65–92 range, and both report UDP P2P + reflector support, so
+  1:1 signaling interop is plausible. Its `min_layer = 92` (not 65) means
+  it requires layer-92 peers — current official clients qualify. This is
+  *capability* evidence only; no real audio path has been exercised.
+- Advertised protocol: engine present AND available →
+  `udp_p2p:true udp_reflector:true min_layer:92 max_layer:92
+  library_versions:["8.0.0","9.0.0","12.0.0","13.0.0"]` (the ENGINE's own
+  reported values). Engine absent OR installed-but-unavailable → the C1
+  signaling-only shape (`false,false,65,92,[]`) (reviewer fix; advertisement
+  now keys on `is_available()`, not merely `Some(engine)`).
+  - Why min 92, not 65: the schema's 65 is TDLib's floor; the engine does
+    not claim to speak 65, so advertising it would be dishonest.
+  - Why not `library_versions:["3.0.0"]`: :7007 defines that field as the
+    supported *tgcalls* versions, and "3.0.0" is the ntgcalls package
+    version — different thing.
+
+### Architecture (what was built)
+- `src/calls/mod.rs` + `src/calls/engine.rs`: `CallEngine` trait
+  (start/accept, `send_signaling_data` app→engine,
+  `receive_signaling_data` engine→app, emitted-signaling hook,
+  `hangup` idempotent, `set_muted`, `media_devices`, `protocol`,
+  `is_available`), `MockEngine` (Arc/Mutex-shared, observable, test-only),
+  `NtgcallsEngine` (dlopen sidecar; real, driver-thread-only). Runtime
+  `dlopen` is preserved — no link-time ntgcalls dependency.
+- `NtgcallsEngine` lifecycle this slice: instance create + signaling
+  callback registration + `ntg_create_p2p_call` on call start +
+  `ntg_stop` on hangup/teardown. The callback is a C trampoline through
+  an `Arc<CallbackShared>`; emitted bytes are queued into a
+  `Mutex<VecDeque>` and drained on the driver thread. `Drop` unregisters
+  the callback first, keeps the shared state alive while destroying the
+  instance, and only then clears call maps — no callback can reach the
+  shared state after destruction.
+- DELIBERATELY NOT called: `ntg_skip_exchange` / `ntg_connect_p2p`.
+  Human-verified reason: `P2PCall::connect()` adds mic/camera/screen
+  capture+playback tracks — potentially starting real audio I/O on the
+  user's default devices. Without an E2E audio test, that side effect is
+  not verifiable, so C2b ships the bridge only. Transport connect,
+  stream sources, and real mute are Phase C2c. The UI keeps its honest
+  "No audio yet" wording; mute is still local-only.
+- `ConnectDriver` owns the engine (`Box<dyn CallEngine>`, default None)
+  and drains the outbox in `ingest()`; `pump_call_engine` maps TDLib
+  `updateCall` lifecycle (Pending→start, terminal→hangup) and
+  `updateNewCallSignalingData` → `engine.send_signaling_data`, gated on
+  the reducer-tracked call id (unknown or ended calls never reach the
+  engine — reviewer fix). Engine-emitted bytes leave via the outbox as
+  `sendCallSignalingData`; a failed send removes the allocated request
+  bookkeeping and requeues the bytes at the head of the outbox for a
+  later ingest to retry (reviewer fix). Engine errors at the bridge are
+  ignored — TDLib remains the source of truth and the session signaling
+  queue keeps the honest record.
+- New TDLib request: `send_call_signaling_data` (:14218) with base64
+  `data`; `RequestPurpose::SendCallSignalingData` added.
+- 17 unit tests for the slice (mock protocol advertisement incl.
+  unavailable-engine fallback, engine-derived createCall/acceptCall
+  protocol, absent-engine fallback, inbound-signaling bridge + unknown-call
+  gating, engine lifecycle bridge, outbox send-failure cleanup/requeue,
+  protocol_json shape, protocol probe).
+
+### What still needs C2c (not this slice)
+- `ntg_skip_exchange` (TDLib precomputed key) + `ntg_connect_p2p`
+  (servers/config/`callStateReady` parsing), audio/video device sources,
+  real mute wiring, E2E audio validation against a real peer, group calls.
+
 ## Phase C3a — group-call signaling surface (2026-09-26)
 
 **Scope: chat-bound voice chats, signaling only.** No audio/video

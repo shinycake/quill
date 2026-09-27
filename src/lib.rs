@@ -4,6 +4,7 @@
 pub mod album;
 pub mod animation;
 pub mod auth;
+pub mod calls;
 pub mod composer;
 pub mod connect;
 pub mod connect_smoke;
