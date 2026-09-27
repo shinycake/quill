@@ -116,6 +116,26 @@ pub struct MediaPrefs {
     pub auto_download_groups: u8,
     #[serde(default = "auto_download_default")]
     pub auto_download_channels: u8,
+    /// MED4: Instant View mode (TGX `Settings.INSTANT_VIEW_MODE`:
+    /// None / Telegram-internal / All, `Settings.java:796-798`).
+    /// Default `Telegram` — the reader opens for links TDLib flagged
+    /// with `instant_view_version > 0`.
+    #[serde(default)]
+    pub instant_view_mode: InstantViewMode,
+}
+
+/// MED4: Instant View preference (TGX values 0/1/2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum InstantViewMode {
+    /// Never attempt Instant View — links open in the browser.
+    Off,
+    /// Only links carrying `instant_view_version > 0` (preview cards).
+    #[default]
+    Telegram,
+    /// Every http(s) link is tried via `getWebPageInstantView` first
+    /// (TDLib 404 → browser fallback).
+    All,
 }
 
 fn auto_download_default() -> u8 {
@@ -133,6 +153,7 @@ impl Default for MediaPrefs {
             auto_download_private: AUTO_DOWNLOAD_DEFAULT,
             auto_download_groups: AUTO_DOWNLOAD_DEFAULT,
             auto_download_channels: AUTO_DOWNLOAD_DEFAULT,
+            instant_view_mode: InstantViewMode::default(),
         }
     }
 }

@@ -20,12 +20,12 @@ use crate::telegram::envelope::{
     ConnectionState, EnvelopePayload, EphemeralMessageContent, ErrorClass, ForumTopic,
     InlineKeyboard, InviteGroupCallParticipantResult, MessageAutoDelete, MessageContent,
     MessageForwardInfo, MessageInteractionInfo, MessageOrigin, MessageReaction, MessageReplyTo,
-    MessageSelfDestruct, MessageSender, NotificationSettingsScope, NotificationSound, ParsedCall,
-    ParsedChatEvent, ParsedChatInviteLink, ParsedChatJoinRequest, ParsedChatMember, ParsedFile,
-    ParsedGroupCall, ParsedGroupCallMessage, ParsedGroupCallParticipant, ParsedMessage,
+    MessageSelfDestruct, MessageSender, NotificationSettingsScope, NotificationSound, OptionValue,
+    ParsedCall, ParsedChatEvent, ParsedChatInviteLink, ParsedChatJoinRequest, ParsedChatMember,
+    ParsedFile, ParsedGroupCall, ParsedGroupCallMessage, ParsedGroupCallParticipant, ParsedMessage,
     ParsedSecretChat, ParsedStory, ParsedUser, ParsedVideoChat, ParsedWelcomeMessage, Poll,
-    ReportOption, ReportSponsoredResult, ScopeNotificationSettings, SecretChatState,
-    SponsoredMessage, StickerFormat, StickerItem, StickerSetInfo, StorageStats,
+    ReportOption, ReportSponsoredResult, RichMessageContent, ScopeNotificationSettings,
+    SecretChatState, SponsoredMessage, StickerFormat, StickerItem, StickerSetInfo, StorageStats,
     StoryAvailableReactionView, StoryListView, TdError, effective_content,
 };
 use crate::telegram::envelope::{CallState, ReadyParams};
@@ -154,6 +154,13 @@ pub enum RequestPurpose {
         chat_id: ChatId,
         message_id: MessageId,
     },
+    /// MED4: `getWebPageInstantView` (TDLib 1.8.67, `schema/td_api.tl:14794`).
+    /// The URL rides `Session::instant_view_urls` keyed by `RequestId`
+    /// (the purpose stays `Copy`). Success lands in
+    /// `Session::instant_view`; the 404 error falls back to the browser
+    /// via `Session::instant_view_fallback_url` — a refusal is never
+    /// shown as success.
+    GetWebPageInstantView,
     /// M1: `resendMessages`. Response is `messages` (the retried sends).
     ResendMessages,
     /// M1: `getChatScheduledMessages`. Response is `messages`, stored in
@@ -2790,6 +2797,14 @@ impl CallSummary {
 /// Cap for the honest signaling queue (C1: no consumer yet).
 const MAX_QUEUED_SIGNALING_CHUNKS: usize = 32;
 
+/// MED4: one-shot `getWebPageInstantView` answer — the URL plus the M2
+/// `pageBlock*` content the IV reader renders.
+#[derive(Debug, Clone)]
+pub struct InstantViewPage {
+    pub url: String,
+    pub rich: RichMessageContent,
+}
+
 pub struct Session {
     pub account: AccountKey,
     pub account_generation: AccountGeneration,
@@ -2835,6 +2850,20 @@ pub struct Session {
     /// request errors. The UI drains it into the status note so the
     /// click never silently does nothing.
     pub message_link_error: Option<String>,
+    /// MED4: `getOption("message_caption_length_max")` via `updateOption`
+    /// (TDLib 1.8.67, `schema/td_api.tl:10926`); default 1024 is TDLib's
+    /// compiled default. Guards caption edits and media-send captions.
+    pub message_caption_length_max: i32,
+    /// MED4: one-shot `getWebPageInstantView` answer for the IV reader.
+    /// The UI drains it (opens the reader) and clears it.
+    pub instant_view: Option<InstantViewPage>,
+    /// MED4: one-shot fallback URL when `getWebPageInstantView` errors
+    /// (TDLib 404s when the page has no Instant View). The UI drains it
+    /// into the browser — TGX behaves the same.
+    pub instant_view_fallback_url: Option<String>,
+    /// MED4: pending `getWebPageInstantView` URLs by `RequestId`
+    /// (`RequestPurpose` stays `Copy`, so the URL rides here).
+    pub instant_view_urls: HashMap<RequestId, String>,
     /// MED2 fix-up: one-shot; set when TDLib refuses a `recognizeSpeech`
     /// request. The UI drains it into the status note — previously the
     /// error fell into the `_ => {}` swallower and the user saw
@@ -3519,6 +3548,10 @@ impl Session {
             folder_chats_to_leave: HashMap::new(),
             histories: HashMap::new(),
             message_link_result: None,
+            message_caption_length_max: 1024,
+            instant_view: None,
+            instant_view_fallback_url: None,
+            instant_view_urls: HashMap::new(),
             message_link_error: None,
             recognize_speech_error: None,
             resend_error: None,
@@ -4266,6 +4299,17 @@ impl Session {
     ) {
         match payload {
             EnvelopePayload::UpdateAuthorizationState(state) => self.set_auth(state),
+            // MED4: `updateOption` (schema:10926). Only
+            // `message_caption_length_max` is consumed (caption edits /
+            // media-send captions); every other option parses but is
+            // ignored, never an error.
+            EnvelopePayload::UpdateOption { name, value } => {
+                if name == "message_caption_length_max"
+                    && let OptionValue::Integer(limit) = value
+                {
+                    self.message_caption_length_max = limit.max(0).min(i64::from(i32::MAX)) as i32;
+                }
+            }
             EnvelopePayload::UpdateConnectionState(state) => self.connection = state,
             EnvelopePayload::UpdateNewChat {
                 chat_id,
@@ -5953,6 +5997,11 @@ impl Session {
             // M2: handled by the driver before `apply` (blocks land in
             // history there); nothing to reduce here.
             EnvelopePayload::RichMessage { .. } => {}
+            // MED4: `webPageInstantView` — captured by the driver before
+            // `apply` into `Session::instant_view` (success) or
+            // `Session::instant_view_fallback_url` (error); nothing to
+            // reduce here.
+            EnvelopePayload::WebPageInstantView { .. } => {}
             // M1 fix-up: `getMessageProperties` returns
             // `messageProperties`. The driver gates the chained
             // `getMessageLink` on `can_get_link` before `apply` takes

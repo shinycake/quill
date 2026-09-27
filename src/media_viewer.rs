@@ -411,6 +411,7 @@ mod tests {
             MessageContent::Photo(PhotoContent {
                 caption: caption.to_string(),
                 caption_entities: Vec::new(),
+                show_caption_above_media: false,
                 sizes: sizes
                     .into_iter()
                     .map(|(file_id, width, height)| PhotoSizeView {

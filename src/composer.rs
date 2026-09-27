@@ -209,6 +209,9 @@ pub struct ComposerEdit {
     /// not a history message. `edit_snapshot` validates against the
     /// scheduled list in that case.
     pub scheduled: bool,
+    /// MED4: caption position for caption edits
+    /// (`editMessageCaption.show_caption_above_media`, schema:12338).
+    pub caption_above: bool,
 }
 
 impl ComposerEdit {
@@ -260,6 +263,15 @@ impl ComposerEdit {
             original_text,
             kind,
             scheduled: false,
+            // MED4: preserve the message's caption position on edit
+            // (`editMessageCaption.show_caption_above_media`,
+            // schema:12338). The composer toggle can flip it.
+            caption_above: match content {
+                MessageContent::Photo(photo) => photo.show_caption_above_media,
+                MessageContent::Video(video) => video.show_caption_above_media,
+                MessageContent::Animation(animation) => animation.show_caption_above_media,
+                _ => false,
+            },
         })
     }
 }
@@ -1055,6 +1067,11 @@ pub struct ComposerSnapshot {
     pub self_destruct: Option<SelfDestructSend>,
     /// M1: silent / scheduled / when-online / link-preview send options.
     pub send_options: SendOptions,
+    /// MED4: `show_caption_above_media` for photo/video sends (TDLib
+    /// 1.8.67, `schema/td_api.tl:6117/6128`). Toggled from the composer;
+    /// the driver also enforces it on album items (schema: all album
+    /// contents must share the same value).
+    pub caption_above_media: bool,
 }
 
 impl ComposerSnapshot {
@@ -1082,6 +1099,7 @@ impl ComposerSnapshot {
             reply_to: None,
             self_destruct: None,
             send_options: SendOptions::default(),
+            caption_above_media: false,
         }
     }
 
@@ -1101,6 +1119,7 @@ impl ComposerSnapshot {
             reply_to: None,
             self_destruct: None,
             send_options: SendOptions::default(),
+            caption_above_media: false,
         }
     }
 
@@ -1120,6 +1139,12 @@ impl ComposerSnapshot {
     /// when-online / link-preview toggle).
     pub fn with_send_options(mut self, options: SendOptions) -> Self {
         self.send_options = options;
+        self
+    }
+
+    /// MED4: caption-above-media toggle state from the composer.
+    pub fn with_caption_above_media(mut self, above: bool) -> Self {
+        self.caption_above_media = above;
         self
     }
 
@@ -1173,6 +1198,26 @@ impl ComposerSnapshot {
     pub fn caption(&self) -> &str {
         self.text.trim()
     }
+}
+
+/// MED4: find `http(s)://` URLs in composer text (TDLib's `getLinkPreview`
+/// takes the raw text, but the composer preview chip needs to know when
+/// to appear at all). Stdlib scan — no URL parser dependency; trailing
+/// punctuation (`,.;:!?)]'"`) is trimmed the way clients do.
+pub fn find_urls(text: &str) -> Vec<String> {
+    text.split_whitespace()
+        .filter_map(|token| {
+            let lower = token.to_lowercase();
+            let url = if lower.starts_with("http://") || lower.starts_with("https://") {
+                token
+            } else {
+                return None;
+            };
+            let trimmed =
+                url.trim_end_matches([',', '.', ';', ':', '!', '?', ')', ']', '\'', '"', '…']);
+            (!trimmed.is_empty()).then(|| trimmed.to_string())
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -1683,6 +1728,22 @@ mod tests {
         assert_eq!(clear_format_markup("**a** **b**", 0..5), "a **b**");
     }
 
+    /// MED4: composer URL detection for the preview chip.
+    #[test]
+    fn find_urls_detects_http_links() {
+        assert!(find_urls("no links here").is_empty());
+        assert_eq!(
+            find_urls("see https://example.com/a, and http://x.org."),
+            vec!["https://example.com/a", "http://x.org"]
+        );
+        // Bare "www." is not a URL for the chip (TDLib may still preview
+        // it server-side; the chip only tracks explicit schemes).
+        assert!(find_urls("see www.example.com").is_empty());
+        assert_eq!(
+            find_urls("https://EXAMPLE.com/Path"),
+            vec!["https://EXAMPLE.com/Path"]
+        );
+    }
     /// Slice G1: `quote_position` — UTF-16 code-unit offsets for
     /// `inputTextQuote.position`.
     #[test]
