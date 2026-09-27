@@ -2491,8 +2491,12 @@ pub struct Session {
     /// Phase C2i: peer-to-peer calls
     /// (`userPrivacySettingAllowPeerToPeerCalls`, schema 1.8.67 :9009).
     pub call_privacy_p2p: Option<PrivacyWho>,
-    /// A privacy get/set round-trip is in flight.
+    /// A privacy get/set round-trip is in flight (see
+    /// `call_privacy_pending` — fetch sends two gets, so this clears
+    /// only when the last response lands).
     pub call_privacy_loading: bool,
+    /// Outstanding call-privacy get/set round-trips.
+    pub call_privacy_pending: u8,
     /// The last privacy get/set failed.
     pub call_privacy_error: bool,
     /// Phase C2i: local call preferences (confirm-before-calling,
@@ -2881,6 +2885,18 @@ pub struct ContactRow {
 }
 
 impl Session {
+    /// Phase C2i: one call-privacy round-trip landed. The spinner and
+    /// error flag only reset when no round-trip is outstanding —
+    /// `fetch_call_privacy` sends two gets, and clearing on the first
+    /// would briefly render the radios with nothing selected.
+    fn privacy_roundtrip_done(&mut self) {
+        self.call_privacy_pending = self.call_privacy_pending.saturating_sub(1);
+        if self.call_privacy_pending == 0 {
+            self.call_privacy_loading = false;
+            self.call_privacy_error = false;
+        }
+    }
+
     pub fn new(account: AccountKey, diagnostics: Arc<dyn DiagnosticSink>) -> Self {
         let auth = AuthorizationState::WaitTdlibParameters;
         Self {
@@ -2927,6 +2943,7 @@ impl Session {
             call_privacy_allow_calls: None,
             call_privacy_p2p: None,
             call_privacy_loading: false,
+            call_privacy_pending: 0,
             call_privacy_error: false,
             call_prefs: CallPrefs::default(),
             active_group_call: None,
@@ -4364,8 +4381,7 @@ impl Session {
                         CallPrivacySetting::AllowCalls => self.call_privacy_allow_calls = who,
                         CallPrivacySetting::PeerToPeer => self.call_privacy_p2p = who,
                     }
-                    self.call_privacy_loading = false;
-                    self.call_privacy_error = false;
+                    self.privacy_roundtrip_done();
                 }
             }
             EnvelopePayload::FoundChatMessages {
@@ -4844,8 +4860,7 @@ impl Session {
                     pending.map(|p| p.purpose),
                     Some(RequestPurpose::SetCallPrivacyRules { .. })
                 ) {
-                    self.call_privacy_loading = false;
-                    self.call_privacy_error = false;
+                    self.privacy_roundtrip_done();
                 }
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::LoadChats) {
                     // A short OK is not exhaustion; 404 is.
@@ -4962,7 +4977,7 @@ impl Session {
                         self.recent_calls_error = true;
                     }
                     Some(RequestPurpose::GetCallPrivacyRules { .. }) => {
-                        self.call_privacy_loading = false;
+                        self.privacy_roundtrip_done();
                         self.call_privacy_error = true;
                     }
                     // Phase C2i: a failed `setUserPrivacySettingRules`
@@ -4973,7 +4988,7 @@ impl Session {
                             CallPrivacySetting::AllowCalls => self.call_privacy_allow_calls = None,
                             CallPrivacySetting::PeerToPeer => self.call_privacy_p2p = None,
                         }
-                        self.call_privacy_loading = false;
+                        self.privacy_roundtrip_done();
                         self.call_privacy_error = true;
                     }
                     Some(RequestPurpose::SendCallLog) => {
@@ -11976,5 +11991,41 @@ mod tests {
         );
         assert_eq!(session.call_privacy_allow_calls, None);
         assert!(session.call_privacy_error);
+    }
+
+    #[test]
+    fn call_privacy_loading_clears_only_after_both_gets_land() {
+        // `fetch_call_privacy` fires two gets (AllowCalls + PeerToPeer):
+        // clearing on the first would briefly render the radios with
+        // nothing selected instead of "Loading…".
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        session.call_privacy_loading = true;
+        session.call_privacy_pending = 2;
+        for setting in [
+            CallPrivacySetting::AllowCalls,
+            CallPrivacySetting::PeerToPeer,
+        ] {
+            let extra = session.request(RequestPurpose::GetCallPrivacyRules { setting }, None);
+            apply_json(
+                &mut session,
+                &seq,
+                &sink,
+                &format!(
+                    r#"{{"@type":"userPrivacySettingRules","@extra":"{}","rules":[{{"@type":"userPrivacySettingRuleAllowAll"}}]}}"#,
+                    extra.0,
+                ),
+            );
+            if setting == CallPrivacySetting::AllowCalls {
+                assert!(session.call_privacy_loading);
+                assert_eq!(session.call_privacy_p2p, None);
+            }
+        }
+        assert!(!session.call_privacy_loading);
+        assert_eq!(
+            session.call_privacy_allow_calls,
+            Some(PrivacyWho::Everybody)
+        );
+        assert_eq!(session.call_privacy_p2p, Some(PrivacyWho::Everybody));
     }
 }

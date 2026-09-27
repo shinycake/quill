@@ -330,7 +330,7 @@ This is the comprehensive Telegram-parity checklist: one checkbox per user-visib
 - [x] Call failed / offline / microphone-missing error states <!-- parity:calls-errors --> ("Call failed" card ui/mod.rs:9668)
 - [x] Reconnect indicator when audio transport drops <!-- parity:calls-reconnect --> (TransportState::Reconnecting calls/engine.rs:27; shown ui/mod.rs:9787)
 - [x] Call end summary screen with duration <!-- parity:calls-summary --> (CallSummary state.rs:2006)
-- [x] Rate call quality after call <!-- parity:calls-rating --> (rate_last_call ui/mod.rs:4576; sendCallRating requests.rs:899)
+- [x] Rate call quality after call <!-- parity:calls-rating --> (open_rating_detail ui/mod.rs:5009; submit_call_rating ui/mod.rs:5030; sendCallRating requests.rs:899)
 - [x] Rating problems and comment (stars + problem chips + optional comment sent via sendCallRating) <!-- parity:calls-rating-detail -->
 - [x] Send call debug information to Telegram <!-- parity:calls-debug --> (send_call_debug_information connect.rs:1984)
 - [x] Call log file upload (sendCallLog with inputFileLocal; button on end screen when need_log) <!-- parity:calls-log-upload -->

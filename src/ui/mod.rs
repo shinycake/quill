@@ -8666,13 +8666,14 @@ impl QuillApp {
             .as_ref()
             .map(|(_, name)| name.clone())
             .unwrap_or_else(|| "Call".to_owned());
-        let missed = matches!(
-            entry.content,
-            MessageContent::Call {
-                discard_reason: CallDiscardReason::Missed,
-                ..
-            }
-        );
+        let missed = !entry.is_outgoing
+            && matches!(
+                entry.content,
+                MessageContent::Call {
+                    discard_reason: CallDiscardReason::Missed,
+                    ..
+                }
+            );
         div()
             .id(("call-row", entry.id.0 as u64))
             .px_2()

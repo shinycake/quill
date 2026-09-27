@@ -3832,7 +3832,7 @@ P2P privacy in the privacy settings.
   (Telegram X's less-data is engine config, not a TDLib setting).
   README stays unchecked.
 - **Busy-call honesty.** No TDLib hold/swap request exists
-  (concept-level schema + TDLib source check; native `ntg_pause` /
+  (concept-level schema search; native `ntg_pause` /
   `ntg_resume` only pause local media — not a Telegram-level swap).
   Incoming calls during an active call are still auto-declined via
   `discardCall`, but now recorded in

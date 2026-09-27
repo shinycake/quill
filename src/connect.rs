@@ -2591,6 +2591,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 self.session.call_privacy_error = true;
                 return Err(err);
             }
+            self.session.call_privacy_pending += 1;
         }
         Ok(())
     }
@@ -2623,6 +2624,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             CallPrivacySetting::PeerToPeer => self.session.call_privacy_p2p = Some(who),
         }
         self.session.call_privacy_loading = true;
+        self.session.call_privacy_pending += 1;
         Ok(extra)
     }
 

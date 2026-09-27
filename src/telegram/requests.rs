@@ -894,8 +894,10 @@ pub fn discard_call(
 /// `sendCallRating call_id:InputCall rating:int32 comment:string
 /// problems:vector<CallProblem> = Ok;` "Sends a call rating". The call
 /// has ended, so the call is identified with `inputCallDiscarded`.
-/// The simple rating card sends no comment and no problem list (the
-/// per-problem checklist is a documented follow-up).
+/// The star tap opens the rating detail editor (C2i:
+/// `open_rating_detail` / `send_call_rating_detail`) instead of
+/// calling this directly; this kept helper covers the
+/// no-problems no-comment shape used in tests.
 pub fn send_call_rating(extra: RequestId, call_id: i32, rating: i32) -> String {
     send_call_rating_detail(extra, call_id, rating, "", &[])
 }
@@ -1028,8 +1030,11 @@ impl PrivacyWho {
     }
 
     /// Map server-returned rule constructor names back to the simple
-    /// choice; `None` when the account has mixed/custom rules the
-    /// three-option UI cannot represent.
+    /// choice. Exception rules (`AllowUsers` / `RestrictUsers` / ...)
+    /// are ignored: the list collapses to the first recognizable base
+    /// rule in priority order (AllowAll > RestrictAll > AllowContacts);
+    /// `None` only when no base rule is present (empty or fully custom
+    /// lists the three-option UI cannot represent).
     pub fn from_rule_names(names: &[String]) -> Option<Self> {
         if names.iter().any(|n| n == "userPrivacySettingRuleAllowAll") {
             Some(PrivacyWho::Everybody)
