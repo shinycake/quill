@@ -5799,9 +5799,10 @@ impl Session {
     fn accept_group_call_update(&mut self, group_call: &ParsedGroupCall) {
         if !group_call.is_active {
             // Phase C2h: a scheduled (not yet started) video chat is
-            // still tracked — the overlay shows "starts in …" instead
-            // of join controls. TDLib has no `startGroupCall`, so the
-            // card is informational until the call goes active.
+            // still tracked — the overlay shows "starts in …" plus an
+            // admin-only "Start now" (startScheduledVideoChat,
+            // schema/td_api.tl:14277). Join appears once TDLib
+            // activates the call.
             if group_call.scheduled_start_date > 0 {
                 let tracked = self
                     .active_group_call
