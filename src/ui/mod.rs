@@ -11709,7 +11709,7 @@ impl QuillApp {
 
     /// Slice CL3: "Select unread" — check every listed chat with unread
     /// messages or a marked-as-unread flag (TGX `ChatsController`
-    /// select-unread).
+    /// select-unread), main list and archive alike.
     fn select_unread_chats(&mut self, cx: &mut Context<Self>) {
         // Collect first: `session()` borrows `self`, so the ids must be
         // owned before touching `selected_chats`.
@@ -11719,7 +11719,8 @@ impl QuillApp {
                 session
                     .ordered_chats()
                     .into_iter()
-                    .filter(|chat| chat.unread_count > 0 || chat.is_marked_as_unread)
+                    .chain(session.ordered_archived_chats())
+                    .filter(|chat| chat.is_unread())
                     .map(|chat| chat.id.0)
                     .collect()
             })
@@ -11730,13 +11731,20 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// Slice CL3: bulk pin toggle for the selection, reusing
-    /// `toggle_chat_pin` (with its rollback note).
+    /// Slice CL3: bulk pin for the selection, all-or-nothing like TGX:
+    /// if any selected chat is unpinned, pin all; otherwise unpin all.
+    /// Reuses `toggle_chat_pin` (with its rollback note) per chat that
+    /// still needs the change.
     fn toggle_selected_pins(&mut self, cx: &mut Context<Self>) {
-        let ids: Vec<ChatId> = self.selected_chats.iter().map(|id| ChatId(*id)).collect();
-        for id in ids {
-            self.toggle_chat_pin(id, cx);
+        let chats = self.selected_chat_pin_states();
+        let pin_all = chats.iter().any(|(_, pinned)| !pinned);
+        for (id, pinned) in chats {
+            if pinned != pin_all {
+                self.toggle_chat_pin(id, cx);
+            }
         }
+        self.selected_chats.clear();
+        cx.notify();
     }
 
     /// Slice CL3: bulk mark-as-read for the selection, reusing the
@@ -11745,34 +11753,92 @@ impl QuillApp {
     fn mark_selected_read(&mut self, cx: &mut Context<Self>) {
         let ids: Vec<ChatId> = self.selected_chats.iter().map(|id| ChatId(*id)).collect();
         for id in ids {
-            self.toggle_chat_marked_as_unread(id, cx);
-        }
-        self.selected_chats.clear();
-        cx.notify();
-    }
-
-    /// Slice CL3: bulk mute toggle for the selection, reusing
-    /// `apply_chat_mute` (mute-forever / unmute, like the row menu).
-    fn toggle_selected_mute(&mut self, cx: &mut Context<Self>) {
-        let ids: Vec<ChatId> = self.selected_chats.iter().map(|id| ChatId(*id)).collect();
-        for id in ids {
-            let muted = self
+            // `toggle_chat_marked_as_unread` is a genuine toggle: calling it
+            // on a fully-read chat would mark it *unread* — never do that
+            // under a "Read" button.
+            let unread = self
                 .session()
                 .and_then(|s| s.chats.get(&id.0))
-                .is_some_and(|chat| chat.is_muted());
-            self.apply_chat_mute(id, if muted { 0 } else { MUTE_FOREVER }, cx);
-        }
-    }
-
-    /// Slice CL3: bulk archive toggle for the selection, reusing
-    /// `toggle_archive`.
-    fn toggle_selected_archive(&mut self, cx: &mut Context<Self>) {
-        let ids: Vec<ChatId> = self.selected_chats.iter().map(|id| ChatId(*id)).collect();
-        for id in ids {
-            self.toggle_archive(id, cx);
+                .is_some_and(|chat| chat.is_unread());
+            if unread {
+                self.toggle_chat_marked_as_unread(id, cx);
+            }
         }
         self.selected_chats.clear();
         cx.notify();
+    }
+
+    /// Slice CL3: bulk mute for the selection, all-or-nothing like TGX:
+    /// if any selected chat is unmuted, mute all; otherwise unmute all.
+    /// Reuses `apply_chat_mute` (mute-forever / unmute, like the row menu)
+    /// per chat that still needs the change.
+    fn toggle_selected_mute(&mut self, cx: &mut Context<Self>) {
+        let chats: Vec<(ChatId, bool)> = self
+            .selected_chats
+            .iter()
+            .map(|&id| {
+                let muted = self
+                    .session()
+                    .and_then(|s| s.chats.get(&id))
+                    .is_some_and(|chat| chat.is_muted());
+                (ChatId(id), muted)
+            })
+            .collect();
+        let mute_all = chats.iter().any(|(_, muted)| !muted);
+        for (id, muted) in chats {
+            if muted != mute_all {
+                self.apply_chat_mute(id, if mute_all { MUTE_FOREVER } else { 0 }, cx);
+            }
+        }
+        self.selected_chats.clear();
+        cx.notify();
+    }
+
+    /// Slice CL3: bulk archive for the selection, all-or-nothing like
+    /// TGX: if any selected chat is unarchived, archive all; otherwise
+    /// unarchive all. Reuses `toggle_archive` per chat that still needs
+    /// the change.
+    fn toggle_selected_archive(&mut self, cx: &mut Context<Self>) {
+        let chats: Vec<(ChatId, bool)> = self
+            .selected_chats
+            .iter()
+            .map(|&id| {
+                let archived = self
+                    .session()
+                    .and_then(|s| s.chats.get(&id))
+                    .is_some_and(|chat| chat.in_archive);
+                (ChatId(id), archived)
+            })
+            .collect();
+        let archive_all = chats.iter().any(|(_, archived)| !archived);
+        for (id, archived) in chats {
+            if archived != archive_all {
+                self.toggle_archive(id, cx);
+            }
+        }
+        self.selected_chats.clear();
+        cx.notify();
+    }
+
+    /// Slice CL3: per-selected-chat pin state, honoring the pinned flag
+    /// of the list the chat actually sits in (main vs archive).
+    fn selected_chat_pin_states(&self) -> Vec<(ChatId, bool)> {
+        self.selected_chats
+            .iter()
+            .map(|&id| {
+                let pinned = self
+                    .session()
+                    .and_then(|s| s.chats.get(&id))
+                    .is_some_and(|chat| {
+                        if chat.in_archive {
+                            chat.archive_is_pinned
+                        } else {
+                            chat.is_pinned
+                        }
+                    });
+                (ChatId(id), pinned)
+            })
+            .collect()
     }
 
     /// Slice CL3: bulk delete — confirms first, like the single-chat
@@ -33075,8 +33141,9 @@ fn apply_ready_chat_list_menu(session: &mut Session, sink: &Arc<MemorySink>, seq
 /// Slice CL3: chat-list screenshot fixture — chat 11 (private) carries
 /// 2 unread mentions (the @ badge; the single-digit main counter hides
 /// per TGX `setCounter`), chat 12 (private) carries an unread reaction
-/// (the ♥ badge) and is muted so the badge dims, chat 11 is reportable
-/// and chat 12 is blocked so the row menu shows Report / Unblock user.
+/// (the ♥ badge) and is muted + blocked so the badge dims and its row
+/// menu offers Unblock. Chat 11 is reportable and unblocked, so the row
+/// menu (opened on chat 11) shows Report / Block user.
 /// All injected through the normal reducer, no live Telegram.
 fn apply_ready_chat_list_3(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
     let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();

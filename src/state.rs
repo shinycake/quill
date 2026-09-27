@@ -15079,6 +15079,21 @@ mod tests {
     }
 
     #[test]
+    fn cl3_is_unread_guards_bulk_mark_read() {
+        // CL3 review blocker: `mark_selected_read` skips chats with no
+        // unread state (the single-chat path is a genuine toggle — on a
+        // fully-read chat it would mark it *unread*).
+        let read = placeholder_chat(ChatId(11));
+        assert!(!read.is_unread());
+        let mut with_unread = placeholder_chat(ChatId(12));
+        with_unread.unread_count = 3;
+        assert!(with_unread.is_unread());
+        let mut marked = placeholder_chat(ChatId(13));
+        marked.is_marked_as_unread = true;
+        assert!(marked.is_unread());
+    }
+
+    #[test]
     fn cl1_clear_history_error_surfaces() {
         // Slice CL1: a refused `deleteChatHistory` surfaces in
         // `chat_action_error`.
