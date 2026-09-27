@@ -13844,15 +13844,14 @@ impl QuillApp {
                 Some(self.rights_editor_panel(dialog.chat_id, *user_id, *rights, cx))
             }
             AdminDialogKind::DemoteConfirm { user_id } => {
-                Some(self.demote_confirm_panel(dialog.chat_id, *user_id, cx))
+                Some(self.demote_confirm_panel(*user_id, cx))
             }
         }
     }
 
-    /// Phase D3b: 18 rights checkboxes bound to a toggle handler. `id_prefix`
-    /// namespaces the checkbox button IDs (`{id_prefix}-{index}`).
-    /// Phase D3b: 18 rights checkboxes for a dialog's staged rights.
-    /// `id_prefix` namespaces the button IDs (`{id_prefix}-{index}`).
+    /// Phase D3b: 18 rights checkboxes for a dialog's staged rights, bound
+    /// to a toggle handler. `id_prefix` namespaces the button IDs
+    /// (`{id_prefix}-{index}`).
     fn rights_checkboxes(
         &self,
         rights: &ChatAdminRights,
@@ -14198,13 +14197,7 @@ impl QuillApp {
     }
 
     /// Phase D3b: demote confirmation for one administrator.
-    fn demote_confirm_panel(
-        &self,
-        chat_id: ChatId,
-        user_id: i64,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let _ = chat_id;
+    fn demote_confirm_panel(&self, user_id: i64, cx: &mut Context<Self>) -> AnyElement {
         let name = self
             .session()
             .and_then(|session| session.user(user_id))

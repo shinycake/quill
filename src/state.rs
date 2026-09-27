@@ -9,19 +9,18 @@ use crate::telegram::client::OwnedEnvelope;
 use crate::telegram::envelope::CallState;
 use crate::telegram::envelope::{
     AnimationItem, AuthorizationState, BotCommand, BotInfo, CallbackQueryAnswer,
-    ChannelMemberStatus, ChatAction, ChatActiveStoriesView, ChatDraft, ChatFolderInfo,
-    ChatFolderSpec, ChatJoinResult, ChatKind, ChatList, ChatNotificationSettings,
-    ChatPositionUpdate, ChatStatistics, ConnectionState, EnvelopePayload, ErrorClass, ForumTopic,
-    InlineKeyboard, MessageAutoDelete, MessageContent, MessageForwardInfo, MessageInteractionInfo,
-    MessageOrigin, MessageReaction, MessageReplyTo, MessageSelfDestruct, MessageSender,
-    NotificationSettingsScope, NotificationSound, ParsedCall, ParsedChatInviteLink,
-    ParsedChatJoinRequest, ParsedChatMember, ParsedFile, ParsedGroupCall,
+    ChannelMemberStatus, ChatAction, ChatActiveStoriesView, ChatAdminRights,
+    ChatAdministratorEntry, ChatDraft, ChatFolderInfo, ChatFolderSpec, ChatJoinResult, ChatKind,
+    ChatList, ChatNotificationSettings, ChatPositionUpdate, ChatStatistics, ConnectionState,
+    EnvelopePayload, ErrorClass, ForumTopic, InlineKeyboard, MessageAutoDelete, MessageContent,
+    MessageForwardInfo, MessageInteractionInfo, MessageOrigin, MessageReaction, MessageReplyTo,
+    MessageSelfDestruct, MessageSender, NotificationSettingsScope, NotificationSound, ParsedCall,
+    ParsedChatInviteLink, ParsedChatJoinRequest, ParsedChatMember, ParsedFile, ParsedGroupCall,
     ParsedGroupCallParticipant, ParsedMessage, ParsedSecretChat, ParsedStory, ParsedUser,
     ParsedVideoChat, Poll, ReportOption, ReportSponsoredResult, ScopeNotificationSettings,
     SecretChatState, SponsoredMessage, StickerFormat, StickerItem, StickerSetInfo,
     StoryAvailableReactionView, StoryListView, TdError,
 };
-use crate::telegram::envelope::{ChatAdminRights, ChatAdministratorEntry};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Instant;
@@ -4195,6 +4194,12 @@ impl Session {
                 // instead of showing stale data. `accept_own_chat_member`
                 // also refreshes the viewer's own rights below.
                 self.admin_lists.remove(&chat_id.0);
+                // Phase D3b: per-admin rights for the changed member are
+                // stale too (e.g. after an edit-rights save) — drop them
+                // so the editor refetches instead of showing old rights.
+                if let MessageSender::User { user_id } = member.member_id {
+                    self.admin_rights.remove(&(chat_id.0, user_id));
+                }
                 self.accept_own_chat_member(chat_id, member);
             }
             EnvelopePayload::JoinChatResult(result) => {

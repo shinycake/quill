@@ -2928,6 +2928,18 @@ impl<S: JsonSender> ConnectDriver<S> {
         chat_id: ChatId,
         user_id: i64,
     ) -> Result<Option<RequestId>, ConnectSendError> {
+        // Phase D3b: the owner can never be demoted — the UI hides the
+        // action, but enforce it at the driver level too so no future
+        // caller can bypass it. Unknown/unloaded list → allow and let
+        // TDLib reject as the backstop.
+        let is_owner = matches!(
+            self.session.admin_lists.get(&chat_id.0),
+            Some(AdminListFetch::Loaded(list))
+                if list.iter().any(|e| e.user_id == user_id && e.is_owner)
+        );
+        if is_owner {
+            return Ok(None);
+        }
         let status = chat_member_status_member_json();
         self.send_set_chat_member_status(chat_id, user_id, MemberStatusChange::Demote, &status)
     }
