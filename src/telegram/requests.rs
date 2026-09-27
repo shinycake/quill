@@ -667,6 +667,83 @@ pub fn supergroup_members_filter_search_json(query: &str) -> Value {
     })
 }
 
+/// Phase D3c: `chatEventLogFilters` (TDLib 1.8.67,
+/// `schema/td_api.tl:7956`). Mirrors the schema field order exactly so a
+/// future slice can request filtered logs; Quill's event log always
+/// passes `null` (all event types — the schema's "pass null to get chat
+/// events of all types", line 15252).
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ChatEventLogFilterSet {
+    pub message_edits: bool,
+    pub message_deletions: bool,
+    pub message_pins: bool,
+    pub member_joins: bool,
+    pub member_leaves: bool,
+    pub member_invites: bool,
+    pub member_promotions: bool,
+    pub member_restrictions: bool,
+    pub member_tag_changes: bool,
+    pub info_changes: bool,
+    pub setting_changes: bool,
+    pub invite_link_changes: bool,
+    pub video_chat_changes: bool,
+    pub forum_changes: bool,
+    pub subscription_extensions: bool,
+}
+
+impl ChatEventLogFilterSet {
+    fn to_json(self) -> Value {
+        json!({
+            "@type": "chatEventLogFilters",
+            "message_edits": self.message_edits,
+            "message_deletions": self.message_deletions,
+            "message_pins": self.message_pins,
+            "member_joins": self.member_joins,
+            "member_leaves": self.member_leaves,
+            "member_invites": self.member_invites,
+            "member_promotions": self.member_promotions,
+            "member_restrictions": self.member_restrictions,
+            "member_tag_changes": self.member_tag_changes,
+            "info_changes": self.info_changes,
+            "setting_changes": self.setting_changes,
+            "invite_link_changes": self.invite_link_changes,
+            "video_chat_changes": self.video_chat_changes,
+            "forum_changes": self.forum_changes,
+            "subscription_extensions": self.subscription_extensions,
+        })
+    }
+}
+
+/// Phase D3c: `getChatEventLog` (TDLib 1.8.67, `schema/td_api.tl:15252`):
+/// `getChatEventLog chat_id:int53 query:string from_event_id:int64 limit:int32 filters:chatEventLogFilters user_ids:vector<int53> = ChatEvents;`
+/// "Returns a list of service actions taken by chat members and
+/// administrators in the last 48 hours. Available only in supergroups and
+/// channels. Requires administrator rights. Returns results in reverse
+/// chronological order (i.e., in order of decreasing event_id)".
+/// `from_event_id` 0 starts from the latest events; `filters` `None` is
+/// the schema's `null` = all event types.
+pub fn get_chat_event_log(
+    extra: RequestId,
+    chat_id: i64,
+    query: &str,
+    from_event_id: i64,
+    limit: i32,
+    filters: Option<ChatEventLogFilterSet>,
+    user_ids: &[i64],
+) -> String {
+    json!({
+        "@type": "getChatEventLog",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id,
+        "query": query,
+        "from_event_id": from_event_id,
+        "limit": limit,
+        "filters": filters.map(|set| set.to_json()).unwrap_or(Value::Null),
+        "user_ids": user_ids,
+    })
+    .to_string()
+}
+
 /// Phase B1: `createNewSecretChat` (TDLib 1.8.67, `schema/td_api.tl:13340`):
 /// `createNewSecretChat user_id:int53 = Chat;`
 /// "Creates a new secret chat. Returns the newly created chat". The new
@@ -2852,6 +2929,58 @@ mod tests {
 
         let recent = supergroup_members_filter_recent_json();
         assert_eq!(recent["@type"], "supergroupMembersFilterRecent");
+    }
+
+    #[test]
+    fn get_chat_event_log_shape_matches_1_8_67() {
+        // Phase D3c: `getChatEventLog chat_id:int53 query:string
+        // from_event_id:int64 limit:int32 filters:chatEventLogFilters
+        // user_ids:vector<int53> = ChatEvents;` (schema 1.8.67, line
+        // 15252). `filters: None` is the schema's `null` = all event
+        // types; a filter set serializes as `chatEventLogFilters`
+        // (line 7956) with every field present in schema order.
+        let json = get_chat_event_log(RequestId(75), 13, "", 0, 100, None, &[]);
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "getChatEventLog");
+        assert_eq!(v["@extra"], "75");
+        assert_eq!(v["chat_id"], 13);
+        assert_eq!(v["query"], "");
+        assert_eq!(v["from_event_id"], 0);
+        assert_eq!(v["limit"], 100);
+        assert_eq!(v["filters"], Value::Null);
+        assert_eq!(v["user_ids"].as_array().unwrap().len(), 0);
+
+        let filters = ChatEventLogFilterSet {
+            member_promotions: true,
+            invite_link_changes: true,
+            ..Default::default()
+        };
+        let json = get_chat_event_log(RequestId(76), 13, "", 42, 50, Some(filters), &[7]);
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["from_event_id"], 42);
+        assert_eq!(v["limit"], 50);
+        assert_eq!(v["filters"]["@type"], "chatEventLogFilters");
+        assert_eq!(v["filters"]["member_promotions"], true);
+        assert_eq!(v["filters"]["invite_link_changes"], true);
+        assert_eq!(v["filters"]["message_edits"], false);
+        // Every schema field of chatEventLogFilters must be present.
+        let schema = include_str!("../../schema/td_api.tl");
+        let filters_line = schema
+            .lines()
+            .find(|l| l.starts_with("chatEventLogFilters "))
+            .expect("chatEventLogFilters in schema");
+        for field in filters_line
+            .split_whitespace()
+            .skip(1)
+            .take_while(|token| !token.starts_with('='))
+        {
+            let name = field.split(':').next().unwrap();
+            assert!(
+                v["filters"][name].is_boolean(),
+                "missing filters field {name}"
+            );
+        }
+        assert_eq!(v["user_ids"], serde_json::json!([7]));
     }
 
     #[test]

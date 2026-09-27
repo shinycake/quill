@@ -36,24 +36,25 @@ use quill::poll::{
     POLL_OPTIONS_MAX, POLL_OPTIONS_MIN, PollDraft, poll_bar_fraction, voter_count_label,
 };
 use quill::state::{
-    ActiveCall, ActiveGroupCall, AdminListFetch, AdminRightsFetch, CallSummary, ChatSearchJump,
-    ChatStatisticsFetch, ChatSummary, ContactRow, ForwardResult, HistoryMessage, InfoPanelTarget,
-    InviteLinkFetch, JoinRequestFetch, OutboxReceipt, RequestPurpose, SearchStatus, Session,
-    SponsoredReportFlight, SupergroupMembersFetch, outgoing_status_label, unix_ms_now,
-    unread_badge_text,
+    ActiveCall, ActiveGroupCall, AdminListFetch, AdminRightsFetch, CallSummary, ChatEventLogFetch,
+    ChatSearchJump, ChatStatisticsFetch, ChatSummary, ContactRow, ForwardResult, HistoryMessage,
+    InfoPanelTarget, InviteLinkFetch, JoinRequestFetch, OutboxReceipt, RequestPurpose,
+    SearchStatus, Session, SponsoredReportFlight, SupergroupMembersFetch, event_log_relative_time,
+    outgoing_status_label, unix_ms_now, unread_badge_text,
 };
 use quill::story_viewer::{StoryViewer, StoryViewerItem, StoryViewerKind, collect_story_items};
 use quill::telegram::client::copy_and_parse;
 use quill::telegram::envelope::{
     AuthorizationState, BotInfo, CallState, CallbackQueryAnswer, ChannelMemberStatus,
-    ChatAdminRights, ChatAdministratorEntry, ChatDraft, ChatFolderInfo, ChatFolderSpec, ChatKind,
-    ChatList, ChatNotificationSettings, ChatStatistics, DEFAULT_EMOJI_REACTIONS, ForumTopic,
-    InlineKeyboardButton, InlineKeyboardButtonStyle, InlineKeyboardButtonType, MUTE_FOR_1_HOUR,
-    MUTE_FOR_2_DAYS, MUTE_FOR_8_HOURS, MUTE_FOREVER, MessageContent, MessageInteractionInfo,
-    MessageSender, NotificationSettingsScope, NotificationSound, ParsedFile,
-    ParsedGroupCallParticipant, ParsedSecretChat, ParsedStory, PollContent, PollOption, PollType,
-    ScopeNotificationSettings, SecretChatState, SponsoredMessage, StatisticalGraph,
-    StatisticalValue, chat_ttl_service_label, format_ttl_setting, toggle_chosen_emoji_reaction,
+    ChatAdminRights, ChatAdministratorEntry, ChatDraft, ChatEventAction, ChatFolderInfo,
+    ChatFolderSpec, ChatKind, ChatList, ChatNotificationSettings, ChatStatistics,
+    DEFAULT_EMOJI_REACTIONS, ForumTopic, InlineKeyboardButton, InlineKeyboardButtonStyle,
+    InlineKeyboardButtonType, MUTE_FOR_1_HOUR, MUTE_FOR_2_DAYS, MUTE_FOR_8_HOURS, MUTE_FOREVER,
+    MessageContent, MessageInteractionInfo, MessageSender, NotificationSettingsScope,
+    NotificationSound, ParsedChatEvent, ParsedFile, ParsedGroupCallParticipant, ParsedSecretChat,
+    ParsedStory, PollContent, PollOption, PollType, ScopeNotificationSettings, SecretChatState,
+    SponsoredMessage, StatisticalGraph, StatisticalValue, chat_ttl_service_label,
+    format_ttl_setting, toggle_chosen_emoji_reaction,
 };
 use quill::telegram::requests::SelfDestructSend;
 use quill::text::{TextEntity, styled_runs, utf8_to_utf16_offset};
@@ -875,6 +876,11 @@ pub enum ScreenshotDemo {
     /// picker, and the promote dialog open with a member selected, so
     /// the info-panel section and the rights checkboxes render directly.
     ReadyAdminManagement,
+    /// Phase D3c: synthetic admin-log surface (no live TDLib): the demo
+    /// channel (id 13) with the viewer as an administrator, plus a
+    /// loaded `chatEvents` fixture covering the handled action types, so
+    /// the info panel's "Recent actions" section renders directly.
+    ReadyAdminLog,
     /// Bot chat demo (injected, no live Telegram): private chat with a
     /// `userTypeBot` user (id 21), opened with history plus a cached
     /// `botInfo` (description + commands), so the bot panel renders under
@@ -1592,6 +1598,15 @@ impl QuillApp {
                     ConnectUiStatus::DemoReadyChats,
                     None,
                     "screenshot demo — admin management".into(),
+                    AuthorizationState::Ready,
+                )
+            }
+            Some(ScreenshotDemo::ReadyAdminLog) => {
+                demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
+                (
+                    ConnectUiStatus::DemoReadyChats,
+                    None,
+                    "screenshot demo — recent actions".into(),
                     AuthorizationState::Ready,
                 )
             }
@@ -2583,6 +2598,17 @@ impl QuillApp {
                 *selected_user = Some(5);
             }
             app.status_note = "screenshot demo — admin management".into();
+        }
+        // Phase D3c: admin-log fixture, then open the channel info panel
+        // (viewer 777 is an administrator, seeded by
+        // apply_ready_channels_admin).
+        if matches!(demo, Some(ScreenshotDemo::ReadyAdminLog)) {
+            if let Some(session) = app.demo_session.as_mut() {
+                app.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_admin_log(session, &app.demo_sink, &app.demo_seq);
+            }
+            app.open_info_panel_target(InfoPanelTarget::Supergroup(13), window, cx);
+            app.status_note = "screenshot demo — recent actions".into();
         }
         if matches!(demo, Some(ScreenshotDemo::ReadyBotChat)) {
             if let Some(session) = app.demo_session.as_mut() {
@@ -6258,6 +6284,37 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// Phase D3c: re-request the event log (bypasses the dedupe cache so
+    /// the Refresh button always hits the server).
+    fn refresh_event_log(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            match live.driver.refresh_chat_event_log(chat_id) {
+                Ok(_) => {}
+                Err(_) => {
+                    self.status_note = "could not refresh recent actions".into();
+                }
+            }
+        } else {
+            self.status_note = "recent actions need a live connection (demo)".into();
+        }
+        cx.notify();
+    }
+
+    /// Phase D3c: fetch the next older page of the event log.
+    fn load_more_event_log(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            match live.driver.fetch_chat_event_log_more(chat_id) {
+                Ok(_) => {}
+                Err(_) => {
+                    self.status_note = "could not load more actions".into();
+                }
+            }
+        } else {
+            self.status_note = "recent actions need a live connection (demo)".into();
+        }
+        cx.notify();
+    }
+
     /// Phase D3b: open the promote member picker for a chat. Fetches the
     /// first page of supergroup members; the rights checkboxes start
     /// with every right enabled.
@@ -7660,10 +7717,13 @@ impl QuillApp {
                         // Phase D3b: administrator list; the driver
                         // no-ops unless the viewer may manage admins
                         // (owner or `can_promote_members`).
+                        // Phase D3c: recent-actions log; the driver no-ops
+                        // unless the viewer is an administrator/creator.
                         for fetch in [
                             live.driver.fetch_chat_invite_links(chat_id).map(|_| ()),
                             live.driver.fetch_chat_join_requests(chat_id).map(|_| ()),
                             live.driver.fetch_chat_administrators(chat_id).map(|_| ()),
+                            live.driver.fetch_chat_event_log(chat_id).map(|_| ()),
                         ] {
                             if fetch.is_err() {
                                 result = fetch;
@@ -8179,6 +8239,9 @@ impl QuillApp {
         // Phase D3b: administrator management (owner / admins with
         // `can_promote_members` only; the section no-ops otherwise).
         body = body.child(self.administrators_section(chat_id, cx));
+        // Phase D3c: recent-actions admin log (administrators and the
+        // creator only; the section no-ops otherwise).
+        body = body.child(self.event_log_section(chat_id, cx));
         body.into_any_element()
     }
 
@@ -8690,6 +8753,289 @@ impl QuillApp {
                 );
         }
         row.into_any_element()
+    }
+
+    /// Phase D3c: "Recent actions" admin-log section for the channel/group
+    /// info panel. Shown only to administrators and the creator
+    /// (`Session::chat_can_view_event_log` — `getChatEventLog` "requires
+    /// administrator rights", schema 1.8.67 line 15252). Honest states:
+    /// loading / failed-with-retry / loaded rows with actor name, action
+    /// description, and relative timestamp, plus "Load more" while older
+    /// pages exist. Unhandled event types render as generic rows — never
+    /// faked details.
+    fn event_log_section(&self, chat_id: ChatId, cx: &mut Context<Self>) -> AnyElement {
+        if !self
+            .session()
+            .is_some_and(|session| session.chat_can_view_event_log(chat_id))
+        {
+            return div().into_any_element();
+        }
+        let fetch = self
+            .session()
+            .and_then(|session| session.event_logs.get(&chat_id.0))
+            .cloned();
+        let mut section = div()
+            .id("event-log-section")
+            .flex()
+            .flex_col()
+            .w_full()
+            .gap_1()
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .w_full()
+                    .gap_1()
+                    .child(
+                        div()
+                            .text_xs()
+                            .font_semibold()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("Recent actions"),
+                    )
+                    .child(div().flex_1())
+                    .child(
+                        Button::new("event-log-refresh")
+                            .label("Refresh")
+                            .ghost()
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.refresh_event_log(chat_id, cx);
+                            })),
+                    ),
+            );
+        match fetch {
+            None | Some(ChatEventLogFetch::Loading) => {
+                section = section.child(
+                    div()
+                        .text_sm()
+                        .text_color(cx.theme().muted_foreground)
+                        .child("Loading recent actions…"),
+                );
+            }
+            Some(ChatEventLogFetch::Failed(message)) => {
+                section = section.child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .w_full()
+                        .gap_1()
+                        .child(
+                            div()
+                                .flex_1()
+                                .text_sm()
+                                .text_color(cx.theme().muted_foreground)
+                                .child(message),
+                        )
+                        .child(
+                            Button::new("event-log-retry")
+                                .label("Retry")
+                                .ghost()
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.refresh_event_log(chat_id, cx);
+                                })),
+                        ),
+                );
+            }
+            Some(ChatEventLogFetch::Loaded(page)) => {
+                if page.events.is_empty() {
+                    section = section.child(
+                        div()
+                            .text_sm()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("No recent actions."),
+                    );
+                } else {
+                    for event in &page.events {
+                        section = section.child(self.event_log_row(event, cx));
+                    }
+                    if page.has_more {
+                        section = section.child(
+                            Button::new("event-log-load-more")
+                                .label("Load more")
+                                .ghost()
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.load_more_event_log(chat_id, cx);
+                                })),
+                        );
+                    }
+                }
+            }
+        }
+        section.into_any_element()
+    }
+
+    /// Phase D3c: one admin-log row — actor name, action description, and
+    /// relative timestamp.
+    fn event_log_row(&self, event: &ParsedChatEvent, cx: &mut Context<Self>) -> AnyElement {
+        let actor = self.group_call_participant_name(&event.member_id);
+        let description = self.event_log_action_description(event);
+        div()
+            .id(("event-log-row", event.id as u64))
+            .flex()
+            .w_full()
+            .gap_2()
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .flex_1()
+                    .gap_1()
+                    .child(div().text_sm().child(actor))
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(description),
+                    ),
+            )
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(event_log_relative_time(event.date)),
+            )
+            .into_any_element()
+    }
+
+    /// Phase D3c: human description of an admin-log action. Every string
+    /// is built only from parsed fields; unhandled constructors render
+    /// the honest generic "performed an action".
+    fn event_log_action_description(&self, event: &ParsedChatEvent) -> String {
+        let user_name = |user_id: i64| {
+            self.session()
+                .and_then(|session| session.user(user_id))
+                .map(|user| user.display_name())
+                .unwrap_or_else(|| format!("User {user_id}"))
+        };
+        let sender_name = |sender: &MessageSender| match sender {
+            MessageSender::User { user_id } => user_name(*user_id),
+            MessageSender::Chat { chat_id } => self
+                .session()
+                .and_then(|session| session.chats.get(chat_id))
+                .map(|chat| chat.title.clone())
+                .unwrap_or_else(|| format!("Chat {chat_id}")),
+        };
+        // Short quoted excerpt; long titles/descriptions are cut rather
+        // than wrapping the row.
+        let quote = |text: &str| {
+            let mut short: String = text.chars().take(60).collect();
+            if text.chars().count() > 60 {
+                short.push('…');
+            }
+            format!("\"{short}\"")
+        };
+        let with_text = |verb: &str, text: &str| {
+            if text.is_empty() {
+                verb.to_owned()
+            } else {
+                format!("{verb} {}", quote(text))
+            }
+        };
+        match &event.action {
+            ChatEventAction::MessageEdited { text, .. } => with_text("edited a message", text),
+            ChatEventAction::MessageDeleted { text, .. } => with_text("deleted a message", text),
+            ChatEventAction::MessagePinned { text, .. } => with_text("pinned a message", text),
+            ChatEventAction::MessageUnpinned { text, .. } => with_text("unpinned a message", text),
+            ChatEventAction::MemberJoined => "joined the chat".to_owned(),
+            ChatEventAction::MemberJoinedByInviteLink {
+                invite_link_name, ..
+            } => {
+                if invite_link_name.is_empty() {
+                    "joined via an invite link".to_owned()
+                } else {
+                    format!("joined via invite link {}", quote(invite_link_name))
+                }
+            }
+            ChatEventAction::MemberJoinedByRequest {
+                approver_user_id, ..
+            } => {
+                if *approver_user_id == 0 {
+                    "joined via an approved join request".to_owned()
+                } else {
+                    format!("join request approved by {}", user_name(*approver_user_id))
+                }
+            }
+            ChatEventAction::MemberInvited { user_id, .. } => {
+                format!("invited {}", user_name(*user_id))
+            }
+            ChatEventAction::MemberPromoted {
+                user_id,
+                old_status,
+                new_status,
+            } => {
+                let name = user_name(*user_id);
+                match (old_status, new_status) {
+                    (_, ChannelMemberStatus::Creator) => {
+                        format!("transferred ownership to {name}")
+                    }
+                    (_, ChannelMemberStatus::Administrator) => {
+                        format!("promoted {name} to administrator")
+                    }
+                    (ChannelMemberStatus::Administrator, ChannelMemberStatus::Member) => {
+                        format!("removed {name} as administrator")
+                    }
+                    _ => format!("changed {name}'s role"),
+                }
+            }
+            ChatEventAction::MemberRestricted {
+                member_id,
+                old_status,
+                new_status,
+            } => {
+                let name = sender_name(member_id);
+                match (old_status, new_status) {
+                    (_, ChannelMemberStatus::Banned) => format!("banned {name}"),
+                    (_, ChannelMemberStatus::Restricted) => format!("restricted {name}"),
+                    (ChannelMemberStatus::Banned, _) => format!("unbanned {name}"),
+                    (ChannelMemberStatus::Restricted, _) => {
+                        format!("lifted restrictions on {name}")
+                    }
+                    _ => format!("changed {name}'s restrictions"),
+                }
+            }
+            ChatEventAction::DescriptionChanged {
+                new_description, ..
+            } => {
+                if new_description.is_empty() {
+                    "cleared the description".to_owned()
+                } else {
+                    format!("changed the description to {}", quote(new_description))
+                }
+            }
+            ChatEventAction::PhotoChanged => "changed the chat photo".to_owned(),
+            ChatEventAction::TitleChanged { new_title, .. } => {
+                format!("changed the title to {}", quote(new_title))
+            }
+            ChatEventAction::InviteLinkEdited {
+                old_name, new_name, ..
+            } => {
+                let name = if new_name.is_empty() {
+                    old_name
+                } else {
+                    new_name
+                };
+                if name.is_empty() {
+                    "edited an invite link".to_owned()
+                } else {
+                    format!("edited invite link {}", quote(name))
+                }
+            }
+            ChatEventAction::InviteLinkRevoked { name, .. } => {
+                if name.is_empty() {
+                    "revoked an invite link".to_owned()
+                } else {
+                    format!("revoked invite link {}", quote(name))
+                }
+            }
+            ChatEventAction::InviteLinkDeleted { name, .. } => {
+                if name.is_empty() {
+                    "deleted an invite link".to_owned()
+                } else {
+                    format!("deleted invite link {}", quote(name))
+                }
+            }
+            ChatEventAction::Unsupported { .. } => "performed an action".to_owned(),
+        }
     }
 
     /// Phase D2: the channel/group statistics view (`getChatStatistics`,
@@ -19119,6 +19465,137 @@ fn apply_ready_admin_management(session: &mut Session, sink: &Arc<MemorySink>, s
         format!(
             r#"{{"@type":"chatMembers","@extra":"{}","total_count":2,"members":[{{"@type":"chatMember","member_id":{{"@type":"messageSenderUser","user_id":5}},"tag":"","inviter_user_id":0,"joined_chat_date":0,"status":{{"@type":"chatMemberStatusMember"}}}},{{"@type":"chatMember","member_id":{{"@type":"messageSenderUser","user_id":6}},"tag":"","inviter_user_id":0,"joined_chat_date":0,"status":{{"@type":"chatMemberStatusMember"}}}}]}}"#,
             members_extra.0
+        ),
+    ];
+    for json in jsons {
+        if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
+            session.apply(owned);
+        }
+    }
+}
+
+/// `ReadyAdminLog` fixture (Phase D3c): like `apply_ready_channels_admin`
+/// (chat 13, viewer 777 is an administrator), plus `updateUser` rows for
+/// the actors/targets and a `chatEvents` response through the real
+/// reducer paths. Event timestamps are relative to capture time so the
+/// rows show "just now" / "Nm ago". Covers the handled action types
+/// plus one unhandled (`chatEventMemberLeft`) rendering as a generic row.
+fn apply_ready_admin_log(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
+    apply_ready_channels_admin(session, sink, seq);
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let log_extra = session.request(
+        RequestPurpose::GetChatEventLog { from_event_id: 0 },
+        Some(ChatId(13)),
+    );
+    let user = |id: i64, first: &str, last: &str| {
+        format!(
+            r#"{{"@type":"updateUser","user":{{"@type":"user","id":{id},"first_name":"{first}","last_name":"{last}","usernames":null,"phone_number":"","status":null,"profile_photo":null,"is_contact":false,"is_mutual_contact":false,"is_close_friend":false,"is_verified":false,"is_premium":false,"is_support":false,"restriction_reason":"","is_scam":false,"is_fake":false,"is_bot":false,"type":{{"@type":"userTypeRegular"}}}}}}"#
+        )
+    };
+    let now = unix_ms_now() / 1000;
+    let date = |minutes_ago: u64| now - minutes_ago * 60;
+    let sender = |id: i64| format!(r#"{{"@type":"messageSenderUser","user_id":{id}}}"#);
+    let link = |url: &str, name: &str| {
+        format!(
+            r#"{{"@type":"chatInviteLink","invite_link":"{url}","name":"{name}","creator_user_id":777,"date":1700000000,"edit_date":0,"expiration_date":0,"member_limit":0,"member_count":0,"expired_member_count":0,"pending_join_request_count":0,"creates_join_request":false,"is_primary":false,"is_revoked":false}}"#
+        )
+    };
+    let event = |id: i64, minutes_ago: u64, actor: i64, action: &str| {
+        format!(
+            r#"{{"@type":"chatEvent","id":{id},"date":{},"member_id":{},"action":{}}}"#,
+            date(minutes_ago),
+            sender(actor),
+            action
+        )
+    };
+    let member_status = r#"{"@type":"chatMemberStatusMember","member_until_date":0}"#;
+    let admin_status = r#"{"@type":"chatMemberStatusAdministrator","can_be_edited":true}"#;
+    let restricted_status = r#"{"@type":"chatMemberStatusRestricted"}"#;
+    let events = [
+        event(
+            901,
+            2,
+            1,
+            &format!(
+                r#"{{"@type":"chatEventMemberPromoted","user_id":2,"old_status":{member_status},"new_status":{admin_status}}}"#
+            ),
+        ),
+        event(
+            902,
+            9,
+            777,
+            r#"{"@type":"chatEventTitleChanged","old_title":"Demo channel","new_title":"Demo channel — news"}"#,
+        ),
+        event(
+            903,
+            21,
+            1,
+            &format!(
+                r#"{{"@type":"chatEventMemberRestricted","member_id":{},"old_status":{member_status},"new_status":{restricted_status}}}"#,
+                sender(6)
+            ),
+        ),
+        event(
+            904,
+            35,
+            5,
+            &format!(
+                r#"{{"@type":"chatEventMemberJoinedByInviteLink","invite_link":{},"via_chat_folder_invite_link":false}}"#,
+                link("https://t.me/+mods", "Mods")
+            ),
+        ),
+        event(
+            905,
+            58,
+            777,
+            r#"{"@type":"chatEventMessagePinned","message":{"id":201,"chat_id":13,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"Broadcast one — channel post from the channel itself.","entities":[]}}}}"#,
+        ),
+        event(
+            906,
+            95,
+            777,
+            &format!(
+                r#"{{"@type":"chatEventInviteLinkRevoked","invite_link":{}}}"#,
+                link("https://t.me/+old", "Old campaign")
+            ),
+        ),
+        event(
+            907,
+            130,
+            1,
+            r#"{"@type":"chatEventDescriptionChanged","old_description":"","new_description":"Daily news, no noise."}"#,
+        ),
+        event(
+            908,
+            180,
+            777,
+            &format!(
+                r#"{{"@type":"chatEventMemberInvited","user_id":6,"status":{member_status}}}"#
+            ),
+        ),
+        event(
+            909,
+            240,
+            6,
+            r#"{"@type":"chatEventMemberLeft"}"#,
+        ),
+        event(
+            910,
+            400,
+            777,
+            r#"{"@type":"chatEventPhotoChanged","old_photo":{"@type":"chatPhoto"},"new_photo":{"@type":"chatPhoto"}}"#,
+        ),
+    ]
+    .join(",");
+    let jsons = [
+        user(777, "Demo", "Viewer"),
+        user(1, "Idan", "Founder"),
+        user(2, "Dana", "Levi"),
+        user(5, "Omar", "Haddad"),
+        user(6, "Maya", "Sharon"),
+        format!(
+            r#"{{"@type":"chatEvents","@extra":"{}","events":[{events}]}}"#,
+            log_extra.0
         ),
     ];
     for json in jsons {

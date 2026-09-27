@@ -15,11 +15,11 @@ use crate::telegram::envelope::{
     EnvelopePayload, ErrorClass, ForumTopic, InlineKeyboard, MessageAutoDelete, MessageContent,
     MessageForwardInfo, MessageInteractionInfo, MessageOrigin, MessageReaction, MessageReplyTo,
     MessageSelfDestruct, MessageSender, NotificationSettingsScope, NotificationSound, ParsedCall,
-    ParsedChatInviteLink, ParsedChatJoinRequest, ParsedChatMember, ParsedFile, ParsedGroupCall,
-    ParsedGroupCallParticipant, ParsedMessage, ParsedSecretChat, ParsedStory, ParsedUser,
-    ParsedVideoChat, Poll, ReportOption, ReportSponsoredResult, ScopeNotificationSettings,
-    SecretChatState, SponsoredMessage, StickerFormat, StickerItem, StickerSetInfo,
-    StoryAvailableReactionView, StoryListView, TdError,
+    ParsedChatEvent, ParsedChatInviteLink, ParsedChatJoinRequest, ParsedChatMember, ParsedFile,
+    ParsedGroupCall, ParsedGroupCallParticipant, ParsedMessage, ParsedSecretChat, ParsedStory,
+    ParsedUser, ParsedVideoChat, Poll, ReportOption, ReportSponsoredResult,
+    ScopeNotificationSettings, SecretChatState, SponsoredMessage, StickerFormat, StickerItem,
+    StickerSetInfo, StoryAvailableReactionView, StoryListView, TdError,
 };
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
@@ -214,6 +214,13 @@ pub enum RequestPurpose {
     /// Phase D3b: `getSupergroupMembers` for the promote member picker.
     /// Response is `chatMembers`; correlated via `PendingRequest::chat_id`.
     GetSupergroupMembers,
+    /// Phase D3c: `getChatEventLog`. Response is `chatEvents`; correlated
+    /// via `PendingRequest::chat_id`. `from_event_id` is the paging
+    /// cursor: 0 replaces the cached page, a nonzero id appends the
+    /// older page to it.
+    GetChatEventLog {
+        from_event_id: i64,
+    },
     /// Phase A1: `setChatSlowModeDelay`. Response is `ok`; the new delay
     /// arrives via `updateSupergroupFullInfo`.
     SetChatSlowModeDelay,
@@ -749,6 +756,17 @@ impl RequestRegistry {
             .any(|p| p.purpose == purpose && p.chat_id == Some(chat_id))
     }
 
+    /// Phase D3c: whether any `getChatEventLog` request is in flight for
+    /// the chat, whatever its paging cursor. `has_purpose_for_chat`
+    /// compares the full purpose (including `from_event_id`), so it
+    /// cannot dedup across pages.
+    pub fn has_event_log_in_flight(&self, chat_id: ChatId) -> bool {
+        self.pending.values().any(|p| {
+            matches!(p.purpose, RequestPurpose::GetChatEventLog { .. })
+                && p.chat_id == Some(chat_id)
+        })
+    }
+
     /// Mutable access to a pending request (parity slice: stamping
     /// `PendingRequest::scope` after `register`).
     pub fn pending_mut(&mut self, id: RequestId) -> Option<&mut PendingRequest> {
@@ -1063,6 +1081,20 @@ impl ChatSummary {
             }
             _ => false,
         }
+    }
+
+    /// Phase D3c: whether the current user is the creator or an
+    /// administrator of this chat (own membership, probed via
+    /// `getChatMember`). Unlike `can_manage_admins` (D3b, which needs the
+    /// explicit `can_promote_members` right) and `can_invite_users`
+    /// (D3a, `can_invite_users`), the event log requires only
+    /// administrator rights (schema 1.8.67, line 15252), so any
+    /// administrator qualifies. Unknown status keeps the gate closed.
+    pub fn is_admin_or_creator(&self) -> bool {
+        matches!(
+            self.my_member_status,
+            Some(ChannelMemberStatus::Creator | ChannelMemberStatus::Administrator)
+        )
     }
 
     /// Phase D3b: record `rights.can_promote_members` (`None` for
@@ -2338,6 +2370,8 @@ pub struct Session {
     /// (schema 1.8.67, line 10555). The full request list still needs
     /// `getChatJoinRequests`; this is only the badge count.
     pub pending_join_request_counts: HashMap<i64, i32>,
+    /// Phase D3c: `getChatEventLog` fetch state, keyed by chat id.
+    pub event_logs: HashMap<i64, ChatEventLogFetch>,
     /// Parity slice: first active username per supergroup (`supergroup`
     /// object / `updateSupergroup`, schema 1.8.67 line 2746), keyed by
     /// supergroup id. Feeds the channel/supergroup header's @username.
@@ -2547,6 +2581,62 @@ pub enum SupergroupMembersFetch {
     Failed(String),
 }
 
+/// Phase D3c: `getChatEventLog` page size (schema 1.8.67, line 15252:
+/// "up to 100"). Shared by the driver and the `has_more` heuristic in
+/// `Session::apply` — a short page means the log is exhausted.
+pub const CHAT_EVENT_LOG_PAGE_SIZE: i32 = 100;
+
+/// Phase D3c: fetch state for one chat's `getChatEventLog` result
+/// (schema 1.8.67, line 15252). Keyed by chat id. `Loading` is the
+/// in-flight guard — the driver never sends a second request while one
+/// is outstanding.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ChatEventLogFetch {
+    Loading,
+    Loaded(ChatEventLogPage),
+    Failed(String),
+}
+
+/// Phase D3c: one cached `getChatEventLog` result. Events arrive in
+/// reverse chronological order (decreasing event `id`, schema 1.8.67,
+/// line 15252); pages append older events, deduped by event id.
+/// `has_more` is true when the last page was full — an older page is
+/// worth requesting.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct ChatEventLogPage {
+    pub events: Vec<ParsedChatEvent>,
+    pub has_more: bool,
+}
+
+/// Phase D3c: relative timestamp for admin-log rows. The log only
+/// covers the last 48 hours (schema 1.8.67, line 15252), so relative
+/// forms are always meaningful; no date crate is pulled in for this.
+/// Pure in `now_unix` for tests. `pub` (not `pub(crate)`) because the
+/// `ui` module is built against the lib as an external crate.
+pub fn event_log_relative_time_for(date_unix: i32, now_unix: i64) -> String {
+    let age = now_unix.saturating_sub(i64::from(date_unix));
+    if age < 60 {
+        "just now".to_owned()
+    } else if age < 3600 {
+        format!("{}m ago", age / 60)
+    } else if age < 86_400 {
+        format!("{}h ago", age / 3600)
+    } else {
+        format!("{}d ago", age / 86_400)
+    }
+}
+
+/// Phase D3c: relative timestamp for admin-log rows, against the
+/// current wall clock. `pub` (not `pub(crate)`) because the `ui` module
+/// is built against the lib as an external crate.
+pub fn event_log_relative_time(date_unix: i32) -> String {
+    let now_unix = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    event_log_relative_time_for(date_unix, now_unix)
+}
+
 /// Phase A1: wall-clock milliseconds. Used to timestamp
 /// `supergroupFullInfo` arrivals so the slow-mode expiry decays locally.
 pub fn unix_ms_now() -> u64 {
@@ -2645,6 +2735,7 @@ impl Session {
             invite_links: HashMap::new(),
             join_requests: HashMap::new(),
             pending_join_request_counts: HashMap::new(),
+            event_logs: HashMap::new(),
             supergroup_usernames: HashMap::new(),
             supergroup_member_status: HashMap::new(),
             supergroup_restrict_right: HashMap::new(),
@@ -2848,6 +2939,33 @@ impl Session {
                 self.supergroup_own_status(supergroup_id) == Some(ChannelMemberStatus::Creator)
                     || self.supergroup_can_promote_members(supergroup_id)
             }
+            _ => false,
+        }
+    }
+
+    /// Phase D3c: admin-log gate for a chat. `getChatEventLog` "requires
+    /// administrator rights" and is "available only in supergroups and
+    /// channels" (schema 1.8.67, line 15252). Deny-by-default, following
+    /// the D3b `chat_can_manage_admins` pattern: the `ChatSummary` path
+    /// covers channels (own membership probed via `getChatMember`);
+    /// supergroups carry own admin status on the `updateSupergroup` /
+    /// `getSupergroup` status block instead. Unlike admin management
+    /// (which needs the explicit `can_promote_members` right), any
+    /// administrator or the creator may view the log. Unknown/absent
+    /// status keeps the section hidden and the request unsent rather
+    /// than fabricating a right.
+    pub fn chat_can_view_event_log(&self, chat_id: ChatId) -> bool {
+        let Some(chat) = self.chats.get(&chat_id.0) else {
+            return false;
+        };
+        if chat.is_admin_or_creator() {
+            return true;
+        }
+        match chat.kind {
+            ChatKind::Supergroup { supergroup_id, .. } => matches!(
+                self.supergroup_own_status(supergroup_id),
+                Some(ChannelMemberStatus::Creator | ChannelMemberStatus::Administrator)
+            ),
             _ => false,
         }
     }
@@ -3339,6 +3457,40 @@ impl Session {
                             members,
                             total_count,
                         },
+                    );
+                }
+            }
+            // Phase D3c: `getChatEventLog` answer — a first page (cursor
+            // 0) replaces the cache; an older page appends, deduped by
+            // event id, keeping reverse-chronological order (decreasing
+            // event id, schema 1.8.67 line 15252). A full page sets
+            // `has_more`; a short page exhausts the log.
+            EnvelopePayload::ChatEvents { events } => {
+                if let Some(pending) = pending
+                    && let RequestPurpose::GetChatEventLog { from_event_id } = pending.purpose
+                    && let Some(chat_id) = pending.chat_id
+                {
+                    let has_more = events.len() as i32 >= CHAT_EVENT_LOG_PAGE_SIZE;
+                    let mut merged = match (from_event_id, self.event_logs.get(&chat_id.0)) {
+                        (0, _) => events,
+                        (_, Some(ChatEventLogFetch::Loaded(page))) => {
+                            let mut merged = page.events.clone();
+                            for event in events {
+                                if !merged.iter().any(|old| old.id == event.id) {
+                                    merged.push(event);
+                                }
+                            }
+                            merged
+                        }
+                        _ => events,
+                    };
+                    merged.sort_by_key(|event| std::cmp::Reverse(event.id));
+                    self.event_logs.insert(
+                        chat_id.0,
+                        ChatEventLogFetch::Loaded(ChatEventLogPage {
+                            events: merged,
+                            has_more,
+                        }),
                     );
                 }
             }
@@ -4541,6 +4693,27 @@ impl Session {
                                 SupergroupMembersFetch::Failed(call_request_error_line(
                                     &err,
                                     "Could not load members",
+                                )),
+                            );
+                        }
+                    }
+                    // Phase D3c: a failed first page lands in the fetch
+                    // state so the panel shows an honest error instead of
+                    // spinning forever. A failed "load more" keeps the
+                    // already-loaded page so the button stays retryable.
+                    Some(RequestPurpose::GetChatEventLog { from_event_id }) => {
+                        if let Some(chat_id) = pending.and_then(|p| p.chat_id)
+                            && (from_event_id == 0
+                                || !matches!(
+                                    self.event_logs.get(&chat_id.0),
+                                    Some(ChatEventLogFetch::Loaded(_))
+                                ))
+                        {
+                            self.event_logs.insert(
+                                chat_id.0,
+                                ChatEventLogFetch::Failed(call_request_error_line(
+                                    &err,
+                                    "Could not load recent actions",
                                 )),
                             );
                         }
@@ -10610,6 +10783,244 @@ mod tests {
 
         session.supergroup_promote_right.insert(15, false);
         assert!(!session.chat_can_manage_admins(ChatId(15)));
+    }
+
+    #[test]
+    fn event_log_gate() {
+        // Phase D3c: the event-log gate is deny-by-default. Any
+        // administrator or the creator qualifies (no `can_promote_members`
+        // right needed, unlike D3b): channels probe via the ChatSummary
+        // path (`getChatMember`), supergroups via the status block.
+        let (mut session, _) = session();
+
+        assert!(!session.chat_can_view_event_log(ChatId(999)));
+
+        let mut channel = placeholder_chat(ChatId(13));
+        channel.kind = ChatKind::Supergroup {
+            supergroup_id: 13,
+            is_channel: true,
+        };
+        session.chats.insert(13, channel);
+        assert!(!session.chat_can_view_event_log(ChatId(13)));
+
+        session
+            .chats
+            .get_mut(&13)
+            .unwrap()
+            .set_member_status(ChannelMemberStatus::Administrator, None);
+        assert!(session.chat_can_view_event_log(ChatId(13)));
+
+        // An admin without the promote right still qualifies for the log.
+        session
+            .chats
+            .get_mut(&13)
+            .unwrap()
+            .set_admin_can_promote_members(Some(false));
+        assert!(session.chat_can_view_event_log(ChatId(13)));
+
+        session
+            .chats
+            .get_mut(&13)
+            .unwrap()
+            .set_member_status(ChannelMemberStatus::Creator, None);
+        assert!(session.chat_can_view_event_log(ChatId(13)));
+
+        session
+            .chats
+            .get_mut(&13)
+            .unwrap()
+            .set_member_status(ChannelMemberStatus::Member, None);
+        assert!(!session.chat_can_view_event_log(ChatId(13)));
+
+        // Non-channel supergroup path: administrator without promote right.
+        let mut group = placeholder_chat(ChatId(14));
+        group.kind = ChatKind::Supergroup {
+            supergroup_id: 14,
+            is_channel: false,
+        };
+        session.chats.insert(14, group);
+        assert!(!session.chat_can_view_event_log(ChatId(14)));
+        session
+            .supergroup_member_status
+            .insert(14, ChannelMemberStatus::Administrator);
+        assert!(session.chat_can_view_event_log(ChatId(14)));
+
+        // Other chat kinds never qualify.
+        let private = placeholder_chat(ChatId(15));
+        session.chats.insert(15, private);
+        assert!(!session.chat_can_view_event_log(ChatId(15)));
+    }
+
+    #[test]
+    fn event_log_fetch_replaces_appends_and_dedups() {
+        // Phase D3c: a first page replaces the cache; older pages append
+        // in decreasing id order with duplicates dropped; a full page
+        // sets `has_more`, a short one clears it.
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        let event = |id: i64| {
+            format!(
+                r#"{{"@type":"chatEvent","id":{id},"date":1700000000,"member_id":{{"@type":"messageSenderUser","user_id":777}},"action":{{"@type":"chatEventMemberJoined"}}}}"#
+            )
+        };
+        let page = |extra: u64, ids: &[i64]| {
+            format!(
+                r#"{{"@type":"chatEvents","@extra":"{extra}","events":[{}]}}"#,
+                ids.iter()
+                    .map(|id| event(*id))
+                    .collect::<Vec<_>>()
+                    .join(",")
+            )
+        };
+
+        let extra = session.request(
+            RequestPurpose::GetChatEventLog { from_event_id: 0 },
+            Some(ChatId(13)),
+        );
+        apply_json(&mut session, &seq, &sink, &page(extra.0, &[300, 299]));
+        let ChatEventLogFetch::Loaded(loaded) = session.event_logs.get(&13).expect("log loaded")
+        else {
+            panic!("expected loaded event log");
+        };
+        assert_eq!(
+            loaded.events.iter().map(|e| e.id).collect::<Vec<_>>(),
+            vec![300, 299]
+        );
+        assert!(!loaded.has_more);
+
+        // Older page appends; the overlapping id dedupes; a full page
+        // (100 events) keeps `has_more`.
+        let full: Vec<i64> = (200..300).rev().collect();
+        let extra = session.request(
+            RequestPurpose::GetChatEventLog { from_event_id: 299 },
+            Some(ChatId(13)),
+        );
+        apply_json(&mut session, &seq, &sink, &page(extra.0, &full));
+        let ChatEventLogFetch::Loaded(loaded) = session.event_logs.get(&13).expect("log loaded")
+        else {
+            panic!("expected loaded event log");
+        };
+        let ids: Vec<i64> = loaded.events.iter().map(|e| e.id).collect();
+        assert_eq!(ids.len(), 101);
+        assert_eq!(ids[0], 300);
+        assert_eq!(ids[100], 200);
+        assert!(loaded.has_more);
+
+        // A short final page clears `has_more`.
+        let extra = session.request(
+            RequestPurpose::GetChatEventLog { from_event_id: 200 },
+            Some(ChatId(13)),
+        );
+        apply_json(&mut session, &seq, &sink, &page(extra.0, &[199]));
+        let ChatEventLogFetch::Loaded(loaded) = session.event_logs.get(&13).expect("log loaded")
+        else {
+            panic!("expected loaded event log");
+        };
+        assert_eq!(loaded.events.len(), 102);
+        assert!(!loaded.has_more);
+
+        // A first-page refetch replaces everything (refresh semantics).
+        let extra = session.request(
+            RequestPurpose::GetChatEventLog { from_event_id: 0 },
+            Some(ChatId(13)),
+        );
+        apply_json(&mut session, &seq, &sink, &page(extra.0, &[500]));
+        let ChatEventLogFetch::Loaded(loaded) = session.event_logs.get(&13).expect("log loaded")
+        else {
+            panic!("expected loaded event log");
+        };
+        assert_eq!(
+            loaded.events.iter().map(|e| e.id).collect::<Vec<_>>(),
+            vec![500]
+        );
+    }
+
+    #[test]
+    fn event_log_failure_states() {
+        // Phase D3c: a failed first page becomes `Failed`; a failed
+        // "load more" keeps the loaded page so the retry button stays.
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+
+        let extra = session.request(
+            RequestPurpose::GetChatEventLog { from_event_id: 0 },
+            Some(ChatId(13)),
+        );
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"error","@extra":"{}","code":400,"message":"CHAT_ADMIN_REQUIRED"}}"#,
+                extra.0
+            ),
+        );
+        let ChatEventLogFetch::Failed(message) = session.event_logs.get(&13).expect("log failed")
+        else {
+            panic!("expected failed event log");
+        };
+        assert!(message.contains("Could not load recent actions"));
+
+        // Load one page, then fail the older page: the loaded page stays.
+        let extra = session.request(
+            RequestPurpose::GetChatEventLog { from_event_id: 0 },
+            Some(ChatId(13)),
+        );
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"chatEvents","@extra":"{}","events":[{{"@type":"chatEvent","id":50,"date":1700000000,"member_id":{{"@type":"messageSenderUser","user_id":777}},"action":{{"@type":"chatEventMemberJoined"}}}}]}}"#,
+                extra.0
+            ),
+        );
+        let extra = session.request(
+            RequestPurpose::GetChatEventLog { from_event_id: 50 },
+            Some(ChatId(13)),
+        );
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"error","@extra":"{}","code":500,"message":"INTERNAL"}}"#,
+                extra.0
+            ),
+        );
+        let ChatEventLogFetch::Loaded(loaded) = session.event_logs.get(&13).expect("log loaded")
+        else {
+            panic!("expected loaded event log");
+        };
+        assert_eq!(loaded.events.len(), 1);
+    }
+
+    #[test]
+    fn event_log_relative_time_buckets() {
+        // Phase D3c: the log only covers 48h, so relative buckets suffice.
+        let now = 1_700_000_000i64;
+        assert_eq!(event_log_relative_time_for(now as i32 - 5, now), "just now");
+        assert_eq!(event_log_relative_time_for(now as i32 - 90, now), "1m ago");
+        assert_eq!(
+            event_log_relative_time_for(now as i32 - 3599, now),
+            "59m ago"
+        );
+        assert_eq!(
+            event_log_relative_time_for(now as i32 - 3600, now),
+            "1h ago"
+        );
+        assert_eq!(
+            event_log_relative_time_for(now as i32 - 86_399, now),
+            "23h ago"
+        );
+        assert_eq!(
+            event_log_relative_time_for(now as i32 - 86_400, now),
+            "1d ago"
+        );
+        assert_eq!(
+            event_log_relative_time_for(now as i32 - 172_800, now),
+            "2d ago"
+        );
     }
 
     #[test]
