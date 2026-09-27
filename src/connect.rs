@@ -2,8 +2,9 @@
 //! Never logs api_hash, phone numbers, or codes.
 
 use crate::calls::engine::{
-    CallEngine, ConnectParams, EngineError, MediaDevice, RemoteVideoState, RtcServer,
-    TransportState, VideoFrame, video_wanted,
+    CallEngine, ConnectParams, EngineError, GroupVideoSource, GroupVideoSourceGroup, MediaDevice,
+    MediaDeviceKind, RemoteVideoState, RtcServer, TransportState, VideoFrame,
+    group_offer_audio_source_id, video_wanted,
 };
 use crate::composer::{
     AttachmentKind, ComposerEdit, ComposerEditKind, ComposerSnapshot, DeleteConfirm,
@@ -27,8 +28,9 @@ use crate::state::{
 use crate::telegram::client::{LiveTdJson, OwnedEnvelope, ReceiveBridge};
 use crate::telegram::envelope::{
     AuthorizationState, CallState, ChatAdminRights, ChatDraft, ChatFolderSpec, ChatKind,
-    ChatNotificationSettings, EnvelopePayload, MUTE_FOREVER, MessageContent, MessageSender,
-    NotificationSettingsScope, ReadyParams, ScopeNotificationSettings, StoryContentView,
+    ChatNotificationSettings, EnvelopePayload, GroupCallVideoInfo, MUTE_FOREVER, MessageContent,
+    MessageSender, NotificationSettingsScope, ParsedGroupCallParticipant, ReadyParams,
+    ScopeNotificationSettings, StoryContentView,
 };
 use crate::telegram::ffi::{LibraryOrigin, TdJsonError, resolve_tdjson_path};
 use crate::telegram::requests::{
@@ -43,11 +45,12 @@ use crate::telegram::requests::{
     create_video_chat, decline_group_call_invitation, delete_chat_folder, delete_messages,
     delete_story, discard_call as discard_call_request, download_file as download_file_request,
     edit_chat_folder, edit_chat_invite_link, edit_message_caption, edit_message_text,
-    end_group_call, forward_messages, get_authorization_state, get_callback_query_answer,
-    get_chat_active_stories, get_chat_administrators, get_chat_event_log, get_chat_folder,
-    get_chat_history, get_chat_invite_links, get_chat_join_requests, get_chat_lists_to_add_chat,
-    get_chat_member, get_chat_sponsored_messages, get_chat_statistics, get_commands, get_contacts,
-    get_forum_topics, get_group_call, get_installed_sticker_sets, get_me, get_saved_animations,
+    end_group_call, end_group_call_screen_sharing, forward_messages, get_authorization_state,
+    get_callback_query_answer, get_chat_active_stories, get_chat_administrators,
+    get_chat_event_log, get_chat_folder, get_chat_history, get_chat_invite_links,
+    get_chat_join_requests, get_chat_lists_to_add_chat, get_chat_member,
+    get_chat_sponsored_messages, get_chat_statistics, get_commands, get_contacts, get_forum_topics,
+    get_group_call, get_installed_sticker_sets, get_me, get_saved_animations,
     get_saved_notification_sounds, get_scope_notification_settings, get_secret_chat,
     get_sticker_set, get_story, get_story_available_reactions, get_supergroup,
     get_supergroup_full_info, get_supergroup_members, get_user_full_info,
@@ -64,12 +67,12 @@ use crate::telegram::requests::{
     set_authentication_phone_number, set_chat_draft_message, set_chat_member_status,
     set_chat_message_auto_delete_time, set_chat_notification_settings, set_chat_slow_mode_delay,
     set_group_call_participant_volume_level, set_poll_answer, set_scope_notification_settings,
-    set_story_reaction, set_video_chat_title, supergroup_members_filter_recent_json,
-    supergroup_members_filter_search_json, toggle_chat_folder_tags,
-    toggle_group_call_is_my_video_enabled, toggle_group_call_is_my_video_paused,
-    toggle_group_call_participant_is_hand_raised, toggle_group_call_participant_is_muted,
-    toggle_video_chat_mute_new_participants, unpin_chat_message, view_messages,
-    view_sponsored_chat,
+    set_story_reaction, set_video_chat_title, start_group_call_screen_sharing,
+    supergroup_members_filter_recent_json, supergroup_members_filter_search_json,
+    toggle_chat_folder_tags, toggle_group_call_is_my_video_enabled,
+    toggle_group_call_is_my_video_paused, toggle_group_call_participant_is_hand_raised,
+    toggle_group_call_participant_is_muted, toggle_video_chat_mute_new_participants,
+    unpin_chat_message, view_messages, view_sponsored_chat,
 };
 use crate::voice::VoiceDraft;
 use std::collections::{HashMap, VecDeque};
@@ -364,6 +367,10 @@ type VideoStateOutbox = Arc<Mutex<VecDeque<(i32, RemoteVideoState)>>>;
 /// the newest frame is kept, so the UI never sees a backlog.
 type VideoFrameSlots = Arc<Mutex<HashMap<(i32, bool), VideoFrame>>>;
 
+/// Phase C2g: latest decoded group video frame per (group call id,
+/// participant user id, is_screen).
+type GroupVideoFrameSlots = Arc<Mutex<HashMap<(i32, i64, bool), VideoFrame>>>;
+
 /// Session + outbound sender that auto-replies to `WaitTdlibParameters`.
 pub struct ConnectDriver<S: JsonSender> {
     pub session: Session,
@@ -376,6 +383,12 @@ pub struct ConnectDriver<S: JsonSender> {
     video_state_outbox: VideoStateOutbox,
     /// Phase C2e: latest decoded video frame per (call id, is_local).
     video_frame_slots: VideoFrameSlots,
+    /// Phase C2g: latest decoded group video frame per (group call id,
+    /// participant user id, is_screen); only the newest frame is kept.
+    group_video_frame_slots: GroupVideoFrameSlots,
+    /// Phase C2g: last camera-enabled value issued to the engine per
+    /// group call id; the engine is only re-issued on change.
+    group_camera_state: HashMap<i32, bool>,
     /// Phase C2e: selected camera device id; `None` means the engine
     /// default. No devices are fabricated, so this can legitimately be
     /// unset.
@@ -425,6 +438,54 @@ pub enum DraftSaveOutcome {
     Skipped,
 }
 
+/// Phase C2g: build the engine's incoming-video subscription set from
+/// the tracked participants' `video_info` / `screen_sharing_video_info`
+/// (TDLib 1.8.67, `schema/td_api.tl:7163`). Skips the local user, paused
+/// channels, and channels without a usable endpoint/ssrc — the engine
+/// diffs this set against its subscriptions on every pump.
+fn group_video_sources(participants: &[ParsedGroupCallParticipant]) -> Vec<GroupVideoSource> {
+    fn one(user_id: i64, info: &Option<GroupCallVideoInfo>, out: &mut Vec<GroupVideoSource>) {
+        let Some(info) = info else { return };
+        if info.is_paused || info.endpoint_id.is_empty() {
+            return;
+        }
+        let ssrc_groups: Vec<GroupVideoSourceGroup> = info
+            .source_groups
+            .iter()
+            .filter(|group| !group.source_ids.is_empty())
+            .map(|group| GroupVideoSourceGroup {
+                semantics: group.semantics.clone(),
+                ssrcs: group.source_ids.clone(),
+            })
+            .collect();
+        if ssrc_groups.is_empty() {
+            return;
+        }
+        out.push(GroupVideoSource {
+            user_id,
+            endpoint: info.endpoint_id.clone(),
+            ssrc_groups,
+        });
+    }
+
+    let mut sources = Vec::new();
+    for participant in participants {
+        if participant.is_current_user {
+            continue;
+        }
+        let MessageSender::User { user_id } = participant.participant_id else {
+            continue;
+        };
+        one(user_id, &participant.video_info, &mut sources);
+        one(
+            user_id,
+            &participant.screen_sharing_video_info,
+            &mut sources,
+        );
+    }
+    sources
+}
+
 impl<S: JsonSender> ConnectDriver<S> {
     pub fn new(
         session: Session,
@@ -440,6 +501,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             transport_outbox: Arc::new(Mutex::new(VecDeque::new())),
             video_state_outbox: Arc::new(Mutex::new(VecDeque::new())),
             video_frame_slots: Arc::new(Mutex::new(HashMap::new())),
+            group_video_frame_slots: Arc::new(Mutex::new(HashMap::new())),
+            group_camera_state: HashMap::new(),
             selected_camera: None,
             call_devices_cache: Vec::new(),
             selected_devices: (None, None),
@@ -498,11 +561,22 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .push_back((call_id, state));
         }));
         let video_frame_slots = self.video_frame_slots.clone();
+        let group_video_frame_slots = self.group_video_frame_slots.clone();
         engine.set_video_frame_callback(Arc::new(move |call_id, frame| {
-            video_frame_slots
-                .lock()
-                .expect("call video frame slots")
-                .insert((call_id, frame.is_local), frame);
+            // Phase C2g: group-call frames carry the participant they were
+            // subscribed for; they live in their own slots so the 1:1
+            // (call id, is_local) keys stay untouched.
+            if let Some(user_id) = frame.participant_user_id {
+                group_video_frame_slots
+                    .lock()
+                    .expect("group video frame slots")
+                    .insert((call_id, user_id, frame.is_screen), frame);
+            } else {
+                video_frame_slots
+                    .lock()
+                    .expect("call video frame slots")
+                    .insert((call_id, frame.is_local), frame);
+            }
         }));
         self.call_engine = Some(engine);
     }
@@ -536,6 +610,23 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             self.call_devices_cache = devices;
         }
+    }
+
+    /// Phase C2g: whether the engine enumerates a screen-capture
+    /// source. The presentation handshake needs one; without it the UI
+    /// offers no screen-share control ("No screen source available").
+    pub fn group_call_screen_source_available(&self) -> bool {
+        self.call_devices_cache
+            .iter()
+            .any(|device| device.kind == MediaDeviceKind::Screen)
+    }
+
+    /// Phase C2g: whether the native call engine is installed and
+    /// available, for honest group-call audio/video state copy.
+    pub fn group_call_engine_available(&self) -> bool {
+        self.call_engine
+            .as_ref()
+            .is_some_and(|engine| engine.is_available())
     }
 
     /// Phase C2b: advertise the engine's protocol only when an engine is
@@ -627,6 +718,22 @@ impl<S: JsonSender> ConnectDriver<S> {
             .cloned()
     }
 
+    /// Phase C2g: newest decoded group video frame for a participant;
+    /// `screen` selects the screen-share stream (`true`) or the camera
+    /// (`false`). `None` when no frame has arrived yet.
+    pub fn latest_group_video_frame(
+        &self,
+        group_call_id: i32,
+        user_id: i64,
+        screen: bool,
+    ) -> Option<VideoFrame> {
+        self.group_video_frame_slots
+            .lock()
+            .expect("group video frame slots")
+            .get(&(group_call_id, user_id, screen))
+            .cloned()
+    }
+
     /// Phase C2e: selected camera device id; `None` is the engine default.
     pub fn selected_call_camera(&self) -> Option<&str> {
         self.selected_camera.as_deref()
@@ -687,6 +794,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     pub fn ingest(&mut self, owned: OwnedEnvelope) -> Result<(), ConnectSendError> {
         let was_ready = matches!(self.session.auth, AuthorizationState::Ready);
         let active_call_before = self.session.active_call.as_ref().map(|call| call.id);
+        let active_group_call_before = self.session.active_group_call.as_ref().map(|call| call.id);
         let bridge_signaling = match &owned.envelope.payload {
             EnvelopePayload::UpdateNewCallSignalingData { call_id, data } => {
                 Some((*call_id, data.clone()))
@@ -737,6 +845,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         );
         self.session.apply(owned);
         self.pump_call_engine(active_call_before, bridge_signaling)?;
+        self.pump_group_call_transport(active_group_call_before)?;
         self.maybe_send_parameters()?;
         self.maybe_probe_channel_membership()?;
         let became_ready = !was_ready && matches!(self.session.auth, AuthorizationState::Ready);
@@ -1033,6 +1142,186 @@ impl<S: JsonSender> ConnectDriver<S> {
             }
         }
 
+        Ok(())
+    }
+
+    /// Phase C2g: native group-call transport lifecycle, after every
+    /// reducer update. Finishes the `ntg_connect` handshake once the
+    /// `joinVideoChat` `Text` answer arrives, keeps the outgoing camera
+    /// and the incoming video subscriptions in sync with the tracked
+    /// participants, finishes the presentation handshake, and tears the
+    /// transport down when the tracked call goes away.
+    fn pump_group_call_transport(
+        &mut self,
+        active_group_call_before: Option<i32>,
+    ) -> Result<(), ConnectSendError> {
+        let active_group_call_after = self.session.active_group_call.as_ref().map(|call| call.id);
+        if active_group_call_after != active_group_call_before
+            && let Some(before_id) = active_group_call_before
+        {
+            // The tracked call ended or was replaced: the native transport
+            // must not linger, and stale frames must not render.
+            if let Some(engine) = self.call_engine.as_deref_mut() {
+                let _ = engine.leave_group_call(before_id);
+            }
+            self.group_video_frame_slots
+                .lock()
+                .expect("group video frame slots")
+                .retain(|(slot_call_id, _, _), _| *slot_call_id != before_id);
+            self.group_camera_state.remove(&before_id);
+        }
+        let Some(group_call_id) = active_group_call_after else {
+            return Ok(());
+        };
+        let engine_available = self
+            .call_engine
+            .as_ref()
+            .is_some_and(|engine| engine.is_available());
+        if !engine_available {
+            return Ok(());
+        }
+        // Finish the join handshake once the `joinVideoChat` answer is
+        // stored on the tracked call.
+        let join_answer = self
+            .session
+            .active_group_call
+            .as_ref()
+            .filter(|call| !call.transport_ready)
+            .map(|call| {
+                (
+                    call.join_payload.clone(),
+                    call.is_my_video_enabled && !call.is_my_video_paused,
+                )
+            });
+        if let Some((answer, video_enabled)) = join_answer
+            && !answer.is_empty()
+        {
+            let result = self
+                .call_engine
+                .as_deref_mut()
+                .expect("available engine")
+                .connect_group_call(group_call_id, &answer, video_enabled);
+            let connected = result.is_ok();
+            if let Some(call) = self.session.active_group_call.as_mut() {
+                match result {
+                    Ok(()) => {
+                        call.transport_ready = true;
+                        call.transport_error = None;
+                    }
+                    Err(err) => {
+                        call.transport_error = Some(err.to_string());
+                    }
+                }
+            }
+            if connected {
+                self.group_camera_state.insert(group_call_id, video_enabled);
+                // Refresh the device cache on connect so the screen-share
+                // availability gate sees the engine's real sources.
+                self.refresh_call_devices();
+            }
+        }
+        let transport_ready = self
+            .session
+            .active_group_call
+            .as_ref()
+            .is_some_and(|call| call.transport_ready);
+        if !transport_ready {
+            return Ok(());
+        }
+        // Outgoing camera follows the TDLib video flags; re-issue only on
+        // change (mirrors the 1:1 `set_call_camera` discipline).
+        let wanted_camera = self
+            .session
+            .active_group_call
+            .as_ref()
+            .map(|call| call.is_my_video_enabled && !call.is_my_video_paused)
+            .unwrap_or(false);
+        if self.group_camera_state.get(&group_call_id) != Some(&wanted_camera) {
+            let camera = self.selected_camera.clone();
+            let result = self
+                .call_engine
+                .as_deref_mut()
+                .expect("available engine")
+                .set_group_camera(group_call_id, wanted_camera, camera.as_deref());
+            match result {
+                Ok(()) => {
+                    self.group_camera_state.insert(group_call_id, wanted_camera);
+                    if let Some(call) = self.session.active_group_call.as_mut() {
+                        call.transport_error = None;
+                    }
+                }
+                Err(err) => {
+                    if let Some(call) = self.session.active_group_call.as_mut() {
+                        call.transport_error = Some(err.to_string());
+                    }
+                }
+            }
+        }
+        // Incoming video follows the participants' `video_info` /
+        // `screen_sharing_video_info`; the engine diffs add/remove.
+        let sources: Vec<GroupVideoSource> = self
+            .session
+            .active_group_call
+            .as_ref()
+            .map(|call| group_video_sources(&call.participants))
+            .unwrap_or_default();
+        if let Err(err) = self
+            .call_engine
+            .as_deref_mut()
+            .expect("available engine")
+            .sync_group_video(group_call_id, &sources)
+            && let Some(call) = self.session.active_group_call.as_mut()
+        {
+            call.transport_error = Some(err.to_string());
+        }
+        // Finish the presentation handshake once the
+        // `startGroupCallScreenSharing` answer is stored.
+        let share_answer = self
+            .session
+            .active_group_call
+            .as_ref()
+            .filter(|call| call.screen_share_pending)
+            .map(|call| call.screen_share_answer.clone());
+        if let Some(answer) = share_answer
+            && !answer.is_empty()
+        {
+            let result = self
+                .call_engine
+                .as_deref_mut()
+                .expect("available engine")
+                .connect_screen_share(group_call_id, &answer);
+            if let Some(call) = self.session.active_group_call.as_mut() {
+                match result {
+                    Ok(()) => {
+                        call.screen_share_pending = false;
+                        call.screen_sharing = true;
+                        call.screen_share_answer.clear();
+                        call.transport_error = None;
+                    }
+                    Err(err) => {
+                        call.screen_share_pending = false;
+                        call.screen_share_answer.clear();
+                        call.transport_error = Some(err.to_string());
+                    }
+                }
+            }
+        }
+        // Phase C2g: reconcile the native presentation against the
+        // tracked screen-share flags. A failed start request or a bad
+        // answer clears the tracked flags without touching the engine,
+        // so a stray initialized-but-unwanted presentation is stopped
+        // here instead of lingering.
+        let want_presentation = self
+            .session
+            .active_group_call
+            .as_ref()
+            .is_some_and(|call| call.screen_sharing || call.screen_share_pending);
+        if !want_presentation
+            && let Some(engine) = self.call_engine.as_deref_mut()
+            && engine.presentation_active(group_call_id)
+        {
+            let _ = engine.stop_screen_share(group_call_id);
+        }
         Ok(())
     }
 
@@ -2219,10 +2508,14 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     /// Phase C3a: `joinVideoChat` for a chat-bound voice chat (schema
-    /// 1.8.67, :14292). Joins as self with the honest no-device join
-    /// params (`audio_source_id` 0, empty payload — no audio device /
-    /// tgcalls engine until Phase C2). The `Text` response (tgcalls
-    /// join payload) is stored, never consumed.
+    /// 1.8.67, :14292). Joins as self; the TDLib `Text` answer is stored
+    /// on the tracked call and consumed by the driver pump to finish the
+    /// native handshake.
+    /// Phase C2g: the native group transport is created first so the
+    /// join carries the real tgcalls offer (`ntg_create_call`) as its
+    /// payload, with `audio_source_id` parsed from the offer SDP. When
+    /// no engine is available (or the offer fails), the join still goes
+    /// out with the honest no-device params — signaling-only, as before.
     pub fn join_video_chat(&mut self, group_call_id: i32) -> Result<RequestId, ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
@@ -2235,14 +2528,16 @@ impl<S: JsonSender> ConnectDriver<S> {
         if self.session.active_call.is_some() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        match &self.session.active_group_call {
-            Some(call) if call.id == group_call_id && !call.is_joined => {}
+        let is_muted_self = match &self.session.active_group_call {
+            Some(call) if call.id == group_call_id && !call.is_joined => call.is_muted_self,
             _ => return Err(ConnectSendError::InvalidRequest),
-        }
+        };
+        // Phase C2g: the native group context is created inside
+        // `group_join_params` so the join carries the real tgcalls offer.
+        let params = self.group_join_params(group_call_id, is_muted_self);
         let extra = self
             .session
             .request(RequestPurpose::JoinVideoChat { group_call_id }, None);
-        let params = GroupCallJoinParams::honest_no_device();
         if let Err(err) =
             self.sender
                 .send_json(&join_video_chat(extra, group_call_id, None, &params, ""))
@@ -2313,8 +2608,15 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request(RequestPurpose::JoinVideoChat { group_call_id }, None);
-        let mut params = GroupCallJoinParams::honest_no_device();
-        params.is_muted = is_muted;
+        // Review fix: the new native context starts unconnected, and
+        // `create_group_call` below replaces the old media entry — a
+        // live presentation would be orphaned (still capturing on the
+        // native side). Snapshot it before the entry is replaced.
+        let orphaned_presentation = self
+            .call_engine
+            .as_ref()
+            .is_some_and(|engine| engine.presentation_active(group_call_id));
+        let params = self.group_join_params(group_call_id, is_muted);
         if let Err(err) =
             self.sender
                 .send_json(&join_video_chat(extra, group_call_id, None, &params, ""))
@@ -2327,9 +2629,21 @@ impl<S: JsonSender> ConnectDriver<S> {
             }
             return Err(err);
         }
+        if orphaned_presentation && let Some(engine) = self.call_engine.as_deref_mut() {
+            let _ = engine.stop_screen_share(group_call_id);
+        }
         if let Some(call) = self.session.active_group_call.as_mut() {
             call.rejoin_attempts += 1;
             call.reconnecting = false;
+            // Review fix: the fresh native context must run the join
+            // handshake again — reset the transport gate, the stale
+            // answer, and the stale screen-share state so the pump
+            // doesn't drop the new `joinVideoChat` answer.
+            call.transport_ready = false;
+            call.join_payload.clear();
+            call.screen_sharing = false;
+            call.screen_share_pending = false;
+            call.screen_share_answer.clear();
         }
         Ok(extra)
     }
@@ -2348,6 +2662,60 @@ impl<S: JsonSender> ConnectDriver<S> {
             let _ = self.rejoin_group_call(false);
         }
         Ok(())
+    }
+
+    /// Phase C2g: build `joinVideoChat` params for a (re)join. Creates
+    /// the native group context first so the payload is the real tgcalls
+    /// offer; degrades to the honest no-device params when no engine is
+    /// available or the offer fails (the join is never blocked).
+    fn group_join_params(&mut self, group_call_id: i32, is_muted: bool) -> GroupCallJoinParams {
+        let is_my_video_enabled = self
+            .session
+            .active_group_call
+            .as_ref()
+            .is_some_and(|call| call.is_my_video_enabled);
+        // The native call key is the chat id; resolve it through the
+        // chat's `video_chat` association (schema `groupCall` carries no
+        // chat id).
+        let chat_id = self
+            .session
+            .chats
+            .values()
+            .find(|chat| {
+                chat.video_chat
+                    .as_ref()
+                    .is_some_and(|video_chat| video_chat.group_call_id == group_call_id)
+            })
+            .map(|chat| chat.id.0);
+        let offer = match (chat_id, self.call_engine.as_deref_mut()) {
+            (Some(chat_id), Some(engine)) if engine.is_available() => {
+                Some(engine.create_group_call(group_call_id, chat_id))
+            }
+            _ => None,
+        };
+        match offer {
+            Some(Ok(payload)) => GroupCallJoinParams {
+                audio_source_id: group_offer_audio_source_id(&payload),
+                payload,
+                is_muted,
+                is_my_video_enabled,
+            },
+            Some(Err(err)) => {
+                if let Some(call) = self.session.active_group_call.as_mut() {
+                    call.transport_error = Some(err.to_string());
+                }
+                let mut params = GroupCallJoinParams::honest_no_device();
+                params.is_muted = is_muted;
+                params.is_my_video_enabled = is_my_video_enabled;
+                params
+            }
+            None => {
+                let mut params = GroupCallJoinParams::honest_no_device();
+                params.is_muted = is_muted;
+                params.is_my_video_enabled = is_my_video_enabled;
+                params
+            }
+        }
     }
 
     /// Phase C3a: `leaveGroupCall` (schema 1.8.67, :14458). Drops the
@@ -2371,7 +2739,23 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
+        // Phase C2g: tear the native group transport down eagerly; the
+        // pump's before/after backstop covers server-driven ends.
+        self.teardown_group_call_transport(group_call_id);
         Ok(extra)
+    }
+
+    /// Phase C2g: drop the native transport and retained frames for one
+    /// group call id. Unknown ids succeed (idempotent cleanup).
+    fn teardown_group_call_transport(&mut self, group_call_id: i32) {
+        if let Some(engine) = self.call_engine.as_deref_mut() {
+            let _ = engine.leave_group_call(group_call_id);
+        }
+        self.group_video_frame_slots
+            .lock()
+            .expect("group video frame slots")
+            .retain(|(slot_call_id, _, _), _| *slot_call_id != group_call_id);
+        self.group_camera_state.remove(&group_call_id);
     }
 
     /// Phase C3a: `endGroupCall` (schema 1.8.67, :14461). Gated on
@@ -2391,13 +2775,110 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
+        // Phase C2g: same native teardown as leaving; the server-driven
+        // end also lands via the pump backstop.
+        self.teardown_group_call_transport(group_call_id);
+        Ok(extra)
+    }
+
+    /// Phase C2g: start or stop screen sharing in the tracked group
+    /// call. Starting goes through the native presentation handshake:
+    /// `ntg_init_presentation` yields the offer that
+    /// `startGroupCallScreenSharing` (schema 1.8.67, :14303) carries;
+    /// its `Text` answer is consumed by the driver pump
+    /// (`ntg_connect(..., is_presentation=true)` + desktop capture).
+    /// Stopping pairs `endGroupCallScreenSharing` (:14309) with
+    /// `ntg_stop_presentation`. Requires the joined call and an
+    /// available engine; without one the toggle is rejected.
+    pub fn toggle_group_call_screen_share(&mut self) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let group_call_id = match &self.session.active_group_call {
+            Some(call) if call.is_joined => call.id,
+            _ => return Err(ConnectSendError::InvalidRequest),
+        };
+        let engine_available = self
+            .call_engine
+            .as_ref()
+            .is_some_and(|engine| engine.is_available());
+        if !engine_available {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        // Honest gate: the presentation handshake needs a screen-capture
+        // source, and the native engine enumerates them via
+        // `media_devices` (`MediaDeviceKind::Screen`).
+        if !self.group_call_screen_source_available() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let sharing = self
+            .session
+            .active_group_call
+            .as_ref()
+            .is_some_and(|call| call.screen_sharing || call.screen_share_pending);
+        if sharing {
+            let extra = self.session.request(
+                RequestPurpose::EndGroupCallScreenSharing { group_call_id },
+                None,
+            );
+            if let Err(err) = self
+                .sender
+                .send_json(&end_group_call_screen_sharing(extra, group_call_id))
+            {
+                self.session.requests.take(extra);
+                return Err(err);
+            }
+            if let Some(engine) = self.call_engine.as_deref_mut()
+                && let Err(err) = engine.stop_screen_share(group_call_id)
+                && let Some(call) = self.session.active_group_call.as_mut()
+            {
+                call.transport_error = Some(err.to_string());
+            }
+            if let Some(call) = self.session.active_group_call.as_mut() {
+                call.screen_sharing = false;
+                call.screen_share_pending = false;
+                call.screen_share_answer.clear();
+            }
+            return Ok(extra);
+        }
+        let offer = match self
+            .call_engine
+            .as_deref_mut()
+            .expect("available engine")
+            .start_screen_share(group_call_id)
+        {
+            Ok(offer) => offer,
+            Err(err) => {
+                if let Some(call) = self.session.active_group_call.as_mut() {
+                    call.transport_error = Some(err.to_string());
+                }
+                return Err(ConnectSendError::InvalidRequest);
+            }
+        };
+        let extra = self.session.request(
+            RequestPurpose::StartGroupCallScreenSharing { group_call_id },
+            None,
+        );
+        if let Err(err) = self.sender.send_json(&start_group_call_screen_sharing(
+            extra,
+            group_call_id,
+            &offer,
+        )) {
+            self.session.requests.take(extra);
+            if let Some(engine) = self.call_engine.as_deref_mut() {
+                let _ = engine.stop_screen_share(group_call_id);
+            }
+            return Err(err);
+        }
+        if let Some(call) = self.session.active_group_call.as_mut() {
+            call.screen_share_pending = true;
+        }
         Ok(extra)
     }
 
     /// Phase C3a: local-only self mute toggle. There is no TDLib "mute
-    /// self" for group calls outside the join parameters, and no audio
-    /// path exists yet (C2) — the UI labels this honestly as
-    /// local-only; the state rides on the next (re)join.
+    /// self" for group calls outside the join parameters — the UI labels
+    /// this honestly as local-only; the state rides on the next (re)join.
     pub fn toggle_group_call_self_mute(&mut self) {
         let muted = !self
             .session
@@ -2408,7 +2889,8 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     /// Phase C3a: `toggleGroupCallIsMyVideoEnabled` (schema 1.8.67,
-    /// :14414). Signaling-only: tracks state, no camera (Phase C2).
+    /// :14414). Tracks the TDLib flag; Phase C2g applies it to the
+    /// native transport in the driver pump (`set_group_camera`).
     pub fn toggle_group_call_my_video(&mut self) -> Result<RequestId, ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
@@ -12642,6 +13124,8 @@ mod tests {
             height: 2,
             rgba: vec![0u8; 16],
             is_local,
+            participant_user_id: None,
+            is_screen: false,
         };
         handle.emit_video_frame(77, frame(false));
         handle.emit_video_frame(77, frame(false));
@@ -12803,6 +13287,8 @@ mod tests {
                 height: 2,
                 rgba: vec![0u8; 16],
                 is_local: false,
+                participant_user_id: None,
+                is_screen: false,
             },
         );
         assert!(driver.latest_video_frame(77, false).is_some());
@@ -12871,6 +13357,11 @@ mod tests {
             verification: None,
             join_payload: String::new(),
             invite_link: None,
+            transport_ready: false,
+            transport_error: None,
+            screen_share_pending: false,
+            screen_sharing: false,
+            screen_share_answer: String::new(),
         }
     }
 
@@ -13152,5 +13643,466 @@ mod tests {
             .as_mut()
             .unwrap()
             .reconnecting = true;
+    }
+
+    /// Phase C2g: driver with a chat-bound unjoined group call (chat 51
+    /// -> call 555) and an available mock engine.
+    type GroupCallDriverHarness = (
+        std::path::PathBuf,
+        ConnectDriver<Arc<RecordingSender>>,
+        Arc<RecordingSender>,
+        MockEngine,
+        Arc<dyn DiagnosticSink>,
+        AtomicU64,
+    );
+    fn ready_group_call_driver() -> GroupCallDriverHarness {
+        let (dir, mut driver, recorder, sink, seq) = call_driver();
+        let mock = MockEngine::new();
+        let handle = mock.clone();
+        driver.set_call_engine(Box::new(mock));
+        ingest_call_json(
+            &mut driver,
+            &seq,
+            &sink,
+            r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+        );
+        ingest_call_json(
+            &mut driver,
+            &seq,
+            &sink,
+            r#"{"@type":"updateNewChat","chat":{"id":51,"title":"Design voice","type":{"@type":"chatTypeSupergroup","supergroup_id":51,"is_channel":false},"unread_count":0}}"#,
+        );
+        ingest_call_json(
+            &mut driver,
+            &seq,
+            &sink,
+            r#"{"@type":"updateChatVideoChat","chat_id":51,"video_chat":{"@type":"videoChat","group_call_id":555,"has_participants":true,"default_participant_id":null}}"#,
+        );
+        ingest_call_json(
+            &mut driver,
+            &seq,
+            &sink,
+            r#"{"@type":"updateGroupCall","group_call":{"@type":"groupCall","id":555,"unique_id":"999","title":"Design voice","invite_link":"","paid_message_star_count":0,"scheduled_start_date":0,"enabled_start_notification":false,"is_active":true,"is_video_chat":true,"is_live_story":false,"is_rtmp_stream":false,"is_joined":false,"need_rejoin":false,"is_owned":false,"can_be_managed":true,"participant_count":0,"has_hidden_listeners":false,"loaded_all_participants":false,"message_sender_id":null,"recent_speakers":[],"is_my_video_enabled":false,"is_my_video_paused":false,"can_enable_video":true,"mute_new_participants":false,"can_toggle_mute_new_participants":true,"can_send_messages":true,"are_messages_allowed":true,"can_toggle_are_messages_allowed":false,"can_delete_messages":false,"record_duration":0,"is_video_recorded":false,"duration":0}}"#,
+        );
+        (dir, driver, recorder, handle, sink, seq)
+    }
+
+    fn group_participant_json(
+        user_id: i64,
+        current: bool,
+        video_info: &str,
+        screen_info: &str,
+    ) -> String {
+        format!(
+            r#"{{"@type":"updateGroupCallParticipant","group_call_id":555,"participant":{{"@type":"groupCallParticipant","participant_id":{{"@type":"messageSenderUser","user_id":{user_id}}},"audio_source_id":0,"screen_sharing_audio_source_id":0,"video_info":{video_info},"screen_sharing_video_info":{screen_info},"bio":"","is_current_user":{current},"is_speaking":false,"is_hand_raised":false,"can_be_muted_for_all_users":false,"can_be_unmuted_for_all_users":false,"can_be_muted_for_current_user":false,"can_be_unmuted_for_current_user":false,"is_muted_for_all_users":false,"is_muted_for_current_user":false,"can_unmute_self":false,"volume_level":10000,"order":"a1"}}}}"#,
+        )
+    }
+
+    /// Phase C2g: the join carries the native offer (not the no-device
+    /// fallback) and the audio SSRC parsed from it.
+    #[test]
+    fn group_join_carries_engine_offer() {
+        let (dir, mut driver, recorder, handle, _sink, _seq) = ready_group_call_driver();
+        driver.join_video_chat(555).expect("join tracked call");
+        assert_eq!(handle.group_offers(), vec![(555, 51)]);
+        let join = sent_request(&recorder, "joinVideoChat");
+        assert_eq!(join["join_parameters"]["payload"], "mock-group-offer-555");
+        // The mock offer carries no `a=ssrc:` lines: honest 0.
+        assert_eq!(join["join_parameters"]["audio_source_id"], 0);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Phase C2g: the `joinVideoChat` Text answer finishes the native
+    /// handshake exactly once.
+    #[test]
+    fn group_join_answer_connects_native_transport() {
+        let (dir, mut driver, _recorder, handle, sink, seq) = ready_group_call_driver();
+        let extra = driver.join_video_chat(555).expect("join tracked call");
+        ingest_call_json(
+            &mut driver,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"text","text":"join-answer","@extra":{}}}"#,
+                extra.0
+            ),
+        );
+        assert_eq!(
+            handle.group_connects(),
+            vec![(555, "join-answer".to_string(), false)]
+        );
+        assert!(
+            driver
+                .session
+                .active_group_call
+                .as_ref()
+                .is_some_and(|call| call.transport_ready)
+        );
+        // A second pump (no new answer) must not reconnect.
+        ingest_call_json(
+            &mut driver,
+            &seq,
+            &sink,
+            r#"{"@type":"updateGroupCall","group_call":{"@type":"groupCall","id":555,"unique_id":"999","title":"Design voice","invite_link":"","paid_message_star_count":0,"scheduled_start_date":0,"enabled_start_notification":false,"is_active":true,"is_video_chat":true,"is_live_story":false,"is_rtmp_stream":false,"is_joined":true,"need_rejoin":false,"is_owned":false,"can_be_managed":true,"participant_count":0,"has_hidden_listeners":false,"loaded_all_participants":false,"message_sender_id":null,"recent_speakers":[],"is_my_video_enabled":false,"is_my_video_paused":false,"can_enable_video":true,"mute_new_participants":false,"can_toggle_mute_new_participants":true,"can_send_messages":true,"are_messages_allowed":true,"can_toggle_are_messages_allowed":false,"can_delete_messages":false,"record_duration":0,"is_video_recorded":false,"duration":0}}"#,
+        );
+        assert_eq!(handle.group_connects().len(), 1);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Phase C2g (review fix): a rejoin resets the transport handshake —
+    /// the new `joinVideoChat` answer reconnects the fresh native context
+    /// instead of being dropped by the pump's `transport_ready` filter,
+    /// and an orphaned presentation is stopped.
+    #[test]
+    fn group_rejoin_answer_reconnects_native_transport() {
+        let (dir, mut driver, recorder, mut handle, sink, seq) = ready_group_call_driver();
+        let need_rejoin = r#"{"@type":"updateGroupCall","group_call":{"@type":"groupCall","id":555,"unique_id":"999","title":"Design voice","invite_link":"","paid_message_star_count":0,"scheduled_start_date":0,"enabled_start_notification":false,"is_active":true,"is_video_chat":true,"is_live_story":false,"is_rtmp_stream":false,"is_joined":true,"need_rejoin":true,"is_owned":false,"can_be_managed":true,"participant_count":0,"has_hidden_listeners":false,"loaded_all_participants":false,"message_sender_id":null,"recent_speakers":[],"is_my_video_enabled":false,"is_my_video_paused":false,"can_enable_video":true,"mute_new_participants":false,"can_toggle_mute_new_participants":true,"can_send_messages":true,"are_messages_allowed":true,"can_toggle_are_messages_allowed":false,"can_delete_messages":false,"record_duration":0,"is_video_recorded":false,"duration":0}}"#;
+        // Join → answer → the native transport is connected.
+        let extra = driver.join_video_chat(555).expect("join tracked call");
+        ingest_call_json(
+            &mut driver,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"text","text":"join-answer","@extra":{}}}"#,
+                extra.0
+            ),
+        );
+        assert!(
+            driver
+                .session
+                .active_group_call
+                .as_ref()
+                .is_some_and(|call| call.transport_ready)
+        );
+        assert_eq!(handle.group_connects().len(), 1);
+        // A live presentation plus tracked screen-share state: the
+        // rejoin must stop the orphaned native presentation and clear
+        // the stale flags.
+        handle.start_screen_share(555).expect("mock presentation");
+        driver
+            .session
+            .active_group_call
+            .as_mut()
+            .expect("tracked call")
+            .screen_sharing = true;
+        driver
+            .session
+            .active_group_call
+            .as_mut()
+            .expect("tracked call")
+            .screen_share_answer = "old-answer".into();
+        // `need_rejoin` auto-rejoins with a fresh offer and a reset
+        // handshake gate.
+        ingest_call_json(&mut driver, &seq, &sink, need_rejoin);
+        assert_eq!(handle.group_offers().len(), 2);
+        assert_eq!(handle.screen_share_stops(), vec![555]);
+        let call = driver
+            .session
+            .active_group_call
+            .as_ref()
+            .expect("tracked call");
+        assert!(!call.transport_ready);
+        assert!(call.join_payload.is_empty());
+        assert!(!call.screen_sharing && !call.screen_share_pending);
+        assert!(call.screen_share_answer.is_empty());
+        // The new answer reconnects the fresh native context.
+        let extra = sent_request(&recorder, "joinVideoChat")["@extra"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        ingest_call_json(
+            &mut driver,
+            &seq,
+            &sink,
+            &format!(r#"{{"@type":"text","text":"rejoin-answer","@extra":"{extra}"}}"#),
+        );
+        assert_eq!(handle.group_connects().len(), 2);
+        assert!(
+            driver
+                .session
+                .active_group_call
+                .as_ref()
+                .is_some_and(|call| call.transport_ready)
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Phase C2g: participant `video_info` / `screen_sharing_video_info`
+    /// become engine subscriptions; paused endpoints and the local user
+    /// are skipped.
+    #[test]
+    fn group_participant_video_syncs_subscriptions() {
+        let (dir, mut driver, _recorder, handle, sink, seq) = ready_group_call_driver();
+        let extra = driver.join_video_chat(555).expect("join tracked call");
+        ingest_call_json(
+            &mut driver,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"text","text":"join-answer","@extra":{}}}"#,
+                extra.0
+            ),
+        );
+        let camera = r#"{"@type":"groupCallParticipantVideoInfo","source_groups":[{"@type":"groupCallVideoSourceGroup","semantics":"SIM","source_ids":[111,112]}],"endpoint_id":"ep-42","is_paused":false}"#;
+        let screen = r#"{"@type":"groupCallParticipantVideoInfo","source_groups":[{"@type":"groupCallVideoSourceGroup","semantics":"SIM","source_ids":[222]}],"endpoint_id":"ep-42-screen","is_paused":false}"#;
+        ingest_call_json(
+            &mut driver,
+            &seq,
+            &sink,
+            &group_participant_json(42, false, camera, screen),
+        );
+        // Paused endpoint: skipped.
+        let paused = r#"{"@type":"groupCallParticipantVideoInfo","source_groups":[{"@type":"groupCallVideoSourceGroup","semantics":"SIM","source_ids":[333]}],"endpoint_id":"ep-43","is_paused":true}"#;
+        ingest_call_json(
+            &mut driver,
+            &seq,
+            &sink,
+            &group_participant_json(43, false, paused, "null"),
+        );
+        // Local user: skipped even with video info.
+        ingest_call_json(
+            &mut driver,
+            &seq,
+            &sink,
+            &group_participant_json(777, true, camera, "null"),
+        );
+        let syncs = handle.group_video_syncs();
+        let (call_id, sources) = syncs.last().expect("sync recorded");
+        assert_eq!(*call_id, 555);
+        assert_eq!(sources.len(), 2);
+        let camera_source = sources
+            .iter()
+            .find(|source| source.endpoint == "ep-42")
+            .expect("camera source");
+        assert_eq!(camera_source.user_id, 42);
+        assert_eq!(camera_source.ssrc_groups.len(), 1);
+        assert_eq!(camera_source.ssrc_groups[0].semantics, "SIM");
+        assert_eq!(camera_source.ssrc_groups[0].ssrcs, vec![111, 112]);
+        let screen_source = sources
+            .iter()
+            .find(|source| source.endpoint == "ep-42-screen")
+            .expect("screen source");
+        assert_eq!(screen_source.user_id, 42);
+        assert_eq!(screen_source.ssrc_groups[0].ssrcs, vec![222]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Phase C2g: frames with `participant_user_id` land in the group
+    /// slots (camera vs screen), never in the 1:1 slots.
+    #[test]
+    fn group_video_frames_route_to_participant_slots() {
+        let (dir, driver, _recorder, handle, _sink, _seq) = ready_group_call_driver();
+        let frame = |screen: bool| VideoFrame {
+            seq: 0,
+            width: 2,
+            height: 2,
+            rgba: vec![0u8; 16],
+            is_local: false,
+            participant_user_id: Some(42),
+            is_screen: screen,
+        };
+        handle.emit_video_frame(555, frame(false));
+        handle.emit_video_frame(555, frame(true));
+        assert!(driver.latest_group_video_frame(555, 42, false).is_some());
+        assert!(driver.latest_group_video_frame(555, 42, true).is_some());
+        assert!(driver.latest_group_video_frame(555, 43, false).is_none());
+        assert!(driver.latest_video_frame(555, false).is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Phase C2g: leaving tears the native transport down and drops the
+    /// retained frames.
+    #[test]
+    fn group_call_leave_tears_down_transport_and_frames() {
+        let (dir, mut driver, _recorder, mut handle, _sink, _seq) = ready_group_call_driver();
+        handle.emit_video_frame(
+            555,
+            VideoFrame {
+                seq: 0,
+                width: 2,
+                height: 2,
+                rgba: vec![0u8; 16],
+                is_local: false,
+                participant_user_id: Some(42),
+                is_screen: false,
+            },
+        );
+        assert!(driver.latest_group_video_frame(555, 42, false).is_some());
+        // Review fix: a live presentation is stopped before the call
+        // (privacy — capture ends first).
+        handle.start_screen_share(555).expect("mock presentation");
+        driver.leave_group_call().expect("leave");
+        assert_eq!(handle.group_leaves(), vec![555]);
+        assert_eq!(handle.screen_share_stops(), vec![555]);
+        assert!(driver.latest_group_video_frame(555, 42, false).is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Phase C2g: screen-share toggle runs the presentation handshake —
+    /// offer into `startGroupCallScreenSharing`, answer into the engine,
+    /// stop pairs `endGroupCallScreenSharing` with the engine stop.
+    #[test]
+    fn group_screen_share_toggle_handshake() {
+        let (dir, mut driver, recorder, handle, sink, seq) = ready_group_call_driver();
+        // The engine enumerates a screen source; the driver picks it up
+        // on connect.
+        handle.set_devices(vec![MediaDevice {
+            id: "screen-0".into(),
+            name: "Test screen".into(),
+            kind: MediaDeviceKind::Screen,
+        }]);
+        // Join and finish the native handshake first, as in reality.
+        let join_extra = driver.join_video_chat(555).expect("join tracked call");
+        ingest_call_json(
+            &mut driver,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"text","text":"join-answer","@extra":{}}}"#,
+                join_extra.0
+            ),
+        );
+        assert!(
+            driver
+                .session
+                .active_group_call
+                .as_ref()
+                .is_some_and(|call| call.transport_ready)
+        );
+        // TDLib confirms the join via `updateGroupCall is_joined`; the
+        // toggle gates on it.
+        driver
+            .session
+            .active_group_call
+            .as_mut()
+            .expect("tracked call")
+            .is_joined = true;
+        let start_extra = driver
+            .toggle_group_call_screen_share()
+            .expect("start sharing");
+        assert_eq!(handle.screen_share_offers(), vec![555]);
+        let start = sent_request(&recorder, "startGroupCallScreenSharing");
+        assert_eq!(start["group_call_id"], 555);
+        assert_eq!(start["payload"], "mock-presentation-offer-555");
+        assert!(
+            driver
+                .session
+                .active_group_call
+                .as_ref()
+                .is_some_and(|call| call.screen_share_pending && !call.screen_sharing)
+        );
+        ingest_call_json(
+            &mut driver,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"text","text":"share-answer","@extra":{}}}"#,
+                start_extra.0
+            ),
+        );
+        assert_eq!(
+            handle.screen_share_connects(),
+            vec![(555, "share-answer".to_string())]
+        );
+        assert!(
+            driver
+                .session
+                .active_group_call
+                .as_ref()
+                .is_some_and(|call| call.screen_sharing && !call.screen_share_pending)
+        );
+        driver
+            .toggle_group_call_screen_share()
+            .expect("stop sharing");
+        let end = sent_request(&recorder, "endGroupCallScreenSharing");
+        assert_eq!(end["group_call_id"], 555);
+        assert_eq!(handle.screen_share_stops(), vec![555]);
+        assert!(
+            driver
+                .session
+                .active_group_call
+                .as_ref()
+                .is_some_and(|call| !call.screen_sharing && !call.screen_share_pending)
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Phase C2g: a failed screen-share handshake (the reducer clears
+    /// the tracked flags on a `startGroupCallScreenSharing` error)
+    /// leaves no stray native presentation: the pump stops it.
+    #[test]
+    fn group_screen_share_failure_stops_native_presentation() {
+        let (dir, mut driver, recorder, handle, sink, seq) = ready_group_call_driver();
+        handle.set_devices(vec![MediaDevice {
+            id: "screen-0".into(),
+            name: "Test screen".into(),
+            kind: MediaDeviceKind::Screen,
+        }]);
+        let join_extra = driver.join_video_chat(555).expect("join tracked call");
+        ingest_call_json(
+            &mut driver,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"text","text":"join-answer","@extra":{}}}"#,
+                join_extra.0
+            ),
+        );
+        driver
+            .session
+            .active_group_call
+            .as_mut()
+            .expect("tracked call")
+            .is_joined = true;
+        driver
+            .toggle_group_call_screen_share()
+            .expect("start sharing");
+        assert!(handle.presentation_active(555));
+        // Simulate the reducer's error arm: flags cleared, error
+        // surfaced, native presentation untouched.
+        if let Some(call) = driver.session.active_group_call.as_mut() {
+            call.screen_share_pending = false;
+            call.screen_sharing = false;
+            call.screen_share_answer.clear();
+        }
+        ingest_call_json(
+            &mut driver,
+            &seq,
+            &sink,
+            r#"{"@type":"updateGroupCall","group_call":{"@type":"groupCall","id":555,"unique_id":"999","title":"Design voice","invite_link":"","paid_message_star_count":0,"scheduled_start_date":0,"enabled_start_notification":false,"is_active":true,"is_video_chat":true,"is_live_story":false,"is_rtmp_stream":false,"is_joined":true,"need_rejoin":false,"is_owned":false,"can_be_managed":true,"participant_count":0,"has_hidden_listeners":false,"loaded_all_participants":false,"message_sender_id":null,"recent_speakers":[],"is_my_video_enabled":false,"is_my_video_paused":false,"can_enable_video":true,"mute_new_participants":false,"can_toggle_mute_new_participants":true,"can_send_messages":true,"are_messages_allowed":true,"can_toggle_are_messages_allowed":false,"can_delete_messages":false,"record_duration":0,"is_video_recorded":false,"duration":0}}"#,
+        );
+        assert_eq!(handle.screen_share_stops(), vec![555]);
+        assert!(!handle.presentation_active(555));
+        assert!(recorder.snapshot().len() >= 2);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Phase C2g: without an enumerated screen source the toggle is
+    /// rejected and no request goes out ("No screen source available").
+    #[test]
+    fn group_screen_share_rejected_without_screen_source() {
+        let (dir, mut driver, recorder, _handle, _sink, _seq) = ready_group_call_driver();
+        driver
+            .session
+            .active_group_call
+            .as_mut()
+            .expect("tracked call")
+            .is_joined = true;
+        assert!(driver.toggle_group_call_screen_share().is_err());
+        assert!(
+            !driver
+                .session
+                .active_group_call
+                .as_ref()
+                .is_some_and(|call| call.screen_share_pending || call.screen_sharing)
+        );
+        assert!(
+            recorder
+                .snapshot()
+                .iter()
+                .all(|json| !json.contains("startGroupCallScreenSharing"))
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -326,8 +326,8 @@ pub enum RequestPurpose {
         chat_id: i64,
     },
     /// Phase C3a: `joinVideoChat`. Response is `text` (join payload
-    /// for tgcalls) — stored on the tracked call, never consumed (no
-    /// media transport until Phase C2).
+    /// for tgcalls) — stored on the tracked call; Phase C2g consumes it
+    /// in the driver pump to finish the native group handshake.
     JoinVideoChat {
         group_call_id: i32,
     },
@@ -337,6 +337,17 @@ pub enum RequestPurpose {
     },
     /// Phase C3a: `endGroupCall`. Response is `ok`.
     EndGroupCall {
+        group_call_id: i32,
+    },
+    /// Phase C2g: `startGroupCallScreenSharing` (schema 1.8.67, :14303).
+    /// Response is `text` — the presentation answer for
+    /// `ntg_connect(..., is_presentation=true)`.
+    StartGroupCallScreenSharing {
+        group_call_id: i32,
+    },
+    /// Phase C2g: `endGroupCallScreenSharing` (schema 1.8.67, :14309).
+    /// Response is `ok`.
+    EndGroupCallScreenSharing {
         group_call_id: i32,
     },
     /// Phase C3a: `getGroupCall`. Response is `groupCall`; refreshes
@@ -2123,9 +2134,28 @@ pub struct ActiveGroupCall {
     pub mute_new_participants: bool,
     pub can_toggle_mute_new_participants: bool,
     pub verification: Option<GroupCallVerificationState>,
-    /// The `Text` join payload returned by `joinVideoChat` — stored
-    /// honestly, **never consumed** (it feeds tgcalls in Phase C2).
+    /// The `Text` join payload returned by `joinVideoChat`; Phase C2g
+    /// consumes it in the driver pump to finish the native group
+    /// handshake.
     pub join_payload: String,
+    /// Phase C2g: whether the native group transport handshake has
+    /// completed (`ntg_connect` with the `joinVideoChat` answer). False
+    /// when the join went out with the honest no-device params (no
+    /// engine) or while the answer is still in flight.
+    pub transport_ready: bool,
+    /// Phase C2g: last native group-transport error (offer/connect/
+    /// subscribe failures), mirroring the 1:1 call's `transport_error`.
+    /// The join itself is never blocked by these.
+    pub transport_error: Option<String>,
+    /// Phase C2g: screen-share presentation state. `screen_share_pending`
+    /// while the `startGroupCallScreenSharing` answer is in flight;
+    /// `screen_sharing` once the presentation transport connected.
+    pub screen_share_pending: bool,
+    pub screen_sharing: bool,
+    /// The `Text` presentation answer from
+    /// `startGroupCallScreenSharing`; consumed by the driver pump to
+    /// finish the presentation handshake.
+    pub screen_share_answer: String,
     /// `HttpUrl` from `getVideoChatInviteLink`, fetched on demand.
     pub invite_link: Option<String>,
 }
@@ -2156,6 +2186,11 @@ impl ActiveGroupCall {
             can_toggle_mute_new_participants: false,
             verification: None,
             join_payload: String::new(),
+            transport_ready: false,
+            transport_error: None,
+            screen_share_pending: false,
+            screen_sharing: false,
+            screen_share_answer: String::new(),
             invite_link: None,
         }
     }
@@ -4497,16 +4532,20 @@ impl Session {
                 self.scope_notification_settings.insert(scope, settings);
                 self.scope_settings_loading.remove(&scope);
             }
-            // Phase C3a: `joinVideoChat` returns `text` — the join
-            // payload for tgcalls. Stored on the tracked call, never
-            // consumed (no media transport until Phase C2).
-            EnvelopePayload::Text { text } => {
-                if let Some(RequestPurpose::JoinVideoChat { group_call_id }) =
-                    pending.map(|p| p.purpose)
-                {
+            // Phase C2g: `joinVideoChat` returns `text` — the tgcalls
+            // join answer, stored on the tracked call and consumed by
+            // the driver pump (`ntg_connect`).
+            // `startGroupCallScreenSharing` returns `text` — the
+            // presentation answer, consumed by the driver pump.
+            EnvelopePayload::Text { text } => match pending.map(|p| p.purpose) {
+                Some(RequestPurpose::JoinVideoChat { group_call_id }) => {
                     self.set_group_call_join_payload(group_call_id, text);
                 }
-            }
+                Some(RequestPurpose::StartGroupCallScreenSharing { group_call_id }) => {
+                    self.set_group_call_screen_share_answer(group_call_id, text);
+                }
+                _ => {}
+            },
             // Phase C3a: `getVideoChatInviteLink` returns `httpUrl`.
             EnvelopePayload::HttpUrl { url } => {
                 if let Some(RequestPurpose::GetVideoChatInviteLink { group_call_id }) =
@@ -4704,6 +4743,35 @@ impl Session {
                                 "Could not join the voice chat",
                             ));
                         }
+                    }
+                    // Phase C2g: a failed screen-sharing handshake must
+                    // not leave the call stuck "sharing" — clear the
+                    // pending/active flags and surface an honest error.
+                    Some(RequestPurpose::StartGroupCallScreenSharing { group_call_id }) => {
+                        if let Some(tracked) = self.active_group_call.as_mut()
+                            && tracked.id == group_call_id
+                        {
+                            tracked.screen_share_pending = false;
+                            tracked.screen_sharing = false;
+                            tracked.screen_share_answer.clear();
+                        }
+                        self.group_call_error = Some(call_request_error_line(
+                            &err,
+                            "Could not start screen sharing",
+                        ));
+                    }
+                    Some(RequestPurpose::EndGroupCallScreenSharing { group_call_id }) => {
+                        if let Some(tracked) = self.active_group_call.as_mut()
+                            && tracked.id == group_call_id
+                        {
+                            tracked.screen_share_pending = false;
+                            tracked.screen_sharing = false;
+                            tracked.screen_share_answer.clear();
+                        }
+                        self.group_call_error = Some(call_request_error_line(
+                            &err,
+                            "Could not stop screen sharing",
+                        ));
                     }
                     Some(
                         RequestPurpose::LeaveGroupCall { .. }
@@ -5756,13 +5824,24 @@ impl Session {
     }
 
     /// Phase C3a: store the `joinVideoChat` `Text` response payload on
-    /// the tracked call. Stored honestly, **never consumed** — it feeds
-    /// tgcalls in Phase C2.
+    /// the tracked call. Phase C2g consumes it in the driver pump to
+    /// finish the native group handshake.
     pub fn set_group_call_join_payload(&mut self, group_call_id: i32, payload: String) {
         if let Some(tracked) = self.active_group_call.as_mut()
             && tracked.id == group_call_id
         {
             tracked.join_payload = payload;
+        }
+    }
+
+    /// Phase C2g: store the `startGroupCallScreenSharing` `Text`
+    /// response on the tracked call; the driver pump consumes it to
+    /// finish the presentation handshake.
+    pub fn set_group_call_screen_share_answer(&mut self, group_call_id: i32, payload: String) {
+        if let Some(tracked) = self.active_group_call.as_mut()
+            && tracked.id == group_call_id
+        {
+            tracked.screen_share_answer = payload;
         }
     }
 
