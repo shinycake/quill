@@ -358,14 +358,14 @@ This is the comprehensive Telegram-parity checklist: one checkbox per user-visib
 - [x] Mute new participants by default <!-- parity:calls-mute-new --> (toggle ui/mod.rs:10740; requests.rs:1278)
 - [x] Raise / lower hand <!-- parity:calls-hand --> (group-call-hand button ui/mod.rs:10383; toggle_group_call_self_hand:10627; requests.rs:1255)
 - [x] Hand-raised badge on participants <!-- parity:calls-hand-badge --> (ui/mod.rs:10144)
-- [ ] Per-participant volume control (partial: volume parsed from updates, no setVolume request) <!-- parity:calls-participant-volume -->
-- [ ] Invite participants to group call (partial: no inviteGroupCallParticipant request in requests.rs) <!-- parity:calls-invite -->
-- [ ] Decline group call invitation UI (partial: decline request exists, requests.rs:1333) <!-- parity:calls-decline-invite -->
-- [ ] Ban participant from group call (partial: no banGroupCallParticipants request) <!-- parity:calls-ban -->
+- [x] Per-participant volume control (`setGroupCallParticipantVolumeLevel`, 1-20000, per-row stepper) <!-- parity:calls-participant-volume -->
+- [x] Invite participants to group call (`inviteGroupCallParticipant` + contact picker) <!-- parity:calls-invite -->
+- [x] Group call invitation UI: incoming `messageGroupCall` row with Accept (`joinGroupCall`) / Decline (`declineGroupCallInvitation`) <!-- parity:calls-decline-invite -->
+- [x] Ban participant from group call (`banGroupCallParticipants`, admin-gated) <!-- parity:calls-ban -->
 - [x] Group call verification emojis <!-- parity:calls-group-verify-emoji --> (ui/mod.rs:10325; state.rs:2043)
 - [x] Toggle my video in group video chat (partial: signaling only, no video frames rendered) <!-- parity:calls-group-video-toggle --> (toggle_group_call_video ui/mod.rs:10667)
 - [ ] Group video tiles show live video (partial: participant grid renders, no frames) <!-- parity:calls-video-tiles -->
-- [ ] Auto-rejoin group call after network loss (partial: need_rejoin tracked in state, no auto-rejoin) <!-- parity:calls-rejoin -->
+- [x] Auto-rejoin group call after network loss (auto-rejoin on `need_rejoin`, max 3 attempts, manual retry resets) <!-- parity:calls-rejoin -->
 - [ ] Record group call <!-- parity:calls-recording -->
 - [ ] RTMP stream key for video chat <!-- parity:calls-rtmp -->
 - [ ] Set / rename video chat title (partial: GroupCallTitleDialog struct exists, ui/mod.rs:419) <!-- parity:calls-title -->

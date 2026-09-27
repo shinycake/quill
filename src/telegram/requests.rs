@@ -1340,6 +1340,69 @@ pub fn decline_group_call_invitation(extra: RequestId, chat_id: i64, message_id:
     .to_string()
 }
 
+/// Phase C2f: `inviteGroupCallParticipant` (TDLib 1.8.67,
+/// `schema/td_api.tl:14375`):
+/// `inviteGroupCallParticipant group_call_id:int32 user_id:int53
+/// is_video:Bool = InviteGroupCallParticipantResult;`
+/// "Invites a user to an active group call". The answer is one of
+/// the `inviteGroupCallParticipantResult*` variants (schema 1.8.67,
+/// lines 7216-7227), parsed by the envelope.
+pub fn invite_group_call_participant(
+    extra: RequestId,
+    group_call_id: i32,
+    user_id: i64,
+    is_video: bool,
+) -> String {
+    json!({
+        "@type": "inviteGroupCallParticipant",
+        "@extra": extra.as_extra(),
+        "group_call_id": group_call_id,
+        "user_id": user_id,
+        "is_video": is_video,
+    })
+    .to_string()
+}
+
+/// Phase C2f: `banGroupCallParticipants` (TDLib 1.8.67,
+/// `schema/td_api.tl:14385`):
+/// `banGroupCallParticipants group_call_id:int32 user_ids:vector<int64>
+/// = Ok;` "Identifiers of group call participants to ban".
+pub fn ban_group_call_participants(
+    extra: RequestId,
+    group_call_id: i32,
+    user_ids: &[i64],
+) -> String {
+    json!({
+        "@type": "banGroupCallParticipants",
+        "@extra": extra.as_extra(),
+        "group_call_id": group_call_id,
+        "user_ids": user_ids,
+    })
+    .to_string()
+}
+
+/// Phase C2f: `setGroupCallParticipantVolumeLevel` (TDLib 1.8.67,
+/// `schema/td_api.tl:14438`):
+/// `setGroupCallParticipantVolumeLevel group_call_id:int32
+/// participant_id:MessageSender volume_level:int32 = Ok;`
+/// "New participant's volume level; 1-20000 in hundreds of percents"
+/// — the driver clamps before sending.
+pub fn set_group_call_participant_volume_level(
+    extra: RequestId,
+    group_call_id: i32,
+    participant_id: &MessageSenderRef,
+    volume_level: i32,
+) -> String {
+    json!({
+        "@type": "setGroupCallParticipantVolumeLevel",
+        "@extra": extra.as_extra(),
+        "group_call_id": group_call_id,
+        "participant_id": participant_id.to_value(),
+        "volume_level": volume_level,
+    })
+    .to_string()
+}
+
 /// Phase B4: `setChatMessageAutoDeleteTime` (TDLib 1.8.67,
 /// `schema/td_api.tl:13454`):
 /// `setChatMessageAutoDeleteTime chat_id:int53
@@ -4650,5 +4713,47 @@ mod channel_requests_tests {
         assert_eq!(v["@type"], "declineGroupCallInvitation");
         assert_eq!(v["chat_id"], 100);
         assert_eq!(v["message_id"], 7);
+    }
+
+    #[test]
+    fn group_call_participant_management_shapes_match_1_8_67() {
+        // Phase C2f: `inviteGroupCallParticipant group_call_id:int32
+        // user_id:int53 is_video:Bool = InviteGroupCallParticipantResult`
+        // (schema 1.8.67, line 14375).
+        let v: serde_json::Value =
+            serde_json::from_str(&invite_group_call_participant(RequestId(31), 555, 42, true))
+                .unwrap();
+        assert_eq!(v["@type"], "inviteGroupCallParticipant");
+        assert_eq!(v["@extra"], "31");
+        assert_eq!(v["group_call_id"], 555);
+        assert_eq!(v["user_id"], 42);
+        assert_eq!(v["is_video"], true);
+
+        // Phase C2f: `banGroupCallParticipants group_call_id:int32
+        // user_ids:vector<int64> = Ok` (schema 1.8.67, line 14385).
+        let v: serde_json::Value =
+            serde_json::from_str(&ban_group_call_participants(RequestId(32), 555, &[42, 43]))
+                .unwrap();
+        assert_eq!(v["@type"], "banGroupCallParticipants");
+        assert_eq!(v["@extra"], "32");
+        assert_eq!(v["group_call_id"], 555);
+        assert_eq!(v["user_ids"], serde_json::json!([42, 43]));
+
+        // Phase C2f: `setGroupCallParticipantVolumeLevel
+        // group_call_id:int32 participant_id:MessageSender
+        // volume_level:int32 = Ok` (schema 1.8.67, line 14438).
+        let v: serde_json::Value = serde_json::from_str(&set_group_call_participant_volume_level(
+            RequestId(33),
+            555,
+            &MessageSenderRef::User(42),
+            15000,
+        ))
+        .unwrap();
+        assert_eq!(v["@type"], "setGroupCallParticipantVolumeLevel");
+        assert_eq!(v["@extra"], "33");
+        assert_eq!(v["group_call_id"], 555);
+        assert_eq!(v["participant_id"]["@type"], "messageSenderUser");
+        assert_eq!(v["participant_id"]["user_id"], 42);
+        assert_eq!(v["volume_level"], 15000);
     }
 }

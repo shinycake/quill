@@ -12,14 +12,14 @@ use crate::telegram::envelope::{
     ChannelMemberStatus, ChatAction, ChatActiveStoriesView, ChatAdminRights,
     ChatAdministratorEntry, ChatDraft, ChatFolderInfo, ChatFolderSpec, ChatJoinResult, ChatKind,
     ChatList, ChatNotificationSettings, ChatPositionUpdate, ChatStatistics, ConnectionState,
-    EnvelopePayload, ErrorClass, ForumTopic, InlineKeyboard, MessageAutoDelete, MessageContent,
-    MessageForwardInfo, MessageInteractionInfo, MessageOrigin, MessageReaction, MessageReplyTo,
-    MessageSelfDestruct, MessageSender, NotificationSettingsScope, NotificationSound, ParsedCall,
-    ParsedChatEvent, ParsedChatInviteLink, ParsedChatJoinRequest, ParsedChatMember, ParsedFile,
-    ParsedGroupCall, ParsedGroupCallParticipant, ParsedMessage, ParsedSecretChat, ParsedStory,
-    ParsedUser, ParsedVideoChat, Poll, ReportOption, ReportSponsoredResult,
-    ScopeNotificationSettings, SecretChatState, SponsoredMessage, StickerFormat, StickerItem,
-    StickerSetInfo, StoryAvailableReactionView, StoryListView, TdError,
+    EnvelopePayload, ErrorClass, ForumTopic, InlineKeyboard, InviteGroupCallParticipantResult,
+    MessageAutoDelete, MessageContent, MessageForwardInfo, MessageInteractionInfo, MessageOrigin,
+    MessageReaction, MessageReplyTo, MessageSelfDestruct, MessageSender, NotificationSettingsScope,
+    NotificationSound, ParsedCall, ParsedChatEvent, ParsedChatInviteLink, ParsedChatJoinRequest,
+    ParsedChatMember, ParsedFile, ParsedGroupCall, ParsedGroupCallParticipant, ParsedMessage,
+    ParsedSecretChat, ParsedStory, ParsedUser, ParsedVideoChat, Poll, ReportOption,
+    ReportSponsoredResult, ScopeNotificationSettings, SecretChatState, SponsoredMessage,
+    StickerFormat, StickerItem, StickerSetInfo, StoryAvailableReactionView, StoryListView, TdError,
 };
 use crate::telegram::envelope::{CallState, ReadyParams};
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -378,6 +378,35 @@ pub enum RequestPurpose {
     /// `ok`; state refreshes via `updateGroupCall`.
     ToggleVideoChatMuteNew {
         group_call_id: i32,
+    },
+    /// Phase C2f: `inviteGroupCallParticipant`. Response is
+    /// `inviteGroupCallParticipantResult*`; non-success results
+    /// surface via `group_call_error`.
+    InviteGroupCallParticipant {
+        group_call_id: i32,
+    },
+    /// Phase C2f: `banGroupCallParticipants`. Response is `ok`;
+    /// the roster refreshes via participant updates.
+    BanGroupCallParticipants {
+        group_call_id: i32,
+    },
+    /// Phase C2f: `setGroupCallParticipantVolumeLevel`. Response is
+    /// `ok`; the new level arrives via `updateGroupCallParticipant`.
+    SetGroupCallParticipantVolumeLevel {
+        group_call_id: i32,
+    },
+    /// Phase C2f: `joinGroupCall` to accept a `messageGroupCall`
+    /// invitation (schema 1.8.67, line 5288: "Use joinGroupCall to
+    /// accept the call"). The joined call is tracked via
+    /// `updateGroupCall` like any other join.
+    JoinGroupCallInvitation {
+        chat_id: i64,
+        message_id: i64,
+    },
+    /// Phase C2f: `declineGroupCallInvitation`. Response is `ok`.
+    DeclineGroupCallInvitation {
+        chat_id: i64,
+        message_id: i64,
     },
     /// Phase B4: `setChatMessageAutoDeleteTime`. Response is `ok`; the
     /// new timer arrives as `updateChatMessageAutoDeleteTime` (plus a
@@ -2070,6 +2099,11 @@ pub struct ActiveGroupCall {
     /// UI "reconnecting" banner; set on `need_rejoin`, cleared when a
     /// rejoin is issued or a fresh joined `updateGroupCall` arrives.
     pub reconnecting: bool,
+    /// Phase C2f: group-call rejoin attempts after `need_rejoin` —
+    /// the C2d 1:1 reconnect discipline (max 3 attempts). Reset on a
+    /// fresh joined `updateGroupCall` or when a new call takes the
+    /// slot (`fresh()`).
+    pub rejoin_attempts: usize,
     pub can_be_managed: bool,
     pub is_owned: bool,
     pub participant_count: i32,
@@ -2110,6 +2144,7 @@ impl ActiveGroupCall {
             is_joined: false,
             need_rejoin: false,
             reconnecting: false,
+            rejoin_attempts: 0,
             can_be_managed: false,
             is_owned: false,
             participant_count: 0,
@@ -3655,6 +3690,26 @@ impl Session {
                 }
                 self.group_call_error = None;
             }
+            // Phase C2f: `groupCallInfo` — the `joinGroupCall`
+            // answer to invitation acceptance. Queue a `getGroupCall`
+            // fetch so tracking starts even if the `updateGroupCall`
+            // is delayed; the update remains the source of truth for
+            // `is_joined`. Store the tgcalls join payload like the
+            // `joinVideoChat` Text arm does.
+            EnvelopePayload::GroupCallInfo {
+                group_call_id,
+                join_payload,
+            } => {
+                if let Some(RequestPurpose::JoinGroupCallInvitation { .. }) =
+                    pending.map(|p| p.purpose)
+                {
+                    if !self.group_call_fetch_queue.contains(&group_call_id) {
+                        self.group_call_fetch_queue.push(group_call_id);
+                    }
+                    self.set_group_call_join_payload(group_call_id, join_payload);
+                }
+                self.group_call_error = None;
+            }
             // Phase C3a: group-call signaling (schema 1.8.67, lines
             // 10819 / 10824 / 10830 / 10836 / 10576). `updateGroupCall`
             // drives the tracked-call state; participant updates feed
@@ -4465,6 +4520,30 @@ impl Session {
                     self.set_group_call_invite_link(group_call_id, url);
                 }
             }
+            // Phase C2f: `inviteGroupCallParticipant` answer. A success
+            // clears any earlier invite error; the three failure
+            // variants surface honestly via `group_call_error` (shown
+            // on the group-call overlay).
+            EnvelopePayload::InviteGroupCallParticipantResult(result) => {
+                if matches!(
+                    pending.map(|p| p.purpose),
+                    Some(RequestPurpose::InviteGroupCallParticipant { .. })
+                ) {
+                    self.group_call_error = match result {
+                        InviteGroupCallParticipantResult::Success { .. } => None,
+                        InviteGroupCallParticipantResult::UserPrivacyRestricted => Some(
+                            "Couldn't invite: that user restricts group-call invitations."
+                                .to_string(),
+                        ),
+                        InviteGroupCallParticipantResult::UserAlreadyParticipant => {
+                            Some("That user is already in the voice chat.".to_string())
+                        }
+                        InviteGroupCallParticipantResult::UserWasBanned => {
+                            Some("That user was banned from the voice chat.".to_string())
+                        }
+                    };
+                }
+            }
             EnvelopePayload::Ok => {
                 // Phase C3a: a successful `leaveGroupCall` /
                 // `endGroupCall` drops the tracked call (the `ok`
@@ -4602,10 +4681,34 @@ impl Session {
                         ));
                     }
                     Some(RequestPurpose::JoinVideoChat { .. }) => {
-                        self.group_call_error = Some(call_request_error_line(
-                            &err,
-                            "Could not join the voice chat",
-                        ));
+                        // Phase C2f: a failed rejoin re-arms
+                        // `reconnecting` so the driver's auto-rejoin
+                        // retries (max 3 attempts, the C2d discipline);
+                        // a plain initial-join failure just reports.
+                        // `rejoin_attempts > 0` marks the failed join
+                        // as a rejoin (only `rejoin_group_call`
+                        // increments the counter).
+                        let rejoin_attempt = self
+                            .active_group_call
+                            .as_ref()
+                            .map(|call| call.rejoin_attempts)
+                            .unwrap_or(0);
+                        if rejoin_attempt > 0 {
+                            if let Some(call) = self.active_group_call.as_mut() {
+                                // Keep the banner + manual Rejoin
+                                // available even after exhaustion.
+                                call.reconnecting = true;
+                                if call.rejoin_attempts >= 3 {
+                                    self.group_call_error =
+                                        Some("Reconnect attempts exhausted.".to_string());
+                                }
+                            }
+                        } else {
+                            self.group_call_error = Some(call_request_error_line(
+                                &err,
+                                "Could not join the voice chat",
+                            ));
+                        }
                     }
                     Some(
                         RequestPurpose::LeaveGroupCall { .. }
@@ -4617,7 +4720,12 @@ impl Session {
                         | RequestPurpose::ToggleGroupCallVideo { .. }
                         | RequestPurpose::ToggleGroupCallParticipantMute { .. }
                         | RequestPurpose::ToggleGroupCallParticipantHand { .. }
-                        | RequestPurpose::ToggleVideoChatMuteNew { .. },
+                        | RequestPurpose::ToggleVideoChatMuteNew { .. }
+                        | RequestPurpose::InviteGroupCallParticipant { .. }
+                        | RequestPurpose::BanGroupCallParticipants { .. }
+                        | RequestPurpose::SetGroupCallParticipantVolumeLevel { .. }
+                        | RequestPurpose::JoinGroupCallInvitation { .. }
+                        | RequestPurpose::DeclineGroupCallInvitation { .. },
                     ) => {
                         self.group_call_error =
                             Some(call_request_error_line(&err, "Voice chat request failed"));
@@ -5528,6 +5636,12 @@ impl Session {
             tracked.reconnecting = true;
         } else if group_call.is_joined {
             tracked.reconnecting = false;
+            // Phase C2f: a clean joined update means the rejoin
+            // succeeded — the attempt counter starts over.
+            tracked.rejoin_attempts = 0;
+            // Phase C2f: the failure is resolved — a stale
+            // group-call error line would lie now.
+            self.group_call_error = None;
         }
         tracked.sort_participants();
     }

@@ -14,6 +14,20 @@ pub struct Envelope {
     pub payload: EnvelopePayload,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InviteGroupCallParticipantResult {
+    /// `inviteGroupCallParticipantResultSuccess` — carries the
+    /// invitation service message's chat/message ids (usable with
+    /// `declineGroupCallInvitation` to cancel).
+    Success {
+        chat_id: i64,
+        message_id: i64,
+    },
+    UserPrivacyRestricted,
+    UserAlreadyParticipant,
+    UserWasBanned,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum EnvelopePayload {
     UpdateAuthorizationState(AuthorizationState),
@@ -212,6 +226,16 @@ pub enum EnvelopePayload {
     GroupCallId {
         id: i32,
     },
+    /// Phase C2f: `groupCallInfo` (schema 1.8.67, line 7190) — the
+    /// `joinGroupCall` answer (invitation acceptance). Correlated via
+    /// `@extra` / `RequestPurpose::JoinGroupCallInvitation`. The
+    /// `join_payload` is the tgcalls payload (stored, never consumed —
+    /// no media transport until Phase C2); `updateGroupCall` remains
+    /// the source of truth for join state.
+    GroupCallInfo {
+        group_call_id: i32,
+        join_payload: String,
+    },
     /// Phase C3a: `updateGroupCall` (schema 1.8.67, line 10819) — a
     /// group call was created or its information was updated.
     UpdateGroupCall {
@@ -253,6 +277,9 @@ pub enum EnvelopePayload {
     HttpUrl {
         url: String,
     },
+    /// Phase C2f: `inviteGroupCallParticipantResult*` (schema 1.8.67,
+    /// lines 7216-7227) — the `inviteGroupCallParticipant` answer.
+    InviteGroupCallParticipantResult(InviteGroupCallParticipantResult),
     Error(TdError),
     Messages(Vec<ParsedMessage>),
     Message(ParsedMessage),
@@ -3580,6 +3607,18 @@ pub enum MessageContent {
     ChatTtlChanged {
         secs: i32,
     },
+    /// Phase C2f: `messageGroupCall` (TDLib 1.8.67,
+    /// `schema/td_api.tl:5288`) — a group call not bound to a chat.
+    /// Incoming, not active, not missed: an invitation the user can
+    /// accept (`joinGroupCall`) or decline
+    /// (`declineGroupCallInvitation`). `other_participant_ids` is not
+    /// kept (the row only needs the invitation state).
+    GroupCallInvitation {
+        unique_id: i64,
+        is_active: bool,
+        was_missed: bool,
+        is_video: bool,
+    },
     Unsupported {
         type_name: String,
     },
@@ -4091,6 +4130,15 @@ impl MessageContent {
                     format!("Timer set to {}", format_ttl_setting(*secs))
                 } else {
                     "Timer turned off".to_string()
+                }
+            }
+            // Phase C2f: chat-list last-message preview for a
+            // `messageGroupCall` invitation.
+            MessageContent::GroupCallInvitation { is_video, .. } => {
+                if *is_video {
+                    "📹 Video chat invitation".to_string()
+                } else {
+                    "📞 Voice chat invitation".to_string()
                 }
             }
             MessageContent::Unsupported { type_name } => format!("({type_name})"),
@@ -4713,6 +4761,19 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
                 .and_then(Value::as_i64)
                 .ok_or(ParseError::MissingField)? as i32,
         }),
+        // Phase C2f: `groupCallInfo` (schema 1.8.67, line 7190) — the
+        // `joinGroupCall` answer.
+        "groupCallInfo" => Ok(EnvelopePayload::GroupCallInfo {
+            group_call_id: value
+                .get("group_call_id")
+                .and_then(Value::as_i64)
+                .ok_or(ParseError::MissingField)? as i32,
+            join_payload: value
+                .get("join_payload")
+                .and_then(Value::as_str)
+                .ok_or(ParseError::MissingField)?
+                .to_string(),
+        }),
         // Phase C3a: group-call signaling updates (schema 1.8.67,
         // lines 10819 / 10824 / 10830 / 10836 / 10576). All
         // signaling-only: no media transport until Phase C2.
@@ -4961,6 +5022,33 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
                 .unwrap_or("")
                 .to_string(),
         }),
+        // Phase C2f: `inviteGroupCallParticipantResult*` (schema 1.8.67,
+        // lines 7216-7227) — the `inviteGroupCallParticipant` answer.
+        // Note: the success variant is
+        // `inviteGroupCallParticipantResultSuccess`, not `...ResultOk`.
+        "inviteGroupCallParticipantResultSuccess" => {
+            Ok(EnvelopePayload::InviteGroupCallParticipantResult(
+                InviteGroupCallParticipantResult::Success {
+                    chat_id: value.get("chat_id").and_then(Value::as_i64).unwrap_or(0),
+                    message_id: value.get("message_id").and_then(Value::as_i64).unwrap_or(0),
+                },
+            ))
+        }
+        "inviteGroupCallParticipantResultUserPrivacyRestricted" => {
+            Ok(EnvelopePayload::InviteGroupCallParticipantResult(
+                InviteGroupCallParticipantResult::UserPrivacyRestricted,
+            ))
+        }
+        "inviteGroupCallParticipantResultUserAlreadyParticipant" => {
+            Ok(EnvelopePayload::InviteGroupCallParticipantResult(
+                InviteGroupCallParticipantResult::UserAlreadyParticipant,
+            ))
+        }
+        "inviteGroupCallParticipantResultUserWasBanned" => {
+            Ok(EnvelopePayload::InviteGroupCallParticipantResult(
+                InviteGroupCallParticipantResult::UserWasBanned,
+            ))
+        }
         "callbackQueryAnswer" => Ok(EnvelopePayload::CallbackQueryAnswer(
             parse_callback_query_answer(&value),
         )),
@@ -6478,6 +6566,25 @@ fn parse_content(value: Option<&Value>) -> (MessageContent, Vec<ParsedFile>) {
                     .get("message_auto_delete_time")
                     .and_then(Value::as_i64)
                     .unwrap_or(0) as i32,
+            },
+            Vec::new(),
+        ),
+        // Phase C2f: `messageGroupCall` (schema 1.8.67, line 5288).
+        Some("messageGroupCall") => (
+            MessageContent::GroupCallInvitation {
+                unique_id: int64(value.get("unique_id")).unwrap_or(0),
+                is_active: value
+                    .get("is_active")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
+                was_missed: value
+                    .get("was_missed")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
+                is_video: value
+                    .get("is_video")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
             },
             Vec::new(),
         ),
@@ -12049,6 +12156,97 @@ mod notification_sound_tests {
                 .lines()
                 .any(|l| l.starts_with("chatEventInviteLinkCreated ")),
             "chatEventInviteLinkCreated must not exist in 1.8.67"
+        );
+    }
+
+    #[test]
+    fn message_group_call_parses_invitation_state() {
+        // Phase C2f: `messageGroupCall unique_id:int64 is_active:Bool
+        // was_missed:Bool is_video:Bool duration:int32
+        // other_participant_ids:vector<MessageSender> = MessageContent`
+        // (schema 1.8.67, line 5288).
+        let env = parse_envelope(
+            r#"{"@type":"updateNewMessage","message":{"id":90,"chat_id":51,"is_outgoing":false,"date":1700000100,"content":{"@type":"messageGroupCall","unique_id":"123456789","is_active":false,"was_missed":false,"is_video":true,"duration":0,"other_participant_ids":[]}}}"#,
+        )
+        .unwrap();
+        match env.payload {
+            EnvelopePayload::UpdateNewMessage(message) => {
+                assert_eq!(
+                    message.content,
+                    MessageContent::GroupCallInvitation {
+                        unique_id: 123456789,
+                        is_active: false,
+                        was_missed: false,
+                        is_video: true,
+                    }
+                );
+                assert_eq!(message.content.preview(), "📹 Video chat invitation");
+            }
+            other => panic!("{other:?}"),
+        }
+        let schema = include_str!("../../schema/td_api.tl");
+        assert_eq!(
+            schema
+                .lines()
+                .find(|l| l.starts_with("messageGroupCall "))
+                .expect("messageGroupCall in schema"),
+            "messageGroupCall unique_id:int64 is_active:Bool was_missed:Bool is_video:Bool duration:int32 other_participant_ids:vector<MessageSender> = MessageContent;"
+        );
+    }
+
+    #[test]
+    fn invite_group_call_participant_results_parse() {
+        // Phase C2f: the `inviteGroupCallParticipant` answer variants
+        // (schema 1.8.67, lines 7216-7227).
+        let env = parse_envelope(
+            r#"{"@type":"inviteGroupCallParticipantResultSuccess","chat_id":51,"message_id":90}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            env.payload,
+            EnvelopePayload::InviteGroupCallParticipantResult(
+                InviteGroupCallParticipantResult::Success {
+                    chat_id: 51,
+                    message_id: 90
+                }
+            )
+        );
+        for (json, expected) in [
+            (
+                r#"{"@type":"inviteGroupCallParticipantResultUserPrivacyRestricted"}"#,
+                InviteGroupCallParticipantResult::UserPrivacyRestricted,
+            ),
+            (
+                r#"{"@type":"inviteGroupCallParticipantResultUserAlreadyParticipant"}"#,
+                InviteGroupCallParticipantResult::UserAlreadyParticipant,
+            ),
+            (
+                r#"{"@type":"inviteGroupCallParticipantResultUserWasBanned"}"#,
+                InviteGroupCallParticipantResult::UserWasBanned,
+            ),
+        ] {
+            let env = parse_envelope(json).unwrap();
+            assert_eq!(
+                env.payload,
+                EnvelopePayload::InviteGroupCallParticipantResult(expected)
+            );
+        }
+    }
+
+    #[test]
+    fn group_call_info_parses() {
+        // Phase C2f: the `joinGroupCall` answer (schema 1.8.67, line
+        // 7190) — invitation acceptance.
+        let env = parse_envelope(
+            r#"{"@type":"groupCallInfo","group_call_id":555,"join_payload":"tgcalls-payload"}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            env.payload,
+            EnvelopePayload::GroupCallInfo {
+                group_call_id: 555,
+                join_payload: "tgcalls-payload".to_string(),
+            }
         );
     }
 }
