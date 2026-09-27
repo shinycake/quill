@@ -583,6 +583,11 @@ pub struct QuillApp {
     demo_auth_inputs: bool,
     /// Screenshot Ready list: same reducers as live, injected JSON only.
     demo_session: Option<Session>,
+    /// Phase C2c screenshot ReadyCallDevices demo: injected demo devices
+    /// only (no live Telegram, no real hardware); `None` means the engine
+    /// reported none.
+    demo_call_devices: Option<Vec<quill::calls::engine::MediaDevice>>,
+    demo_selected_devices: (Option<String>, Option<String>),
     demo_seq: AtomicU64,
     demo_sink: Arc<MemorySink>,
     /// Phase 8.1: chat ids whose OS notification was clicked (set by the
@@ -1022,6 +1027,8 @@ pub enum ScreenshotDemo {
     /// duration clock, Mute / Hang up, and the honest no-video-transport
     /// note. Signaling only — no live Telegram, no media.
     ReadyCallVideo,
+    /// Phase C2c: connected voice call with microphone/speaker choices.
+    ReadyCallDevices,
     /// Phase B4: chat-level auto-delete / self-destruct timer (injected,
     /// no live Telegram) — the Ready secret chat with Zed (id 41) with
     /// `message_auto_delete_time` 3600, one message carrying a live
@@ -1837,6 +1844,16 @@ impl QuillApp {
                     AuthorizationState::Ready,
                 )
             }
+            Some(ScreenshotDemo::ReadyCallDevices) => {
+                demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
+                (
+                    ConnectUiStatus::DemoReadyChats,
+                    None,
+                    "screenshot demo — connected call audio devices (injected, no live Telegram)"
+                        .into(),
+                    AuthorizationState::Ready,
+                )
+            }
             Some(ScreenshotDemo::ReadyChatTtl) => {
                 demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
                 (
@@ -1936,6 +1953,8 @@ impl QuillApp {
                 )
             ),
             demo_session,
+            demo_call_devices: None,
+            demo_selected_devices: (None, None),
             demo_seq: AtomicU64::new(0),
             demo_sink,
             notify_clicks: Arc::new(Mutex::new(Vec::new())),
@@ -2357,6 +2376,46 @@ impl QuillApp {
             app.status_note =
                 "screenshot demo — connected video call with Zed (injected, no live Telegram)"
                     .into();
+        }
+        if matches!(demo, Some(ScreenshotDemo::ReadyCallDevices)) {
+            if let Some(session) = app.demo_session.as_mut() {
+                app.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_call_video(session, &app.demo_sink, &app.demo_seq);
+                if let Some(call) = session.active_call.as_mut() {
+                    call.is_video = false;
+                    call.transport = Some(quill::calls::engine::TransportState::Connected);
+                }
+            }
+            // Injected demo devices only (no live Telegram, no real
+            // hardware); pre-selects the USB headset pair.
+            app.demo_call_devices = Some(vec![
+                quill::calls::engine::MediaDevice {
+                    id: "default-mic".into(),
+                    name: "Default - Built-in Microphone".into(),
+                    kind: quill::calls::engine::MediaDeviceKind::Microphone,
+                },
+                quill::calls::engine::MediaDevice {
+                    id: "usb-headset-mic".into(),
+                    name: "USB Headset Microphone".into(),
+                    kind: quill::calls::engine::MediaDeviceKind::Microphone,
+                },
+                quill::calls::engine::MediaDevice {
+                    id: "default-sp".into(),
+                    name: "Default - Built-in Output".into(),
+                    kind: quill::calls::engine::MediaDeviceKind::Speaker,
+                },
+                quill::calls::engine::MediaDevice {
+                    id: "usb-headset-sp".into(),
+                    name: "USB Headset".into(),
+                    kind: quill::calls::engine::MediaDeviceKind::Speaker,
+                },
+            ]);
+            app.demo_selected_devices = (
+                Some("usb-headset-mic".into()),
+                Some("usb-headset-sp".into()),
+            );
+            app.status_note =
+                "screenshot demo — real-audio device selection (injected, no live Telegram)".into();
         }
         // Phase B4: chat TTL fixture — the Ready secret chat with a 1h
         // self-destruct timer, a live `auto_delete_in` countdown on one
@@ -4396,19 +4455,65 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// Phase C1b: local-only mute toggle for the live call card. The
-    /// state is tracked on `ActiveCall.muted` but is a no-op without
-    /// media transport (C2) — the card labels it honestly.
     fn toggle_call_mute(&mut self, cx: &mut Context<Self>) {
-        if let Some(call) = self
-            .live
+        if let Some(live) = self.live.as_mut() {
+            let muted = live
+                .driver
+                .session
+                .active_call
+                .as_ref()
+                .is_some_and(|call| !call.muted);
+            self.status_note = match live.driver.set_call_muted(muted) {
+                Ok(()) => {
+                    if muted {
+                        "microphone muted".into()
+                    } else {
+                        "microphone unmuted".into()
+                    }
+                }
+                Err(err) => format!("could not change mute state: {err}"),
+            };
+        } else if let Some(call) = self
+            .demo_session
             .as_mut()
-            .map(|live| &mut live.driver.session)
-            .into_iter()
-            .chain(self.demo_session.as_mut())
-            .find_map(|session| session.active_call.as_mut())
+            .and_then(|session| session.active_call.as_mut())
         {
             call.muted = !call.muted;
+        }
+        cx.notify();
+    }
+
+    fn select_call_device(
+        &mut self,
+        kind: quill::calls::engine::MediaDeviceKind,
+        device_id: &str,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(live) = self.live.as_mut() {
+            let (microphone, speaker) = live.driver.selected_call_devices();
+            let (microphone, speaker) = match kind {
+                quill::calls::engine::MediaDeviceKind::Microphone => {
+                    (Some(device_id.to_string()), speaker.map(str::to_owned))
+                }
+                quill::calls::engine::MediaDeviceKind::Speaker => {
+                    (microphone.map(str::to_owned), Some(device_id.to_string()))
+                }
+                _ => return,
+            };
+            self.status_note = match live.driver.select_call_devices(microphone, speaker) {
+                Ok(()) => "audio device selected".into(),
+                Err(err) => format!("could not select audio device: {err}"),
+            };
+        } else {
+            match kind {
+                quill::calls::engine::MediaDeviceKind::Microphone => {
+                    self.demo_selected_devices.0 = Some(device_id.into())
+                }
+                quill::calls::engine::MediaDeviceKind::Speaker => {
+                    self.demo_selected_devices.1 = Some(device_id.into())
+                }
+                _ => return,
+            }
         }
         cx.notify();
     }
@@ -9593,13 +9698,10 @@ impl QuillApp {
             .w_full()
             .flex()
             .gap_2()
-            .child(tile(
-                name.to_string(),
-                "No video — transport ships in Phase C2",
-            ))
+            .child(tile(name.to_string(), "No video — ships in a later slice"))
             .child(tile(
                 "You".to_string(),
-                "No preview — transport ships in Phase C2",
+                "No preview — ships in a later slice",
             ))
     }
 
@@ -9626,10 +9728,25 @@ impl QuillApp {
                 }
             }
             CallState::ExchangingKeys => ("Connecting…".to_string(), None),
-            CallState::Ready => (
-                "Connected".to_string(),
-                Some(Self::call_clock(call.connected_secs().max(0) as u64)),
-            ),
+            CallState::Ready => {
+                use quill::calls::engine::TransportState;
+                let status = match call.transport {
+                    Some(TransportState::Connected) if call.muted => {
+                        "Muted - microphone off".to_string()
+                    }
+                    Some(TransportState::Connected) => "Connected".to_string(),
+                    Some(TransportState::Failed) => format!(
+                        "Couldn't start audio: {}. The call is up but carries no sound.",
+                        call.transport_error.as_deref().unwrap_or("unknown error")
+                    ),
+                    Some(TransportState::Closed) => "Audio disconnected.".to_string(),
+                    None | Some(TransportState::Connecting) => "Connecting audio...".to_string(),
+                };
+                (
+                    status,
+                    Some(Self::call_clock(call.connected_secs().max(0) as u64)),
+                )
+            }
             CallState::HangingUp => ("Hanging up…".to_string(), None),
             // A future state the pinned schema doesn't know: label it
             // honestly instead of pretending it means something else.
@@ -9671,11 +9788,11 @@ impl QuillApp {
         );
         if no_transport_note {
             let note = if call.is_video {
-                "Video isn't connected — video transport ships in Phase \
-                 C2. This call carries no video or audio."
+                "Video transport ships in a later slice; audio may be real."
+            } else if call.transport == Some(quill::calls::engine::TransportState::Connected) {
+                "Audio connected"
             } else {
-                "Audio isn't connected — Quill's voice transport \
-                 ships in Phase C2. This call carries no sound."
+                "Waiting for audio transport"
             };
             card = card.child(
                 div()
@@ -9693,7 +9810,7 @@ impl QuillApp {
                 div()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
-                    .child("Muted — no audio to mute; voice transport ships in Phase C2."),
+                    .child("Microphone muted"),
             );
         }
         if let Some(error) = error {
@@ -9703,6 +9820,88 @@ impl QuillApp {
                     .text_color(rgb(0xe17076))
                     .child(error.to_string()),
             );
+        }
+        if let Some(error) = &call.transport_error {
+            card = card.child(
+                div()
+                    .text_xs()
+                    .text_color(rgb(0xe17076))
+                    .child(error.clone()),
+            );
+        }
+        if matches!(call.state, CallState::Ready) {
+            // Phase C2c: microphone/speaker pickers. Live state comes
+            // from the driver; the screenshot demo injects demo devices
+            // only (no live Telegram, no real hardware). Empty means the
+            // engine reported none — never fabricated.
+            let no_engine = self
+                .live
+                .as_ref()
+                .is_some_and(|live| !live.driver.has_call_engine());
+            let (devices, selected): (
+                Vec<quill::calls::engine::MediaDevice>,
+                (Option<String>, Option<String>),
+            ) = if let Some(live) = self.live.as_ref() {
+                let (microphone, speaker) = live.driver.selected_call_devices();
+                (
+                    live.driver.call_devices().to_vec(),
+                    (microphone.map(str::to_owned), speaker.map(str::to_owned)),
+                )
+            } else {
+                (
+                    self.demo_call_devices.clone().unwrap_or_default(),
+                    self.demo_selected_devices.clone(),
+                )
+            };
+            if no_engine {
+                card = card.child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child("No audio - call engine unavailable."),
+                );
+            } else if devices.is_empty() {
+                card = card.child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child("No audio devices found - the engine reported none."),
+                );
+            } else {
+                let mut pickers = div().w_full().flex().flex_col().gap_1();
+                for (kind, label, selected) in [
+                    (
+                        quill::calls::engine::MediaDeviceKind::Microphone,
+                        "Microphone",
+                        selected.0.as_deref(),
+                    ),
+                    (
+                        quill::calls::engine::MediaDeviceKind::Speaker,
+                        "Speaker",
+                        selected.1.as_deref(),
+                    ),
+                ] {
+                    pickers =
+                        pickers.child(div().text_xs().font_semibold().child(label.to_string()));
+                    for device in devices.iter().filter(|device| device.kind == kind) {
+                        let device_id = device.id.clone();
+                        let chosen = Some(device.id.as_str()) == selected;
+                        pickers = pickers.child(
+                            Button::new(format!("call-device-{}-{}", label, device.id))
+                                .label(format!(
+                                    "{} {}",
+                                    if chosen { "●" } else { "○" },
+                                    device.name
+                                ))
+                                .ghost()
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.select_call_device(kind, &device_id, cx);
+                                })),
+                        );
+                    }
+                }
+                card = card.child(pickers);
+            }
         }
         let mut buttons = div().flex().gap_2();
         match &call.state {
@@ -9785,16 +9984,15 @@ impl QuillApp {
                     )),
             );
         }
-        // Always present: the end screen never implies the call carried
-        // audio, even when it never connected.
         card = card.child(
             div()
                 .text_xs()
                 .text_color(cx.theme().muted_foreground)
-                .child(
-                    "No audio was carried — voice transport isn't \
-                     implemented yet (Phase C2).",
-                ),
+                .child(if summary.had_audio {
+                    "Audio was connected for this call."
+                } else {
+                    "No audio was carried."
+                }),
         );
         if summary.need_debug_information || summary.need_log {
             card = card.child(

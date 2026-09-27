@@ -1,7 +1,9 @@
 //! Live TDLib connect gate: credentials + tdjson → setTdlibParameters → auth updates.
 //! Never logs api_hash, phone numbers, or codes.
 
-use crate::calls::engine::CallEngine;
+use crate::calls::engine::{
+    CallEngine, ConnectParams, EngineError, MediaDevice, RtcServer, TransportState,
+};
 use crate::composer::{
     AttachmentKind, ComposerEdit, ComposerEditKind, ComposerSnapshot, DeleteConfirm,
     DraftSaveClock, DraftSaveStep, ForwardDraft, draft_text_to_store, schedule_draft_save,
@@ -352,6 +354,7 @@ impl JsonSender for LiveSender {
 
 /// Phase C2b: worker-safe queue for engine-emitted signaling.
 type SignalingOutbox = Arc<Mutex<VecDeque<(i32, Vec<u8>)>>>;
+type TransportOutbox = Arc<Mutex<VecDeque<(i32, TransportState)>>>;
 
 /// Session + outbound sender that auto-replies to `WaitTdlibParameters`.
 pub struct ConnectDriver<S: JsonSender> {
@@ -359,6 +362,12 @@ pub struct ConnectDriver<S: JsonSender> {
     sender: S,
     call_engine: Option<Box<dyn CallEngine>>,
     signaling_outbox: SignalingOutbox,
+    transport_outbox: TransportOutbox,
+    /// Phase C2c: last-enumerated audio devices and the selected
+    /// (microphone, speaker) ids. `None` means the engine default; no
+    /// devices are fabricated, so this can legitimately be empty.
+    call_devices_cache: Vec<MediaDevice>,
+    selected_devices: (Option<String>, Option<String>),
     credentials: TelegramCredentials,
     paths: AccountPaths,
     database_key: DatabaseKey,
@@ -409,6 +418,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             sender,
             call_engine: None,
             signaling_outbox: Arc::new(Mutex::new(VecDeque::new())),
+            transport_outbox: Arc::new(Mutex::new(VecDeque::new())),
+            call_devices_cache: Vec::new(),
+            selected_devices: (None, None),
             credentials,
             paths: prepared.paths,
             database_key: prepared.database_key,
@@ -434,7 +446,9 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     /// Phase C2b: install the driver-thread call engine and route its
-    /// worker-thread signaling emissions into the driver's TDLib outbox.
+    /// worker-thread signaling/transport emissions into the driver
+    /// queues. Devices are fetched on demand (`refresh_call_devices`),
+    /// never here.
     pub fn set_call_engine(&mut self, mut engine: Box<dyn CallEngine>) {
         let outbox = self.signaling_outbox.clone();
         engine.set_signaling_emitted_callback(Arc::new(move |call_id, data| {
@@ -443,7 +457,45 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .expect("call signaling outbox")
                 .push_back((call_id, data));
         }));
+        let transport_outbox = self.transport_outbox.clone();
+        engine.set_transport_state_callback(Arc::new(move |call_id, state| {
+            transport_outbox
+                .lock()
+                .expect("call transport outbox")
+                .push_back((call_id, state));
+        }));
         self.call_engine = Some(engine);
+    }
+
+    /// Phase C2c: whether a call engine is installed at all.
+    pub fn has_call_engine(&self) -> bool {
+        self.call_engine.is_some()
+    }
+
+    /// Phase C2c: last-enumerated audio devices; empty when the engine
+    /// reported none (or is missing/unavailable).
+    pub fn call_devices(&self) -> &[MediaDevice] {
+        &self.call_devices_cache
+    }
+
+    /// Phase C2c: selected (microphone, speaker) device ids; `(None,
+    /// None)` is the engine default. No fabricated devices: nothing is
+    /// auto-selected from enumeration.
+    pub fn selected_call_devices(&self) -> (Option<&str>, Option<&str>) {
+        (
+            self.selected_devices.0.as_deref(),
+            self.selected_devices.1.as_deref(),
+        )
+    }
+
+    /// Phase C2c: best-effort device re-enumeration. A missing or
+    /// unavailable engine leaves the cache untouched.
+    pub fn refresh_call_devices(&mut self) {
+        if let Some(engine) = self.call_engine.as_deref()
+            && let Ok(devices) = engine.media_devices()
+        {
+            self.call_devices_cache = devices;
+        }
     }
 
     /// Phase C2b: advertise the engine's protocol only when an engine is
@@ -583,16 +635,22 @@ impl<S: JsonSender> ConnectDriver<S> {
             .session
             .active_call
             .as_ref()
-            .map(|call| (call.id, call.user_id, call.is_outgoing));
-        let tracked_call_id = active_call_after.map(|(call_id, _, _)| call_id);
+            .map(|call| (call.id, call.user_id, call.is_outgoing, call.ready.clone()));
+        let tracked_call_id = active_call_after
+            .as_ref()
+            .map(|(call_id, _, _, _)| *call_id);
 
-        if let Some((call_id, user_id, is_outgoing)) = active_call_after
-            && Some(call_id) != active_call_before
+        if let Some((call_id, user_id, is_outgoing, _)) = &active_call_after
+            && Some(*call_id) != active_call_before
             && let Some(engine) = self.call_engine.as_deref_mut()
         {
             // TDLib remains the source of truth; engine startup failures must
             // not erase the reducer's honest signaling-only call state.
-            let _ = engine.start_call(call_id, user_id, is_outgoing);
+            if let Err(err) = engine.start_call(*call_id, *user_id, *is_outgoing)
+                && let Some(call) = self.session.active_call.as_mut()
+            {
+                call.transport_error = Some(err.to_string());
+            }
         }
         if tracked_call_id.is_none()
             && let Some(call_id) = active_call_before
@@ -609,6 +667,117 @@ impl<S: JsonSender> ConnectDriver<S> {
             // gate. The session queue remains the honest diagnostic record
             // if the optional engine rejects or cannot consume these bytes.
             let _ = engine.send_signaling_data(call_id, &data);
+        }
+
+        // Phase C2c: connect the native audio transport exactly once per
+        // call — gated on the reducer-tracked transport state, not on a
+        // separate attempted set. A Ready call without an encryption key
+        // cannot build the native encryption parameters; the call stays
+        // up (TDLib owns signaling) but carries no sound.
+        if let Some((call_id, _, is_outgoing, Some(ready))) = &active_call_after
+            && self
+                .session
+                .active_call
+                .as_ref()
+                .is_some_and(|call| call.transport.is_none())
+        {
+            let call_id = *call_id;
+            let is_outgoing = *is_outgoing;
+            if ready.encryption_key.is_empty() {
+                if let Some(call) = self.session.active_call.as_mut() {
+                    call.transport = Some(TransportState::Failed);
+                    call.transport_error =
+                        Some("call became ready without an encryption key".into());
+                }
+            } else {
+                // Refresh devices before connecting so the native engine
+                // sees the current device ids.
+                self.refresh_call_devices();
+                let library_versions = self
+                    .call_engine
+                    .as_ref()
+                    .filter(|engine| engine.is_available())
+                    .map(|engine| engine.protocol().library_versions)
+                    .unwrap_or_default();
+                let params = ConnectParams {
+                    encryption_key: ready.encryption_key.clone(),
+                    is_outgoing,
+                    servers: ready
+                        .servers
+                        .iter()
+                        .map(|server| RtcServer {
+                            id: server.id,
+                            ipv4: server.ipv4.clone(),
+                            ipv6: server.ipv6.clone(),
+                            port: server.port,
+                            username: server.username.clone(),
+                            password: server.password.clone(),
+                            turn: server.turn,
+                            stun: server.stun,
+                            tcp: server.tcp,
+                            peer_tag: server.peer_tag.clone(),
+                        })
+                        .collect(),
+                    library_versions,
+                    p2p_allowed: ready.allow_p2p,
+                    mic_input: self.selected_devices.0.clone(),
+                    speaker_input: self.selected_devices.1.clone(),
+                };
+                let result = self
+                    .call_engine
+                    .as_deref_mut()
+                    .ok_or(crate::calls::engine::EngineError::Unavailable)
+                    .and_then(|engine| engine.connect(call_id, &params));
+                let pre_muted = self
+                    .session
+                    .active_call
+                    .as_ref()
+                    .is_some_and(|call| call.muted);
+                if result.is_ok()
+                    && pre_muted
+                    && let Some(engine) = self.call_engine.as_deref_mut()
+                {
+                    // A mute requested before the transport existed applies
+                    // once it does; failure here is non-fatal (the unmute
+                    // path can retry).
+                    let _ = engine.set_muted(call_id, true);
+                }
+                if let Some(call) = self.session.active_call.as_mut() {
+                    match result {
+                        Ok(()) => {
+                            call.transport = Some(TransportState::Connecting);
+                            call.transport_error = None;
+                        }
+                        Err(err) => {
+                            call.transport = Some(TransportState::Failed);
+                            call.transport_error = Some(err.to_string());
+                        }
+                    }
+                }
+            }
+        }
+
+        loop {
+            let update = self
+                .transport_outbox
+                .lock()
+                .expect("call transport outbox")
+                .pop_front();
+            let Some((call_id, state)) = update else {
+                break;
+            };
+            if let Some(call) = self
+                .session
+                .active_call
+                .as_mut()
+                .filter(|call| call.id == call_id)
+            {
+                call.transport = Some(state);
+                call.transport_error = match state {
+                    TransportState::Failed => Some("Audio transport failed".into()),
+                    _ => None,
+                };
+            }
         }
 
         loop {
@@ -1625,6 +1794,47 @@ impl<S: JsonSender> ConnectDriver<S> {
             let _ = engine.hangup(call_id);
         }
         Ok(extra)
+    }
+
+    /// Phase C2c: real mute through the native engine. When an available
+    /// engine is installed and the transport exists, the engine is
+    /// called first and its error propagates *without* flipping the
+    /// session flag; otherwise the flag is stored (it applies to the
+    /// transport on connect).
+    pub fn set_call_muted(&mut self, muted: bool) -> Result<(), EngineError> {
+        let Some(call) = self.session.active_call.as_mut() else {
+            return Err(EngineError::NoActiveCall);
+        };
+        if call.transport.is_some()
+            && let Some(engine) = self.call_engine.as_deref_mut()
+            && engine.is_available()
+        {
+            // Engine first: a failed native call must not flip the flag.
+            engine.set_muted(call.id, muted)?;
+        }
+        call.muted = muted;
+        Ok(())
+    }
+
+    /// Phase C2c: pick the (microphone, speaker) device ids. `None`
+    /// means the engine default. The pair is always stored; it is
+    /// forwarded to the native engine only when a transport is already
+    /// connected, and a failed forward propagates before the stored
+    /// selection changes.
+    pub fn select_call_devices(
+        &mut self,
+        mic: Option<String>,
+        speaker: Option<String>,
+    ) -> Result<(), EngineError> {
+        let selection = (mic, speaker);
+        if let Some(call) = self.session.active_call.as_ref()
+            && call.transport.is_some()
+            && let Some(engine) = self.call_engine.as_deref_mut()
+        {
+            engine.select_devices(call.id, selection.0.as_deref(), selection.1.as_deref())?;
+        }
+        self.selected_devices = selection;
+        Ok(())
     }
 
     /// Phase C1: `sendCallRating` for the last ended call (the 1–5
@@ -11448,6 +11658,208 @@ mod tests {
             r#"{"@type":"updateNewCallSignalingData","call_id":77,"data":"aW5ib3VuZA=="}"#,
         );
         assert_eq!(handle.signaling_received(), vec![(77, b"inbound".to_vec())]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Phase C2c: Ready `updateCall` carrying transport material
+    /// (reflector + WebRTC servers, base64 key, `allow_p2p`).
+    const READY_CALL_JSON: &str = r#"{"@type":"updateCall","call":{"@type":"call","id":77,"unique_id":"99","user_id":41,"is_outgoing":true,"is_video":false,"state":{"@type":"callStateReady","protocol":{"@type":"callProtocol","udp_p2p":true,"udp_reflector":true,"min_layer":92,"max_layer":92,"library_versions":["13.0.0"]},"servers":[{"@type":"callServer","id":"7","ip_address":"149.154.167.40","ipv6_address":"2001:b28:f23d:f001::a","port":443,"type":{"@type":"callServerTypeTelegramReflector","peer_tag":"AAEC","is_tcp":true}},{"@type":"callServer","id":"8","ip_address":"203.0.113.1","ipv6_address":"","port":3478,"type":{"@type":"callServerTypeWebrtc","username":"alice","password":"secret","supports_turn":true,"supports_stun":false}}],"config":"{}","encryption_key":"AQIDBA==","emojis":[],"allow_p2p":true}}}"#;
+
+    fn ready_call_driver() -> (
+        std::path::PathBuf,
+        ConnectDriver<Arc<RecordingSender>>,
+        MockEngine,
+        Arc<dyn DiagnosticSink>,
+        AtomicU64,
+    ) {
+        let (dir, mut driver, _recorder, sink, seq) = call_driver();
+        let mock = MockEngine::new();
+        let handle = mock.clone();
+        driver.set_call_engine(Box::new(mock));
+        ingest_call_json(
+            &mut driver,
+            &seq,
+            &sink,
+            r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+        );
+        ingest_call_json(
+            &mut driver,
+            &seq,
+            &sink,
+            r#"{"@type":"updateCall","call":{"@type":"call","id":77,"unique_id":"99","user_id":41,"is_outgoing":true,"is_video":false,"state":{"@type":"callStatePending","is_created":true,"is_received":false}}}"#,
+        );
+        (dir, driver, handle, sink, seq)
+    }
+
+    #[test]
+    fn call_ready_connects_transport_once_with_mapped_params() {
+        let (dir, mut driver, handle, sink, seq) = ready_call_driver();
+        // Pre-select devices before the transport exists.
+        driver
+            .select_call_devices(Some("mic-a".into()), Some("spk-a".into()))
+            .unwrap();
+        ingest_call_json(&mut driver, &seq, &sink, READY_CALL_JSON);
+
+        let connects = handle.connects();
+        assert_eq!(connects.len(), 1);
+        let (call_id, params) = &connects[0];
+        assert_eq!(*call_id, 77);
+        assert_eq!(params.encryption_key, vec![1, 2, 3, 4]);
+        assert!(params.is_outgoing);
+        assert!(params.p2p_allowed);
+        assert_eq!(
+            params.library_versions,
+            vec!["8.0.0", "9.0.0", "12.0.0", "13.0.0"]
+        );
+        assert_eq!(params.mic_input.as_deref(), Some("mic-a"));
+        assert_eq!(params.speaker_input.as_deref(), Some("spk-a"));
+        assert_eq!(params.servers.len(), 2);
+        let reflector = &params.servers[0];
+        assert_eq!(reflector.id, 7);
+        assert_eq!(reflector.ipv4, "149.154.167.40");
+        assert_eq!(reflector.ipv6, "2001:b28:f23d:f001::a");
+        assert_eq!(reflector.port, 443);
+        assert!(reflector.username.is_empty());
+        assert!(reflector.turn);
+        assert!(!reflector.stun);
+        assert!(reflector.tcp);
+        assert_eq!(reflector.peer_tag, vec![0, 1, 2]);
+        let webrtc = &params.servers[1];
+        assert_eq!(webrtc.id, 8);
+        assert_eq!(webrtc.username, "alice");
+        assert_eq!(webrtc.password, "secret");
+        assert!(webrtc.turn);
+        assert!(!webrtc.stun);
+        assert!(!webrtc.tcp);
+        assert!(webrtc.peer_tag.is_empty());
+
+        let call = driver.session.active_call.as_ref().unwrap();
+        assert_eq!(call.transport, Some(TransportState::Connecting));
+        assert_eq!(call.transport_error, None);
+
+        // A second Ready update must not reconnect.
+        ingest_call_json(&mut driver, &seq, &sink, READY_CALL_JSON);
+        assert_eq!(handle.connects().len(), 1);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn call_ready_without_key_fails_transport_honestly() {
+        let (dir, mut driver, handle, sink, seq) = ready_call_driver();
+        let no_key = READY_CALL_JSON.replace(r#""encryption_key":"AQIDBA==","#, "");
+        ingest_call_json(&mut driver, &seq, &sink, &no_key);
+
+        assert!(handle.connects().is_empty());
+        let call = driver.session.active_call.as_ref().unwrap();
+        assert_eq!(call.transport, Some(TransportState::Failed));
+        assert_eq!(
+            call.transport_error.as_deref(),
+            Some("call became ready without an encryption key")
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn call_transport_callback_updates_session() {
+        let (dir, mut driver, handle, sink, seq) = ready_call_driver();
+        ingest_call_json(&mut driver, &seq, &sink, READY_CALL_JSON);
+        handle.emit_transport_state(77, TransportState::Connected);
+        // The next pump drains the transport outbox into the session.
+        ingest_call_json(&mut driver, &seq, &sink, READY_CALL_JSON);
+
+        let call = driver.session.active_call.as_ref().unwrap();
+        assert_eq!(call.transport, Some(TransportState::Connected));
+        assert_eq!(call.transport_error, None);
+        assert_eq!(handle.connects().len(), 1);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn call_mute_goes_through_engine_first() {
+        let (dir, mut driver, handle, sink, seq) = ready_call_driver();
+        ingest_call_json(&mut driver, &seq, &sink, READY_CALL_JSON);
+        handle.emit_transport_state(77, TransportState::Connected);
+        ingest_call_json(&mut driver, &seq, &sink, READY_CALL_JSON);
+
+        assert!(driver.set_call_muted(true).is_ok());
+        assert_eq!(handle.mute_changes(), vec![(77, true)]);
+        assert!(driver.session.active_call.as_ref().unwrap().muted);
+        assert!(driver.set_call_muted(false).is_ok());
+        assert_eq!(handle.mute_changes(), vec![(77, true), (77, false)]);
+        assert!(!driver.session.active_call.as_ref().unwrap().muted);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn call_mute_failure_leaves_state_unchanged() {
+        let (dir, mut driver, handle, sink, seq) = ready_call_driver();
+        ingest_call_json(&mut driver, &seq, &sink, READY_CALL_JSON);
+        handle.emit_transport_state(77, TransportState::Connected);
+        ingest_call_json(&mut driver, &seq, &sink, READY_CALL_JSON);
+
+        handle.fail_mute();
+        let err = driver.set_call_muted(true).unwrap_err();
+        assert!(matches!(err, EngineError::Engine { .. }));
+        assert!(!driver.session.active_call.as_ref().unwrap().muted);
+        assert!(handle.mute_changes().is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn call_mute_without_active_call_is_no_active_call() {
+        let (dir, mut driver, _recorder, _sink, _seq) = call_driver();
+        driver.set_call_engine(Box::new(MockEngine::new()));
+        assert_eq!(driver.set_call_muted(true), Err(EngineError::NoActiveCall));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn call_device_selection_stored_before_connect_forwarded_after() {
+        let (dir, mut driver, handle, sink, seq) = ready_call_driver();
+        handle.set_devices(vec![crate::calls::engine::MediaDevice {
+            id: "mic-a".into(),
+            name: "Mic A".into(),
+            kind: crate::calls::engine::MediaDeviceKind::Microphone,
+        }]);
+        // Pending, not Ready: stored only, never forwarded; install does
+        // not enumerate either.
+        driver
+            .select_call_devices(Some("mic-a".into()), Some("spk-a".into()))
+            .unwrap();
+        assert_eq!(
+            driver.selected_call_devices(),
+            (Some("mic-a"), Some("spk-a"))
+        );
+        assert!(handle.device_selections().is_empty());
+        assert!(driver.call_devices().is_empty());
+
+        // Ready connects with the stored selection as stream inputs and
+        // refreshes the device cache.
+        ingest_call_json(&mut driver, &seq, &sink, READY_CALL_JSON);
+        let connects = handle.connects();
+        assert_eq!(connects.len(), 1);
+        assert_eq!(connects[0].1.mic_input.as_deref(), Some("mic-a"));
+        assert_eq!(connects[0].1.speaker_input.as_deref(), Some("spk-a"));
+        assert_eq!(driver.call_devices().len(), 1);
+
+        // After connect the selection forwards to the engine.
+        driver
+            .select_call_devices(Some("mic-b".into()), None)
+            .unwrap();
+        assert_eq!(
+            handle.device_selections(),
+            vec![(77, Some("mic-b".to_string()), None)]
+        );
+        assert_eq!(driver.selected_call_devices(), (Some("mic-b"), None));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn call_device_refresh_without_engine_is_best_effort() {
+        let (dir, mut driver, _recorder, _sink, _seq) = call_driver();
+        driver.refresh_call_devices();
+        assert!(driver.call_devices().is_empty());
+        assert_eq!(driver.selected_call_devices(), (None, None));
         let _ = std::fs::remove_dir_all(&dir);
     }
 

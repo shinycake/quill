@@ -3311,3 +3311,109 @@ Failing cases become regression tests/screenshots in E5.
   `chatEventForumTopicPinned` (:7928); event-log filtering/search UI
   (the request builder already supports filters/query/user_ids);
   channel title/description/photo editing (deferred from D3b).
+
+## Phase C2c - real call audio transport (2026-09-26)
+
+Goal: real P2P audio for 1:1 calls — `ntg_skip_exchange` +
+`ntg_connect_p2p` with microphone-capture / speaker-playback stream
+sources, real mute through the native engine, and real device
+enumeration with mic/speaker pickers. No fabricated devices: an empty
+device list renders honestly.
+
+### Connect sequence
+- The driver connects the native transport exactly once per call,
+  gated on the reducer-tracked `ActiveCall.transport` being `None`
+  (no separate attempted set): `updateCall` → `callStateReady`
+  (schema 1.8.67 :7068) with `call.ready` parsed → `ConnectParams`
+  → `engine.connect(call_id, &params)` → `TransportState::Connecting`.
+- Native order inside the engine (`NtgcallsEngine::connect`):
+  `ntg_skip_exchange` (encryption key + reflector/WebRTC servers),
+  then `ntg_connect_p2p` with null custom parameters, then
+  `ntg_set_stream_sources` with the selected mic/speaker inputs.
+  Custom-parameters passthrough is deferred (out of slice).
+- A Ready call without a decodable encryption key cannot build the
+  native encryption parameters: the driver sets
+  `transport = Failed` with the exact error
+  `call became ready without an encryption key`. TDLib still owns
+  signaling, so the call stays up but carries no sound.
+- The device list is refreshed at connect (best effort), and a
+  pre-existing mute applies via `engine.set_muted(call_id, true)`
+  once the transport exists (failure there is non-fatal).
+- Transport states arrive from the engine's worker thread into the
+  driver's transport outbox and drain into
+  `ActiveCall.transport` / `transport_error` on the next pump.
+
+### TDLib → native server mapping (schema 1.8.67)
+- `callProtocol` (:7008), `callServerTypeTelegramReflector` (:7014),
+  `callServerTypeWebrtc` (:7021), `callServer` (:7030),
+  `callStateReady` (:7068), `updateCall` (:10816). TDLib `bytes`
+  fields (encryption key, peer tag) are base64, decoded with
+  `base64::engine::general_purpose::STANDARD`.
+- Reflector: empty username/password, `turn=true`, `stun=false`,
+  `tcp=is_tcp`, base64-decoded `peer_tag`. WebRTC: supplied
+  username/password, `supports_turn`/`supports_stun` flags,
+  `tcp=false`, empty `peer_tag`.
+
+### Real mute
+- `CallEngine::set_muted` → `ntg_mute` / `ntg_unmute`. The driver
+  calls the engine first when an available engine is installed and a
+  transport exists; an engine error propagates via
+  `EngineError::NoActiveCall` / `EngineError` without flipping the
+  session `muted` flag. Without a transport yet, the flag is stored
+  and applied on connect.
+
+### Device selection
+- `ConnectDriver` keeps `call_devices_cache` and
+  `selected_devices: (Option<String>, Option<String>)`, defaulting
+  to `(None, None)` = engine default. Nothing is auto-selected from
+  enumeration and no devices are fabricated; an empty cache renders
+  `No audio devices found - the engine reported none.`, and a
+  missing engine renders `No audio - call engine unavailable.`
+- `select_call_devices` always stores the pair and forwards to
+  `engine.select_devices` only when a transport is connected; a
+  failed forward propagates before the stored selection changes.
+
+### Honest state
+- `CallState::Ready` stays a unit tag; parsed transport material
+  lives in `ParsedCall.ready: Option<ReadyParams>`, copied to
+  `ActiveCall.ready` by the reducer.
+- UI transport text: `Connecting audio...` (none/connecting),
+  `Connected` / `Muted - microphone off`, `Couldn't start audio:
+  {error}. The call is up but carries no sound.` (failed),
+  `Audio disconnected.` (closed). The call-end summary reports
+  `Audio was connected for this call.` only when the transport
+  actually reached `Connected`.
+
+### Input semantics assumption
+- Stream sources are registered as `NTG_STREAM_DEVICE` at 48 kHz
+  mono with nullable input ids (engine default when `None`) and
+  `keep_open=false`. The v3.0.0 C API exposes no device-type
+  distinction beyond the input id, so mic-vs-speaker routing relies
+  on the engine interpreting each id; device kinds come only from
+  `ntg_get_media_devices` enumeration.
+
+### AEC/NS/AGC
+- Minimal by necessity: the v3.0.0 C API exposes no AEC/NS/AGC
+  knobs — verified by direct inspection of
+  `vendor/ntgcalls/include/ntgcalls.h` (80 `NTG_C_EXPORT`
+  declarations, zero matches for echo/noise/gain/AEC/AGC). The
+  engine's internal WebRTC audio-processing defaults apply; no
+  unsupported controls were invented.
+
+### Tests (all hardware-free, mock engine only)
+- Engine: connect records exact params incl. mapped server data;
+  unknown call → `NoSuchCall`; unavailable → `Unavailable`; device
+  selection recording/errors; transport-state delivery; newest
+  callback wins for both hooks.
+- Envelope: Ready parsing for reflector + WebRTC (key, peer tag,
+  TURN/STUN/TCP, `allow_p2p`).
+- Driver: Ready connects exactly once; transport callback updates
+  the session; real mute updates engine and state; failed mute
+  leaves state unchanged; device selection before connect is stored
+  only, after connect invokes the engine; empty key fails honestly.
+
+### Out of this slice (→ future)
+- Video transport (later slice; video calls carry audio only, noted
+  honestly in the UI); group calls; screen sharing; call recording;
+  custom-parameters passthrough to `ntg_connect_p2p`;
+  reconnect/backoff on transport failure; stats/debug surface (C2d).
