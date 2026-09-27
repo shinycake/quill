@@ -11017,8 +11017,9 @@ impl QuillApp {
 
         if call.scheduled_start_date > 0 && !call.is_joined {
             // Phase C2h: scheduled (not yet started) video chat —
-            // TDLib has no `startGroupCall`, so this is informational
-            // until the call goes active.
+            // admins (`can_be_managed`) get a Start-now button
+            // (`startScheduledVideoChat`, schema 1.8.67 :14277); Join
+            // appears once TDLib activates the call.
             card = card.child(
                 div()
                     .flex()
@@ -11043,7 +11044,16 @@ impl QuillApp {
                                 "Starts {}",
                                 format_starts_in(call.scheduled_start_date as i64)
                             )),
-                    ),
+                    )
+                    .when(call.can_be_managed, |this| {
+                        this.child(
+                            Button::new("group-call-start-now")
+                                .label("Start now")
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.start_scheduled_video_chat(cx);
+                                })),
+                        )
+                    }),
             );
         } else if !call.is_joined {
             card = card.child(self.group_call_join_prompt(call, cx));
@@ -11545,7 +11555,7 @@ impl QuillApp {
     /// Phase C2h: in-call group-chat section for the joined call card.
     fn group_call_messages_section(
         &self,
-        mut card: Stateful<Div>,
+        card: Stateful<Div>,
         call: &ActiveGroupCall,
         cx: &mut Context<Self>,
     ) -> Stateful<Div> {
@@ -12351,6 +12361,22 @@ impl QuillApp {
             };
         } else {
             self.status_note = "Recording needs a live connection.".into();
+        }
+        cx.notify();
+    }
+
+    /// Phase C2h: `startScheduledVideoChat` — start the tracked
+    /// scheduled video chat now (admins only; driver-gated on
+    /// `can_be_managed`). Failures surface via the group-call error
+    /// line on the card.
+    fn start_scheduled_video_chat(&mut self, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            self.status_note = match live.driver.start_scheduled_video_chat() {
+                Ok(_) => "Starting the video chat…".into(),
+                Err(_) => "Couldn't start the video chat.".into(),
+            };
+        } else {
+            self.status_note = "Start now needs a live connection.".into();
         }
         cx.notify();
     }

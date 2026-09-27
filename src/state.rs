@@ -386,6 +386,12 @@ pub enum RequestPurpose {
     EndGroupCallRecording {
         group_call_id: i32,
     },
+    /// Phase C2h: `startScheduledVideoChat`. Response is `ok`;
+    /// the call goes live via `updateGroupCall` /
+    /// `updateNewVideoChat`.
+    StartScheduledVideoChat {
+        group_call_id: i32,
+    },
     /// Phase C2h: `getVideoChatRtmpUrl`. Response is `rtmpUrl`.
     GetVideoChatRtmpUrl {
         chat_id: i64,
@@ -4915,6 +4921,7 @@ impl Session {
                         | RequestPurpose::RevokeVideoChatInviteLink { .. }
                         | RequestPurpose::StartGroupCallRecording { .. }
                         | RequestPurpose::EndGroupCallRecording { .. }
+                        | RequestPurpose::StartScheduledVideoChat { .. }
                         | RequestPurpose::GetVideoChatRtmpUrl { .. }
                         | RequestPurpose::ReplaceVideoChatRtmpUrl { .. }
                         | RequestPurpose::SendGroupCallMessage { .. }

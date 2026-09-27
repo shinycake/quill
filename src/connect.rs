@@ -69,12 +69,13 @@ use crate::telegram::requests::{
     set_chat_message_auto_delete_time, set_chat_notification_settings, set_chat_slow_mode_delay,
     set_group_call_participant_volume_level, set_poll_answer, set_scope_notification_settings,
     set_story_reaction, set_video_chat_title, start_group_call_recording,
-    start_group_call_screen_sharing, supergroup_members_filter_recent_json,
-    supergroup_members_filter_search_json, toggle_chat_folder_tags,
-    toggle_group_call_are_messages_allowed, toggle_group_call_is_my_video_enabled,
-    toggle_group_call_is_my_video_paused, toggle_group_call_participant_is_hand_raised,
-    toggle_group_call_participant_is_muted, toggle_video_chat_mute_new_participants,
-    unpin_chat_message, view_messages, view_sponsored_chat,
+    start_group_call_screen_sharing, start_scheduled_video_chat,
+    supergroup_members_filter_recent_json, supergroup_members_filter_search_json,
+    toggle_chat_folder_tags, toggle_group_call_are_messages_allowed,
+    toggle_group_call_is_my_video_enabled, toggle_group_call_is_my_video_paused,
+    toggle_group_call_participant_is_hand_raised, toggle_group_call_participant_is_muted,
+    toggle_video_chat_mute_new_participants, unpin_chat_message, view_messages,
+    view_sponsored_chat,
 };
 use crate::voice::VoiceDraft;
 use std::collections::{HashMap, VecDeque};
@@ -3287,7 +3288,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     /// Phase C2h: `revokeGroupCallInviteLink` (schema 1.8.67,
-    /// :14396). Gated on `groupCall.can_be_managed` (video chats).
+    /// :14398). Gated on `groupCall.can_be_managed` (video chats).
     pub fn revoke_video_chat_invite_link(&mut self) -> Result<RequestId, ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
@@ -3310,7 +3311,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         Ok(extra)
     }
 
-    /// Phase C2h: `startGroupCallRecording` (schema 1.8.67, :14400).
+    /// Phase C2h: `startGroupCallRecording` (schema 1.8.67, :14405).
     /// Gated on `groupCall.can_be_managed` and `is_video_chat`
     /// (schema: "for video chats only"). Recording state arrives as
     /// `updateGroupCall` (`record_duration` / `is_video_recorded`).
@@ -3347,14 +3348,15 @@ impl<S: JsonSender> ConnectDriver<S> {
         Ok(extra)
     }
 
-    /// Phase C2h: `endGroupCallRecording` (schema 1.8.67, :14407).
-    /// Gated on `groupCall.can_be_managed`.
+    /// Phase C2h: `endGroupCallRecording` (schema 1.8.67, :14408).
+    /// Gated on `groupCall.can_be_managed` and `is_video_chat`
+    /// (schema: "for video chats only"), matching the start gate.
     pub fn stop_group_call_recording(&mut self) -> Result<RequestId, ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
         let group_call_id = match &self.session.active_group_call {
-            Some(call) if call.can_be_managed => call.id,
+            Some(call) if call.can_be_managed && call.is_video_chat => call.id,
             _ => return Err(ConnectSendError::InvalidRequest),
         };
         let extra = self.session.request(
@@ -3364,6 +3366,35 @@ impl<S: JsonSender> ConnectDriver<S> {
         if let Err(err) = self
             .sender
             .send_json(&end_group_call_recording(extra, group_call_id))
+        {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(extra)
+    }
+
+    /// Phase C2h: `startScheduledVideoChat` (schema 1.8.67, :14277).
+    /// Starts the tracked scheduled (not-yet-active) video chat early.
+    /// Gated on `groupCall.can_be_managed && scheduled_start_date > 0`
+    /// — the schema names no explicit right for this constructor, so
+    /// `can_be_managed` (the tracked proxy for the
+    /// `can_manage_video_chats` admin right) matches the other
+    /// video-chat admin actions.
+    pub fn start_scheduled_video_chat(&mut self) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let group_call_id = match &self.session.active_group_call {
+            Some(call) if call.can_be_managed && call.scheduled_start_date > 0 => call.id,
+            _ => return Err(ConnectSendError::InvalidRequest),
+        };
+        let extra = self.session.request(
+            RequestPurpose::StartScheduledVideoChat { group_call_id },
+            None,
+        );
+        if let Err(err) = self
+            .sender
+            .send_json(&start_scheduled_video_chat(extra, group_call_id))
         {
             self.session.requests.take(extra);
             return Err(err);
@@ -3450,7 +3481,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         Ok(extra)
     }
 
-    /// Phase C2h: `sendGroupCallMessage` (schema 1.8.67, :14335).
+    /// Phase C2h: `sendGroupCallMessage` (schema 1.8.67, :14341).
     /// Gated on `groupCall.can_send_messages` and
     /// `are_messages_allowed`. The echo arrives as
     /// `updateNewGroupCallMessage`; there is no history getter, so
@@ -3484,7 +3515,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     /// Phase C2h: `toggleGroupCallAreMessagesAllowed` (schema 1.8.67,
-    /// :14319). Gated on `can_toggle_are_messages_allowed`; flips the
+    /// :14322). Gated on `can_toggle_are_messages_allowed`; flips the
     /// current `are_messages_allowed`.
     pub fn toggle_group_call_are_messages_allowed(
         &mut self,
@@ -13745,7 +13776,7 @@ mod tests {
             .is_video_chat = true;
 
         // Recording: `startGroupCallRecording` / `endGroupCallRecording`
-        // (schema :14400 / :14407), gated on `groupCall.can_be_managed`
+        // (schema :14405 / :14408), gated on `groupCall.can_be_managed`
         // for video chats.
         driver
             .start_group_call_recording("Team voice".to_string(), true)
@@ -13776,7 +13807,49 @@ mod tests {
             .unwrap()
             .can_be_managed = true;
 
-        // Invite revocation: `revokeGroupCallInviteLink` (:14396),
+        // Start now: `startScheduledVideoChat` (:14277), gated on
+        // `can_be_managed` for a still-scheduled call.
+        driver
+            .session
+            .active_group_call
+            .as_mut()
+            .unwrap()
+            .scheduled_start_date = 1_788_000_000;
+        driver
+            .start_scheduled_video_chat()
+            .expect("start-now sends");
+        assert_eq!(last_sent()["@type"], "startScheduledVideoChat");
+        assert_eq!(last_sent()["group_call_id"], 77);
+        driver
+            .session
+            .active_group_call
+            .as_mut()
+            .unwrap()
+            .can_be_managed = false;
+        assert_eq!(
+            driver.start_scheduled_video_chat(),
+            Err(ConnectSendError::InvalidRequest),
+            "non-manageable call must refuse start-now"
+        );
+        driver
+            .session
+            .active_group_call
+            .as_mut()
+            .unwrap()
+            .can_be_managed = true;
+        driver
+            .session
+            .active_group_call
+            .as_mut()
+            .unwrap()
+            .scheduled_start_date = 0;
+        assert_eq!(
+            driver.start_scheduled_video_chat(),
+            Err(ConnectSendError::InvalidRequest),
+            "already-active call must refuse start-now"
+        );
+
+        // Invite revocation: `revokeGroupCallInviteLink` (:14398),
         // gated on `can_be_managed` for video chats.
         driver
             .revoke_video_chat_invite_link()
@@ -13784,7 +13857,7 @@ mod tests {
         assert_eq!(last_sent()["@type"], "revokeGroupCallInviteLink");
         assert_eq!(last_sent()["group_call_id"], 77);
 
-        // In-call chat: `sendGroupCallMessage` (:14335), gated on
+        // In-call chat: `sendGroupCallMessage` (:14341), gated on
         // `can_send_messages && are_messages_allowed`.
         {
             let call = driver.session.active_group_call.as_mut().unwrap();
@@ -13816,7 +13889,7 @@ mod tests {
             .as_mut()
             .unwrap()
             .are_messages_allowed = true;
-        // Chat toggle: `toggleGroupCallAreMessagesAllowed` (:14319),
+        // Chat toggle: `toggleGroupCallAreMessagesAllowed` (:14322),
         // gated on `can_toggle_are_messages_allowed`; flips the flag.
         driver
             .session

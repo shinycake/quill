@@ -372,7 +372,8 @@ This is the comprehensive Telegram-parity checklist: one checkbox per user-visib
 - [x] Record group call (`startGroupCallRecording` video / `endGroupCallRecording`, `can_be_managed`-gated; REC indicator with duration; code + demo only, live recording unverified) <!-- parity:calls-recording -->
 - [x] RTMP stream key for video chat (`getVideoChatRtmpUrl` / `replaceVideoChatRtmpUrl`, fetch admin-gated, regenerate owner-gated; code + demo only, live unverified) <!-- parity:calls-rtmp -->
 - [x] Set / rename video chat title (`setVideoChatTitle`, 1-64 chars, `can_be_managed`-gated; code + demo only, live unverified) <!-- parity:calls-title -->
-- [x] Schedule video chat for later (`createVideoChat` start_date with 10s–8d validation; scheduled card shows start time, Join appears only once TDLib activates the call — no `startGroupCall` exists in the schema; code + demo only, live activation unverified) <!-- parity:calls-schedule -->
+- [x] Schedule video chat for later (`createVideoChat` start_date with 10s–8d validation; scheduled card shows start time + admin-only **Start now** (`startScheduledVideoChat`), Join appears once TDLib activates the call; code + demo only, live activation unverified) <!-- parity:calls-schedule -->
+- [ ] Notify me when a scheduled video chat starts (`toggleVideoChatEnabledStartNotification`, scheduled-only; not implemented) <!-- parity:calls-schedule-notify -->
 - [x] Video chat invite link (`getVideoChatInviteLink` with Copy, `revokeGroupCallInviteLink`; code + demo only, live unverified) <!-- parity:calls-invite-link -->
 - [x] In-call chat messages for group calls (`sendGroupCallMessage` + live `updateNewGroupCallMessage` feed with composer, gated on `can_send_messages`/`are_messages_allowed`; no history getter exists in the schema, so live feed only; code + demo only, live unverified) <!-- parity:calls-group-messages -->
 

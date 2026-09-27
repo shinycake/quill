@@ -1361,7 +1361,7 @@ pub fn get_video_chat_invite_link(
 }
 
 /// Phase C2h: `revokeGroupCallInviteLink` (TDLib 1.8.67,
-/// `schema/td_api.tl:14396`):
+/// `schema/td_api.tl:14398`):
 /// `revokeGroupCallInviteLink group_call_id:int32 = Ok;`
 /// "Revokes invite link for a group call. Requires
 /// groupCall.can_be_managed right for video chats or
@@ -1376,7 +1376,7 @@ pub fn revoke_group_call_invite_link(extra: RequestId, group_call_id: i32) -> St
 }
 
 /// Phase C2h: `startGroupCallRecording` (TDLib 1.8.67,
-/// `schema/td_api.tl:14400`):
+/// `schema/td_api.tl:14405`):
 /// `startGroupCallRecording group_call_id:int32 title:string
 /// record_video:Bool use_portrait_orientation:Bool = Ok;`
 /// "Starts recording of an active group call; for video chats only.
@@ -1402,13 +1402,30 @@ pub fn start_group_call_recording(
 }
 
 /// Phase C2h: `endGroupCallRecording` (TDLib 1.8.67,
-/// `schema/td_api.tl:14407`):
+/// `schema/td_api.tl:14408`):
 /// `endGroupCallRecording group_call_id:int32 = Ok;`
 /// "Ends recording of an active group call; for video chats only.
 /// Requires groupCall.can_be_managed right".
 pub fn end_group_call_recording(extra: RequestId, group_call_id: i32) -> String {
     json!({
         "@type": "endGroupCallRecording",
+        "@extra": extra.as_extra(),
+        "group_call_id": group_call_id,
+    })
+    .to_string()
+}
+
+/// Phase C2h: `startScheduledVideoChat` (TDLib 1.8.67,
+/// `schema/td_api.tl:14277`):
+/// `startScheduledVideoChat group_call_id:int32 = Ok;`
+/// "Starts a scheduled video chat". The schema names no explicit
+/// right for this constructor; the driver gates it on
+/// `groupCall.can_be_managed` (the tracked proxy for the
+/// `can_manage_video_chats` admin right), same as the other
+/// video-chat admin actions.
+pub fn start_scheduled_video_chat(extra: RequestId, group_call_id: i32) -> String {
+    json!({
+        "@type": "startScheduledVideoChat",
         "@extra": extra.as_extra(),
         "group_call_id": group_call_id,
     })
@@ -1444,7 +1461,7 @@ pub fn replace_video_chat_rtmp_url(extra: RequestId, chat_id: i64) -> String {
 }
 
 /// Phase C2h: `sendGroupCallMessage` (TDLib 1.8.67,
-/// `schema/td_api.tl:14335`):
+/// `schema/td_api.tl:14341`):
 /// `sendGroupCallMessage group_call_id:int32 text:formattedText
 /// paid_message_star_count:int53 = Ok;`
 /// "Sends a message to other participants of a group call. Requires
@@ -1463,7 +1480,7 @@ pub fn send_group_call_message(extra: RequestId, group_call_id: i32, text: &str)
 }
 
 /// Phase C2h: `toggleGroupCallAreMessagesAllowed` (TDLib 1.8.67,
-/// `schema/td_api.tl:14319`):
+/// `schema/td_api.tl:14322`):
 /// `toggleGroupCallAreMessagesAllowed group_call_id:int32
 /// are_messages_allowed:Bool = Ok;`
 /// "Toggles whether participants of a group call can send messages
@@ -4892,17 +4909,22 @@ mod channel_requests_tests {
         assert_eq!(v["group_call_id"], 555);
 
         let v: serde_json::Value =
-            serde_json::from_str(&get_video_chat_rtmp_url(RequestId(24), 51)).unwrap();
+            serde_json::from_str(&start_scheduled_video_chat(RequestId(24), 555)).unwrap();
+        assert_eq!(v["@type"], "startScheduledVideoChat");
+        assert_eq!(v["group_call_id"], 555);
+
+        let v: serde_json::Value =
+            serde_json::from_str(&get_video_chat_rtmp_url(RequestId(26), 51)).unwrap();
         assert_eq!(v["@type"], "getVideoChatRtmpUrl");
         assert_eq!(v["chat_id"], 51);
 
         let v: serde_json::Value =
-            serde_json::from_str(&replace_video_chat_rtmp_url(RequestId(25), 51)).unwrap();
+            serde_json::from_str(&replace_video_chat_rtmp_url(RequestId(27), 51)).unwrap();
         assert_eq!(v["@type"], "replaceVideoChatRtmpUrl");
         assert_eq!(v["chat_id"], 51);
 
         let v: serde_json::Value =
-            serde_json::from_str(&send_group_call_message(RequestId(26), 555, "hello")).unwrap();
+            serde_json::from_str(&send_group_call_message(RequestId(28), 555, "hello")).unwrap();
         assert_eq!(v["@type"], "sendGroupCallMessage");
         assert_eq!(v["group_call_id"], 555);
         assert_eq!(v["text"]["@type"], "formattedText");
@@ -4910,7 +4932,7 @@ mod channel_requests_tests {
         assert_eq!(v["paid_message_star_count"], 0);
 
         let v: serde_json::Value = serde_json::from_str(&toggle_group_call_are_messages_allowed(
-            RequestId(27),
+            RequestId(29),
             555,
             false,
         ))
