@@ -146,12 +146,12 @@ pub enum EnvelopePayload {
         /// editor; `None` when the block is absent or malformed.
         permissions: Option<ChatPermissions>,
         /// Slice G1: `chat.can_be_deleted_for_all_users` (schema 1.8.67,
-        /// line 3616). Gates `deleteChat` (schema line 11848: "Use the
+        /// line 3605). Gates `deleteChat` (schema line 11850: "Use the
         /// field chat.can_be_deleted_for_all_users to find whether the
         /// method can be applied to the chat").
         can_be_deleted_for_all_users: bool,
         /// Slice CL1: `chat.can_be_deleted_only_for_self` (schema 1.8.67,
-        /// line 3616). Together with `can_be_deleted_for_all_users` it
+        /// line 3604). Together with `can_be_deleted_for_all_users` it
         /// tells "whether and how" `deleteChatHistory` (schema line
         /// 11845) can be applied.
         can_be_deleted_only_for_self: bool,

@@ -20085,6 +20085,24 @@ impl QuillApp {
             .session()
             .and_then(|session| session.chats.get(&chat_id.0))
             .is_some_and(|chat| chat.is_marked_as_unread || chat.unread_count > 0);
+        // Slice CL1 review nit: server-side unread with no cached history
+        // can't be marked read (the driver has nothing to view and sends
+        // nothing); say so honestly instead of "request already in flight".
+        let nothing_to_view = self.session().is_some_and(|session| {
+            session
+                .chats
+                .get(&chat_id.0)
+                .is_some_and(|c| c.unread_count > 0 && !c.is_marked_as_unread)
+                && !session
+                    .histories
+                    .get(&chat_id.0)
+                    .is_some_and(|h| !h.messages.is_empty())
+        });
+        if marked && nothing_to_view && self.live.is_some() {
+            self.status_note = "open the chat to mark it as read".into();
+            cx.notify();
+            return;
+        }
         if self.live.is_some() {
             let result = if marked {
                 self.live
@@ -32708,8 +32726,9 @@ fn session_chat_row(
     let title = chat.title.clone();
     let preview = chat.sidebar_preview();
     // Slice CL1: a marked-as-unread chat shows the unread badge even
-    // with zero unread messages (official clients show a dot).
-    let badge = if chat.is_marked_as_unread {
+    // with zero unread messages (official clients show a dot); the count
+    // wins when there are unread messages (TGX TGChat.java:396).
+    let badge = if chat.unread_count == 0 && chat.is_marked_as_unread {
         Some("●".to_string())
     } else {
         unread_badge_text(chat.unread_count)

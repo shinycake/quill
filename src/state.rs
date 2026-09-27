@@ -1400,10 +1400,10 @@ pub struct ChatSummary {
     pub permissions: Option<ChatPermissions>,
     /// Slice G1: `chat.can_be_deleted_for_all_users` (schema 1.8.67, line
     /// 3616), refreshed by `updateNewChat`. Gates `deleteChat` (schema
-    /// line 11848).
+    /// line 11850).
     pub can_be_deleted_for_all_users: bool,
     /// Slice CL1: `chat.can_be_deleted_only_for_self` (schema 1.8.67,
-    /// line 3616), refreshed by `updateNewChat`. Together with
+    /// line 3604), refreshed by `updateNewChat`. Together with
     /// `can_be_deleted_for_all_users` gates `deleteChatHistory` (schema
     /// line 11845).
     pub can_be_deleted_only_for_self: bool,
