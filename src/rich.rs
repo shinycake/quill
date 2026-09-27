@@ -443,7 +443,6 @@ pub fn parse_page_block(value: &Value) -> RichBlock {
 }
 
 /// Parse an incoming `richMessage` object → (blocks, is_full).
-/// Parse an incoming `richMessage` object into blocks + `is_full`.
 /// Known simplification (DECISIONS.md): `is_rtl` is ignored — Hebrew/Arabic
 /// rich messages render LTR.
 pub fn parse_rich_message(value: &Value) -> (Vec<RichBlock>, bool) {
