@@ -361,7 +361,7 @@ This is the comprehensive Telegram-parity checklist: one checkbox per user-visib
 - [x] Per-participant volume control (`setGroupCallParticipantVolumeLevel`, 1-20000, per-row stepper) <!-- parity:calls-participant-volume -->
 - [x] Invite participants to group call (`inviteGroupCallParticipant` + contact picker) <!-- parity:calls-invite -->
 - [x] Group call invitation UI: incoming `messageGroupCall` row with Accept (`joinGroupCall`) / Decline (`declineGroupCallInvitation`) <!-- parity:calls-decline-invite -->
-- [x] Ban participant from group call (`banGroupCallParticipants`, admin-gated) <!-- parity:calls-ban -->
+- [x] Ban participant from group call (`banGroupCallParticipants`, owner-gated, per schema) <!-- parity:calls-ban -->
 - [x] Group call verification emojis <!-- parity:calls-group-verify-emoji --> (ui/mod.rs:10325; state.rs:2043)
 - [x] Toggle my video in group video chat (partial: signaling only, no video frames rendered) <!-- parity:calls-group-video-toggle --> (toggle_group_call_video ui/mod.rs:10667)
 - [ ] Group video tiles show live video (partial: participant grid renders, no frames) <!-- parity:calls-video-tiles -->

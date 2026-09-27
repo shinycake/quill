@@ -1058,7 +1058,7 @@ pub enum ScreenshotDemo {
     ReadyGroupCall,
     /// Phase C2f: group-call invite picker — the Ready voice chat with
     /// the invite panel open (two contacts seeded), per-participant
-    /// volume steppers and admin Ban buttons (injected, no live
+    /// volume steppers and owner-gated Ban buttons (injected, no live
     /// Telegram).
     ReadyGroupCallInvite,
     /// Phase C2f: incoming `messageGroupCall` invitation in a Ready
@@ -10582,22 +10582,27 @@ impl QuillApp {
                 );
                 admin_count += 1;
             }
-            // Phase C2f: ban (`banGroupCallParticipants` takes user
-            // ids only — `messageSenderChat` participants have no
-            // button).
-            if let MessageSender::User { user_id } = participant.participant_id {
-                admin_row = admin_row.child(
-                    Button::new(format!("gc-ban-participant-{user_id}"))
-                        .label("Ban")
-                        .ghost()
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.ban_group_call_participant(user_id, cx);
-                        })),
-                );
-                admin_count += 1;
-            }
             if admin_count > 0 {
                 tile = tile.child(admin_row);
+            }
+        }
+        // Phase C2f: ban (`banGroupCallParticipants` takes user ids
+        // only — `messageSenderChat` participants have no button).
+        // Owner-gated: schema requires `groupCall.is_owned`
+        // (`can_be_managed` is "for video chats and live stories
+        // only"), so this is its own block, not part of the admin row.
+        if call.is_owned && !participant.is_current_user {
+            if let MessageSender::User { user_id } = participant.participant_id {
+                tile = tile.child(
+                    div().flex().flex_wrap().justify_center().gap_1().child(
+                        Button::new(format!("gc-ban-participant-{user_id}"))
+                            .label("Ban")
+                            .ghost()
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.ban_group_call_participant(user_id, cx);
+                            })),
+                    ),
+                );
             }
         }
         // Phase C2f: per-participant volume stepper
@@ -10605,8 +10610,8 @@ impl QuillApp {
         // of percents, stepped ±10%). Local playback volume — no
         // admin right needed; self has no button.
         if !participant.is_current_user {
-            let sender_down = sender.clone();
-            let sender_up = sender.clone();
+            let sender_down = sender;
+            let sender_up = sender;
             tile = tile.child(
                 div()
                     .flex()
@@ -10617,11 +10622,7 @@ impl QuillApp {
                             .label("−")
                             .ghost()
                             .on_click(cx.listener(move |this, _, _, cx| {
-                                this.adjust_group_call_participant_volume(
-                                    sender_down.clone(),
-                                    -1000,
-                                    cx,
-                                );
+                                this.adjust_group_call_participant_volume(sender_down, -1000, cx);
                             })),
                     )
                     .child(
@@ -10635,11 +10636,7 @@ impl QuillApp {
                             .label("+")
                             .ghost()
                             .on_click(cx.listener(move |this, _, _, cx| {
-                                this.adjust_group_call_participant_volume(
-                                    sender_up.clone(),
-                                    1000,
-                                    cx,
-                                );
+                                this.adjust_group_call_participant_volume(sender_up, 1000, cx);
                             })),
                     ),
             );
@@ -11397,7 +11394,7 @@ impl QuillApp {
     }
 
     /// Phase C2f: `banGroupCallParticipants` for one participant
-    /// (admin-gated by the driver on `can_be_managed`).
+    /// (owner-gated by the driver on `groupCall.is_owned`).
     fn ban_group_call_participant(&mut self, user_id: i64, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             self.status_note = match live.driver.ban_group_call_participant(user_id) {
@@ -19298,7 +19295,9 @@ fn apply_ready_call_video(session: &mut Session, sink: &Arc<MemorySink>, seq: &A
 /// demo user (777), with Zed speaking, Mia's hand raised, and one
 /// muted participant, plus E2E verification emojis. The overlay
 /// renders its participant grid, controls, and the honest no-audio
-/// note. Injected, no live Telegram, no media.
+/// note. The demo user OWNS the chat (`is_owned: true`) so the
+/// owner-gated Ban buttons render. Injected, no live Telegram, no
+/// media.
 fn apply_ready_group_call(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
     let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
     let chat_id = 51i64;
@@ -19325,7 +19324,7 @@ fn apply_ready_group_call(session: &mut Session, sink: &Arc<MemorySink>, seq: &A
             r#"{{"@type":"updateChatVideoChat","chat_id":{chat_id},"video_chat":{{"@type":"videoChat","group_call_id":{call_id},"has_participants":true,"default_participant_id":null}}}}"#
         ),
         format!(
-            r#"{{"@type":"updateGroupCall","group_call":{{"@type":"groupCall","id":{call_id},"unique_id":"999","title":"Weekly design sync","invite_link":"","paid_message_star_count":0,"scheduled_start_date":0,"enabled_start_notification":false,"is_active":true,"is_video_chat":true,"is_live_story":false,"is_rtmp_stream":false,"is_joined":true,"need_rejoin":false,"is_owned":false,"can_be_managed":true,"participant_count":4,"has_hidden_listeners":false,"loaded_all_participants":true,"message_sender_id":null,"recent_speakers":[{{"@type":"groupCallRecentSpeaker","participant_id":{{"@type":"messageSenderUser","user_id":41}},"is_speaking":true}}],"is_my_video_enabled":false,"is_my_video_paused":false,"can_enable_video":true,"mute_new_participants":false,"can_toggle_mute_new_participants":true,"can_send_messages":true,"are_messages_allowed":true,"can_toggle_are_messages_allowed":false,"can_delete_messages":false,"record_duration":0,"is_video_recorded":false,"duration":0}}}}"#
+            r#"{{"@type":"updateGroupCall","group_call":{{"@type":"groupCall","id":{call_id},"unique_id":"999","title":"Weekly design sync","invite_link":"","paid_message_star_count":0,"scheduled_start_date":0,"enabled_start_notification":false,"is_active":true,"is_video_chat":true,"is_live_story":false,"is_rtmp_stream":false,"is_joined":true,"need_rejoin":false,"is_owned":true,"can_be_managed":true,"participant_count":4,"has_hidden_listeners":false,"loaded_all_participants":true,"message_sender_id":null,"recent_speakers":[{{"@type":"groupCallRecentSpeaker","participant_id":{{"@type":"messageSenderUser","user_id":41}},"is_speaking":true}}],"is_my_video_enabled":false,"is_my_video_paused":false,"can_enable_video":true,"mute_new_participants":false,"can_toggle_mute_new_participants":true,"can_send_messages":true,"are_messages_allowed":true,"can_toggle_are_messages_allowed":false,"can_delete_messages":false,"record_duration":0,"is_video_recorded":false,"duration":0}}}}"#
         ),
         participant(777, r#","is_current_user":true"#, "a4"),
         participant(41, r#","is_speaking":true"#, "a3"),
@@ -19393,6 +19392,8 @@ fn apply_ready_group_call_invitation(
     }
     session.open_chat(ChatId(chat_id));
 }
+/// Phase B2: key verification UI fixture — the Ready secret chat (id 41)
+/// with Zed (user 41), but with a real deterministic 36-byte `key_hash`
 /// (base64; the B1 fixture left it empty), opened with E2E history, and
 /// Zed's info panel open on the "Encryption key" 12×12 fingerprint grid.
 fn apply_ready_key_verification(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {

@@ -399,10 +399,7 @@ pub enum RequestPurpose {
     /// invitation (schema 1.8.67, line 5288: "Use joinGroupCall to
     /// accept the call"). The joined call is tracked via
     /// `updateGroupCall` like any other join.
-    JoinGroupCallInvitation {
-        chat_id: i64,
-        message_id: i64,
-    },
+    JoinGroupCallInvitation,
     /// Phase C2f: `declineGroupCallInvitation`. Response is `ok`.
     DeclineGroupCallInvitation {
         chat_id: i64,
@@ -3700,9 +3697,7 @@ impl Session {
                 group_call_id,
                 join_payload,
             } => {
-                if let Some(RequestPurpose::JoinGroupCallInvitation { .. }) =
-                    pending.map(|p| p.purpose)
-                {
+                if let Some(RequestPurpose::JoinGroupCallInvitation) = pending.map(|p| p.purpose) {
                     if !self.group_call_fetch_queue.contains(&group_call_id) {
                         self.group_call_fetch_queue.push(group_call_id);
                     }
@@ -4724,7 +4719,7 @@ impl Session {
                         | RequestPurpose::InviteGroupCallParticipant { .. }
                         | RequestPurpose::BanGroupCallParticipants { .. }
                         | RequestPurpose::SetGroupCallParticipantVolumeLevel { .. }
-                        | RequestPurpose::JoinGroupCallInvitation { .. }
+                        | RequestPurpose::JoinGroupCallInvitation
                         | RequestPurpose::DeclineGroupCallInvitation { .. },
                     ) => {
                         self.group_call_error =

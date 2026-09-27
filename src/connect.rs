@@ -2566,8 +2566,9 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// Phase C2f: `banGroupCallParticipants` (schema 1.8.67, :14385)
     /// for a single participant. Takes `user_ids` (int64 user ids —
-    /// `messageSenderChat` participants cannot be banned); the UI
-    /// gates on `can_be_managed`.
+    /// `messageSenderChat` participants cannot be banned); requires
+    /// `groupCall.is_owned` — the owner can ban, not `can_be_managed`
+    /// admins (that's "for video chats and live stories only").
     pub fn ban_group_call_participant(
         &mut self,
         user_id: i64,
@@ -2576,7 +2577,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         let group_call_id = match &self.session.active_group_call {
-            Some(call) if call.can_be_managed => call.id,
+            Some(call) if call.is_owned => call.id,
             _ => return Err(ConnectSendError::InvalidRequest),
         };
         let extra = self.session.request(
@@ -2648,13 +2649,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         if self.session.active_call.is_some() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let extra = self.session.request(
-            RequestPurpose::JoinGroupCallInvitation {
-                chat_id,
-                message_id,
-            },
-            None,
-        );
+        let extra = self
+            .session
+            .request(RequestPurpose::JoinGroupCallInvitation, None);
         let input = InputGroupCallRef::Message {
             chat_id,
             message_id,
@@ -12846,7 +12843,11 @@ mod tests {
         (dir, recorder, driver, seq)
     }
 
-    fn tracked_group_call(need_rejoin: bool, can_be_managed: bool) -> ActiveGroupCall {
+    fn tracked_group_call(
+        need_rejoin: bool,
+        can_be_managed: bool,
+        is_owned: bool,
+    ) -> ActiveGroupCall {
         ActiveGroupCall {
             id: 77,
             title: "Team voice".into(),
@@ -12856,7 +12857,7 @@ mod tests {
             reconnecting: false,
             rejoin_attempts: 0,
             can_be_managed,
-            is_owned: false,
+            is_owned,
             participant_count: 1,
             loaded_all_participants: false,
             participants: Vec::new(),
@@ -12906,7 +12907,7 @@ mod tests {
         assert_eq!(sent["chat_id"], 3);
         assert_eq!(sent["message_id"], 42);
 
-        driver.session.active_group_call = Some(tracked_group_call(false, true));
+        driver.session.active_group_call = Some(tracked_group_call(false, true, false));
 
         // Invite: shape follows schema 1.8.67 :14375; `is_video`
         // follows the tracked call.
@@ -12920,20 +12921,24 @@ mod tests {
         assert_eq!(sent["is_video"], false);
 
         // Ban: schema :14385 takes `user_ids:vector<int64>` (the
-        // plural constructor), gated on `can_be_managed`.
+        // plural constructor), owner-gated on `groupCall.is_owned` —
+        // `can_be_managed` is "for video chats and live stories only"
+        // and does NOT grant ban rights in a voice chat.
+        driver.session.active_group_call = Some(tracked_group_call(false, true, false));
+        assert_eq!(
+            driver.ban_group_call_participant(9),
+            Err(ConnectSendError::InvalidRequest),
+            "can_be_managed=true but is_owned=false must refuse"
+        );
+        driver.session.active_group_call = Some(tracked_group_call(false, false, true));
         driver
             .ban_group_call_participant(9)
-            .expect("ban sends for admin");
+            .expect("ban sends for owner");
         let sent = last_sent();
         assert_eq!(sent["@type"], "banGroupCallParticipants");
         assert_eq!(sent["group_call_id"], 77);
         assert_eq!(sent["user_ids"], serde_json::json!([9]));
-        driver.session.active_group_call = Some(tracked_group_call(false, false));
-        assert_eq!(
-            driver.ban_group_call_participant(9),
-            Err(ConnectSendError::InvalidRequest)
-        );
-        driver.session.active_group_call = Some(tracked_group_call(false, true));
+        driver.session.active_group_call = Some(tracked_group_call(false, true, true));
 
         // Volume: schema :14438, 1-20000 (hundreds of percents).
         driver
@@ -13065,7 +13070,7 @@ mod tests {
         assert!(driver.maybe_auto_rejoin_group_call().is_ok());
         assert_eq!(join_sends(), 0);
 
-        driver.session.active_group_call = Some(tracked_group_call(true, false));
+        driver.session.active_group_call = Some(tracked_group_call(true, false, false));
         driver
             .session
             .active_group_call
@@ -13139,7 +13144,7 @@ mod tests {
     }
 
     fn call_state_for_rejoin(driver: &mut ConnectDriver<Arc<RecordingSender>>) {
-        let call = tracked_group_call(true, false);
+        let call = tracked_group_call(true, false, false);
         driver.session.active_group_call = Some(call);
         driver
             .session
