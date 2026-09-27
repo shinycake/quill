@@ -2089,7 +2089,10 @@ pub fn send_text(
 ) -> String {
     // M1: composer markup (`**bold**` etc.) becomes `textEntities` here,
     // so formatting genuinely reaches the wire on every text send.
+    // M1 fix-up: secret chats strip `textEntityTypeBlockQuote` (schema:
+    // unsupported there) — see `secret_chat_entities`.
     let (clean_text, entities) = parse_format_markup(text);
+    let entities = secret_chat_entities(entities, options.is_secret);
     let entities_json: Vec<Value> = entities.iter().map(format_entity_json).collect();
     // Phase S1: secret chats never get link previews (TGX default-off —
     // previews are generated on Telegram servers, which can't see E2E
@@ -2129,12 +2132,36 @@ pub fn send_text(
     .to_string()
 }
 
-fn formatted_caption(caption: &str) -> Value {
+fn formatted_caption(caption: &str, strip_blockquote: bool) -> Value {
+    // M1 fix-up: captions get the same markup→entities treatment as
+    // message text (the toolbar is always visible above the composer,
+    // including with attachments pending, so `**bold**` in a caption
+    // must not go out literal).
+    let (clean_text, entities) = parse_format_markup(caption);
+    let entities = secret_chat_entities(entities, strip_blockquote);
+    let entities_json: Vec<Value> = entities.iter().map(format_entity_json).collect();
     json!({
         "@type": "formattedText",
-        "text": caption,
-        "entities": []
+        "text": clean_text,
+        "entities": entities_json
     })
+}
+
+/// M1 fix-up: `textEntityTypeBlockQuote` is not supported in secret chats
+/// (schema 1.8.67) — strip it driver-side instead of letting TDLib drop
+/// it (S1's layer-based gating philosophy).
+fn secret_chat_entities(
+    entities: Vec<ComposerEntity>,
+    strip_blockquote: bool,
+) -> Vec<ComposerEntity> {
+    if strip_blockquote {
+        entities
+            .into_iter()
+            .filter(|e| e.kind != FormatKind::BlockQuote)
+            .collect()
+    } else {
+        entities
+    }
 }
 
 /// Phase B3: self-destruct choice for `inputMessagePhoto` /
@@ -2175,6 +2202,7 @@ pub fn input_message_photo(
     path: &str,
     caption: &str,
     self_destruct: Option<SelfDestructSend>,
+    strip_blockquote: bool,
 ) -> Value {
     json!({
         "@type": "inputMessagePhoto",
@@ -2190,7 +2218,7 @@ pub fn input_message_photo(
             "width": 0,
             "height": 0
         },
-        "caption": formatted_caption(caption),
+        "caption": formatted_caption(caption, strip_blockquote),
         "show_caption_above_media": false,
         "self_destruct_type": self_destruct_type_value(self_destruct),
         "has_spoiler": false
@@ -2199,6 +2227,7 @@ pub fn input_message_photo(
 
 /// `sendMessage` + `inputMessagePhoto` / `inputPhoto` / `inputFileLocal` (1.8.67).
 /// `path` must already be an explicitly picked local file — never a JSON `local.path`.
+#[allow(clippy::too_many_arguments)] // `strip_blockquote` is pure pass-through to `input_message_photo`
 pub fn send_photo(
     extra: RequestId,
     chat_id: ChatId,
@@ -2207,6 +2236,7 @@ pub fn send_photo(
     caption: &str,
     reply_to: Option<MessageId>,
     self_destruct: Option<SelfDestructSend>,
+    strip_blockquote: bool,
 ) -> String {
     json!({
         "@type": "sendMessage",
@@ -2216,7 +2246,7 @@ pub fn send_photo(
         "reply_to": input_message_reply_to(reply_to),
         "options": Value::Null,
         "reply_markup": Value::Null,
-        "input_message_content": input_message_photo(path, caption, self_destruct)
+        "input_message_content": input_message_photo(path, caption, self_destruct, strip_blockquote)
     })
     .to_string()
 }
@@ -2352,7 +2382,12 @@ pub struct VideoSend {
 }
 
 /// `inputMessageVideo` body (TDLib 1.8.67). Shared by `sendMessage` and `sendMessageAlbum`.
-pub fn input_message_video(path: &str, video: &VideoSend, caption: &str) -> Value {
+pub fn input_message_video(
+    path: &str,
+    video: &VideoSend,
+    caption: &str,
+    strip_blockquote: bool,
+) -> Value {
     json!({
         "@type": "inputMessageVideo",
         "video": {
@@ -2370,7 +2405,7 @@ pub fn input_message_video(path: &str, video: &VideoSend, caption: &str) -> Valu
             "height": video.height,
             "supports_streaming": video.supports_streaming
         },
-        "caption": formatted_caption(caption),
+        "caption": formatted_caption(caption, strip_blockquote),
         "show_caption_above_media": false,
         "self_destruct_type": self_destruct_type_value(video.self_destruct),
         "has_spoiler": false
@@ -2447,6 +2482,7 @@ pub fn send_video_note(
 
 /// `sendMessage` + `inputMessageVideo` / `inputVideo` / `inputFileLocal` (1.8.67).
 /// `path` must already be an explicitly picked local file — never a JSON `local.path`.
+#[allow(clippy::too_many_arguments)] // `strip_blockquote` is pure pass-through to `input_message_video`
 pub fn send_video(
     extra: RequestId,
     chat_id: ChatId,
@@ -2455,6 +2491,7 @@ pub fn send_video(
     video: &VideoSend,
     caption: &str,
     reply_to: Option<MessageId>,
+    strip_blockquote: bool,
 ) -> String {
     json!({
         "@type": "sendMessage",
@@ -2464,7 +2501,7 @@ pub fn send_video(
         "reply_to": input_message_reply_to(reply_to),
         "options": Value::Null,
         "reply_markup": Value::Null,
-        "input_message_content": input_message_video(path, video, caption)
+        "input_message_content": input_message_video(path, video, caption, strip_blockquote)
     })
     .to_string()
 }
@@ -2499,6 +2536,7 @@ pub fn send_document(
     path: &str,
     caption: &str,
     reply_to: Option<MessageId>,
+    strip_blockquote: bool,
 ) -> String {
     json!({
         "@type": "sendMessage",
@@ -2519,11 +2557,7 @@ pub fn send_document(
                 "thumbnail": Value::Null,
                 "disable_content_type_detection": false
             },
-            "caption": {
-                "@type": "formattedText",
-                "text": caption,
-                "entities": []
-            }
+            "caption": formatted_caption(caption, strip_blockquote)
         }
     })
     .to_string()
@@ -2628,9 +2662,13 @@ pub fn edit_message_text(
     chat_id: ChatId,
     message_id: MessageId,
     text: &str,
+    strip_blockquote: bool,
 ) -> String {
     // M1: edits carry the same markup→entities conversion as sends.
+    // M1 fix-up: secret chats strip `textEntityTypeBlockQuote`
+    // (unsupported there), same as sends.
     let (clean_text, entities) = parse_format_markup(text);
+    let entities = secret_chat_entities(entities, strip_blockquote);
     let entities_json: Vec<Value> = entities.iter().map(format_entity_json).collect();
     json!({
         "@type": "editMessageText",
@@ -2654,12 +2692,15 @@ pub fn edit_message_text(
 
 /// `editMessageCaption` (TDLib 1.8.67). Caption-only media edit.
 /// `show_caption_above_media` is false unless the original already inverted it.
+/// M1 fix-up: the caption gets the same markup→entities treatment as
+/// sends (blocker: `**bold**` went out literal).
 pub fn edit_message_caption(
     extra: RequestId,
     chat_id: ChatId,
     message_id: MessageId,
     caption: &str,
     show_caption_above_media: bool,
+    strip_blockquote: bool,
 ) -> String {
     json!({
         "@type": "editMessageCaption",
@@ -2667,11 +2708,7 @@ pub fn edit_message_caption(
         "chat_id": chat_id.0,
         "message_id": message_id.0,
         "reply_markup": Value::Null,
-        "caption": {
-            "@type": "formattedText",
-            "text": caption,
-            "entities": []
-        },
+        "caption": formatted_caption(caption, strip_blockquote),
         "show_caption_above_media": show_caption_above_media
     })
     .to_string()
@@ -2751,6 +2788,20 @@ pub fn get_message_link(extra: RequestId, chat_id: ChatId, message_id: MessageId
         "poll_option_id": "",
         "for_album": false,
         "in_message_thread": false,
+    })
+    .to_string()
+}
+
+/// M1 fix-up: `getMessageProperties` (TDLib 1.8.67,
+/// `schema/td_api.tl:11557`). "Share link" sends this first so the
+/// driver can gate `getMessageLink` on `messageProperties.can_get_link`
+/// (schema line 12056) instead of letting it silently 400.
+pub fn get_message_properties(extra: RequestId, chat_id: ChatId, message_id: MessageId) -> String {
+    json!({
+        "@type": "getMessageProperties",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0,
+        "message_id": message_id.0,
     })
     .to_string()
 }
@@ -3712,6 +3763,7 @@ mod tests {
             "CANARY_CAP",
             None,
             None,
+            false,
         );
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(v["@type"], "sendMessage");
@@ -3747,7 +3799,112 @@ mod tests {
         assert!(!json.contains("message_thread_id"));
     }
 
-    /// Phase B3: `self_destruct_type` shapes on `inputMessagePhoto` /
+    /// M1 fix-up: captions parse composer markup into entities, exactly
+    /// like message text (`**bold**` in a caption must not go out
+    /// literal).
+    #[test]
+    fn photo_caption_parses_markup_into_entities() {
+        let json = send_photo(
+            RequestId(61),
+            ChatId(7),
+            None,
+            "/tmp/picked.png",
+            "**bold** and plain",
+            None,
+            None,
+            false,
+        );
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let caption = &v["input_message_content"]["caption"];
+        assert_eq!(caption["text"], "bold and plain");
+        let entities = caption["entities"].as_array().unwrap();
+        assert_eq!(entities.len(), 1);
+        assert_eq!(entities[0]["type"]["@type"], "textEntityTypeBold");
+        assert_eq!(entities[0]["offset"], 0);
+        assert_eq!(entities[0]["length"], 4);
+    }
+
+    /// M1 fix-up: `editMessageCaption` parses markup too.
+    #[test]
+    fn edit_caption_parses_markup_into_entities() {
+        let json = edit_message_caption(
+            RequestId(62),
+            ChatId(11),
+            MessageId(60),
+            "*italic* cap",
+            false,
+            false,
+        );
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let caption = &v["caption"];
+        assert_eq!(caption["text"], "italic cap");
+        let entities = caption["entities"].as_array().unwrap();
+        assert_eq!(entities.len(), 1);
+        assert_eq!(entities[0]["type"]["@type"], "textEntityTypeItalic");
+    }
+
+    /// M1 fix-up: `textEntityTypeBlockQuote` is stripped for secret chats
+    /// (schema: unsupported there); other entities survive.
+    #[test]
+    fn secret_chat_captions_strip_blockquote_only() {
+        let json = send_photo(
+            RequestId(63),
+            ChatId(7),
+            None,
+            "/tmp/picked.png",
+            "> quoted\n**bold**",
+            None,
+            None,
+            true,
+        );
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let caption = &v["input_message_content"]["caption"];
+        let entities = caption["entities"].as_array().unwrap();
+        assert!(
+            entities
+                .iter()
+                .all(|e| e["type"]["@type"] != "textEntityTypeBlockQuote"),
+            "blockquote must be stripped for secret chats: {entities:?}"
+        );
+        assert!(
+            entities
+                .iter()
+                .any(|e| e["type"]["@type"] == "textEntityTypeBold"),
+            "non-blockquote entities survive: {entities:?}"
+        );
+    }
+
+    /// M1 fix-up: `send_text` strips blockquote entities for secret chats.
+    #[test]
+    fn secret_chat_text_strips_blockquote_only() {
+        let json = send_text(
+            RequestId(64),
+            ChatId(7),
+            None,
+            "> quoted\n**bold**",
+            None,
+            &SendOptions {
+                is_secret: true,
+                ..SendOptions::default()
+            },
+        );
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let entities = v["input_message_content"]["text"]["entities"]
+            .as_array()
+            .unwrap();
+        assert!(
+            entities
+                .iter()
+                .all(|e| e["type"]["@type"] != "textEntityTypeBlockQuote"),
+            "blockquote must be stripped for secret chats: {entities:?}"
+        );
+        assert!(
+            entities
+                .iter()
+                .any(|e| e["type"]["@type"] == "textEntityTypeBold"),
+            "non-blockquote entities survive: {entities:?}"
+        );
+    }
     /// `inputMessageVideo` (schema 1.8.67, lines 5915/5918/6117/6128).
     #[test]
     fn send_photo_self_destruct_shapes() {
@@ -3770,6 +3927,7 @@ mod tests {
                 "cap",
                 None,
                 choice,
+                false,
             );
             let v: serde_json::Value = serde_json::from_str(&json).unwrap();
             let sd = &v["input_message_content"]["self_destruct_type"];
@@ -3787,6 +3945,7 @@ mod tests {
             "cap",
             None,
             Some(SelfDestructSend::Timer(30)),
+            false,
         );
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(
@@ -3807,6 +3966,7 @@ mod tests {
             },
             "cap",
             None,
+            false,
         );
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(
@@ -3929,6 +4089,7 @@ mod tests {
             },
             "CANARY_VIDEO",
             Some(MessageId(9)),
+            false,
         );
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(v["@type"], "sendMessage");
@@ -4030,7 +4191,15 @@ mod tests {
 
     #[test]
     fn send_document_shape_matches_1_8_67() {
-        let json = send_document(RequestId(12), ChatId(7), None, "/tmp/picked.txt", "", None);
+        let json = send_document(
+            RequestId(12),
+            ChatId(7),
+            None,
+            "/tmp/picked.txt",
+            "",
+            None,
+            false,
+        );
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(v["@type"], "sendMessage");
         assert_eq!(v["input_message_content"]["@type"], "inputMessageDocument");
@@ -4485,7 +4654,13 @@ mod tests {
 
     #[test]
     fn edit_message_text_shape_matches_1_8_67() {
-        let json = edit_message_text(RequestId(31), ChatId(11), MessageId(102), "edited body");
+        let json = edit_message_text(
+            RequestId(31),
+            ChatId(11),
+            MessageId(102),
+            "edited body",
+            false,
+        );
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(v["@type"], "editMessageText");
         assert_eq!(v["@extra"], "31");
@@ -4547,7 +4722,14 @@ mod tests {
 
     #[test]
     fn edit_message_caption_shape_matches_1_8_67() {
-        let json = edit_message_caption(RequestId(32), ChatId(11), MessageId(60), "new cap", false);
+        let json = edit_message_caption(
+            RequestId(32),
+            ChatId(11),
+            MessageId(60),
+            "new cap",
+            false,
+            false,
+        );
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(v["@type"], "editMessageCaption");
         assert_eq!(v["@extra"], "32");

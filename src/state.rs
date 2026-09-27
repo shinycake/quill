@@ -95,6 +95,13 @@ pub enum RequestPurpose {
     /// M1: `getMessageLink`. Response is `messageLink`; the parsed link is
     /// stored in `Session::message_link_result` for the UI to copy.
     GetMessageLink,
+    /// M1 fix-up: `getMessageProperties`, sent first by "Share link" so
+    /// the driver can gate `getMessageLink` on
+    /// `messageProperties.can_get_link` (schema 1.8.67 line 12056).
+    GetMessageLinkProperties {
+        chat_id: ChatId,
+        message_id: MessageId,
+    },
     /// M1: `resendMessages`. Response is `messages` (the retried sends).
     ResendMessages,
     /// M1: `getChatScheduledMessages`. Response is `messages`, stored in
@@ -1408,10 +1415,16 @@ pub struct HistoryMessage {
     /// messages. Rendered as a small signature line under the post, except
     /// under forwarded-message headers (which already attribute it).
     pub author_signature: Option<String>,
-    /// M1: the send failed and TDLib allows a retry (`message.can_retry`,
-    /// schema 1.8.67 line 3038). Renders a "failed — retry" state; the
-    /// retry action sends `resendMessages`.
+    /// M1: the send failed (`updateMessageSendFailed`). `true` means the
+    /// row renders a failed state. A "Retry send" affordance is offered
+    /// only when `can_retry` is also true — TDLib does not allow every
+    /// failed send to be retried.
     pub failed: bool,
+    /// M1 fix-up: `message.sending_state.can_retry` (TDLib 1.8.67 line
+    /// 3038) — whether the failed send may be retried via
+    /// `resendMessages`. Gates the retry affordance and the driver's
+    /// `resend_failed_message`.
+    pub can_retry: bool,
 }
 
 impl HistoryMessage {
@@ -1645,6 +1658,7 @@ impl SearchMessageHit {
             auto_delete: self.auto_delete,
             author_signature: self.author_signature,
             failed: false,
+            can_retry: false,
         }
     }
 }
@@ -2438,6 +2452,16 @@ pub struct Session {
     /// M1: parsed `messageLink.link` from the last `getMessageLink` response
     /// (one-shot; the UI copies it to the clipboard and clears it).
     pub message_link_result: Option<String>,
+    /// M1 fix-up: one-shot; set when "Share link" is gated off by
+    /// `messageProperties.can_get_link == false` or the `getMessageLink`
+    /// request errors. The UI drains it into the status note so the
+    /// click never silently does nothing.
+    pub message_link_error: Option<String>,
+    /// M1 fix-up: one-shot; set when a `resendMessages` request errors.
+    /// The UI drains it into the status note — previously the error fell
+    /// into the `_ => {}` swallower and the user saw "retrying send…"
+    /// followed by silence.
+    pub resend_error: Option<String>,
     /// M1: `getChatScheduledMessages` results — the chat's scheduled sends,
     /// with `scheduling_state` showing the planned send time.
     pub scheduled_messages: Vec<ParsedMessage>,
@@ -2963,6 +2987,8 @@ impl Session {
             folder_chats_to_leave: HashMap::new(),
             histories: HashMap::new(),
             message_link_result: None,
+            message_link_error: None,
+            resend_error: None,
             scheduled_messages: Vec::new(),
             open_chat: None,
             app_active: true,
@@ -4256,8 +4282,10 @@ impl Session {
                 let chat_id = message.chat_id;
                 let topic_id = message.topic_id;
                 self.remember_files(&message.files);
-                // M1: mark the row failed so the UI can offer a retry
-                // (`resendMessages` via `driver.resend_failed_message`).
+                // M1: mark the row failed. The retry affordance is gated
+                // separately on `can_retry` (`resendMessages` via
+                // `driver.resend_failed_message`) — not every failed send
+                // may be retried.
                 let mut row = history_message(message, true);
                 row.failed = true;
                 let history = self.histories.entry(chat_id.0).or_default();
@@ -4328,6 +4356,15 @@ impl Session {
             } => {
                 self.remember_files(&files);
                 let preview = content.preview();
+                // M1 fix-up: the edited message may be a scheduled send —
+                // refresh the scheduled-list entry too, not just history.
+                if let Some(slot) = self
+                    .scheduled_messages
+                    .iter_mut()
+                    .find(|m| m.chat_id == chat_id && m.id == message_id)
+                {
+                    slot.content = content.clone();
+                }
                 let updated = self
                     .histories
                     .get_mut(&chat_id.0)
@@ -4609,7 +4646,25 @@ impl Session {
                 }
             }
             EnvelopePayload::Message(message) => {
-                if pending.map(|p| p.purpose) == Some(RequestPurpose::SendMessage) {
+                // M1 fix-up: editing a scheduled send returns the edited
+                // `message` with `scheduling_state` set — refresh the
+                // scheduled-list entry instead of inserting a phantom row
+                // into chat history (which also left the scheduled list
+                // showing the stale pre-edit text).
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::EditMessage)
+                    && message.scheduling_state.is_some()
+                {
+                    self.remember_files(&message.files);
+                    if let Some(slot) = self
+                        .scheduled_messages
+                        .iter_mut()
+                        .find(|m| m.id == message.id)
+                    {
+                        *slot = message;
+                    } else {
+                        self.scheduled_messages.push(message);
+                    }
+                } else if pending.map(|p| p.purpose) == Some(RequestPurpose::SendMessage) {
                     self.upsert_message(message, true);
                 } else {
                     self.upsert_message(message, false);
@@ -4870,6 +4925,11 @@ impl Session {
             // stashes the link in `Session::message_link_result` before
             // `apply` takes the pending request; nothing to reduce here.
             EnvelopePayload::MessageLink { .. } => {}
+            // M1 fix-up: `getMessageProperties` returns
+            // `messageProperties`. The driver gates the chained
+            // `getMessageLink` on `can_get_link` before `apply` takes
+            // the pending request; nothing to reduce here.
+            EnvelopePayload::MessageProperties { .. } => {}
             // Phase C2f: `inviteGroupCallParticipant` answer. A success
             // clears any earlier invite error; the three failure
             // variants surface honestly via `group_call_error` (shown
@@ -5332,6 +5392,23 @@ impl Session {
                     // yet." instead of spinning forever.
                     Some(RequestPurpose::GetStorageStatistics) => {
                         self.storage_stats_loading = false;
+                    }
+                    // M1 fix-up: a failed `resendMessages` surfaces in the
+                    // status note instead of vanishing into `_ => {}` —
+                    // the menu item says "retrying send…" and the user
+                    // deserves an answer either way.
+                    Some(RequestPurpose::ResendMessages) => {
+                        self.resend_error =
+                            Some(call_request_error_line(&err, "Could not retry the send"));
+                    }
+                    // M1 fix-up: a failed "Share link" surfaces in the
+                    // status note instead of silently doing nothing.
+                    Some(
+                        RequestPurpose::GetMessageLink
+                        | RequestPurpose::GetMessageLinkProperties { .. },
+                    ) => {
+                        self.message_link_error =
+                            Some(call_request_error_line(&err, "Could not get message link"));
                     }
                     _ => {}
                 }
@@ -7183,6 +7260,7 @@ fn history_message(message: ParsedMessage, pending: bool) -> HistoryMessage {
         auto_delete: message.auto_delete,
         author_signature: message.author_signature,
         failed: false,
+        can_retry: message.can_retry,
     }
 }
 
@@ -7372,6 +7450,201 @@ mod tests {
         assert!(!history.messages.contains_key(&-1));
         assert!(history.messages.contains_key(&88));
         assert!(!history.messages.get(&88).unwrap().pending);
+    }
+
+    /// M1 fix-up: editing a scheduled send returns the edited `message`
+    /// with `scheduling_state` set — it must refresh the scheduled-list
+    /// entry, not insert a phantom row into chat history.
+    #[test]
+    fn edit_scheduled_message_refreshes_scheduled_list_not_history() {
+        use crate::telegram::envelope::MessageSchedulingState;
+
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        session.scheduled_messages.push(ParsedMessage {
+            id: MessageId(70),
+            chat_id: ChatId(7),
+            is_outgoing: true,
+            is_pinned: false,
+            topic_id: None,
+            media_album_id: 0,
+            author_signature: None,
+            scheduling_state: Some(MessageSchedulingState::SendAtDate { send_date: 999 }),
+            can_retry: false,
+            content: MessageContent::Text("scheduled draft".into()),
+            files: Vec::new(),
+            reply_to: None,
+            forward_info: None,
+            interaction_info: None,
+            reply_markup: None,
+            self_destruct: None,
+            auto_delete: None,
+        });
+        let extra = session.request(RequestPurpose::EditMessage, Some(ChatId(7)));
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"message","@extra":"{}","id":70,"chat_id":7,"is_outgoing":true,"scheduling_state":{{"@type":"messageSchedulingStateSendAtDate","send_date":999}},"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"edited draft","entities":[]}}}}}}"#,
+                extra.0,
+            ),
+        );
+        assert_eq!(session.scheduled_messages.len(), 1);
+        assert_eq!(
+            session.scheduled_messages[0].content.preview(),
+            "edited draft"
+        );
+        assert!(
+            session
+                .histories
+                .get(&7)
+                .is_none_or(|h| !h.messages.contains_key(&70)),
+            "edited scheduled send must not land in chat history"
+        );
+    }
+
+    /// M1 fix-up: a regular (non-scheduled) edit still upserts history —
+    /// the scheduled branch must not swallow it.
+    #[test]
+    fn edit_regular_message_still_upserts_history() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        let extra = session.request(RequestPurpose::EditMessage, Some(ChatId(7)));
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"message","@extra":"{}","id":71,"chat_id":7,"is_outgoing":true,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"edited","entities":[]}}}}}}"#,
+                extra.0,
+            ),
+        );
+        let history = session.histories.get(&7).expect("history row present");
+        assert_eq!(
+            history.messages.get(&71).unwrap().content.preview(),
+            "edited"
+        );
+    }
+
+    /// M1 fix-up: `updateMessageContent` for a scheduled send refreshes
+    /// the scheduled-list entry, not just history.
+    #[test]
+    fn update_message_content_refreshes_scheduled_entry() {
+        use crate::telegram::envelope::MessageSchedulingState;
+
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        session.scheduled_messages.push(ParsedMessage {
+            id: MessageId(70),
+            chat_id: ChatId(7),
+            is_outgoing: true,
+            is_pinned: false,
+            topic_id: None,
+            media_album_id: 0,
+            author_signature: None,
+            scheduling_state: Some(MessageSchedulingState::SendAtDate { send_date: 999 }),
+            can_retry: false,
+            content: MessageContent::Text("old caption".into()),
+            files: Vec::new(),
+            reply_to: None,
+            forward_info: None,
+            interaction_info: None,
+            reply_markup: None,
+            self_destruct: None,
+            auto_delete: None,
+        });
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateMessageContent","chat_id":7,"message_id":70,"new_content":{"@type":"messageText","text":{"@type":"formattedText","text":"new caption","entities":[]}}}"#,
+        );
+        assert_eq!(
+            session.scheduled_messages[0].content.preview(),
+            "new caption"
+        );
+    }
+
+    /// M1 fix-up: `updateMessageSendFailed` parses
+    /// `sending_state.can_retry` through to the history row — retry is
+    /// gated on it, not offered unconditionally.
+    #[test]
+    fn send_failed_marks_can_retry_from_sending_state() {
+        for (can_retry, label) in [(true, "retryable"), (false, "not retryable")] {
+            let (mut session, sink) = session();
+            let seq = AtomicU64::new(0);
+            apply_json(
+                &mut session,
+                &seq,
+                &sink,
+                r#"{"@type":"updateNewMessage","message":{"id":-1,"chat_id":1,"is_outgoing":true,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"hi","entities":[]}}}}"#,
+            );
+            apply_json(
+                &mut session,
+                &seq,
+                &sink,
+                &format!(
+                    r#"{{"@type":"updateMessageSendFailed","old_message_id":-1,"message":{{"id":88,"chat_id":1,"is_outgoing":true,"sending_state":{{"@type":"messageSendingStateFailed","can_retry":{}}},"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"hi","entities":[]}}}}}},"error":{{"code":400}}}}"#,
+                    can_retry,
+                ),
+            );
+            let row = session
+                .histories
+                .get(&1)
+                .unwrap()
+                .messages
+                .get(&88)
+                .unwrap();
+            assert!(row.failed, "{label}: failed send marks the row failed");
+            assert_eq!(
+                row.can_retry, can_retry,
+                "{label}: can_retry parsed through"
+            );
+        }
+    }
+
+    /// M1 fix-up: a failed `resendMessages` surfaces in
+    /// `Session::resend_error` (drained into the status note) instead of
+    /// vanishing into the `_ => {}` swallower.
+    #[test]
+    fn resend_error_surfaces_instead_of_silence() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        let extra = session.request(RequestPurpose::ResendMessages, Some(ChatId(1)));
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"error","@extra":"{}","code":400,"message":"MESSAGE_SEND_FAILED"}}"#,
+                extra.0,
+            ),
+        );
+        let err = session.resend_error.expect("resend error surfaced");
+        assert!(err.contains("Could not retry the send"), "{err}");
+    }
+
+    /// M1 fix-up: a failed `getMessageLink` surfaces in
+    /// `Session::message_link_error` instead of silently doing nothing.
+    #[test]
+    fn message_link_error_surfaces_instead_of_silence() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        let extra = session.request(RequestPurpose::GetMessageLink, Some(ChatId(1)));
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"error","@extra":"{}","code":400,"message":"LINK_NOT_AVAILABLE"}}"#,
+                extra.0,
+            ),
+        );
+        let err = session
+            .message_link_error
+            .expect("message link error surfaced");
+        assert!(err.contains("Could not get message link"), "{err}");
     }
 
     #[test]

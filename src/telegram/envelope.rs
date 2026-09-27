@@ -317,6 +317,15 @@ pub enum EnvelopePayload {
         link: String,
         is_public: bool,
     },
+    /// M1 fix-up: `messageProperties` (TDLib 1.8.67,
+    /// `schema/td_api.tl:11557`) — the `getMessageProperties` answer.
+    /// Only `can_get_link` is kept: `getMessageLink` is "available only
+    /// if messageProperties.can_get_link" (schema line 12056), so the
+    /// driver gates the link request on it instead of letting "Share
+    /// link" silently 400.
+    MessageProperties {
+        can_get_link: bool,
+    },
     /// `chats` — `searchChats` / `searchRecentlyFoundChats` / similar.
     Chats {
         total_count: i32,
@@ -3285,6 +3294,12 @@ pub struct ParsedMessage {
     /// `Some` only on scheduled sends; the UI's scheduled list reads the
     /// planned time from here.
     pub scheduling_state: Option<MessageSchedulingState>,
+    /// M1 fix-up: `message.sending_state.can_retry` (TDLib 1.8.67, lines
+    /// 3038 / 5896) — only `messageSendingStateFailed` carries it.
+    /// `true` means the failed send may be retried via `resendMessages`;
+    /// the reducer gates the retry affordance on this instead of offering
+    /// it on every `updateMessageSendFailed`.
+    pub can_retry: bool,
     pub content: MessageContent,
     pub files: Vec<ParsedFile>,
     pub reply_to: Option<MessageReplyTo>,
@@ -5458,6 +5473,14 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
                 .and_then(Value::as_bool)
                 .unwrap_or(false),
         }),
+        // M1 fix-up: only `can_get_link` is kept (see the
+        // `MessageProperties` payload docs).
+        "messageProperties" => Ok(EnvelopePayload::MessageProperties {
+            can_get_link: value
+                .get("can_get_link")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+        }),
         // Phase C3a: `text` (schema 1.8.67, line 10071) — the
         // `joinVideoChat` / `joinGroupCall` answer ("join response
         // payload for tgcalls"). Quill stores it, never consumes it
@@ -6878,6 +6901,14 @@ fn parse_message(value: &Value) -> Result<ParsedMessage, ParseError> {
         ),
         auto_delete: parse_auto_delete_in(value.get("auto_delete_in")),
         scheduling_state: parse_message_scheduling_state(value.get("scheduling_state")),
+        // M1 fix-up: `can_retry` lives on `messageSendingStateFailed`
+        // only (schema 1.8.67 line 5896); absent everywhere else.
+        can_retry: value
+            .get("sending_state")
+            .filter(|s| s.get("@type").and_then(Value::as_str) == Some("messageSendingStateFailed"))
+            .and_then(|s| s.get("can_retry"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
     })
 }
 

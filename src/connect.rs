@@ -51,7 +51,7 @@ use crate::telegram::requests::{
     get_chat_invite_links, get_chat_join_requests, get_chat_lists_to_add_chat, get_chat_member,
     get_chat_scheduled_messages, get_chat_sponsored_messages, get_chat_statistics, get_commands,
     get_contacts, get_forum_topics, get_group_call, get_installed_sticker_sets, get_me,
-    get_message_link, get_saved_animations, get_saved_notification_sounds,
+    get_message_link, get_message_properties, get_saved_animations, get_saved_notification_sounds,
     get_scope_notification_settings, get_secret_chat, get_sticker_set, get_storage_statistics,
     get_story, get_story_available_reactions, get_supergroup, get_supergroup_full_info,
     get_supergroup_members, get_user_full_info, get_user_privacy_setting_rules,
@@ -860,6 +860,22 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .then(|| link.clone()),
             _ => None,
         };
+        // M1 fix-up: capture the `getMessageProperties` answer for the
+        // "Share link" gate before `apply` takes the pending request.
+        let link_gate: Option<(ChatId, MessageId, bool)> = match &owned.envelope.payload {
+            EnvelopePayload::MessageProperties { can_get_link } => owned
+                .envelope
+                .extra
+                .and_then(|id| self.session.requests.purpose(id))
+                .and_then(|purpose| match purpose {
+                    RequestPurpose::GetMessageLinkProperties {
+                        chat_id,
+                        message_id,
+                    } => Some((chat_id, message_id, *can_get_link)),
+                    _ => None,
+                }),
+            _ => None,
+        };
         self.session.apply(owned);
         self.pump_call_engine(active_call_before, bridge_signaling)?;
         self.pump_group_call_transport(active_group_call_before)?;
@@ -894,6 +910,17 @@ impl<S: JsonSender> ConnectDriver<S> {
         // M1: stash the `getMessageLink` answer for the UI clipboard drain.
         if let Some(link) = message_link_answer {
             self.session.message_link_result = Some(link);
+        }
+        // M1 fix-up: "Share link" gate — chain to `getMessageLink` only
+        // when `messageProperties.can_get_link` passed; otherwise tell
+        // the user instead of silently doing nothing.
+        if let Some((chat_id, message_id, can_get_link)) = link_gate {
+            if can_get_link {
+                let _ = self.send_message_link_request(chat_id, message_id);
+            } else {
+                self.session.message_link_error =
+                    Some("message link not available for this message".into());
+            }
         }
         if thumbs_after || self.session.stickers.open || self.session.gifs.open {
             self.maybe_download_open_thumbs()?;
@@ -5841,6 +5868,14 @@ impl<S: JsonSender> ConnectDriver<S> {
             .get(&chat_id.0)
             .filter(|chat| matches!(chat.kind, ChatKind::Private { .. }))
             .and(snapshot.self_destruct);
+        // M1 fix-up: `textEntityTypeBlockQuote` is not supported in secret
+        // chats (schema) — strip it from captions here; the text path
+        // does the same via `SendOptions::is_secret`.
+        let is_secret = self
+            .session
+            .chats
+            .get(&chat_id.0)
+            .is_some_and(|chat| matches!(chat.kind, ChatKind::Secret { .. }));
         // Contains caption / path — do not log `json`.
         let json = match (snapshot.attachment.as_ref(), media_path.as_deref()) {
             (Some(att), Some(path)) => match att.kind {
@@ -5852,9 +5887,10 @@ impl<S: JsonSender> ConnectDriver<S> {
                     caption,
                     reply_to,
                     self_destruct,
+                    is_secret,
                 ),
                 AttachmentKind::Document => {
-                    send_document(extra, chat_id, topic_id, path, caption, reply_to)
+                    send_document(extra, chat_id, topic_id, path, caption, reply_to, is_secret)
                 }
                 AttachmentKind::Video => {
                     let probe = video_probe.ok_or_else(|| {
@@ -5875,6 +5911,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                         },
                         caption,
                         reply_to,
+                        is_secret,
                     )
                 }
                 AttachmentKind::VideoNote => {
@@ -5895,10 +5932,13 @@ impl<S: JsonSender> ConnectDriver<S> {
                     .get(&chat_id.0)
                     .is_some_and(|chat| matches!(chat.kind, ChatKind::Secret { .. }));
                 // M1: the composer send options ride the snapshot; secret
-                // chats force the preview toggle off regardless.
+                // chats force the preview toggle off regardless, and mark
+                // the send so `textEntityTypeBlockQuote` is stripped
+                // (unsupported in secret chats).
                 let mut send_options = snapshot.send_options;
                 if is_secret {
                     send_options.link_preview_disabled = true;
+                    send_options.is_secret = true;
                 }
                 send_text(extra, chat_id, topic_id, caption, reply_to, &send_options)
             }
@@ -5944,6 +5984,12 @@ impl<S: JsonSender> ConnectDriver<S> {
             .get(&chat_id.0)
             .filter(|chat| matches!(chat.kind, ChatKind::Private { .. }))
             .and(snapshot.self_destruct);
+        // M1 fix-up: same secret-chat blockquote strip as `send_snapshot`.
+        let is_secret = self
+            .session
+            .chats
+            .get(&chat_id.0)
+            .is_some_and(|chat| matches!(chat.kind, ChatKind::Secret { .. }));
         let mut contents = Vec::with_capacity(snapshot.album.len());
         for (index, att) in snapshot.album.iter().enumerate() {
             let path = att
@@ -5951,7 +5997,9 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .ok_or(ConnectSendError::InvalidRequest)?;
             let item_caption = if index == last { caption } else { "" };
             let content = match att.kind {
-                AttachmentKind::Photo => input_message_photo(&path, item_caption, self_destruct),
+                AttachmentKind::Photo => {
+                    input_message_photo(&path, item_caption, self_destruct, is_secret)
+                }
                 AttachmentKind::Video => {
                     let probe = crate::video::probe_local_video(&att.path)
                         .map_err(|_| ConnectSendError::InvalidRequest)?;
@@ -5965,6 +6013,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                             self_destruct,
                         },
                         item_caption,
+                        is_secret,
                     )
                 }
                 AttachmentKind::Document | AttachmentKind::VideoNote => {
@@ -6304,13 +6353,29 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request(RequestPurpose::EditMessage, Some(edit.chat_id));
+        // M1 fix-up: secret chats strip `textEntityTypeBlockQuote` from
+        // the edited caption too (unsupported in secret chats).
+        let strip_blockquote = self
+            .session
+            .chats
+            .get(&edit.chat_id.0)
+            .is_some_and(|chat| matches!(chat.kind, ChatKind::Secret { .. }));
         let json = match edit.kind {
-            ComposerEditKind::Text => {
-                edit_message_text(extra, edit.chat_id, edit.message_id, caption)
-            }
-            ComposerEditKind::Caption => {
-                edit_message_caption(extra, edit.chat_id, edit.message_id, caption, false)
-            }
+            ComposerEditKind::Text => edit_message_text(
+                extra,
+                edit.chat_id,
+                edit.message_id,
+                caption,
+                strip_blockquote,
+            ),
+            ComposerEditKind::Caption => edit_message_caption(
+                extra,
+                edit.chat_id,
+                edit.message_id,
+                caption,
+                false,
+                strip_blockquote,
+            ),
         };
         match self.sender.send_json(&json) {
             Ok(()) => Ok(extra),
@@ -6645,6 +6710,11 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     /// M1: share a message link (tdesktop context menu "Copy Message Link").
+    /// M1 fix-up: `getMessageLink` is only valid when
+    /// `messageProperties.can_get_link` (schema 1.8.67 line 12056), so
+    /// this sends `getMessageProperties` first; `ingest` chains to the
+    /// actual `getMessageLink` only when the gate passes, and otherwise
+    /// stashes `Session::message_link_error` for the UI status note.
     /// The parsed `messageLink.link` lands in
     /// `session.message_link_result` for the UI to copy to the clipboard.
     pub fn get_message_link(
@@ -6664,6 +6734,33 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         };
         if message.pending || message.id.0 <= 0 {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self.session.request(
+            RequestPurpose::GetMessageLinkProperties {
+                chat_id,
+                message_id,
+            },
+            Some(chat_id),
+        );
+        let json = get_message_properties(extra, chat_id, message_id);
+        match self.sender.send_json(&json) {
+            Ok(()) => Ok(extra),
+            Err(err) => {
+                self.session.requests.take(extra);
+                Err(err)
+            }
+        }
+    }
+
+    /// M1 fix-up: the second half of the "Share link" gate — sent from
+    /// `ingest` only after `messageProperties.can_get_link` passed.
+    fn send_message_link_request(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
         let extra = self
@@ -6713,7 +6810,11 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     /// M1: retry a failed send (`resendMessages`, TDLib 1.8.67,
-    /// `schema/td_api.tl:12251`; `message.can_retry`, schema line 3038).
+    /// `schema/td_api.tl:12251`; `message.sending_state.can_retry`, schema
+    /// line 3038). The driver only retries rows the reducer marked
+    /// `failed` **and** retryable — not every failed send may be
+    /// retried, and the context menu offers "Retry send" on the same
+    /// gate.
     pub fn resend_failed_message(
         &mut self,
         chat_id: ChatId,
@@ -6727,7 +6828,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .histories
             .get(&chat_id.0)
             .and_then(|history| history.messages.get(&message_id.0))
-            .is_some_and(|message| message.failed);
+            .is_some_and(|message| message.failed && message.can_retry);
         if !can_retry {
             return Err(ConnectSendError::InvalidRequest);
         }
@@ -10981,7 +11082,7 @@ mod tests {
         let snap = ComposerSnapshot::capture_with_attachment(
             ChatId(7),
             driver.session.view_generation,
-            "CANARY_PHOTO_CAP",
+            "CANARYPHOTOCAP",
             Some(photo_att),
         );
         let extra = driver.send_snapshot(&snap).unwrap();
@@ -10997,7 +11098,7 @@ mod tests {
         );
         assert_eq!(
             v["input_message_content"]["caption"]["text"],
-            "CANARY_PHOTO_CAP"
+            "CANARYPHOTOCAP"
         );
 
         // Pending message response upserts outgoing media.
@@ -11054,7 +11155,7 @@ mod tests {
         let video_snap = ComposerSnapshot::capture_with_attachment(
             ChatId(7),
             driver.session.view_generation,
-            "CANARY_VIDEO_CAP",
+            "CANARYVIDEOCAP",
             Some(video_att),
         );
         let video_extra = driver.send_snapshot(&video_snap).unwrap();
@@ -11081,7 +11182,7 @@ mod tests {
         );
         assert_eq!(
             video_json["input_message_content"]["caption"]["text"],
-            "CANARY_VIDEO_CAP"
+            "CANARYVIDEOCAP"
         );
 
         let note = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -11139,7 +11240,7 @@ mod tests {
         let album_snap = ComposerSnapshot::capture_album(
             ChatId(7),
             driver.session.view_generation,
-            "CANARY_ALBUM_CAP",
+            "CANARYALBUMCAP",
             vec![album_photo, album_video],
         )
         .with_reply(None);
@@ -11154,7 +11255,7 @@ mod tests {
         assert_eq!(contents[0]["caption"]["text"], "");
         assert_eq!(contents[0]["show_caption_above_media"], false);
         assert_eq!(contents[1]["@type"], "inputMessageVideo");
-        assert_eq!(contents[1]["caption"]["text"], "CANARY_ALBUM_CAP");
+        assert_eq!(contents[1]["caption"]["text"], "CANARYALBUMCAP");
         assert_eq!(contents[1]["show_caption_above_media"], false);
         let album_reply = copy_and_parse(
             &format!(
@@ -11959,6 +12060,7 @@ mod tests {
             media_album_id: 0,
             author_signature: None,
             scheduling_state: Some(MessageSchedulingState::SendAtDate { send_date: 999 }),
+            can_retry: false,
             content: MessageContent::Text(TextContent::plain("scheduled draft")),
             files: Vec::new(),
             reply_to: None,

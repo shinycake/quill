@@ -382,6 +382,11 @@ pub struct SendOptions {
     /// `linkPreviewOptions.is_disabled` — the composer preview toggle.
     /// Secret chats force this on the driver side regardless.
     pub link_preview_disabled: bool,
+    /// M1 fix-up: the driver sets this when the target chat is a secret
+    /// chat. `textEntityTypeBlockQuote` is not supported in secret chats
+    /// (schema 1.8.67), so `send_text` strips blockquote entities instead
+    /// of letting TDLib drop them.
+    pub is_secret: bool,
 }
 
 /// M1: `MessageSchedulingState` for a send (TDLib 1.8.67,

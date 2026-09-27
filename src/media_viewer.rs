@@ -382,6 +382,7 @@ mod tests {
             auto_delete: None,
             author_signature: None,
             failed: false,
+            can_retry: false,
         }
     }
 

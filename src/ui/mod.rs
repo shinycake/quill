@@ -3299,6 +3299,26 @@ impl QuillApp {
             self.status_note = "message link copied".into();
             progressed = true;
         }
+        // M1 fix-up: a "Share link" gated off by
+        // `messageProperties.can_get_link` (or a failed `getMessageLink`)
+        // and a failed `resendMessages` surface here instead of silently
+        // doing nothing.
+        if let Some(err) = self
+            .live
+            .as_mut()
+            .and_then(|live| live.driver.session.message_link_error.take())
+        {
+            self.status_note = err;
+            progressed = true;
+        }
+        if let Some(err) = self
+            .live
+            .as_mut()
+            .and_then(|live| live.driver.session.resend_error.take())
+        {
+            self.status_note = err;
+            progressed = true;
+        }
         // Phase 3.2: bot answers to inline keyboard callback presses.
         if let Some(answer) = self
             .live
@@ -3807,6 +3827,8 @@ impl QuillApp {
             disable_notification: self.composer_silent,
             scheduling: self.composer_scheduling,
             link_preview_disabled: self.composer_preview_disabled,
+            // The driver overrides this for secret chats at send time.
+            is_secret: false,
         }
     }
 
@@ -3988,6 +4010,9 @@ impl QuillApp {
 
     /// M1: schedule picker popup above the composer (duration presets +
     /// send-when-online, mirroring tdesktop's "Schedule message" options).
+    /// M1 fix-up: "When contact comes online" is offered only in private
+    /// (1:1) chats — `messageSchedulingStateSendWhenOnline` is
+    /// private-chats-only (schema 1.8.67 line 5905).
     fn schedule_popup(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let mut panel = div()
             .id("schedule-popup")
@@ -4018,8 +4043,9 @@ impl QuillApp {
                 },
             )));
         }
-        panel = panel
-            .child(
+        // M1 fix-up: private chats only (see `open_chat_is_private`).
+        if self.open_chat_is_private() {
+            panel = panel.child(
                 Button::new("schedule-when-online")
                     .label("When contact comes online")
                     .ghost()
@@ -4029,7 +4055,9 @@ impl QuillApp {
                         this.status_note = "will send when the contact is online".into();
                         cx.notify();
                     })),
-            )
+            );
+        }
+        panel = panel
             .child(
                 Button::new("schedule-clear")
                     .label("Send now (clear schedule)")
@@ -4124,8 +4152,10 @@ impl QuillApp {
     }
 
     /// M1: retry a failed send (`resendMessages`, TDLib 1.8.67,
-    /// `schema/td_api.tl:12251`). The driver only retries messages the
-    /// reducer marked `failed` via `updateMessageSendFailed`.
+    /// `schema/td_api.tl:12251`). Offered only for rows the reducer
+    /// marked `failed` **and** `can_retry` — TDLib does not allow every
+    /// failed send to be retried. A failed `resendMessages` surfaces in
+    /// the status note via `Session::resend_error`.
     fn retry_failed_message(
         &mut self,
         chat_id: ChatId,
@@ -4254,7 +4284,7 @@ impl QuillApp {
             this.message_menu = None;
             cx.notify();
         });
-        if failed {
+        if failed && message.can_retry {
             item!("menu-retry", "Retry send", this, _window, cx, {
                 this.retry_failed_message(chat_id, message_id, cx);
                 this.message_menu = None;
@@ -4946,6 +4976,20 @@ impl QuillApp {
             .and_then(|s| s.open_chat)
             .and_then(|id| session.as_ref()?.chats.get(&id.0))
             .is_some_and(|chat| matches!(chat.kind, ChatKind::Secret { .. }))
+    }
+
+    /// M1 fix-up: whether the open chat is a 1:1 cloud chat.
+    /// `messageSchedulingStateSendWhenOnline` is private-chats-only
+    /// (schema 1.8.67 line 5905), so the schedule popup offers "When
+    /// contact comes online" only here — elsewhere the server 400s and
+    /// leaves a red failed row.
+    fn open_chat_is_private(&self) -> bool {
+        let session = self.session();
+        session
+            .as_ref()
+            .and_then(|s| s.open_chat)
+            .and_then(|id| session.as_ref()?.chats.get(&id.0))
+            .is_some_and(|chat| matches!(chat.kind, ChatKind::Private { .. }))
     }
 
     /// Phase S2: the inline-bot warning banner shown above the composer

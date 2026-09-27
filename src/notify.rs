@@ -454,6 +454,7 @@ mod tests {
             self_destruct: None,
             auto_delete: None,
             scheduling_state: None,
+            can_retry: false,
         }
     }
 
