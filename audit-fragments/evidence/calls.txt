@@ -1,0 +1,66 @@
+# Calls — evidence harvest (2026-09-27)
+Sources: schema/td_api.tl (pinned 1.8.67), telegram-x res/values/strings.xml, quill/src (read-only).
+
+## SCHEMA
+
+### 1:1 call types (td_api.tl lines 6984-7287, 14212-14240)
+- call, callId(7034), callState (Pending/ExchangingKeys/Ready/Discarded/HangingUp/Error), 14212 createCall, 14215 acceptCall, 14218 sendCallSignalingData, 14227 discardCall, 14234 sendCallRating, 14237 sendCallDebugInformation, 14240 sendCallLog
+- callStateReady: protocol, servers, config, encryption_key, emojis (verification), allow_p2p, is_group_call_supported, custom_parameters
+- callStateDiscarded: reason (Missed/Declined/Disconnected/HungUp/Empty/UpgradeToGroupCall), need_rating, need_debug_information, need_log
+- callProtocol: udp_p2p, udp_reflector, min/max_layer, library_versions; callServerType TelegramReflector/Webrtc
+- sendCallRating(call_id, rating:int32, comment:string, problems:vector<CallProblem>) — problems: Echo, Noise, Interruptions, DistortedSpeech, SilentLocal, SilentRemote, Dropped, DistortedVideo, PixelatedVideo
+- 11903 searchCallMessages, 11956 deleteAllCallMessages; 10816 updateCall, 10862 updateNewCallSignalingData; notificationTypeNewCall
+- option use_less_data_for_calls (x2); userPrivacySettingAllowCalls + allow_p2p (privacy)
+
+### Group call types (lines 10819-11049, 14244-14455, 7154)
+- groupCall (7154): title, invite_link, scheduled_start_date, is_active, is_video_chat, is_joined, need_rejoin, participant_count, mute_new_participants, can_toggle_mute_new_participants, can_send_messages, record_duration, is_video_recorded, recent_speakers, is_my_video_enabled/paused, can_enable_video
+- groupCallParticipant: is_speaking, is_hand_raised, video_info, screen_sharing_video_info, is_muted_for_all_users/current_user, can_be_muted/unmuted_for_all/current_user, can_unmute_self, volume_level, order, bio
+- updates: updateGroupCall(10819), updateGroupCallParticipant(10824), updateGroupCallParticipants(10830), updateGroupCallVerificationState(10836), updateGroupCallMessageLevels(11049), updateNewGroupCallMessage(10839), updateGroupCallMessageSendFailed(10851), updateGroupCallMessagesDeleted(10856)
+- join/leave: 14285 joinGroupCall, 14292 joinVideoChat, 14297 joinLiveStory; leaveGroupCall (= discard of join)
+- mute/moderation: 14431 toggleGroupCallParticipantIsMuted, 14438 setGroupCallParticipantVolumeLevel, 14444 toggleGroupCallParticipantIsHandRaised, 14322 toggleVideoChatMuteNewParticipants (mute new), 14385 banGroupCallParticipants, 14425 setGroupCallParticipantIsSpeaking
+- video: 14411 toggleGroupCallIsMyVideoPaused, 14414 toggleGroupCallIsMyVideoEnabled; screen share: 14303 startGroupCallScreenSharing, 14306 toggleGroupCallScreenSharingIsPaused, 14309 endGroupCallScreenSharing
+- create/manage: 14256 createVideoChat, 14259 createGroupCall, 14274 getGroupCall, 14282 startScheduledVideoChat, 14285 toggleVideoChatEnabledStartNotification, 14312 setVideoChatTitle, 14395 getVideoChatInviteLink, 14398 revokeGroupCallInviteLink, 14405 startGroupCallRecording, 14408 endGroupCallRecording, 14449 getGroupCallParticipants, 14455 loadGroupCallParticipants, 14375 inviteGroupCallParticipant, 14380 declineGroupCallInvitation, 14390 inviteVideoChatParticipants
+- RTMP: 14262 getVideoChatRtmpUrl, 14265 replaceVideoChatRtmpUrl; live stories: joinLiveStory(14297), getLiveStoryStreamer(14325), sendGroupCallMessage(14341), deleteGroupCallMessages(14359/14365)
+
+## TGX (official client, strings.xml — user-visible feature surface)
+- Outgoing/Incoming/Missed call; Answer/Decline; Call Again/Call Back; End call
+- States: Connecting, Ringing, Waiting, Exchanging keys, Failed to connect, Line Busy, Disconnected, Call ended/canceled/missed/answered
+- CallEmojiHint: "If the emoji on %1$s's screen are the same, this call is 100% secure." (verification)
+- VoipRateCallAlert + VoipFeedbackCommentHint: rate call quality + optional comment
+- ShareCallLogs + CallLogsWarning (privacy warning about diagnostics)
+- VoipUseLessData: Less Data for Calls; ConfirmCalls: prompt before calling; UseProxyForCalls
+- VoipAudioRoutingEarpiece/Speaker/Bluetooth (audio routing)
+- Privacy: WhoCanCallMe, PrivacyCallsP2PTitle2 (peer-to-peer toggle), PrivacyCallsEverybody/Contacts/Nobody (+exceptions); NoRightToCall (privacy error)
+- VoipOngoingAlertTitle: "Another call in progress" — dialog asking hang up + start new
+- Offline/airplane errors; Microphone permission errors
+- Video chat: "Started/ended a video chat", invited strings, scheduled-for string, event-log entries for mute/unmute participant, mute-new-participants toggle
+- No strings for hand-raise/screen-share/audio-output-picker; TGX java: VoIP.java, CallManager, GroupCallListener, VoIPPersistentConfig, CallConfiguration, CallOptions (full call stack incl group calls)
+- Call logs list: CallItem.java, CallListController, "NoCalls: You haven't called anybody yet.", Remove
+
+## QUILL (src, read-only)
+
+### requests.rs (request builders, @type)
+- create_call 809, accept_call_with_protocol 843, send_call_signaling_data 859, discard_call 881, send_call_rating 899, send_call_debug_information 917
+- join_group_call 1101, leave_group_call 1165, get_group_call 1117, get_group_call_participants 1132, load_group_call_participants 1152, create_video_chat 1036, create_group_call 1054
+- toggle_group_call_participant_is_muted 1233, toggle_group_call_participant_is_hand_raised 1255, toggle_video_chat_mute_new_participants 1278, decline_group_call_invitation 1333
+- NO request fns found: sendCallLog, inviteGroupCallParticipant, banGroupCallParticipants, startGroupCallScreenSharing, endGroupCallScreenSharing, toggleGroupCallScreenSharingIsPaused, startGroupCallRecording, getVideoChatRtmpUrl, searchCallMessages, setGroupCallParticipantVolumeLevel, setGroupCallParticipantIsSpeaking
+
+### connect.rs (driver)
+- start_call 1772, accept_call 1805, set_call_muted 1871, select_call_devices 1891 (mic+speaker), send_call_rating 1910 (rating:int32 only), send_call_debug_information 1984, leave_group_call 2161, toggle_group_call_my_video, toggle_video_chat_mute_new
+
+### calls/engine.rs
+- Engine trait: start_call, accept_call, send_signaling_data, connect, hangup, set_muted; TransportState incl Reconnecting; MediaDevice kinds include Camera (line 865) + Microphone + Speaker; MockEngine (tests) and NtgcallsEngine::load
+
+### state.rs
+- ActiveCall 1976 (is_video, state, muted, signaling_queue); CallSummary 2006 (end_line, need_rating, need_debug_information, need_log, rating_sent, debug_information_sent, reconnect_attempts)
+- updateCall state machine 3594-3632; incoming-while-active auto-declines ("incoming-while-active-busy-decline" 5383)
+- ActiveGroupCall 2051 (participants w/ is_speaking/is_hand_raised/mute flags/volume/screen_sharing_enabled 1281), GroupCallVerificationState emojis (2043) accepted at 3672, displayed ui/mod.rs:10325
+
+### ui/mod.rs (call UI)
+- "Call" button on user profile -> start_call_for_user 4459/8195 (is_video flag)
+- Incoming card: Accept/Decline buttons (call-decline 9963; accept_incoming_call 4547)
+- Active call: Mute/Unmute toggle 4483/9985; mic+speaker device choice 4523-4537; hang_up_call 4562; end rating card -> rate_last_call 4576; state lines (Calling…/Connecting…/Exchanging keys/"Connecting audio..." 9768-9797; "Reconnecting" transport 9787)
+- Video call: remote+local placeholder tiles "No video — ships in a later slice" 9711-9745 (no actual frames, no camera preview, no camera switch)
+- "Call failed" error card 9668
+- Group call UI: participant list w/ speaking + hand-raise badges 10144/10187, per-participant Mute/Unmute 10203, self Mute 10375, "Raise hand"/"Lower hand" button -> toggle_group_call_self_hand 10627, "Leave" 10407, mute-new-participants toggle 10740, my-video toggle 10667, verification emojis 10325, screen-sharing participant flagged 10150
+- NO: call log/history list, messageCall rendering, echo/noise settings UI, use-less-data, peer-to-peer, who-can-call-me, confirm-before-call, proxy-for-calls, volume slider UI, screen-share start, invite-participants, recording, RTMP, group-call messages, scheduled-start UI

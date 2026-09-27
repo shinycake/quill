@@ -1,0 +1,39 @@
+### Chat list
+
+- [x] Chat rows with avatar (photo or colored initials), title, and last-message preview <!-- parity:chatlist-row -->
+- [x] Unread count badge on rows, capped at 99+ (src/state.rs:883) <!-- parity:chatlist-unread-badge -->
+- [x] Muted-chat speaker icon on rows (src/ui/mod.rs:21139) <!-- parity:chatlist-muted-icon -->
+- [x] Row preview shows typing…, Draft:, last message, and secret-chat label (src/state.rs:1148) <!-- parity:chatlist-row-preview -->
+- [x] Folder tag chips on rows when folder tags are enabled (src/ui/mod.rs:20893) <!-- parity:chatlist-folder-tags -->
+- [x] Pinned chats sort first by TDLib order in the model (src/state.rs:923) <!-- parity:chatlist-pinned-order -->
+- [x] Archived section listed under the main chat list (src/ui/mod.rs:18248) <!-- parity:chatlist-archive-section -->
+- [x] Archive / Unarchive action in the open-chat header bar (src/ui/mod.rs:11671) <!-- parity:chatlist-archive-toggle -->
+- [x] Chats | Contacts sidebar tabs (src/ui/mod.rs:7510) <!-- parity:chatlist-chats-contacts-tabs -->
+- [x] Folder tabs (Main + folder names) with always-present manage entry; selecting a folder loads its chats (src/ui/mod.rs:7641) <!-- parity:chatlist-folder-tabs -->
+- [x] Create/edit chat folders with include/exclude chat-type and mute/read/archive filters (src/folders.rs:21) <!-- parity:chatlist-folder-editor -->
+- [x] Delete folder with confirmation (src/ui/mod.rs:11854) <!-- parity:chatlist-folder-delete -->
+- [x] Per-chat add-to-folder picker backed by getChatListsToAddChat (src/ui/mod.rs:12676) <!-- parity:chatlist-folder-picker -->
+- [x] Global search field with Clear button (src/ui/mod.rs:16360) <!-- parity:chatlist-search-field -->
+- [x] Search sections: Recent, Chats, Messages, and Global public chats via searchPublicChats (src/ui/mod.rs:16438; src/state.rs:63) <!-- parity:chatlist-search-sections -->
+- [x] Empty states: "Loading chats…", "No chats in this folder yet.", "No chats in the main list." (src/ui/mod.rs:18218) <!-- parity:chatlist-empty-states -->
+- [ ] Right-click context menu on chat rows (missing entirely; mute/archive exist only in the open-chat header) <!-- parity:chatlist-row-context-menu -->
+- [ ] Pin / Unpin chat (schema toggleChatIsPinned exists at schema/td_api.tl:13678, never wired to UI) <!-- parity:chatlist-pin-unpin -->
+- [ ] Drag-to-reorder pinned chats <!-- parity:chatlist-pin-drag-reorder -->
+- [ ] Pin-limit error handling (TGX: "you can pin up to N chats and N secret chats at once") <!-- parity:chatlist-pin-limit -->
+- [ ] Mark all chats as read (schema readChatList exists, unused in src) <!-- parity:chatlist-mark-all-read -->
+- [ ] Per-chat mark as read / unread (schema toggleChatIsMarkedAsUnread exists, unused in src) <!-- parity:chatlist-mark-read-unread -->
+- [ ] Per-chat mute/unmute from the list (partial: open-chat header bar only) <!-- parity:chatlist-list-mute -->
+- [ ] Delete chat from the list (partial: driver has a deleteChat request builder, no UI) <!-- parity:chatlist-delete-chat -->
+- [ ] Clear chat history <!-- parity:chatlist-clear-history -->
+- [ ] Saved Messages entry row in the list <!-- parity:chatlist-saved-messages -->
+- [ ] Chat preview on long-press / hover <!-- parity:chatlist-chat-preview -->
+- [ ] Clear recent searches (recents load but are not clearable) <!-- parity:chatlist-clear-recent-searches -->
+- [ ] No-results state in search <!-- parity:chatlist-search-no-results -->
+- [ ] Collapsible / hideable archive section (TGX: archiveCollapsed setting) <!-- parity:chatlist-archive-collapse -->
+- [ ] Archive auto-settings: archive+mute chats from unknown users, keep muted/folder chats archived (schema setArchiveChatListSettings exists, unused in src) <!-- parity:chatlist-archive-auto-settings -->
+- [ ] Mention/reaction counts on the unread badge (partial: plain unread count only) <!-- parity:chatlist-mention-badge -->
+- [ ] Multi-select mode: Select…, Select unread <!-- parity:chatlist-multi-select -->
+- [ ] Report / Block contact from the list <!-- parity:chatlist-report-block -->
+- [ ] App badge counter settings: include muted chats, include archived chats, count messages vs chats <!-- parity:chatlist-badge-settings -->
+- [ ] Chat list style settings: two/three lines, media icons, text formatting <!-- parity:chatlist-list-style -->
+- [ ] Unread / Archived filter category chips <!-- parity:chatlist-category-filters -->

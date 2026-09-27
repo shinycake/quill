@@ -1,0 +1,54 @@
+### Media
+
+- [x] Fullscreen photo/video viewer overlay with prev/next navigation (arrow keys) and "N of M" counter (src/media_viewer.rs:74-124) <!-- parity:media-viewer -->
+- [x] Zoom viewer image via `=`/`-` keys and scroll, drag-pan when zoomed, `0` resets to fit (src/media_viewer.rs:172-250, ui/mod.rs:146-150) <!-- parity:media-viewer-zoom -->
+- [ ] Rotate photo in the viewer <!-- parity:media-viewer-rotate -->
+- [ ] Picture-in-picture for video playback <!-- parity:media-video-pip -->
+- [x] Viewer auto-downloads the current item when not local and resumes a parked play once `downloadFile` lands (ui/mod.rs:4926, 5179) <!-- parity:media-viewer-autodownload -->
+- [ ] Share photo/video from the viewer <!-- parity:media-viewer-share -->
+- [ ] Save viewer media to gallery / downloads folder <!-- parity:media-viewer-save -->
+- [ ] "Show in chat" jump from the viewer to the source message <!-- parity:media-viewer-show-in-chat -->
+- [x] Play/pause video in the viewer with elapsed/total overlay (PlaybackClock, src/playback.rs:18; ui/mod.rs:4951) <!-- parity:media-video-play -->
+- [ ] Seek scrubber in the fullscreen video player (partial: scrub seek bars exist only on history rows, ui/mod.rs:1063) <!-- parity:media-video-seek -->
+- [ ] Playback speed control for voice/audio/video, incl. 0.5x–2x long-press dial (TGX PlaybackSpeed*) <!-- parity:media-playback-speed -->
+- [ ] Volume control / mute toggle in the video player <!-- parity:media-video-volume -->
+- [ ] Playback error states for unsupported video/audio/GIF/round-video formats (TGX *PlaybackError/*PlaybackUnsupported) <!-- parity:media-playback-errors -->
+- [x] Record voice note from the mic (ffmpeg OGG capture) with `chatActionRecordingVoiceNote` shown while recording (src/voice.rs:86-99, connect.rs:4796) <!-- parity:media-voice-record -->
+- [ ] Lock-to-record (swipe up) and slide-to-cancel while recording (partial: click-to-record, Esc/Cancel discards, ui/mod.rs:650) <!-- parity:media-voice-lock -->
+- [x] Waveform bars on voice messages decoded from TDLib 5-bit waveform (src/voice.rs:29-67) <!-- parity:media-voice-waveform -->
+- [x] Voice/audio history rows with play/pause, draggable seek bar, and remembered position (ui/mod.rs:1063, 6966) <!-- parity:media-audio-player -->
+- [ ] Voice note transcription display (partial: `speech_recognition_result` parsed, no UI) <!-- parity:media-voice-transcription -->
+- [ ] Hold-to-record audio vs tap-to-switch video recording mode toggle (TGX HoldToAudio/HoldToVideo) <!-- parity:media-record-mode-toggle -->
+- [ ] "Record HQ round videos" quality setting (TGX UseHqRoundVideos) <!-- parity:media-video-note-hq -->
+- [ ] Discard-recording confirmation dialog <!-- parity:media-record-discard-confirm -->
+- [x] Round video-note player with play/pause in history (ui/mod.rs:842) <!-- parity:media-video-note-player -->
+- [x] Send video notes from video files with probed duration and generated square thumbnail (requests.rs:1885, src/video.rs:107-156) <!-- parity:media-video-note-send -->
+- [ ] Record video note from the camera (partial: video notes attach from file only) <!-- parity:media-video-note-record -->
+- [x] Music rows with title/performer/album-cover art and play/pause (ui/mod.rs:844) <!-- parity:media-music-row -->
+- [x] GIF/animation frame playback in history (ui/mod.rs:688-690, 5838) <!-- parity:media-gif-playback -->
+- [x] Document rows with file name and mime type, click-to-download (envelope.rs:4025, ui/mod.rs:16933) <!-- parity:media-document-row -->
+- [ ] Open downloaded document with the system app / reveal in file manager <!-- parity:media-document-open -->
+- [x] On-demand `downloadFile` with priority and auto-download of thumbnails in the open chat (requests.rs:1491, connect.rs:2820) <!-- parity:media-download -->
+- [ ] Download progress display on history rows (partial: in-flight download state tracked, no progress bar/percent, ui/mod.rs:866) <!-- parity:media-download-progress -->
+- [ ] Pause / cancel an in-flight download (schema has `cancelDownloadFile`; Quill never calls it) <!-- parity:media-download-cancel -->
+- [ ] Retry a failed download <!-- parity:media-download-retry -->
+- [ ] Downloads manager screen listing active/completed downloads (TGX Downloads, NoDownloadFilesFound) <!-- parity:media-downloads-manager -->
+- [ ] Automatic media download settings incl. data-saver pause-all mode (partial: thumb auto-download is hardcoded, connect.rs:2820) <!-- parity:media-auto-download-settings -->
+- [x] Link preview cards render on messages with site, title, description, and thumbnail (ui/mod.rs:22426) <!-- parity:media-link-preview -->
+- [ ] Send-time link preview controls: disable, force small/large media, show above text (partial: `link_preview_options` always null on send, requests.rs:1529) <!-- parity:media-link-preview-send-options -->
+- [ ] Instant View reader with auto-open setting (None / Telegram / All links) (partial: `instant_view_version` only passed through) <!-- parity:media-instant-view -->
+- [ ] Embedded media players inside link previews (video/audio embeds) <!-- parity:media-link-preview-embedded -->
+- [ ] Album-type link previews with multiple photo/video thumbnails <!-- parity:media-link-preview-album -->
+- [x] Send photo/video albums of 2–10 items via `sendMessageAlbum` with composer text as caption (requests.rs:1943, connect.rs:4605) <!-- parity:media-album-send -->
+- [x] Received albums grouped by `media_album_id` into grid tiles (ui/mod.rs:17592, 21223) <!-- parity:media-album-grid -->
+- [ ] Open an album item in the fullscreen viewer (partial: album tiles do not open the viewer, ui/mod.rs:22718) <!-- parity:media-album-viewer -->
+- [ ] Pin / unpin an album (TGX MessagePinAlbum/MessageUnpinAlbum) <!-- parity:media-album-pin -->
+- [ ] "Remember media grouping" setting (TGX RememberAlbumSetting) <!-- parity:media-album-grouping-setting -->
+- [ ] Per-chat shared media gallery with Media / Files / Music / Links / Voice / GIFs tabs (partial: `searchMessagesFilter*` schema constructors exist, no UI) <!-- parity:media-shared-gallery -->
+- [ ] Empty states per shared-media tab (TGX NoPhotosToShowInChat etc.) <!-- parity:media-shared-gallery-empty -->
+- [x] Captions render on photos, videos, animations, audio, and documents <!-- parity:media-caption-render -->
+- [x] Edit a sent media caption via `editMessageCaption` (requests.rs:2123, connect.rs:4941) <!-- parity:media-caption-edit -->
+- [ ] Caption position toggle: show above vs below media (partial: `show_caption_above_media` parsed, no UI) <!-- parity:media-caption-position -->
+- [ ] "Add a caption…" affordance when attaching media (partial: composer text field doubles as caption) <!-- parity:media-caption-prompt -->
+- [ ] Remove captions when forwarding copies (TGX RemoveCaptions) <!-- parity:media-caption-remove-on-forward -->
+- [ ] Caption-too-long validation on caption edits (TGX EditMessageCaptionTooLong) <!-- parity:media-caption-length-limit -->

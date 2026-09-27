@@ -1,0 +1,111 @@
+# Evidence: GROUPS / SUPERGROUPS / CHANNELS
+# Harvested 2026-09-27, schema td_api.tl 1.8.67, TGX strings.xml (5912 lines), Quill src
+
+## SCHEMA (concept-level counts + key constructors)
+- supergroup: 363 hits. Key: supergroup, supergroupFullInfo, chatTypeSupergroup,
+  createNewSupergroupChat, createSupergroupChat, getSupergroup, getSupergroupFullInfo,
+  toggleSupergroupIsForum|IsBroadcastGroup|JoinByRequest|JoinToSendMessages|
+  SignMessages|HasAggressiveAntiSpamEnabled|HasHiddenMembers|IsAllHistoryAvailable,
+  setSupergroupUsername|UnrestrictBoostCount|MainProfileTab|StickerSet|
+  CustomEmojiStickerSet, reportSupergroupSpam|AntiSpamFalsePositive,
+  upgradeBasicGroupChatToSupergroupChat, supergroupMembersFilter* (8 filters)
+- chatMember: 47 hits. chatMemberStatusAdministrator|Banned|Creator|Left|Member|Restricted,
+  chatAdministratorRights (18 fields), chatAdministrators, getChatAdministrators,
+  getChatMember, getSupergroupMembers, searchChatMembers, setChatMemberStatus, banChatMember
+- inviteLink: 59 hits. chatInviteLink, getChatInviteLinks, createChatInviteLink,
+  editChatInviteLink, revokeChatInviteLink, deleteRevokedChatInviteLink,
+  replacePrimaryChatInviteLink, checkChatInviteLink, getChatInviteLinkCounts|Members,
+  getChatInviteLink, chatInviteLinkCounts, chatInviteLinkMember(s)
+- joinRequest: 17 hits. chatJoinRequest, chatJoinRequests, getChatJoinRequests,
+  processChatJoinRequest, processChatJoinRequests, updateNewChatJoinRequest,
+  updateChatPendingJoinRequests, chatActionBarJoinRequest, answerChatJoinRequestQuery
+- chatEventLog: 3 hits (getChatEventLog, chatEventLogFilters + many chatEvent* actions:
+  ForumTopicCreated/Deleted/Edited/Pinned, InviteLinkDeleted/Edited/Revoked,
+  MemberJoinedByInviteLink, MemberRestricted, PermissionsChanged, SlowModeDelayChanged,
+  Promoted*, ToggledSignaturesOn/Off, AntiSpamEnabled/Disabled)
+- statistic: 111 hits. getChatStatistics, chatStatisticsChannel|Supergroup,
+  chatStatisticsAdministratorActionsInfo|InteractionInfo|InviterInfo|MessageSenderInfo,
+  getChatRevenueStatistics, resetStatistics
+- slowMode: 2 hits. setChatSlowModeDelay (allowed 0/5/10/30/60/300/900/3600),
+  slow_mode_delay in supergroupFullInfo
+- forumTopic: 40 hits. forumTopic, createForumTopic, editForumTopic, deleteForumTopic,
+  toggleForumTopicIsClosed|IsPinned, toggleGeneralForumTopicIsHidden, getForumTopics,
+  setPinnedForumTopics, unpinAllForumTopicMessages, readAllForumTopic*
+- boost: 141 hits. boostChat, getChatBoostStatus, chatBoostStatus, chatBoostLevelFeatures,
+  getAvailableChatBoostSlots, setSupergroupUnrestrictBoostCount
+- permission: 23 hits. chatPermissions, setChatPermissions, communityPermissions,
+  updateChatPermissions; restrictionInfo
+- No deleteChat/deleteSupergroup-style constructor found in concept search (checkChatInviteLink etc. not relevant)
+
+## TGX (strings.xml — the strings ARE the feature list)
+- Admin: AdminRights, EditAdmin (18 rights incl. post/edit/delete messages, post/edit/delete
+  stories, add admins, remain anonymous, manage topics/voice chats/live streams/welcome
+  messages/direct messages/tags), SetAsAdmin, EditAdminTag (custom title), EditAdminAnonymous,
+  Promote/Demote (DismissAdmin), ViewAdmins/RecentAdmins, AdminRules hint, EventLogPromoted*
+  (30+ per-action strings: changed info, posted messages, banned users, pinned messages,
+  managed topics/tags/stories/voice chats/live streams/direct messages)
+- Rights toggles: RightSendMedia/Audio/Docs/Photo/Video/VoiceNote/VideoNote,
+  RightChangeGroupInfo/RightChangeChannelInfo, RightBanUsers, RightInviteViaLink,
+  RightPinMessages, RightAddNewAdmins, RightEditMessages, RightVoiceChats, RightLiveStreams,
+  RightDirectMessages, RightWelcomeMessages, RightTags/TagsOwn, RightTopics/TopicsCreate,
+  RightStories/RightStoriesPost/Edit/Delete, RightMessages, RightAnonymous
+- Invite links: InviteLink/RevokeLink/CopyLink/GeneratingLink, link expiry
+  (ExpireNever/Today/Tomorrow/Future), member limit, approval mode
+  (group_user_join_by_link_with_approval), InviteLinkViewRequests, pending-join-request
+  count per link, primary link, no-links empty states (NoLinksToShow*), TabEmptyLinks
+- Join requests: RequestJoinGroupX/ChannelX buttons, ApproveNewMembers + info,
+  xJoinRequests_one/other, AreYouSureAccept/DeclineJoinRequest, PullRequestsInfo
+- Restrictions: UserRestrictions/GroupRestrictions/ChannelRestrictions editors;
+  toggles: Send, SendStickers, SendPolls, EmbedLinks, ReactToMessages, Read;
+  mute durations (MuteForXDays/Hours), UserRestrictionsUntilForever, Restricted/Banned,
+  BannedByX/RestrictedByX (actor + date), YouWereKicked
+- Event log: EventLog + filters (EventLogFilterNewAdmins, EventLogAllEvents/AllAdmins/
+  SelectedEvents/EmptyFilter/Empty/EmptyChannel/EmptySearch/EmptyTextSearch), per-entry
+  strings for ~60 actions (promoted/unpromoted, banned/unbanned, restricted, pinned/
+  unpinned/deleted/edited messages, poll stopped, invite links, permissions changed,
+  signatures toggled, anti-spam toggled, slow-mode changed/disabled, description/link edited)
+- Slow mode: xSlowModeRestrictionSeconds/Minutes, slow-mode delay picker values
+- Forum topics: ActionTopicCreated/Renamed/Closed/Reopened/Hidden/Unhidden/ChangedIcon,
+  General-topic close, topic pin/hide toggles
+- Statistics: StatsMessageSignature, ResetStatistics
+- Misc group mgmt: NewGroup/NewChannel, ConvertToBroadcastGroup (with confirm + hint
+  texts), ChannelOwner, LeaveChannel, DeleteAndLeave, ShowInDiscussionGroup, Discuss,
+  ViewXComments/ViewXOtherComments (channel comments), AggressiveAntiSpam + desc,
+  EventLogToggledSignaturesOn/Off (author signatures toggle), format_channelAndSignature,
+  ChannelPrivateLinkHelp, PublicLinkTooShort/Invalid (public username validation),
+  AddMember/AddMemberBtn, ApproveNewMembers(Info)
+
+## QUILL (src) — what exists today
+Requests (telegram/requests.rs): getForumTopics(241), getSupergroup(267),
+getChatMember(338), getSupergroupFullInfo(407), getChatStatistics(421),
+getChatInviteLinks(435), createChatInviteLink(461), editChatInviteLink(485),
+revokeChatInviteLink(511), getChatJoinRequests(526), processChatJoinRequest(550),
+setChatMemberStatus(586), getSupergroupMembers(636), getChatEventLog(725, supports
+filters in builder), joinChat(1389), leaveChat(1399), setChatSlowModeDelay(2293).
+State (state.rs): MemberStatusChange {Promote,EditRights,Demote}(33); RequestPurpose
+GetChatAdministrators/SetChatMemberStatus/GetAdminRights/GetSupergroupMembers(199-215);
+invite-link fetch cache; join-request fetch + pending counts; event log fetch; forum topic
+cache; linked_chat_id + discussion_chat_id(6038); my_boost_count/unrestrict_boost_count(2496);
+author_signature parsed + rendered on channel posts; admin_lists + admin_rights caches;
+supergroup_restrict_right; slow-mode boost bypass (3034).
+UI (ui/mod.rs): InviteLinkDialog create dialog w/ name/expiry/member-limit/join-request
+toggle(222-265); 18-right admin rights checkboxes ADMIN_RIGHT_LABELS(270-310);
+AdminDialog promote (member picker w/ search)/edit-rights/demote-confirm(353-415);
+group/channel info panel (group_info_panel ~8280-8395) with description, SLOW MODE picker
+(Off/5s/10s/30s/1m/5m/15m/1h, gated on can_restrict_members), Statistics entry point
+(gated on can_get_statistics), invite-links section + join-requests section w/
+approve-decline buttons(8596-8728), administrators section w/ refresh + edit/demote(8748-8907),
+event-log ("Recent actions") section(8914+) w/ refresh + load-more, no filter UI;
+slow-mode enforcement countdown + send gate(3099-3146); Statistics panel w/ graphs +
+"Top senders · administrators · inviters"(9195-9365); channel info shows "Discuss" jump
+to linked discussion group(12343-12646); join/leave requests exist in connect.rs
+(leave_chat used in UI "could not leave channel" at ui/mod.rs:17302).
+MISSING (no constructor in requests.rs/connect.rs/ui/state):
+createNewBasicGroupChat, createNewSupergroupChat, addChatMember(s), banChatMember
+(only via status change), setChatPermissions (no permissions editor UI), deleteChat,
+toggleSupergroup* (IsForum/SignMessages/AggressiveAntiSpam/HasHiddenMembers/
+JoinByRequest...), createForumTopic/editForumTopic/toggleForumTopicIsClosed|IsPinned,
+replacePrimaryChatInviteLink, deleteRevokedChatInviteLink, getChatBoostStatus/boostChat
+UI, reportSupergroupSpam, channel comments viewer, event-log filter picker UI,
+public-username (setSupergroupUsername) management UI, member-list panel for non-admins
+(only promote picker), add-member contact picker, chat-permissions defaults editor.

@@ -1,0 +1,26 @@
+### Secret chats
+
+- [x] Start secret chat from a contact's profile (non-bot, non-self) via createNewSecretChat (src/telegram/requests.rs:751, src/ui/mod.rs:4432) <!-- parity:secret-start -->
+- [ ] "New secret chat" main-menu entry with a contact picker (partial: user-profile entry point only) <!-- parity:secret-new-from-menu -->
+- [x] Secret-chat state lifecycle: pending → ready → closed rendered from updateSecretChat / getSecretChat (src/telegram/envelope.rs:767, src/state.rs:3587) <!-- parity:secret-state-lifecycle -->
+- [x] 🔒 secret-chat badge in chat list and header state rows ("Secret chat closed", "Loading secret chat…") (src/ui/mod.rs:17394, src/ui/mod.rs:2339) <!-- parity:secret-badge -->
+- [x] "Close this secret chat?" confirm dialog (closing is permanent, no new messages) wired to closeSecretChat (src/ui/mod.rs:14295) <!-- parity:secret-close -->
+- [ ] Distinct confirm texts for pending vs closed secret chats (only one close dialog exists) <!-- parity:secret-close-variants -->
+- [ ] Waiting-for-partner banner for pending secret chats ("waiting for the other user to get online" — state parsed but no banner) <!-- parity:secret-pending-banner -->
+- [x] Encryption key fingerprint: 12×12 pixel grid from secretChat.key_hash rendered in the chat info panel with a still-loading state (src/key_fingerprint.rs:56, src/ui/mod.rs:7963) <!-- parity:secret-key-grid -->
+- [ ] Encryption-key guarantee text ("If they look the same on X's device, end-to-end encryption is guaranteed") next to the fingerprint <!-- parity:secret-key-description -->
+- [ ] End-to-end-encryption explainer row when a secret chat is created (Telegram X shows "This chat is end-to-end encrypted") <!-- parity:secret-e2e-notice -->
+- [x] Per-media self-destruct timer/view-once picker in the composer (self_destruct_type on photo/video/voice/video-note inputs, live countdown + view-once in demo) (src/telegram/requests.rs:1614, src/ui/mod.rs:608) <!-- parity:secret-selfdestruct-media -->
+- [x] Chat-level self-destruct timer for secret chats (incl. text messages): ⏱ picker (Off/5s/30s/1m/1h/1d/1w), timer status line, "X set timer …" service rows, per-message auto_delete_in countdown chips (setChatMessageAutoDeleteTime; connect.rs:2513, ui/mod.rs:12882/11611, envelope.rs:3137) <!-- parity:secret-ttl-timer -->
+- [ ] Incoming "X took a screenshot" notification rendered as a chat service message (schema: messageScreenshotTaken, td_api.tl:5375 — not parsed/rendered in Quill) <!-- parity:secret-screenshot-notify -->
+- [ ] Send screenshot-taken notification when the user screenshots (blocked: same as above — no expressible TDLib API) <!-- parity:secret-screenshot-send -->
+- [ ] Screenshot capture prevention for secret chats on the desktop (no OS-level screen-capture blocking implemented) <!-- parity:secret-screenshot-block -->
+- [ ] Forwarding blocked in secret chats (Telegram X SecretChatForwardError — no forward-block logic in Quill) <!-- parity:secret-no-forward -->
+- [ ] Inline-bot warning alert in secret chats (Telegram X SecretChatContextBotAlert — no bot alert) <!-- parity:secret-bot-alert -->
+- [ ] Link previews off by default in secret chats with opt-in server-side-preview alert (Telegram X SecretLinkPreviewAlert/SecretWebPageInfo — absent) <!-- parity:secret-link-preview -->
+- [ ] "Peer client doesn't support this feature" notice for unsupported secret-chat messages (Telegram X SecretChatFeatureUnsupported — absent) <!-- parity:secret-feature-unsupported -->
+- [ ] "Allow creating secret chats by phone number" privacy toggle (toggleSessionCanAcceptSecretChats not surfaced) <!-- parity:secret-session-accept -->
+- [ ] Secret-chat-specific notification settings and lock-screen notification privacy (Telegram X NotificationChannelSecretChat, HideSecret/ShowSecretOn — absent) <!-- parity:secret-notif-settings -->
+- [ ] Per-secret-chat passcode hint/integration (Telegram X SecretPasscodeInfo — absent) <!-- parity:secret-passcode -->
+- [ ] "Secret media and files" category in storage usage (Telegram X SecretFiles — absent) <!-- parity:secret-storage-category -->
+- [ ] Secret-chat count shown when terminating a session that would cancel secret chats (Telegram X ClosingXSecretChats/SessionSecretChats — absent) <!-- parity:secret-session-terminate -->

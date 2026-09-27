@@ -1,0 +1,51 @@
+# Bots / Polls / Payments evidence — harvested 2026-09-27 with rg (bounded, head-truncated)
+
+## SCHEMA (~/workspace/quill/schema/td_api.tl, pinned TDLib 1.8.67)
+
+Line-hit counts for concept patterns (case-insensitive):
+- botCommand|botInfo|botMenu: 31
+- inlineKeyboard|keyboardButton: 66
+- poll|vote: 227
+- invoice|payment|inputCredentials: 268
+- webApp|WebApp: 65
+- game|sendGame|callbackQuery: 71
+- botCommandScope: 11
+
+Representative constructors/functions (verified present):
+- replyMarkup: replyMarkupShowKeyboard, replyMarkupRemoveKeyboard, replyMarkupInlineKeyboard, replyMarkupForceReply
+- keyboard buttons: keyboardButton{,TypeText,TypeRequestPhoneNumber,TypeRequestLocation,TypeRequestChat,TypeRequestUsers,TypeRequestManagedBot,TypeRequestPoll,TypeWebApp}
+- inline button types: inlineKeyboardButtonType{Url,Callback,SwitchInline,LoginUrl,WebApp,CallbackGame,Buy,User,CopyText}
+- polls: poll, pollOption, pollVoteStatistics, pollVoter, pollMedia{Photo,Video,Animation,Audio,Document,Sticker,Location,Venue,Link}, pollTypeRegular, pollTypeQuiz, pollVoteRestrictionReason{Closed,CountryRestricted,MembershipRequired,Scheduled,YetUnsent,Other}
+- poll functions: setPollAnswer (l.12932), stopPoll (l.12953), getPollVoters; inputMessagePoll (send path); updates updatePoll (l.11179), updatePollAnswer (l.11186)
+- bot functions: getCommands (l.14953, botCommandScopeDefault l.10360), getBotInfoDescription, setBotInfoDescription, setBotInfoShortDescription, setBotName; botInfo/botCommand/botCommands/botMenuButton constructors
+- inline mode: getInlineQueryResults, answerInlineQuery, inputInlineQueryResult{Article,Photo,Video,...}
+- web apps: getWebAppUrl, getWebAppLinkUrl, answerWebAppQuery; keyboardButtonSourceWebApp
+- games: setGameScore, getGameHighScores, getInlineGameHighScores, setInlineGameScore
+- payments: sendPaymentForm, getPaymentForm, validateOrderInfo, getPaymentReceipt, getSavedOrderInfo, deleteSavedCredentials, getAvailableGifts, starAmount, getStarTransactions; messageInvoice constructor present (unparsed by Quill)
+- callback answers: getCallbackQueryAnswer (l.13138, user-side), answerCallbackQuery (bots-only), updateNewCallbackQuery, updateNewInlineCallbackQuery
+
+## TGX (~/workspace/telegram-x/app/src/main/res/values/strings.xml, 166 matching lines)
+
+Bot UX: BotInfo/BotDescription/BotDescriptionEmpty/BotHelp panels, "WhatThisBotCanDo", BotStart (START), RestartBot ("Restart"), ShareBtnBot ("Share Bot"), EditBotCommands, bot command menu, BlockBot/BlockBotConfirm/UnblockBot, SimilarBots/TabSimilarBots, BotStatusRead/BotStatusCantRead, SecretChatContextBotAlert, bot privacy settings (PrivacyBots, AllowBotsAndMiniApps/RestrictBotsAndMiniApps), BotWebappAllowed.
+Inline mode: InlineBot, ShareYouLocationInline, switch-inline ("Search here"-style), inline results, AdOpenBot/OpenBot.
+Custom keyboards: (forceReply/keyboardButton types render as composer keyboard; force-reply flag).
+Games: GameInvite/AreSendingGame/SendingGame/IsSendingGame, game_ActionScored*, NotificationGame, ChatDisabledGames/ChatRestrictedGames.
+Polls: CreatePoll/CreateQuiz dialogs with settings — PollSetting{Anonymous,Multiple,Quiz,HideResults,Revoting,Shuffle,Duration,ShowVoters,Members,Countries(+CountriesOnSpecific "Only users from %1$s"),Adding}; PollDiscard/QuizDiscard prompts; options add/remove with PollOptionsLimit_one/other, QuizOptionHint; descriptions (PollDescriptionInfo "Description will be displayed above the poll title"); quiz explanation (QuizExplanationInfo "Quiz participants will see this text after choosing the wrong option"); Vote button; RetractVote; WaitingResultsPoll/Quiz (results hidden until voted); ViewPollResults/ViewXPollResults_one ("View %1$s Result"); NoVotes/NoVotesResult; StopPoll/StopQuiz + StopPollWarn ("If you stop this poll now... This action cannot be undone."); EventLogPollStopped/EventLogQuizStopped; ChatDisabledPolls/ChatRestrictedPolls(+Until), UserRestrictionsSendPolls, error_CHAT_SEND_POLL_FORBIDDEN; ActionPinnedPoll/ActionPinnedQuiz.
+Payments: Invoice/InvoiceFor messages, PaymentSuccessfullyPaid(+NoItem), PaymentRefunded, RecurringPayment, PrivacyClearPayment/PrivacyPaymentsClear(+Alert); checkout flow (order info, shipping, card credentials) present in TDLib schema.
+
+## QUILL (~/workspace/quill/src — read-only)
+
+Inline keyboards (ui/mod.rs:21636-21712): full row/button rendering with styles (Primary/Danger/Success/Link/Default → ui buttons).
+- Url: opens link (21663). Callback: sends getCallbackQueryAnswer via connect.rs:4786, answers shown via present_callback_answer (ui/mod.rs:3941 — toast, opens URL if answer.url set; state.rs:2327 stores last_callback_answer). NOT bots-only answerCallbackQuery (requests.rs:2241-2245 doc).
+- SwitchInline: inserts "@bot query" into composer (insert_switch_inline_query, ui/mod.rs:3734/21678). CopyText: copies (21681).
+- Tooltip labels "not supported yet" for: LoginUrl (21698), WebApp (21699), CallbackWithPassword (21700), CallbackGame (21703), Buy → "Payment buttons are not supported yet" (21704), User (21706); Disabled → "This button is disabled" (21707), Unknown → "Unsupported button".
+Custom reply keyboards: replyMarkupShowKeyboard parsed in envelope.rs:8548 but NEVER rendered in ui/ (no show-keyboard/composer-keyboard code); replyMarkupForceReply/RemoveKeyboard: no UI.
+Bot info panel (ui/mod.rs:13726): description + tappable command buttons inserting "/cmd" into composer (insert_bot_command); fed by userFullInfo.bot_info (state.rs:2807-2809, 4332-4346). No START/Restart/Share/Block bot UI; no bot privacy settings UI; no bot menu button.
+Command menu (composer.rs:415 trigger '/'; ui/mod.rs:1175-1184,1944): chat-specific (botInfo.commands) + global getCommands merged (state.rs:3100-3113 merge_command_menu_items); getCommands request purpose GetCommands (state.rs:4355). No '@' inline-query trigger in composer.
+Inline mode: NO getInlineQueryResults/answerInlineQuery usage anywhere in src (no inline result list/dispatch); no inline bot result send path.
+Web apps: WebApp button type unsupported; no getWebAppUrl/getWebAppLinkUrl/answerWebAppQuery/main-web-app/menu-button code.
+Games: no sendGame/messageGame/setGameScore code; CallbackGame buttons "not supported".
+Polls — create (attach-menu "Poll" entry ui/mod.rs:16986 → PollDialog ui/mod.rs:173-211, panel 14860): question, options add/remove (2–10, validation poll.rs:112 "add a poll question"/"at least 2 options"/"at most 10"/255-char max), anonymous toggle, multiple-answers toggle, Create poll/Cancel; sent via send_poll (connect.rs:5400, inputMessagePoll test 11486). NO quiz mode in dialog (comment: "Quiz correct-option marking stays out of this", ui/mod.rs:14858), no duration, no revoting/shuffle/show-voters/countries/description settings, no discard prompt.
+Polls — vote (poll.rs:51 poll_answer_for_tap; connect.rs:5287 send_poll_answer → setPollAnswer requests.rs:2006): single tap, multiple toggle, retract-when-revoting (empty option_ids, tested requests.rs:4301), quiz single-answer, closed-poll blocked (can_vote envelope.rs:3670), optimistic UI with rollback on send failure. NO getPollVoters (no "view voters" list), no "View results" detail, NO stopPoll UI (zero hits in src), no vote-restriction-reason strings, no poll discard prompt, no service-message rendering for stopped polls.
+Polls — render (ui/mod.rs:21714-21830): option rows with percentage bars (poll_bar_fraction poll.rs:20), voter count label (poll.rs:25), chosen marks, closed-quiz correct-answer mark ("· correct answer"), "Quiz"/"Poll" headers (21724). updatePoll applied live across histories (state.rs:3962 apply_update_poll). Quiz explanation text NOT rendered; WaitingResults-style hidden results not handled.
+Payments: ZERO invoice/payment code — no messageInvoice parse (envelope.rs has none), no sendPaymentForm/getPaymentForm; invoices fall through to Unsupported; Buy buttons tooltip-only. No checkout, receipt, saved-credentials, gift, or Stars UI (auth.rs hit is 'payment' substring in unrelated auth copy; only hits: ui/mod.rs:21704).

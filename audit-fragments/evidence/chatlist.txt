@@ -1,0 +1,114 @@
+EVIDENCE: CHAT LIST parity audit — Quill vs Telegram X vs TDLib schema 1.8.67
+Harvested 2026-09-27 by ripgrep only. Repo ~/workspace/quill is READ-ONLY; all hits are read evidence.
+
+## SCHEMA (~/workspace/quill/schema/td_api.tl, pinned 1.8.67 — concept-level, case-insensitive)
+
+chatList family (35 hits for 'chatList'):
+- chatListMain, chatListArchive, chatListFolder constructors; ChatLists, ChatList
+- archiveChatListSettings (3): fields archive_and_mute_new_chats_from_unknown_users, keep_unmuted_chats_archived, keep_chats_from_folders_archived (line 3512)
+- setArchiveChatListSettings (13424), getArchiveChatListSettings (13421)
+- getChatListsToAddChat (2) -> chatLists
+- readChatList (1): "marks all chats in the chat list as read" (mark-all-read path)
+- loadChats (1); messageSourceChatList (1)
+chatFolder family:
+- chatFolder, ChatFolder, chatFolderInfo, ChatFolderInfo, chatFolderIcon, ChatFolderIcon,
+  chatFolderName, recommendedChatFolder, RecommendedChatFolders, addChatFolderByInviteLink,
+  getChatsForChatFolderInviteLink, checkChatFolderInviteLink, chatFolderInviteLinkInfo,
+  ChatFolderInviteLinks, getChatFolderDefaultIconName, updateChatFolders, toggleChatFolderTags (2)
+pin/read/mute/delete functions:
+- toggleChatIsPinned chat_list:ChatList chat_id:int53 is_pinned:Bool = Ok (line 13678) [EXISTS]
+- toggleChatIsMarkedAsUnread (1) [EXISTS]
+- readChatList (1) [EXISTS — the only mark-all-read]
+- setChatNotificationSettings (3), setScopeNotificationSettings (1), chatNotificationSettings (7) [mute path; NO toggleChatNotifications function exists]
+- deleteChat (1), deleteChatHistory (1)
+- NO markChatsAsRead function (concept check: only readChatList covers it)
+search functions:
+- searchChats (1), searchChatsOnServer (1), searchPublicChat (16), searchPublicChats (2),
+  searchChatMessages (2), searchSecretMessages (2), getRecentInlineBots (1)
+ordering/unread:
+- chatPosition list:ChatList order:int64 is_pinned:Bool source:ChatSource (line 3544) — pins are per-list
+- chat fields: unread_count:int32, unread_mention_count:int32, unread_reaction_count:int32,
+  unread_poll_vote_count:int32, is_marked_as_unread:Bool, notification_settings, draft_message
+
+## TGX (~/workspace/telegram-x — official TDLib-based client; strings.xml 5912 lines + ChatsController.java)
+
+strings.xml labels (the feature list):
+- Archive / Unarchive / "Archived"; Archive/Unarchive X chat(s) confirm dialogs
+- Mute / Unmute / "Mute for 1h / 8h / 2 days / forever" / "Unmute in %s" / MutedXChats
+- "Mark as read" / "Mark as unread"; "Mark all chats as read" + confirm
+  "Are you sure you want to mark all chats and mentions as read?" + "Marked %s chats as read"
+- "Pin to top" / "Unpin from top"; pin-limit error "you can pin up to %s chats and %s secret chats at once"
+- Folder, "This folder is empty" / "No chats currently belong to this folder",
+  "You have no chats", "No unread chats", Folder Link, AddToFolder, RemoveFromFolder,
+  "Hold and drag to reorder" (folder reorder tip), ChatFoldersReorderTip
+- Search: "Search", message-type filters, "No results to show", "Clear recent searches?",
+  Recent
+- Saved Messages, "Clear Saved Messages" confirm, "Delete all Saved Messages"
+- Delete chat, Clear history ("Clear history for everyone" / for one side), Leave channel,
+  "Delete media cache" (clear chat cache), Report, Unblock, Block contact
+- Select / "Select Chat" / "Select Unread" / "Select…" multi-select mode
+- Chat list: title unread badge, "Draft:", "typing…", online/last seen, muted icon, unread counts,
+  mention/reaction counts on badge
+- Badge counter settings: "Badge Counter", "Include Muted Chats", "Include Archived Chats",
+  "Count Unread Messages"
+- Chat list style settings: Two lines / Three lines / Three lines (bigger text) / Media Icons / Text Formatting
+- CategoryUnread / CategoryArchiveUnread filter categories; Hide All Chats
+- res/menu/ contains only text.xml (no chat-list menus as resources; menus built in code)
+
+ChatsController.java multi-select action menu (verified in code, lines ~1320-1430):
+- Select…, Archive/Unarchive, Add to folder / Remove from folder, Mark as read / Mark as unread,
+  Report, Unblock / Block contact, Clear history, Delete media cache, Pin to top / Unpin from top
+- Toolbar: settings button, search button; "ReadAllChats" (mark all read) menu entry
+- Archive collapsible (archiveCollapsed / needHideArchive settings)
+
+## QUILL (~/workspace/quill/src — presence / absence)
+
+PRESENT:
+- Chat row (session_chat_row, ui/mod.rs:20893): avatar (photo or colored initials), title,
+  unread badge via unread_badge_text (state.rs:883 — cap "99+"), muted icon
+  (muted_badge, ui/mod.rs:21139), sidebar preview (state.rs:1148: "typing…", "Draft: …",
+  last message, "N unread", "Secret chat"), folder-tag chips (are_folder_tags_enabled)
+- List assembly (ui/mod.rs:18200-18295): Main list + "Archived" section header with
+  ordered_archived_chats; empty states "Loading chats…", "No chats in this folder yet.",
+  "No chats in the main list."; chat ordering by TDLib order, pinned-first (state.rs:923-924)
+- Chats | Contacts tabs (list_tabs, ui/mod.rs:7510)
+- Folder tabs: "Main" + folder names, rendered only when account has folders; manage entry
+  always present; selecting a folder fires loadChats(chatListFolder) (ui/mod.rs:7641-7700)
+- Folder editor dialog (folders.rs:21, ui/mod.rs:11037+): create/edit, name validation
+  (1-12 chars per schema), include contacts/non-contacts/bots/groups/channels,
+  exclude muted/read/archived, per-chat include/exclude lists, pinned_chat_ids carried over
+  but not editable ("The dialog never edits these", folders.rs:35)
+- Folder manage dialog + delete folder with confirm (delete_chat_folder, ui/mod.rs:11854)
+- Per-chat folder picker via getChatListsToAddChat (ui/mod.rs:12676)
+- Archive / Unarchive button in open-chat action bar (ui/mod.rs:12663-12669; toggle_archive
+  ui/mod.rs:11671 -> driver.archive_chat/unarchive_chat)
+- Mute / Unmute + "Mute for" presets panel + "Show message preview in notifications" toggle
+  in open-chat action bar (ui/mod.rs:12649, 12752-12810; apply_chat_mute ui/mod.rs:11565+)
+- Search: field + Clear button (ui/mod.rs:16360), caption "Recent"/"Search"
+  (chat_list_caption ui/mod.rs:20621); sections "Recent"/"Chats"/"Messages"/"Public"
+  (ui/mod.rs:16438, searchPublicChats via state.rs:63-68, searchMessages), "Loading recent
+  chats…" / "Type to search chats and messages."
+- ChatSummary tracks is_pinned, in_archive, archive_order, archive_is_pinned,
+  folder_positions, notification_settings, unread_count (state.rs:905+)
+- Driver requests used: SearchChats (13), GetChatFolder (13), SearchPublicChat (10),
+  LoadChats (10), DeleteChat (5), ToggleChatFolderTags (2), SetChatNotificationSettings (2)
+
+ABSENT (verified by bounded rg, zero hits):
+- No chat-list context menu: no context_menu/ContextMenu anywhere in src; no right-click
+  handling in ui/mod.rs or synthetic.rs -> no pin/mute/archive/delete/mark-read from rows
+- ToggleChatIsPinned: zero hits in src (schema HAS it at td_api.tl:13678) -> pin/unpin chat
+  not wired anywhere; no pin/unpin UI, no drag-to-reorder pins, no pin-limit handling
+- readChatList: zero hits -> no mark-all-read (schema HAS it)
+- toggleChatIsMarkedAsUnread: zero hits (schema HAS it) -> no per-chat mark read/unread
+- setArchiveChatListSettings / getArchiveChatListSettings: zero hits -> no archive
+  auto-settings UI
+- deleteChat: 5 hits but all in requests/connect (request builder), none wired to chat-list UI
+- clearChatHistory/clear history: no UI action (delete-confirm at ui/mod.rs:14223 is for messages)
+- Saved Messages entry row: zero hits in ui
+- Clear recent searches: zero hits (recents loaded, not clearable)
+- Chat preview (long-press/hover peek): zero evidence
+- Archive hide/collapse: zero hits
+- Mention/reaction counts on badge: not shown (badge only uses unread_count)
+- Multi-select mode (Select/Unread select): absent
+- Report / block contact from list: absent
+- No-result text in search: no "no results" string in search UI

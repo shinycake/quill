@@ -1,0 +1,73 @@
+## SCHEMA (schema/td_api.tl pinned 1.8.67; concept-level case-insensitive search, not single-name greps)
+Counts are representative constructor hits only.
+
+auth-flow functions: setAuthenticationPhoneNumber, checkAuthenticationCode, checkAuthenticationPassword,
+  registerUser, requestQrCodeAuthentication, confirmQrCodeAuthentication, getAuthorizationState,
+  sendPhoneNumberCode, resendPhoneNumberCode, checkPhoneNumberCode,
+  requestAuthenticationPasswordRecovery, recoverAuthenticationPassword, resetPassword,
+  checkAuthenticationEmailCode, sendEmailAddressVerificationCode,
+  setLoginEmailAddress, resendLoginEmailAddressCode, checkLoginEmailAddressCode,
+  deleteAccount, getAccountTtl, setAccountTtl, logOut
+password/2fa: passwordState(31 concept hits incl. setPassword, getPasswordState, setRecoveryEmailAddress,
+  temporaryPasswordState, suggestedActionSetPassword), authorizationStateWaitPassword,
+  authorizationStateWaitOtherDeviceConfirmation, authorizationStateWaitEmailAddress,
+  authorizationStateWaitEmailCode, authorizationStateWaitPremiumPurchase, authorizationStateWaitRegistration
+sessions: getActiveSessions, sessions, session, terminateSession, terminateAllOtherSessions,
+  toggleSessionCanAcceptSecretChats, toggleSessionCanAcceptCalls, unconfirmedSession,
+  updateUnconfirmedSession, authorizationStateWaitOtherDeviceConfirmation
+profile: setName, setBio, setUsername, setProfilePhoto, deleteProfilePhoto, setProfileAccentColor,
+  suggestUserProfilePhoto, suggestedActionSetProfilePhoto, setUserPersonalProfilePhoto,
+  reorderActiveUsernames, toggleUsernameIsActive, setRecoveryEmailAddress (password), changePhoneNumber (NOT in schema: grep for ^changePhoneNumber = 0 hits; server-driven via auth.sendCode on new number)
+contacts: getContacts (= Users, no params, line ~14520), addContact (line ~14513), importContacts,
+  removeContacts, searchContacts, changeImportedContacts, updateContactCloseBirthdays
+blocked: getBlockedMessageSenders, setMessageSenderBlockList, toggleMessageSenderIsBlocked,
+  updateChatBlockList (NO plain blockUser/unblockUser constructors — concept search confirms blocking is per message-sender)
+
+## TGX (official Telegram X, app/src/main/res/values/strings.xml — strings are the feature list)
+login: login_PhoneNumber, login_Code, login_LastDigits_(one/other), login_InvalidPhone,
+  login_PHONE_NUMBER_INVALID, login_PHONE_NUMBER_BANNED, login_SmsHint, login_FirstName, login_LastName (optional),
+  InvalidCode, login_Password, LoginPasswordText, SignOutHint2 (secret chats die + media erased on logout)
+qr: ScanQR, ScanQRFullTitle, ScanQRFullSubtitle, ScanQRAuthorizedToast,
+  ScanQRAuthorizedToastPasswordPending, ScanQRLogInInfo, ScanQRLinkHint (Settings > Devices > Add Device)
+2fa: TwoStepVerification, EnabledPasswordText, ChooseYourPassword, SetRecoveryEmail, ChangeRecoveryEmail,
+  SinceNotProvided, PendingEmailText, PasswordRecovery, RecoveryCodeSent(6-digit), RecoveryCodeInvalid,
+  CheckYourVerificationEmail, AbortPasswordSetup
+sessions: SessionsTitle (Active Sessions), SessionsIncompleteTitle (Incomplete Login Attempts),
+  SessionsIncompleteInfo (code ok, password missing), NoOtherSessions(+Info), TerminateSession,
+  TerminateAllSessions, TerminateSessionQuestion, TerminateIncompleteSession(Question),
+  AreYouSureSessions, ClearOtherSessionsHelp, SessionAccepts ("What can be received on this device?"),
+  SessionAcceptsCalls, SessionAccept (+ per-session toggles accept secret chats / accept calls),
+  WebSessionsTitle, OtherWebSessions, TerminateAllWebSessions, Disconnect All Websites
+logout: LogOut, SignOutAlt (Alternative options), SignOutAltAddAccount(+Hint multi-number switch),
+  SignOutAltPasscode(+Hint), SignOutAltClearCache(+Hint), SignOutAltChangeNumber(+Hint: move contacts/groups/messages/media to new number), SignOutAltHelp(+Hint)
+deactivate: DeleteAccount, DeleteAccountBtn, DeleteAccountInfo (chats see Deleted Account),
+  DeleteAccountIfAwayFor{Days,Months,Years}, getAccountTtl/setAccountTtl in schema
+profile: SetProfilePhoto, RemoveProfilePhoto, EditName, EditUsername, xOtherUsernames_(one/other),
+  UsernamesMy (Active Usernames), reorder via usernames order, LoadingUsername, UsernameInvalidStartNumber
+contacts: AddContact, DeleteContact(+Confirm), SyncContacts (+InfoOff/InfoOn, Progress, Delete,
+  DeleteButton, DeleteInfo: removes contacts from Telegram servers), NoContacts (empty state)
+blocked: BlockUser, BlockUserBtn, QBlockUser, BlockUserConfirm, Unblock, QUnblockX, UnblockedUser/Bot,
+  UnblockedXUsers_(one/other), UnblockedXBots_(one/other)
+
+## QUILL (src; read-only repo, evidence only)
+auth flow: requests.rs has set_authentication_phone_number(:51), check_authentication_code(:71),
+  check_authentication_password(:81), log_out(:98), close_request(:90); auth.rs view_for() renders
+  every AuthorizationState incl. WaitOtherDeviceConfirmation (auth.rs:62), WaitPassword (recovery-email hint),
+  WaitPremiumPurchase / WaitEmailAddress / WaitRegistration as UnsupportedHalt.
+  NO requestQrCodeAuthentication, registerUser, sendPhoneNumberCode, recoverAuthenticationPassword,
+  resetPassword, checkPhoneNumberCode in telegram/requests.rs (verified via grep of @type strings: 0 hits).
+  README line 24 confirms phone/code/2FA submit live (owner api_id/api_hash + tdjson).
+contacts: requests.rs get_contacts (:364), add_contact (:379) with schema line comments; UI AddContactDialog
+  (ui/mod.rs:9436, submit at :9469) -> driver.add_contact (live + demo paths); "Add contact" buttons at
+  ui/mod.rs:8160 and :9597. NO importContacts/removeContacts/searchContacts/changeImportedContacts,
+  NO sync-contacts toggle, NO delete-contact UI.
+blocked: NO block/unblock anywhere in Quill — grep finds only slow_mode_blocked (ui/mod.rs:3101 etc.);
+  no toggleMessageSenderIsBlocked/setMessageSenderBlockList/getBlockedMessageSenders request builders.
+profile: NO setName/setBio/setUsername/setProfilePhoto/deleteProfilePhoto request builders;
+  user panel shows Bio text in info panel (ui/mod.rs:8150-8155, read-only).
+sessions: NO getActiveSessions/terminateSession/terminateAllOtherSessions/toggleSessionCanAccept* builders;
+  no Sessions UI. state.rs begin_logout (:6502) invalidates account + CloseRequested; ui/mod.rs:16613 "signing out".
+multi-account: none — only single "accounts/primary" db path layout in settings.rs (:39,:78-:86);
+  no AddAccount / switch-account UI or driver support.
+deactivate: NO deleteAccount/getAccountTtl/setAccountTtl; NO 2FA management (setPassword, recovery email,
+  change recovery email); NO change phone number (changePhoneNumber not in schema either).

@@ -1,0 +1,91 @@
+# Sticker / Emoji / GIF evidence — harvested 2026-09-27
+# Bounded ripgrep only. Quill repo is READ-ONLY; TGX = official Telegram X ref.
+
+## SCHEMA (~/workspace/quill/schema/td_api.tl, pinned TDLib 1.8.67; 1570 lines match 'sticker|emoji|animation|gif')
+
+Sticker constructors (concept search, case-insensitive):
+getInstalledStickerSets, getArchivedStickerSets, getTrendingStickerSets, viewTrendingStickerSets,
+getAttachedStickerSets, getOwnedStickerSets, searchInstalledStickerSets, searchStickerSet, searchStickerSets, searchStickers,
+getStickerSet, getStickerEmojis, getAllStickerEmojis, getStickers, getStickerOutline,
+changeStickerSet (install/archive/uninstall via sticker_set_id), deleteStickerSet,
+reorderInstalledStickerSets, setStickerSetThumbnail, setStickerSetTitle, setCustomEmojiStickerSetThumbnail,
+createNewStickerSet, addStickerToSet, replaceStickerInSet, removeStickerFromSet, setStickerPositionInSet,
+setStickerEmojis, setStickerKeywords, setStickerMaskPosition, uploadStickerFile, checkStickerSetName,
+getFavoriteStickers, addFavoriteSticker, removeFavoriteSticker,
+getRecentStickers, addRecentSticker, removeRecentSticker, clearRecentStickers,
+inputMessageSticker, inputSticker, sticker (stickerFormatTgs|stickerFormatWebm|stickerFormatWebp),
+stickerFullTypeRegular|Mask|CustomEmoji, chatActionChoosingSticker,
+updateFavoriteStickers, updateInstalledStickerSets, updateRecentStickers, updateTrendingStickerSets,
+updateAnimatedEmojiMessageClicked, setSupergroupStickerSet, setSupergroupCustomEmojiStickerSet.
+Note: no `sendStory`/`getStorySenders`-style single-name false negatives here; concept-level search done.
+
+Emoji constructors:
+emojiCategory, emojiCategoryTypeRegularStickers|ChatPhoto|Default|EmojiStatus,
+emojiCategories, emojiKeyword(s), getAnimatedEmoji, animatedEmoji, clickAnimatedEmojiMessage,
+getCustomEmojiStickers, emojiStatus / emojiStatuses / emojiStatusCustomEmojis,
+emojiStatusTypeCustomEmoji, emojiStatusTypeUpgradedGift, clearRecentEmojiStatuses,
+setStickerSetTitle, searchEmojisByQuery-equivalents: none named so; emojiCategorySourcePremium|Search,
+getForumTopicDefaultIcons, setEmojiSet-ish: emoji packs use sticker-set functions with stickerTypeCustomEmoji.
+
+GIF/animation constructors (Telegram GIFs = saved animations):
+getSavedAnimations, addSavedAnimation, removeSavedAnimation, updateSavedAnimations,
+inputMessageAnimation, inputAnimation, messageAnimation, inlineQueryResultAnimation,
+inputInlineQueryResultAnimation. No `trending GIF` function in schema (trending GIFs are an inline-bot feed);
+search via inline query to @gif bot is the standard path (searchInlineBots / getInlineQueryResults in schema).
+
+## TGX (~/workspace/telegram-x/app/src/main/res/values/strings.xml — the strings ARE the feature list)
+Stickers settings: "Stickers", "Stickers and Emoji", "No sticker sets installed",
+"ArchivedStickersInfo: up to N installed; unused archived when installing new",
+"StickersHide" (Archive), "Remove sticker set %1$s?" (Remove action),
+"Archive sticker set %1$s? restore in Settings > Stickers > Archived",
+"DynamicStickerPackOrder: automatically place recently used sets above others",
+"Loop Animated Stickers", "Clear Recent Stickers", "Recently Used",
+"SuggestStickers (sticker suggestions by emoji): Installed + recommended / Only installed / None",
+"PremiumRequiredSticker: sending requires Premium", "OpenStickerSet (Show Sticker Set)",
+"Share Stickers", "xStickerSetsInstalled (set installed)", stickers Hide/Install batch actions,
+"AnimatedSticker" vs "Sticker", choosing-a-sticker chat action strings,
+emoji tab: "Emoji & People", "Emoji Sets", "Emoji Set" per-pack, "Current Set", "Default" (EmojiBuiltIn),
+"EmojiInfo: appearance only for you", "Remove emoji pack?", "Archive emoji pack (restore in Settings > Emoji > Archived)",
+"EmojiUsedFrom %1$s pack", "Loading…/Downloaded/Update Needed/Installing…" states,
+"DynamicEmojiPackOrder", "Clear Recent Emoji", "Add X emoji / packs", "Remove X emoji / packs",
+"Suggest Animated Emoji", "Big Emoji" (setting), "SmileysAndPeople",
+emoji status: "Select Emoji Status", "Set as status", "Set timed (1h/2h/8h/2d/custom)",
+"Trending statuses", "No emoji status found", "Clear Recent Emoji Statuses",
+GIF tab: "GIFs", "No GIFs", "Save GIF / GIF saved → media keyboard", "Delete saved GIF?" (RemoveGifConfirm),
+"Autoplay GIFs" (setting), message search filter "GIFs".
+
+## QUILL (~/workspace/quill/src — grep presence/absence)
+PRESENT:
+- StickerPanel state (src/state.rs:1925,2339): installed regular sets via getInstalledStickerSets (state.rs:113-115,
+  requests.rs:1696 get_installed_sticker_sets with stickerTypeRegular), getStickerSet per set (requests.rs:1706).
+  accepts updates: GetInstalledStickerSets responses + errors (state.rs:4230,4844-4849 loading/failed flags).
+- Sticker picker UI (src/ui/mod.rs:14131-14169): header "Stickers", status line
+  ("Loading installed sticker sets…" / error), set rows, sticker grid, Close button. Toggle from composer (ui/mod.rs:7265-7274).
+- Tap-to-send: send_sticker via inputMessageSticker (requests.rs:1715-1743; connect.rs:60,8946-8956 test "sticker panel … send uses inputMessageSticker").
+- StickerItem (envelope.rs:4312): id/set_id/emoji/w-h/format (StickerFormat enum), thumb ids. Picker/render shows
+  thumbnails; tgs+webm have format enum (stickerFormatTgs/Webm/Webp parsed) but render path (ui/mod.rs:14067,
+  state.rs:5215) only shows thumbnail file_id or Webp file — no TGS/Lottie playback, no loop-animated rendering.
+- GIF panel (state.rs:1938,2341; ui/mod.rs:13991-14007): getSavedAnimations (state.rs:117-118, connect.rs:4016-4054,
+  updateSavedAnimations refresh via state.rs:4397-4398), grid "GIFs" + Close, tap-to-send via inputMessageAnimation
+  (requests.rs:1762-1795 send_animation; connect.rs:8928-8983 test "gif_panel_loads_saved_animations_and_send_uses_input_animation").
+- Emoji reactions picker exists (ui/mod.rs:631 reaction picker, emoji-only; chosen_emoji reaction chips state.rs:1298-1308).
+- needs_premium parsed in availableReaction (envelope.rs:3320,3483) but no Premium-required gating UI for stickers/custom emoji seen.
+
+ABSENT (zero hits, case-insensitive):
+- Trending sticker sets (getTrendingStickerSets/viewTrendingStickerSets), sticker search (searchStickerSets/searchStickers),
+  favorites tab (getFavoriteStickers/addFavoriteSticker/removeFavoriteSticker), recent stickers in picker
+  (getRecentStickers/addRecentSticker/clearRecentStickers).
+- Set management: install/remove/archive UI (changeStickerSet/deleteStickerSet), reorder installed sets
+  (reorderInstalledStickerSets), set preview/open-set screen (OpenStickerSet), "No sticker sets installed" empty state,
+  dynamic-set-order setting, archive view, set install/remove counts.
+- Sticker suggestions by emoji (SuggestStickers modes) in composer.
+- Animated sticker playback (tgs loop); "Loop Animated Stickers" setting.
+- GIFs: trending/search GIFs (inline @gif bot path: searchInlineBots/getInlineQueryResults unused), save-GIF UI
+  (addSavedAnimation), delete saved GIF UI (removeSavedAnimation), "Autoplay GIFs" setting, "No GIFs" empty state text,
+  GIF search in message search.
+- Emoji picker for composer (insert emoji into text): none — no emoji categories/search/insert UI.
+- Custom emoji: getCustomEmojiStickers/rendering of custom emoji in text unused; animated emoji suggestions (SuggestAnimatedEmoji) none.
+- Emoji status: no "Select Emoji Status", timed status, trending statuses, clear recent statuses (emojiStatus*/clearRecentEmojiStatuses unused).
+- Emoji packs settings ("Emoji Sets", current/default pack, per-pack download states, DynamicEmojiPackOrder): none.
+- "Big Emoji" setting: none (message_text emoji-only messages use normal size; verified no big_emoji hits in src).
+- Group sticker set management (setSupergroupStickerSet, setSupergroupCustomEmojiStickerSet): unused.

@@ -1,0 +1,55 @@
+### Calls
+
+- [x] Start voice call from user profile <!-- parity:calls-start-voice --> (ui/mod.rs:8195 → start_call_for_user:4459; createCall requests.rs:809)
+- [x] Accept incoming call <!-- parity:calls-accept --> (accept_incoming_call ui/mod.rs:4547; acceptCall requests.rs:843)
+- [x] Decline incoming call <!-- parity:calls-decline --> (call-decline button ui/mod.rs:9963; discardCall requests.rs:881)
+- [x] End active call (hang up) <!-- parity:calls-hangup --> (hang_up_call ui/mod.rs:4562)
+- [x] Call state indicators (calling / connecting / exchanging keys) <!-- parity:calls-states --> (ui/mod.rs:9768)
+- [x] Mute / unmute microphone during call <!-- parity:calls-mute --> (toggle_call_mute ui/mod.rs:4483; set_call_muted connect.rs:1871)
+- [x] Microphone and speaker output selection during call <!-- parity:calls-devices --> (select_call_devices connect.rs:1891; picker ui/mod.rs:4523)
+- [ ] Incoming-call-while-busy swap prompt (partial: incoming call is auto-declined instead, state.rs:5383) <!-- parity:calls-swap-prompt -->
+- [x] Call failed / offline / microphone-missing error states <!-- parity:calls-errors --> ("Call failed" card ui/mod.rs:9668)
+- [x] Reconnect indicator when audio transport drops <!-- parity:calls-reconnect --> (TransportState::Reconnecting calls/engine.rs:27; shown ui/mod.rs:9787)
+- [x] Call end summary screen with duration <!-- parity:calls-summary --> (CallSummary state.rs:2006)
+- [x] Rate call quality after call <!-- parity:calls-rating --> (rate_last_call ui/mod.rs:4576; sendCallRating requests.rs:899)
+- [ ] Rating problems and comment (partial: star rating only; comment/problems never sent) <!-- parity:calls-rating-detail -->
+- [x] Send call debug information to Telegram <!-- parity:calls-debug --> (send_call_debug_information connect.rs:1984)
+- [ ] Call log file upload (partial: debug info only; no sendCallLog request in requests.rs) <!-- parity:calls-log-upload -->
+- [ ] Recent calls list <!-- parity:calls-history -->
+- [ ] Missed / declined / canceled call entries in chat <!-- parity:calls-chat-messages -->
+- [ ] Call again from summary or chat entry (partial: new calls start from profile only) <!-- parity:calls-again -->
+- [ ] Confirm before calling setting <!-- parity:calls-confirm -->
+- [ ] "Who can call me" privacy setting <!-- parity:calls-privacy -->
+- [ ] Peer-to-peer call relay toggle <!-- parity:calls-p2p -->
+- [ ] Less data for calls setting <!-- parity:calls-less-data -->
+- [ ] Use proxy for calls setting <!-- parity:calls-proxy -->
+- [ ] Echo cancellation / noise suppression toggles (partial: ntgcalls defaults only, no settings UI) <!-- parity:calls-audio-fx -->
+- [ ] Start video call with working video (partial: call starts with is_video flag but no media transport yet) <!-- parity:calls-start-video -->
+- [ ] Camera preview (local video tile) in video call (partial: placeholder tile, ui/mod.rs:9711) <!-- parity:calls-camera-preview -->
+- [ ] Remote video frames in video call (partial: placeholder tile "No video — ships in a later slice") <!-- parity:calls-remote-video -->
+- [ ] Switch camera during video call <!-- parity:calls-camera-switch -->
+- [ ] Camera device selection (partial: MediaDeviceKind::Camera exists in calls/engine.rs:865, no UI) <!-- parity:calls-camera-select -->
+- [ ] 1:1 call verification emojis (partial: parsed and shown only for group calls) <!-- parity:calls-verify-emoji -->
+- [ ] Share screen in a call (partial: screen-sharing participants are detected and flagged, ui/mod.rs:10150; no start request) <!-- parity:calls-screen-share -->
+- [x] Join group voice chat <!-- parity:calls-join --> (group-call-join button ui/mod.rs:10817; join_group_call requests.rs:1101)
+- [x] Leave group voice chat <!-- parity:calls-leave --> ("Leave" button ui/mod.rs:10407; leave_group_call connect.rs:2161)
+- [x] Participant list with live speaking indicators <!-- parity:calls-participants --> (ui/mod.rs:10144)
+- [x] Mute / unmute self in group call <!-- parity:calls-group-mute-self --> (ui/mod.rs:10375)
+- [x] Mute / unmute a participant (admin) <!-- parity:calls-mute-participant --> (ui/mod.rs:10203; toggle_group_call_participant_is_muted requests.rs:1233)
+- [x] Mute new participants by default <!-- parity:calls-mute-new --> (toggle ui/mod.rs:10740; requests.rs:1278)
+- [x] Raise / lower hand <!-- parity:calls-hand --> (group-call-hand button ui/mod.rs:10383; toggle_group_call_self_hand:10627; requests.rs:1255)
+- [x] Hand-raised badge on participants <!-- parity:calls-hand-badge --> (ui/mod.rs:10144)
+- [ ] Per-participant volume control (partial: volume parsed from updates, no setVolume request) <!-- parity:calls-participant-volume -->
+- [ ] Invite participants to group call (partial: no inviteGroupCallParticipant request in requests.rs) <!-- parity:calls-invite -->
+- [ ] Decline group call invitation UI (partial: decline request exists, requests.rs:1333) <!-- parity:calls-decline-invite -->
+- [ ] Ban participant from group call (partial: no banGroupCallParticipants request) <!-- parity:calls-ban -->
+- [x] Group call verification emojis <!-- parity:calls-group-verify-emoji --> (ui/mod.rs:10325; state.rs:2043)
+- [x] Toggle my video in group video chat (partial: signaling only, no video frames rendered) <!-- parity:calls-group-video-toggle --> (toggle_group_call_video ui/mod.rs:10667)
+- [ ] Group video tiles show live video (partial: participant grid renders, no frames) <!-- parity:calls-video-tiles -->
+- [ ] Auto-rejoin group call after network loss (partial: need_rejoin tracked in state, no auto-rejoin) <!-- parity:calls-rejoin -->
+- [ ] Record group call <!-- parity:calls-recording -->
+- [ ] RTMP stream key for video chat <!-- parity:calls-rtmp -->
+- [ ] Set / rename video chat title (partial: GroupCallTitleDialog struct exists, ui/mod.rs:419) <!-- parity:calls-title -->
+- [ ] Schedule video chat for later (partial: createVideoChat request only, requests.rs:1036) <!-- parity:calls-schedule -->
+- [ ] Video chat invite link <!-- parity:calls-invite-link -->
+- [ ] In-call chat messages for group calls <!-- parity:calls-group-messages -->
