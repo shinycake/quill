@@ -4082,7 +4082,7 @@ greps.
 
 - **Schema (pinned TDLib 1.8.67, `schema/td_api.tl`, verified verbatim):**
   - `videoNote.speech_recognition_result` (:614-616) and `voiceNote.speech_recognition_result` (:622-624) carry `speechRecognitionResult` (:7390-7399): `speechRecognitionResultPending partial_text`, `speechRecognitionResultText text`, `speechRecognitionResultError error`. Parsed into `envelope::SpeechRecognition`; null/unknown stay `None`.
-  - `recognizeSpeech chat_id:int53 message_id:int53 = Ok` (:12181); `messageProperties.can_recognize_speech` (:6254) gates eligibility (parsed but the UI shows the Transcribe button regardless — a refusal surfaces as an error, never a faked transcript).
+  - `recognizeSpeech chat_id:int53 message_id:int53 = Ok` (:12181); `messageProperties.can_recognize_speech` (:6254) gates eligibility (parsed but the UI shows the Transcribe button regardless — a refusal is surfaced in the status note, never a faked transcript). Request optimistically shows "transcription requested"; a TDLib refusal (`error` envelope on the request) lands in `Session::recognize_speech_error` and is drained into the status note (MED2 fix-up — it was previously swallowed).
   - `chatActionRecordingVoiceNote` (:6368) / `chatActionRecordingVideoNote` (:6392) — the driver sends the matching action while the record bar is active (Unigram/TGX pattern).
   - Transcript delivery is `updateMessageContent` on the existing message — no new update plumbing; the reducer's existing content replacement picks it up.
 - **Telegram X evidence (local TGX-Android source, `~/workspace/telegram-x`):**

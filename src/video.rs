@@ -657,9 +657,6 @@ pub struct VideoNoteCapture {
     started: std::time::Instant,
     child: Option<std::process::Child>,
     hq: bool,
-    /// Screenshot fixtures must not be deleted on Cancel.
-    keep_file: bool,
-    preview_secs: Option<i32>,
 }
 
 impl VideoNoteCapture {
@@ -705,28 +702,10 @@ impl VideoNoteCapture {
             started: std::time::Instant::now(),
             child: Some(child),
             hq,
-            keep_file: false,
-            preview_secs: None,
         })
     }
 
-    /// Screenshot / fixture capture. Does not open a camera; `finish`
-    /// still runs the square transcode on `path`.
-    pub fn preview(path: PathBuf, seconds: i32, hq: bool) -> Self {
-        Self {
-            raw_path: path,
-            started: std::time::Instant::now(),
-            child: None,
-            hq,
-            keep_file: true,
-            preview_secs: Some(seconds.max(0)),
-        }
-    }
-
     pub fn elapsed_secs(&self) -> i32 {
-        if let Some(seconds) = self.preview_secs {
-            return seconds;
-        }
         self.started
             .elapsed()
             .as_secs()
@@ -735,9 +714,7 @@ impl VideoNoteCapture {
 
     pub fn discard(mut self) {
         self.stop_child(false);
-        if !self.keep_file {
-            let _ = std::fs::remove_file(&self.raw_path);
-        }
+        let _ = std::fs::remove_file(&self.raw_path);
     }
 
     /// Stop the encoder, square-crop + scale to the HQ setting, and keep
@@ -748,17 +725,13 @@ impl VideoNoteCapture {
             .map(|m| m.len())
             .unwrap_or(0);
         if len == 0 || !self.raw_path.is_file() {
-            if !self.keep_file {
-                let _ = std::fs::remove_file(&self.raw_path);
-            }
+            let _ = std::fs::remove_file(&self.raw_path);
             return Err("video recording was empty".into());
         }
         let size = round_video_size(self.hq);
         let dest = self.raw_path.with_extension("round.mp4");
         transcode_square(&self.raw_path, &dest, size)?;
-        if !self.keep_file {
-            let _ = std::fs::remove_file(&self.raw_path);
-        }
+        let _ = std::fs::remove_file(&self.raw_path);
         let probe =
             probe_local_video(&dest).map_err(|err| format!("recorded clip unreadable ({err})"))?;
         if probe.width != probe.height || probe.width != size {

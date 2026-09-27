@@ -4029,6 +4029,17 @@ impl QuillApp {
             self.status_note = err;
             progressed = true;
         }
+        // MED2 fix-up: a refused `recognizeSpeech` surfaces in the status
+        // note instead of silently doing nothing after
+        // "transcription requested".
+        if let Some(err) = self
+            .live
+            .as_mut()
+            .and_then(|live| live.driver.session.recognize_speech_error.take())
+        {
+            self.status_note = err;
+            progressed = true;
+        }
         if let Some(err) = self
             .live
             .as_mut()
@@ -8845,6 +8856,8 @@ impl QuillApp {
     /// (TGX tap-to-switch, desktop-mapped). Ignored while recording.
     fn toggle_record_mode(&mut self, cx: &mut Context<Self>) {
         if self.recording_active() {
+            self.status_note = "finish the recording first".into();
+            cx.notify();
             return;
         }
         let next = !matches!(self.record_mode(), RecordMode::Video);
@@ -8925,7 +8938,9 @@ impl QuillApp {
     /// MED2: Cancel / Esc on an unlocked recording opens the confirm row
     /// instead of discarding silently.
     fn request_discard_recording(&mut self, cx: &mut Context<Self>) {
-        if !self.recording_active() || self.record_locked {
+        // MED2 fix-up: locked recordings CAN be cancelled — the confirm
+        // row still guards against accidental discards. Esc stays locked.
+        if !self.recording_active() {
             return;
         }
         self.record_discard_confirm = true;
@@ -8984,6 +8999,10 @@ impl QuillApp {
         let Some(capture) = self.voice_capture.take() else {
             return;
         };
+        // MED2 fix-up: the send consumes the recording — locked state must
+        // not leak into the next recording.
+        self.record_locked = false;
+        self.record_discard_confirm = false;
         let caption = self.composer.read(cx).value().to_string();
         let draft = match capture.finish() {
             Ok(draft) => draft,
@@ -9073,6 +9092,10 @@ impl QuillApp {
         let Some(capture) = self.video_note_capture.take() else {
             return;
         };
+        // MED2 fix-up: the send consumes the recording — locked state must
+        // not leak into the next recording.
+        self.record_locked = false;
+        self.record_discard_confirm = false;
         let draft = match capture.finish() {
             Ok(draft) => draft,
             Err(err) => {
