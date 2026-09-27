@@ -106,6 +106,12 @@ This is the comprehensive Telegram-parity checklist: one checkbox per user-visib
 - [x] Per-message hover actions (Reply/Forward/Select/Edit/Delete/React/Pin) <!-- parity:msg-row-actions --> (ui/mod.rs:21917+)
 - [x] Right-click context menu (no right-click handlers; hover buttons only) <!-- parity:msg-context-menu --> (M1: right-click menu Reply/Copy/Forward/Pin/Unpin/Share link/Retry/Delete)
 - [x] Link preview options on send (partial: received previews render card ui/mod.rs:22404; send has link_preview_options:null, no toggle) <!-- parity:msg-link-preview-toggle --> (M1: previews toggle -> linkPreviewOptions.is_disabled; secret chats force off)
+- [ ] Rich text editor: expand icon after 3+ lines, produces inputRichMessage <!-- parity:msg-richtext-editor -->
+- [ ] Inline documents/files/music inside text blocks (pageBlockDocument / inputPageBlockDocument) <!-- parity:msg-richtext-inline-doc -->
+- [ ] Send rich messages (inputMessageRichMessage) <!-- parity:msg-richmessage-send -->
+- [ ] Render richMessage PageBlocks in message bubbles (messageRichMessage, getFullRichMessage) <!-- parity:msg-richmessage-render -->
+- [ ] In-message buttons: render pageBlockButtonRow + richTextButton, taps fire bot callbacks <!-- parity:msg-richmessage-buttons -->
+- [ ] Ephemeral messages: render message.ephemeral_content instead of regular content <!-- parity:msg-ephemeral-render -->
 
 ### Chat list
 
@@ -241,6 +247,9 @@ This is the comprehensive Telegram-parity checklist: one checkbox per user-visib
 - [ ] Public username management for group/channel (`setSupergroupUsername`) <!-- parity:groups-public-username -->
 - [x] Leave channel (src/ui/mod.rs:17302) <!-- parity:groups-leave -->
 - [ ] Delete group/channel for everyone <!-- parity:groups-delete -->
+- [ ] Welcome messages: render the welcome pack shown only to new joiners (updateChatWelcomeMessages, welcomeMessage content) <!-- parity:groups-welcome-view -->
+- [ ] Welcome messages: add/edit/delete via addChatWelcomeMessage, editChatWelcomeMessage, deleteChatWelcomeMessage, loadChatWelcomeMessages (can_send_welcome_messages right) <!-- parity:groups-welcome-manage -->
+- [ ] Welcome message setup: Edit → Welcome Message entry in group/channel profile <!-- parity:groups-welcome-setup -->
 
 ### Secret chats
 
@@ -474,6 +483,8 @@ This is the comprehensive Telegram-parity checklist: one checkbox per user-visib
 - [ ] Payment receipts <!-- parity:bots-payment-receipt -->
 - [ ] Recurring payments <!-- parity:bots-payment-recurring -->
 - [ ] Clear payment/shipping info (privacy) <!-- parity:bots-payment-clear -->
+- [ ] Signed gifts: personal comment when buying a collectible gift via Marketplace (sendResoldGift text) <!-- parity:gifts-signed-comment -->
+- [ ] Signed gifts: custom signature on Marketplace gift purchase (blocked: no TDLib/raw API for a gift signature field — concept-level search: sendResoldGift/inputInvoiceStarGiftResale carry text/message only) <!-- parity:gifts-signed-signature -->
 
 ### Settings
 
@@ -528,6 +539,7 @@ This is the comprehensive Telegram-parity checklist: one checkbox per user-visib
 - [ ] Chat history export to file (partial: getChatHistory fetching exists; no export-to-file; implementable client-side — no exportHistory constructor in schema, not schema-blocked) <!-- parity:platform-history-export -->
 - [ ] Full account data export (Telegram Desktop "Export Telegram data") <!-- parity:platform-data-export -->
 - [ ] In-app update check/download/install <!-- parity:platform-app-updates -->
+- [ ] Outdated-feature placeholder: placeholder card with one-tap update button when the app can't render a new feature <!-- parity:platform-update-placeholder -->
 - [ ] Update changelog display after updates <!-- parity:platform-update-changelog -->
 - [ ] Offline connection indicator in UI (partial: updateConnectionState parsed at telegram/envelope.rs:5506 and stored in state.rs:2199, but never rendered) <!-- parity:platform-offline-indicator -->
 - [ ] Reconnect state labels ("Connecting…", "Waiting for network…", "Updating…", "Connecting to proxy…") <!-- parity:platform-reconnect-states -->
