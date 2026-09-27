@@ -191,6 +191,8 @@ impl ComposerEdit {
             | MessageContent::GroupCallInvitation { .. }
             // Phase C2i: call entries are not editable.
             | MessageContent::Call { .. }
+            // Phase S1: screenshot-taken service rows are not editable.
+            | MessageContent::ScreenshotTaken
             | MessageContent::Unsupported { .. } => return None,
         };
         Some(Self {

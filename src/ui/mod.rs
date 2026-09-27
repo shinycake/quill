@@ -751,6 +751,8 @@ pub struct QuillApp {
     /// Phase B1: pending "Close secret chat" confirm for the open chat
     /// (`closeSecretChat`, schema 1.8.67 line 15242).
     pending_close_secret_chat: Option<ChatId>,
+    /// Phase S1: "New secret chat" contact-picker overlay (sidebar).
+    new_secret_picker_open: bool,
     /// tdesktop `Data::ForwardDraft` / history multi-select.
     pending_forward: Option<ForwardDraft>,
     /// ShareBox / `ShowForwardMessagesBox` dest picker overlay.
@@ -1153,6 +1155,12 @@ pub enum ScreenshotDemo {
     /// info panel open showing the "Encryption key" 12×12 fingerprint
     /// grid plus the verification copy.
     ReadyKeyVerification,
+    /// Phase S1: "New secret chat" contact picker (injected, no live
+    /// Telegram) — the Ready secret chat fixture plus the contacts
+    /// fixture, with the sidebar "🔒 New secret chat" picker open.
+    /// `session.contacts` is assigned directly (the fixture equivalent
+    /// of a `getContacts` answer) so the picker has eligible rows.
+    ReadySecretPicker,
     /// Phase B3: self-destructing media (injected, no live Telegram) —
     /// a Ready *private* (1:1 cloud) chat with Zed: an incoming photo
     /// with a live 60s `messageSelfDestructTypeTimer` countdown, an
@@ -2004,6 +2012,17 @@ impl QuillApp {
                     AuthorizationState::Ready,
                 )
             }
+            // Phase S1: "New secret chat" picker fixture (injected, no
+            // live Telegram).
+            Some(ScreenshotDemo::ReadySecretPicker) => {
+                demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
+                (
+                    ConnectUiStatus::DemoReadyChats,
+                    None,
+                    "screenshot demo — new secret chat picker (injected, no live Telegram)".into(),
+                    AuthorizationState::Ready,
+                )
+            }
             // Phase B2: key verification UI fixture (injected, no live
             // Telegram).
             Some(ScreenshotDemo::ReadyKeyVerification) => {
@@ -2223,6 +2242,7 @@ impl QuillApp {
             saved_edit_reply: None,
             pending_delete: None,
             pending_close_secret_chat: None,
+            new_secret_picker_open: false,
             pending_forward: None,
             forward_picker_open: false,
             forward_result: None,
@@ -2587,6 +2607,24 @@ impl QuillApp {
                 input.set_value("this goes through the E2E session…", window, cx);
             });
             app.status_note = "secret chat — Ready, 🔒 badge in the chat list".into();
+        }
+        // Phase S1: "New secret chat" picker fixture — the secret chat
+        // fixture plus contacts, with the picker open. `contacts` is
+        // assigned directly (fixture equivalent of a `getContacts`
+        // answer); the picker rows come from `contact_rows()` through the
+        // real eligibility gate.
+        if matches!(demo, Some(ScreenshotDemo::ReadySecretPicker)) {
+            if let Some(session) = app.demo_session.as_mut() {
+                app.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_secret_chat(session, &app.demo_sink, &app.demo_seq);
+                apply_ready_contacts(session, &app.demo_sink, &app.demo_seq);
+                session.contacts = Some(vec![31, 33]);
+                // `apply_ready_contacts` opens the contact info panel for
+                // its own demo; the picker screenshot wants it closed.
+                session.open_info_panel = None;
+            }
+            app.new_secret_picker_open = true;
+            app.status_note = "screenshot demo — new secret chat picker".into();
         }
         // Phase B2: key verification fixture — the Ready secret chat with
         // a real 36-byte key_hash and Zed's info panel open on the
@@ -3504,7 +3542,39 @@ impl QuillApp {
         }
     }
 
+    /// Phase S1: the open secret chat's peer name + `secretChat.layer`
+    /// (`secretChat`, schema 1.8.67 line 2816), if the open chat is a
+    /// secret chat with a known record. Used for the TGX
+    /// `SecretChatFeatureUnsupported` gate (round videos need layer ≥ 66).
+    fn open_secret_chat_peer_layer(&self) -> Option<(String, i32)> {
+        let session = self.session()?;
+        let open = session.open_chat?;
+        let chat = session.chats.get(&open.0)?;
+        let secret_chat_id = chat.secret_chat_id()?;
+        let record = session.secret_chat_states.get(&secret_chat_id)?;
+        let name = session
+            .user(record.user_id)
+            .map(|u| u.display_name())
+            .filter(|name| !name.is_empty())
+            .unwrap_or_else(|| "Your contact".to_string());
+        Some((name, record.layer))
+    }
+
     fn attach_local(&mut self, kind: AttachmentKind, cx: &mut Context<Self>) {
+        // Phase S1: round video notes need secret-chat layer ≥ 66 (TGX
+        // `chatSupportsRoundVideos`); an older peer client gets the
+        // `SecretChatFeatureUnsupported` notice instead of a broken send.
+        if matches!(kind, AttachmentKind::VideoNote)
+            && let Some((name, layer)) = self.open_secret_chat_peer_layer()
+            && layer < 66
+        {
+            self.status_note = format!(
+                "{name}'s Telegram client doesn't support this feature. \
+                 They need to install an update first."
+            );
+            cx.notify();
+            return;
+        }
         // Explicit user action → pick. Prefer QUILL_ATTACH_PHOTO / QUILL_ATTACH_FILE /
         // QUILL_ATTACH_VIDEO when set (live testing); otherwise the demo fixtures
         // under docs/screenshots.
@@ -3906,6 +3976,7 @@ impl QuillApp {
                         | MessageContent::GroupCallInvitation { .. }
                         | MessageContent::Call { .. }
                         | MessageContent::ChatTtlChanged { .. }
+                        | MessageContent::ScreenshotTaken
                         | MessageContent::Unsupported { .. } => {}
                     }
                 }
@@ -4745,6 +4816,14 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// Phase S1: eligibility for a new secret chat — non-bot user, not
+    /// yourself. Shared by the profile button and the "New secret chat"
+    /// contact picker.
+    fn can_start_secret_chat_with(session: &Session, user_id: i64) -> bool {
+        session.user(user_id).is_some_and(|u| !u.is_bot)
+            && session.my_user_id.is_none_or(|me| me != user_id)
+    }
+
     /// Phase B1: `createNewSecretChat` from a user profile. The new chat
     /// opens when its `updateNewChat` arrives; the state (Pending →
     /// Ready) arrives as `updateSecretChat`.
@@ -5239,6 +5318,18 @@ impl QuillApp {
         let Some(draft) = self.pending_forward.clone() else {
             return;
         };
+        // Phase S1: messages cannot be forwarded to secret chats (TGX
+        // `SecretChatForwardError`, verbatim). The picker stays open so
+        // the user can pick another destination.
+        let dest_is_secret = self
+            .session()
+            .and_then(|s| s.chats.get(&dest.0))
+            .is_some_and(|chat| matches!(chat.kind, ChatKind::Secret { .. }));
+        if dest_is_secret {
+            self.status_note = "This message cannot be forwarded to secret chats.".into();
+            cx.notify();
+            return;
+        }
         // Phase A1: slow-mode gate applies to forwards — forwarding sends
         // messages to the destination chat.
         if self.slow_mode_blocked(dest, cx) {
@@ -8949,6 +9040,85 @@ impl QuillApp {
         self.open_info_panel_target(InfoPanelTarget::User(user_id), window, cx);
     }
 
+    /// Phase S1: "New secret chat" contact picker — eligible contacts
+    /// (non-bot, not self, via `can_start_secret_chat_with`) rendered in
+    /// the contacts-list style; picking one calls
+    /// `start_secret_chat_for_user` and closes the picker.
+    fn new_secret_picker_panel(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let rows: Vec<ContactRow> = self
+            .session()
+            .map(|s| {
+                s.contact_rows()
+                    .into_iter()
+                    .filter(|row| Self::can_start_secret_chat_with(s, row.user_id))
+                    .collect()
+            })
+            .unwrap_or_default();
+        let mut panel = div()
+            .id("new-secret-picker")
+            .flex()
+            .flex_col()
+            .gap_1()
+            .p_2()
+            .rounded_md()
+            .border_1()
+            .border_color(cx.theme().border)
+            .child(
+                div()
+                    .text_xs()
+                    .font_semibold()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("Start a secret chat with:"),
+            );
+        if rows.is_empty() {
+            panel = panel.child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("No eligible contacts."),
+            );
+        }
+        for row in rows {
+            let user_id = row.user_id;
+            let name = row.name.clone();
+            let status = row.status_text.clone();
+            panel = panel.child(
+                div()
+                    .id(("new-secret-contact", user_id as u64))
+                    .px_2()
+                    .py_2()
+                    .rounded_md()
+                    .cursor_pointer()
+                    .bg(cx.theme().sidebar)
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.new_secret_picker_open = false;
+                        this.start_secret_chat_for_user(user_id, cx);
+                    }))
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .child(initials_avatar(&name, 32.))
+                            .child(
+                                div()
+                                    .flex()
+                                    .flex_col()
+                                    .min_w_0()
+                                    .child(div().font_medium().text_sm().child(name))
+                                    .child(
+                                        div()
+                                            .text_xs()
+                                            .text_color(cx.theme().muted_foreground)
+                                            .child(status),
+                                    ),
+                            ),
+                    ),
+            );
+        }
+        panel
+    }
+
     fn open_supergroup_panel(
         &mut self,
         supergroup_id: i64,
@@ -9164,12 +9334,24 @@ impl QuillApp {
                             .items_center()
                             .child(grid.border_1().border_color(cx.theme().border)),
                     )
-                    .child(
+                    .child({
+                        // Phase S1: TGX `EncryptionKeyDescription`, verbatim,
+                        // with the peer's display name.
+                        let name = self
+                            .session()
+                            .and_then(|s| s.user(record.user_id))
+                            .map(|u| u.display_name())
+                            .filter(|name| !name.is_empty())
+                            .unwrap_or_else(|| "your contact".to_string());
                         div()
                             .text_xs()
                             .text_color(cx.theme().muted_foreground)
-                            .child("If this image matches the one on your contact's device, your conversation is secure."),
-                    );
+                            .child(format!(
+                                "This image and text were derived from the encryption key for this \
+                                 secret chat with {name}.\n\nIf they look the same on {name}'s \
+                                 device, end-to-end encryption is guaranteed."
+                            ))
+                    });
             }
             None => {
                 body = body.child(
@@ -9300,11 +9482,9 @@ impl QuillApp {
         // Phase B1: "Start secret chat" from a user profile — E2E chat
         // with a non-bot user (`createNewSecretChat`, schema 1.8.67 line
         // 13340). Not offered for bots or for yourself.
-        let show_start_secret = user.as_ref().is_some_and(|u| !u.is_bot)
-            && session
-                .as_ref()
-                .and_then(|s| s.my_user_id)
-                .is_none_or(|me| me != user_id);
+        let show_start_secret = session
+            .as_ref()
+            .is_some_and(|s| Self::can_start_secret_chat_with(s, user_id));
         if show_start_secret {
             body = body.child(
                 Button::new("info-panel-start-secret")
@@ -9349,8 +9529,50 @@ impl QuillApp {
             .and_then(|s| s.open_ready_secret_chat_for_user(user_id))
         {
             body = body.child(self.encryption_key_section(record, cx));
+            body = body.child(self.secret_passcode_hint(user_id, cx));
         }
         body.into_any_element()
+    }
+
+    /// Phase S1: per-secret-chat passcode hint (TGX `SecretPasscodeInfo`,
+    /// verbatim, with the peer's name). The hint only — setting an
+    /// additional per-chat passcode needs a full app passcode feature,
+    /// which is out of this slice.
+    fn secret_passcode_hint(&self, user_id: i64, cx: &mut Context<Self>) -> AnyElement {
+        let name = self
+            .session()
+            .and_then(|s| s.user(user_id))
+            .map(|u| u.display_name())
+            .filter(|name| !name.is_empty())
+            .unwrap_or_else(|| "this chat".to_string());
+        div()
+            .flex()
+            .flex_col()
+            .w_full()
+            .gap_2()
+            .pt_2()
+            .border_t_1()
+            .border_color(cx.theme().border)
+            .child(
+                div()
+                    .text_xs()
+                    .font_semibold()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("Passcode"),
+            )
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(format!(
+                        "When you set up an additional passcode, you'll need to enter it each \
+                         time you access {name}. Message preview will be hidden on the chats \
+                         page.\n\nNote: if you forget it, contents of this chat will be \
+                         lost.\n\nIf you need a global passcode, use Settings > Privacy and \
+                         Security > Passcode Lock."
+                    )),
+            )
+            .into_any_element()
     }
 
     /// Supergroup/channel panel: title, member count, description.
@@ -15040,6 +15262,17 @@ impl QuillApp {
                         }))
                         .child(title_text),
                 )
+                // Phase S1: pending secret chats show the TGX
+                // `AwaitingEncryption` subtitle under the title.
+                .when_some(self.secret_pending_subtitle(chat_id), |this, line| {
+                    this.child(
+                        div()
+                            .id("secret-pending-subtitle")
+                            .text_xs()
+                            .text_color(cx.theme().accent)
+                            .child(line),
+                    )
+                })
                 .when(typing, |this| {
                     this.child(
                         div()
@@ -15247,10 +15480,33 @@ impl QuillApp {
             })
     }
 
+    /// Phase S1: "Custom notification settings for the secret chat with
+    /// {name}." (TGX `NotificationChannelSecretChat`) — `Some` only when
+    /// the open chat is a secret chat with a known peer.
+    fn secret_notif_label(session: Option<&Session>) -> Option<String> {
+        let session = session?;
+        let open = session.open_chat?;
+        let chat = session.chats.get(&open.0)?;
+        let ChatKind::Secret { user_id, .. } = &chat.kind else {
+            return None;
+        };
+        let name = session
+            .user(user_id.0)
+            .map(|u| u.display_name())
+            .filter(|name| !name.is_empty())
+            .unwrap_or_else(|| "your contact".to_string());
+        Some(format!(
+            "Custom notification settings for the secret chat with {name}."
+        ))
+    }
+
     /// Parity slice: the tdesktop "Mute" submenu is now a per-chat
     /// notification settings panel — mute presets, message-preview toggle,
     /// notification-sound picker (`getSavedNotificationSounds`), and a link
     /// to the scope defaults dialog. Current state shows in the summary line.
+    ///
+    /// Phase S1: secret chats additionally show the TGX
+    /// `NotificationChannelSecretChat` label with the peer's name.
     fn mute_menu_panel(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let session = self.session();
         let open_chat = session.as_ref().and_then(|s| s.open_chat);
@@ -15336,6 +15592,11 @@ impl QuillApp {
                     .text_color(cx.theme().muted_foreground)
                     .child(status),
             )
+            // Phase S1: TGX `NotificationChannelSecretChat` — secret chats
+            // get their own custom-settings label with the peer's name.
+            .when_some(Self::secret_notif_label(session), |this, label| {
+                this.child(div().text_xs().text_color(cx.theme().accent).child(label))
+            })
             .child(
                 div()
                     .text_xs()
@@ -16831,7 +17092,12 @@ impl QuillApp {
     /// Phase B1: "Close secret chat" confirm banner, styled like the
     /// delete confirm. Closing is permanent — the chat can never send
     /// again once `secretChatStateClosed` lands.
+    ///
+    /// Phase S1: distinct TGX copy per secret-chat state
+    /// (`DeleteSecretChatPendingConfirm` / `DeleteSecretChatClosedConfirm` /
+    /// `DeleteSecretChatConfirm`).
     fn close_secret_chat_confirm_banner(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let (title, body, confirm_label) = self.secret_close_copy();
         div()
             .id("close-secret-confirm")
             .flex()
@@ -16854,34 +17120,72 @@ impl QuillApp {
                             .text_xs()
                             .font_medium()
                             .text_color(rgb(0xf85149))
-                            .child("Close this secret chat?"),
+                            .child(title),
                     )
-                    .child(
-                        div()
-                            .text_sm()
-                            .text_color(rgb(0xc9d1d9))
-                            .child("Closing is permanent — the encrypted session ends and no new messages can be sent."),
-                    ),
+                    .child(div().text_sm().text_color(rgb(0xc9d1d9)).child(body)),
             )
             .child(
                 div()
                     .flex()
                     .gap_2()
-                    .child(
-                        Button::new("cancel-close-secret")
-                            .label("Cancel")
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.cancel_close_secret_chat(cx);
-                            })),
-                    )
+                    .child(Button::new("cancel-close-secret").label("Cancel").on_click(
+                        cx.listener(|this, _, _, cx| {
+                            this.cancel_close_secret_chat(cx);
+                        }),
+                    ))
                     .child(
                         Button::new("confirm-close-secret")
-                            .label("Close chat")
+                            .label(confirm_label)
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.confirm_close_secret_chat(cx);
                             })),
                     ),
             )
+    }
+
+    /// Phase S1: close-confirm copy keyed on the secret chat's state, with
+    /// the peer's display name (TGX `DeleteSecretChat{Pending,Closed,}`
+    /// `Confirm` strings, verbatim).
+    fn secret_close_copy(&self) -> (String, String, &'static str) {
+        let session = self.session();
+        let name = self
+            .pending_close_secret_chat
+            .and_then(|id| session.as_ref()?.chats.get(&id.0))
+            .and_then(|chat| match &chat.kind {
+                ChatKind::Secret { user_id, .. } => Some(*user_id),
+                _ => None,
+            })
+            .and_then(|user_id| session.as_ref()?.user(user_id.0))
+            .map(|u| u.display_name())
+            .filter(|name| !name.is_empty())
+            .unwrap_or_else(|| "your contact".to_string());
+        let state = self
+            .pending_close_secret_chat
+            .and_then(|id| session.as_ref()?.chats.get(&id.0))
+            .and_then(|chat| chat.secret_state.clone());
+        match state {
+            Some(SecretChatState::Pending) => (
+                "Cancel this secret chat?".to_string(),
+                format!("Are you sure you want to cancel the secret chat with {name}?"),
+                "Cancel chat",
+            ),
+            Some(SecretChatState::Closed) => (
+                "Delete this secret chat?".to_string(),
+                format!(
+                    "Are you sure you want to delete the secret chat with {name}? \
+                     This action cannot be undone."
+                ),
+                "Delete",
+            ),
+            _ => (
+                "Close this secret chat?".to_string(),
+                format!(
+                    "Are you sure you want to delete the secret chat with {name}? \
+                     All chat history will be deleted forever. This action cannot be undone."
+                ),
+                "Close chat",
+            ),
+        }
     }
 
     fn composer_reply_banner(
@@ -19938,6 +20242,27 @@ impl QuillApp {
             .child(waveform_row(0, &bars))
     }
 
+    /// Phase S1: "Waiting for {name} to get online…" header subtitle for a
+    /// Pending secret chat (TGX `AwaitingEncryption`). `None` for anything
+    /// else — the composer note covers the bottom of the pane, this covers
+    /// the header like TGX's chat subtitle.
+    fn secret_pending_subtitle(&self, chat_id: ChatId) -> Option<String> {
+        let session = self.session()?;
+        let chat = session.chats.get(&chat_id.0)?;
+        let ChatKind::Secret { user_id, .. } = &chat.kind else {
+            return None;
+        };
+        if chat.secret_state != Some(SecretChatState::Pending) {
+            return None;
+        }
+        let name = session
+            .user(user_id.0)
+            .map(|u| u.display_name())
+            .filter(|name| !name.is_empty())
+            .unwrap_or_else(|| "your contact".to_string());
+        Some(format!("Waiting for {name} to get online…"))
+    }
+
     /// Phase B1: the composer note for a secret chat that can't send —
     /// Pending ("Waiting for X to come online…", schema 1.8.67 line 2797:
     /// "waiting for the other user to get online"), Closed ("Secret chat
@@ -19964,6 +20289,38 @@ impl QuillApp {
             Some(SecretChatState::Closed) => Some("🔒 Secret chat closed".to_string()),
             Some(SecretChatState::Unknown(_)) | None => Some("🔒 Loading secret chat…".to_string()),
         }
+    }
+
+    /// Phase S1: empty-secret-chat end-to-end encryption explainer (TGX
+    /// `MessagesHolder` TYPE_SECRET_CHAT_INFO: "Secret Chats" header plus
+    /// the four `EncryptedDescription` bullets).
+    fn secret_empty_explainer(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let bullets = [
+            "Use end-to-end encryption",
+            "Leave no trace on our servers",
+            "Have a self-destruct timer",
+            "Do not allow forwarding",
+        ];
+        let mut list = div().flex().flex_col().gap_1();
+        for bullet in bullets {
+            list = list.child(
+                div()
+                    .text_sm()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(format!("• {bullet}")),
+            );
+        }
+        div()
+            .id("secret-e2e-explainer")
+            .flex()
+            .flex_col()
+            .flex_1()
+            .items_center()
+            .justify_center()
+            .gap_3()
+            .p_6()
+            .child(div().text_lg().font_semibold().child("🔒 Secret chats"))
+            .child(list)
     }
 
     fn session_history(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -20113,12 +20470,21 @@ impl QuillApp {
                     )
                 }
             } else if messages.is_empty() {
-                pane_placeholder(
-                    "No messages yet",
-                    "History arrives via getChatHistory and updates.",
-                    cx,
-                )
-                .into_any_element()
+                // Phase S1: an empty secret chat shows TGX's end-to-end
+                // encryption explainer (MessagesHolder TYPE_SECRET_CHAT_INFO:
+                // "Secret Chats" + EncryptedDescription1-4) instead of the
+                // generic placeholder.
+                let is_secret = chat.is_some_and(|c| matches!(c.kind, ChatKind::Secret { .. }));
+                if is_secret {
+                    self.secret_empty_explainer(cx).into_any_element()
+                } else {
+                    pane_placeholder(
+                        "No messages yet",
+                        "History arrives via getChatHistory and updates.",
+                        cx,
+                    )
+                    .into_any_element()
+                }
             } else {
                 self.history_message_list(
                     "session-history",
@@ -20759,6 +21125,19 @@ impl QuillApp {
                 } else {
                     list = list.child(self.folder_tabs(cx));
                     list = list.child(self.sidebar_search_field(cx));
+                    // Phase S1: "New secret chat" entry (TGX main-menu "New
+                    // Secret Chat") — toggles the contact picker below.
+                    list = list.child(
+                        Button::new("new-secret-chat")
+                            .label("🔒 New secret chat")
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.new_secret_picker_open = !this.new_secret_picker_open;
+                                cx.notify();
+                            })),
+                    );
+                    if self.new_secret_picker_open {
+                        list = list.child(self.new_secret_picker_panel(cx));
+                    }
                     // Phase 9.1: tdesktop-style active-stories tray above the
                     // chat rows; omitted for the contacts tab.
                     if let Some(tray) = self.story_tray(cx) {
@@ -20953,6 +21332,9 @@ fn seed_ready_unread_read_session(sink: Arc<MemorySink>) -> Session {
 /// (`chatTypeSecret`), exactly as the schema guarantees (td_api.tl line
 /// 10740); the chat opens with three E2E messages and the composer live.
 /// The 🔒 badge shows in the chat-list row.
+/// Phase S1: the new-secret-chat fixture injects NO messages — the real
+/// app-rendered end-to-end encryption explainer (`secret_empty_explainer`)
+/// shows for an empty secret chat, like TGX's new-secret-chat screen.
 fn apply_ready_secret_chat(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
     let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
     let chat_id = 41i64;
@@ -20971,16 +21353,10 @@ fn apply_ready_secret_chat(session: &mut Session, sink: &Arc<MemorySink>, seq: &
         format!(
             r#"{{"@type":"updateChatPosition","chat_id":{chat_id},"position":{{"@type":"chatPosition","list":{{"@type":"chatListMain"}},"order":"85","is_pinned":false}}}}"#
         ),
-        format!(
-            r#"{{"@type":"updateNewMessage","message":{{"id":401,"chat_id":{chat_id},"sender_id":{{"@type":"messageSenderUser","user_id":{user_id}}},"is_outgoing":false,"date":1700000100,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"This chat is end-to-end encrypted.","entities":[]}}}}}}}}"#
-        ),
-        format!(
-            r#"{{"@type":"updateNewMessage","message":{{"id":402,"chat_id":{chat_id},"sender_id":{{"@type":"messageSenderUser","user_id":{user_id}}},"is_outgoing":false,"date":1700000160,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"Only the two devices in this chat can read it.","entities":[]}}}}}}}}"#
-        ),
-        format!(
-            r#"{{"@type":"updateNewMessage","message":{{"id":403,"chat_id":{chat_id},"sender_id":{{"@type":"messageSenderUser","user_id":999}},"is_outgoing":true,"date":1700000220,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"Exactly — the lock in the chat list marks it.","entities":[]}}}}}}}}"#
-        ),
     ];
+    // Phase S1: no fake messages are injected — the real app-rendered
+    // end-to-end encryption explainer (`secret_empty_explainer`) shows for
+    // an empty secret chat, like TGX's new-secret-chat screen.
     for json in jsons {
         if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
             session.apply(owned);
@@ -24766,6 +25142,29 @@ fn session_history_row(
             )
             .into_any_element();
     }
+    // Phase S1: `messageScreenshotTaken` service row (schema 1.8.67,
+    // line 5375) — centered neutral notice, attributed via
+    // `message.is_outgoing` (TGX `YouTookAScreenshot` /
+    // `XTookAScreenshot`).
+    if matches!(message.content, MessageContent::ScreenshotTaken) {
+        let text = if message.is_outgoing {
+            "You took a screenshot".to_string()
+        } else {
+            format!("{label} took a screenshot")
+        };
+        return div()
+            .id(("screenshot-service-row", message.id.0 as u64))
+            .flex()
+            .justify_center()
+            .py_1()
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(text),
+            )
+            .into_any_element();
+    }
     // Phase C2f: `messageGroupCall` invitation service row (schema
     // 1.8.67, line 5288) — incoming and pending: Accept / Decline.
     if let MessageContent::GroupCallInvitation {
@@ -24832,26 +25231,36 @@ fn session_history_row(
     let chat_id = message.chat_id;
     let message_id = message.id;
     let pending = message.pending;
-    let forward_btn = ForwardDraft::from_message(chat_id, message_id, pending).map(|_| {
-        Button::new(format!("forward-{}", message_id.0))
-            .label("Forward")
-            .ghost()
-            .on_click(cx.listener(move |this, _, window, cx| {
-                this.begin_forward_one(chat_id, message_id, pending, window, cx);
-            }))
-    });
-    let select_btn = ForwardDraft::from_message(chat_id, message_id, pending).map(|_| {
-        Button::new(format!("select-forward-{}", message_id.0))
-            .label(if selected_forward {
-                "Selected"
-            } else {
-                "Select"
-            })
-            .ghost()
-            .on_click(cx.listener(move |this, _, _, cx| {
-                this.toggle_forward_select(chat_id, message_id, pending, cx);
-            }))
-    });
+    // Phase S1: TGX only offers Forward when
+    // `messageProperties.canBeForwarded` (`MessagesController.java:5287`);
+    // TDLib sets it false for secret-chat messages — the chat kind is the
+    // faithful equivalent here.
+    let forward_btn = (!is_secret)
+        .then(|| ForwardDraft::from_message(chat_id, message_id, pending))
+        .flatten()
+        .map(|_| {
+            Button::new(format!("forward-{}", message_id.0))
+                .label("Forward")
+                .ghost()
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    this.begin_forward_one(chat_id, message_id, pending, window, cx);
+                }))
+        });
+    let select_btn = (!is_secret)
+        .then(|| ForwardDraft::from_message(chat_id, message_id, pending))
+        .flatten()
+        .map(|_| {
+            Button::new(format!("select-forward-{}", message_id.0))
+                .label(if selected_forward {
+                    "Selected"
+                } else {
+                    "Select"
+                })
+                .ghost()
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.toggle_forward_select(chat_id, message_id, pending, cx);
+                }))
+        });
     let edit_btn = ComposerEdit::from_own_content(
         message.chat_id,
         message.id,
@@ -25087,6 +25496,7 @@ fn session_history_row(
         | MessageContent::GroupCallInvitation { .. }
         | MessageContent::Call { .. }
         | MessageContent::ChatTtlChanged { .. }
+        | MessageContent::ScreenshotTaken
         | MessageContent::Unsupported { .. } => None,
     };
     let keyboard = inline_keyboard(message, cx);

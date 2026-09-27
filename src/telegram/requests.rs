@@ -785,6 +785,27 @@ pub fn close_secret_chat(extra: RequestId, secret_chat_id: i32) -> String {
     .to_string()
 }
 
+/// Phase S1: `toggleSessionCanAcceptSecretChats` (TDLib 1.8.67,
+/// `schema/td_api.tl:15117`):
+/// `toggleSessionCanAcceptSecretChats session_id:int64 can_accept_secret_chats:Bool = Ok;`
+/// Per-session toggle — the session accepts (or rejects) new secret chats.
+/// TGX surfaces it in the session editor ("Secret Chats" Accept/Reject,
+/// `EditSessionController`); Quill has no sessions screen yet, so this is
+/// request-layer only until one lands.
+pub fn toggle_session_can_accept_secret_chats(
+    extra: RequestId,
+    session_id: i64,
+    can_accept_secret_chats: bool,
+) -> String {
+    json!({
+        "@type": "toggleSessionCanAcceptSecretChats",
+        "@extra": extra.as_extra(),
+        "session_id": session_id.to_string(),
+        "can_accept_secret_chats": can_accept_secret_chats,
+    })
+    .to_string()
+}
+
 /// Phase C1: the `callProtocol` Quill advertises for signaling-only
 /// calls (TDLib 1.8.67, `schema/td_api.tl:7008`):
 /// `callProtocol udp_p2p:Bool udp_reflector:Bool min_layer:int32
@@ -1977,7 +1998,24 @@ pub fn send_text(
     topic_id: Option<i32>,
     text: &str,
     reply_to: Option<MessageId>,
+    disable_link_preview: bool,
 ) -> String {
+    // Phase S1: secret chats never get link previews (TGX default-off —
+    // previews are generated on Telegram servers, which can't see E2E
+    // content). `is_disabled: true` makes the default-off explicit on the
+    // wire instead of relying on TDLib to skip it.
+    let link_preview_options = if disable_link_preview {
+        json!({
+            "@type": "linkPreviewOptions",
+            "is_disabled": true,
+            "url": "",
+            "force_small_media": false,
+            "force_large_media": false,
+            "show_above_text": false,
+        })
+    } else {
+        Value::Null
+    };
     json!({
         "@type": "sendMessage",
         "@extra": extra.as_extra(),
@@ -1993,7 +2031,7 @@ pub fn send_text(
                 "text": text,
                 "entities": []
             },
-            "link_preview_options": Value::Null,
+            "link_preview_options": link_preview_options,
             "clear_draft": true
         }
     })
@@ -3227,6 +3265,23 @@ mod tests {
     }
 
     #[test]
+    fn toggle_session_can_accept_secret_chats_shape_matches_1_8_67() {
+        // Phase S1: `toggleSessionCanAcceptSecretChats session_id:int64
+        // can_accept_secret_chats:Bool = Ok` (schema 1.8.67, line 15117);
+        // int64 serializes as a JSON string like other int64 ids here.
+        let json = toggle_session_can_accept_secret_chats(RequestId(31), 123456789, true);
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "toggleSessionCanAcceptSecretChats");
+        assert_eq!(v["@extra"], "31");
+        assert_eq!(v["session_id"], "123456789");
+        assert_eq!(v["can_accept_secret_chats"], true);
+
+        let off = toggle_session_can_accept_secret_chats(RequestId(32), 123456789, false);
+        let v: serde_json::Value = serde_json::from_str(&off).unwrap();
+        assert_eq!(v["can_accept_secret_chats"], false);
+    }
+
+    #[test]
     fn get_commands_shape_matches_1_8_67() {
         // `getCommands scope:BotCommandScope language_code:string =
         // BotCommands` (schema 1.8.67 line 14953); a null scope selects the
@@ -3242,7 +3297,7 @@ mod tests {
 
     #[test]
     fn send_text_includes_topic_id_null() {
-        let json = send_text(RequestId(9), ChatId(1), None, "hi", None);
+        let json = send_text(RequestId(9), ChatId(1), None, "hi", None, false);
         assert!(json.contains("\"topic_id\":null"));
         assert!(!json.contains("message_thread_id"));
         assert!(json.contains("\"@extra\":\"9\""));
@@ -3253,7 +3308,7 @@ mod tests {
     fn send_text_topic_id_uses_message_topic_forum() {
         // Parity slice 4: `sendMessage.topic_id` (schema 1.8.67, line 12200)
         // takes `messageTopicForum{forum_topic_id}` (line 3004).
-        let json = send_text(RequestId(9), ChatId(16), Some(2), "hi", None);
+        let json = send_text(RequestId(9), ChatId(16), Some(2), "hi", None, false);
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(v["@type"], "sendMessage");
         assert_eq!(v["chat_id"], 16);
@@ -3269,6 +3324,7 @@ mod tests {
             None,
             "sounds good",
             Some(MessageId(101)),
+            false,
         );
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(v["@type"], "sendMessage");
@@ -3279,6 +3335,37 @@ mod tests {
         assert_eq!(v["reply_to"]["poll_option_id"], "");
         assert!(!json.contains("inputMessageReplyToExternalMessage"));
         assert!(!json.contains("CANARY"));
+    }
+
+    #[test]
+    fn send_text_disables_link_preview_for_secret_chats() {
+        // Phase S1: secret chats never get link previews (TGX default-off).
+        let json = send_text(
+            RequestId(11),
+            ChatId(41),
+            None,
+            "see https://example.com",
+            None,
+            true,
+        );
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let opts = &v["input_message_content"]["link_preview_options"];
+        assert_eq!(opts["@type"], "linkPreviewOptions");
+        assert_eq!(opts["is_disabled"], true);
+
+        let json = send_text(
+            RequestId(12),
+            ChatId(11),
+            None,
+            "see https://example.com",
+            None,
+            false,
+        );
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(
+            v["input_message_content"]["link_preview_options"],
+            Value::Null
+        );
     }
 
     #[test]
