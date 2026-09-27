@@ -135,25 +135,25 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Empty states: "Loading chats…", "No chats in this folder yet.", "No chats in the main list." (src/ui/mod.rs:18218) <!-- parity:chatlist-empty-states -->
 - [x] Right-click context menu on chat rows (src/ui/mod.rs:5580) <!-- parity:chatlist-row-context-menu -->
 - [x] Pin / Unpin chat via toggleChatIsPinned with optimistic rollback (src/connect.rs) <!-- parity:chatlist-pin-unpin -->
-- [ ] Drag-to-reorder pinned chats <!-- parity:chatlist-pin-drag-reorder -->
+- [x] Drag-to-reorder pinned chats (main + archive lists): pin-drag ghost, drop moves to slot, full pinned-id list via setPinnedChats with optimistic reorder + rollback on refusal (src/connect.rs: set_pinned_chat_order, src/state.rs: reorder_pinned_chats, src/ui/mod.rs: PinnedChatDrag) <!-- parity:chatlist-pin-drag-reorder -->
 - [x] Pin-limit handling: client-side pre-check from pinned_chat_count_max / pinned_archived_chat_count_max options plus server error surfacing (src/connect.rs, src/state.rs) <!-- parity:chatlist-pin-limit -->
-- [ ] Mark all chats as read (schema readChatList exists, unused in src) <!-- parity:chatlist-mark-all-read -->
+- [x] Mark all chats as read: readChatList for main + archive lists, "✓ Mark all read" on the main list and the archive header, no-op when nothing is unread (src/connect.rs: mark_all_chats_as_read, src/ui/mod.rs) <!-- parity:chatlist-mark-all-read -->
 - [x] Per-chat mark as read / unread: viewMessages with messageSourceChatList + force_read (TGX semantics) and toggleChatIsMarkedAsUnread; marked-unread dot badge (src/connect.rs, src/ui/mod.rs) <!-- parity:chatlist-mark-read-unread -->
 - [x] Per-chat mute/unmute from the list via the row menu (src/ui/mod.rs:5611) <!-- parity:chatlist-list-mute -->
 - [x] Delete chat from the list via deleteChatHistory(remove_from_chat_list:true) — not the destructive deleteChat (src/connect.rs, src/ui/mod.rs) <!-- parity:chatlist-delete-chat -->
 - [x] Clear chat history via deleteChatHistory(remove_from_chat_list:false), gated on delete capabilities (src/connect.rs, src/ui/mod.rs) <!-- parity:chatlist-clear-history -->
-- [ ] Saved Messages entry row in the list <!-- parity:chatlist-saved-messages -->
+- [x] Saved Messages entry row in the list: opens the existing self chat directly, otherwise createPrivateChat with getOption("my_id") and opens the returned chat (schema td_api.tl:9590; src/connect.rs: create_private_chat_with_self, src/ui/mod.rs: open_saved_messages) <!-- parity:chatlist-saved-messages -->
 - [ ] Chat preview on long-press / hover <!-- parity:chatlist-chat-preview -->
-- [ ] Clear recent searches (recents load but are not clearable) <!-- parity:chatlist-clear-recent-searches -->
-- [ ] No-results state in search <!-- parity:chatlist-search-no-results -->
-- [ ] Collapsible / hideable archive section (TGX: archiveCollapsed setting) <!-- parity:chatlist-archive-collapse -->
-- [ ] Archive auto-settings: archive+mute chats from unknown users, keep muted/folder chats archived (schema setArchiveChatListSettings exists, unused in src) <!-- parity:chatlist-archive-auto-settings -->
+- [x] Clear recent searches: Clear button on the Recent heading, clearRecentlyFoundChats with optimistic local clear (TGX SearchManager parity), refusal surfaced as a status note (src/connect.rs: clear_recently_found_chats, src/ui/mod.rs: clear_search_recents) <!-- parity:chatlist-clear-recent-searches -->
+- [x] No-results state in search: "No chats or messages match “…”" (src/ui/mod.rs: search_results; demo quill --screenshot-demo ready-chat-list-search) <!-- parity:chatlist-search-no-results -->
+- [x] Collapsible archive section: clickable ▸/▾ header with count, per-session collapsed state (TGX archiveCollapsed) (src/state.rs: archive_collapsed, src/ui/mod.rs: toggle_archive_collapsed) <!-- parity:chatlist-archive-collapse -->
+- [x] Archive auto-settings: get/setArchiveChatListSettings with a dialog for the three schema-backed toggles (archive+mute unknown users, keep unmuted archived, keep folder chats archived), fetch-on-open, optimistic toggle with rollback, TGX SettingsArchiveChatListController labels (src/connect.rs, src/state.rs, src/ui/mod.rs: archive_settings_overlay) <!-- parity:chatlist-archive-auto-settings -->
 - [ ] Mention/reaction counts on the unread badge (partial: plain unread count only) <!-- parity:chatlist-mention-badge -->
 - [ ] Multi-select mode: Select…, Select unread <!-- parity:chatlist-multi-select -->
 - [ ] Report / Block contact from the list <!-- parity:chatlist-report-block -->
 - [ ] App badge counter settings: include muted chats, include archived chats, count messages vs chats <!-- parity:chatlist-badge-settings -->
 - [ ] Chat list style settings: two/three lines, media icons, text formatting <!-- parity:chatlist-list-style -->
-- [ ] Unread / Archived filter category chips <!-- parity:chatlist-category-filters -->
+- [x] Unread / Archived filter category chips beside the folder tabs (the folder/Main selection itself is the All view); Archived forces the archive section open (src/ui/mod.rs: ChatListFilter) <!-- parity:chatlist-category-filters -->
 
 ### Media
 

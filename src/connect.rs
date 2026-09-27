@@ -40,59 +40,61 @@ use crate::telegram::envelope::{
 };
 use crate::telegram::ffi::{LibraryOrigin, TdJsonError, resolve_tdjson_path};
 use crate::telegram::requests::{
-    AnimationSend, CallPrivacySetting, ChatEventLogFilterSet, GroupCallJoinParams,
-    InputGroupCallRef, MessageSenderRef, PollSend, PrivacyWho, SendReply, SetTdlibParameters,
-    StickerSend, VideoNoteSend, VideoNoteThumbnailSend, VideoSend, VoiceNoteSend,
-    accept_call_with_protocol, add_chat_member, add_chat_members, add_chat_to_list,
+    AnimationSend, ArchiveChatListSettings, CallPrivacySetting, ChatEventLogFilterSet,
+    GroupCallJoinParams, InputGroupCallRef, MessageSenderRef, PollSend, PrivacyWho, SendReply,
+    SetTdlibParameters, StickerSend, VideoNoteSend, VideoNoteThumbnailSend, VideoSend,
+    VoiceNoteSend, accept_call_with_protocol, add_chat_member, add_chat_members, add_chat_to_list,
     add_chat_to_list_value, add_chat_welcome_message, add_contact, add_message_reaction,
     add_recently_found_chat, ban_group_call_participants, boost_chat,
     cancel_download_file as cancel_download_file_request, chat_member_status_administrator_json,
     chat_member_status_banned_json, chat_member_status_member_json,
     chat_member_status_restricted_json, check_authentication_code, check_authentication_password,
-    click_chat_sponsored_message, close_chat, close_request,
+    clear_recently_found_chats, click_chat_sponsored_message, close_chat, close_request,
     close_secret_chat as close_secret_chat_request, close_story, create_call_with_protocol,
     create_chat_folder, create_chat_invite_link, create_forum_topic, create_new_basic_group_chat,
-    create_new_secret_chat, create_new_supergroup_chat, create_video_chat,
+    create_new_secret_chat, create_new_supergroup_chat, create_private_chat, create_video_chat,
     decline_group_call_invitation, delete_chat, delete_chat_folder, delete_chat_history,
     delete_chat_welcome_message, delete_forum_topic, delete_messages, delete_story,
     discard_call as discard_call_request, download_file as download_file_request, edit_chat_folder,
     edit_chat_invite_link, edit_chat_welcome_message, edit_forum_topic, edit_message_caption,
     edit_message_text, end_group_call, end_group_call_recording, end_group_call_screen_sharing,
-    forward_messages, get_authorization_state, get_available_chat_boost_slots,
-    get_basic_group_full_info, get_callback_query_answer, get_chat_active_stories,
-    get_chat_administrators, get_chat_boost_status, get_chat_event_log, get_chat_folder,
-    get_chat_history, get_chat_invite_links, get_chat_join_requests, get_chat_lists_to_add_chat,
-    get_chat_member, get_chat_scheduled_messages, get_chat_sponsored_messages, get_chat_statistics,
-    get_commands, get_contacts, get_forum_topics, get_full_rich_message, get_group_call,
-    get_installed_sticker_sets, get_me, get_message_link, get_message_properties,
-    get_message_thread_history, get_saved_animations, get_saved_notification_sounds,
-    get_scope_notification_settings, get_secret_chat, get_sticker_set, get_storage_statistics,
-    get_story, get_story_available_reactions, get_supergroup, get_supergroup_full_info,
-    get_supergroup_members, get_user_full_info, get_user_privacy_setting_rules,
-    get_video_chat_invite_link, get_video_chat_rtmp_url, get_web_page_instant_view,
-    input_message_photo, input_message_video, invite_group_call_participant, join_chat,
-    join_group_call, join_video_chat, leave_chat, leave_group_call, load_active_stories,
-    load_chat_welcome_messages, load_chats, load_chats_list, load_group_call_participants,
-    open_chat, open_message_content, open_story, pin_chat_message, process_chat_join_request,
-    recognize_speech, remove_message_reaction, reorder_chat_folders,
-    replace_primary_chat_invite_link, replace_video_chat_rtmp_url, report_chat_sponsored_message,
-    resend_messages, revoke_chat_invite_link, revoke_group_call_invite_link, search_call_messages,
-    search_chat_messages, search_chats, search_messages, search_public_chats,
-    search_recently_found_chats, send_animation, send_call_debug_information, send_call_log,
-    send_call_rating_detail, send_call_signaling_data, send_chat_action, send_chat_action_kind,
-    send_document, send_group_call_message, send_message_album, send_photo, send_poll,
-    send_rich_message, send_sticker, send_text, send_text_story_reply, send_video, send_video_note,
-    send_voice_note, set_authentication_phone_number, set_chat_draft_message,
+    forward_messages, get_archive_chat_list_settings, get_authorization_state,
+    get_available_chat_boost_slots, get_basic_group_full_info, get_callback_query_answer,
+    get_chat_active_stories, get_chat_administrators, get_chat_boost_status, get_chat_event_log,
+    get_chat_folder, get_chat_history, get_chat_invite_links, get_chat_join_requests,
+    get_chat_lists_to_add_chat, get_chat_member, get_chat_scheduled_messages,
+    get_chat_sponsored_messages, get_chat_statistics, get_commands, get_contacts, get_forum_topics,
+    get_full_rich_message, get_group_call, get_installed_sticker_sets, get_me, get_message_link,
+    get_message_properties, get_message_thread_history, get_saved_animations,
+    get_saved_notification_sounds, get_scope_notification_settings, get_secret_chat,
+    get_sticker_set, get_storage_statistics, get_story, get_story_available_reactions,
+    get_supergroup, get_supergroup_full_info, get_supergroup_members, get_user_full_info,
+    get_user_privacy_setting_rules, get_video_chat_invite_link, get_video_chat_rtmp_url,
+    get_web_page_instant_view, input_message_photo, input_message_video,
+    invite_group_call_participant, join_chat, join_group_call, join_video_chat, leave_chat,
+    leave_group_call, load_active_stories, load_chat_welcome_messages, load_chats, load_chats_list,
+    load_group_call_participants, open_chat, open_message_content, open_story, pin_chat_message,
+    process_chat_join_request, read_chat_list, recognize_speech, remove_message_reaction,
+    reorder_chat_folders, replace_primary_chat_invite_link, replace_video_chat_rtmp_url,
+    report_chat_sponsored_message, resend_messages, revoke_chat_invite_link,
+    revoke_group_call_invite_link, search_call_messages, search_chat_messages, search_chats,
+    search_messages, search_public_chats, search_recently_found_chats, send_animation,
+    send_call_debug_information, send_call_log, send_call_rating_detail, send_call_signaling_data,
+    send_chat_action, send_chat_action_kind, send_document, send_group_call_message,
+    send_message_album, send_photo, send_poll, send_rich_message, send_sticker, send_text,
+    send_text_story_reply, send_video, send_video_note, send_voice_note,
+    set_archive_chat_list_settings, set_authentication_phone_number, set_chat_draft_message,
     set_chat_member_status, set_chat_member_tag, set_chat_message_auto_delete_time,
     set_chat_notification_settings, set_chat_permissions, set_chat_slow_mode_delay,
-    set_group_call_participant_volume_level, set_poll_answer, set_scope_notification_settings,
-    set_story_reaction, set_supergroup_username, set_user_privacy_setting_rules,
-    set_video_chat_title, start_group_call_recording, start_group_call_screen_sharing,
-    start_scheduled_video_chat, supergroup_members_filter_administrators_json,
-    supergroup_members_filter_banned_json, supergroup_members_filter_recent_json,
-    supergroup_members_filter_restricted_json, supergroup_members_filter_search_json,
-    toggle_chat_folder_tags, toggle_chat_is_marked_as_unread, toggle_chat_is_pinned,
-    toggle_forum_topic_closed, toggle_forum_topic_pinned, toggle_general_forum_topic_hidden,
+    set_group_call_participant_volume_level, set_pinned_chats, set_poll_answer,
+    set_scope_notification_settings, set_story_reaction, set_supergroup_username,
+    set_user_privacy_setting_rules, set_video_chat_title, start_group_call_recording,
+    start_group_call_screen_sharing, start_scheduled_video_chat,
+    supergroup_members_filter_administrators_json, supergroup_members_filter_banned_json,
+    supergroup_members_filter_recent_json, supergroup_members_filter_restricted_json,
+    supergroup_members_filter_search_json, toggle_chat_folder_tags,
+    toggle_chat_is_marked_as_unread, toggle_chat_is_pinned, toggle_forum_topic_closed,
+    toggle_forum_topic_pinned, toggle_general_forum_topic_hidden,
     toggle_group_call_are_messages_allowed, toggle_group_call_is_my_video_enabled,
     toggle_group_call_is_my_video_paused, toggle_group_call_participant_is_hand_raised,
     toggle_group_call_participant_is_muted, toggle_supergroup_aggressive_anti_spam,
@@ -971,6 +973,21 @@ impl<S: JsonSender> ConnectDriver<S> {
             }),
             _ => None,
         };
+        // Slice CL2: our `createPrivateChat` answer — the bare `chat`
+        // parses as `UpdateNewChat`; the `@extra` tells it apart from a
+        // genuine `updateNewChat`. Captured before `apply` takes the
+        // pending request; opened through the normal `select_chat`
+        // flow (openChat + history) after apply inserts the chat.
+        let created_chat: Option<ChatId> = match &owned.envelope.payload {
+            EnvelopePayload::UpdateNewChat { chat_id, .. } => owned
+                .envelope
+                .extra
+                .and_then(|id| self.session.requests.purpose(id))
+                .and_then(|purpose| {
+                    (purpose == RequestPurpose::CreatePrivateChat).then_some(*chat_id)
+                }),
+            _ => None,
+        };
         // Slice G2: capture forum/welcome/boost mutations before `apply`
         // takes the pending request. The state drops the stale cache on
         // confirmed success; the post-apply refetch reloads it now that
@@ -1030,6 +1047,13 @@ impl<S: JsonSender> ConnectDriver<S> {
                 }
                 _ => {}
             }
+        }
+        // Slice CL2: open the `createPrivateChat` chat (Saved Messages
+        // flow) through the normal chat-open path — `openChat` and
+        // history load. `let _` on purpose: the chat is already in the
+        // model; a failed open must not fail the ingest.
+        if let Some(chat_id) = created_chat {
+            let _ = self.select_chat(chat_id);
         }
         let became_ready = !was_ready && matches!(self.session.auth, AuthorizationState::Ready);
         if became_ready || load_chats_ok {
@@ -6710,6 +6734,210 @@ impl<S: JsonSender> ConnectDriver<S> {
             sent = self.toggle_chat_marked_as_unread(chat_id, false)?.or(sent);
         }
         Ok(sent)
+    }
+
+    /// Slice CL2: `setPinnedChats` (schema 1.8.67, line 13681) — drag
+    /// reorder of the pinned chats. `new_ids` is the full new pinned
+    /// order (highest first), built by the UI from the current model
+    /// order (TGX `ChatsAdapter.movePinnedChat` sends the reordered
+    /// array the same way). The model applies it optimistically via
+    /// `Session::reorder_pinned_chats`; a refusal restores the
+    /// pre-reorder order values. `Ok(None)` = no-op: id-set mismatch
+    /// or a reorder already in flight.
+    pub fn set_pinned_chat_order(
+        &mut self,
+        archived: bool,
+        new_ids: Vec<i64>,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let purpose = RequestPurpose::SetPinnedChats;
+        if self.session.requests.has_purpose(purpose) {
+            return Ok(None);
+        }
+        if self.session.pinned_chat_ids(archived) == new_ids {
+            return Ok(None);
+        }
+        let previous = self.session.reorder_pinned_chats(archived, &new_ids);
+        if previous.is_empty() {
+            return Ok(None);
+        }
+        let extra = self.session.request(purpose, None);
+        if let Err(err) = self
+            .sender
+            .send_json(&set_pinned_chats(extra, archived, &new_ids))
+        {
+            self.session.requests.take(extra);
+            // Transport failure: undo the optimistic swap with the
+            // inverse permutation (same value multiset, original ids).
+            let restored: Vec<i64> = previous.iter().map(|(id, _)| *id).collect();
+            self.session.reorder_pinned_chats(archived, &restored);
+            return Err(err);
+        }
+        if let Some(pending) = self.session.requests.pending_mut(extra) {
+            pending.rollback = Some(RequestRollback::ChatPinOrder { previous, archived });
+        }
+        Ok(Some(extra))
+    }
+
+    /// Slice CL2: `readChatList` (schema 1.8.67, line 13684) — mark all
+    /// chats in the list as read. The badges clear via
+    /// `updateChatReadInbox` / `updateChatUnreadMentionCount`; nothing
+    /// is faked locally. `Ok(None)` = nothing unread or a read already
+    /// in flight.
+    pub fn mark_all_chats_as_read(
+        &mut self,
+        archived: bool,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let purpose = RequestPurpose::ReadChatList;
+        if self.session.requests.has_purpose(purpose) {
+            return Ok(None);
+        }
+        let any_unread = self.session.chats.values().any(|c| {
+            let in_list = if archived {
+                c.in_archive
+            } else {
+                c.in_main_list
+            };
+            in_list && c.is_unread()
+        });
+        if !any_unread {
+            return Ok(None);
+        }
+        let extra = self.session.request(purpose, None);
+        if let Err(err) = self.sender.send_json(&read_chat_list(extra, archived)) {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(Some(extra))
+    }
+
+    /// Slice CL2: `clearRecentlyFoundChats` (schema 1.8.67, line 11671).
+    /// The recents are cleared optimistically — the schema defines no
+    /// update for this, so the client can't wait for confirmation (TGX
+    /// `SearchManager.clearRecentlyFoundChats` clears locally too); a
+    /// refusal surfaces via `chat_action_error` and the next recents
+    /// fetch restores the truth. `Ok(None)` = recents already empty or
+    /// a clear already in flight.
+    pub fn clear_recently_found_chats(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let purpose = RequestPurpose::ClearRecentlyFoundChats;
+        if self.session.requests.has_purpose(purpose) {
+            return Ok(None);
+        }
+        if !(self.session.search.recents && !self.session.search.chat_ids.is_empty()) {
+            return Ok(None);
+        }
+        let extra = self.session.request(purpose, None);
+        if let Err(err) = self.sender.send_json(&clear_recently_found_chats(extra)) {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        self.session.search.chat_ids.clear();
+        self.session.search.status = SearchStatus::Idle;
+        Ok(Some(extra))
+    }
+
+    /// Slice CL2: `getArchiveChatListSettings` (schema 1.8.67, line
+    /// 13421) — one-shot fetch feeding
+    /// `Session::archive_chat_list_settings` (TGX
+    /// `SettingsArchiveChatListController` fetches on open the same
+    /// way). `Ok(None)` = already fetched or a fetch in flight.
+    pub fn fetch_archive_chat_list_settings(
+        &mut self,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let purpose = RequestPurpose::GetArchiveChatListSettings;
+        if self.session.archive_chat_list_settings.is_some()
+            || self.session.requests.has_purpose(purpose)
+        {
+            return Ok(None);
+        }
+        let extra = self.session.request(purpose, None);
+        if let Err(err) = self
+            .sender
+            .send_json(&get_archive_chat_list_settings(extra))
+        {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        self.session.archive_settings_loading = true;
+        Ok(Some(extra))
+    }
+
+    /// Slice CL2: `setArchiveChatListSettings` (schema 1.8.67, line
+    /// 13424). Optimistic flip of the cached settings; a refusal
+    /// restores the previous values. The optimistic value stands
+    /// until the next fetch.
+    pub fn set_archive_chat_list_settings(
+        &mut self,
+        settings: ArchiveChatListSettings,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let purpose = RequestPurpose::SetArchiveChatListSettings;
+        if self.session.requests.has_purpose(purpose) {
+            return Ok(None);
+        }
+        let Some(current) = self.session.archive_chat_list_settings else {
+            return Err(ConnectSendError::InvalidRequest);
+        };
+        if current == settings {
+            return Ok(None);
+        }
+        let extra = self.session.request(purpose, None);
+        if let Err(err) = self
+            .sender
+            .send_json(&set_archive_chat_list_settings(extra, settings))
+        {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        self.session.archive_chat_list_settings = Some(settings);
+        if let Some(pending) = self.session.requests.pending_mut(extra) {
+            pending.rollback = Some(RequestRollback::ArchiveChatListSettings {
+                previous: Some(current),
+            });
+        }
+        Ok(Some(extra))
+    }
+
+    /// Slice CL2: Saved Messages — `createPrivateChat` with the own user
+    /// id (schema 1.8.67, line 9590: "Call createPrivateChat with
+    /// getOption(\"my_id\") and open the chat"). The `chat` answer opens
+    /// the chat via the `CreatePrivateChat` pending purpose. `Ok(None)`
+    /// = own id unknown (call `getMe` first) or a creation already in
+    /// flight; the UI prefers the already-listed self chat when one
+    /// exists.
+    pub fn create_private_chat_with_self(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let purpose = RequestPurpose::CreatePrivateChat;
+        if self.session.requests.has_purpose(purpose) {
+            return Ok(None);
+        }
+        let Some(my_id) = self.session.my_user_id else {
+            return Ok(None);
+        };
+        let extra = self.session.request(purpose, None);
+        if let Err(err) = self
+            .sender
+            .send_json(&create_private_chat(extra, my_id, false))
+        {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(Some(extra))
     }
 
     /// Slice CL1: `deleteChatHistory` (schema 1.8.67, line 11845). The
@@ -12621,6 +12849,429 @@ mod tests {
                 .iter()
                 .all(|j| !j.contains("viewMessages") && !j.contains("toggleChatIsMarkedAsUnread")),
             "noop must not send read requests"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn cl2_set_pinned_chat_order_sends_full_list_and_rolls_back() {
+        // Slice CL2: the pin drag reorder sends the full reordered id
+        // list via `setPinnedChats` (TGX `ChatsAdapter.movePinnedChat`
+        // semantics), applies optimistically, and restores the old
+        // order on refusal.
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = ViewCtlSender::new();
+        let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+        let mut driver =
+            ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+        let seq = AtomicU64::new(0);
+        ready_private_chat(&mut driver, &seq, &dyn_sink);
+        driver
+            .ingest(
+                copy_and_parse(
+                    r#"{"@type":"updateNewChat","chat":{"id":9,"title":"Bob","type":{"@type":"chatTypePrivate","user_id":9},"unread_count":0}}"#,
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        for (id, order) in [(7i64, 300i64), (9, 200)] {
+            let chat = driver.session.chats.get_mut(&id).expect("chat");
+            chat.in_main_list = true;
+            chat.is_pinned = true;
+            chat.order = order;
+        }
+
+        let sent = driver
+            .set_pinned_chat_order(false, vec![9, 7])
+            .expect("send");
+        assert!(sent.is_some(), "order actually changed");
+        let snapshot = recorder.snapshot();
+        let set_pinned = snapshot
+            .iter()
+            .find(|j| j.contains("\"setPinnedChats\""))
+            .expect("setPinnedChats sent");
+        let set_pinned_value: Value = serde_json::from_str(set_pinned).unwrap();
+        assert_eq!(set_pinned_value["chat_list"]["@type"], "chatListMain");
+        assert_eq!(set_pinned_value["chat_ids"], serde_json::json!([9, 7]));
+        // Optimistic: the model order flipped before the answer.
+        assert_eq!(driver.session.chats.get(&9).expect("chat").order, 300);
+        assert_eq!(driver.session.chats.get(&7).expect("chat").order, 200);
+
+        driver
+            .ingest(
+                copy_and_parse(
+                    &format!(
+                        r#"{{"@type":"error","@extra":"{}","code":400,"message":"CHAT_NOT_MODIFIED"}}"#,
+                        sent.unwrap().0
+                    ),
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        assert_eq!(driver.session.chats.get(&7).expect("chat").order, 300);
+        assert_eq!(driver.session.chats.get(&9).expect("chat").order, 200);
+        assert_eq!(
+            driver.session.chat_action_error.as_deref(),
+            Some("could not reorder pinned chats (error 400)")
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn cl2_set_pinned_chat_order_id_mismatch_is_noop() {
+        // Slice CL2: a drag order whose id set doesn't match the
+        // current pins sends nothing — `setPinnedChats` requires the
+        // complete list.
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = ViewCtlSender::new();
+        let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+        let mut driver =
+            ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+        let seq = AtomicU64::new(0);
+        ready_private_chat(&mut driver, &seq, &dyn_sink);
+        let chat = driver.session.chats.get_mut(&7).expect("chat");
+        chat.in_main_list = true;
+        chat.is_pinned = true;
+
+        assert_eq!(
+            driver
+                .set_pinned_chat_order(false, vec![7, 999])
+                .expect("send"),
+            None
+        );
+        assert!(
+            recorder
+                .snapshot()
+                .iter()
+                .all(|j| !j.contains("setPinnedChats")),
+            "mismatched order must not send"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn cl2_mark_all_chats_as_read_sends_read_chat_list() {
+        // Slice CL2: \"Mark all as read\" sends `readChatList`; badges
+        // clear via the server updates, nothing is faked locally.
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = ViewCtlSender::new();
+        let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+        let mut driver =
+            ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+        let seq = AtomicU64::new(0);
+        ready_private_chat(&mut driver, &seq, &dyn_sink);
+        driver.session.chats.get_mut(&7).expect("chat").in_main_list = true;
+
+        let sent = driver.mark_all_chats_as_read(false).expect("send");
+        assert!(sent.is_some(), "chat 7 is unread");
+        let snapshot = recorder.snapshot();
+        let read_list = snapshot
+            .iter()
+            .find(|j| j.contains("\"readChatList\""))
+            .expect("readChatList sent");
+        let read_list_value: Value = serde_json::from_str(read_list).unwrap();
+        assert_eq!(read_list_value["chat_list"]["@type"], "chatListMain");
+        // Second call while the first is in flight is a no-op.
+        assert_eq!(driver.mark_all_chats_as_read(false).expect("send"), None);
+        assert_eq!(
+            snapshot
+                .iter()
+                .filter(|j| j.contains("\"readChatList\""))
+                .count(),
+            1
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn cl2_mark_all_chats_as_read_noop_when_all_read() {
+        // Slice CL2: no unread chats means no `readChatList` — honest
+        // no-op.
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = ViewCtlSender::new();
+        let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+        let mut driver =
+            ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+        let seq = AtomicU64::new(0);
+        ready_private_chat(&mut driver, &seq, &dyn_sink);
+        let chat = driver.session.chats.get_mut(&7).expect("chat");
+        chat.in_main_list = true;
+        chat.unread_count = 0;
+
+        assert_eq!(driver.mark_all_chats_as_read(false).expect("send"), None);
+        assert!(
+            recorder
+                .snapshot()
+                .iter()
+                .all(|j| !j.contains("readChatList")),
+            "all-read must not send"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn cl2_clear_recently_found_chats_optimistic_clear() {
+        // Slice CL2: \"Clear recents\" sends `clearRecentlyFoundChats`
+        // and clears the local empty-search recents immediately (TGX
+        // `SearchManager` clears locally too).
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = ViewCtlSender::new();
+        let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+        let mut driver =
+            ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+        let seq = AtomicU64::new(0);
+        ready_private_chat(&mut driver, &seq, &dyn_sink);
+        driver.session.search.recents = true;
+        driver.session.search.chat_ids = vec![ChatId(7)];
+
+        let sent = driver.clear_recently_found_chats().expect("send");
+        assert!(sent.is_some(), "recents were non-empty");
+        assert!(
+            recorder
+                .snapshot()
+                .iter()
+                .any(|j| j.contains("\"clearRecentlyFoundChats\"")),
+            "clearRecentlyFoundChats sent"
+        );
+        assert!(driver.session.search.chat_ids.is_empty());
+        // A refusal surfaces — the next recents fetch restores truth.
+        driver
+            .ingest(
+                copy_and_parse(
+                    &format!(
+                        r#"{{"@type":"error","@extra":"{}","code":500,"message":"CLEAR_FAILED"}}"#,
+                        sent.unwrap().0
+                    ),
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        assert_eq!(
+            driver.session.chat_action_error.as_deref(),
+            Some("could not clear recent searches (error 500)")
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn cl2_archive_chat_list_settings_fetch_and_set() {
+        // Slice CL2: `getArchiveChatListSettings` fills the session
+        // cache; a toggle sends `setArchiveChatListSettings` with the
+        // three schema fields and flips optimistically.
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = ViewCtlSender::new();
+        let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+        let mut driver =
+            ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+        let seq = AtomicU64::new(0);
+        ready_private_chat(&mut driver, &seq, &dyn_sink);
+
+        let sent = driver.fetch_archive_chat_list_settings().expect("send");
+        assert!(sent.is_some(), "settings not fetched yet");
+        assert!(
+            recorder
+                .snapshot()
+                .iter()
+                .any(|j| j.contains("\"getArchiveChatListSettings\"")),
+            "getArchiveChatListSettings sent"
+        );
+        driver
+            .ingest(
+                copy_and_parse(
+                    &format!(
+                        r#"{{"@type":"archiveChatListSettings","@extra":"{}","archive_and_mute_new_chats_from_unknown_users":true,"keep_unmuted_chats_archived":false,"keep_chats_from_folders_archived":true}}"#,
+                        sent.unwrap().0
+                    ),
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        assert!(driver.session.archive_chat_list_settings.is_some());
+        assert!(!driver.session.archive_settings_loading);
+
+        let mut next = driver.session.archive_chat_list_settings.expect("fetched");
+        next.keep_unmuted_chats_archived = true;
+        let sent = driver.set_archive_chat_list_settings(next).expect("send");
+        assert!(sent.is_some(), "a field actually changed");
+        let snapshot = recorder.snapshot();
+        let set = snapshot
+            .iter()
+            .find(|j| j.contains("\"setArchiveChatListSettings\""))
+            .expect("setArchiveChatListSettings sent");
+        let set_value: Value = serde_json::from_str(set).unwrap();
+        assert_eq!(set_value["settings"]["keep_unmuted_chats_archived"], true);
+        assert!(
+            driver
+                .session
+                .archive_chat_list_settings
+                .expect("cached")
+                .keep_unmuted_chats_archived,
+            "optimistic flip applied"
+        );
+        driver
+            .ingest(
+                copy_and_parse(
+                    &format!(
+                        r#"{{"@type":"error","@extra":"{}","code":400,"message":"ARCHIVE_SETTINGS_INVALID"}}"#,
+                        sent.unwrap().0
+                    ),
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        assert!(
+            !driver
+                .session
+                .archive_chat_list_settings
+                .expect("cached")
+                .keep_unmuted_chats_archived,
+            "refusal restored the old settings"
+        );
+        assert_eq!(
+            driver.session.chat_action_error.as_deref(),
+            Some("could not save archive settings (error 400)")
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn cl2_create_private_chat_answer_opens_through_select_chat() {
+        // Slice CL2: the `createPrivateChat` answer is a bare `chat`
+        // object (schema 1.8.67, line 13312), parsed as `UpdateNewChat`.
+        // The driver opens it through the normal `select_chat` flow —
+        // `openChat` + history — never by poking `session.open_chat`.
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = ViewCtlSender::new();
+        let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+        let mut driver =
+            ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+        let seq = AtomicU64::new(0);
+        ready_private_chat(&mut driver, &seq, &dyn_sink);
+        driver.session.my_user_id = Some(777);
+
+        let extra = driver
+            .create_private_chat_with_self()
+            .expect("send")
+            .expect("request sent");
+        assert!(
+            recorder
+                .snapshot()
+                .iter()
+                .any(|j| j.contains("\"createPrivateChat\"")),
+            "createPrivateChat sent"
+        );
+        driver
+            .ingest(
+                copy_and_parse(
+                    &format!(
+                        r#"{{"@type":"chat","@extra":"{}","id":777001,"title":"Saved Messages","type":{{"@type":"chatTypePrivate","user_id":777}},"unread_count":0}}"#,
+                        extra.0
+                    ),
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        assert_eq!(driver.session.open_chat, Some(ChatId(777001)));
+        assert!(
+            driver.session.chats.contains_key(&777001),
+            "created chat inserted into the model"
+        );
+        let snapshot = recorder.snapshot();
+        assert!(
+            snapshot.iter().any(|j| {
+                let v: Value = serde_json::from_str(j).unwrap();
+                v["@type"] == "openChat" && v["chat_id"] == 777001
+            }),
+            "openChat sent for the created chat"
+        );
+        assert!(
+            snapshot.iter().any(|j| {
+                let v: Value = serde_json::from_str(j).unwrap();
+                v["@type"] == "getChatHistory" && v["chat_id"] == 777001
+            }),
+            "history requested for the created chat"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn cl2_create_private_chat_refusal_opens_nothing() {
+        // Slice CL2: a refused `createPrivateChat` must not open
+        // anything — the refusal surfaces on the chat-action error
+        // line instead of silently doing nothing.
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = ViewCtlSender::new();
+        let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+        let mut driver =
+            ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+        let seq = AtomicU64::new(0);
+        ready_private_chat(&mut driver, &seq, &dyn_sink);
+        driver.session.my_user_id = Some(777);
+
+        let extra = driver
+            .create_private_chat_with_self()
+            .expect("send")
+            .expect("request sent");
+        driver
+            .ingest(
+                copy_and_parse(
+                    &format!(
+                        r#"{{"@type":"error","@extra":"{}","code":400,"message":"CHAT_CREATE_FAILED"}}"#,
+                        extra.0
+                    ),
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        assert_eq!(driver.session.open_chat, None, "nothing opened on refusal");
+        assert_eq!(
+            driver.session.chat_action_error.as_deref(),
+            Some("could not open Saved Messages (error 400)")
+        );
+        assert!(
+            !recorder
+                .snapshot()
+                .iter()
+                .any(|j| j.contains("\"openChat\"")),
+            "no openChat sent on refusal"
         );
         let _ = std::fs::remove_dir_all(&dir);
     }

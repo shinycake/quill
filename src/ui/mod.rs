@@ -67,7 +67,9 @@ use quill::telegram::envelope::{
     toggle_chosen_emoji_reaction,
 };
 use quill::telegram::requests::SelfDestructSend;
-use quill::telegram::requests::{CallPrivacySetting, ChatEventLogFilterSet, PrivacyWho};
+use quill::telegram::requests::{
+    ArchiveChatListSettings, CallPrivacySetting, ChatEventLogFilterSet, PrivacyWho,
+};
 use quill::text::{TextEntity, styled_runs, utf8_to_utf16_offset};
 use quill::video::VideoNoteCapture;
 use quill::voice::{self, VoiceCapture, format_voice_duration};
@@ -1211,6 +1213,11 @@ pub struct QuillApp {
     inline_bot_alert_shown: bool,
     /// Phase S2: storage-usage overlay (TGX Settings → Data and Storage).
     storage_usage_open: bool,
+    /// Slice CL2: chat-list category filter (TGX `ChatFilter` unread /
+    /// archive categories, `MainController` pager categories). `All` is
+    /// the unfiltered list; `Unread` filters to unread chats;
+    /// `Archived` shows only the archive.
+    chat_filter: ChatListFilter,
     /// Phase S1: "New secret chat" contact-picker overlay (sidebar).
     new_secret_picker_open: bool,
     /// tdesktop `Data::ForwardDraft` / history multi-select.
@@ -1508,6 +1515,17 @@ pub enum ScreenshotDemo {
     /// marked-as-unread row, and the row context menu open (injected,
     /// no live Telegram).
     ReadyChatListMenu,
+    /// Slice CL2: chat list with folder tabs, All/Unread/Archived
+    /// category chips, pinned + unread chats, an expanded archive
+    /// section, and the Saved Messages entry (injected, no live
+    /// Telegram).
+    ReadyChatList,
+    /// Slice CL2: the archive auto-settings dialog over the
+    /// `ReadyChatList` fixture (injected settings, no live Telegram).
+    ReadyChatListArchive,
+    /// Slice CL2: sidebar search with an empty result (injected, no
+    /// live Telegram).
+    ReadyChatListSearch,
     /// Peer `chatActionTyping` in the open-chat header and sidebar row.
     ReadyTyping,
     /// Sticker panel + sticker in history (injected, no live Telegram).
@@ -1809,6 +1827,17 @@ enum PaneMode {
     Synthetic,
     Connecting,
     Ready,
+}
+
+/// Slice CL2: chat-list category filter (TGX `ChatFilter` unread /
+/// archive categories). View state on `QuillApp`, not the session —
+/// it filters the already-loaded model, never the server query.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum ChatListFilter {
+    #[default]
+    All,
+    Unread,
+    Archived,
 }
 
 /// Which kind of track the shared ffplay child is playing (Phase 4.6).
@@ -2367,6 +2396,34 @@ impl QuillApp {
                     ConnectUiStatus::DemoReadyChats,
                     None,
                     "screenshot demo — chat list: pinned, archived, marked unread, row menu".into(),
+                    AuthorizationState::Ready,
+                )
+            }
+            Some(ScreenshotDemo::ReadyChatList) => {
+                demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
+                (
+                    ConnectUiStatus::DemoReadyChats,
+                    None,
+                    "screenshot demo — chat list: folders, category filters, pinned drag, archive"
+                        .into(),
+                    AuthorizationState::Ready,
+                )
+            }
+            Some(ScreenshotDemo::ReadyChatListArchive) => {
+                demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
+                (
+                    ConnectUiStatus::DemoReadyChats,
+                    None,
+                    "screenshot demo — chat list: archive settings dialog".into(),
+                    AuthorizationState::Ready,
+                )
+            }
+            Some(ScreenshotDemo::ReadyChatListSearch) => {
+                demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
+                (
+                    ConnectUiStatus::DemoReadyChats,
+                    None,
+                    "screenshot demo — chat list: search empty state".into(),
                     AuthorizationState::Ready,
                 )
             }
@@ -3072,6 +3129,7 @@ impl QuillApp {
             event_log_search: None,
             event_log_admin_filter: None,
             storage_usage_open: false,
+            chat_filter: ChatListFilter::All,
             new_secret_picker_open: false,
             pending_forward: None,
             forward_picker_open: false,
@@ -3295,6 +3353,34 @@ impl QuillApp {
                 position: Point::new(px(120.), px(490.)),
             });
             app.status_note = "screenshot demo — pin · archive · marked unread · row menu".into();
+        }
+        // Slice CL2: folder tabs + category chips + pinned chat +
+        // expanded archive section; Main stays selected.
+        if matches!(demo, Some(ScreenshotDemo::ReadyChatList)) {
+            if let Some(session) = app.demo_session.as_mut() {
+                app.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_chat_list(session, &app.demo_sink, &app.demo_seq);
+            }
+            app.status_note = "screenshot demo — folders · categories · pinned · archive".into();
+        }
+        // Slice CL2: same chat-list fixture with the archive
+        // auto-settings dialog open.
+        if matches!(demo, Some(ScreenshotDemo::ReadyChatListArchive)) {
+            if let Some(session) = app.demo_session.as_mut() {
+                app.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_chat_list(session, &app.demo_sink, &app.demo_seq);
+                session.archive_settings_open = true;
+            }
+            app.status_note = "screenshot demo — archive settings dialog".into();
+        }
+        // Slice CL2: sidebar search showing the empty-result state.
+        if matches!(demo, Some(ScreenshotDemo::ReadyChatListSearch)) {
+            if let Some(session) = app.demo_session.as_mut() {
+                session.open_search();
+                session.search.begin_query("xyzzy-no-such-chat");
+                session.search.status = SearchStatus::Empty;
+            }
+            app.status_note = "screenshot demo — search empty state".into();
         }
         if matches!(demo, Some(ScreenshotDemo::ReadyNotificationSound)) {
             if let Some(session) = app.demo_session.as_mut() {
@@ -12763,11 +12849,50 @@ impl QuillApp {
                     this.open_folder_manage(cx);
                 })),
         );
+        // Slice CL2: category filters (TGX `ChatFilter` unread category
+        // and the archive pager category). They filter the loaded model
+        // — never the server query. `Archived` is global, so it leaves
+        // any folder tab.
+        for (filter, name) in [
+            (ChatListFilter::Unread, "Unread"),
+            (ChatListFilter::Archived, "Archived"),
+        ] {
+            let active = self.chat_filter == filter;
+            let id = match filter {
+                ChatListFilter::Unread => "tab-filter-unread",
+                ChatListFilter::Archived => "tab-filter-archived",
+                ChatListFilter::All => "tab-filter-all",
+            };
+            row = row.child(
+                div()
+                    .id(id)
+                    .cursor_pointer()
+                    .px_2()
+                    .py_1()
+                    .rounded_md()
+                    .text_xs()
+                    .font_medium()
+                    .bg(if active {
+                        cx.theme().accent.opacity(0.15)
+                    } else {
+                        cx.theme().sidebar
+                    })
+                    .child(name)
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.chat_filter = filter;
+                        if filter == ChatListFilter::Archived {
+                            this.folder_tab = None;
+                        }
+                        cx.notify();
+                    })),
+            );
+        }
         row.into_any_element()
     }
 
     fn open_folder_tab(&mut self, folder: Option<i32>, cx: &mut Context<Self>) {
         self.folder_tab = folder;
+        self.chat_filter = ChatListFilter::All;
         self.contacts_tab_open = false;
         if let (Some(live), Some(folder_id)) = (self.live.as_mut(), folder)
             && let Err(err) = live.driver.load_folder_chats(folder_id)
@@ -12775,6 +12900,305 @@ impl QuillApp {
             self.status_note = format!("folder load failed: {err:?}");
         }
         cx.notify();
+    }
+
+    /// Slice CL2: pin-drag drop — moves the dragged pinned chat to the
+    /// drop target's slot, then sends the full reordered pinned-id list
+    /// via `setPinnedChats` (TGX `ChatsAdapter.movePinnedChat`). A drop
+    /// onto its own row is a no-op.
+    fn drop_pinned_chat(
+        &mut self,
+        dragged: ChatId,
+        archived: bool,
+        target: ChatId,
+        cx: &mut Context<Self>,
+    ) {
+        if dragged == target {
+            return;
+        }
+        let mut ids = match self.session() {
+            Some(s) => s.pinned_chat_ids(archived),
+            None => return,
+        };
+        if !ids.contains(&dragged.0) || !ids.contains(&target.0) {
+            return;
+        }
+        ids.retain(|id| *id != dragged.0);
+        let at = ids
+            .iter()
+            .position(|id| *id == target.0)
+            .unwrap_or(ids.len());
+        ids.insert(at, dragged.0);
+        if let Some(live) = self.live.as_mut() {
+            if let Err(err) = live.driver.set_pinned_chat_order(archived, ids) {
+                self.status_note = format!("pin reorder failed: {err:?}");
+            }
+        } else if let Some(session) = self.demo_session.as_mut() {
+            session.reorder_pinned_chats(archived, &ids);
+        }
+        cx.notify();
+    }
+
+    /// Slice CL2: "Mark all as read" for a chat list — `readChatList`
+    /// (schema 1.8.67, line 13684). The badges clear via the server
+    /// updates; nothing is faked locally.
+    fn mark_all_chats_as_read(&mut self, archived: bool, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            if let Err(err) = live.driver.mark_all_chats_as_read(archived) {
+                self.status_note = format!("mark all read failed: {err:?}");
+            }
+        } else if let Some(session) = self.demo_session.as_mut() {
+            // Demo: clear the badges directly so the fixture shows the
+            // result (no server sends updates in a screenshot demo).
+            for chat in session.chats.values_mut() {
+                let in_list = if archived {
+                    chat.in_archive
+                } else {
+                    chat.in_main_list
+                };
+                if in_list {
+                    chat.unread_count = 0;
+                    chat.is_marked_as_unread = false;
+                }
+            }
+        }
+        cx.notify();
+    }
+
+    /// Slice CL2: archive section collapse toggle.
+    fn toggle_archive_collapsed(&mut self, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            let collapsed = live.driver.session.archive_collapsed;
+            live.driver.session.archive_collapsed = !collapsed;
+        } else if let Some(session) = self.demo_session.as_mut() {
+            session.archive_collapsed = !session.archive_collapsed;
+        }
+        cx.notify();
+    }
+
+    /// Slice CL2: Saved Messages entry — opens the private chat with
+    /// yourself (schema 1.8.67, line 9590: "Call createPrivateChat
+    /// with getOption(\"my_id\") and open the chat"). An already-listed
+    /// self chat opens directly; otherwise `createPrivateChat` is sent
+    /// and its answer opens the chat.
+    fn open_saved_messages(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let self_chat = self.session().and_then(|s| {
+            let my_id = s.my_user_id?;
+            s.chats
+                .values()
+                .find(|c| matches!(c.kind, ChatKind::Private { user_id } if user_id.0 == my_id))
+                .map(|c| c.id)
+        });
+        if let Some(chat_id) = self_chat {
+            self.select_listed_chat(chat_id, window, cx);
+            return;
+        }
+        if self.live.is_some() {
+            // Flush the open chat's composer before switching away — the
+            // answer arrives asynchronously, so the driver can't do it.
+            self.flush_leaving_draft(cx);
+        }
+        if let Some(live) = self.live.as_mut() {
+            match live.driver.create_private_chat_with_self() {
+                Ok(Some(_)) => {}
+                Ok(None) if live.driver.session.my_user_id.is_none() => {
+                    self.status_note = "account info not loaded yet".into();
+                }
+                Ok(None) => {}
+                Err(err) => self.status_note = format!("saved messages failed: {err:?}"),
+            }
+        } else {
+            self.status_note = "no Saved Messages chat in this demo".into();
+        }
+        cx.notify();
+    }
+
+    /// Slice CL2: "Clear" on the Recent searches heading —
+    /// `clearRecentlyFoundChats` (schema 1.8.67, line 11671); the
+    /// recents clear optimistically (TGX `SearchManager` clears
+    /// locally too, lines 788-796).
+    fn clear_search_recents(&mut self, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            if let Err(err) = live.driver.clear_recently_found_chats() {
+                self.status_note = format!("clear recents failed: {err:?}");
+            }
+        } else if let Some(session) = self.demo_session.as_mut() {
+            session.search.chat_ids.clear();
+            session.search.status = SearchStatus::Idle;
+        }
+        cx.notify();
+    }
+
+    /// Slice CL2: open the archive auto-settings dialog (TGX
+    /// `SettingsArchiveChatListController` fetches
+    /// `getArchiveChatListSettings` on open).
+    fn open_archive_settings(&mut self, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            live.driver.session.archive_settings_open = true;
+            if let Err(err) = live.driver.fetch_archive_chat_list_settings() {
+                self.status_note = format!("archive settings failed: {err:?}");
+            }
+        } else if let Some(session) = self.demo_session.as_mut() {
+            session.archive_settings_open = true;
+        }
+        cx.notify();
+    }
+
+    /// Slice CL2: flip one archive auto-setting — optimistic local flip
+    /// plus `setArchiveChatListSettings`; a refusal restores the old
+    /// values (driver rollback).
+    fn toggle_archive_setting(&mut self, index: usize, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            let Some(mut settings) = live.driver.session.archive_chat_list_settings else {
+                self.status_note = "archive settings still loading…".into();
+                cx.notify();
+                return;
+            };
+            let enabled = archive_setting_get(&settings, index);
+            archive_setting_set(&mut settings, index, !enabled);
+            if let Err(err) = live.driver.set_archive_chat_list_settings(settings) {
+                self.status_note = format!("archive setting failed: {err:?}");
+            }
+        } else if let Some(session) = self.demo_session.as_mut() {
+            if let Some(mut settings) = session.archive_chat_list_settings {
+                let enabled = archive_setting_get(&settings, index);
+                archive_setting_set(&mut settings, index, !enabled);
+                session.archive_chat_list_settings = Some(settings);
+            }
+        }
+        cx.notify();
+    }
+
+    /// Slice CL2: the archive auto-settings dialog — the three
+    /// schema-backed toggles (schema 1.8.67, line 3512), with TGX's
+    /// labels (`SettingsArchiveChatListController`). TGX's fourth
+    /// "archive as folder" appearance toggle is a client-side display
+    /// preference and stays out of scope.
+    fn archive_settings_overlay(&self, cx: &mut Context<Self>) -> AnyElement {
+        let settings = self.session().and_then(|s| s.archive_chat_list_settings);
+        let loading = self.session().is_some_and(|s| s.archive_settings_loading);
+        let mut body = div().flex().flex_col().gap_3();
+        if loading {
+            body = body.child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("Loading archive settings…"),
+            );
+        } else if settings.is_none() {
+            body = body
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child("Could not load archive settings."),
+                )
+                .child(
+                    Button::new("archive-settings-retry")
+                        .label("Retry")
+                        .ghost()
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.open_archive_settings(cx);
+                        })),
+                );
+        } else {
+            let settings = settings.expect("checked");
+            for (index, (title, label, desc)) in ARCHIVE_SETTING_ROWS.iter().enumerate() {
+                let enabled = archive_setting_get(&settings, index);
+                body = body.child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap_1()
+                        .child(div().text_xs().font_semibold().child(*title))
+                        .child(
+                            Button::new(format!("archive-setting-{index}"))
+                                .label(if enabled {
+                                    format!("☑ {label}")
+                                } else {
+                                    format!("☐ {label}")
+                                })
+                                .ghost()
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.toggle_archive_setting(index, cx);
+                                })),
+                        )
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(cx.theme().muted_foreground)
+                                .child(*desc),
+                        ),
+                );
+            }
+        }
+        div()
+            .id("archive-settings-overlay")
+            .absolute()
+            .top_0()
+            .left_0()
+            .right_0()
+            .bottom_0()
+            .flex()
+            .items_center()
+            .justify_center()
+            .child(
+                div()
+                    .id("archive-settings-backdrop")
+                    .absolute()
+                    .top_0()
+                    .left_0()
+                    .right_0()
+                    .bottom_0()
+                    .bg(rgba(0x000000e6))
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.set_archive_settings_open(false);
+                        cx.notify();
+                    })),
+            )
+            .child(
+                div()
+                    .id("archive-settings-dialog")
+                    .flex()
+                    .flex_col()
+                    .gap_2()
+                    .px_4()
+                    .py_3()
+                    .rounded_lg()
+                    .bg(cx.theme().sidebar)
+                    .border_1()
+                    .border_color(cx.theme().border)
+                    .min_w(px(360.))
+                    .max_w(px(480.))
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .justify_between()
+                            .child(div().font_semibold().child("Archive settings"))
+                            .child(
+                                Button::new("close-archive-settings")
+                                    .label("Close")
+                                    .ghost()
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.set_archive_settings_open(false);
+                                        cx.notify();
+                                    })),
+                            ),
+                    )
+                    .child(body),
+            )
+            .into_any_element()
+    }
+
+    /// Slice CL2: show/hide the archive settings dialog on the active
+    /// session.
+    fn set_archive_settings_open(&mut self, open: bool) {
+        if let Some(live) = self.live.as_mut() {
+            live.driver.session.archive_settings_open = open;
+        } else if let Some(session) = self.demo_session.as_mut() {
+            session.archive_settings_open = open;
+        }
     }
 
     fn retry_contacts(&mut self, cx: &mut Context<Self>) {
@@ -27222,12 +27646,26 @@ impl QuillApp {
                 )
             })
             .when(!chats.is_empty(), |this| {
-                let mut block = div()
-                    .id("search-chats")
-                    .flex()
-                    .flex_col()
-                    .gap_1()
-                    .child(div().text_xs().font_semibold().child(chat_heading));
+                let mut block = div().id("search-chats").flex().flex_col().gap_1().child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .child(div().text_xs().font_semibold().child(chat_heading))
+                        // Slice CL2: "Clear" on the Recent heading —
+                        // `clearRecentlyFoundChats` (TGX
+                        // `SearchManager.clearRecentlyFoundChats`).
+                        .when(recents, |this| {
+                            this.child(
+                                Button::new("clear-search-recents")
+                                    .label("Clear")
+                                    .ghost()
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.clear_search_recents(cx);
+                                    })),
+                            )
+                        }),
+                );
                 for (id, title, preview) in chats {
                     block = block.child(search_result_row(
                         ("search-chat", id.0 as u64),
@@ -27610,6 +28048,11 @@ impl Render for QuillApp {
             .when(self.storage_usage_open, |this| {
                 this.child(self.storage_usage_overlay(cx))
             })
+            // Slice CL2: archive auto-settings overlay.
+            .when(
+                self.session().is_some_and(|s| s.archive_settings_open),
+                |this| this.child(self.archive_settings_overlay(cx)),
+            )
             // Phase C1: call overlay above everything else.
             .when_some(self.call_overlay(cx), |this, overlay| this.child(overlay))
             // Phase C3a: group-call (voice chat) overlay above the call
@@ -29278,6 +29721,36 @@ impl QuillApp {
                 } else {
                     list = list.child(self.folder_tabs(cx));
                     list = list.child(self.sidebar_search_field(cx));
+                    // Slice CL2: "Mark all as read" for the main list
+                    // (TGX overflow menu, `readChatList`). Hidden when
+                    // there is nothing unread to mark or the view is
+                    // filtered to the archive.
+                    let main_unread = self
+                        .session()
+                        .is_some_and(|s| s.chats.values().any(|c| c.in_main_list && c.is_unread()));
+                    if self.folder_tab.is_none()
+                        && self.chat_filter != ChatListFilter::Archived
+                        && main_unread
+                    {
+                        list = list.child(
+                            Button::new("mark-all-read")
+                                .label("✓ Mark all read")
+                                .ghost()
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.mark_all_chats_as_read(false, cx);
+                                })),
+                        );
+                    }
+                    // Slice CL2: Saved Messages entry (schema 1.8.67, line
+                    // 9590 — `createPrivateChat` with the own id, then open
+                    // the chat).
+                    list = list.child(
+                        Button::new("saved-messages")
+                            .label("💾 Saved Messages")
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.open_saved_messages(window, cx);
+                            })),
+                    );
                     // Phase S1: "New secret chat" entry (TGX main-menu "New
                     // Secret Chat") — toggles the contact picker below.
                     list = list.child(
@@ -29358,6 +29831,7 @@ impl QuillApp {
                     } else {
                         let open = self.session().and_then(|s| s.open_chat);
                         let folder = self.folder_tab;
+                        let filter = self.chat_filter;
                         // Parity slice: folder names + tags flag for chat-row
                         // chips.
                         let (folder_names, show_folder_tags) = self
@@ -29372,7 +29846,7 @@ impl QuillApp {
                                 )
                             })
                             .unwrap_or_default();
-                        let chats: Vec<ChatSummary> = self
+                        let mut chats: Vec<ChatSummary> = self
                             .session()
                             .map(|s| match folder {
                                 Some(folder_id) => s
@@ -29383,7 +29857,17 @@ impl QuillApp {
                                 None => s.ordered_chats().into_iter().cloned().collect(),
                             })
                             .unwrap_or_default();
-                        if chats.is_empty() {
+                        // Slice CL2: the Unread category filters the loaded
+                        // model (TGX `ChatFilter` unread predicate:
+                        // unread_count > 0 or marked-as-unread,
+                        // `ChatFilter.java:166`) — never the server query.
+                        if filter == ChatListFilter::Unread {
+                            chats.retain(|c| c.is_unread());
+                        }
+                        // Slice CL2: the Archived category shows only the
+                        // archive section.
+                        let show_main_list = filter != ChatListFilter::Archived;
+                        if show_main_list && chats.is_empty() {
                             let loading = self.session().is_some_and(|s| !s.chats_exhausted);
                             list = list.child(
                                 div()
@@ -29391,6 +29875,8 @@ impl QuillApp {
                                     .text_color(cx.theme().muted_foreground)
                                     .child(if loading && folder.is_none() {
                                         "Loading chats…"
+                                    } else if filter == ChatListFilter::Unread {
+                                        "No unread chats."
                                     } else if folder.is_some() {
                                         "No chats in this folder yet."
                                     } else {
@@ -29398,6 +29884,14 @@ impl QuillApp {
                                     }),
                             );
                         }
+                        // Slice CL2: pin drag runs only on the unfiltered
+                        // list with at least two pinned chats (TGX
+                        // `ChatsAdapter`).
+                        let pin_draggable = filter == ChatListFilter::All
+                            && folder.is_none()
+                            && self
+                                .session()
+                                .is_some_and(|s| s.pinned_chat_ids(false).len() >= 2);
                         // Parity slice: chat photos resolve here (once per
                         // render) and are sandboxed before display.
                         let media_roots = self.media_display_roots();
@@ -29406,17 +29900,21 @@ impl QuillApp {
                                 .and_then(|s| s.chat_photo_path(chat.id))
                                 .and_then(|path| sandboxed_display_path(path, &media_roots))
                         };
-                        for chat in chats {
-                            let selected = open == Some(chat.id);
-                            let photo = photo_for(&chat);
-                            list = list.child(session_chat_row(
-                                &chat,
-                                selected,
-                                &folder_names,
-                                show_folder_tags,
-                                photo.as_deref(),
-                                cx,
-                            ));
+                        if show_main_list {
+                            for chat in chats {
+                                let selected = open == Some(chat.id);
+                                let photo = photo_for(&chat);
+                                list = list.child(session_chat_row(
+                                    &chat,
+                                    selected,
+                                    &folder_names,
+                                    show_folder_tags,
+                                    photo.as_deref(),
+                                    pin_draggable && chat.is_pinned,
+                                    false,
+                                    cx,
+                                ));
+                            }
                         }
                         // Parity slice: folder chats page eagerly — the driver
                         // re-requests `loadChats(chatListFolder)` after each
@@ -29426,31 +29924,104 @@ impl QuillApp {
                         // Archive stays as-is under the main list; a folder
                         // tab shows only that folder's chats.
                         if folder.is_none() {
-                            let archived: Vec<ChatSummary> = self
+                            let mut archived: Vec<ChatSummary> = self
                                 .session()
                                 .map(|s| s.ordered_archived_chats().into_iter().cloned().collect())
                                 .unwrap_or_default();
-                            if !archived.is_empty() {
+                            if filter == ChatListFilter::Unread {
+                                archived.retain(|c| c.is_unread());
+                            }
+                            if !archived.is_empty() || filter == ChatListFilter::Archived {
+                                // Slice CL2: the archive header collapses
+                                // the section, marks the archive read, and
+                                // opens the auto-archive settings. The
+                                // Archived category forces the section open.
+                                let collapsed = filter != ChatListFilter::Archived
+                                    && self.session().is_some_and(|s| s.archive_collapsed);
+                                let any_unread = archived.iter().any(|c| c.is_unread());
+                                let archive_draggable = (filter == ChatListFilter::All
+                                    || filter == ChatListFilter::Archived)
+                                    && self
+                                        .session()
+                                        .is_some_and(|s| s.pinned_chat_ids(true).len() >= 2);
                                 list = list.child(
                                     div()
                                         .id("archive-section")
                                         .mt_2()
-                                        .text_xs()
-                                        .font_semibold()
-                                        .text_color(cx.theme().muted_foreground)
-                                        .child("Archived"),
+                                        .flex()
+                                        .items_center()
+                                        .justify_between()
+                                        .child(
+                                            div()
+                                                .id("archive-section-toggle")
+                                                .cursor_pointer()
+                                                .text_xs()
+                                                .font_semibold()
+                                                .text_color(cx.theme().muted_foreground)
+                                                .child(format!(
+                                                    "{} Archived ({})",
+                                                    if collapsed { "▸" } else { "▾" },
+                                                    archived.len()
+                                                ))
+                                                .on_click(cx.listener(|this, _, _, cx| {
+                                                    this.toggle_archive_collapsed(cx);
+                                                })),
+                                        )
+                                        .child(
+                                            div()
+                                                .flex()
+                                                .items_center()
+                                                .gap_1()
+                                                .when(any_unread && !collapsed, |this| {
+                                                    this.child(
+                                                        Button::new("archive-mark-read")
+                                                            .label("✓")
+                                                            .ghost()
+                                                            .on_click(cx.listener(
+                                                                |this, _, _, cx| {
+                                                                    this.mark_all_chats_as_read(
+                                                                        true, cx,
+                                                                    );
+                                                                },
+                                                            )),
+                                                    )
+                                                })
+                                                .child(
+                                                    Button::new("archive-settings")
+                                                        .label("⚙")
+                                                        .ghost()
+                                                        .on_click(cx.listener(|this, _, _, cx| {
+                                                            this.open_archive_settings(cx);
+                                                        })),
+                                                ),
+                                        ),
                                 );
-                                for chat in archived {
-                                    let selected = open == Some(chat.id);
-                                    let photo = photo_for(&chat);
-                                    list = list.child(session_chat_row(
-                                        &chat,
-                                        selected,
-                                        &folder_names,
-                                        show_folder_tags,
-                                        photo.as_deref(),
-                                        cx,
-                                    ));
+                                if !collapsed {
+                                    // Collapsed keeps the rows hidden; the
+                                    // header above still shows the count.
+                                    if archived.is_empty() {
+                                        list = list.child(
+                                            div()
+                                                .text_xs()
+                                                .text_color(cx.theme().muted_foreground)
+                                                .child("No archived chats."),
+                                        );
+                                    } else {
+                                        for chat in archived {
+                                            let selected = open == Some(chat.id);
+                                            let photo = photo_for(&chat);
+                                            list = list.child(session_chat_row(
+                                                &chat,
+                                                selected,
+                                                &folder_names,
+                                                show_folder_tags,
+                                                photo.as_deref(),
+                                                archive_draggable && chat.archive_is_pinned,
+                                                true,
+                                                cx,
+                                            ));
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -32114,6 +32685,36 @@ fn apply_ready_chat_list_menu(session: &mut Session, sink: &Arc<MemorySink>, seq
     }
 }
 
+/// Slice CL2: chat-list screenshot fixture — folder tabs (Work/News;
+/// the chats stay on Main so the Main tab renders with the category
+/// chips), chat 12 moved to the archive (expanded section), chat 11
+/// pinned + unread, and the archive auto-settings seeded. All injected
+/// through the normal reducer, no live Telegram.
+fn apply_ready_chat_list(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let folders = r#"{"@type":"updateChatFolders","chat_folders":[{"@type":"chatFolderInfo","id":1,"name":{"@type":"chatFolderName","text":{"@type":"formattedText","text":"Work","entities":[]}},"icon":{"@type":"chatFolderIcon","name":"Work"},"color_id":2,"is_shareable":false,"has_my_invite_links":false},{"@type":"chatFolderInfo","id":2,"name":{"@type":"chatFolderName","text":{"@type":"formattedText","text":"News","entities":[]}},"icon":{"@type":"chatFolderIcon","name":"Channels"},"color_id":4,"is_shareable":false,"has_my_invite_links":false}],"main_chat_list_position":0,"are_tags_enabled":false}"#;
+    if let Some(owned) = copy_and_parse(folders, seq, &dyn_sink) {
+        session.apply(owned);
+    }
+    let jsons = [
+        r#"{"@type":"updateChatPosition","chat_id":12,"position":{"@type":"chatPosition","list":{"@type":"chatListMain"},"order":"0","is_pinned":false}}"#.to_string(),
+        r#"{"@type":"updateChatRemovedFromList","chat_id":12,"chat_list":{"@type":"chatListMain"}}"#.to_string(),
+        r#"{"@type":"updateChatPosition","chat_id":12,"position":{"@type":"chatPosition","list":{"@type":"chatListArchive"},"order":"20","is_pinned":false}}"#.to_string(),
+        r#"{"@type":"updateChatAddedToList","chat_id":12,"chat_list":{"@type":"chatListArchive"}}"#.to_string(),
+    ];
+    for json in jsons {
+        if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
+            session.apply(owned);
+        }
+    }
+    session.archive_collapsed = false;
+    session.archive_chat_list_settings = Some(ArchiveChatListSettings {
+        archive_and_mute_new_chats_from_unknown_users: false,
+        keep_unmuted_chats_archived: true,
+        keep_chats_from_folders_archived: false,
+    });
+}
+
 /// `ReadySlowMode` fixture (Phase A1): a dedicated supergroup
 /// ("Slow-mode demo group", chat id 17) with slow mode enabled
 /// (`slow_mode_delay: 30`, `slow_mode_delay_expires_in: 25.0`) and the
@@ -32720,10 +33321,20 @@ fn session_chat_row(
     // (`chat.photo.small`), if any; the avatar falls back to colored
     // initials otherwise.
     photo_path: Option<&std::path::Path>,
+    // Slice CL2: pinned rows are drag-reorderable, but only on the
+    // unfiltered list with at least two pinned chats (TGX
+    // `ChatsAdapter`); the caller computes this.
+    draggable: bool,
+    // Slice CL2: which pinned list the row is in (`setPinnedChats`
+    // takes main or archive).
+    archived: bool,
     cx: &mut Context<QuillApp>,
 ) -> impl IntoElement {
     let id = chat.id;
     let title = chat.title.clone();
+    // Slice CL2: cloned for the pin-drag ghost (the row itself moves
+    // `title` below).
+    let drag_title = title.clone();
     let preview = chat.sidebar_preview();
     // Slice CL1: a marked-as-unread chat shows the unread badge even
     // with zero unread messages (official clients show a dot); the count
@@ -32830,6 +33441,93 @@ fn session_chat_row(
                 }),
             ))
         })
+        // Slice CL2: pin-drag reorder — dropping a pinned chat onto
+        // another pinned row moves it to that row's slot (TGX
+        // `ChatsAdapter.movePinnedChat` sends the full reordered
+        // pinned-id list via `setPinnedChats`).
+        .when(draggable, |this| {
+            let drag = PinnedChatDrag {
+                chat_id: id,
+                archived,
+                title: drag_title.clone(),
+            };
+            let target = id;
+            this.cursor_move()
+                .on_drag(drag, |drag: &PinnedChatDrag, _, _, cx| {
+                    cx.new(|_| drag.clone())
+                })
+                .on_drop(cx.listener(move |this, drag: &PinnedChatDrag, _, cx| {
+                    this.drop_pinned_chat(drag.chat_id, drag.archived, target, cx);
+                }))
+        })
+}
+
+/// Slice CL2: drag payload for pinned-chat reorder. It renders itself
+/// as the drag ghost (the chat title on a highlighted chip).
+#[derive(Clone)]
+struct PinnedChatDrag {
+    chat_id: ChatId,
+    archived: bool,
+    title: String,
+}
+
+impl Render for PinnedChatDrag {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .px_3()
+            .py_2()
+            .rounded_md()
+            .bg(cx.theme().accent.opacity(0.15))
+            .border_1()
+            .border_color(cx.theme().border)
+            .text_sm()
+            .font_medium()
+            .child(self.title.clone())
+    }
+}
+
+/// Slice CL2: the three `archiveChatListSettings` fields (schema
+/// 1.8.67, line 3512) as (section title, toggle label, description),
+/// in schema order. Labels mirror TGX
+/// `SettingsArchiveChatListController`.
+const ARCHIVE_SETTING_ROWS: [(&str, &str, &str); 3] = [
+    (
+        "Chats from unknown users",
+        "Archive and Mute",
+        "Automatically archive and mute new chats, groups and channels from non-contacts.",
+    ),
+    (
+        "Unmuted chats",
+        "Always keep archived",
+        "Keep archived chats in the Archive even if they are unmuted and get a new message.",
+    ),
+    (
+        "Chats from folders",
+        "Always keep archived",
+        "Keep archived chats from folders in the Archive even if they are unmuted and get a new message.",
+    ),
+];
+
+/// Slice CL2: read one `archiveChatListSettings` field by schema-order
+/// index.
+fn archive_setting_get(settings: &ArchiveChatListSettings, index: usize) -> bool {
+    match index {
+        0 => settings.archive_and_mute_new_chats_from_unknown_users,
+        1 => settings.keep_unmuted_chats_archived,
+        2 => settings.keep_chats_from_folders_archived,
+        _ => false,
+    }
+}
+
+/// Slice CL2: write one `archiveChatListSettings` field by schema-order
+/// index.
+fn archive_setting_set(settings: &mut ArchiveChatListSettings, index: usize, value: bool) {
+    match index {
+        0 => settings.archive_and_mute_new_chats_from_unknown_users = value,
+        1 => settings.keep_unmuted_chats_archived = value,
+        2 => settings.keep_chats_from_folders_archived = value,
+        _ => {}
+    }
 }
 
 /// One `sponsoredMessage` row: Sponsored / Recommended label, title, content,

@@ -29,7 +29,9 @@ use crate::telegram::envelope::{
     StoryAvailableReactionView, StoryListView, TdError, effective_content,
 };
 use crate::telegram::envelope::{CallState, ReadyParams};
-use crate::telegram::requests::{CallPrivacySetting, ChatEventLogFilterSet, PrivacyWho};
+use crate::telegram::requests::{
+    ArchiveChatListSettings, CallPrivacySetting, ChatEventLogFilterSet, PrivacyWho,
+};
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 use std::time::Instant;
@@ -449,6 +451,32 @@ pub enum RequestPurpose {
     /// (the chat-list "Delete chat", Telegram X `Tdlib.deleteChat`).
     /// Response is `ok`; the row drops via `updateChatRemovedFromList`.
     RemoveChatFromList,
+    /// Slice CL2: `setPinnedChats` (schema 1.8.67, line 13681).
+    /// Response is `ok`; the new pinned order arrives via
+    /// `updateChatPosition`. Rollback restores the swapped `order`
+    /// values (`RequestRollback::ChatPinOrder`).
+    SetPinnedChats,
+    /// Slice CL2: `readChatList` (schema 1.8.67, line 13684).
+    /// Response is `ok`; badges clear via `updateChatReadInbox` /
+    /// `updateChatUnreadMentionCount`.
+    ReadChatList,
+    /// Slice CL2: `clearRecentlyFoundChats` (schema 1.8.67, line 11671).
+    /// Response is `ok`; the local recents were already cleared
+    /// optimistically (TGX `SearchManager.clearRecentlyFoundChats`).
+    ClearRecentlyFoundChats,
+    /// Slice CL2: `getArchiveChatListSettings` (schema 1.8.67, line
+    /// 13421). Response is `archiveChatListSettings`; stored in
+    /// `Session::archive_chat_list_settings`.
+    GetArchiveChatListSettings,
+    /// Slice CL2: `setArchiveChatListSettings` (schema 1.8.67, line
+    /// 13424). Response is `ok`; the settings were flipped
+    /// optimistically, rollback on refusal.
+    SetArchiveChatListSettings,
+    /// Slice CL2: `createPrivateChat` for Saved Messages (schema
+    /// 1.8.67, line 9590 — "Call createPrivateChat with
+    /// getOption("my_id") and open the chat"). The `chat` answer opens
+    /// the chat.
+    CreatePrivateChat,
     /// Phase 9.1: `loadActiveStories` (`storyListMain`). The stories
     /// arrive as `updateChatActiveStories` updates; feed the story tray.
     LoadActiveStories,
@@ -754,6 +782,21 @@ pub enum RequestRollback {
     /// Slice CL1: `toggleChatIsMarkedAsUnread` — the previous
     /// marked-as-unread flag.
     ChatMarkedAsUnread { previous: bool },
+    /// Slice CL2: `setPinnedChats` — the previous `(chat_id, order)`
+    /// pairs of the pinned chats in the list (`archived` = archive
+    /// list). The reorder swaps `order` values among the pinned chats
+    /// so `rebuild_main_order` keeps the new arrangement until the
+    /// authoritative `updateChatPosition` orders arrive.
+    ChatPinOrder {
+        previous: Vec<(i64, i64)>,
+        archived: bool,
+    },
+    /// Slice CL2: `setArchiveChatListSettings` — the previous settings
+    /// (`None` = never fetched; the optimistic value is dropped and
+    /// the panel re-fetches).
+    ArchiveChatListSettings {
+        previous: Option<ArchiveChatListSettings>,
+    },
 }
 
 fn is_auth_submit(purpose: RequestPurpose) -> bool {
@@ -1650,6 +1693,13 @@ impl ChatSummary {
 
     pub fn is_muted(&self) -> bool {
         self.notification_settings.is_muted()
+    }
+
+    /// Slice CL2: the TGX unread-filter predicate
+    /// (`ChatFilter.unreadFilter.accept`: `unreadCount > 0 ||
+    /// isMarkedAsUnread`) — drives the Unread category chip.
+    pub fn is_unread(&self) -> bool {
+        self.unread_count > 0 || self.is_marked_as_unread
     }
 
     /// Phase B4: the chat-level timer status line — "Self-destruct: 1h"
@@ -3125,6 +3175,19 @@ pub struct Session {
     /// Own user id from `getMe` (TDLib 1.8.67). `None` until the first
     /// `getMe` response; needed to resolve `getChatMember` ownership.
     pub my_user_id: Option<i64>,
+    /// Slice CL2: archive auto-settings from `getArchiveChatListSettings`
+    /// (schema 1.8.67, line 13421). `None` until the first fetch; the
+    /// archive-settings panel fetches on open (TGX
+    /// `SettingsArchiveChatListController` does the same).
+    pub archive_chat_list_settings: Option<ArchiveChatListSettings>,
+    /// Slice CL2: the archive-settings panel is fetching its truth.
+    pub archive_settings_loading: bool,
+    /// Slice CL2: the archive-settings panel is open.
+    pub archive_settings_open: bool,
+    /// Slice CL2: the Archived section is collapsed to a single summary
+    /// row (TGX `archiveCollapsed`). Client-side only, per session —
+    /// not persisted.
+    pub archive_collapsed: bool,
     /// Phase 6: user directory from `updateUser`, keyed by user id. Feeds
     /// the contacts list and the user info panel.
     pub users: HashMap<i64, ParsedUser>,
@@ -3676,6 +3739,10 @@ impl Session {
             sponsored_report_target: None,
             last_sponsored_report: None,
             my_user_id: None,
+            archive_chat_list_settings: None,
+            archive_settings_loading: false,
+            archive_settings_open: false,
+            archive_collapsed: false,
             users: HashMap::new(),
             contacts: None,
             contacts_error: false,
@@ -6031,6 +6098,14 @@ impl Session {
                     self.storage_stats_loading = false;
                 }
             }
+            EnvelopePayload::ArchiveChatListSettings { settings } => {
+                // Slice CL2: `getArchiveChatListSettings` answer — only
+                // our own in-flight request writes the cache.
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetArchiveChatListSettings) {
+                    self.archive_chat_list_settings = Some(settings);
+                    self.archive_settings_loading = false;
+                }
+            }
             EnvelopePayload::ScopeNotificationSettings { settings, .. } => {
                 // Parity slice: `getScopeNotificationSettings` answer; the
                 // scope is correlated via the pending request (the response
@@ -6388,6 +6463,25 @@ impl Session {
                             chat.is_marked_as_unread = previous;
                         }
                     }
+                    // Slice CL2: restore the pre-reorder `order` values
+                    // the server refused, then rebuild the list order.
+                    Some(RequestRollback::ChatPinOrder { previous, archived }) => {
+                        for (chat_id, order) in previous {
+                            if let Some(chat) = self.chats.get_mut(&chat_id) {
+                                if archived {
+                                    chat.archive_order = order;
+                                } else {
+                                    chat.order = order;
+                                }
+                            }
+                        }
+                        self.rebuild_main_order();
+                    }
+                    // Slice CL2: drop the refused archive-settings flip;
+                    // the panel re-fetches the truth on next open.
+                    Some(RequestRollback::ArchiveChatListSettings { previous }) => {
+                        self.archive_chat_list_settings = previous;
+                    }
                     None => {}
                 }
                 // Phase C1: a failed call request surfaces on the call
@@ -6476,6 +6570,46 @@ impl Session {
                     Some(RequestPurpose::RemoveChatFromList) => {
                         self.chat_action_error =
                             Some(format!("could not delete the chat (error {})", err.code));
+                    }
+                    // Slice CL2: refused chat-list actions surface in the
+                    // status note like the CL1 ones — a refusal is never
+                    // shown as success.
+                    Some(RequestPurpose::SetPinnedChats) => {
+                        self.chat_action_error = Some(format!(
+                            "could not reorder pinned chats (error {})",
+                            err.code
+                        ));
+                    }
+                    Some(RequestPurpose::ReadChatList) => {
+                        self.chat_action_error = Some(format!(
+                            "could not mark all chats as read (error {})",
+                            err.code
+                        ));
+                    }
+                    Some(RequestPurpose::ClearRecentlyFoundChats) => {
+                        self.chat_action_error = Some(format!(
+                            "could not clear recent searches (error {})",
+                            err.code
+                        ));
+                    }
+                    Some(RequestPurpose::GetArchiveChatListSettings) => {
+                        self.archive_settings_loading = false;
+                        self.chat_action_error = Some(format!(
+                            "could not load archive settings (error {})",
+                            err.code
+                        ));
+                    }
+                    Some(RequestPurpose::SetArchiveChatListSettings) => {
+                        self.chat_action_error = Some(format!(
+                            "could not save archive settings (error {})",
+                            err.code
+                        ));
+                    }
+                    Some(RequestPurpose::CreatePrivateChat) => {
+                        self.chat_action_error = Some(format!(
+                            "could not open Saved Messages (error {})",
+                            err.code
+                        ));
                     }
                     // Phase C3a: group-call request failures surface on
                     // the group-call overlay (shown and cleared by the
@@ -8098,6 +8232,72 @@ impl Session {
             .register_download(self.account_generation, file_id);
         self.download_extras.insert(extra.0, file_id.0);
         extra
+    }
+
+    /// Slice CL2: optimistic pinned-chat reorder for `setPinnedChats`.
+    /// `new_ids` is the desired full pinned order (chat ids) of the
+    /// list, highest first. The pinned chats swap `order` values among
+    /// themselves so the new sequence survives `rebuild_main_order`
+    /// until authoritative `updateChatPosition` orders arrive (TDLib
+    /// `order` is opaque — new values can't be minted, only the
+    /// existing ones permuted). Returns the previous `(chat_id,
+    /// order)` pairs for rollback; returns an empty vec and changes
+    /// nothing when the id set doesn't match the currently pinned set.
+    /// Slice CL2: ordered pinned chat ids for a list (main or archive),
+    /// highest first — the canonical order `setPinnedChats` expects.
+    pub fn pinned_chat_ids(&self, archived: bool) -> Vec<i64> {
+        let mut pinned: Vec<(i64, i64)> = self
+            .chats
+            .values()
+            .filter(|c| {
+                if archived {
+                    c.in_archive && c.archive_is_pinned
+                } else {
+                    c.in_main_list && c.is_pinned
+                }
+            })
+            .map(|c| {
+                let order = if archived { c.archive_order } else { c.order };
+                (c.id.0, order)
+            })
+            .collect();
+        // Canonical current order: highest order first, matching
+        // `rebuild_main_order`'s sort.
+        pinned.sort_by(|a, b| b.1.cmp(&a.1).then(b.0.cmp(&a.0)));
+        pinned.into_iter().map(|(id, _)| id).collect()
+    }
+
+    pub fn reorder_pinned_chats(&mut self, archived: bool, new_ids: &[i64]) -> Vec<(i64, i64)> {
+        let current: Vec<(i64, i64)> = self
+            .pinned_chat_ids(archived)
+            .into_iter()
+            .map(|id| {
+                let order = self
+                    .chats
+                    .get(&id)
+                    .map(|c| if archived { c.archive_order } else { c.order });
+                (id, order.unwrap_or(0))
+            })
+            .collect();
+        let mut current_ids: Vec<i64> = current.iter().map(|(id, _)| *id).collect();
+        let mut new_sorted: Vec<i64> = new_ids.to_vec();
+        current_ids.sort_unstable();
+        new_sorted.sort_unstable();
+        if current_ids != new_sorted || new_ids.is_empty() {
+            return Vec::new();
+        }
+        let orders: Vec<i64> = current.iter().map(|(_, order)| *order).collect();
+        for (id, order) in new_ids.iter().zip(orders.iter()) {
+            if let Some(chat) = self.chats.get_mut(id) {
+                if archived {
+                    chat.archive_order = *order;
+                } else {
+                    chat.order = *order;
+                }
+            }
+        }
+        self.rebuild_main_order();
+        current
     }
 
     fn rebuild_main_order(&mut self) {
@@ -14826,6 +15026,163 @@ mod tests {
         );
         assert_eq!(session.pinned_chat_count_max, 10);
         assert_eq!(session.pinned_archived_chat_count_max, 200);
+    }
+
+    #[test]
+    fn cl2_reorder_pinned_chats_swaps_orders() {
+        // Slice CL2: `reorder_pinned_chats` permutes the pinned chats'
+        // `order` values into the new sequence so `rebuild_main_order`
+        // keeps it; the returned pairs restore the old arrangement.
+        let (mut session, _sink) = session();
+        for (id, order) in [(11i64, 300i64), (12, 200), (13, 100), (14, 50)] {
+            let mut chat = placeholder_chat(ChatId(id));
+            chat.in_main_list = true;
+            chat.order = order;
+            chat.is_pinned = id != 14;
+            session.chats.insert(id, chat);
+        }
+        session.rebuild_main_order();
+        let previous = session.reorder_pinned_chats(false, &[13, 11, 12]);
+        assert_eq!(previous, vec![(11, 300), (12, 200), (13, 100)]);
+        let ids: Vec<i64> = session.ordered_chats().iter().map(|c| c.id.0).collect();
+        assert_eq!(ids, vec![13, 11, 12, 14]);
+        // Id-set mismatch changes nothing.
+        let noop = session.reorder_pinned_chats(false, &[13, 11]);
+        assert!(noop.is_empty());
+        let ids: Vec<i64> = session.ordered_chats().iter().map(|c| c.id.0).collect();
+        assert_eq!(ids, vec![13, 11, 12, 14]);
+    }
+
+    #[test]
+    fn cl2_pin_order_error_rolls_back_and_surfaces() {
+        // Slice CL2: a refused `setPinnedChats` restores the pre-reorder
+        // order values and surfaces in `chat_action_error`.
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        for (id, order) in [(11i64, 300i64), (12, 200)] {
+            let mut chat = placeholder_chat(ChatId(id));
+            chat.in_main_list = true;
+            chat.order = order;
+            chat.is_pinned = true;
+            session.chats.insert(id, chat);
+        }
+        let extra = session.request(RequestPurpose::SetPinnedChats, None);
+        session
+            .requests
+            .pending_mut(extra)
+            .expect("pending")
+            .rollback = Some(RequestRollback::ChatPinOrder {
+            previous: vec![(11, 300), (12, 200)],
+            archived: false,
+        });
+        session.reorder_pinned_chats(false, &[12, 11]);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"error","@extra":"{}","code":400,"message":"CHAT_NOT_MODIFIED"}}"#,
+                extra.0
+            ),
+        );
+        assert_eq!(session.chats.get(&11).expect("chat").order, 300);
+        assert_eq!(session.chats.get(&12).expect("chat").order, 200);
+        assert_eq!(
+            session.chat_action_error.as_deref(),
+            Some("could not reorder pinned chats (error 400)")
+        );
+    }
+
+    #[test]
+    fn cl2_archive_settings_fetch_stores_and_set_rolls_back() {
+        // Slice CL2: the `getArchiveChatListSettings` answer lands in
+        // the session (purpose-matched); a refused
+        // `setArchiveChatListSettings` restores the previous settings
+        // and surfaces.
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        let extra = session.request(RequestPurpose::GetArchiveChatListSettings, None);
+        session.archive_settings_loading = true;
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"archiveChatListSettings","@extra":"{}","archive_and_mute_new_chats_from_unknown_users":true,"keep_unmuted_chats_archived":false,"keep_chats_from_folders_archived":true}}"#,
+                extra.0
+            ),
+        );
+        assert_eq!(
+            session.archive_chat_list_settings,
+            Some(ArchiveChatListSettings {
+                archive_and_mute_new_chats_from_unknown_users: true,
+                keep_unmuted_chats_archived: false,
+                keep_chats_from_folders_archived: true,
+            })
+        );
+        assert!(!session.archive_settings_loading);
+
+        let old = session.archive_chat_list_settings;
+        let extra = session.request(RequestPurpose::SetArchiveChatListSettings, None);
+        session
+            .requests
+            .pending_mut(extra)
+            .expect("pending")
+            .rollback = Some(RequestRollback::ArchiveChatListSettings { previous: old });
+        session.archive_chat_list_settings = Some(ArchiveChatListSettings {
+            keep_unmuted_chats_archived: true,
+            ..old.unwrap_or_default()
+        });
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"error","@extra":"{}","code":400,"message":"ARCHIVE_SETTINGS_INVALID"}}"#,
+                extra.0
+            ),
+        );
+        assert_eq!(session.archive_chat_list_settings, old);
+        assert_eq!(
+            session.chat_action_error.as_deref(),
+            Some("could not save archive settings (error 400)")
+        );
+    }
+
+    #[test]
+    fn cl2_mark_all_read_and_clear_recents_errors_surface() {
+        // Slice CL2: refused `readChatList` / `clearRecentlyFoundChats`
+        // surface in `chat_action_error` — never silent.
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        let extra = session.request(RequestPurpose::ReadChatList, None);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"error","@extra":"{}","code":500,"message":"READ_FAILED"}}"#,
+                extra.0
+            ),
+        );
+        assert_eq!(
+            session.chat_action_error.as_deref(),
+            Some("could not mark all chats as read (error 500)")
+        );
+        let extra = session.request(RequestPurpose::ClearRecentlyFoundChats, None);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"error","@extra":"{}","code":500,"message":"CLEAR_FAILED"}}"#,
+                extra.0
+            ),
+        );
+        assert_eq!(
+            session.chat_action_error.as_deref(),
+            Some("could not clear recent searches (error 500)")
+        );
     }
 
     #[test]
