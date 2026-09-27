@@ -4091,7 +4091,7 @@ greps.
 - **Built:**
   - Viewer Rotate (photos): `rotate_rgba_quarter_turns` (pure pixel math, no image crate — covered by the no-default-features tests) decoded eagerly into a cached `RenderImage`; per-item, reset on open/step; 0 → 90 → 180 → 270 cycle.
   - Viewer Share: closes the viewer, opens the existing forward picker with the message selected (`begin_forward_one`, reused).
-  - Viewer Save: copies the largest local photo size / full video clip (thumbnail fallback) to the downloads folder (`XDG_DOWNLOAD_DIR` → `UserDirs` → `~/Downloads`), ` (n)` de-dup like the desktop clients; honest "download the media first" when nothing is local.
+  - Viewer Save: copies the largest local photo size / full local video clip to the downloads folder (`XDG_DOWNLOAD_DIR` → `UserDirs` → `~/Downloads`), ` (n)` de-dup like the desktop clients; honest "download the media first" when nothing is local (no thumbnail fallback — a video never saves its thumbnail).
   - Viewer "Show in chat": closes the viewer, jumps to the source message via the existing reply-jump machinery.
   - Viewer seek: scrub slider under the transport (the history-row `SliderState`/`SliderEvent` pattern) — drag previews the position in the elapsed label, release seeks the `PlaybackClock` and restarts ffplay at `-ss` when playing; the tick syncs the thumb (skipped while scrubbing).
   - Playback speed: one shared `playback_speed` (0.5–2.0) applied to voice/audio rows and the viewer video — clock rate moves the playhead, ffplay restarts with `-af atempo=` so audio stays in sync; `PlaybackClock::set_rate` clamps and never jumps the playhead.
