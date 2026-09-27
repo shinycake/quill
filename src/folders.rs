@@ -228,6 +228,8 @@ mod tests {
             can_send_basic_messages: true,
             permissions: None,
             can_be_deleted_for_all_users: false,
+            can_be_deleted_only_for_self: false,
+            is_marked_as_unread: false,
             secret_state: None,
             message_auto_delete_time: 0,
             video_chat: None,

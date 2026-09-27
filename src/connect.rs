@@ -53,17 +53,17 @@ use crate::telegram::requests::{
     close_secret_chat as close_secret_chat_request, close_story, create_call_with_protocol,
     create_chat_folder, create_chat_invite_link, create_forum_topic, create_new_basic_group_chat,
     create_new_secret_chat, create_new_supergroup_chat, create_video_chat,
-    decline_group_call_invitation, delete_chat, delete_chat_folder, delete_chat_welcome_message,
-    delete_forum_topic, delete_messages, delete_story, discard_call as discard_call_request,
-    download_file as download_file_request, edit_chat_folder, edit_chat_invite_link,
-    edit_chat_welcome_message, edit_forum_topic, edit_message_caption, edit_message_text,
-    end_group_call, end_group_call_recording, end_group_call_screen_sharing, forward_messages,
-    get_authorization_state, get_available_chat_boost_slots, get_basic_group_full_info,
-    get_callback_query_answer, get_chat_active_stories, get_chat_administrators,
-    get_chat_boost_status, get_chat_event_log, get_chat_folder, get_chat_history,
-    get_chat_invite_links, get_chat_join_requests, get_chat_lists_to_add_chat, get_chat_member,
-    get_chat_scheduled_messages, get_chat_sponsored_messages, get_chat_statistics, get_commands,
-    get_contacts, get_forum_topics, get_full_rich_message, get_group_call,
+    decline_group_call_invitation, delete_chat, delete_chat_folder, delete_chat_history,
+    delete_chat_welcome_message, delete_forum_topic, delete_messages, delete_story,
+    discard_call as discard_call_request, download_file as download_file_request, edit_chat_folder,
+    edit_chat_invite_link, edit_chat_welcome_message, edit_forum_topic, edit_message_caption,
+    edit_message_text, end_group_call, end_group_call_recording, end_group_call_screen_sharing,
+    forward_messages, get_authorization_state, get_available_chat_boost_slots,
+    get_basic_group_full_info, get_callback_query_answer, get_chat_active_stories,
+    get_chat_administrators, get_chat_boost_status, get_chat_event_log, get_chat_folder,
+    get_chat_history, get_chat_invite_links, get_chat_join_requests, get_chat_lists_to_add_chat,
+    get_chat_member, get_chat_scheduled_messages, get_chat_sponsored_messages, get_chat_statistics,
+    get_commands, get_contacts, get_forum_topics, get_full_rich_message, get_group_call,
     get_installed_sticker_sets, get_me, get_message_link, get_message_properties,
     get_message_thread_history, get_saved_animations, get_saved_notification_sounds,
     get_scope_notification_settings, get_secret_chat, get_sticker_set, get_storage_statistics,
@@ -91,14 +91,14 @@ use crate::telegram::requests::{
     start_scheduled_video_chat, supergroup_members_filter_administrators_json,
     supergroup_members_filter_banned_json, supergroup_members_filter_recent_json,
     supergroup_members_filter_restricted_json, supergroup_members_filter_search_json,
-    toggle_chat_folder_tags, toggle_forum_topic_closed, toggle_forum_topic_pinned,
-    toggle_general_forum_topic_hidden, toggle_group_call_are_messages_allowed,
-    toggle_group_call_is_my_video_enabled, toggle_group_call_is_my_video_paused,
-    toggle_group_call_participant_is_hand_raised, toggle_group_call_participant_is_muted,
-    toggle_supergroup_aggressive_anti_spam, toggle_supergroup_is_broadcast_group,
-    toggle_supergroup_join_by_request, toggle_supergroup_sign_messages,
-    toggle_video_chat_mute_new_participants, unpin_all_chat_messages, unpin_chat_message,
-    view_messages, view_sponsored_chat,
+    toggle_chat_folder_tags, toggle_chat_is_marked_as_unread, toggle_chat_is_pinned,
+    toggle_forum_topic_closed, toggle_forum_topic_pinned, toggle_general_forum_topic_hidden,
+    toggle_group_call_are_messages_allowed, toggle_group_call_is_my_video_enabled,
+    toggle_group_call_is_my_video_paused, toggle_group_call_participant_is_hand_raised,
+    toggle_group_call_participant_is_muted, toggle_supergroup_aggressive_anti_spam,
+    toggle_supergroup_is_broadcast_group, toggle_supergroup_join_by_request,
+    toggle_supergroup_sign_messages, toggle_video_chat_mute_new_participants,
+    unpin_all_chat_messages, unpin_chat_message, view_messages, view_sponsored_chat,
 };
 use crate::voice::VoiceDraft;
 use std::collections::{HashMap, VecDeque};
@@ -4321,10 +4321,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request(RequestPurpose::ViewMessages, Some(chat_id));
-        match self
-            .sender
-            .send_json(&view_messages(extra, chat_id, &ids, true))
-        {
+        match self.sender.send_json(&view_messages(
+            extra,
+            chat_id,
+            &ids,
+            "messageSourceChatHistory",
+            true,
+        )) {
             Ok(()) => {
                 self.session.begin_viewing(chat_id, &ids);
                 Ok(Some(extra))
@@ -6529,6 +6532,250 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         let extra = self.session.request(purpose, Some(chat_id));
         if let Err(err) = self.sender.send_json(&delete_chat(extra, chat_id.0)) {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(Some(extra))
+    }
+
+    /// Slice CL1: `toggleChatIsPinned` (schema 1.8.67, line 13678).
+    /// The pin is optimistic (the target list comes from the chat's
+    /// current membership: archive list when `in_archive`, else main);
+    /// the authoritative state arrives via `updateChatPosition` and the
+    /// pre-request value rides on the pending entry for rollback. The
+    /// pin-limit pre-check lives in the UI (TGX behavior).
+    pub fn toggle_chat_pin(
+        &mut self,
+        chat_id: ChatId,
+        pin: bool,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let purpose = RequestPurpose::ToggleChatIsPinned;
+        if self.session.requests.has_purpose_for_chat(purpose, chat_id) {
+            return Ok(None);
+        }
+        let (archived, supported) = self
+            .session
+            .chats
+            .get(&chat_id.0)
+            .map(|chat| (chat.in_archive, chat.supported()))
+            .unwrap_or((false, false));
+        if !supported {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self.session.request(purpose, Some(chat_id));
+        if let Err(err) = self
+            .sender
+            .send_json(&toggle_chat_is_pinned(extra, chat_id.0, archived, pin))
+        {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        if let Some(chat) = self.session.chats.get_mut(&chat_id.0) {
+            let rollback = RequestRollback::ChatPin {
+                previous: if archived {
+                    chat.archive_is_pinned
+                } else {
+                    chat.is_pinned
+                },
+                archived,
+            };
+            if archived {
+                chat.archive_is_pinned = pin;
+            } else {
+                chat.is_pinned = pin;
+            }
+            if let Some(pending) = self.session.requests.pending_mut(extra) {
+                pending.rollback = Some(rollback);
+            }
+        }
+        Ok(Some(extra))
+    }
+
+    /// Slice CL1: `toggleChatIsMarkedAsUnread` (schema 1.8.67, line
+    /// 13519). Optimistic with rollback; the authoritative flag arrives
+    /// via `updateChatIsMarkedAsUnread`.
+    pub fn toggle_chat_marked_as_unread(
+        &mut self,
+        chat_id: ChatId,
+        marked: bool,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let purpose = RequestPurpose::ToggleChatIsMarkedAsUnread;
+        if self.session.requests.has_purpose_for_chat(purpose, chat_id) {
+            return Ok(None);
+        }
+        let supported = self
+            .session
+            .chats
+            .get(&chat_id.0)
+            .is_some_and(|chat| chat.supported());
+        if !supported {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self.session.request(purpose, Some(chat_id));
+        if let Err(err) = self
+            .sender
+            .send_json(&toggle_chat_is_marked_as_unread(extra, chat_id.0, marked))
+        {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        if let Some(chat) = self.session.chats.get_mut(&chat_id.0) {
+            let rollback = RequestRollback::ChatMarkedAsUnread {
+                previous: chat.is_marked_as_unread,
+            };
+            chat.is_marked_as_unread = marked;
+            if let Some(pending) = self.session.requests.pending_mut(extra) {
+                pending.rollback = Some(rollback);
+            }
+        }
+        Ok(Some(extra))
+    }
+
+    /// Slice CL1: mark a chat as read the way Telegram X does
+    /// (`Tdlib.markChatAsRead` with `MessageSourceChatList`): `viewMessages`
+    /// over the newest known message reads real unread history, and the
+    /// manual marked-unread flag is cleared when set. Honest noop when the
+    /// chat has nothing unread.
+    pub fn mark_chat_as_read(
+        &mut self,
+        chat_id: ChatId,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let (supported, unread, marked) = self
+            .session
+            .chats
+            .get(&chat_id.0)
+            .map(|chat| {
+                (
+                    chat.supported(),
+                    chat.unread_count > 0,
+                    chat.is_marked_as_unread,
+                )
+            })
+            .unwrap_or((false, false, false));
+        if !supported {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if !unread && !marked {
+            return Ok(None);
+        }
+        let mut sent: Option<RequestId> = None;
+        // TGX: viewing the newest known message reads the real unread
+        // history. Skipped when the chat was never opened (same as TGX's
+        // `chat.lastMessage == null` guard); the authoritative
+        // `updateChatReadInbox` then confirms.
+        if unread {
+            let newest = self
+                .session
+                .histories
+                .get(&chat_id.0)
+                .and_then(|history| history.messages.keys().next_back().copied())
+                .map(MessageId);
+            if let Some(id) = newest
+                && !self
+                    .session
+                    .requests
+                    .has_purpose_for_chat(RequestPurpose::ViewMessages, chat_id)
+            {
+                let extra = self
+                    .session
+                    .request(RequestPurpose::ViewMessages, Some(chat_id));
+                match self.sender.send_json(&view_messages(
+                    extra,
+                    chat_id,
+                    &[id],
+                    "messageSourceChatList",
+                    true,
+                )) {
+                    Ok(()) => {
+                        self.session.begin_viewing(chat_id, &[id]);
+                        sent = Some(extra);
+                    }
+                    Err(err) => {
+                        self.session.requests.take(extra);
+                        return Err(err);
+                    }
+                }
+            }
+        }
+        if marked {
+            sent = self.toggle_chat_marked_as_unread(chat_id, false)?.or(sent);
+        }
+        Ok(sent)
+    }
+
+    /// Slice CL1: `deleteChatHistory` (schema 1.8.67, line 11845). The
+    /// chat stays in the chat list (`remove_from_chat_list: false`);
+    /// `revoke` clears for everyone when
+    /// `chat.can_be_deleted_for_all_users` (the UI gates the choice).
+    pub fn clear_chat_history(
+        &mut self,
+        chat_id: ChatId,
+        revoke: bool,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let purpose = RequestPurpose::DeleteChatHistory;
+        if self.session.requests.has_purpose_for_chat(purpose, chat_id) {
+            return Ok(None);
+        }
+        let deletable = self.session.chats.get(&chat_id.0).is_some_and(|chat| {
+            chat.supported()
+                && (chat.can_be_deleted_only_for_self || chat.can_be_deleted_for_all_users)
+        });
+        if !deletable {
+            return Ok(None);
+        }
+        let extra = self.session.request(purpose, Some(chat_id));
+        if let Err(err) = self
+            .sender
+            .send_json(&delete_chat_history(extra, chat_id.0, false, revoke))
+        {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(Some(extra))
+    }
+
+    /// Slice CL1: remove a chat from the chat list the way Telegram X
+    /// does (`Tdlib.deleteChat` for private chats, closed secret chats,
+    /// and chats the user already left): `deleteChatHistory` with
+    /// `remove_from_chat_list: true` (schema 1.8.67, line 11845).
+    /// This is deliberately NOT the destructive `deleteChat`
+    /// constructor (line 11850) — that deletes the chat for all
+    /// members and stays on the group panel's "Delete group" (G1).
+    pub fn remove_chat_from_list(
+        &mut self,
+        chat_id: ChatId,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let purpose = RequestPurpose::RemoveChatFromList;
+        if self.session.requests.has_purpose_for_chat(purpose, chat_id) {
+            return Ok(None);
+        }
+        let removable = self.session.chats.get(&chat_id.0).is_some_and(|chat| {
+            chat.supported()
+                && (chat.can_be_deleted_only_for_self || chat.can_be_deleted_for_all_users)
+        });
+        if !removable {
+            return Ok(None);
+        }
+        let extra = self.session.request(purpose, Some(chat_id));
+        if let Err(err) = self
+            .sender
+            .send_json(&delete_chat_history(extra, chat_id.0, true, false))
+        {
             self.session.requests.take(extra);
             return Err(err);
         }
@@ -12291,6 +12538,146 @@ mod tests {
                 .has_purpose_for_chat(RequestPurpose::ViewMessages, ChatId(7))
         );
         assert!(!sink.rendered().contains("CANARY_VIEW_TD"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn cl1_mark_chat_as_read_sends_view_plus_untoggle() {
+        // Slice CL1: "Mark as read" follows Telegram X
+        // (`Tdlib.markChatAsRead` with `MessageSourceChatList`) —
+        // `viewMessages` over the newest known message reads real
+        // unread history, and the manual marked-unread flag is cleared.
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = ViewCtlSender::new();
+        let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+        let mut driver =
+            ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+        let seq = AtomicU64::new(0);
+        ready_private_chat(&mut driver, &seq, &dyn_sink);
+        driver
+            .ingest(
+                copy_and_parse(
+                    r#"{"@type":"updateChatIsMarkedAsUnread","chat_id":7,"is_marked_as_unread":true}"#,
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+
+        let sent = driver.mark_chat_as_read(ChatId(7)).expect("send");
+        assert!(sent.is_some(), "something to read");
+        let snapshot = recorder.snapshot();
+        let view = snapshot
+            .iter()
+            .find(|j| j.contains("\"viewMessages\""))
+            .expect("viewMessages sent");
+        let view_value: Value = serde_json::from_str(view).unwrap();
+        assert_eq!(view_value["source"]["@type"], "messageSourceChatList");
+        assert_eq!(view_value["message_ids"], serde_json::json!([11]));
+        assert_eq!(view_value["force_read"], true);
+        let untoggle = snapshot
+            .iter()
+            .find(|j| j.contains("\"toggleChatIsMarkedAsUnread\""))
+            .expect("untoggle sent");
+        let untoggle_value: Value = serde_json::from_str(untoggle).unwrap();
+        assert_eq!(untoggle_value["is_marked_as_unread"], false);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn cl1_mark_chat_as_read_noop_when_nothing_unread() {
+        // Slice CL1: "Mark as read" on a fully-read chat sends nothing
+        // (honest noop, like TGX skipping when there is nothing to do).
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = ViewCtlSender::new();
+        let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+        let mut driver =
+            ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+        let seq = AtomicU64::new(0);
+        ready_private_chat(&mut driver, &seq, &dyn_sink);
+        // ready_private_chat seeds unread_count=1; mark it read first.
+        driver
+            .ingest(
+                copy_and_parse(
+                    r#"{"@type":"updateChatReadInbox","chat_id":7,"last_read_inbox_message_id":11,"unread_count":0}"#,
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+
+        assert_eq!(driver.mark_chat_as_read(ChatId(7)).expect("send"), None);
+        assert!(
+            recorder
+                .snapshot()
+                .iter()
+                .all(|j| !j.contains("viewMessages") && !j.contains("toggleChatIsMarkedAsUnread")),
+            "noop must not send read requests"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn cl1_remove_chat_from_list_sends_delete_history() {
+        // Slice CL1: chat-list "Delete chat" is `deleteChatHistory`
+        // with `remove_from_chat_list: true` (Telegram X
+        // `Tdlib.deleteChat`), never the destructive `deleteChat`.
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = ViewCtlSender::new();
+        let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+        let mut driver =
+            ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+        let seq = AtomicU64::new(0);
+        driver
+            .ingest(
+                copy_and_parse(
+                    r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        driver
+            .ingest(
+                copy_and_parse(
+                    r#"{"@type":"updateNewChat","chat":{"id":9,"title":"Old","type":{"@type":"chatTypePrivate","user_id":9},"unread_count":0,"can_be_deleted_only_for_self":true,"can_be_deleted_for_all_users":false}}"#,
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+
+        driver
+            .remove_chat_from_list(ChatId(9))
+            .expect("send")
+            .expect("removable");
+        let delete = recorder
+            .snapshot()
+            .into_iter()
+            .find(|j| j.contains("deleteChatHistory"))
+            .expect("deleteChatHistory sent");
+        let value: Value = serde_json::from_str(&delete).unwrap();
+        assert_eq!(value["@type"], "deleteChatHistory");
+        assert_eq!(value["chat_id"], 9);
+        assert_eq!(value["remove_from_chat_list"], true);
+        assert_eq!(value["revoke"], false);
+        assert!(
+            !delete.contains("\"deleteChat\""),
+            "must not use the destructive deleteChat constructor"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 

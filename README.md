@@ -133,15 +133,15 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Global search field with Clear button (src/ui/mod.rs:16360) <!-- parity:chatlist-search-field -->
 - [x] Search sections: Recent, Chats, Messages, and Global public chats via searchPublicChats (src/ui/mod.rs:16438; src/state.rs:63) <!-- parity:chatlist-search-sections -->
 - [x] Empty states: "Loading chats…", "No chats in this folder yet.", "No chats in the main list." (src/ui/mod.rs:18218) <!-- parity:chatlist-empty-states -->
-- [ ] Right-click context menu on chat rows (missing entirely; mute/archive exist only in the open-chat header) <!-- parity:chatlist-row-context-menu -->
-- [ ] Pin / Unpin chat (schema toggleChatIsPinned exists at schema/td_api.tl:13678, never wired to UI) <!-- parity:chatlist-pin-unpin -->
+- [x] Right-click context menu on chat rows (src/ui/mod.rs:5580) <!-- parity:chatlist-row-context-menu -->
+- [x] Pin / Unpin chat via toggleChatIsPinned with optimistic rollback (src/connect.rs) <!-- parity:chatlist-pin-unpin -->
 - [ ] Drag-to-reorder pinned chats <!-- parity:chatlist-pin-drag-reorder -->
-- [ ] Pin-limit error handling (TGX: "you can pin up to N chats and N secret chats at once") <!-- parity:chatlist-pin-limit -->
+- [x] Pin-limit handling: client-side pre-check from pinned_chat_count_max / pinned_archived_chat_count_max options plus server error surfacing (src/connect.rs, src/state.rs) <!-- parity:chatlist-pin-limit -->
 - [ ] Mark all chats as read (schema readChatList exists, unused in src) <!-- parity:chatlist-mark-all-read -->
-- [ ] Per-chat mark as read / unread (schema toggleChatIsMarkedAsUnread exists, unused in src) <!-- parity:chatlist-mark-read-unread -->
-- [ ] Per-chat mute/unmute from the list (partial: open-chat header bar only) <!-- parity:chatlist-list-mute -->
-- [ ] Delete chat from the list (partial: driver has a deleteChat request builder, no UI) <!-- parity:chatlist-delete-chat -->
-- [ ] Clear chat history <!-- parity:chatlist-clear-history -->
+- [x] Per-chat mark as read / unread: viewMessages with messageSourceChatList + force_read (TGX semantics) and toggleChatIsMarkedAsUnread; marked-unread dot badge (src/connect.rs, src/ui/mod.rs) <!-- parity:chatlist-mark-read-unread -->
+- [x] Per-chat mute/unmute from the list via the row menu (src/ui/mod.rs:5611) <!-- parity:chatlist-list-mute -->
+- [x] Delete chat from the list via deleteChatHistory(remove_from_chat_list:true) — not the destructive deleteChat (src/connect.rs, src/ui/mod.rs) <!-- parity:chatlist-delete-chat -->
+- [x] Clear chat history via deleteChatHistory(remove_from_chat_list:false), gated on delete capabilities (src/connect.rs, src/ui/mod.rs) <!-- parity:chatlist-clear-history -->
 - [ ] Saved Messages entry row in the list <!-- parity:chatlist-saved-messages -->
 - [ ] Chat preview on long-press / hover <!-- parity:chatlist-chat-preview -->
 - [ ] Clear recent searches (recents load but are not clearable) <!-- parity:chatlist-clear-recent-searches -->

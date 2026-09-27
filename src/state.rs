@@ -434,6 +434,21 @@ pub enum RequestPurpose {
     /// `ok`. The chat is dropped locally; it deletes the chat for all
     /// members and releases the username.
     DeleteChat,
+    /// Slice CL1: `toggleChatIsPinned` (schema 1.8.67, line 13678).
+    /// Response is `ok`; the authoritative pinned state arrives via
+    /// `updateChatPosition`. Rollback rides on `PendingRequest::rollback`.
+    ToggleChatIsPinned,
+    /// Slice CL1: `toggleChatIsMarkedAsUnread` (schema 1.8.67, line
+    /// 13519). Response is `ok`; authoritative state arrives via
+    /// `updateChatIsMarkedAsUnread`. Rollback on error.
+    ToggleChatIsMarkedAsUnread,
+    /// Slice CL1: `deleteChatHistory` (schema 1.8.67, line 11845).
+    /// Response is `ok`; history is re-fetched on next open.
+    DeleteChatHistory,
+    /// Slice CL1: `deleteChatHistory` with `remove_from_chat_list: true`
+    /// (the chat-list "Delete chat", Telegram X `Tdlib.deleteChat`).
+    /// Response is `ok`; the row drops via `updateChatRemovedFromList`.
+    RemoveChatFromList,
     /// Phase 9.1: `loadActiveStories` (`storyListMain`). The stories
     /// arrive as `updateChatActiveStories` updates; feed the story tray.
     LoadActiveStories,
@@ -732,6 +747,13 @@ pub enum RequestRollback {
         supergroup_id: i64,
         previous: Option<bool>,
     },
+    /// Slice CL1: `toggleChatIsPinned` — the previous pinned flag and
+    /// which list it belonged to (`archived` = archive list). The
+    /// authoritative state arrives via `updateChatPosition`.
+    ChatPin { previous: bool, archived: bool },
+    /// Slice CL1: `toggleChatIsMarkedAsUnread` — the previous
+    /// marked-as-unread flag.
+    ChatMarkedAsUnread { previous: bool },
 }
 
 fn is_auth_submit(purpose: RequestPurpose) -> bool {
@@ -1380,6 +1402,15 @@ pub struct ChatSummary {
     /// 3616), refreshed by `updateNewChat`. Gates `deleteChat` (schema
     /// line 11848).
     pub can_be_deleted_for_all_users: bool,
+    /// Slice CL1: `chat.can_be_deleted_only_for_self` (schema 1.8.67,
+    /// line 3616), refreshed by `updateNewChat`. Together with
+    /// `can_be_deleted_for_all_users` gates `deleteChatHistory` (schema
+    /// line 11845).
+    pub can_be_deleted_only_for_self: bool,
+    /// Slice CL1: `chat.is_marked_as_unread` (schema 1.8.67, lines
+    /// 3600 / 3627), refreshed by `updateNewChat` and
+    /// `updateChatIsMarkedAsUnread` (schema line 10588).
+    pub is_marked_as_unread: bool,
     /// Phase B1: latest known `SecretChatState` for `ChatKind::Secret`
     /// chats (from `updateSecretChat` / `getSecretChat`, schema 1.8.67
     /// lines 10741 / 2816). `None` for other chat kinds and until the
@@ -1743,6 +1774,8 @@ fn placeholder_chat(chat_id: ChatId) -> ChatSummary {
         can_send_basic_messages: true,
         permissions: None,
         can_be_deleted_for_all_users: false,
+        can_be_deleted_only_for_self: false,
+        is_marked_as_unread: false,
         // Phase B1: unknown until `updateSecretChat` / `getSecretChat`
         // resolves it.
         secret_state: None,
@@ -2854,6 +2887,19 @@ pub struct Session {
     /// (TDLib 1.8.67, `schema/td_api.tl:10926`); default 1024 is TDLib's
     /// compiled default. Guards caption edits and media-send captions.
     pub message_caption_length_max: i32,
+    /// Slice CL1: `getOption("pinned_chat_count_max")` /
+    /// `getOption("pinned_archived_chat_count_max")` via `updateOption`
+    /// (schema 1.8.67, line 13674). Defaults 5 / 100 are TDLib's
+    /// compiled defaults; the server raises them for Premium. Used for
+    /// the client-side pin-limit pre-check (TGX `ChatsController`
+    /// `PinTooMuchWarn` / `ErrorPinnedChatsLimit` behavior).
+    pub pinned_chat_count_max: i32,
+    pub pinned_archived_chat_count_max: i32,
+    /// Slice CL1: one-shot error from a refused chat-list action
+    /// (`toggleChatIsPinned`, `toggleChatIsMarkedAsUnread`,
+    /// `deleteChatHistory`). The UI drains it into the status note so a
+    /// refused action never looks like it worked.
+    pub chat_action_error: Option<String>,
     /// MED4: one-shot `getWebPageInstantView` answer for the IV reader.
     /// The UI drains it (opens the reader) and clears it.
     pub instant_view: Option<InstantViewPage>,
@@ -3549,6 +3595,11 @@ impl Session {
             histories: HashMap::new(),
             message_link_result: None,
             message_caption_length_max: 1024,
+            // Slice CL1: TDLib's compiled defaults for the pin limits
+            // (schema 1.8.67, line 13674); `updateOption` overrides.
+            pinned_chat_count_max: 5,
+            pinned_archived_chat_count_max: 100,
+            chat_action_error: None,
             instant_view: None,
             instant_view_fallback_url: None,
             instant_view_urls: HashMap::new(),
@@ -4309,6 +4360,18 @@ impl Session {
                 {
                     self.message_caption_length_max = limit.max(0).min(i64::from(i32::MAX)) as i32;
                 }
+                // Slice CL1: pin-limit options (schema:13674) for the
+                // client-side pin pre-check.
+                if (name == "pinned_chat_count_max" || name == "pinned_archived_chat_count_max")
+                    && let OptionValue::Integer(limit) = value
+                {
+                    let limit = limit.max(0).min(i64::from(i32::MAX)) as i32;
+                    if name == "pinned_chat_count_max" {
+                        self.pinned_chat_count_max = limit;
+                    } else {
+                        self.pinned_archived_chat_count_max = limit;
+                    }
+                }
             }
             EnvelopePayload::UpdateConnectionState(state) => self.connection = state,
             EnvelopePayload::UpdateNewChat {
@@ -4324,6 +4387,8 @@ impl Session {
                 can_send_basic_messages,
                 permissions,
                 can_be_deleted_for_all_users,
+                can_be_deleted_only_for_self,
+                is_marked_as_unread,
                 message_auto_delete_time,
                 video_chat,
                 has_welcome_messages,
@@ -4351,6 +4416,9 @@ impl Session {
                 // Slice G1: full default permissions block for the editor.
                 chat.permissions = permissions;
                 chat.can_be_deleted_for_all_users = can_be_deleted_for_all_users;
+                // Slice CL1: clear-history gate + marked-as-unread flag.
+                chat.can_be_deleted_only_for_self = can_be_deleted_only_for_self;
+                chat.is_marked_as_unread = is_marked_as_unread;
                 // Phase B4: chat-level auto-delete / self-destruct timer
                 // (`chat.message_auto_delete_time`, schema 1.8.67, lines
                 // 3616 / 3627).
@@ -4830,6 +4898,18 @@ impl Session {
                     .entry(chat_id.0)
                     .or_insert_with(|| placeholder_chat(chat_id))
                     .notification_settings = notification_settings;
+            }
+            // Slice CL1: `updateChatIsMarkedAsUnread` (schema 1.8.67,
+            // line 10588) — the authoritative marked-as-unread flag; the
+            // row shows the unread badge while set.
+            EnvelopePayload::UpdateChatIsMarkedAsUnread {
+                chat_id,
+                is_marked_as_unread,
+            } => {
+                self.chats
+                    .entry(chat_id.0)
+                    .or_insert_with(|| placeholder_chat(chat_id))
+                    .is_marked_as_unread = is_marked_as_unread;
             }
             // Phase B4: `updateChatMessageAutoDeleteTime` (schema 1.8.67,
             // line 10549) — keep the chat-level timer fresh. The same
@@ -6288,6 +6368,26 @@ impl Session {
                             self.supergroup_anti_spam_enabled.remove(&supergroup_id);
                         }
                     },
+                    // Slice CL1: restore the pre-toggle pinned /
+                    // marked-as-unread flags the server refused.
+                    Some(RequestRollback::ChatPin { previous, archived }) => {
+                        if let Some(chat_id) = pending.and_then(|p| p.chat_id)
+                            && let Some(chat) = self.chats.get_mut(&chat_id.0)
+                        {
+                            if archived {
+                                chat.archive_is_pinned = previous;
+                            } else {
+                                chat.is_pinned = previous;
+                            }
+                        }
+                    }
+                    Some(RequestRollback::ChatMarkedAsUnread { previous }) => {
+                        if let Some(chat_id) = pending.and_then(|p| p.chat_id)
+                            && let Some(chat) = self.chats.get_mut(&chat_id.0)
+                        {
+                            chat.is_marked_as_unread = previous;
+                        }
+                    }
                     None => {}
                 }
                 // Phase C1: a failed call request surfaces on the call
@@ -6355,6 +6455,27 @@ impl Session {
                                 "Could not upload the call log",
                             ));
                         }
+                    }
+                    // Slice CL1: refused chat-list actions surface in the
+                    // status note (the UI drains `chat_action_error`) —
+                    // the optimistic state was already rolled back above.
+                    // Only the numeric code is shown; TDLib's message is
+                    // never stored.
+                    Some(RequestPurpose::ToggleChatIsPinned) => {
+                        self.chat_action_error =
+                            Some(format!("could not pin the chat (error {})", err.code));
+                    }
+                    Some(RequestPurpose::ToggleChatIsMarkedAsUnread) => {
+                        self.chat_action_error =
+                            Some(format!("could not change read state (error {})", err.code));
+                    }
+                    Some(RequestPurpose::DeleteChatHistory) => {
+                        self.chat_action_error =
+                            Some(format!("could not clear history (error {})", err.code));
+                    }
+                    Some(RequestPurpose::RemoveChatFromList) => {
+                        self.chat_action_error =
+                            Some(format!("could not delete the chat (error {})", err.code));
                     }
                     // Phase C3a: group-call request failures surface on
                     // the group-call overlay (shown and cleared by the
@@ -14584,6 +14705,127 @@ mod tests {
             session.welcome_message_fetches.get(&13),
             Some(WelcomeMessagesFetch::Failed(_))
         ));
+    }
+
+    #[test]
+    fn cl1_pin_error_rolls_back_and_surfaces() {
+        // Slice CL1: the optimistic pin restores the previous flag when
+        // TDLib answers `error`, and the refusal surfaces in
+        // `chat_action_error` (drained by the UI) — never silent.
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        session.chats.insert(11, placeholder_chat(ChatId(11)));
+        let extra = session.request(RequestPurpose::ToggleChatIsPinned, Some(ChatId(11)));
+        session
+            .requests
+            .pending_mut(extra)
+            .expect("pending")
+            .rollback = Some(RequestRollback::ChatPin {
+            previous: false,
+            archived: false,
+        });
+        session.chats.get_mut(&11).expect("chat").is_pinned = true;
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"error","@extra":"{}","code":400,"message":"PINNED_CHATS_LIMIT_EXCEEDED"}}"#,
+                extra.0
+            ),
+        );
+        assert!(!session.chats.get(&11).expect("chat").is_pinned);
+        assert_eq!(
+            session.chat_action_error.as_deref(),
+            Some("could not pin the chat (error 400)")
+        );
+    }
+
+    #[test]
+    fn cl1_marked_as_unread_update_and_rollback() {
+        // Slice CL1: `updateChatIsMarkedAsUnread` flips the row badge
+        // flag, and a refused toggle restores it.
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        session.chats.insert(12, placeholder_chat(ChatId(12)));
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateChatIsMarkedAsUnread","chat_id":12,"is_marked_as_unread":true}"#,
+        );
+        assert!(session.chats.get(&12).expect("chat").is_marked_as_unread);
+        let extra = session.request(RequestPurpose::ToggleChatIsMarkedAsUnread, Some(ChatId(12)));
+        session
+            .requests
+            .pending_mut(extra)
+            .expect("pending")
+            .rollback = Some(RequestRollback::ChatMarkedAsUnread { previous: true });
+        session
+            .chats
+            .get_mut(&12)
+            .expect("chat")
+            .is_marked_as_unread = false;
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"error","@extra":"{}","code":400,"message":"CHAT_NOT_MODIFIED"}}"#,
+                extra.0
+            ),
+        );
+        assert!(session.chats.get(&12).expect("chat").is_marked_as_unread);
+        assert_eq!(
+            session.chat_action_error.as_deref(),
+            Some("could not change read state (error 400)")
+        );
+    }
+
+    #[test]
+    fn cl1_clear_history_error_surfaces() {
+        // Slice CL1: a refused `deleteChatHistory` surfaces in
+        // `chat_action_error`.
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        let extra = session.request(RequestPurpose::DeleteChatHistory, Some(ChatId(13)));
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"error","@extra":"{}","code":400,"message":"CHAT_HISTORY_NOT_MODIFIED"}}"#,
+                extra.0
+            ),
+        );
+        assert_eq!(
+            session.chat_action_error.as_deref(),
+            Some("could not clear history (error 400)")
+        );
+    }
+
+    #[test]
+    fn cl1_pin_limit_options_tracked() {
+        // Slice CL1: `updateOption` for the pin limits (schema 1.8.67,
+        // line 13674) feeds the client-side pin pre-check.
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        assert_eq!(session.pinned_chat_count_max, 5);
+        assert_eq!(session.pinned_archived_chat_count_max, 100);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateOption","name":"pinned_chat_count_max","value":{"@type":"optionValueInteger","value":10}}"#,
+        );
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateOption","name":"pinned_archived_chat_count_max","value":{"@type":"optionValueInteger","value":200}}"#,
+        );
+        assert_eq!(session.pinned_chat_count_max, 10);
+        assert_eq!(session.pinned_archived_chat_count_max, 200);
     }
 
     #[test]
