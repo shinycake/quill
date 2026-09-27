@@ -326,21 +326,21 @@ This is the comprehensive Telegram-parity checklist: one checkbox per user-visib
 - [x] Call state indicators (calling / connecting / exchanging keys) <!-- parity:calls-states --> (ui/mod.rs:9768)
 - [x] Mute / unmute microphone during call <!-- parity:calls-mute --> (toggle_call_mute ui/mod.rs:4483; set_call_muted connect.rs:1871)
 - [x] Microphone and speaker output selection during call <!-- parity:calls-devices --> (select_call_devices connect.rs:1891; picker ui/mod.rs:4523)
-- [ ] Incoming-call-while-busy swap prompt (partial: incoming call is auto-declined instead, state.rs:5383) <!-- parity:calls-swap-prompt -->
+- [ ] Incoming-call-while-busy swap prompt (partial: no Telegram-level hold/swap API; incoming call is auto-declined with an explanatory banner, state.rs) <!-- parity:calls-swap-prompt -->
 - [x] Call failed / offline / microphone-missing error states <!-- parity:calls-errors --> ("Call failed" card ui/mod.rs:9668)
 - [x] Reconnect indicator when audio transport drops <!-- parity:calls-reconnect --> (TransportState::Reconnecting calls/engine.rs:27; shown ui/mod.rs:9787)
 - [x] Call end summary screen with duration <!-- parity:calls-summary --> (CallSummary state.rs:2006)
-- [x] Rate call quality after call <!-- parity:calls-rating --> (rate_last_call ui/mod.rs:4576; sendCallRating requests.rs:899)
-- [ ] Rating problems and comment (partial: star rating only; comment/problems never sent) <!-- parity:calls-rating-detail -->
+- [x] Rate call quality after call <!-- parity:calls-rating --> (open_rating_detail ui/mod.rs:5009; submit_call_rating ui/mod.rs:5030; sendCallRating requests.rs:899)
+- [x] Rating problems and comment (stars + problem chips + optional comment sent via sendCallRating) <!-- parity:calls-rating-detail -->
 - [x] Send call debug information to Telegram <!-- parity:calls-debug --> (send_call_debug_information connect.rs:1984)
-- [ ] Call log file upload (partial: debug info only; no sendCallLog request in requests.rs) <!-- parity:calls-log-upload -->
-- [ ] Recent calls list <!-- parity:calls-history -->
-- [ ] Missed / declined / canceled call entries in chat <!-- parity:calls-chat-messages -->
-- [ ] Call again from summary or chat entry (partial: new calls start from profile only) <!-- parity:calls-again -->
-- [ ] Confirm before calling setting <!-- parity:calls-confirm -->
-- [ ] "Who can call me" privacy setting <!-- parity:calls-privacy -->
-- [ ] Peer-to-peer call relay toggle <!-- parity:calls-p2p -->
-- [ ] Less data for calls setting <!-- parity:calls-less-data -->
+- [x] Call log file upload (sendCallLog with inputFileLocal; button on end screen when need_log) <!-- parity:calls-log-upload -->
+- [x] Recent calls list (Calls tab: searchCallMessages with Load more) <!-- parity:calls-history -->
+- [x] Missed / declined / canceled call entries in chat (messageCall service rows) <!-- parity:calls-chat-messages -->
+- [x] Call again from summary or chat entry (end screen + service rows + recent calls) <!-- parity:calls-again -->
+- [x] Confirm before calling setting (persisted per-account call_prefs.json; gates startCall) <!-- parity:calls-confirm -->
+- [x] "Who can call me" privacy setting (getUserPrivacySettingRules / setUserPrivacySettingRules) <!-- parity:calls-privacy -->
+- [x] Peer-to-peer call relay toggle (getUserPrivacySettingRules / setUserPrivacySettingRules) <!-- parity:calls-p2p -->
+- [ ] Less data for calls setting (partial: persisted in call_prefs.json, but the native call engine exposes no data-saving API) <!-- parity:calls-less-data -->
 - [ ] Use proxy for calls setting <!-- parity:calls-proxy -->
 - [ ] Echo cancellation / noise suppression toggles (partial: ntgcalls defaults only, no settings UI) <!-- parity:calls-audio-fx -->
 - [x] Start video call with working video (video negotiated when a camera exists via `video_wanted`; peer frames flow through the engine callbacks to the video stage — verified in code + screenshot; real camera/peer still unverified) <!-- parity:calls-start-video -->

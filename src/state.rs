@@ -6,6 +6,7 @@ use crate::ids::{
     AccountGeneration, AccountKey, ChatId, FileId, MessageId, RequestId, ViewGeneration,
 };
 use crate::notify::{self, OsNotification, QueuedNotification};
+use crate::settings::CallPrefs;
 use crate::telegram::client::OwnedEnvelope;
 use crate::telegram::envelope::{
     AnimationItem, AuthorizationState, BotCommand, BotInfo, CallbackQueryAnswer,
@@ -23,6 +24,7 @@ use crate::telegram::envelope::{
     StoryAvailableReactionView, StoryListView, TdError,
 };
 use crate::telegram::envelope::{CallState, ReadyParams};
+use crate::telegram::requests::{CallPrivacySetting, PrivacyWho};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Instant;
@@ -321,6 +323,22 @@ pub enum RequestPurpose {
     SendCallRating,
     /// Phase C2d: `sendCallDebugInformation` for the ended call.
     SendCallDebugInformation,
+    /// Phase C2i: `searchCallMessages`. Response is `foundMessages`;
+    /// drives the Recent-calls tab.
+    SearchCallMessages,
+    /// Phase C2i: `getUserPrivacySettingRules`. Response is
+    /// `userPrivacySettingRules`; `setting` selects which of the two
+    /// call privacy settings is fetched.
+    GetCallPrivacyRules {
+        setting: CallPrivacySetting,
+    },
+    /// Phase C2i: `setUserPrivacySettingRules`. Response is `ok`; the
+    /// new value is applied optimistically at send time.
+    SetCallPrivacyRules {
+        setting: CallPrivacySetting,
+    },
+    /// Phase C2i: `sendCallLog` for the ended call. Response is `ok`.
+    SendCallLog,
     /// Phase C3a: `createVideoChat`. Response is `groupCallId`; the
     /// chat-bound voice chat's states arrive as `updateGroupCall`.
     CreateVideoChat {
@@ -2110,6 +2128,10 @@ pub struct CallSummary {
     pub rating_sent: bool,
     pub debug_information_sent: bool,
     pub debug_information_error: Option<String>,
+    /// Phase C2i: `sendCallLog` upload state (`need_log` from
+    /// `callStateDiscarded`, schema 1.8.67 :7080).
+    pub log_sent: bool,
+    pub log_error: Option<String>,
     pub final_transport: Option<TransportState>,
     pub reconnect_attempts: usize,
     pub muted: bool,
@@ -2330,6 +2352,8 @@ impl CallSummary {
             rating_sent: false,
             debug_information_sent: false,
             debug_information_error: None,
+            log_sent: false,
+            log_error: None,
             final_transport: None,
             reconnect_attempts: 0,
             muted: false,
@@ -2443,9 +2467,42 @@ pub struct Session {
     pub group_call_error: Option<String>,
     /// Phase C1: incoming calls that arrived while another call was
     /// active — the driver discards them (busy) via `discardCall`.
-    /// Entries are `(call_id, is_video)` so the decline reports the
-    /// actual call kind rather than a hardcoded one.
-    pub call_busy_decline_queue: Vec<(i32, bool)>,
+    /// Entries are `(call_id, user_id, is_video)` so the decline
+    /// reports the actual call kind rather than a hardcoded one.
+    pub call_busy_decline_queue: Vec<(i32, i64, bool)>,
+    /// Phase C2i: incoming calls auto-declined while busy, kept as
+    /// `(user_id, is_video)` so the UI can say so honestly instead of
+    /// declining silently. Drained by the UI banner.
+    pub call_busy_declined: Vec<(i64, bool)>,
+    /// Phase C2i: recent calls from `searchCallMessages` (server-side
+    /// history, schema 1.8.67 :11903) for the Recent-calls tab, newest
+    /// first.
+    pub recent_calls: Vec<ParsedMessage>,
+    /// `next_offset` from the last `foundMessages` page; empty starts
+    /// (or restarts) the list.
+    pub recent_calls_offset: String,
+    /// A `searchCallMessages` page is in flight.
+    pub recent_calls_loading: bool,
+    /// The last `searchCallMessages` request failed.
+    pub recent_calls_error: bool,
+    /// Phase C2i: "who can call me"
+    /// (`userPrivacySettingAllowCalls`, schema 1.8.67 :9006).
+    pub call_privacy_allow_calls: Option<PrivacyWho>,
+    /// Phase C2i: peer-to-peer calls
+    /// (`userPrivacySettingAllowPeerToPeerCalls`, schema 1.8.67 :9009).
+    pub call_privacy_p2p: Option<PrivacyWho>,
+    /// A privacy get/set round-trip is in flight (see
+    /// `call_privacy_pending` — fetch sends two gets, so this clears
+    /// only when the last response lands).
+    pub call_privacy_loading: bool,
+    /// Outstanding call-privacy get/set round-trips.
+    pub call_privacy_pending: u8,
+    /// The last privacy get/set failed.
+    pub call_privacy_error: bool,
+    /// Phase C2i: local call preferences (confirm-before-calling,
+    /// less-data), persisted via `settings::CallPrefs`. The driver
+    /// loads them at startup; the UI saves on toggle.
+    pub call_prefs: CallPrefs,
     /// Phase C3a: the tracked group call / voice chat, if any.
     /// **Signaling only** — TDLib transports no audio/video; the
     /// `joinVideoChat` response payload is stored (`join_payload`) and
@@ -2828,6 +2885,18 @@ pub struct ContactRow {
 }
 
 impl Session {
+    /// Phase C2i: one call-privacy round-trip landed. The spinner and
+    /// error flag only reset when no round-trip is outstanding —
+    /// `fetch_call_privacy` sends two gets, and clearing on the first
+    /// would briefly render the radios with nothing selected.
+    fn privacy_roundtrip_done(&mut self) {
+        self.call_privacy_pending = self.call_privacy_pending.saturating_sub(1);
+        if self.call_privacy_pending == 0 {
+            self.call_privacy_loading = false;
+            self.call_privacy_error = false;
+        }
+    }
+
     pub fn new(account: AccountKey, diagnostics: Arc<dyn DiagnosticSink>) -> Self {
         let auth = AuthorizationState::WaitTdlibParameters;
         Self {
@@ -2866,6 +2935,17 @@ impl Session {
             call_error: None,
             group_call_error: None,
             call_busy_decline_queue: Vec::new(),
+            call_busy_declined: Vec::new(),
+            recent_calls: Vec::new(),
+            recent_calls_offset: String::new(),
+            recent_calls_loading: false,
+            recent_calls_error: false,
+            call_privacy_allow_calls: None,
+            call_privacy_p2p: None,
+            call_privacy_loading: false,
+            call_privacy_pending: 0,
+            call_privacy_error: false,
+            call_prefs: CallPrefs::default(),
             active_group_call: None,
             group_call_fetch_queue: Vec::new(),
             open_topic: None,
@@ -4261,7 +4341,11 @@ impl Session {
                     }
                 }
             }
-            EnvelopePayload::FoundMessages { messages, .. } => {
+            EnvelopePayload::FoundMessages {
+                messages,
+                next_offset,
+                ..
+            } => {
                 if self.search.matches_generation(pending)
                     && pending.map(|p| p.purpose) == Some(RequestPurpose::SearchMessages)
                 {
@@ -4270,6 +4354,34 @@ impl Session {
                     }
                     let hits = messages.iter().map(SearchMessageHit::from_parsed).collect();
                     self.search.accept_messages(hits, false);
+                }
+                // Phase C2i: `searchCallMessages` pages for the
+                // Recent-calls tab. `searchCallMessages` returns call and
+                // group-call messages newest-first; the rows render both.
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::SearchCallMessages) {
+                    for message in &messages {
+                        self.remember_files(&message.files);
+                    }
+                    self.recent_calls.extend(messages);
+                    self.recent_calls_offset = next_offset;
+                    self.recent_calls_loading = false;
+                    self.recent_calls_error = false;
+                }
+            }
+            // Phase C2i: `getUserPrivacySettingRules` answer — map the
+            // rule list to the simple Everybody / Contacts / Nobody
+            // choice (`None` when the account has custom rules the UI
+            // cannot represent; the radios then show nothing selected).
+            EnvelopePayload::UserPrivacySettingRules { rules } => {
+                if let Some(RequestPurpose::GetCallPrivacyRules { setting }) =
+                    pending.map(|p| p.purpose)
+                {
+                    let who = PrivacyWho::from_rule_names(&rules);
+                    match setting {
+                        CallPrivacySetting::AllowCalls => self.call_privacy_allow_calls = who,
+                        CallPrivacySetting::PeerToPeer => self.call_privacy_p2p = who,
+                    }
+                    self.privacy_roundtrip_done();
                 }
             }
             EnvelopePayload::FoundChatMessages {
@@ -4734,6 +4846,22 @@ impl Session {
                     }
                     _ => {}
                 }
+                // Phase C2i: `sendCallLog` confirmed — the log upload for
+                // the ended call succeeded.
+                if let Some(RequestPurpose::SendCallLog) = pending.map(|p| p.purpose)
+                    && let Some(summary) = self.call_summary.as_mut()
+                {
+                    summary.log_sent = true;
+                    summary.log_error = None;
+                }
+                // Phase C2i: `setUserPrivacySettingRules` confirmed (the
+                // new value was applied optimistically at send time).
+                if matches!(
+                    pending.map(|p| p.purpose),
+                    Some(RequestPurpose::SetCallPrivacyRules { .. })
+                ) {
+                    self.privacy_roundtrip_done();
+                }
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::LoadChats) {
                     // A short OK is not exhaustion; 404 is.
                 }
@@ -4838,6 +4966,37 @@ impl Session {
                             summary.debug_information_error = Some(call_request_error_line(
                                 &err,
                                 "Could not upload diagnostics",
+                            ));
+                        }
+                    }
+                    // Phase C2i: call history / privacy / log failures
+                    // surface on the Recent-calls tab (the UI reads the
+                    // flags), not the call overlay.
+                    Some(RequestPurpose::SearchCallMessages) => {
+                        self.recent_calls_loading = false;
+                        self.recent_calls_error = true;
+                    }
+                    Some(RequestPurpose::GetCallPrivacyRules { .. }) => {
+                        self.privacy_roundtrip_done();
+                        self.call_privacy_error = true;
+                    }
+                    // Phase C2i: a failed `setUserPrivacySettingRules`
+                    // clears the optimistic value (the next fetch
+                    // restores the truth) and flags the error.
+                    Some(RequestPurpose::SetCallPrivacyRules { setting }) => {
+                        match setting {
+                            CallPrivacySetting::AllowCalls => self.call_privacy_allow_calls = None,
+                            CallPrivacySetting::PeerToPeer => self.call_privacy_p2p = None,
+                        }
+                        self.privacy_roundtrip_done();
+                        self.call_privacy_error = true;
+                    }
+                    Some(RequestPurpose::SendCallLog) => {
+                        if let Some(summary) = self.call_summary.as_mut() {
+                            summary.log_sent = false;
+                            summary.log_error = Some(call_request_error_line(
+                                &err,
+                                "Could not upload the call log",
                             ));
                         }
                     }
@@ -5699,9 +5858,10 @@ impl Session {
                 && !self
                     .call_busy_decline_queue
                     .iter()
-                    .any(|(id, _)| *id == call.id)
+                    .any(|(id, _, _)| *id == call.id)
             {
-                self.call_busy_decline_queue.push((call.id, call.is_video));
+                self.call_busy_decline_queue
+                    .push((call.id, call.user_id, call.is_video));
                 self.diagnostics.record(Diagnostic {
                     category: "call",
                     type_name: Some("updateCall".to_string()),
@@ -5782,7 +5942,7 @@ impl Session {
         summary.muted = active.muted;
         self.call_summary = Some(summary);
         self.call_busy_decline_queue
-            .retain(|(id, _)| *id != call.id);
+            .retain(|(id, _, _)| *id != call.id);
     }
 
     /// Phase C3a: `updateGroupCall` state machine. Quill tracks at most
@@ -11746,5 +11906,126 @@ mod tests {
             Some("rtmp://dc1-rtmp.telegram.org:443/live")
         );
         assert_eq!(call.rtmp_stream_key.as_deref(), Some("secret-key"));
+    }
+
+    /// Phase C2i: `searchCallMessages` pages accumulate in
+    /// `recent_calls` newest-first and the server `next_offset` is
+    /// kept for "Load more".
+    #[test]
+    fn call_history_pages_accumulate_and_track_offset() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        let extra = session.request(RequestPurpose::SearchCallMessages, None);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"foundMessages","@extra":"{}","total_count":2,"next_offset":"page2","messages":[{{"@type":"message","id":901,"chat_id":71,"is_outgoing":false,"date":1700000000,"content":{{"@type":"messageCall","unique_id":901,"is_video":true,"discard_reason":{{"@type":"callDiscardReasonHungUp"}},"duration":372}}}}]}}"#,
+                extra.0,
+            ),
+        );
+        assert_eq!(session.recent_calls.len(), 1);
+        assert_eq!(session.recent_calls_offset, "page2");
+        assert!(!session.recent_calls_loading);
+        assert!(!session.recent_calls_error);
+        let extra = session.request(RequestPurpose::SearchCallMessages, None);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"foundMessages","@extra":"{}","total_count":2,"next_offset":"","messages":[{{"@type":"message","id":900,"chat_id":71,"is_outgoing":false,"date":1699999999,"content":{{"@type":"messageCall","unique_id":900,"is_video":false,"discard_reason":{{"@type":"callDiscardReasonMissed"}},"duration":0}}}}]}}"#,
+                extra.0,
+            ),
+        );
+        assert_eq!(session.recent_calls.len(), 2);
+        assert_eq!(session.recent_calls_offset, "");
+        assert_eq!(session.recent_calls[0].id.0, 901);
+        assert_eq!(session.recent_calls[1].id.0, 900);
+    }
+
+    /// Phase C2i: `getUserPrivacySettingRules` maps the rule list to
+    /// the simple choice; a failed set clears the optimistic value
+    /// and flags the error so the UI shows it.
+    #[test]
+    fn call_privacy_get_maps_rules_and_set_failure_clears() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        let extra = session.request(
+            RequestPurpose::GetCallPrivacyRules {
+                setting: CallPrivacySetting::AllowCalls,
+            },
+            None,
+        );
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"userPrivacySettingRules","@extra":"{}","rules":[{{"@type":"userPrivacySettingRuleAllowContacts"}}]}}"#,
+                extra.0,
+            ),
+        );
+        assert_eq!(session.call_privacy_allow_calls, Some(PrivacyWho::Contacts));
+        assert!(!session.call_privacy_error);
+
+        // Optimistic set, then a TDLib error: the optimistic value is
+        // cleared (the next fetch restores the truth) and the error
+        // flag is set.
+        session.call_privacy_allow_calls = Some(PrivacyWho::Nobody);
+        let extra = session.request(
+            RequestPurpose::SetCallPrivacyRules {
+                setting: CallPrivacySetting::AllowCalls,
+            },
+            None,
+        );
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"error","@extra":"{}","code":400,"message":"PRIVACY_TOO_LONG"}}"#,
+                extra.0,
+            ),
+        );
+        assert_eq!(session.call_privacy_allow_calls, None);
+        assert!(session.call_privacy_error);
+    }
+
+    #[test]
+    fn call_privacy_loading_clears_only_after_both_gets_land() {
+        // `fetch_call_privacy` fires two gets (AllowCalls + PeerToPeer):
+        // clearing on the first would briefly render the radios with
+        // nothing selected instead of "Loading…".
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        session.call_privacy_loading = true;
+        session.call_privacy_pending = 2;
+        for setting in [
+            CallPrivacySetting::AllowCalls,
+            CallPrivacySetting::PeerToPeer,
+        ] {
+            let extra = session.request(RequestPurpose::GetCallPrivacyRules { setting }, None);
+            apply_json(
+                &mut session,
+                &seq,
+                &sink,
+                &format!(
+                    r#"{{"@type":"userPrivacySettingRules","@extra":"{}","rules":[{{"@type":"userPrivacySettingRuleAllowAll"}}]}}"#,
+                    extra.0,
+                ),
+            );
+            if setting == CallPrivacySetting::AllowCalls {
+                assert!(session.call_privacy_loading);
+                assert_eq!(session.call_privacy_p2p, None);
+            }
+        }
+        assert!(!session.call_privacy_loading);
+        assert_eq!(
+            session.call_privacy_allow_calls,
+            Some(PrivacyWho::Everybody)
+        );
+        assert_eq!(session.call_privacy_p2p, Some(PrivacyWho::Everybody));
     }
 }

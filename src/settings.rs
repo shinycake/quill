@@ -25,6 +25,44 @@ impl Default for Preferences {
     }
 }
 
+/// Phase C2i: local-only call preferences, persisted as JSON next to
+/// the account root (`call_prefs.json`). These are client-side (no
+/// TDLib setting exists for them):
+/// - `confirm_before_calling`: ask before placing an outgoing call;
+/// - `less_data_for_calls`: stored and shown; the native call engine
+///   (ntgcalls) exposes no data-saving API, so it currently has no
+///   media effect — the settings UI says so honestly.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CallPrefs {
+    pub confirm_before_calling: bool,
+    pub less_data_for_calls: bool,
+}
+
+fn call_prefs_path(paths: &AccountPaths) -> PathBuf {
+    paths.root.join("call_prefs.json")
+}
+
+/// Load call prefs; missing or corrupt files fall back to defaults
+/// (never a hard error — prefs must not block startup).
+pub fn load_call_prefs(paths: &AccountPaths) -> CallPrefs {
+    std::fs::read(call_prefs_path(paths))
+        .ok()
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+        .unwrap_or_default()
+}
+
+/// Persist call prefs; failures are returned to the caller to surface
+/// in the status note.
+pub fn save_call_prefs(paths: &AccountPaths, prefs: &CallPrefs) -> std::io::Result<()> {
+    let path = call_prefs_path(paths);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let bytes = serde_json::to_vec_pretty(prefs)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+    std::fs::write(path, bytes)
+}
+
 #[derive(Debug, Clone)]
 pub struct AccountPaths {
     pub root: PathBuf,
@@ -77,6 +115,26 @@ mod tests {
         let paths = AccountPaths::for_root(&root, &AccountKey::primary());
         assert!(paths.tdlib_database.ends_with("accounts/primary/tdlib"));
         assert!(paths.tdlib_files.ends_with("accounts/primary/files"));
+    }
+
+    #[test]
+    fn call_prefs_roundtrip_and_missing_file() {
+        // Phase C2i: what the toggle round-trip is ultimately
+        // validating — the stored value survives a load.
+        let dir = std::env::temp_dir().join(format!("quill-prefs-test-{}", std::process::id()));
+        let paths = AccountPaths::for_root(&dir, &AccountKey::primary());
+        // Missing file → defaults, never an error.
+        assert_eq!(load_call_prefs(&paths), CallPrefs::default());
+        let prefs = CallPrefs {
+            confirm_before_calling: true,
+            less_data_for_calls: true,
+        };
+        save_call_prefs(&paths, &prefs).expect("save works");
+        assert_eq!(load_call_prefs(&paths), prefs);
+        // Corrupt file → defaults, never a panic.
+        std::fs::write(dir.join("accounts/primary/call_prefs.json"), b"not json").unwrap();
+        assert_eq!(load_call_prefs(&paths), CallPrefs::default());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
