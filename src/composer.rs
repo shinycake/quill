@@ -113,6 +113,17 @@ pub struct ComposerReplyTo {
     pub chat_id: ChatId,
     pub message_id: MessageId,
     pub preview: String,
+    /// Slice G1: partial-message quote (`inputTextQuote`, schema 1.8.67
+    /// line 3056) — `text` is a verbatim substring of the original
+    /// message and `position` its UTF-16 code-unit offset.
+    pub quote: Option<QuoteSelection>,
+}
+
+/// Slice G1: a quoted part of the replied-to message.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct QuoteSelection {
+    pub text: String,
+    pub position: i32,
 }
 
 impl ComposerReplyTo {
@@ -121,8 +132,50 @@ impl ComposerReplyTo {
             chat_id,
             message_id,
             preview: preview.into(),
+            quote: None,
         }
     }
+
+    /// Slice G1: reply carrying a validated partial quote.
+    pub fn with_quote(
+        chat_id: ChatId,
+        message_id: MessageId,
+        preview: impl Into<String>,
+        quote: QuoteSelection,
+    ) -> Self {
+        Self {
+            chat_id,
+            message_id,
+            preview: preview.into(),
+            quote: Some(quote),
+        }
+    }
+
+    /// Slice G1: draft/send-pipeline view of this reply — the replied-to
+    /// message id plus the optional validated partial quote, mirroring
+    /// `telegram::SendReply`. `None` when this reply targets another chat.
+    pub fn send_reply(&self, chat_id: ChatId) -> Option<crate::telegram::SendReply> {
+        (self.chat_id == chat_id).then(|| crate::telegram::SendReply {
+            message_id: self.message_id,
+            quote: self
+                .quote
+                .as_ref()
+                .map(|quote| (quote.text.clone(), quote.position)),
+        })
+    }
+}
+
+/// Slice G1: find `quote` in `full_text` and return its UTF-16 code-unit
+/// offset, as `inputTextQuote.position` requires (schema 1.8.67, line
+/// 3056). `None` when the quote is empty or not a verbatim substring —
+/// the quote dialog only submits validated quotes, so this is a guard,
+/// not the validation itself.
+pub fn quote_position(full_text: &str, quote: &str) -> Option<i32> {
+    if quote.is_empty() {
+        return None;
+    }
+    let byte_offset = full_text.find(quote)?;
+    Some(full_text[..byte_offset].encode_utf16().count() as i32)
 }
 
 /// tdesktop `FieldHeader` Escape / `replyCancelled`: drop the reply header
@@ -1080,6 +1133,24 @@ impl ComposerSnapshot {
         })
     }
 
+    /// Slice G1: the full reply (message id plus validated partial
+    /// quote) for the send builders.
+    pub fn send_reply(&self) -> Option<crate::telegram::SendReply> {
+        self.reply_to.as_ref().and_then(|reply| {
+            if reply.chat_id.0 == self.chat_id {
+                Some(crate::telegram::SendReply {
+                    message_id: reply.message_id,
+                    quote: reply
+                        .quote
+                        .as_ref()
+                        .map(|quote| (quote.text.clone(), quote.position)),
+                })
+            } else {
+                None
+            }
+        })
+    }
+
     pub fn chat_id(&self) -> ChatId {
         ChatId(self.chat_id)
     }
@@ -1608,5 +1679,19 @@ mod tests {
         assert_eq!(clear_format_markup("[label](https://x)", 0..0), "label");
         // A selection only strips inside itself.
         assert_eq!(clear_format_markup("**a** **b**", 0..5), "a **b**");
+    }
+
+    /// Slice G1: `quote_position` — UTF-16 code-unit offsets for
+    /// `inputTextQuote.position`.
+    #[test]
+    fn quote_position_finds_substring_utf16_offset() {
+        assert_eq!(quote_position("hello world", "world"), Some(6));
+        assert_eq!(quote_position("hello world", "hello"), Some(0));
+        // Non-BMP characters count as 2 UTF-16 code units.
+        assert_eq!(quote_position("a😀b", "b"), Some(3));
+        assert_eq!(quote_position("hello", ""), None);
+        assert_eq!(quote_position("hello", "xyz"), None);
+        // First occurrence wins.
+        assert_eq!(quote_position("aa aa", "aa"), Some(0));
     }
 }

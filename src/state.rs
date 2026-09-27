@@ -12,16 +12,16 @@ use crate::telegram::envelope::{
     AnimationItem, AuthorizationState, BotCommand, BotInfo, CallbackQueryAnswer,
     ChannelMemberStatus, ChatAction, ChatActiveStoriesView, ChatAdminRights,
     ChatAdministratorEntry, ChatDraft, ChatFolderInfo, ChatFolderSpec, ChatJoinResult, ChatKind,
-    ChatList, ChatNotificationSettings, ChatPositionUpdate, ChatStatistics, ConnectionState,
-    EnvelopePayload, ErrorClass, ForumTopic, InlineKeyboard, InviteGroupCallParticipantResult,
-    MessageAutoDelete, MessageContent, MessageForwardInfo, MessageInteractionInfo, MessageOrigin,
-    MessageReaction, MessageReplyTo, MessageSelfDestruct, MessageSender, NotificationSettingsScope,
-    NotificationSound, ParsedCall, ParsedChatEvent, ParsedChatInviteLink, ParsedChatJoinRequest,
-    ParsedChatMember, ParsedFile, ParsedGroupCall, ParsedGroupCallMessage,
-    ParsedGroupCallParticipant, ParsedMessage, ParsedSecretChat, ParsedStory, ParsedUser,
-    ParsedVideoChat, Poll, ReportOption, ReportSponsoredResult, ScopeNotificationSettings,
-    SecretChatState, SponsoredMessage, StickerFormat, StickerItem, StickerSetInfo, StorageStats,
-    StoryAvailableReactionView, StoryListView, TdError,
+    ChatList, ChatNotificationSettings, ChatPermissions, ChatPositionUpdate, ChatStatistics,
+    ConnectionState, EnvelopePayload, ErrorClass, ForumTopic, InlineKeyboard,
+    InviteGroupCallParticipantResult, MessageAutoDelete, MessageContent, MessageForwardInfo,
+    MessageInteractionInfo, MessageOrigin, MessageReaction, MessageReplyTo, MessageSelfDestruct,
+    MessageSender, NotificationSettingsScope, NotificationSound, ParsedCall, ParsedChatEvent,
+    ParsedChatInviteLink, ParsedChatJoinRequest, ParsedChatMember, ParsedFile, ParsedGroupCall,
+    ParsedGroupCallMessage, ParsedGroupCallParticipant, ParsedMessage, ParsedSecretChat,
+    ParsedStory, ParsedUser, ParsedVideoChat, Poll, ReportOption, ReportSponsoredResult,
+    ScopeNotificationSettings, SecretChatState, SponsoredMessage, StickerFormat, StickerItem,
+    StickerSetInfo, StorageStats, StoryAvailableReactionView, StoryListView, TdError,
 };
 use crate::telegram::envelope::{CallState, ReadyParams};
 use crate::telegram::requests::{CallPrivacySetting, PrivacyWho};
@@ -40,6 +40,45 @@ pub enum MemberStatusChange {
     EditRights,
     /// Administrator → plain member (`chatMemberStatusMember`).
     Demote,
+    /// Member → restricted (`chatMemberStatusRestricted`, schema 1.8.67
+    /// line 2510). Not supported in basic groups and channels.
+    Restrict,
+    /// Member → banned (`chatMemberStatusBanned`, schema 1.8.67 line
+    /// 2517). Works in supergroups and channels.
+    Ban,
+    /// Restricted/banned member → plain member
+    /// (`chatMemberStatusMember`).
+    Unban,
+}
+
+/// Slice G1: which `getSupergroupMembers` filter backs one cached member
+/// page. The `Search` page's query is tracked by the caller (promote
+/// picker / member dialog) rather than the cache — one page per
+/// (chat, filter).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum MemberListFilter {
+    /// `supergroupMembersFilterRecent` (schema 1.8.67, line 2559).
+    Recent,
+    /// `supergroupMembersFilterSearch` (line 2568).
+    Search,
+    /// `supergroupMembersFilterAdministrators` (line 2565).
+    Administrators,
+    /// `supergroupMembersFilterRestricted` (line 2571); admins only.
+    Restricted,
+    /// `supergroupMembersFilterBanned` (line 2574); admins only.
+    Banned,
+}
+
+impl MemberListFilter {
+    /// Slice G1: whether `getSupergroupMembers` with this filter requires
+    /// the `can_restrict_members` administrator right (schema 1.8.67,
+    /// lines 2570/2574: restricted/banned filters are admin-only).
+    pub fn requires_restrict_right(self) -> bool {
+        matches!(
+            self,
+            MemberListFilter::Restricted | MemberListFilter::Banned
+        )
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -233,9 +272,17 @@ pub enum RequestPurpose {
     GetAdminRights {
         user_id: i64,
     },
-    /// Phase D3b: `getSupergroupMembers` for the promote member picker.
-    /// Response is `chatMembers`; correlated via `PendingRequest::chat_id`.
-    GetSupergroupMembers,
+    /// Phase D3b / slice G1: `getSupergroupMembers` for the promote
+    /// member picker and the member-management dialog. Response is
+    /// `chatMembers`; correlated via `PendingRequest::chat_id`, cached
+    /// per (`chat_id`, `filter`).
+    GetSupergroupMembers {
+        filter: MemberListFilter,
+    },
+    /// Slice G1: `getBasicGroupFullInfo` (schema 1.8.67, line 11507).
+    /// Response is `basicGroupFullInfo`; correlated via
+    /// `PendingRequest::chat_id`.
+    GetBasicGroupFullInfo,
     /// Phase D3c: `getChatEventLog`. Response is `chatEvents`; correlated
     /// via `PendingRequest::chat_id`. `from_event_id` is the paging
     /// cursor: 0 replaces the cached page, a nonzero id appends the
@@ -246,6 +293,59 @@ pub enum RequestPurpose {
     /// Phase A1: `setChatSlowModeDelay`. Response is `ok`; the new delay
     /// arrives via `updateSupergroupFullInfo`.
     SetChatSlowModeDelay,
+    /// Slice G1: `createNewBasicGroupChat` (schema 1.8.67, line 13327).
+    /// Response is `createdBasicGroupChat`; the chat itself arrives as
+    /// `updateNewChat`.
+    CreateBasicGroup,
+    /// Slice G1: `createNewSupergroupChat` (schema 1.8.67, line 13337).
+    /// Response is the new `chat`; `updateNewChat` follows as well.
+    CreateSupergroupChannel {
+        is_channel: bool,
+    },
+    /// Slice G1: `toggleSupergroupIsBroadcastGroup` (schema 1.8.67, line
+    /// 15221). Response is `ok`; `updateSupergroup` carries the new
+    /// `is_broadcast_group`. One-way: supergroup → broadcast group.
+    ToggleBroadcastGroup,
+    /// Slice G1: `addChatMembers` (schema 1.8.67, line 13584). Response is
+    /// `failedToAddMembers`; added members arrive as `updateChatMember`.
+    /// The single bulk response replaces the failure count.
+    AddChatMembers,
+    /// Slice G1 fix-up: one `addChatMember` per user for basic groups
+    /// (schema 1.8.67, line 13578 — also answers `failedToAddMembers`,
+    /// 0 or 1 failures each). Per-user responses accumulate into the
+    /// failure count instead of replacing it.
+    AddChatMember,
+    /// Slice G1: `setChatPermissions` (schema 1.8.67, line 13464).
+    /// Response is `ok`; `updateChatPermissions` carries the new block.
+    /// Applied optimistically by the driver at send time; a TDLib error
+    /// restores the previous block via `PendingRequest::rollback`.
+    SetChatPermissions,
+    /// Slice G1: `replacePrimaryChatInviteLink` (schema 1.8.67, line
+    /// 14089). Response is the new `chatInviteLink`; correlated via
+    /// `PendingRequest::chat_id`.
+    ReplacePrimaryChatInviteLink,
+    /// Slice G1: `toggleSupergroupJoinByRequest` (schema 1.8.67, line
+    /// 15188). Response is `ok`; `updateSupergroup` carries the new
+    /// `join_by_request`. Applied optimistically by the driver at send
+    /// time; a TDLib error restores the previous flag via
+    /// `PendingRequest::rollback`.
+    ToggleSupergroupJoinByRequest,
+    /// Slice G1: `setSupergroupUsername` (schema 1.8.67, line 15136).
+    /// Response is `ok`; `updateSupergroup` carries the new username.
+    /// Applied optimistically by the driver at send time; a TDLib error
+    /// restores the previous username via `PendingRequest::rollback`.
+    SetSupergroupUsername,
+    /// Slice G1: `setChatMemberTag` (schema 1.8.67, line 13598) — the
+    /// admin custom-title setter (Telegram X `EditRightsController`
+    /// drives the "Custom title" field through it). Response is `ok`;
+    /// member caches are invalidated so the new tag is refetched.
+    SetChatMemberTag {
+        user_id: i64,
+    },
+    /// Slice G1: `deleteChat` (schema 1.8.67, line 11850). Response is
+    /// `ok`. The chat is dropped locally; it deletes the chat for all
+    /// members and releases the username.
+    DeleteChat,
     /// Phase 9.1: `loadActiveStories` (`storyListMain`). The stories
     /// arrive as `updateChatActiveStories` updates; feed the story tray.
     LoadActiveStories,
@@ -508,6 +608,30 @@ pub enum RequestPurpose {
     Other,
 }
 
+/// Slice G1: the pre-request value an optimistic mutation restores when
+/// TDLib rejects it. Stored on `PendingRequest::rollback` at send time;
+/// the error arm below restores it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RequestRollback {
+    /// `setChatPermissions`: the chat's previous permission block and
+    /// `can_send_basic_messages`.
+    ChatPermissions {
+        previous: Option<ChatPermissions>,
+        previous_can_send: bool,
+    },
+    /// `toggleSupergroupJoinByRequest`: the previous join-by-request flag
+    /// (`None` = unknown, treated as disabled).
+    JoinByRequest {
+        supergroup_id: i64,
+        previous: Option<bool>,
+    },
+    /// `setSupergroupUsername`: the previous username (`None` = none set).
+    SupergroupUsername {
+        supergroup_id: i64,
+        previous: Option<String>,
+    },
+}
+
 fn is_auth_submit(purpose: RequestPurpose) -> bool {
     matches!(
         purpose,
@@ -673,6 +797,12 @@ pub struct PendingRequest {
     /// `CloseSecretChat` so the id-less `secretChat` response and
     /// purpose-gating correlate to the right secret chat.
     pub secret_chat_id: Option<i32>,
+    /// Slice G1: rollback for requests the driver applies optimistically
+    /// at send time (`setChatPermissions`,
+    /// `toggleSupergroupJoinByRequest`, `setSupergroupUsername`). On a
+    /// TDLib error the pre-request value is restored so the UI never
+    /// keeps showing a change the server rejected.
+    pub rollback: Option<RequestRollback>,
 }
 
 #[derive(Debug, Default)]
@@ -722,6 +852,7 @@ impl RequestRegistry {
                 folder_id: None,
                 scope: None,
                 secret_chat_id: None,
+                rollback: None,
             },
         );
         id
@@ -753,6 +884,7 @@ impl RequestRegistry {
                 folder_id: None,
                 scope: None,
                 secret_chat_id: None,
+                rollback: None,
             },
         );
         id
@@ -785,6 +917,7 @@ impl RequestRegistry {
                 folder_id: None,
                 scope: None,
                 secret_chat_id: None,
+                rollback: None,
             },
         );
         id
@@ -817,6 +950,7 @@ impl RequestRegistry {
                 folder_id: None,
                 scope: None,
                 secret_chat_id: None,
+                rollback: None,
             },
         );
         id
@@ -847,6 +981,7 @@ impl RequestRegistry {
                 folder_id: None,
                 scope: None,
                 secret_chat_id: None,
+                rollback: None,
             },
         );
         id
@@ -1087,6 +1222,14 @@ pub struct ChatSummary {
     /// every other status or an absent rights block. Gates admin
     /// management (promote / demote / edit rights).
     pub my_admin_can_promote_members: Option<bool>,
+    /// Slice G1: `rights.can_restrict_members` from
+    /// `chatMemberStatusAdministrator` (TDLib 1.8.67,
+    /// `chatAdministratorRights`, schema line 1092). `Some` only when the
+    /// status is Administrator and the rights block parsed; `None` for
+    /// every other status or an absent rights block. Gates member
+    /// restriction / banning (`setChatMemberStatus` with a restricted or
+    /// banned status requires this right, schema lines 13586-13587).
+    pub my_admin_can_restrict_members: Option<bool>,
     /// Phase 5.1: `supergroup.is_forum` (TDLib 1.8.67). `None` until
     /// `updateSupergroup` / the `getSupergroup` response resolves it; only
     /// meaningful for non-channel supergroups.
@@ -1100,6 +1243,15 @@ pub struct ChatSummary {
     /// `updateChatPermissions` (line 10500). Gates the topic composer
     /// alongside `ForumTopic.is_closed`.
     pub can_send_basic_messages: bool,
+    /// Slice G1: the full default `chat.permissions` block
+    /// (`chatPermissions`, schema 1.8.67 line 1070), refreshed by
+    /// `updateChatPermissions` (line 10500). Drives the default chat
+    /// permissions editor; `None` until a full block parses.
+    pub permissions: Option<ChatPermissions>,
+    /// Slice G1: `chat.can_be_deleted_for_all_users` (schema 1.8.67, line
+    /// 3616), refreshed by `updateNewChat`. Gates `deleteChat` (schema
+    /// line 11848).
+    pub can_be_deleted_for_all_users: bool,
     /// Phase B1: latest known `SecretChatState` for `ChatKind::Secret`
     /// chats (from `updateSecretChat` / `getSecretChat`, schema 1.8.67
     /// lines 10741 / 2816). `None` for other chat kinds and until the
@@ -1242,6 +1394,28 @@ impl ChatSummary {
         self.my_admin_can_promote_members = can_promote_members;
     }
 
+    /// Slice G1: whether the current user may restrict or ban this chat's
+    /// members (`setChatMemberStatus` with a restricted or banned status
+    /// requires the `can_restrict_members` administrator right, schema
+    /// 1.8.67 lines 13586-13587). The creator always can; an administrator
+    /// needs the explicit right. Unknown status or an absent rights block
+    /// keeps the gate closed.
+    pub fn can_restrict_members(&self) -> bool {
+        match self.my_member_status {
+            Some(ChannelMemberStatus::Creator) => true,
+            Some(ChannelMemberStatus::Administrator) => {
+                self.my_admin_can_restrict_members.unwrap_or(false)
+            }
+            _ => false,
+        }
+    }
+
+    /// Slice G1: record `rights.can_restrict_members` (`None` for
+    /// non-admin statuses or an absent rights block).
+    pub fn set_admin_can_restrict_members(&mut self, can_restrict_members: Option<bool>) {
+        self.my_admin_can_restrict_members = can_restrict_members;
+    }
+
     pub fn is_forum_chat(&self) -> bool {
         self.is_forum == Some(true)
     }
@@ -1360,12 +1534,15 @@ fn placeholder_chat(chat_id: ChatId) -> ChatSummary {
         my_admin_can_post_messages: None,
         my_admin_can_invite_users: None,
         my_admin_can_promote_members: None,
+        my_admin_can_restrict_members: None,
         is_forum: None,
         photo_file_id: None,
         // Parity slice 4: lenient default true — the real `chat` object
         // always carries `permissions`; only `updateNewChat` /
         // `updateChatPermissions` ever set it to false.
         can_send_basic_messages: true,
+        permissions: None,
+        can_be_deleted_for_all_users: false,
         // Phase B1: unknown until `updateSecretChat` / `getSecretChat`
         // resolves it.
         secret_state: None,
@@ -2462,6 +2639,10 @@ pub struct Session {
     /// into the `_ => {}` swallower and the user saw "retrying send…"
     /// followed by silence.
     pub resend_error: Option<String>,
+    /// Slice G1 fix-up: one-shot; set when an invite-link mutation
+    /// (create/edit/revoke/replace-primary) errors. The UI drains it into
+    /// the status note — the previously loaded list is kept, not wiped.
+    pub invite_link_error: Option<String>,
     /// M1: `getChatScheduledMessages` results — the chat's scheduled sends,
     /// with `scheduling_state` showing the planned send time.
     pub scheduled_messages: Vec<ParsedMessage>,
@@ -2691,9 +2872,40 @@ pub struct Session {
     pub supergroup_invite_right: HashMap<i64, bool>,
     /// Phase D3b: `getChatAdministrators` fetch state, keyed by chat id.
     pub admin_lists: HashMap<i64, AdminListFetch>,
-    /// Phase D3b: `getSupergroupMembers` fetch state for the promote
-    /// member picker, keyed by chat id.
-    pub supergroup_members: HashMap<i64, SupergroupMembersFetch>,
+    /// Phase D3b / slice G1: `getSupergroupMembers` fetch state for the
+    /// promote member picker and the member-management dialog, keyed by
+    /// (chat id, filter). One page per filter.
+    pub supergroup_members: HashMap<(i64, MemberListFilter), SupergroupMembersFetch>,
+    /// Slice G1: `getBasicGroupFullInfo` fetch state (the member list for
+    /// basic groups), keyed by chat id. Reuses `SupergroupMembersFetch`
+    /// (Loading / Loaded / Failed).
+    pub basic_group_members: HashMap<i64, SupergroupMembersFetch>,
+    /// Slice G1: `supergroup.join_by_request` (schema 1.8.67, lines
+    /// 2733/2746), keyed by supergroup id. Drives the "Approve new
+    /// members" toggle.
+    pub supergroup_join_by_request: HashMap<i64, bool>,
+    /// Slice G1: `supergroup.is_broadcast_group` (schema 1.8.67, lines
+    /// 2736/2746), keyed by supergroup id. Set by
+    /// `toggleSupergroupIsBroadcastGroup` (one-way upgrade).
+    pub supergroup_is_broadcast: HashMap<i64, bool>,
+    /// Slice G1: `addChatMembers` failure count from the last add
+    /// attempt — `failedToAddMembers.failed_to_add_members.len()` for the
+    /// bulk path (schema 1.8.67, line 3640), or the accumulated per-user
+    /// `addChatMember` `failedToAddMembers` counts plus error responses
+    /// for basic groups — keyed by chat id.
+    /// Reset when a new add starts; cleared when the dialog closes.
+    pub add_members_failed: HashMap<i64, i32>,
+    /// Slice G1 fix-up: chat ids whose member-list caches were dropped by
+    /// an `updateChatMember` while a member dialog may be open. One-shot;
+    /// the UI drains it and refetches the open dialog's page.
+    pub member_list_stale: Vec<i64>,
+    /// Slice G1: last member-action failure for the member-management
+    /// dialog (`setChatMemberTag` / `setChatMemberStatus`), keyed by
+    /// chat id. The dialog reads the member-list fetch states, not
+    /// `admin_lists`, so action failures need their own slot to be
+    /// visible where the action was taken. Cleared when the dialog
+    /// opens.
+    pub member_action_error: HashMap<i64, String>,
     /// Phase D3b: one administrator's parsed `chatAdministratorRights`
     /// fetch state, keyed by (chat_id, user_id). Filled by `getChatMember`
     /// (purpose `GetAdminRights`); drives the edit-rights dialog.
@@ -2703,6 +2915,9 @@ pub struct Session {
     /// 1092). Admin management requires this right (or creator status).
     /// Absent = unknown, treated as lacking the right.
     pub supergroup_promote_right: HashMap<i64, bool>,
+    /// Slice G1: own `rights.can_manage_tags` per supergroup (schema
+    /// 1.8.67, line 1092) — gates custom-title changes for others.
+    pub supergroup_manage_tags_right: HashMap<i64, bool>,
     /// Phase 6: the open user / supergroup info panel, if any.
     pub open_info_panel: Option<InfoPanelTarget>,
     /// Phase 9.1: active stories per chat from `updateChatActiveStories` /
@@ -2735,6 +2950,8 @@ pub struct Session {
 pub enum InfoPanelTarget {
     User(i64),
     Supergroup(i64),
+    /// Slice G1: basic-group info panel, keyed by basic group id.
+    BasicGroup(i64),
     /// Phase D2: channel/group statistics view, keyed by chat id. The
     /// `getChatStatistics` fetch is gated on
     /// `supergroupFullInfo.can_get_statistics` before opening.
@@ -2989,6 +3206,7 @@ impl Session {
             message_link_result: None,
             message_link_error: None,
             resend_error: None,
+            invite_link_error: None,
             scheduled_messages: Vec::new(),
             open_chat: None,
             app_active: true,
@@ -3067,10 +3285,17 @@ impl Session {
             supergroup_member_status: HashMap::new(),
             supergroup_restrict_right: HashMap::new(),
             supergroup_invite_right: HashMap::new(),
+            supergroup_join_by_request: HashMap::new(),
+            supergroup_is_broadcast: HashMap::new(),
+            add_members_failed: HashMap::new(),
+            member_list_stale: Vec::new(),
+            member_action_error: HashMap::new(),
             admin_lists: HashMap::new(),
             supergroup_members: HashMap::new(),
+            basic_group_members: HashMap::new(),
             admin_rights: HashMap::new(),
             supergroup_promote_right: HashMap::new(),
+            supergroup_manage_tags_right: HashMap::new(),
             open_info_panel: None,
             story_tray: HashMap::new(),
             stories: HashMap::new(),
@@ -3136,6 +3361,9 @@ impl Session {
             ChatKind::Secret { user_id, .. } => Some(InfoPanelTarget::User(user_id.0)),
             ChatKind::Supergroup { supergroup_id, .. } => {
                 Some(InfoPanelTarget::Supergroup(supergroup_id))
+            }
+            ChatKind::BasicGroup { basic_group_id } => {
+                Some(InfoPanelTarget::BasicGroup(basic_group_id))
             }
             _ => None,
         }
@@ -3227,6 +3455,36 @@ impl Session {
             .unwrap_or(false)
     }
 
+    /// Slice G1: whether the viewer's own administrator rights in a
+    /// supergroup include `can_manage_tags` (schema 1.8.67, line 1092),
+    /// which changing another member's custom title requires. Creators
+    /// hold all rights implicitly — check `supergroup_own_status` for
+    /// that. Absent = unknown, treated as lacking the right.
+    pub fn supergroup_can_manage_tags(&self, supergroup_id: i64) -> bool {
+        self.supergroup_manage_tags_right
+            .get(&supergroup_id)
+            .copied()
+            .unwrap_or(false)
+    }
+
+    /// Slice G1: whether the viewer may set a member's custom title in
+    /// this chat — creator, or an admin with `can_manage_tags`.
+    /// Basic groups: creators only (basic groups expose no per-admin
+    /// rights; the server rejects anything else).
+    pub fn chat_can_manage_tags(&self, chat_id: ChatId) -> bool {
+        let Some(chat) = self.chats.get(&chat_id.0) else {
+            return false;
+        };
+        match chat.kind {
+            ChatKind::Supergroup { supergroup_id, .. } => {
+                self.supergroup_own_status(supergroup_id) == Some(ChannelMemberStatus::Creator)
+                    || self.supergroup_can_manage_tags(supergroup_id)
+            }
+            ChatKind::BasicGroup { .. } => self.chat_is_owner(chat_id),
+            _ => false,
+        }
+    }
+
     /// Phase D3a: invite-link / join-request gate for a chat. The
     /// `ChatSummary` path covers channels (own membership probed via
     /// `getChatMember`); non-channel supergroups carry own admin rights
@@ -3250,6 +3508,24 @@ impl Session {
         }
     }
 
+    /// Slice G1: whether the viewer may add members to a chat.
+    /// `addChatMember` / `addChatMembers` require the `can_invite_users`
+    /// *member* right (schema 1.8.67, lines 13574/13580) — a plain member
+    /// with the default permission qualifies, so the default
+    /// `chat.permissions` block governs; the admin invite right (or
+    /// creator status) is a blanket override. Unknown permissions keep
+    /// the gate closed.
+    pub fn chat_can_add_members(&self, chat_id: ChatId) -> bool {
+        let Some(chat) = self.chats.get(&chat_id.0) else {
+            return false;
+        };
+        if self.chat_can_invite_users(chat_id) {
+            return true;
+        }
+        chat.permissions
+            .as_ref()
+            .is_some_and(|p| p.can_invite_users)
+    }
     /// Phase D3b: admin-management gate for a chat. The `ChatSummary`
     /// path covers channels (own membership probed via `getChatMember`);
     /// non-channel supergroups carry own admin rights on the
@@ -3265,6 +3541,51 @@ impl Session {
             ChatKind::Supergroup { supergroup_id, .. } => {
                 self.supergroup_own_status(supergroup_id) == Some(ChannelMemberStatus::Creator)
                     || self.supergroup_can_promote_members(supergroup_id)
+            }
+            _ => false,
+        }
+    }
+
+    /// Slice G1: restrict/ban gate for a chat. `setChatMemberStatus`
+    /// requires the `can_restrict_members` administrator right "to change
+    /// restrictions of a user" (schema 1.8.67, lines 13586-13587).
+    /// Deny-by-default, following the D3b `chat_can_manage_admins`
+    /// pattern: the `ChatSummary` path covers channels (own membership
+    /// probed via `getChatMember`); non-channel supergroups carry own
+    /// admin status on the `updateSupergroup` / `getSupergroup` status
+    /// block instead. Note `chatMemberStatusRestricted` is "not supported
+    /// in basic groups and channels" (schema line 2510) — restrict applies
+    /// to non-channel supergroups only; ban works in supergroups and
+    /// channels.
+    pub fn chat_can_restrict_members(&self, chat_id: ChatId) -> bool {
+        let Some(chat) = self.chats.get(&chat_id.0) else {
+            return false;
+        };
+        if chat.can_restrict_members() {
+            return true;
+        }
+        match chat.kind {
+            ChatKind::Supergroup { supergroup_id, .. } => {
+                self.supergroup_own_status(supergroup_id) == Some(ChannelMemberStatus::Creator)
+                    || self.supergroup_can_restrict_members(supergroup_id)
+            }
+            _ => false,
+        }
+    }
+
+    /// Slice G1: whether the viewer owns the chat (creator status).
+    /// `toggleSupergroupIsBroadcastGroup` and `setSupergroupUsername`
+    /// require owner privileges (schema 1.8.67, lines 15220/15133).
+    pub fn chat_is_owner(&self, chat_id: ChatId) -> bool {
+        let Some(chat) = self.chats.get(&chat_id.0) else {
+            return false;
+        };
+        if chat.my_member_status == Some(ChannelMemberStatus::Creator) {
+            return true;
+        }
+        match chat.kind {
+            ChatKind::Supergroup { supergroup_id, .. } => {
+                self.supergroup_own_status(supergroup_id) == Some(ChannelMemberStatus::Creator)
             }
             _ => false,
         }
@@ -3484,6 +3805,8 @@ impl Session {
                 draft,
                 photo,
                 can_send_basic_messages,
+                permissions,
+                can_be_deleted_for_all_users,
                 message_auto_delete_time,
                 video_chat,
             } => {
@@ -3507,6 +3830,9 @@ impl Session {
                 chat.notification_settings = notification_settings;
                 chat.photo_file_id = photo_file_id;
                 chat.can_send_basic_messages = can_send_basic_messages;
+                // Slice G1: full default permissions block for the editor.
+                chat.permissions = permissions;
+                chat.can_be_deleted_for_all_users = can_be_deleted_for_all_users;
                 // Phase B4: chat-level auto-delete / self-destruct timer
                 // (`chat.message_auto_delete_time`, schema 1.8.67, lines
                 // 3616 / 3627).
@@ -3550,11 +3876,16 @@ impl Session {
             EnvelopePayload::UpdateChatPermissions {
                 chat_id,
                 can_send_basic_messages,
+                permissions,
             } => {
-                self.chats
+                let chat = self
+                    .chats
                     .entry(chat_id.0)
-                    .or_insert_with(|| placeholder_chat(chat_id))
-                    .can_send_basic_messages = can_send_basic_messages;
+                    .or_insert_with(|| placeholder_chat(chat_id));
+                chat.can_send_basic_messages = can_send_basic_messages;
+                // Slice G1: keep the full default permissions block for
+                // the editor.
+                chat.permissions = permissions;
             }
             EnvelopePayload::UpdateChatDraftMessage {
                 chat_id,
@@ -3685,7 +4016,11 @@ impl Session {
             EnvelopePayload::ChatInviteLink { link } => {
                 if matches!(
                     pending.map(|p| p.purpose),
-                    Some(RequestPurpose::CreateChatInviteLink | RequestPurpose::EditChatInviteLink)
+                    Some(
+                        RequestPurpose::CreateChatInviteLink
+                            | RequestPurpose::EditChatInviteLink
+                            | RequestPurpose::ReplacePrimaryChatInviteLink,
+                    )
                 ) && let Some(pending) = pending
                     && let Some(chat_id) = pending.chat_id
                 {
@@ -3694,6 +4029,16 @@ impl Session {
                         std::collections::hash_map::Entry::Occupied(mut entry) => {
                             match entry.get_mut() {
                                 InviteLinkFetch::Loaded(list) => {
+                                    if pending.purpose
+                                        == RequestPurpose::ReplacePrimaryChatInviteLink
+                                    {
+                                        // Slice G1: the old primary was
+                                        // revoked server-side; drop it so
+                                        // the list shows only the new one.
+                                        list.links.retain(|e| {
+                                            !e.is_primary || e.invite_link == link.invite_link
+                                        });
+                                    }
                                     if let Some(existing) = list
                                         .links
                                         .iter_mut()
@@ -3768,23 +4113,66 @@ impl Session {
                         .insert(chat_id.0, AdminListFetch::Loaded(administrators));
                 }
             }
-            // Phase D3b: `getSupergroupMembers` answer — replaces the
-            // cached member-picker page.
+            // Phase D3b / slice G1: `getSupergroupMembers` answer —
+            // replaces the cached page for this (chat, filter).
             EnvelopePayload::SupergroupMembers {
                 members,
                 total_count,
             } => {
-                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetSupergroupMembers)
-                    && let Some(pending) = pending
-                    && let Some(chat_id) = pending.chat_id
+                if let Some(RequestPurpose::GetSupergroupMembers { filter }) =
+                    pending.map(|p| p.purpose)
+                    && let Some(chat_id) = pending.and_then(|p| p.chat_id)
                 {
                     self.supergroup_members.insert(
+                        (chat_id.0, filter),
+                        SupergroupMembersFetch::Loaded {
+                            members,
+                            total_count,
+                        },
+                    );
+                }
+            }
+            // Slice G1: `createNewBasicGroupChat` answer
+            // (`createdBasicGroupChat`, schema 1.8.67, line 3644). The new
+            // chat itself arrives as `updateNewChat`; nothing to cache.
+            EnvelopePayload::CreatedBasicGroupChat { chat_id: _ } => {}
+            // Slice G1: `addChatMembers` answer (`failedToAddMembers`,
+            // schema 1.8.67, line 3640). Added members arrive as
+            // `updateChatMember`; the failure count drives the notice in
+            // the add-members dialog.
+            // Slice G1: `getBasicGroupFullInfo` answer — replaces the
+            // cached basic-group member list.
+            EnvelopePayload::BasicGroupFullInfo { members } => {
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetBasicGroupFullInfo)
+                    && let Some(chat_id) = pending.and_then(|p| p.chat_id)
+                {
+                    let total_count = members.len() as i32;
+                    self.basic_group_members.insert(
                         chat_id.0,
                         SupergroupMembersFetch::Loaded {
                             members,
                             total_count,
                         },
                     );
+                }
+            }
+            EnvelopePayload::FailedToAddMembers { failed_count } => {
+                if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
+                    match pending.map(|p| p.purpose) {
+                        // Slice G1: the bulk `addChatMembers` answer is a
+                        // single response — it replaces the count.
+                        Some(RequestPurpose::AddChatMembers) => {
+                            self.add_members_failed.insert(chat_id.0, failed_count);
+                        }
+                        // Slice G1 fix-up: basic groups send one
+                        // `addChatMember` per user and each answers
+                        // `failedToAddMembers` — accumulate, or the last
+                        // response would overwrite the earlier ones.
+                        Some(RequestPurpose::AddChatMember) => {
+                            *self.add_members_failed.entry(chat_id.0).or_insert(0) += failed_count;
+                        }
+                        _ => {}
+                    }
                 }
             }
             // Phase D3c: `getChatEventLog` answer — a first page (cursor
@@ -4529,6 +4917,9 @@ impl Session {
                 can_restrict_members,
                 can_invite_users,
                 can_promote_members,
+                can_manage_tags,
+                join_by_request,
+                is_broadcast_group,
             } => {
                 self.set_supergroup_forum(supergroup_id, is_forum);
                 self.set_supergroup_username(supergroup_id, username);
@@ -4546,6 +4937,18 @@ impl Session {
                 // management; absent = unknown → lacking.
                 self.supergroup_promote_right
                     .insert(supergroup_id, can_promote_members.unwrap_or(false));
+                // Slice G1: `can_manage_tags` gates custom-title
+                // changes for other members.
+                self.supergroup_manage_tags_right
+                    .insert(supergroup_id, can_manage_tags.unwrap_or(false));
+                // Slice G1: `supergroup.join_by_request` (schema 1.8.67,
+                // lines 2733/2746) drives the "Approve new members"
+                // toggle; `supergroup.is_broadcast_group` (lines
+                // 2736/2746) drives the broadcast-group toggle.
+                self.supergroup_join_by_request
+                    .insert(supergroup_id, join_by_request);
+                self.supergroup_is_broadcast
+                    .insert(supergroup_id, is_broadcast_group);
             }
             EnvelopePayload::Supergroup {
                 supergroup_id,
@@ -4555,6 +4958,9 @@ impl Session {
                 can_restrict_members,
                 can_invite_users,
                 can_promote_members,
+                can_manage_tags,
+                join_by_request,
+                is_broadcast_group,
             } => {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetSupergroup) {
                     self.set_supergroup_forum(supergroup_id, is_forum);
@@ -4570,6 +4976,16 @@ impl Session {
                     // Phase D3b: `can_promote_members` gates admin management.
                     self.supergroup_promote_right
                         .insert(supergroup_id, can_promote_members.unwrap_or(false));
+                    // Slice G1: `can_manage_tags` gates custom-title
+                    // changes for other members.
+                    self.supergroup_manage_tags_right
+                        .insert(supergroup_id, can_manage_tags.unwrap_or(false));
+                    // Slice G1: join-by-request + broadcast flags (schema
+                    // 1.8.67, lines 2733/2736/2746).
+                    self.supergroup_join_by_request
+                        .insert(supergroup_id, join_by_request);
+                    self.supergroup_is_broadcast
+                        .insert(supergroup_id, is_broadcast_group);
                 }
             }
             // Phase 5.1: `getForumTopics` response — cache the first page
@@ -4734,7 +5150,7 @@ impl Session {
                     && let Some(pending) = pending
                     && let Some(chat_id) = pending.chat_id
                 {
-                    self.accept_own_chat_member(chat_id, member);
+                    self.accept_own_chat_member(chat_id, member.clone());
                 }
                 // Phase D3b: `getChatMember` for one administrator's rights
                 // (edit dialog). Only an administrator status carries a
@@ -4824,6 +5240,17 @@ impl Session {
                 // so the editor refetches instead of showing old rights.
                 if let MessageSender::User { user_id } = member.member_id {
                     self.admin_rights.remove(&(chat_id.0, user_id));
+                }
+                // Slice G1 fix-up: membership changes also stale the
+                // member-list caches (e.g. our own add, or someone else
+                // joining). Drop both so the dialog refetches instead of
+                // showing the pre-change list; `member_list_stale` tells
+                // the UI an open dialog needs a refetch.
+                self.basic_group_members.remove(&chat_id.0);
+                self.supergroup_members
+                    .retain(|(id, _), _| *id != chat_id.0);
+                if !self.member_list_stale.contains(&chat_id.0) {
+                    self.member_list_stale.push(chat_id.0);
                 }
                 self.accept_own_chat_member(chat_id, member);
             }
@@ -5028,6 +5455,33 @@ impl Session {
                 ) && let Some(chat_id) = pending.and_then(|p| p.chat_id)
                 {
                     self.admin_lists.remove(&chat_id.0);
+                    // Slice G1: restrict/ban/unban change the member
+                    // lists too — drop all cached pages for this chat.
+                    if matches!(
+                        pending.map(|p| p.purpose),
+                        Some(RequestPurpose::SetChatMemberStatus {
+                            kind: MemberStatusChange::Restrict
+                                | MemberStatusChange::Ban
+                                | MemberStatusChange::Unban,
+                            ..
+                        })
+                    ) {
+                        self.supergroup_members
+                            .retain(|(id, _), _| *id != chat_id.0);
+                    }
+                }
+                // Slice G1: `setChatMemberTag` confirmed — the custom
+                // title itself arrives via `updateChatMember`; drop
+                // cached member pages so the new tag is refetched
+                // instead of showing stale data.
+                if matches!(
+                    pending.map(|p| p.purpose),
+                    Some(RequestPurpose::SetChatMemberTag { .. })
+                ) && let Some(chat_id) = pending.and_then(|p| p.chat_id)
+                {
+                    self.supergroup_members
+                        .retain(|(id, _), _| *id != chat_id.0);
+                    self.basic_group_members.remove(&chat_id.0);
                 }
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::LeaveChat)
                     && let Some(chat_id) = pending.and_then(|p| p.chat_id)
@@ -5036,6 +5490,19 @@ impl Session {
                     // Optimistic: `updateChatMember` confirms. TDLib errors
                     // keep the old status (Error arm below does not touch it).
                     chat.set_member_status(ChannelMemberStatus::Left, None);
+                }
+                // Slice G1: `deleteChat` confirmed — drop the chat locally.
+                // The schema (1.8.67, line 11850) deletes the chat for all
+                // members and releases the username; no update announces
+                // it, so the client removes it itself.
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::DeleteChat)
+                    && let Some(chat_id) = pending.and_then(|p| p.chat_id)
+                {
+                    self.chats.remove(&chat_id.0);
+                    self.supergroup_members
+                        .retain(|(id, _), _| *id != chat_id.0);
+                    self.admin_lists.remove(&chat_id.0);
+                    self.add_members_failed.remove(&chat_id.0);
                 }
                 // Phase D3a: `processChatJoinRequest` confirmed — drop the
                 // processed request from the cached list. The count is
@@ -5072,6 +5539,45 @@ impl Session {
                 }
             }
             EnvelopePayload::Error(err) => {
+                // Slice G1: roll back optimistic mutations the server
+                // rejected — the pre-request value rides on
+                // `PendingRequest::rollback`.
+                match pending.and_then(|p| p.rollback.clone()) {
+                    Some(RequestRollback::ChatPermissions {
+                        previous,
+                        previous_can_send,
+                    }) => {
+                        if let Some(chat_id) = pending.and_then(|p| p.chat_id)
+                            && let Some(chat) = self.chats.get_mut(&chat_id.0)
+                        {
+                            chat.permissions = previous;
+                            chat.can_send_basic_messages = previous_can_send;
+                        }
+                    }
+                    Some(RequestRollback::JoinByRequest {
+                        supergroup_id,
+                        previous,
+                    }) => match previous {
+                        Some(flag) => {
+                            self.supergroup_join_by_request.insert(supergroup_id, flag);
+                        }
+                        None => {
+                            self.supergroup_join_by_request.remove(&supergroup_id);
+                        }
+                    },
+                    Some(RequestRollback::SupergroupUsername {
+                        supergroup_id,
+                        previous,
+                    }) => match previous {
+                        Some(username) => {
+                            self.supergroup_usernames.insert(supergroup_id, username);
+                        }
+                        None => {
+                            self.supergroup_usernames.remove(&supergroup_id);
+                        }
+                    },
+                    None => {}
+                }
                 // Phase C1: a failed call request surfaces on the call
                 // overlay (shown and cleared by the UI). A failed
                 // `createCall` also drops the half-tracked outgoing call.
@@ -5265,36 +5771,40 @@ impl Session {
                         }
                     }
                     Some(RequestPurpose::CreateChatInviteLink) => {
-                        if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
-                            self.invite_links.insert(
-                                chat_id.0,
-                                InviteLinkFetch::Failed(call_request_error_line(
-                                    &err,
-                                    "Could not create invite link",
-                                )),
-                            );
-                        }
+                        // Slice G1 fix-up: a failed mutation must not wipe
+                        // the previously loaded list — surface the error in
+                        // the status note and keep the last good data.
+                        self.invite_link_error = Some(call_request_error_line(
+                            &err,
+                            "Could not create invite link",
+                        ));
                     }
                     Some(RequestPurpose::EditChatInviteLink) => {
-                        if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
-                            self.invite_links.insert(
-                                chat_id.0,
-                                InviteLinkFetch::Failed(call_request_error_line(
-                                    &err,
-                                    "Could not edit invite link",
-                                )),
-                            );
-                        }
+                        self.invite_link_error =
+                            Some(call_request_error_line(&err, "Could not edit invite link"));
                     }
                     Some(RequestPurpose::RevokeChatInviteLink) => {
-                        if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
-                            self.invite_links.insert(
-                                chat_id.0,
-                                InviteLinkFetch::Failed(call_request_error_line(
-                                    &err,
-                                    "Could not revoke invite link",
-                                )),
-                            );
+                        self.invite_link_error = Some(call_request_error_line(
+                            &err,
+                            "Could not revoke invite link",
+                        ));
+                    }
+                    // Slice G1: failed primary-link replacement — keep the
+                    // last good list, surface the error in the note.
+                    Some(RequestPurpose::ReplacePrimaryChatInviteLink) => {
+                        self.invite_link_error = Some(call_request_error_line(
+                            &err,
+                            "Could not replace primary invite link",
+                        ));
+                    }
+                    // Slice G1: roll back the optimistic broadcast-group
+                    // upgrade so the panel doesn't lie.
+                    Some(RequestPurpose::ToggleBroadcastGroup) => {
+                        if let Some(chat_id) = pending.and_then(|p| p.chat_id)
+                            && let Some(chat) = self.chats.get(&chat_id.0)
+                            && let ChatKind::Supergroup { supergroup_id, .. } = chat.kind
+                        {
+                            self.supergroup_is_broadcast.remove(&supergroup_id);
                         }
                     }
                     Some(RequestPurpose::GetChatJoinRequests) => {
@@ -5335,19 +5845,56 @@ impl Session {
                     }
                     Some(RequestPurpose::SetChatMemberStatus { .. }) => {
                         if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
-                            self.admin_lists.insert(
+                            let line =
+                                call_request_error_line(&err, "Could not update member status");
+                            // Slice G1: the member-management dialog reads
+                            // the member-list fetch states, not
+                            // `admin_lists`, so the failure is also parked
+                            // where the action was taken.
+                            self.member_action_error.insert(chat_id.0, line.clone());
+                            self.admin_lists
+                                .insert(chat_id.0, AdminListFetch::Failed(line));
+                        }
+                    }
+                    // Slice G1: failed `setChatMemberTag` (custom title)
+                    // surfaces as an admin-list error so the info panel
+                    // shows it, and in `member_action_error` so the
+                    // member-management dialog (which launched the
+                    // action) shows it too.
+                    Some(RequestPurpose::SetChatMemberTag { .. }) => {
+                        if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
+                            let line = call_request_error_line(&err, "Could not set custom title");
+                            self.member_action_error.insert(chat_id.0, line.clone());
+                            self.admin_lists
+                                .insert(chat_id.0, AdminListFetch::Failed(line));
+                        }
+                    }
+                    Some(RequestPurpose::GetBasicGroupFullInfo) => {
+                        if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
+                            self.basic_group_members.insert(
                                 chat_id.0,
-                                AdminListFetch::Failed(call_request_error_line(
+                                SupergroupMembersFetch::Failed(call_request_error_line(
                                     &err,
-                                    "Could not update member status",
+                                    "Could not load members",
                                 )),
                             );
                         }
                     }
-                    Some(RequestPurpose::GetSupergroupMembers) => {
+                    // Slice G1: a basic-group `addChatMember` answers per
+                    // user with `failedToAddMembers` (schema 1.8.67, line
+                    // 13578) — but a request-level TDLib error has no
+                    // such body. Count per-user errors in the same slot
+                    // the dialog already renders so partial adds stay
+                    // honest.
+                    Some(RequestPurpose::AddChatMembers | RequestPurpose::AddChatMember) => {
+                        if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
+                            *self.add_members_failed.entry(chat_id.0).or_insert(0) += 1;
+                        }
+                    }
+                    Some(RequestPurpose::GetSupergroupMembers { filter }) => {
                         if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
                             self.supergroup_members.insert(
-                                chat_id.0,
+                                (chat_id.0, filter),
                                 SupergroupMembersFetch::Failed(call_request_error_line(
                                     &err,
                                     "Could not load members",
@@ -5958,6 +6505,9 @@ impl Session {
             chat.set_member_status(member.status, member.admin_can_post_messages);
             chat.set_admin_can_invite_users(member.admin_can_invite_users);
             chat.set_admin_can_promote_members(member.admin_rights.map(|r| r.can_promote_members));
+            chat.set_admin_can_restrict_members(
+                member.admin_rights.map(|r| r.can_restrict_members),
+            );
         }
     }
 
@@ -7706,6 +8256,259 @@ mod tests {
             panic!("expected failed statistics");
         };
         assert!(message.contains("Could not load statistics"));
+    }
+
+    #[test]
+    fn custom_title_failure_surfaces_in_member_dialog() {
+        // Slice G1 replay: a TDLib `error` for `setChatMemberTag` lands
+        // in `member_action_error` (the member-management dialog reads
+        // the member-list fetch states, not `admin_lists`) as well as
+        // `admin_lists` for the info panel.
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        let extra = session.request(
+            RequestPurpose::SetChatMemberTag { user_id: 42 },
+            Some(ChatId(13)),
+        );
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"error","@extra":"{}","code":400,"message":"CHAT_ADMIN_REQUIRED"}}"#,
+                extra.0
+            ),
+        );
+        let message = session
+            .member_action_error
+            .get(&13)
+            .expect("member action error recorded");
+        assert!(message.contains("Could not set custom title"));
+        assert!(matches!(
+            session.admin_lists.get(&13),
+            Some(AdminListFetch::Failed(_))
+        ));
+    }
+
+    #[test]
+    fn basic_group_add_member_failures_accumulate() {
+        // Slice G1 fix-up replay: every per-user `addChatMember` answers
+        // `failedToAddMembers` (schema 1.8.67, line 13578) — the real
+        // shape, not `ok`/`error`. Two per-user responses must
+        // accumulate (1 + 0), and a request-level error counts one more,
+        // so the dialog's partial-add line is honest.
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        let failed_member = |user_id: i64| {
+            format!(
+                r#"{{"@type":"failedToAddMember","user_id":{user_id},"premium_would_allow_invite":false,"premium_required_to_send_messages":false}}"#
+            )
+        };
+        for (user_id, extra_count) in [(7, 1), (8, 0)] {
+            let extra = session.request(RequestPurpose::AddChatMember, Some(ChatId(13)));
+            let members = (0..extra_count)
+                .map(|_| failed_member(user_id))
+                .collect::<Vec<_>>()
+                .join(",");
+            apply_json(
+                &mut session,
+                &seq,
+                &sink,
+                &format!(
+                    r#"{{"@type":"failedToAddMembers","@extra":"{}","failed_to_add_members":[{members}]}}"#,
+                    extra.0
+                ),
+            );
+        }
+        assert_eq!(session.add_members_failed.get(&13), Some(&1));
+        let extra = session.request(RequestPurpose::AddChatMember, Some(ChatId(13)));
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"error","@extra":"{}","code":400,"message":"USER_PRIVACY_RESTRICTED"}}"#,
+                extra.0
+            ),
+        );
+        assert_eq!(session.add_members_failed.get(&13), Some(&2));
+    }
+
+    #[test]
+    fn bulk_add_members_response_replaces_count() {
+        // Slice G1: the single bulk `addChatMembers` response replaces
+        // the failure count (no accumulation across attempts).
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        for count in [3, 1] {
+            let extra = session.request(RequestPurpose::AddChatMembers, Some(ChatId(13)));
+            let members = (0..count)
+                .map(|_| r#"{"@type":"failedToAddMember","user_id":9,"premium_would_allow_invite":false,"premium_required_to_send_messages":false}"#)
+                .collect::<Vec<_>>()
+                .join(",");
+            apply_json(
+                &mut session,
+                &seq,
+                &sink,
+                &format!(
+                    r#"{{"@type":"failedToAddMembers","@extra":"{}","failed_to_add_members":[{members}]}}"#,
+                    extra.0
+                ),
+            );
+        }
+        assert_eq!(session.add_members_failed.get(&13), Some(&1));
+    }
+
+    #[test]
+    fn optimistic_mutations_roll_back_on_error() {
+        // Slice G1 replay: `setChatPermissions`,
+        // `toggleSupergroupJoinByRequest`, and `setSupergroupUsername`
+        // apply optimistically at send time. A TDLib error restores the
+        // pre-request value carried on `PendingRequest::rollback` so the
+        // UI never keeps showing a change the server rejected.
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+
+        // Permissions: optimistic write, then the error.
+        let mut chat = placeholder_chat(ChatId(13));
+        chat.permissions = Some(ChatPermissions::all());
+        chat.can_send_basic_messages = true;
+        session.chats.insert(13, chat);
+        let extra = session.request(RequestPurpose::SetChatPermissions, Some(ChatId(13)));
+        if let Some(pending) = session.requests.pending_mut(extra) {
+            pending.rollback = Some(RequestRollback::ChatPermissions {
+                previous: None,
+                previous_can_send: false,
+            });
+        }
+        // Simulate the optimistic write the driver performs at send.
+        if let Some(chat) = session.chats.get_mut(&13) {
+            chat.permissions = Some(ChatPermissions::all());
+            chat.can_send_basic_messages = true;
+        }
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"error","@extra":"{}","code":400,"message":"CHAT_NOT_MODIFIED"}}"#,
+                extra.0
+            ),
+        );
+        let chat = session.chats.get(&13).unwrap();
+        assert_eq!(chat.permissions, None);
+        assert!(!chat.can_send_basic_messages);
+
+        // Join-by-request: previous flag restored.
+        session.supergroup_join_by_request.insert(21, true);
+        let extra = session.request(
+            RequestPurpose::ToggleSupergroupJoinByRequest,
+            Some(ChatId(21)),
+        );
+        if let Some(pending) = session.requests.pending_mut(extra) {
+            pending.rollback = Some(RequestRollback::JoinByRequest {
+                supergroup_id: 21,
+                previous: Some(true),
+            });
+        }
+        session.supergroup_join_by_request.insert(21, false);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"error","@extra":"{}","code":400,"message":"CHAT_NOT_MODIFIED"}}"#,
+                extra.0
+            ),
+        );
+        assert_eq!(session.supergroup_join_by_request.get(&21), Some(&true));
+
+        // Username: absent stays absent, present is restored.
+        session.supergroup_usernames.insert(22, "oldname".into());
+        let extra = session.request(RequestPurpose::SetSupergroupUsername, Some(ChatId(22)));
+        if let Some(pending) = session.requests.pending_mut(extra) {
+            pending.rollback = Some(RequestRollback::SupergroupUsername {
+                supergroup_id: 22,
+                previous: Some("oldname".into()),
+            });
+        }
+        session
+            .supergroup_usernames
+            .insert(22, "newname".to_string());
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"error","@extra":"{}","code":400,"message":"USERNAME_OCCUPIED"}}"#,
+                extra.0
+            ),
+        );
+        assert_eq!(
+            session.supergroup_usernames.get(&22).map(String::as_str),
+            Some("oldname")
+        );
+    }
+
+    #[test]
+    fn invite_link_replace_failure_surfaces_and_broadcast_rolls_back() {
+        // Slice G1 fix-up replay: a failed `replacePrimaryChatInviteLink`
+        // keeps the previously loaded list (no cache poisoning) and
+        // surfaces the error via `invite_link_error` for the status
+        // note; a failed `toggleSupergroupIsBroadcastGroup` removes the
+        // optimistic broadcast flag so the panel doesn't lie.
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        session.invite_links.insert(
+            13,
+            InviteLinkFetch::Loaded(InviteLinkList {
+                total_count: 1,
+                links: Vec::new(),
+            }),
+        );
+
+        let extra = session.request(
+            RequestPurpose::ReplacePrimaryChatInviteLink,
+            Some(ChatId(13)),
+        );
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"error","@extra":"{}","code":400,"message":"INVITE_LINK_INVALID"}}"#,
+                extra.0
+            ),
+        );
+        assert!(matches!(
+            session.invite_links.get(&13),
+            Some(InviteLinkFetch::Loaded(_))
+        ));
+        assert!(
+            session
+                .invite_link_error
+                .as_ref()
+                .is_some_and(|m| m.contains("Could not replace primary invite link"))
+        );
+
+        let mut chat = placeholder_chat(ChatId(14));
+        chat.kind = ChatKind::Supergroup {
+            supergroup_id: 14,
+            is_channel: false,
+        };
+        session.chats.insert(14, chat);
+        session.supergroup_is_broadcast.insert(14, true);
+        let extra = session.request(RequestPurpose::ToggleBroadcastGroup, Some(ChatId(14)));
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"error","@extra":"{}","code":400,"message":"CHAT_NOT_MODIFIED"}}"#,
+                extra.0
+            ),
+        );
+        assert!(!session.supergroup_is_broadcast.contains_key(&14));
     }
 
     #[test]
@@ -12241,7 +13044,12 @@ mod tests {
         // Phase D3b: `getSupergroupMembers` loads the member-picker page.
         let (mut session, sink) = session();
         let seq = AtomicU64::new(0);
-        let extra = session.request(RequestPurpose::GetSupergroupMembers, Some(ChatId(13)));
+        let extra = session.request(
+            RequestPurpose::GetSupergroupMembers {
+                filter: MemberListFilter::Recent,
+            },
+            Some(ChatId(13)),
+        );
         apply_json(
             &mut session,
             &seq,
@@ -12254,7 +13062,10 @@ mod tests {
         let SupergroupMembersFetch::Loaded {
             members,
             total_count,
-        } = session.supergroup_members.get(&13).unwrap()
+        } = session
+            .supergroup_members
+            .get(&(13, MemberListFilter::Recent))
+            .unwrap()
         else {
             panic!("members were not loaded");
         };
@@ -12262,6 +13073,39 @@ mod tests {
         assert_eq!(members.len(), 2);
         assert_eq!(members[0].status, ChannelMemberStatus::Member);
         assert_eq!(members[1].status, ChannelMemberStatus::Administrator);
+    }
+
+    #[test]
+    fn basic_group_full_info_caches_members() {
+        // Slice G1: `getBasicGroupFullInfo` loads the basic-group
+        // member list into `basic_group_members`.
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        let extra = session.request(RequestPurpose::GetBasicGroupFullInfo, Some(ChatId(13)));
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"basicGroupFullInfo","@extra":"{}","creator_user_id":7,"members":[{{"@type":"chatMember","member_id":{{"@type":"messageSenderUser","user_id":7}},"tag":"boss","status":{{"@type":"chatMemberStatusCreator"}}}},{{"@type":"chatMember","member_id":{{"@type":"messageSenderUser","user_id":8}},"tag":"","status":{{"@type":"chatMemberStatusMember"}}}}]}}"#,
+                extra.0
+            ),
+        );
+        let SupergroupMembersFetch::Loaded {
+            members,
+            total_count,
+        } = session.basic_group_members.get(&13).unwrap()
+        else {
+            panic!("basic-group members were not loaded");
+        };
+        assert_eq!(*total_count, 2);
+        assert_eq!(members.len(), 2);
+        assert_eq!(members[0].status, ChannelMemberStatus::Creator);
+        // Slice G1: `chatMember.tag` (schema 1.8.67, line 2526) is the
+        // admin custom title.
+        assert_eq!(members[0].tag, "boss");
+        assert_eq!(members[1].status, ChannelMemberStatus::Member);
+        assert_eq!(members[1].tag, "");
     }
 
     /// Phase C2h: group-call message updates route to the tracked call —

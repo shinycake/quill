@@ -22,62 +22,69 @@ use crate::settings::{AccountPaths, default_app_root, load_call_prefs, save_call
 use crate::state::{
     AdminListFetch, AdminRightsFetch, CHAT_EVENT_LOG_PAGE_SIZE, ChatEventLogFetch,
     ChatSearchJumpNeed, ChatStatisticsFetch, ForwardFlight, InfoPanelTarget, InviteLinkFetch,
-    JoinRequestFetch, MemberStatusChange, RequestPurpose, SearchStatus, Session, ShutdownPhase,
-    SupergroupMembersFetch,
+    JoinRequestFetch, MemberListFilter, MemberStatusChange, RequestPurpose, RequestRollback,
+    SearchStatus, Session, ShutdownPhase, SupergroupMembersFetch,
 };
 use crate::telegram::client::{LiveTdJson, OwnedEnvelope, ReceiveBridge};
 use crate::telegram::envelope::{
     AuthorizationState, CallState, ChatAdminRights, ChatDraft, ChatFolderSpec, ChatKind,
-    ChatNotificationSettings, EnvelopePayload, GroupCallVideoInfo, MUTE_FOREVER, MessageContent,
-    MessageSender, NotificationSettingsScope, ParsedGroupCallParticipant, ReadyParams,
-    ScopeNotificationSettings, StoryContentView,
+    ChatNotificationSettings, ChatPermissions, EnvelopePayload, GroupCallVideoInfo, MUTE_FOREVER,
+    MessageContent, MessageSender, NotificationSettingsScope, ParsedGroupCallParticipant,
+    ReadyParams, ScopeNotificationSettings, StoryContentView,
 };
 use crate::telegram::ffi::{LibraryOrigin, TdJsonError, resolve_tdjson_path};
 use crate::telegram::requests::{
     AnimationSend, CallPrivacySetting, GroupCallJoinParams, InputGroupCallRef, MessageSenderRef,
-    PollSend, PrivacyWho, SetTdlibParameters, StickerSend, VideoNoteSend, VideoNoteThumbnailSend,
-    VideoSend, VoiceNoteSend, accept_call_with_protocol, add_chat_to_list, add_chat_to_list_value,
-    add_contact, add_message_reaction, add_recently_found_chat, ban_group_call_participants,
-    chat_member_status_administrator_json, chat_member_status_member_json,
-    check_authentication_code, check_authentication_password, click_chat_sponsored_message,
-    close_chat, close_request, close_secret_chat as close_secret_chat_request, close_story,
-    create_call_with_protocol, create_chat_folder, create_chat_invite_link, create_new_secret_chat,
-    create_video_chat, decline_group_call_invitation, delete_chat_folder, delete_messages,
-    delete_story, discard_call as discard_call_request, download_file as download_file_request,
-    edit_chat_folder, edit_chat_invite_link, edit_message_caption, edit_message_text,
-    end_group_call, end_group_call_recording, end_group_call_screen_sharing, forward_messages,
-    get_authorization_state, get_callback_query_answer, get_chat_active_stories,
-    get_chat_administrators, get_chat_event_log, get_chat_folder, get_chat_history,
-    get_chat_invite_links, get_chat_join_requests, get_chat_lists_to_add_chat, get_chat_member,
-    get_chat_scheduled_messages, get_chat_sponsored_messages, get_chat_statistics, get_commands,
-    get_contacts, get_forum_topics, get_group_call, get_installed_sticker_sets, get_me,
-    get_message_link, get_message_properties, get_saved_animations, get_saved_notification_sounds,
-    get_scope_notification_settings, get_secret_chat, get_sticker_set, get_storage_statistics,
-    get_story, get_story_available_reactions, get_supergroup, get_supergroup_full_info,
-    get_supergroup_members, get_user_full_info, get_user_privacy_setting_rules,
-    get_video_chat_invite_link, get_video_chat_rtmp_url, input_message_photo, input_message_video,
-    invite_group_call_participant, join_chat, join_group_call, join_video_chat, leave_chat,
-    leave_group_call, load_active_stories, load_chats, load_chats_list,
-    load_group_call_participants, open_chat, open_message_content, open_story, pin_chat_message,
-    process_chat_join_request, remove_message_reaction, reorder_chat_folders,
-    replace_video_chat_rtmp_url, report_chat_sponsored_message, resend_messages,
-    revoke_chat_invite_link, revoke_group_call_invite_link, search_call_messages,
-    search_chat_messages, search_chats, search_messages, search_public_chats,
-    search_recently_found_chats, send_animation, send_call_debug_information, send_call_log,
-    send_call_rating_detail, send_call_signaling_data, send_chat_action, send_chat_action_kind,
-    send_document, send_group_call_message, send_message_album, send_photo, send_poll,
-    send_sticker, send_text, send_text_story_reply, send_video, send_video_note, send_voice_note,
-    set_authentication_phone_number, set_chat_draft_message, set_chat_member_status,
-    set_chat_message_auto_delete_time, set_chat_notification_settings, set_chat_slow_mode_delay,
-    set_group_call_participant_volume_level, set_poll_answer, set_scope_notification_settings,
-    set_story_reaction, set_user_privacy_setting_rules, set_video_chat_title,
-    start_group_call_recording, start_group_call_screen_sharing, start_scheduled_video_chat,
-    supergroup_members_filter_recent_json, supergroup_members_filter_search_json,
-    toggle_chat_folder_tags, toggle_group_call_are_messages_allowed,
-    toggle_group_call_is_my_video_enabled, toggle_group_call_is_my_video_paused,
-    toggle_group_call_participant_is_hand_raised, toggle_group_call_participant_is_muted,
-    toggle_video_chat_mute_new_participants, unpin_all_chat_messages, unpin_chat_message,
-    view_messages, view_sponsored_chat,
+    PollSend, PrivacyWho, SendReply, SetTdlibParameters, StickerSend, VideoNoteSend,
+    VideoNoteThumbnailSend, VideoSend, VoiceNoteSend, accept_call_with_protocol, add_chat_member,
+    add_chat_members, add_chat_to_list, add_chat_to_list_value, add_contact, add_message_reaction,
+    add_recently_found_chat, ban_group_call_participants, chat_member_status_administrator_json,
+    chat_member_status_banned_json, chat_member_status_member_json,
+    chat_member_status_restricted_json, check_authentication_code, check_authentication_password,
+    click_chat_sponsored_message, close_chat, close_request,
+    close_secret_chat as close_secret_chat_request, close_story, create_call_with_protocol,
+    create_chat_folder, create_chat_invite_link, create_new_basic_group_chat,
+    create_new_secret_chat, create_new_supergroup_chat, create_video_chat,
+    decline_group_call_invitation, delete_chat, delete_chat_folder, delete_messages, delete_story,
+    discard_call as discard_call_request, download_file as download_file_request, edit_chat_folder,
+    edit_chat_invite_link, edit_message_caption, edit_message_text, end_group_call,
+    end_group_call_recording, end_group_call_screen_sharing, forward_messages,
+    get_authorization_state, get_basic_group_full_info, get_callback_query_answer,
+    get_chat_active_stories, get_chat_administrators, get_chat_event_log, get_chat_folder,
+    get_chat_history, get_chat_invite_links, get_chat_join_requests, get_chat_lists_to_add_chat,
+    get_chat_member, get_chat_scheduled_messages, get_chat_sponsored_messages, get_chat_statistics,
+    get_commands, get_contacts, get_forum_topics, get_group_call, get_installed_sticker_sets,
+    get_me, get_message_link, get_message_properties, get_saved_animations,
+    get_saved_notification_sounds, get_scope_notification_settings, get_secret_chat,
+    get_sticker_set, get_storage_statistics, get_story, get_story_available_reactions,
+    get_supergroup, get_supergroup_full_info, get_supergroup_members, get_user_full_info,
+    get_user_privacy_setting_rules, get_video_chat_invite_link, get_video_chat_rtmp_url,
+    input_message_photo, input_message_video, invite_group_call_participant, join_chat,
+    join_group_call, join_video_chat, leave_chat, leave_group_call, load_active_stories,
+    load_chats, load_chats_list, load_group_call_participants, open_chat, open_message_content,
+    open_story, pin_chat_message, process_chat_join_request, remove_message_reaction,
+    reorder_chat_folders, replace_primary_chat_invite_link, replace_video_chat_rtmp_url,
+    report_chat_sponsored_message, resend_messages, revoke_chat_invite_link,
+    revoke_group_call_invite_link, search_call_messages, search_chat_messages, search_chats,
+    search_messages, search_public_chats, search_recently_found_chats, send_animation,
+    send_call_debug_information, send_call_log, send_call_rating_detail, send_call_signaling_data,
+    send_chat_action, send_chat_action_kind, send_document, send_group_call_message,
+    send_message_album, send_photo, send_poll, send_sticker, send_text, send_text_story_reply,
+    send_video, send_video_note, send_voice_note, set_authentication_phone_number,
+    set_chat_draft_message, set_chat_member_status, set_chat_member_tag,
+    set_chat_message_auto_delete_time, set_chat_notification_settings, set_chat_permissions,
+    set_chat_slow_mode_delay, set_group_call_participant_volume_level, set_poll_answer,
+    set_scope_notification_settings, set_story_reaction, set_supergroup_username,
+    set_user_privacy_setting_rules, set_video_chat_title, start_group_call_recording,
+    start_group_call_screen_sharing, start_scheduled_video_chat,
+    supergroup_members_filter_administrators_json, supergroup_members_filter_banned_json,
+    supergroup_members_filter_recent_json, supergroup_members_filter_restricted_json,
+    supergroup_members_filter_search_json, toggle_chat_folder_tags,
+    toggle_group_call_are_messages_allowed, toggle_group_call_is_my_video_enabled,
+    toggle_group_call_is_my_video_paused, toggle_group_call_participant_is_hand_raised,
+    toggle_group_call_participant_is_muted, toggle_supergroup_is_broadcast_group,
+    toggle_supergroup_join_by_request, toggle_video_chat_mute_new_participants,
+    unpin_all_chat_messages, unpin_chat_message, view_messages, view_sponsored_chat,
 };
 use crate::voice::VoiceDraft;
 use std::collections::{HashMap, VecDeque};
@@ -432,7 +439,7 @@ struct PendingDraft {
     token: u64,
     chat_id: ChatId,
     text: String,
-    reply_to: Option<MessageId>,
+    reply_to: Option<SendReply>,
 }
 
 /// Result of noting a composer edit. UI arms a timer only for `Debounced`.
@@ -3923,7 +3930,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         &mut self,
         chat_id: ChatId,
         text: &str,
-        reply_to: Option<MessageId>,
+        reply_to: Option<SendReply>,
         now_ms: u64,
         delayed: bool,
     ) -> Result<DraftSaveOutcome, ConnectSendError> {
@@ -3932,7 +3939,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         let stored = draft_text_to_store(text, reply_to.is_some()).map(str::to_string);
         let reply_to = stored.as_ref().and(reply_to);
-        if self.draft_matches(chat_id, stored.as_deref(), reply_to) {
+        if self.draft_matches(chat_id, stored.as_deref(), reply_to.as_ref()) {
             self.pending_draft = None;
             self.draft_clock = DraftSaveClock::idle();
             let existing = self
@@ -3968,7 +3975,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             DraftSaveStep::Write => {
                 self.pending_draft = None;
                 self.draft_clock = DraftSaveClock::idle();
-                self.send_draft(chat_id, stored.as_deref(), reply_to)?;
+                self.send_draft(chat_id, stored.as_deref(), reply_to.as_ref())?;
                 Ok(DraftSaveOutcome::Sent)
             }
         }
@@ -3989,7 +3996,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.draft_clock = DraftSaveClock::idle();
         let text = draft_text_to_store(&pending.text, pending.reply_to.is_some());
         let reply_to = text.and(pending.reply_to);
-        if self.draft_matches(pending.chat_id, text, reply_to) {
+        if self.draft_matches(pending.chat_id, text, reply_to.as_ref()) {
             self.session.store_composer_draft(
                 pending.chat_id,
                 self.session
@@ -3999,7 +4006,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             );
             return Ok(None);
         }
-        self.send_draft(pending.chat_id, text, reply_to).map(Some)
+        self.send_draft(pending.chat_id, text, reply_to.as_ref())
+            .map(Some)
     }
 
     /// Successful send: drop the draft when the composer is still idle.
@@ -4028,7 +4036,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         &self,
         chat_id: ChatId,
         text: Option<&str>,
-        reply_to: Option<MessageId>,
+        reply_to: Option<&SendReply>,
     ) -> bool {
         let current = self
             .session
@@ -4038,7 +4046,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         match (current, text) {
             (None, None) => true,
             (Some(draft), Some(text)) => {
-                draft.text == text && draft.reply_to_message_id == reply_to
+                draft.text == text
+                    && draft.reply_to_message_id == reply_to.map(|reply| reply.message_id)
+                    && draft.quote == reply_to.and_then(|reply| reply.quote.clone())
             }
             _ => false,
         }
@@ -4048,7 +4058,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         &mut self,
         chat_id: ChatId,
         text: Option<&str>,
-        reply_to: Option<MessageId>,
+        reply_to: Option<&SendReply>,
     ) -> Result<RequestId, ConnectSendError> {
         let extra = self
             .session
@@ -4062,7 +4072,8 @@ impl<S: JsonSender> ConnectDriver<S> {
                     .filter(|text| !text.trim().is_empty() || reply_to.is_some())
                     .map(|text| ChatDraft {
                         text: text.to_string(),
-                        reply_to_message_id: reply_to,
+                        reply_to_message_id: reply_to.map(|reply| reply.message_id),
+                        quote: reply_to.and_then(|reply| reply.quote.clone()),
                     });
                 self.session.store_composer_draft(chat_id, draft);
                 Ok(extra)
@@ -4907,20 +4918,24 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.fetch_admin_rights(chat_id, user_id)
     }
 
-    /// Phase D3b: `getSupergroupMembers` (TDLib 1.8.67,
-    /// `schema/td_api.tl:15238`) for the promote member picker — recent
-    /// members when `query` is empty, a search filter otherwise (schema
-    /// lines 2559/2568). Only supergroup chats (incl. channels) have
-    /// members to pick. Deduped like the other D3b fetches.
+    /// Phase D3b / slice G1: `getSupergroupMembers` (TDLib 1.8.67,
+    /// `schema/td_api.tl:15238`) for one member-list page. The page is
+    /// cached per (chat, filter); `query` narrows the search-style
+    /// filters (empty = no narrowing). The restricted/banned filters
+    /// require the `can_restrict_members` administrator right (schema
+    /// lines 2570/2574); the other filters are available to every
+    /// member. Only supergroup chats (incl. channels) have members.
+    /// Deduped like the other D3b fetches.
     pub fn fetch_supergroup_members(
         &mut self,
         chat_id: ChatId,
+        filter: MemberListFilter,
         query: &str,
     ) -> Result<Option<RequestId>, ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if !self.session.chat_can_manage_admins(chat_id) {
+        if filter.requires_restrict_right() && !self.session.chat_can_restrict_members(chat_id) {
             return Ok(None);
         }
         let supergroup_id = match self.session.chats.get(&chat_id.0) {
@@ -4930,50 +4945,669 @@ impl<S: JsonSender> ConnectDriver<S> {
             },
             None => return Ok(None),
         };
+        let key = (chat_id.0, filter);
+        let purpose = RequestPurpose::GetSupergroupMembers { filter };
         if matches!(
-            self.session.supergroup_members.get(&chat_id.0),
+            self.session.supergroup_members.get(&key),
             Some(SupergroupMembersFetch::Loading | SupergroupMembersFetch::Loaded { .. })
-        ) || self
-            .session
-            .requests
-            .has_purpose_for_chat(RequestPurpose::GetSupergroupMembers, chat_id)
+        ) || self.session.requests.has_purpose_for_chat(purpose, chat_id)
         {
             return Ok(None);
         }
         self.session
             .supergroup_members
-            .insert(chat_id.0, SupergroupMembersFetch::Loading);
-        let extra = self
-            .session
-            .request(RequestPurpose::GetSupergroupMembers, Some(chat_id));
-        let filter = if query.is_empty() {
-            supergroup_members_filter_recent_json()
-        } else {
-            supergroup_members_filter_search_json(query)
+            .insert(key, SupergroupMembersFetch::Loading);
+        let extra = self.session.request(purpose, Some(chat_id));
+        let filter_json = match filter {
+            MemberListFilter::Recent => supergroup_members_filter_recent_json(),
+            MemberListFilter::Search => supergroup_members_filter_search_json(query),
+            MemberListFilter::Administrators => supergroup_members_filter_administrators_json(),
+            MemberListFilter::Restricted => supergroup_members_filter_restricted_json(query),
+            MemberListFilter::Banned => supergroup_members_filter_banned_json(query),
         };
         if let Err(err) = self.sender.send_json(&get_supergroup_members(
             extra,
             supergroup_id,
-            &filter,
+            &filter_json,
             0,
             200,
         )) {
             self.session.requests.take(extra);
-            self.session.supergroup_members.remove(&chat_id.0);
+            self.session.supergroup_members.remove(&key);
             return Err(err);
         }
         Ok(Some(extra))
     }
 
-    /// Phase D3b: explicit refresh of the member picker — clears the
-    /// cached page and re-sends.
+    /// Slice G1: explicit refresh of one member-list page — clears the
+    /// cached (chat, filter) page and re-sends.
     pub fn refresh_supergroup_members(
         &mut self,
         chat_id: ChatId,
+        filter: MemberListFilter,
         query: &str,
     ) -> Result<Option<RequestId>, ConnectSendError> {
-        self.session.supergroup_members.remove(&chat_id.0);
-        self.fetch_supergroup_members(chat_id, query)
+        self.session.supergroup_members.remove(&(chat_id.0, filter));
+        self.fetch_supergroup_members(chat_id, filter, query)
+    }
+
+    /// Slice G1: `getBasicGroupFullInfo` (schema 1.8.67, line 11507) —
+    /// the member list for a basic group. Any member may view it.
+    /// Deduped like the other fetches.
+    pub fn fetch_basic_group_members(
+        &mut self,
+        chat_id: ChatId,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let basic_group_id = match self.session.chats.get(&chat_id.0) {
+            Some(chat) => match chat.kind {
+                ChatKind::BasicGroup { basic_group_id } => basic_group_id,
+                _ => return Ok(None),
+            },
+            None => return Ok(None),
+        };
+        let purpose = RequestPurpose::GetBasicGroupFullInfo;
+        if matches!(
+            self.session.basic_group_members.get(&chat_id.0),
+            Some(SupergroupMembersFetch::Loading | SupergroupMembersFetch::Loaded { .. })
+        ) || self.session.requests.has_purpose_for_chat(purpose, chat_id)
+        {
+            return Ok(None);
+        }
+        self.session
+            .basic_group_members
+            .insert(chat_id.0, SupergroupMembersFetch::Loading);
+        let extra = self.session.request(purpose, Some(chat_id));
+        if let Err(err) = self
+            .sender
+            .send_json(&get_basic_group_full_info(extra, basic_group_id))
+        {
+            self.session.requests.take(extra);
+            self.session.basic_group_members.remove(&chat_id.0);
+            return Err(err);
+        }
+        Ok(Some(extra))
+    }
+
+    /// Slice G1: `createNewBasicGroupChat` (schema 1.8.67, line 13327).
+    /// The response is `createdBasicGroupChat`; the new chat itself
+    /// arrives as `updateNewChat`.
+    pub fn create_basic_group(
+        &mut self,
+        title: &str,
+        user_ids: &[i64],
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let purpose = RequestPurpose::CreateBasicGroup;
+        if self.session.requests.has_purpose(purpose) {
+            return Ok(None);
+        }
+        let extra = self.session.request(purpose, None);
+        if let Err(err) = self
+            .sender
+            .send_json(&create_new_basic_group_chat(extra, user_ids, title))
+        {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(Some(extra))
+    }
+
+    /// Slice G1: `createNewSupergroupChat` (schema 1.8.67, line 13337).
+    /// `is_channel` selects channel vs. supergroup; the new chat arrives
+    /// as `updateNewChat`.
+    pub fn create_supergroup_channel(
+        &mut self,
+        title: &str,
+        is_channel: bool,
+        description: &str,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let purpose = RequestPurpose::CreateSupergroupChannel { is_channel };
+        if self.session.requests.has_purpose(purpose) {
+            return Ok(None);
+        }
+        let extra = self.session.request(purpose, None);
+        if let Err(err) = self.sender.send_json(&create_new_supergroup_chat(
+            extra,
+            title,
+            is_channel,
+            description,
+        )) {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(Some(extra))
+    }
+
+    /// Slice G1: `toggleSupergroupIsBroadcastGroup` (schema 1.8.67, line
+    /// 15221). One-way upgrade of a supergroup to a broadcast group —
+    /// the constructor takes no boolean and the schema offers no reverse.
+    /// Requires owner privileges (line 15220). Applied optimistically;
+    /// `updateSupergroup` confirms.
+    pub fn upgrade_to_broadcast_group(
+        &mut self,
+        chat_id: ChatId,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let supergroup_id = match self.session.chats.get(&chat_id.0) {
+            Some(chat) => match chat.kind {
+                ChatKind::Supergroup {
+                    supergroup_id,
+                    is_channel: false,
+                } => supergroup_id,
+                _ => return Ok(None),
+            },
+            None => return Ok(None),
+        };
+        if !self.session.chat_is_owner(chat_id)
+            || self
+                .session
+                .supergroup_is_broadcast
+                .get(&supergroup_id)
+                .is_some_and(|b| *b)
+        {
+            return Ok(None);
+        }
+        let purpose = RequestPurpose::ToggleBroadcastGroup;
+        if self.session.requests.has_purpose_for_chat(purpose, chat_id) {
+            return Ok(None);
+        }
+        let extra = self.session.request(purpose, Some(chat_id));
+        if let Err(err) = self
+            .sender
+            .send_json(&toggle_supergroup_is_broadcast_group(extra, supergroup_id))
+        {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        // Optimistic: the toggle is one-way, so a sent request means the
+        // group becomes a broadcast group barring a TDLib error.
+        self.session
+            .supergroup_is_broadcast
+            .insert(supergroup_id, true);
+        Ok(Some(extra))
+    }
+
+    /// Slice G1: `addChatMembers` / `addChatMember` (schema 1.8.67, lines
+    /// 13584/13578). Basic groups use the singular variant (the bulk one
+    /// is supergroups and channels only, line 13580). Both require the
+    /// `can_invite_users` member right. The response is
+    /// `failedToAddMembers`; added members arrive as `updateChatMember`.
+    pub fn add_chat_members(
+        &mut self,
+        chat_id: ChatId,
+        user_ids: &[i64],
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if user_ids.is_empty() || !self.session.chat_can_add_members(chat_id) {
+            return Ok(None);
+        }
+        let is_basic_group = matches!(
+            self.session.chats.get(&chat_id.0),
+            Some(chat) if matches!(chat.kind, ChatKind::BasicGroup { .. })
+        );
+        // Slice G1 fix-up: basic groups send one `addChatMember` per
+        // user, each answering `failedToAddMembers` — a distinct purpose
+        // so per-user responses accumulate instead of replacing the
+        // single bulk count.
+        let purpose = if is_basic_group {
+            RequestPurpose::AddChatMember
+        } else {
+            RequestPurpose::AddChatMembers
+        };
+        if self
+            .session
+            .requests
+            .has_purpose_for_chat(RequestPurpose::AddChatMembers, chat_id)
+            || self
+                .session
+                .requests
+                .has_purpose_for_chat(RequestPurpose::AddChatMember, chat_id)
+        {
+            return Ok(None);
+        }
+        // Slice G1: a new add attempt resets the failure count — errors
+        // from a previous attempt must not linger into this one.
+        self.session.add_members_failed.remove(&chat_id.0);
+        // Basic groups need one `addChatMember` per user; supergroups and
+        // channels take a single bulk `addChatMembers`.
+        let mut first_extra = None;
+        if is_basic_group {
+            for user_id in user_ids {
+                let req_extra = self.session.request(purpose, Some(chat_id));
+                if let Err(err) = self
+                    .sender
+                    .send_json(&add_chat_member(req_extra, chat_id.0, *user_id))
+                {
+                    self.session.requests.take(req_extra);
+                    if first_extra.is_none() {
+                        return Err(err);
+                    }
+                    break;
+                }
+                if first_extra.is_none() {
+                    first_extra = Some(req_extra);
+                }
+            }
+        } else {
+            let extra = self.session.request(purpose, Some(chat_id));
+            if let Err(err) = self
+                .sender
+                .send_json(&add_chat_members(extra, chat_id.0, user_ids))
+            {
+                self.session.requests.take(extra);
+                return Err(err);
+            }
+            first_extra = Some(extra);
+        }
+        Ok(first_extra)
+    }
+
+    /// Slice G1: restrict a member (`chatMemberStatusRestricted`, schema
+    /// 1.8.67, line 2510) via `setChatMemberStatus` (line 13592), which
+    /// requires the `can_restrict_members` administrator right (lines
+    /// 13586-13587). Not supported in basic groups and channels (line
+    /// 2510) — non-channel supergroups only. The change itself arrives as
+    /// `updateChatMember`.
+    pub fn restrict_chat_member(
+        &mut self,
+        chat_id: ChatId,
+        user_id: i64,
+        until_date: i32,
+        permissions: &ChatPermissions,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let is_group = matches!(
+            self.session.chats.get(&chat_id.0),
+            Some(chat) if matches!(
+                chat.kind,
+                ChatKind::Supergroup {
+                    is_channel: false,
+                    ..
+                }
+            )
+        );
+        if !is_group || !self.session.chat_can_restrict_members(chat_id) {
+            return Ok(None);
+        }
+        let status = chat_member_status_restricted_json(true, until_date, &permissions.to_json());
+        let purpose = RequestPurpose::SetChatMemberStatus {
+            user_id,
+            kind: MemberStatusChange::Restrict,
+        };
+        if self.session.requests.has_purpose_for_chat(purpose, chat_id) {
+            return Ok(None);
+        }
+        let extra = self.session.request(purpose, Some(chat_id));
+        let member_id = MessageSenderRef::User(user_id).to_value();
+        if let Err(err) = self.sender.send_json(&set_chat_member_status(
+            extra, chat_id.0, &member_id, &status,
+        )) {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(Some(extra))
+    }
+
+    /// Slice G1: ban a member (`chatMemberStatusBanned`, schema 1.8.67,
+    /// line 2517) via `setChatMemberStatus`. Works in supergroups and
+    /// channels ("Chats can be only banned and unbanned in supergroups
+    /// and channels", line 13587); requires `can_restrict_members`.
+    pub fn ban_chat_member(
+        &mut self,
+        chat_id: ChatId,
+        user_id: i64,
+        until_date: i32,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let is_bannable = matches!(
+            self.session.chats.get(&chat_id.0),
+            Some(chat) if matches!(chat.kind, ChatKind::Supergroup { .. })
+        );
+        if !is_bannable || !self.session.chat_can_restrict_members(chat_id) {
+            return Ok(None);
+        }
+        let status = chat_member_status_banned_json(until_date);
+        let purpose = RequestPurpose::SetChatMemberStatus {
+            user_id,
+            kind: MemberStatusChange::Ban,
+        };
+        if self.session.requests.has_purpose_for_chat(purpose, chat_id) {
+            return Ok(None);
+        }
+        let extra = self.session.request(purpose, Some(chat_id));
+        let member_id = MessageSenderRef::User(user_id).to_value();
+        if let Err(err) = self.sender.send_json(&set_chat_member_status(
+            extra, chat_id.0, &member_id, &status,
+        )) {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(Some(extra))
+    }
+
+    /// Slice G1: unban / unrestrict a member — `setChatMemberStatus` back
+    /// to plain `chatMemberStatusMember` (schema 1.8.67, line 2504).
+    pub fn unban_chat_member(
+        &mut self,
+        chat_id: ChatId,
+        user_id: i64,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let is_bannable = matches!(
+            self.session.chats.get(&chat_id.0),
+            Some(chat) if matches!(chat.kind, ChatKind::Supergroup { .. })
+        );
+        if !is_bannable || !self.session.chat_can_restrict_members(chat_id) {
+            return Ok(None);
+        }
+        let status = chat_member_status_member_json();
+        let purpose = RequestPurpose::SetChatMemberStatus {
+            user_id,
+            kind: MemberStatusChange::Unban,
+        };
+        if self.session.requests.has_purpose_for_chat(purpose, chat_id) {
+            return Ok(None);
+        }
+        let extra = self.session.request(purpose, Some(chat_id));
+        let member_id = MessageSenderRef::User(user_id).to_value();
+        if let Err(err) = self.sender.send_json(&set_chat_member_status(
+            extra, chat_id.0, &member_id, &status,
+        )) {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(Some(extra))
+    }
+
+    /// Slice G1: `setChatPermissions` (schema 1.8.67, line 13464) —
+    /// changes the default chat member permissions. Supported only for
+    /// basic groups and supergroups; requires the `can_restrict_members`
+    /// administrator right (line 13461). Applied optimistically;
+    /// `updateChatPermissions` confirms.
+    pub fn set_chat_permissions(
+        &mut self,
+        chat_id: ChatId,
+        permissions: &ChatPermissions,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let supported = matches!(
+            self.session.chats.get(&chat_id.0),
+            Some(chat) if matches!(
+                chat.kind,
+                ChatKind::BasicGroup { .. }
+                    | ChatKind::Supergroup {
+                        is_channel: false,
+                        ..
+                    }
+            )
+        );
+        if !supported || !self.session.chat_can_restrict_members(chat_id) {
+            return Ok(None);
+        }
+        let purpose = RequestPurpose::SetChatPermissions;
+        if self.session.requests.has_purpose_for_chat(purpose, chat_id) {
+            return Ok(None);
+        }
+        let extra = self.session.request(purpose, Some(chat_id));
+        if let Err(err) = self.sender.send_json(&set_chat_permissions(
+            extra,
+            chat_id.0,
+            &permissions.to_json(),
+        )) {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        // Optimistic: barring a TDLib error the block applies as sent.
+        // The pre-request values ride on the pending entry so the error
+        // arm can roll back.
+        if let Some(chat) = self.session.chats.get_mut(&chat_id.0) {
+            let rollback = RequestRollback::ChatPermissions {
+                previous: chat.permissions,
+                previous_can_send: chat.can_send_basic_messages,
+            };
+            chat.permissions = Some(*permissions);
+            chat.can_send_basic_messages = permissions.can_send_basic_messages;
+            if let Some(pending) = self.session.requests.pending_mut(extra) {
+                pending.rollback = Some(rollback);
+            }
+        }
+        Ok(Some(extra))
+    }
+
+    /// Slice G1: `replacePrimaryChatInviteLink` (schema 1.8.67, line
+    /// 14089) — available for basic groups, supergroups, and channels;
+    /// requires administrator privileges and the `can_invite_users`
+    /// right. The new link arrives as `chatInviteLink`.
+    pub fn replace_primary_chat_invite_link(
+        &mut self,
+        chat_id: ChatId,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if !self.session.chat_can_invite_users(chat_id) {
+            return Ok(None);
+        }
+        let purpose = RequestPurpose::ReplacePrimaryChatInviteLink;
+        if self.session.requests.has_purpose_for_chat(purpose, chat_id) {
+            return Ok(None);
+        }
+        let extra = self.session.request(purpose, Some(chat_id));
+        if let Err(err) = self
+            .sender
+            .send_json(&replace_primary_chat_invite_link(extra, chat_id.0))
+        {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(Some(extra))
+    }
+
+    /// Slice G1: `toggleSupergroupJoinByRequest` (schema 1.8.67, line
+    /// 15188) — whether directly joining the supergroup needs admin
+    /// approval. Requires the `can_restrict_members` administrator right
+    /// (line 15182); not for broadcast groups or channels. Applied
+    /// optimistically; `updateSupergroup` confirms.
+    pub fn toggle_supergroup_join_by_request(
+        &mut self,
+        chat_id: ChatId,
+        join_by_request: bool,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let supergroup_id = match self.session.chats.get(&chat_id.0) {
+            Some(chat) => match chat.kind {
+                ChatKind::Supergroup {
+                    supergroup_id,
+                    is_channel: false,
+                } => supergroup_id,
+                _ => return Ok(None),
+            },
+            None => return Ok(None),
+        };
+        if !self.session.chat_can_restrict_members(chat_id) {
+            return Ok(None);
+        }
+        let purpose = RequestPurpose::ToggleSupergroupJoinByRequest;
+        if self.session.requests.has_purpose_for_chat(purpose, chat_id) {
+            return Ok(None);
+        }
+        let extra = self.session.request(purpose, Some(chat_id));
+        if let Err(err) = self.sender.send_json(&toggle_supergroup_join_by_request(
+            extra,
+            supergroup_id,
+            join_by_request,
+        )) {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        // Optimistic: the previous flag rides on the pending entry so the
+        // error arm can roll back.
+        let previous = self
+            .session
+            .supergroup_join_by_request
+            .get(&supergroup_id)
+            .copied();
+        self.session
+            .supergroup_join_by_request
+            .insert(supergroup_id, join_by_request);
+        if let Some(pending) = self.session.requests.pending_mut(extra) {
+            pending.rollback = Some(RequestRollback::JoinByRequest {
+                supergroup_id,
+                previous,
+            });
+        }
+        Ok(Some(extra))
+    }
+
+    /// Slice G1: `setSupergroupUsername` (schema 1.8.67, line 15136) —
+    /// changes the editable public username; requires owner privileges
+    /// (line 15133). Empty string removes the username. Applied
+    /// optimistically; `updateSupergroup` confirms.
+    pub fn set_supergroup_username(
+        &mut self,
+        chat_id: ChatId,
+        username: &str,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let supergroup_id = match self.session.chats.get(&chat_id.0) {
+            Some(chat) => match chat.kind {
+                ChatKind::Supergroup { supergroup_id, .. } => supergroup_id,
+                _ => return Ok(None),
+            },
+            None => return Ok(None),
+        };
+        if !self.session.chat_is_owner(chat_id) {
+            return Ok(None);
+        }
+        let purpose = RequestPurpose::SetSupergroupUsername;
+        if self.session.requests.has_purpose_for_chat(purpose, chat_id) {
+            return Ok(None);
+        }
+        let extra = self.session.request(purpose, Some(chat_id));
+        if let Err(err) =
+            self.sender
+                .send_json(&set_supergroup_username(extra, supergroup_id, username))
+        {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        // Optimistic: the previous username rides on the pending entry so
+        // the error arm can roll back.
+        let previous = self
+            .session
+            .supergroup_usernames
+            .get(&supergroup_id)
+            .cloned();
+        self.session
+            .set_supergroup_username(supergroup_id, username.to_string());
+        if let Some(pending) = self.session.requests.pending_mut(extra) {
+            pending.rollback = Some(RequestRollback::SupergroupUsername {
+                supergroup_id,
+                previous,
+            });
+        }
+        Ok(Some(extra))
+    }
+
+    /// Slice G1: `setChatMemberTag` (schema 1.8.67, line 13598) — the
+    /// admin custom-title setter (0-16 characters, no emoji; Telegram
+    /// X `EditRightsController` enforces the same limits client-side).
+    /// Basic groups and supergroups only, not channels. Gated on the
+    /// caller being able to manage tags: owner/creator, or an admin
+    /// with `can_manage_tags` (changing your own tag is allowed for
+    /// any admin).
+    pub fn set_chat_member_tag(
+        &mut self,
+        chat_id: ChatId,
+        user_id: i64,
+        tag: &str,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if tag.chars().count() > 16 {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let me = self.session.my_user_id;
+        let allowed = self.session.chats.get(&chat_id.0).is_some_and(|chat| {
+            !matches!(
+                chat.kind,
+                ChatKind::Supergroup {
+                    is_channel: true,
+                    ..
+                }
+            )
+        }) && (Some(user_id) == me
+            || self.session.chat_is_owner(chat_id)
+            || self.session.chat_can_manage_tags(chat_id));
+        if !allowed {
+            return Ok(None);
+        }
+        let purpose = RequestPurpose::SetChatMemberTag { user_id };
+        if self.session.requests.has_purpose_for_chat(purpose, chat_id) {
+            return Ok(None);
+        }
+        let extra = self.session.request(purpose, Some(chat_id));
+        if let Err(err) = self
+            .sender
+            .send_json(&set_chat_member_tag(extra, chat_id, user_id, tag))
+        {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(Some(extra))
+    }
+
+    /// Slice G1: `deleteChat` (schema 1.8.67, line 11850) — deletes the
+    /// chat along with all messages for all members; releases group
+    /// usernames. Gated by `chat.can_be_deleted_for_all_users` (line
+    /// 11848). The chat is dropped locally on `ok`.
+    pub fn delete_chat(&mut self, chat_id: ChatId) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let deletable = self
+            .session
+            .chats
+            .get(&chat_id.0)
+            .is_some_and(|chat| chat.can_be_deleted_for_all_users);
+        if !deletable {
+            return Ok(None);
+        }
+        let purpose = RequestPurpose::DeleteChat;
+        if self.session.requests.has_purpose_for_chat(purpose, chat_id) {
+            return Ok(None);
+        }
+        let extra = self.session.request(purpose, Some(chat_id));
+        if let Err(err) = self.sender.send_json(&delete_chat(extra, chat_id.0)) {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(Some(extra))
     }
 
     /// Phase A1: forced `getSupergroupFullInfo` refresh for the slow-mode
@@ -5815,7 +6449,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         if snapshot.attachment.is_none() && caption.is_empty() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let reply_to = snapshot.send_reply_to();
+        // Slice G1: quote-carrying reply (`inputTextQuote`).
+        let reply_to = snapshot.send_reply();
         // Validate the picked path before allocating `@extra`.
         let media_path = match snapshot.attachment.as_ref() {
             Some(att) => Some(
@@ -6022,7 +6657,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             };
             contents.push(content);
         }
-        let reply_to = snapshot.send_reply_to();
+        // Slice G1: quote-carrying reply (`inputTextQuote`).
+        let reply_to = snapshot.send_reply();
         let extra = self
             .session
             .request(RequestPurpose::SendMessageAlbum, Some(chat_id));
@@ -6045,7 +6681,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         &mut self,
         draft: &VoiceDraft,
         caption: &str,
-        reply_to: Option<MessageId>,
+        reply_to: Option<SendReply>,
     ) -> Result<RequestId, ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
@@ -6964,7 +7600,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         &mut self,
         chat_id: ChatId,
         draft: &PollDraft,
-        reply_to: Option<MessageId>,
+        reply_to: Option<SendReply>,
     ) -> Result<RequestId, ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
@@ -7585,7 +8221,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         &mut self,
         chat_id: ChatId,
         leaving_text: &str,
-        leaving_reply: Option<MessageId>,
+        leaving_reply: Option<SendReply>,
         now_ms: u64,
     ) -> Result<Option<RequestId>, ConnectSendError> {
         self.flush_leaving_composer(chat_id, leaving_text, leaving_reply, now_ms)?;
@@ -7601,7 +8237,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         chat_id: ChatId,
         message_id: MessageId,
         leaving_text: &str,
-        leaving_reply: Option<MessageId>,
+        leaving_reply: Option<SendReply>,
         now_ms: u64,
     ) -> Result<Option<RequestId>, ConnectSendError> {
         self.flush_leaving_composer(chat_id, leaving_text, leaving_reply, now_ms)?;
@@ -7616,7 +8252,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         &mut self,
         next_chat: ChatId,
         leaving_text: &str,
-        leaving_reply: Option<MessageId>,
+        leaving_reply: Option<SendReply>,
         now_ms: u64,
     ) -> Result<(), ConnectSendError> {
         let Some(prev) = self.session.open_chat else {
@@ -10747,7 +11383,7 @@ mod tests {
             bars: vec![31, 0, 1],
         };
         driver
-            .send_voice_note(&draft, "", Some(MessageId(4)))
+            .send_voice_note(&draft, "", Some(SendReply::plain(MessageId(4))))
             .unwrap();
         let sent = recorder
             .snapshot()
@@ -11942,6 +12578,161 @@ mod tests {
     }
 
     #[test]
+    fn driver_send_snapshot_carries_quote() {
+        // Slice G1: a composer reply with a validated partial quote
+        // reaches `sendMessage` as `inputTextQuote` (schema 1.8.67,
+        // line 3056).
+        use crate::composer::{ComposerReplyTo, QuoteSelection};
+
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = Arc::new(RecordingSender::new());
+        let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+        let mut driver =
+            ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+        let seq = AtomicU64::new(0);
+        seed_ready_alice(&mut driver, &seq, &dyn_sink);
+
+        let snap = crate::composer::ComposerSnapshot::capture(
+            ChatId(7),
+            driver.session.view_generation,
+            "CANARYQUOTEtext",
+        )
+        .with_reply(Some(ComposerReplyTo::with_quote(
+            ChatId(7),
+            MessageId(50),
+            "hello already here",
+            QuoteSelection {
+                text: "already".to_string(),
+                position: 6,
+            },
+        )));
+        let extra = driver.send_snapshot(&snap).unwrap();
+        let send_json = recorder.snapshot().last().cloned().expect("sendMessage");
+        let v: Value = serde_json::from_str(&send_json).unwrap();
+        assert_eq!(v["@type"], "sendMessage");
+        assert_eq!(v["@extra"], extra.0.to_string());
+        assert_eq!(v["reply_to"]["@type"], "inputMessageReplyToMessage");
+        assert_eq!(v["reply_to"]["message_id"], 50);
+        assert_eq!(v["reply_to"]["quote"]["@type"], "inputTextQuote");
+        assert_eq!(v["reply_to"]["quote"]["text"]["text"], "already");
+        assert_eq!(v["reply_to"]["quote"]["position"], 6);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn driver_fetch_basic_group_members_shape() {
+        // Slice G1: `getBasicGroupFullInfo` (schema 1.8.67, line 11507)
+        // for a basic group chat; the answer populates
+        // `basic_group_members`.
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = Arc::new(RecordingSender::new());
+        let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+        let mut driver =
+            ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+        let seq = AtomicU64::new(0);
+        seed_ready_alice(&mut driver, &seq, &dyn_sink);
+        driver
+            .ingest(
+                copy_and_parse(
+                    r#"{"@type":"updateNewChat","chat":{"id":9,"title":"Group","type":{"@type":"chatTypeBasicGroup","basic_group_id":3},"permissions":{"@type":"chatPermissions","can_send_basic_messages":true},"unread_count":0}}"#,
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        let extra = driver
+            .fetch_basic_group_members(ChatId(9))
+            .unwrap()
+            .expect("request sent");
+        let sent = recorder.snapshot().last().cloned().expect("request");
+        let v: Value = serde_json::from_str(&sent).unwrap();
+        assert_eq!(v["@type"], "getBasicGroupFullInfo");
+        assert_eq!(v["basic_group_id"], 3);
+        driver
+            .ingest(
+                copy_and_parse(
+                    &format!(
+                        r#"{{"@type":"basicGroupFullInfo","@extra":"{}","members":[{{"@type":"chatMember","member_id":{{"@type":"messageSenderUser","user_id":7}},"status":{{"@type":"chatMemberStatusMember"}}}}]}}"#,
+                        extra.0
+                    ),
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        let fetch = driver.session.basic_group_members.get(&9).unwrap();
+        match fetch {
+            SupergroupMembersFetch::Loaded { members, .. } => assert_eq!(members.len(), 1),
+            other => panic!("unexpected {other:?}"),
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn driver_set_chat_member_tag_gates_and_shape() {
+        // Slice G1: `setChatMemberTag` (schema 1.8.67, line 13598) —
+        // owner of a group may retitle; channels are rejected; tags
+        // over 16 characters are rejected client-side.
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = Arc::new(RecordingSender::new());
+        let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+        let mut driver =
+            ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+        let seq = AtomicU64::new(0);
+        seed_ready_alice(&mut driver, &seq, &dyn_sink);
+        driver
+            .ingest(
+                copy_and_parse(
+                    r#"{"@type":"updateNewChat","chat":{"id":9,"title":"Group","type":{"@type":"chatTypeBasicGroup","basic_group_id":3},"permissions":{"@type":"chatPermissions","can_send_basic_messages":true},"unread_count":0}}"#,
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        // Not the owner → no request.
+        assert!(
+            driver
+                .set_chat_member_tag(ChatId(9), 42, "boss")
+                .unwrap()
+                .is_none()
+        );
+        // Owner → sends `setChatMemberTag`.
+        driver.session.my_user_id = Some(7);
+        driver.session.chats.get_mut(&9).unwrap().my_member_status =
+            Some(ChannelMemberStatus::Creator);
+        let extra = driver
+            .set_chat_member_tag(ChatId(9), 42, "boss")
+            .unwrap()
+            .expect("request sent");
+        let sent = recorder.snapshot().last().cloned().expect("request");
+        let v: Value = serde_json::from_str(&sent).unwrap();
+        assert_eq!(v["@type"], "setChatMemberTag");
+        assert_eq!(v["@extra"], extra.0.to_string());
+        assert_eq!(v["chat_id"], 9);
+        assert_eq!(v["user_id"], 42);
+        assert_eq!(v["tag"], "boss");
+        // Over-long tag rejected without sending.
+        assert!(
+            driver
+                .set_chat_member_tag(ChatId(9), 42, "this title is way too long")
+                .is_err()
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn driver_edit_text_shape_and_incoming_rejected() {
         use crate::composer::{ComposerEdit, ComposerEditKind};
 
@@ -13001,7 +13792,13 @@ mod tests {
             "meet at 6!"
         );
         let flushed = driver
-            .note_composer_draft(ChatId(7), "leaving", Some(MessageId(3)), 2_000, false)
+            .note_composer_draft(
+                ChatId(7),
+                "leaving",
+                Some(SendReply::plain(MessageId(3))),
+                2_000,
+                false,
+            )
             .unwrap();
         assert_eq!(flushed, DraftSaveOutcome::Sent);
         assert!(
@@ -13023,6 +13820,62 @@ mod tests {
         assert_eq!(driver.session.draft_clears, vec![ChatId(7)]);
         driver.clear_draft_after_send(ChatId(7), true).unwrap();
         assert!(driver.session.chats.get(&7).unwrap().draft.is_none());
+        assert!(!sink.rendered().contains("CANARY"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn quoted_draft_round_trips_input_text_quote() {
+        // Slice G1: a composer reply carrying a validated partial quote is
+        // saved to the server draft as `inputTextQuote` (schema 1.8.67
+        // line 3056) and kept in the local `ChatDraft` for restore.
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = Arc::new(RecordingSender::new());
+        let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+        let mut driver =
+            ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+        let seq = AtomicU64::new(0);
+        driver
+            .ingest(
+                copy_and_parse(
+                    r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        driver
+            .ingest(
+                copy_and_parse(
+                    r#"{"@type":"updateNewChat","chat":{"id":7,"title":"Ada","type":{"@type":"chatTypePrivate","user_id":7},"unread_count":0}}"#,
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        driver.select_chat(ChatId(7)).unwrap();
+        let reply = SendReply {
+            message_id: MessageId(3),
+            quote: Some(("meet at".to_string(), 0)),
+        };
+        let outcome = driver
+            .note_composer_draft(ChatId(7), "sounds good", Some(reply), 1_000, false)
+            .unwrap();
+        assert_eq!(outcome, DraftSaveOutcome::Sent);
+        let sent = recorder.snapshot();
+        let draft_json = sent.last().expect("draft request sent");
+        assert!(draft_json.contains("setChatDraftMessage"));
+        assert!(draft_json.contains("\"inputTextQuote\""));
+        assert!(draft_json.contains("meet at"));
+        let saved = driver.session.chats.get(&7).unwrap().draft.clone().unwrap();
+        assert_eq!(saved.text, "sounds good");
+        assert_eq!(saved.reply_to_message_id, Some(MessageId(3)));
+        assert_eq!(saved.quote, Some(("meet at".to_string(), 0)));
         assert!(!sink.rendered().contains("CANARY"));
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -13064,11 +13917,22 @@ mod tests {
         }
         driver.select_chat(ChatId(7)).unwrap();
         let outcome = driver
-            .note_composer_draft(ChatId(7), "hello", Some(MessageId(3)), 1_000, true)
+            .note_composer_draft(
+                ChatId(7),
+                "hello",
+                Some(SendReply::plain(MessageId(3))),
+                1_000,
+                true,
+            )
             .unwrap();
         assert!(matches!(outcome, DraftSaveOutcome::Debounced { .. }));
         driver
-            .select_search_chat(ChatId(8), "hello", Some(MessageId(3)), 1_500)
+            .select_search_chat(
+                ChatId(8),
+                "hello",
+                Some(SendReply::plain(MessageId(3))),
+                1_500,
+            )
             .unwrap();
         assert_eq!(driver.session.open_chat, Some(ChatId(8)));
         let saved = driver.session.chats.get(&7).unwrap().draft.clone().unwrap();
@@ -13083,7 +13947,13 @@ mod tests {
         }));
         driver.select_chat(ChatId(7)).unwrap();
         driver
-            .note_composer_draft(ChatId(7), "caption", Some(MessageId(3)), 2_000, false)
+            .note_composer_draft(
+                ChatId(7),
+                "caption",
+                Some(SendReply::plain(MessageId(3))),
+                2_000,
+                false,
+            )
             .unwrap();
         driver
             .note_composer_draft(ChatId(7), "caption", None, 2_100, false)
@@ -13092,7 +13962,13 @@ mod tests {
         assert_eq!(after.text, "caption");
         assert_eq!(after.reply_to_message_id, None);
         driver
-            .note_composer_draft(ChatId(7), "  ", Some(MessageId(9)), 3_000, false)
+            .note_composer_draft(
+                ChatId(7),
+                "  ",
+                Some(SendReply::plain(MessageId(9))),
+                3_000,
+                false,
+            )
             .unwrap();
         driver
             .select_search_message(ChatId(8), MessageId(1), "  ", None, 3_100)
@@ -13242,7 +14118,7 @@ mod tests {
         assert_invalid(driver.send_poll_draft(ChatId(13), &valid, None));
         // Valid draft: `sendMessage` + `inputMessagePoll`.
         let extra = driver
-            .send_poll_draft(ChatId(7), &valid, Some(MessageId(50)))
+            .send_poll_draft(ChatId(7), &valid, Some(SendReply::plain(MessageId(50))))
             .unwrap();
         let send_json = recorder.snapshot().last().cloned().expect("sendMessage");
         let v: Value = serde_json::from_str(&send_json).unwrap();

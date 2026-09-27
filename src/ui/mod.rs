@@ -9,10 +9,10 @@ use gpui_kit::*;
 use quill::auth::{AuthAction, AuthView, view_for};
 use quill::composer::{
     AttachmentKind, CommandMenuItem, ComposerAttachment, ComposerEdit, ComposerReplyTo,
-    ComposerScheduling, ComposerSnapshot, DeleteConfirm, FormatAction, ForwardDraft, SendOptions,
-    apply_format_markup, begin_edit_keeping_reply, cancel_edit_draft, cancel_edit_keeping_reply,
-    cancel_forward_draft, cancel_reply_draft, clear_format_markup, command_menu_trigger,
-    draft_text_to_store, filter_command_menu_items, should_send_on_enter,
+    ComposerScheduling, ComposerSnapshot, DeleteConfirm, FormatAction, ForwardDraft,
+    QuoteSelection, SendOptions, apply_format_markup, begin_edit_keeping_reply, cancel_edit_draft,
+    cancel_edit_keeping_reply, cancel_forward_draft, cancel_reply_draft, clear_format_markup,
+    command_menu_trigger, draft_text_to_store, filter_command_menu_items, should_send_on_enter,
     strip_command_menu_trigger,
 };
 use quill::connect::{
@@ -40,20 +40,20 @@ use quill::settings::CallPrefs;
 use quill::state::{
     ActiveCall, ActiveGroupCall, AdminListFetch, AdminRightsFetch, CallSummary, ChatEventLogFetch,
     ChatSearchJump, ChatStatisticsFetch, ChatSummary, ContactRow, ForwardResult, HistoryMessage,
-    InfoPanelTarget, InviteLinkFetch, JoinRequestFetch, OutboxReceipt, RequestPurpose,
-    SearchStatus, Session, SponsoredReportFlight, SupergroupMembersFetch, event_log_relative_time,
-    outgoing_status_label, unix_ms_now, unread_badge_text,
+    InfoPanelTarget, InviteLinkFetch, JoinRequestFetch, MemberListFilter, OutboxReceipt,
+    RequestPurpose, SearchStatus, Session, SponsoredReportFlight, SupergroupMembersFetch,
+    event_log_relative_time, outgoing_status_label, unix_ms_now, unread_badge_text,
 };
 use quill::story_viewer::{StoryViewer, StoryViewerItem, StoryViewerKind, collect_story_items};
 use quill::telegram::client::copy_and_parse;
 use quill::telegram::envelope::{
     AuthorizationState, BotInfo, CallDiscardReason, CallState, CallbackQueryAnswer,
     ChannelMemberStatus, ChatAdminRights, ChatAdministratorEntry, ChatDraft, ChatEventAction,
-    ChatFolderInfo, ChatFolderSpec, ChatKind, ChatList, ChatNotificationSettings, ChatStatistics,
-    DEFAULT_EMOJI_REACTIONS, ForumTopic, InlineKeyboardButton, InlineKeyboardButtonStyle,
-    InlineKeyboardButtonType, MUTE_FOR_1_HOUR, MUTE_FOR_2_DAYS, MUTE_FOR_8_HOURS, MUTE_FOREVER,
-    MessageContent, MessageInteractionInfo, MessageSchedulingState, MessageSender,
-    NotificationSettingsScope, NotificationSound, ParsedChatEvent, ParsedFile,
+    ChatFolderInfo, ChatFolderSpec, ChatKind, ChatList, ChatNotificationSettings, ChatPermissions,
+    ChatStatistics, DEFAULT_EMOJI_REACTIONS, ForumTopic, InlineKeyboardButton,
+    InlineKeyboardButtonStyle, InlineKeyboardButtonType, MUTE_FOR_1_HOUR, MUTE_FOR_2_DAYS,
+    MUTE_FOR_8_HOURS, MUTE_FOREVER, MessageContent, MessageInteractionInfo, MessageSchedulingState,
+    MessageSender, NotificationSettingsScope, NotificationSound, ParsedChatEvent, ParsedFile,
     ParsedGroupCallParticipant, ParsedMessage, ParsedSecretChat, ParsedStory, PollContent,
     PollOption, PollType, ScopeNotificationSettings, SecretChatState, SponsoredMessage,
     StatisticalGraph, StatisticalValue, StorageFileTypeStats, StorageStats, call_entry_label,
@@ -363,6 +363,75 @@ pub fn admin_rights_summary(rights: &ChatAdminRights) -> String {
     format!("{enabled} of {} rights", ADMIN_RIGHT_LABELS.len())
 }
 
+/// Slice G1: the 16 `chatPermissions` fields (schema 1.8.67, line 1070)
+/// with checkbox labels, in schema order.
+pub const CHAT_PERMISSION_LABELS: [&str; 16] = [
+    "Send messages",
+    "Send audios",
+    "Send documents",
+    "Send photos",
+    "Send videos",
+    "Send video notes",
+    "Send voice notes",
+    "Send polls",
+    "Send other (stickers/GIFs)",
+    "Add link previews",
+    "React to messages",
+    "Edit tag",
+    "Change info",
+    "Invite users",
+    "Pin messages",
+    "Create topics",
+];
+
+/// Slice G1: read one permission of a [`ChatPermissions`] by
+/// [`CHAT_PERMISSION_LABELS`] index.
+pub fn chat_permission_get(permissions: &ChatPermissions, index: usize) -> bool {
+    match index {
+        0 => permissions.can_send_basic_messages,
+        1 => permissions.can_send_audios,
+        2 => permissions.can_send_documents,
+        3 => permissions.can_send_photos,
+        4 => permissions.can_send_videos,
+        5 => permissions.can_send_video_notes,
+        6 => permissions.can_send_voice_notes,
+        7 => permissions.can_send_polls,
+        8 => permissions.can_send_other_messages,
+        9 => permissions.can_add_link_previews,
+        10 => permissions.can_react_to_messages,
+        11 => permissions.can_edit_tag,
+        12 => permissions.can_change_info,
+        13 => permissions.can_invite_users,
+        14 => permissions.can_pin_messages,
+        15 => permissions.can_create_topics,
+        _ => false,
+    }
+}
+
+/// Slice G1: write one permission of a [`ChatPermissions`] by
+/// [`CHAT_PERMISSION_LABELS`] index.
+pub fn chat_permission_set(permissions: &mut ChatPermissions, index: usize, value: bool) {
+    match index {
+        0 => permissions.can_send_basic_messages = value,
+        1 => permissions.can_send_audios = value,
+        2 => permissions.can_send_documents = value,
+        3 => permissions.can_send_photos = value,
+        4 => permissions.can_send_videos = value,
+        5 => permissions.can_send_video_notes = value,
+        6 => permissions.can_send_voice_notes = value,
+        7 => permissions.can_send_polls = value,
+        8 => permissions.can_send_other_messages = value,
+        9 => permissions.can_add_link_previews = value,
+        10 => permissions.can_react_to_messages = value,
+        11 => permissions.can_edit_tag = value,
+        12 => permissions.can_change_info = value,
+        13 => permissions.can_invite_users = value,
+        14 => permissions.can_pin_messages = value,
+        15 => permissions.can_create_topics = value,
+        _ => {}
+    }
+}
+
 /// Phase D3b: admin-management dialog above the composer. Three flows
 /// share one slot:
 /// - `Promote`: member picker (search + member list from
@@ -422,6 +491,306 @@ impl AdminDialog {
         Self {
             chat_id,
             kind: AdminDialogKind::DemoteConfirm { user_id },
+        }
+    }
+}
+
+/// Slice G1: which chat to create. Basic groups use
+/// `createNewBasicGroupChat` (schema 1.8.67, line 13327); supergroups
+/// and channels use `createNewSupergroupChat` (line 13337) with the
+/// `is_channel` flag.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CreateChatKind {
+    BasicGroup,
+    Supergroup,
+    Channel,
+}
+
+impl CreateChatKind {
+    fn title(self) -> &'static str {
+        match self {
+            Self::BasicGroup => "New group",
+            Self::Supergroup => "New supergroup",
+            Self::Channel => "New channel",
+        }
+    }
+
+    /// Only basic groups take members at creation
+    /// (`createNewBasicGroupChat.user_ids`); supergroup members are
+    /// added afterwards from the member dialog.
+    fn picks_members(self) -> bool {
+        matches!(self, Self::BasicGroup)
+    }
+}
+
+/// Slice G1: group/supergroup/channel creation dialog (sidebar "New"
+/// entries). Title input (plus description for supergroups/channels)
+/// and, for basic groups, a contact picker with multi-select whose ids
+/// ride `createNewBasicGroupChat.user_ids`.
+pub struct CreateChatDialog {
+    kind: CreateChatKind,
+    title_input: Entity<TextareaState>,
+    description_input: Entity<TextareaState>,
+    search_input: Entity<TextareaState>,
+    selected_users: Vec<i64>,
+}
+
+impl CreateChatDialog {
+    fn new(window: &mut Window, cx: &mut Context<QuillApp>, kind: CreateChatKind) -> Self {
+        let title_input = cx.new(|cx| {
+            TextareaState::new(window, cx)
+                .placeholder("Name")
+                .auto_grow(1, 1)
+                .submit_on_enter(false)
+        });
+        let description_input = cx.new(|cx| {
+            TextareaState::new(window, cx)
+                .placeholder("Description (optional)")
+                .auto_grow(1, 3)
+                .submit_on_enter(false)
+        });
+        let search_input = cx.new(|cx| {
+            TextareaState::new(window, cx)
+                .placeholder("Search contacts")
+                .auto_grow(1, 1)
+                .submit_on_enter(false)
+        });
+        Self {
+            kind,
+            title_input,
+            description_input,
+            search_input,
+            selected_users: Vec::new(),
+        }
+    }
+}
+
+/// Slice G1: member-management dialog tabs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MemberTab {
+    All,
+    Administrators,
+    Restricted,
+    Banned,
+}
+
+impl MemberTab {
+    fn label(self) -> &'static str {
+        match self {
+            Self::All => "Members",
+            Self::Administrators => "Admins",
+            Self::Restricted => "Restricted",
+            Self::Banned => "Banned",
+        }
+    }
+
+    fn filter(self) -> Option<MemberListFilter> {
+        match self {
+            Self::All => None,
+            Self::Administrators => Some(MemberListFilter::Administrators),
+            Self::Restricted => Some(MemberListFilter::Restricted),
+            Self::Banned => Some(MemberListFilter::Banned),
+        }
+    }
+}
+
+/// Slice G1: member-management dialog for a basic group or
+/// supergroup. `All` browses Recent/Search pages (basic groups read
+/// their full member list from `getBasicGroupFullInfo`); the other
+/// tabs read the matching `getSupergroupMembers` filter. The add
+/// section at the bottom picks contacts to add via `addChatMember`
+/// (basic groups) / `addChatMembers` (supergroups).
+pub struct MemberDialog {
+    chat_id: ChatId,
+    is_basic_group: bool,
+    tab: MemberTab,
+    search_input: Entity<TextareaState>,
+    add_open: bool,
+    add_search: Entity<TextareaState>,
+    add_selected: Vec<i64>,
+}
+
+impl MemberDialog {
+    fn new(
+        window: &mut Window,
+        cx: &mut Context<QuillApp>,
+        chat_id: ChatId,
+        is_basic_group: bool,
+    ) -> Self {
+        let search_input = cx.new(|cx| {
+            TextareaState::new(window, cx)
+                .placeholder("Search members")
+                .auto_grow(1, 1)
+                .submit_on_enter(false)
+        });
+        let add_search = cx.new(|cx| {
+            TextareaState::new(window, cx)
+                .placeholder("Search contacts to add")
+                .auto_grow(1, 1)
+                .submit_on_enter(false)
+        });
+        Self {
+            chat_id,
+            is_basic_group,
+            tab: MemberTab::All,
+            search_input,
+            add_open: false,
+            add_search,
+            add_selected: Vec::new(),
+        }
+    }
+}
+
+/// Slice G1: default chat permissions editor (`setChatPermissions`,
+/// schema 1.8.67, line 13464). The staged copy starts from the chat's
+/// current block; TDLib only lets the new block loosen the old one
+/// when `can_restrict_members` is held, otherwise the call fails and
+/// the error surfaces in `status_note`.
+pub struct PermissionsDialog {
+    chat_id: ChatId,
+    permissions: ChatPermissions,
+}
+
+/// Slice G1: public username editor (`setSupergroupUsername`, schema
+/// 1.8.67, line 15136). Empty clears the username.
+/// Slice G1: coarse client-side emoji check for custom titles
+/// (`setChatMemberTag` rejects emoji, schema 1.8.67 line 13597). The
+/// server is authoritative; this only gives a friendlier error before
+/// the request goes out.
+fn looks_like_emoji(c: char) -> bool {
+    matches!(
+        c as u32,
+        0x200D | 0xFE00..=0xFE0F | 0x2190..=0x21FF | 0x2300..=0x23FF | 0x25A0..=0x25FF
+            | 0x2600..=0x27BF | 0x2B00..=0x2BFF | 0x1F000..=0x1FAFF
+    )
+}
+
+/// Slice G1: what a `UsernameDialog` text prompt edits.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TextPromptKind {
+    /// `setSupergroupUsername` (schema 1.8.67, line 15136).
+    Username,
+    /// `setChatMemberTag` custom title (schema 1.8.67, line 13598).
+    CustomTitle { user_id: i64 },
+}
+
+pub struct UsernameDialog {
+    chat_id: ChatId,
+    kind: TextPromptKind,
+    input: Entity<TextareaState>,
+}
+
+impl UsernameDialog {
+    fn new(
+        window: &mut Window,
+        cx: &mut Context<QuillApp>,
+        chat_id: ChatId,
+        kind: TextPromptKind,
+        current: &str,
+        placeholder: &str,
+    ) -> Self {
+        let input = cx.new(|cx| {
+            TextareaState::new(window, cx)
+                .placeholder(placeholder)
+                .auto_grow(1, 1)
+                .submit_on_enter(false)
+        });
+        input.update(cx, |input, cx| {
+            input.set_value(current, window, cx);
+        });
+        Self {
+            chat_id,
+            kind,
+            input,
+        }
+    }
+}
+
+/// Slice G1: restrict/ban dialog (`setChatMemberStatus`, schema
+/// 1.8.67, line 13592). `banned_until_days`: 0 = forever; otherwise
+/// the Unix timestamp sent is now + days * 86400.
+pub struct RestrictDialog {
+    chat_id: ChatId,
+    user_id: i64,
+    ban: bool,
+    banned_until_days: i32,
+    permissions: ChatPermissions,
+}
+
+impl RestrictDialog {
+    fn new(chat_id: ChatId, user_id: i64, ban: bool, current: ChatPermissions) -> Self {
+        Self {
+            chat_id,
+            user_id,
+            ban,
+            banned_until_days: 0,
+            permissions: current,
+        }
+    }
+}
+
+/// Slice G1: confirmations that need an explicit tap: deleting a chat
+/// (`deleteChat`), leaving a group/channel, the one-way broadcast
+/// upgrade (`toggleSupergroupIsBroadcastGroup`), and banning a member.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GroupConfirmAction {
+    DeleteChat,
+    LeaveChat,
+    BroadcastUpgrade,
+}
+
+pub struct GroupConfirmDialog {
+    chat_id: ChatId,
+    action: GroupConfirmAction,
+}
+
+/// Slice G1: which close action a modal dialog's backdrop / close
+/// button runs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum G1DialogClose {
+    CreateChat,
+    Member,
+    Permissions,
+    Username,
+    Restrict,
+    GroupConfirm,
+    QuoteReply,
+}
+
+/// Slice G1: partial-quote dialog (message menu → "Quote reply").
+/// The input is prefilled with the message's full text; the user
+/// trims it down to the quoted part. Submit validates that the
+/// remainder is a verbatim substring and computes its UTF-16 offset
+/// (`inputTextQuote`, schema 1.8.67, line 3056).
+pub struct QuoteReplyDialog {
+    chat_id: ChatId,
+    message_id: MessageId,
+    full_text: String,
+    input: Entity<TextareaState>,
+}
+
+impl QuoteReplyDialog {
+    fn new(
+        window: &mut Window,
+        cx: &mut Context<QuillApp>,
+        chat_id: ChatId,
+        message_id: MessageId,
+        full_text: String,
+    ) -> Self {
+        let input = cx.new(|cx| {
+            TextareaState::new(window, cx)
+                .placeholder("Trim to the part to quote")
+                .auto_grow(2, 6)
+                .submit_on_enter(false)
+        });
+        input.update(cx, |input, cx| {
+            input.set_value(&full_text, window, cx);
+        });
+        Self {
+            chat_id,
+            message_id,
+            full_text,
+            input,
         }
     }
 }
@@ -901,6 +1270,20 @@ pub struct QuillApp {
     /// Phase D3b: admin-management dialog state (promote picker /
     /// rights editor / demote confirm).
     admin_dialog: Option<AdminDialog>,
+    /// Slice G1: group/supergroup/channel creation dialog.
+    create_chat_dialog: Option<CreateChatDialog>,
+    /// Slice G1: member-management dialog (tabs + add section).
+    member_dialog: Option<MemberDialog>,
+    /// Slice G1: default chat permissions editor.
+    permissions_dialog: Option<PermissionsDialog>,
+    /// Slice G1: public username editor.
+    username_dialog: Option<UsernameDialog>,
+    /// Slice G1: restrict/ban dialog.
+    restrict_dialog: Option<RestrictDialog>,
+    /// Slice G1: delete / leave / broadcast-upgrade / ban confirmations.
+    group_confirm_dialog: Option<GroupConfirmDialog>,
+    /// Slice G1: partial-quote dialog (message menu → "Quote reply").
+    quote_reply_dialog: Option<QuoteReplyDialog>,
     /// Phase 4.5: fullscreen media viewer (photo/video overlay).
     media_viewer: MediaViewer,
     /// Parity slice 5: zoom/pan of the viewer visual (reset on open/step).
@@ -1084,6 +1467,14 @@ pub enum ScreenshotDemo {
     /// loaded `chatEvents` fixture covering the handled action types, so
     /// the info panel's "Recent actions" section renders directly.
     ReadyAdminLog,
+    /// Slice G1: synthetic group-management surface (no live TDLib):
+    /// demo supergroup (id 61) with the viewer as an administrator
+    /// (`can_restrict_members`, `can_invite_users`, `can_manage_tags`),
+    /// a loaded `chatMembers` page (member, admin with custom title,
+    /// restricted member), and the member-management dialog open on the
+    /// All tab, so member rows, custom titles, and per-tab actions
+    /// render directly.
+    ReadyGroupManage,
     /// Bot chat demo (injected, no live Telegram): private chat with a
     /// `userTypeBot` user (id 21), opened with history plus a cached
     /// `botInfo` (description + commands), so the bot panel renders under
@@ -1880,6 +2271,15 @@ impl QuillApp {
                     AuthorizationState::Ready,
                 )
             }
+            Some(ScreenshotDemo::ReadyGroupManage) => {
+                demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
+                (
+                    ConnectUiStatus::DemoReadyChats,
+                    None,
+                    "screenshot demo — group management".into(),
+                    AuthorizationState::Ready,
+                )
+            }
             Some(ScreenshotDemo::ReadyBotChat) => {
                 demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
                 (
@@ -2376,6 +2776,13 @@ impl QuillApp {
             poll_dialog: None,
             invite_link_dialog: None,
             admin_dialog: None,
+            create_chat_dialog: None,
+            member_dialog: None,
+            permissions_dialog: None,
+            username_dialog: None,
+            restrict_dialog: None,
+            group_confirm_dialog: None,
+            quote_reply_dialog: None,
             media_viewer: MediaViewer::closed(),
             viewer_zoom: ViewerZoom::new(),
             viewer_drag: None,
@@ -3156,6 +3563,19 @@ impl QuillApp {
             app.open_info_panel_target(InfoPanelTarget::Supergroup(13), window, cx);
             app.status_note = "screenshot demo — recent actions".into();
         }
+        // Slice G1: group-management fixture, then open the member
+        // dialog on the demo supergroup (viewer 777 is an admin with
+        // restrict/invite/tag rights, seeded by
+        // apply_ready_group_manage).
+        if matches!(demo, Some(ScreenshotDemo::ReadyGroupManage)) {
+            if let Some(session) = app.demo_session.as_mut() {
+                app.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_group_manage(session, &app.demo_sink, &app.demo_seq);
+            }
+            app.member_dialog = Some(MemberDialog::new(window, cx, ChatId(61), false));
+            app.status_note = "screenshot demo — group management".into();
+            cx.notify();
+        }
         if matches!(demo, Some(ScreenshotDemo::ReadyBotChat)) {
             if let Some(session) = app.demo_session.as_mut() {
                 app.demo_seq.store(session.last_seq, Ordering::SeqCst);
@@ -3317,6 +3737,33 @@ impl QuillApp {
             .and_then(|live| live.driver.session.resend_error.take())
         {
             self.status_note = err;
+            progressed = true;
+        }
+        // Slice G1 fix-up: an invite-link mutation (create/edit/revoke/
+        // replace-primary) failed — the loaded list is kept, so the
+        // error surfaces here instead of wiping the panel.
+        if let Some(err) = self
+            .live
+            .as_mut()
+            .and_then(|live| live.driver.session.invite_link_error.take())
+        {
+            self.status_note = err;
+            progressed = true;
+        }
+        // Slice G1 fix-up: `updateChatMember` dropped the member-list
+        // caches — refetch the open dialog's page so it shows the new
+        // membership instead of sticking on "Loading members…".
+        let stale_chats: Vec<i64> = self
+            .live
+            .as_mut()
+            .map(|live| live.driver.session.member_list_stale.drain(..).collect())
+            .unwrap_or_default();
+        if self
+            .member_dialog
+            .as_ref()
+            .is_some_and(|dialog| stale_chats.contains(&dialog.chat_id.0))
+        {
+            self.refresh_member_dialog(cx);
             progressed = true;
         }
         // Phase 3.2: bot answers to inline keyboard callback presses.
@@ -4253,6 +4700,15 @@ impl QuillApp {
             this.message_menu = None;
             cx.notify();
         });
+        // Slice G1: partial-message quote (`inputTextQuote`, schema
+        // 1.8.67 line 3056) — only for messages with copyable text.
+        if copyable.is_some() {
+            item!("menu-quote-reply", "Quote reply", this, window, cx, {
+                this.open_quote_reply_dialog(chat_id, message_id, window, cx);
+                this.message_menu = None;
+                cx.notify();
+            });
+        }
         if let Some(text) = copyable {
             item!("menu-copy", "Copy", this, _window, cx, {
                 cx.write_to_clipboard(ClipboardItem::new_string(text.clone()));
@@ -4663,7 +5119,7 @@ impl QuillApp {
         chat_id: ChatId,
         emoji: &str,
         file_id: FileId,
-        reply: Option<MessageId>,
+        reply: Option<quill::telegram::SendReply>,
     ) {
         let Some(session) = self.demo_session.as_mut() else {
             return;
@@ -4677,10 +5133,10 @@ impl QuillApp {
             .unwrap_or("");
         let file = demo_file_json(file_id.0, path, !path.is_empty());
         let reply_json = reply
-            .map(|message_id| {
+            .map(|reply| {
                 format!(
                     r#","reply_to":{{"@type":"messageReplyToMessage","chat_id":{},"message_id":{},"quote":null,"checklist_task_id":0,"poll_option_id":""}}"#,
-                    chat_id.0, message_id.0
+                    chat_id.0, reply.message_id.0
                 )
             })
             .unwrap_or_default();
@@ -4701,7 +5157,7 @@ impl QuillApp {
         duration: i32,
         width: i32,
         height: i32,
-        reply: Option<MessageId>,
+        reply: Option<quill::telegram::SendReply>,
     ) {
         let Some(session) = self.demo_session.as_mut() else {
             return;
@@ -4715,10 +5171,10 @@ impl QuillApp {
             .unwrap_or("");
         let file = demo_file_json(file_id.0, path, !path.is_empty());
         let reply_json = reply
-            .map(|message_id| {
+            .map(|reply| {
                 format!(
                     r#","reply_to":{{"@type":"messageReplyToMessage","chat_id":{},"message_id":{},"quote":null,"checklist_task_id":0,"poll_option_id":""}}"#,
-                    chat_id.0, message_id.0
+                    chat_id.0, reply.message_id.0
                 )
             })
             .unwrap_or_default();
@@ -7340,7 +7796,13 @@ impl QuillApp {
                         .as_ref()
                         .is_some_and(|live| live.driver.session.open_chat == Some(reply.chat_id))
                 })
-                .map(|reply| reply.message_id);
+                .map(|reply| quill::telegram::SendReply {
+                    message_id: reply.message_id,
+                    quote: reply
+                        .quote
+                        .as_ref()
+                        .map(|quote| (quote.text.clone(), quote.position)),
+                });
             let result = self.live.as_mut().expect("live").driver.send_voice_note(
                 &draft,
                 caption.trim(),
@@ -8103,7 +8565,10 @@ impl QuillApp {
     ) {
         self.admin_dialog = Some(AdminDialog::promote(window, cx, chat_id));
         if let Some(live) = self.live.as_mut()
-            && live.driver.fetch_supergroup_members(chat_id, "").is_err()
+            && live
+                .driver
+                .fetch_supergroup_members(chat_id, MemberListFilter::Recent, "")
+                .is_err()
         {
             self.status_note = "could not load members".into();
         }
@@ -8123,9 +8588,14 @@ impl QuillApp {
             None => return,
         };
         if let Some(live) = self.live.as_mut() {
+            let filter = if query.trim().is_empty() {
+                MemberListFilter::Recent
+            } else {
+                MemberListFilter::Search
+            };
             if live
                 .driver
-                .refresh_supergroup_members(chat_id, query.trim())
+                .refresh_supergroup_members(chat_id, filter, query.trim())
                 .is_err()
             {
                 self.status_note = "could not search members".into();
@@ -8240,6 +8710,685 @@ impl QuillApp {
             self.admin_dialog = Some(dialog);
         }
         self.status_note = note;
+        cx.notify();
+    }
+
+    /// Slice G1: group/supergroup/channel management handlers. Every
+    /// action is capability-gated in the driver (`chat_can_restrict_`
+    /// `members`, `chat_is_owner`, `chat_can_add_members`,
+    /// `can_be_deleted_for_all_users`); the UI mirrors the gates so
+    /// buttons only appear when the action can succeed.
+
+    /// Slice G1: supergroup id for a chat, if it is one.
+    fn chat_supergroup_id(&self, chat_id: ChatId) -> Option<i64> {
+        self.session()
+            .and_then(|session| session.chats.get(&chat_id.0))
+            .and_then(|chat| match chat.kind {
+                ChatKind::Supergroup { supergroup_id, .. } => Some(supergroup_id),
+                _ => None,
+            })
+    }
+
+    /// Slice G1: cached public username for a supergroup/channel chat.
+    fn chat_username(&self, chat_id: ChatId) -> String {
+        self.chat_supergroup_id(chat_id)
+            .and_then(|id| {
+                self.session()
+                    .and_then(|session| session.supergroup_username(id))
+                    .map(str::to_string)
+            })
+            .unwrap_or_default()
+    }
+
+    /// Slice G1: cached join-by-request flag for a supergroup chat.
+    fn chat_join_by_request(&self, chat_id: ChatId) -> bool {
+        self.chat_supergroup_id(chat_id).is_some_and(|id| {
+            self.session()
+                .is_some_and(|session| session.supergroup_join_by_request.get(&id) == Some(&true))
+        })
+    }
+
+    /// Slice G1: cached broadcast-group flag for a supergroup chat.
+    fn chat_is_broadcast(&self, chat_id: ChatId) -> bool {
+        self.chat_supergroup_id(chat_id).is_some_and(|id| {
+            self.session()
+                .is_some_and(|session| session.supergroup_is_broadcast.get(&id) == Some(&true))
+        })
+    }
+
+    /// Slice G1: days (0 = forever) to a TDLib `banned_until_date` Unix
+    /// timestamp (schema 1.8.67, line 2510: 0 = forever).
+    fn restrict_until_date(days: i32) -> i32 {
+        if days <= 0 {
+            0
+        } else {
+            (quill::state::unix_ms_now() / 1000) as i32 + days.saturating_mul(86_400)
+        }
+    }
+
+    fn open_create_chat_dialog(
+        &mut self,
+        kind: CreateChatKind,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.create_chat_dialog = Some(CreateChatDialog::new(window, cx, kind));
+        cx.notify();
+    }
+
+    fn close_create_chat_dialog(&mut self, cx: &mut Context<Self>) {
+        self.create_chat_dialog = None;
+        cx.notify();
+    }
+
+    fn toggle_create_chat_user(&mut self, user_id: i64, cx: &mut Context<Self>) {
+        if let Some(dialog) = self.create_chat_dialog.as_mut() {
+            if let Some(position) = dialog.selected_users.iter().position(|id| *id == user_id) {
+                dialog.selected_users.remove(position);
+            } else {
+                dialog.selected_users.push(user_id);
+            }
+            cx.notify();
+        }
+    }
+
+    /// Slice G1: submit the creation dialog. Basic groups send their
+    /// picked members with the create call; supergroups/channels are
+    /// created first and members are added from the member dialog
+    /// afterwards (`createNewSupergroupChat` takes no members, schema
+    /// 1.8.67 line 13337).
+    fn submit_create_chat_dialog(&mut self, cx: &mut Context<Self>) {
+        let Some(dialog) = self.create_chat_dialog.take() else {
+            return;
+        };
+        let title = dialog.title_input.read(cx).value().trim().to_string();
+        let description = dialog.description_input.read(cx).value().trim().to_string();
+        let kind = dialog.kind;
+        let user_ids = dialog.selected_users.clone();
+        if title.is_empty() {
+            self.create_chat_dialog = Some(dialog);
+            self.status_note = "Name cannot be empty".into();
+            cx.notify();
+            return;
+        }
+        let note = match self.live.as_mut() {
+            Some(live) => {
+                let result = match kind {
+                    CreateChatKind::BasicGroup => live
+                        .driver
+                        .create_basic_group(&title, &user_ids)
+                        .map(|_| ()),
+                    CreateChatKind::Supergroup => live
+                        .driver
+                        .create_supergroup_channel(&title, false, &description)
+                        .map(|_| ()),
+                    CreateChatKind::Channel => live
+                        .driver
+                        .create_supergroup_channel(&title, true, &description)
+                        .map(|_| ()),
+                };
+                match result {
+                    Ok(()) => format!("{} created", kind.title()),
+                    Err(_) => {
+                        self.create_chat_dialog = Some(dialog);
+                        format!("could not create {}", kind.title().to_lowercase())
+                    }
+                }
+            }
+            None => {
+                self.create_chat_dialog = Some(dialog);
+                "creating chats needs a live connection (demo)".to_string()
+            }
+        };
+        self.status_note = note;
+        cx.notify();
+    }
+
+    /// Slice G1: open the member-management dialog and kick off the
+    /// member fetch for the current tab.
+    fn open_member_dialog(&mut self, chat_id: ChatId, window: &mut Window, cx: &mut Context<Self>) {
+        let is_basic_group = self.session().is_some_and(|session| {
+            session
+                .chats
+                .get(&chat_id.0)
+                .is_some_and(|chat| matches!(chat.kind, ChatKind::BasicGroup { .. }))
+        });
+        self.member_dialog = Some(MemberDialog::new(window, cx, chat_id, is_basic_group));
+        // Slice G1: a fresh dialog open clears the last action error —
+        // stale failures from a previous open must not linger.
+        if let Some(live) = self.live.as_mut() {
+            live.driver.session.member_action_error.remove(&chat_id.0);
+        } else if let Some(session) = self.demo_session.as_mut() {
+            session.member_action_error.remove(&chat_id.0);
+        }
+        cx.notify();
+        self.refresh_member_dialog(cx);
+    }
+
+    fn close_member_dialog(&mut self, cx: &mut Context<Self>) {
+        if let Some(dialog) = self.member_dialog.take() {
+            let chat_id = dialog.chat_id;
+            if let Some(live) = self.live.as_mut() {
+                live.driver.session.add_members_failed.remove(&chat_id.0);
+            } else if let Some(session) = self.demo_session.as_mut() {
+                session.add_members_failed.remove(&chat_id.0);
+            }
+        }
+        cx.notify();
+    }
+
+    /// Slice G1: (re)fetch the member page the dialog's current tab
+    /// shows. Basic groups read `getBasicGroupFullInfo`; supergroups
+    /// read the matching `getSupergroupMembers` filter.
+    fn refresh_member_dialog(&mut self, cx: &mut Context<Self>) {
+        let (chat_id, is_basic_group, tab, query) = match self.member_dialog.as_ref() {
+            Some(dialog) => (
+                dialog.chat_id,
+                dialog.is_basic_group,
+                dialog.tab,
+                dialog.search_input.read(cx).value().trim().to_string(),
+            ),
+            None => return,
+        };
+        let Some(live) = self.live.as_mut() else {
+            return;
+        };
+        let result = if is_basic_group {
+            live.driver.fetch_basic_group_members(chat_id).map(|_| ())
+        } else if tab == MemberTab::All && !query.is_empty() {
+            live.driver
+                .refresh_supergroup_members(chat_id, MemberListFilter::Search, &query)
+                .map(|_| ())
+        } else {
+            let filter = tab.filter().unwrap_or(MemberListFilter::Recent);
+            live.driver
+                .refresh_supergroup_members(chat_id, filter, &query)
+                .map(|_| ())
+        };
+        if result.is_err() {
+            self.status_note = "could not load members".into();
+        }
+        cx.notify();
+    }
+
+    fn member_dialog_tab(&mut self, tab: MemberTab, cx: &mut Context<Self>) {
+        if let Some(dialog) = self.member_dialog.as_mut() {
+            dialog.tab = tab;
+        }
+        self.refresh_member_dialog(cx);
+    }
+
+    fn toggle_member_add_user(&mut self, user_id: i64, cx: &mut Context<Self>) {
+        if let Some(dialog) = self.member_dialog.as_mut() {
+            if let Some(position) = dialog.add_selected.iter().position(|id| *id == user_id) {
+                dialog.add_selected.remove(position);
+            } else {
+                dialog.add_selected.push(user_id);
+            }
+            cx.notify();
+        }
+    }
+
+    /// Slice G1: add the picked contacts (`addChatMember` per user for
+    /// basic groups, one bulk `addChatMembers` for supergroups — the
+    /// driver picks). Failures surface via `FailedToAddMembers` in
+    /// `status_note` through the session's `add_members_failed` map.
+    fn submit_member_add(&mut self, cx: &mut Context<Self>) {
+        let (chat_id, user_ids) = match self.member_dialog.as_mut() {
+            Some(dialog) => (dialog.chat_id, std::mem::take(&mut dialog.add_selected)),
+            None => return,
+        };
+        if user_ids.is_empty() {
+            self.status_note = "pick at least one contact to add".into();
+            cx.notify();
+            return;
+        }
+        let note = match self.live.as_mut() {
+            Some(live) => match live.driver.add_chat_members(chat_id, &user_ids) {
+                Ok(_) => "adding members".into(),
+                Err(_) => "could not add members".into(),
+            },
+            None => "adding members needs a live connection (demo)".into(),
+        };
+        self.status_note = note;
+        // `updateChatMember` drops the cached member list and marks the
+        // chat stale; `poll_live` refetches the open dialog's page.
+        self.refresh_member_dialog(cx);
+    }
+
+    /// Slice G1: open the restrict/ban dialog. Restrict starts from the
+    /// chat's current default permissions block (that's what a new
+    /// restricted status loosens/tightens); ban needs no permissions.
+    fn open_restrict_dialog(
+        &mut self,
+        chat_id: ChatId,
+        user_id: i64,
+        ban: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let current = self
+            .session()
+            .and_then(|session| session.chats.get(&chat_id.0))
+            .and_then(|chat| chat.permissions.clone())
+            .unwrap_or_else(ChatPermissions::all);
+        self.restrict_dialog = Some(RestrictDialog::new(chat_id, user_id, ban, current));
+        cx.notify();
+    }
+
+    fn close_restrict_dialog(&mut self, cx: &mut Context<Self>) {
+        self.restrict_dialog = None;
+        cx.notify();
+    }
+
+    fn toggle_restrict_permission(&mut self, index: usize, cx: &mut Context<Self>) {
+        if let Some(dialog) = self.restrict_dialog.as_mut() {
+            let enabled = chat_permission_get(&dialog.permissions, index);
+            chat_permission_set(&mut dialog.permissions, index, !enabled);
+            cx.notify();
+        }
+    }
+
+    fn cycle_restrict_duration(&mut self, cx: &mut Context<Self>) {
+        const DURATIONS: [i32; 4] = [0, 1, 7, 30];
+        if let Some(dialog) = self.restrict_dialog.as_mut() {
+            let position = DURATIONS
+                .iter()
+                .position(|days| *days == dialog.banned_until_days)
+                .unwrap_or(0);
+            dialog.banned_until_days = DURATIONS[(position + 1) % DURATIONS.len()];
+            cx.notify();
+        }
+    }
+
+    /// Slice G1: submit restrict/ban (`setChatMemberStatus`, schema
+    /// 1.8.67 line 13592). Duration is now + days; 0 = forever.
+    fn submit_restrict_dialog(&mut self, cx: &mut Context<Self>) {
+        let Some(dialog) = self.restrict_dialog.take() else {
+            return;
+        };
+        let note = match self.live.as_mut() {
+            Some(live) => {
+                let until_date = Self::restrict_until_date(dialog.banned_until_days);
+                let result = if dialog.ban {
+                    live.driver
+                        .ban_chat_member(dialog.chat_id, dialog.user_id, until_date)
+                } else {
+                    live.driver.restrict_chat_member(
+                        dialog.chat_id,
+                        dialog.user_id,
+                        until_date,
+                        &dialog.permissions,
+                    )
+                };
+                match result {
+                    // Slice G1 fix-up: `Ok(None)` means the driver
+                    // refused to send (no rights, or restrict in a
+                    // channel) — not success. Keep the dialog open and
+                    // say so instead of claiming it happened.
+                    Ok(Some(_)) => {
+                        if dialog.ban {
+                            "member banned".into()
+                        } else {
+                            "member restricted".into()
+                        }
+                    }
+                    Ok(None) | Err(_) => {
+                        self.restrict_dialog = Some(dialog);
+                        "could not update member status".into()
+                    }
+                }
+            }
+            None => {
+                self.restrict_dialog = Some(dialog);
+                "member actions need a live connection (demo)".into()
+            }
+        };
+        self.status_note = note;
+        cx.notify();
+    }
+
+    /// Slice G1: lift a restriction or ban (`setChatMemberStatus` →
+    /// `chatMemberStatusMember`).
+    fn unban_member(&mut self, chat_id: ChatId, user_id: i64, cx: &mut Context<Self>) {
+        let note = match self.live.as_mut() {
+            // Slice G1 fix-up: `Ok(None)` is a driver refusal, not
+            // success — report it honestly.
+            Some(live) => match live.driver.unban_chat_member(chat_id, user_id) {
+                Ok(Some(_)) => "member unbanned".into(),
+                Ok(None) => "could not unban member".into(),
+                Err(_) => "could not unban member".into(),
+            },
+            None => "member actions need a live connection (demo)".into(),
+        };
+        self.status_note = note;
+        self.refresh_member_dialog(cx);
+    }
+
+    /// Slice G1: open the default-permissions editor, seeded from the
+    /// chat's current block.
+    fn open_permissions_dialog(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
+        let current = self
+            .session()
+            .and_then(|session| session.chats.get(&chat_id.0))
+            .and_then(|chat| chat.permissions.clone())
+            .unwrap_or_else(ChatPermissions::all);
+        self.permissions_dialog = Some(PermissionsDialog {
+            chat_id,
+            permissions: current,
+        });
+        cx.notify();
+    }
+
+    fn close_permissions_dialog(&mut self, cx: &mut Context<Self>) {
+        self.permissions_dialog = None;
+        cx.notify();
+    }
+
+    fn toggle_permission(&mut self, index: usize, cx: &mut Context<Self>) {
+        if let Some(dialog) = self.permissions_dialog.as_mut() {
+            let enabled = chat_permission_get(&dialog.permissions, index);
+            chat_permission_set(&mut dialog.permissions, index, !enabled);
+            cx.notify();
+        }
+    }
+
+    /// Slice G1: `setChatPermissions` (schema 1.8.67, line 13464).
+    fn submit_permissions_dialog(&mut self, cx: &mut Context<Self>) {
+        let Some(dialog) = self.permissions_dialog.take() else {
+            return;
+        };
+        let note = match self.live.as_mut() {
+            Some(live) => match live
+                .driver
+                .set_chat_permissions(dialog.chat_id, &dialog.permissions)
+            {
+                Ok(_) => "permissions updated".into(),
+                Err(_) => {
+                    self.permissions_dialog = Some(dialog);
+                    "could not update permissions".into()
+                }
+            },
+            None => {
+                self.permissions_dialog = Some(dialog);
+                "permissions need a live connection (demo)".into()
+            }
+        };
+        self.status_note = note;
+        cx.notify();
+    }
+
+    fn open_username_dialog(
+        &mut self,
+        chat_id: ChatId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let current = self.chat_username(chat_id);
+        self.username_dialog = Some(UsernameDialog::new(
+            window,
+            cx,
+            chat_id,
+            TextPromptKind::Username,
+            &current,
+            "Public username (empty = remove)",
+        ));
+        cx.notify();
+    }
+
+    /// Slice G1: admin custom-title prompt (`setChatMemberTag`, schema
+    /// 1.8.67, line 13598 — the setter Telegram X's `EditRightsController`
+    /// drives for "Custom title"). Basic groups and supergroups only.
+    fn open_custom_title_dialog(
+        &mut self,
+        chat_id: ChatId,
+        user_id: i64,
+        current: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.username_dialog = Some(UsernameDialog::new(
+            window,
+            cx,
+            chat_id,
+            TextPromptKind::CustomTitle { user_id },
+            current,
+            "Custom title (0-16 characters, no emoji; empty = remove)",
+        ));
+        cx.notify();
+    }
+
+    fn close_username_dialog(&mut self, cx: &mut Context<Self>) {
+        self.username_dialog = None;
+        cx.notify();
+    }
+
+    fn submit_username_dialog(&mut self, cx: &mut Context<Self>) {
+        let Some(dialog) = self.username_dialog.take() else {
+            return;
+        };
+        let value = dialog.input.read(cx).value().trim().to_string();
+        let (kind, chat_id) = (dialog.kind, dialog.chat_id);
+        let note = match kind {
+            TextPromptKind::Username => match self.live.as_mut() {
+                Some(live) => match live.driver.set_supergroup_username(chat_id, &value) {
+                    Ok(_) => {
+                        if value.is_empty() {
+                            "username removed".into()
+                        } else {
+                            format!("username set to @{value}")
+                        }
+                    }
+                    Err(_) => {
+                        self.username_dialog = Some(dialog);
+                        "could not set username".into()
+                    }
+                },
+                None => {
+                    self.username_dialog = Some(dialog);
+                    "usernames need a live connection (demo)".into()
+                }
+            },
+            TextPromptKind::CustomTitle { user_id } => {
+                // 0-16 characters, no emoji — schema line 13597, TGX
+                // `EditRightsController` enforces the same client-side.
+                let too_long = value.chars().count() > 16;
+                let has_emoji = value.chars().any(looks_like_emoji);
+                if too_long || has_emoji {
+                    self.username_dialog = Some(dialog);
+                    self.status_note = if too_long {
+                        "custom title must be at most 16 characters".into()
+                    } else {
+                        "custom title cannot contain emoji".into()
+                    };
+                    cx.notify();
+                    return;
+                }
+                match self.live.as_mut() {
+                    Some(live) => match live.driver.set_chat_member_tag(chat_id, user_id, &value) {
+                        Ok(_) => {
+                            if value.is_empty() {
+                                "custom title removed".into()
+                            } else {
+                                "custom title updated".into()
+                            }
+                        }
+                        Err(_) => {
+                            self.username_dialog = Some(dialog);
+                            "could not set custom title".into()
+                        }
+                    },
+                    None => {
+                        self.username_dialog = Some(dialog);
+                        "custom titles need a live connection (demo)".into()
+                    }
+                }
+            }
+        };
+        self.status_note = note;
+        cx.notify();
+    }
+
+    /// Slice G1: `replacePrimaryChatInviteLink` (schema 1.8.67, line
+    /// 14089) — revokes the current primary link and creates a fresh
+    /// one; the new link arrives as `updateChatInviteLink`.
+    fn replace_primary_invite_link(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
+        let note = match self.live.as_mut() {
+            Some(live) => match live.driver.replace_primary_chat_invite_link(chat_id) {
+                Ok(_) => "replacing primary invite link".into(),
+                Err(_) => "could not replace invite link".into(),
+            },
+            None => "invite links need a live connection (demo)".into(),
+        };
+        self.status_note = note;
+        cx.notify();
+    }
+
+    /// Slice G1: `toggleSupergroupJoinByRequest` (schema 1.8.67, line
+    /// 15188).
+    fn toggle_join_by_request(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
+        let current = self.chat_join_by_request(chat_id);
+        let note = match self.live.as_mut() {
+            Some(live) => {
+                match live
+                    .driver
+                    .toggle_supergroup_join_by_request(chat_id, !current)
+                {
+                    Ok(_) => {
+                        if current {
+                            "join requests disabled".into()
+                        } else {
+                            "join requests enabled".into()
+                        }
+                    }
+                    Err(_) => "could not toggle join requests".into(),
+                }
+            }
+            None => "join requests need a live connection (demo)".into(),
+        };
+        self.status_note = note;
+        cx.notify();
+    }
+
+    fn open_group_confirm(
+        &mut self,
+        chat_id: ChatId,
+        action: GroupConfirmAction,
+        cx: &mut Context<Self>,
+    ) {
+        self.group_confirm_dialog = Some(GroupConfirmDialog { chat_id, action });
+        cx.notify();
+    }
+
+    fn close_group_confirm(&mut self, cx: &mut Context<Self>) {
+        self.group_confirm_dialog = None;
+        cx.notify();
+    }
+
+    /// Slice G1: run the confirmed action — `deleteChat` (schema
+    /// 1.8.67, line 11850; driver checks
+    /// `chat.can_be_deleted_for_all_users`), `leaveChat`, or the
+    /// one-way `toggleSupergroupIsBroadcastGroup` upgrade (schema
+    /// 1.8.67, line 15221).
+    fn submit_group_confirm(&mut self, cx: &mut Context<Self>) {
+        let Some(dialog) = self.group_confirm_dialog.take() else {
+            return;
+        };
+        let note = match self.live.as_mut() {
+            Some(live) => {
+                let result = match dialog.action {
+                    GroupConfirmAction::DeleteChat => live
+                        .driver
+                        .delete_chat(dialog.chat_id)
+                        .map(|_| "chat deleted".to_string()),
+                    GroupConfirmAction::LeaveChat => live
+                        .driver
+                        .leave_channel(dialog.chat_id)
+                        .map(|_| "left the chat".to_string()),
+                    GroupConfirmAction::BroadcastUpgrade => live
+                        .driver
+                        .upgrade_to_broadcast_group(dialog.chat_id)
+                        // Ongoing, not done: TDLib answers `ok`/`error`
+                        // asynchronously; the error arm rolls the
+                        // optimistic flag back.
+                        .map(|_| "converting to broadcast group…".to_string()),
+                };
+                match result {
+                    Ok(note) => note,
+                    Err(_) => {
+                        self.group_confirm_dialog = Some(dialog);
+                        "action failed".to_string()
+                    }
+                }
+            }
+            None => {
+                self.group_confirm_dialog = Some(dialog);
+                "chat actions need a live connection (demo)".to_string()
+            }
+        };
+        self.status_note = note;
+        cx.notify();
+    }
+
+    /// Slice G1: open the partial-quote dialog for a text message.
+    fn open_quote_reply_dialog(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let full_text = self
+            .session()
+            .and_then(|session| session.histories.get(&chat_id.0))
+            .and_then(|history| history.messages.get(&message_id.0))
+            .and_then(|message| Self::message_copyable_text(&message.content))
+            .unwrap_or_default();
+        if full_text.trim().is_empty() {
+            self.status_note = "only text messages can be quoted".into();
+            cx.notify();
+            return;
+        }
+        self.quote_reply_dialog = Some(QuoteReplyDialog::new(
+            window, cx, chat_id, message_id, full_text,
+        ));
+        cx.notify();
+    }
+
+    fn close_quote_reply_dialog(&mut self, cx: &mut Context<Self>) {
+        self.quote_reply_dialog = None;
+        cx.notify();
+    }
+
+    /// Slice G1: validate the trimmed quote against the original text
+    /// and set the composer's reply with its UTF-16 offset. A quote
+    /// that is no longer a verbatim substring keeps the dialog open
+    /// with an explanatory note.
+    fn submit_quote_reply_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(dialog) = self.quote_reply_dialog.take() else {
+            return;
+        };
+        let quote_text = dialog.input.read(cx).value();
+        let quote_text = quote_text.trim();
+        match quill::composer::quote_position(&dialog.full_text, quote_text) {
+            Some(position) => {
+                let preview = dialog.full_text.chars().take(80).collect::<String>();
+                let reply = quill::composer::ComposerReplyTo::with_quote(
+                    dialog.chat_id,
+                    dialog.message_id,
+                    preview,
+                    quill::composer::QuoteSelection {
+                        text: quote_text.to_string(),
+                        position,
+                    },
+                );
+                self.begin_reply_to(reply, window, cx);
+                self.status_note = "quoting part of the message".into();
+            }
+            None => {
+                self.quote_reply_dialog = Some(dialog);
+                self.status_note = "the quote must be an unedited part of the message".into();
+            }
+        }
         cx.notify();
     }
 
@@ -8859,7 +10008,13 @@ impl QuillApp {
             .pending_reply
             .as_ref()
             .filter(|reply| reply.chat_id == chat_id)
-            .map(|reply| reply.message_id);
+            .map(|reply| quill::telegram::SendReply {
+                message_id: reply.message_id,
+                quote: reply
+                    .quote
+                    .as_ref()
+                    .map(|quote| (quote.text.clone(), quote.position)),
+            });
         let sent = if let Some(live) = self.live.as_mut() {
             self.status_note = match live.driver.send_animation(
                 chat_id,
@@ -8962,7 +10117,13 @@ impl QuillApp {
             .pending_reply
             .as_ref()
             .filter(|reply| reply.chat_id == chat_id)
-            .map(|reply| reply.message_id);
+            .map(|reply| quill::telegram::SendReply {
+                message_id: reply.message_id,
+                quote: reply
+                    .quote
+                    .as_ref()
+                    .map(|quote| (quote.text.clone(), quote.position)),
+            });
         let sent = if let Some(live) = self.live.as_mut() {
             self.status_note = match live.driver.send_sticker(
                 chat_id,
@@ -10062,6 +11223,19 @@ impl QuillApp {
             }),
             _ => None,
         };
+        // Slice G1: resolve the basic-group chat before the driver
+        // borrow below.
+        let g1_basic_chat = match target {
+            InfoPanelTarget::BasicGroup(basic_group_id) => self.session().and_then(|session| {
+                session.chats.values().find_map(|chat| match chat.kind {
+                    ChatKind::BasicGroup { basic_group_id: id } if id == basic_group_id => {
+                        Some(chat.id)
+                    }
+                    _ => None,
+                })
+            }),
+            _ => None,
+        };
         if let Some(live) = self.live.as_mut() {
             live.driver.set_info_panel(Some(target));
             let fetch = match target {
@@ -10102,6 +11276,12 @@ impl QuillApp {
                     .driver
                     .fetch_chat_statistics(ChatId(chat_id), false)
                     .map(|_| ()),
+                // Slice G1: basic-group member list; the chat lookup
+                // happened before the driver borrow.
+                InfoPanelTarget::BasicGroup(_) => match g1_basic_chat {
+                    Some(chat_id) => live.driver.fetch_basic_group_members(chat_id).map(|_| ()),
+                    None => Ok(()),
+                },
             };
             if let Err(err) = fetch {
                 self.status_note = format!("info request failed: {err:?}");
@@ -10135,6 +11315,12 @@ impl QuillApp {
             InfoPanelTarget::Supergroup(supergroup_id) => {
                 ("Group info", self.supergroup_info_panel(supergroup_id, cx))
             }
+            // Slice G1: basic-group info panel (members, permissions,
+            // invite link, leave/delete).
+            InfoPanelTarget::BasicGroup(basic_group_id) => (
+                "Group info",
+                self.basic_group_info_panel(basic_group_id, cx),
+            ),
             // Phase D2: channel/group statistics view.
             InfoPanelTarget::Statistics(chat_id) => {
                 ("Statistics", self.chat_statistics_panel(chat_id, cx))
@@ -10645,9 +11831,221 @@ impl QuillApp {
         // Phase D3b: administrator management (owner / admins with
         // `can_promote_members` only; the section no-ops otherwise).
         body = body.child(self.administrators_section(chat_id, cx));
+        // Slice G1: group/channel management — members, permissions,
+        // invite link, join requests, username, broadcast upgrade,
+        // leave/delete. Every row is capability-gated inside.
+        body = body.child(self.group_management_section(chat_id, is_channel, false, cx));
         // Phase D3c: recent-actions admin log (administrators and the
         // creator only; the section no-ops otherwise).
         body = body.child(self.event_log_section(chat_id, cx));
+        body.into_any_element()
+    }
+
+    /// Slice G1: group/channel management section for the info panel.
+    /// Every row is capability-gated (`chat_can_restrict_members`,
+    /// `chat_is_owner`, `chat_can_invite_users`,
+    /// `can_be_deleted_for_all_users`) so buttons only appear when the
+    /// action can succeed. Basic groups get members / permissions /
+    /// invite link / leave / delete; supergroups additionally get
+    /// join-request toggle, username, and the one-way broadcast
+    /// upgrade; channels get members (subscribers), username, invite
+    /// link, leave / delete.
+    fn group_management_section(
+        &self,
+        chat_id: ChatId,
+        is_channel: bool,
+        is_basic_group: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let session = self.session();
+        let can_restrict = session.is_some_and(|s| s.chat_can_restrict_members(chat_id));
+        let is_owner = session.is_some_and(|s| s.chat_is_owner(chat_id));
+        let can_invite = session.is_some_and(|s| s.chat_can_invite_users(chat_id));
+        let can_add = session.is_some_and(|s| s.chat_can_add_members(chat_id));
+        let can_delete = session
+            .as_ref()
+            .and_then(|s| s.chats.get(&chat_id.0))
+            .is_some_and(|chat| chat.can_be_deleted_for_all_users);
+        let is_member = session
+            .as_ref()
+            .and_then(|s| s.chats.get(&chat_id.0))
+            .and_then(|chat| chat.my_member_status)
+            .is_some_and(|status| {
+                matches!(
+                    status,
+                    ChannelMemberStatus::Creator
+                        | ChannelMemberStatus::Administrator
+                        | ChannelMemberStatus::Member
+                        | ChannelMemberStatus::Restricted
+                )
+            });
+        let mut section = div().flex().flex_col().w_full().gap_1().child(
+            div()
+                .text_xs()
+                .font_semibold()
+                .text_color(cx.theme().muted_foreground)
+                .child(if is_channel {
+                    "Manage channel"
+                } else {
+                    "Manage group"
+                }),
+        );
+        macro_rules! row {
+            ($id:expr, $label:expr, |$this:ident, $window:ident, $cx:ident| $action:block) => {
+                section = section.child(
+                    Button::new($id)
+                        .label($label)
+                        .ghost()
+                        .on_click(cx.listener(move |$this, _, $window, $cx| $action)),
+                );
+            };
+        }
+        // Members / subscribers — everyone who can see the panel and
+        // add or restrict may manage; plain members get a read-only
+        // list through the dialog's All tab.
+        if can_add || can_restrict || is_member {
+            let label = if is_channel { "Subscribers" } else { "Members" };
+            row!("g1-open-members", label, |this, window, cx| {
+                this.open_member_dialog(chat_id, window, cx);
+            });
+        }
+        if can_restrict {
+            row!(
+                "g1-open-permissions",
+                "Default permissions",
+                |this, _window, cx| {
+                    this.open_permissions_dialog(chat_id, cx);
+                }
+            );
+        }
+        if can_invite {
+            row!(
+                "g1-replace-invite-link",
+                "Replace primary invite link",
+                |this, _window, cx| {
+                    this.replace_primary_invite_link(chat_id, cx);
+                }
+            );
+        }
+        // Supergroup-only: join-request toggle, username, broadcast
+        // upgrade. `setSupergroupUsername` is owner-only (driver
+        // enforces); broadcast groups can't toggle join-by-request.
+        if !is_channel && !is_basic_group {
+            if can_restrict && !self.chat_is_broadcast(chat_id) {
+                let enabled = self.chat_join_by_request(chat_id);
+                let label = if enabled {
+                    "✓ Approve new members"
+                } else {
+                    "Approve new members"
+                };
+                row!("g1-toggle-join-request", label, |this, _window, cx| {
+                    this.toggle_join_by_request(chat_id, cx);
+                });
+            }
+            if is_owner {
+                let username = self.chat_username(chat_id);
+                let label = if username.is_empty() {
+                    "Set public username".to_string()
+                } else {
+                    format!("Public username (@{username})")
+                };
+                section = section.child(
+                    Button::new("g1-open-username")
+                        .label(label)
+                        .ghost()
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            this.open_username_dialog(chat_id, window, cx);
+                        })),
+                );
+                if !self.chat_is_broadcast(chat_id) {
+                    row!(
+                        "g1-broadcast-upgrade",
+                        "Convert to broadcast group",
+                        |this, _window, cx| {
+                            this.open_group_confirm(
+                                chat_id,
+                                GroupConfirmAction::BroadcastUpgrade,
+                                cx,
+                            );
+                        }
+                    );
+                }
+            }
+        }
+        if is_member {
+            let label = if is_channel {
+                "Leave channel"
+            } else {
+                "Leave group"
+            };
+            row!("g1-leave-chat", label, |this, _window, cx| {
+                this.open_group_confirm(chat_id, GroupConfirmAction::LeaveChat, cx);
+            });
+        }
+        // `deleteChat` (schema 1.8.67, line 11850): TDLib deletes for
+        // everyone only when `chat.can_be_deleted_for_all_users` —
+        // creator of a group/channel, or any private chat.
+        if can_delete {
+            row!("g1-delete-chat", "Delete group", |this, _window, cx| {
+                this.open_group_confirm(chat_id, GroupConfirmAction::DeleteChat, cx);
+            });
+        }
+        section.into_any_element()
+    }
+
+    /// Slice G1: basic-group info panel. Basic groups have no
+    /// `supergroupFullInfo` — the panel shows the title, the member
+    /// list entry point (`getBasicGroupFullInfo`), and the management
+    /// section.
+    fn basic_group_info_panel(&self, basic_group_id: i64, cx: &mut Context<Self>) -> AnyElement {
+        let (title, chat_id) = self
+            .session()
+            .and_then(|s| {
+                s.chats.values().find_map(|chat| match chat.kind {
+                    ChatKind::BasicGroup { basic_group_id: id } if id == basic_group_id => {
+                        Some((chat.title.clone(), chat.id))
+                    }
+                    _ => None,
+                })
+            })
+            .unwrap_or_else(|| (format!("Group {basic_group_id}"), ChatId(basic_group_id)));
+        let member_count = self
+            .session()
+            .and_then(|s| s.basic_group_members.get(&chat_id.0))
+            .and_then(|fetch| match fetch {
+                SupergroupMembersFetch::Loaded { total_count, .. } => Some(*total_count),
+                _ => None,
+            });
+        let roots = self.media_display_roots();
+        let photo = self
+            .session()
+            .and_then(|s| s.chat_photo_path(chat_id))
+            .and_then(|path| sandboxed_display_path(path, &roots));
+        let mut body = div()
+            .flex()
+            .flex_col()
+            .items_center()
+            .gap_3()
+            .p_4()
+            .child(chat_avatar(&title, chat_id.0, photo.as_deref(), 96.))
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .gap_1()
+                    .child(div().text_lg().font_semibold().child(title.clone()))
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(match member_count {
+                                Some(count) => format!("{count} members"),
+                                None => "members unknown".to_string(),
+                            }),
+                    ),
+            );
+        body = body.child(self.group_management_section(chat_id, false, true, cx));
         body.into_any_element()
     }
 
@@ -14115,6 +15513,17 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// Slice G1: dismiss the member-action error line on the
+    /// member-management dialog.
+    fn dismiss_member_action_error(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            live.driver.session.member_action_error.remove(&chat_id.0);
+        } else if let Some(session) = self.demo_session.as_mut() {
+            session.member_action_error.remove(&chat_id.0);
+        }
+        cx.notify();
+    }
+
     /// Phase C2f: dismiss the group-call error line on the overlay.
     fn dismiss_group_call_error(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
@@ -15119,7 +16528,17 @@ impl QuillApp {
         if self.slow_mode_blocked(chat_id, cx) {
             return;
         }
-        let reply_to = self.pending_reply.as_ref().map(|reply| reply.message_id);
+        // Slice G1: the poll carries the composer's quote, if any.
+        let reply_to = self
+            .pending_reply
+            .as_ref()
+            .map(|reply| quill::telegram::SendReply {
+                message_id: reply.message_id,
+                quote: reply
+                    .quote
+                    .as_ref()
+                    .map(|quote| (quote.text.clone(), quote.position)),
+            });
         if let Some(live) = self.live.as_mut() {
             let result = live.driver.send_poll_draft(chat_id, &draft, reply_to);
             match result {
@@ -15770,16 +17189,6 @@ impl QuillApp {
             })
     }
 
-    fn composer_reply_id(&self, chat_id: ChatId) -> Option<MessageId> {
-        self.pending_reply.as_ref().and_then(|reply| {
-            if reply.chat_id == chat_id {
-                Some(reply.message_id)
-            } else {
-                None
-            }
-        })
-    }
-
     fn note_open_draft(&mut self, delayed: bool, cx: &mut Context<Self>) {
         if self.pending_edit.is_some() {
             return;
@@ -15788,11 +17197,17 @@ impl QuillApp {
             return;
         };
         let text = self.composer.read(cx).value().to_string();
-        let reply = self.composer_reply_id(chat_id);
+        let reply = self
+            .pending_reply
+            .as_ref()
+            .and_then(|reply| reply.send_reply(chat_id));
         self.save_chat_draft(chat_id, &text, reply, delayed, cx);
     }
 
-    fn leaving_draft_parts(&self, cx: &Context<Self>) -> (String, Option<MessageId>, u64) {
+    fn leaving_draft_parts(
+        &self,
+        cx: &Context<Self>,
+    ) -> (String, Option<quill::telegram::SendReply>, u64) {
         let now_ms = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_millis() as u64)
@@ -15801,18 +17216,17 @@ impl QuillApp {
             return (String::new(), None, now_ms);
         };
         if self.pending_edit.is_some() {
-            let reply = self.saved_edit_reply.as_ref().and_then(|saved| {
-                if saved.chat_id == chat_id {
-                    Some(saved.message_id)
-                } else {
-                    None
-                }
-            });
+            let reply = self
+                .saved_edit_reply
+                .as_ref()
+                .and_then(|saved| saved.send_reply(chat_id));
             return (self.saved_edit_draft.clone(), reply, now_ms);
         }
         (
             self.composer.read(cx).value().to_string(),
-            self.composer_reply_id(chat_id),
+            self.pending_reply
+                .as_ref()
+                .and_then(|reply| reply.send_reply(chat_id)),
             now_ms,
         )
     }
@@ -15868,18 +17282,17 @@ impl QuillApp {
             return;
         };
         let (text, reply) = if self.pending_edit.is_some() {
-            let reply = self.saved_edit_reply.as_ref().and_then(|saved| {
-                if saved.chat_id == chat_id {
-                    Some(saved.message_id)
-                } else {
-                    None
-                }
-            });
+            let reply = self
+                .saved_edit_reply
+                .as_ref()
+                .and_then(|saved| saved.send_reply(chat_id));
             (self.saved_edit_draft.clone(), reply)
         } else {
             (
                 self.composer.read(cx).value().to_string(),
-                self.composer_reply_id(chat_id),
+                self.pending_reply
+                    .as_ref()
+                    .and_then(|reply| reply.send_reply(chat_id)),
             )
         };
         self.save_chat_draft(chat_id, &text, reply, false, cx);
@@ -15889,7 +17302,7 @@ impl QuillApp {
         &mut self,
         chat_id: ChatId,
         text: &str,
-        reply_to: Option<MessageId>,
+        reply_to: Option<quill::telegram::SendReply>,
         delayed: bool,
         cx: &mut Context<Self>,
     ) {
@@ -15918,7 +17331,8 @@ impl QuillApp {
         let reply_to = stored.as_ref().and(reply_to);
         let draft = stored.map(|text| ChatDraft {
             text,
-            reply_to_message_id: reply_to,
+            reply_to_message_id: reply_to.as_ref().map(|reply| reply.message_id),
+            quote: reply_to.and_then(|reply| reply.quote),
         });
         session.store_composer_draft(chat_id, draft);
     }
@@ -15985,8 +17399,19 @@ impl QuillApp {
             .as_ref()
             .map(|draft| draft.text.clone())
             .unwrap_or_default();
-        self.pending_reply =
-            preview.map(|(id, preview)| ComposerReplyTo::new(chat_id, id, preview));
+        self.pending_reply = preview.map(|(id, preview)| {
+            // Slice G1: a draft saved with a partial quote restores the
+            // quote picker state, not just the replied-to message.
+            match draft.as_ref().and_then(|draft| draft.quote.clone()) {
+                Some((text, position)) => ComposerReplyTo::with_quote(
+                    chat_id,
+                    id,
+                    preview,
+                    QuoteSelection { text, position },
+                ),
+                None => ComposerReplyTo::new(chat_id, id, preview),
+            }
+        });
         self.composer
             .update(cx, |input, cx| input.set_value(&text, window, cx));
     }
@@ -18282,6 +19707,11 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let preview = reply.preview.clone();
+        // Slice G1: show the quoted part when the reply carries one.
+        let quote_label = reply
+            .quote
+            .as_ref()
+            .map(|quote| format!("❝{}❞", quote.text));
         div()
             .id("composer-reply-quote")
             .flex()
@@ -18306,7 +19736,10 @@ impl QuillApp {
                             .text_color(rgb(0x58a6ff))
                             .child("Replying to"),
                     )
-                    .child(div().text_sm().text_color(rgb(0xc9d1d9)).child(preview)),
+                    .child(div().text_sm().text_color(rgb(0xc9d1d9)).child(preview))
+                    .when_some(quote_label, |this, label| {
+                        this.child(div().text_xs().text_color(rgb(0x8b949e)).child(label))
+                    }),
             )
             .child(
                 Button::new("cancel-reply")
@@ -18372,6 +19805,1115 @@ impl QuillApp {
                     ),
             );
         Some(panel.into_any_element())
+    }
+
+    /// Slice G1: centered modal shell shared by the group-management
+    /// dialogs (mirrors `add_contact_dialog_overlay`): a backdrop
+    /// sibling closes on click, the panel never bubbles into it.
+    fn g1_modal(
+        &self,
+        id_prefix: &str,
+        close: G1DialogClose,
+        title: &str,
+        body: AnyElement,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let title = title.to_string();
+        div()
+            .id(format!("{id_prefix}-overlay"))
+            .absolute()
+            .top_0()
+            .left_0()
+            .right_0()
+            .bottom_0()
+            .flex()
+            .items_center()
+            .justify_center()
+            .child(
+                div()
+                    .id(format!("{id_prefix}-backdrop"))
+                    .absolute()
+                    .top_0()
+                    .left_0()
+                    .right_0()
+                    .bottom_0()
+                    .bg(rgba(0x000000e6))
+                    .on_click(cx.listener(move |this, _, _, cx| match close {
+                        G1DialogClose::CreateChat => this.close_create_chat_dialog(cx),
+                        G1DialogClose::Member => this.close_member_dialog(cx),
+                        G1DialogClose::Permissions => this.close_permissions_dialog(cx),
+                        G1DialogClose::Username => this.close_username_dialog(cx),
+                        G1DialogClose::Restrict => this.close_restrict_dialog(cx),
+                        G1DialogClose::GroupConfirm => this.close_group_confirm(cx),
+                        G1DialogClose::QuoteReply => this.close_quote_reply_dialog(cx),
+                    })),
+            )
+            .child(
+                div()
+                    .id(format!("{id_prefix}-panel"))
+                    .flex()
+                    .flex_col()
+                    .gap_2()
+                    .p_4()
+                    .w(px(420.))
+                    .max_h(px(560.))
+                    .rounded_md()
+                    .border_1()
+                    .border_color(cx.theme().border)
+                    .bg(cx.theme().sidebar)
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .justify_between()
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .font_semibold()
+                                    .text_color(rgb(0xffffff))
+                                    .child(title),
+                            )
+                            .child(
+                                Button::new(format!("{id_prefix}-close"))
+                                    .label("✕")
+                                    .ghost()
+                                    .on_click(cx.listener(move |this, _, _, cx| match close {
+                                        G1DialogClose::CreateChat => {
+                                            this.close_create_chat_dialog(cx)
+                                        }
+                                        G1DialogClose::Member => this.close_member_dialog(cx),
+                                        G1DialogClose::Permissions => {
+                                            this.close_permissions_dialog(cx)
+                                        }
+                                        G1DialogClose::Username => this.close_username_dialog(cx),
+                                        G1DialogClose::Restrict => this.close_restrict_dialog(cx),
+                                        G1DialogClose::GroupConfirm => this.close_group_confirm(cx),
+                                        G1DialogClose::QuoteReply => {
+                                            this.close_quote_reply_dialog(cx)
+                                        }
+                                    })),
+                            ),
+                    )
+                    .child(body),
+            )
+            .into_any_element()
+    }
+
+    /// Slice G1: dispatch to whichever group-management dialog is open.
+    fn g1_dialogs_overlay(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        if self.create_chat_dialog.is_some() {
+            return Some(self.create_chat_dialog_overlay(cx));
+        }
+        if self.member_dialog.is_some() {
+            return Some(self.member_dialog_overlay(cx));
+        }
+        if self.permissions_dialog.is_some() {
+            return Some(self.permissions_dialog_overlay(cx));
+        }
+        if self.username_dialog.is_some() {
+            return Some(self.username_dialog_overlay(cx));
+        }
+        if self.restrict_dialog.is_some() {
+            return Some(self.restrict_dialog_overlay(cx));
+        }
+        if self.group_confirm_dialog.is_some() {
+            return Some(self.group_confirm_overlay(cx));
+        }
+        if self.quote_reply_dialog.is_some() {
+            return Some(self.quote_reply_dialog_overlay(cx));
+        }
+        None
+    }
+
+    /// Slice G1: contact rows filtered by a dialog search query.
+    fn g1_contact_rows(&self, query: &str, _cx: &mut Context<Self>) -> Vec<ContactRow> {
+        let query = query.trim().to_lowercase();
+        self.session()
+            .map(|session| {
+                session
+                    .contact_rows()
+                    .into_iter()
+                    .filter(|row| query.is_empty() || row.name.to_lowercase().contains(&query))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// Slice G1: one contact row with a checkbox, shared by the
+    /// create-chat and add-members pickers.
+    fn g1_contact_checkbox(
+        &self,
+        id_prefix: String,
+        row: &ContactRow,
+        selected: bool,
+        user_id: i64,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let name = row.name.clone();
+        div()
+            .id(format!("{id_prefix}-contact-{user_id}"))
+            .flex()
+            .items_center()
+            .gap_2()
+            .child(
+                Button::new(format!("{id_prefix}-toggle-{user_id}"))
+                    .label(if selected {
+                        format!("☑ {name}")
+                    } else {
+                        format!("☐ {name}")
+                    })
+                    .ghost()
+                    .text_color(rgb(0xffffff))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.toggle_g1_contact_pick(&id_prefix, user_id, cx);
+                    })),
+            )
+            .into_any_element()
+    }
+
+    /// Slice G1: route a contact checkbox toggle to the open dialog
+    /// that owns `id_prefix`.
+    fn toggle_g1_contact_pick(&mut self, id_prefix: &str, user_id: i64, cx: &mut Context<Self>) {
+        match id_prefix {
+            "g1-create" => self.toggle_create_chat_user(user_id, cx),
+            "g1-add" => self.toggle_member_add_user(user_id, cx),
+            _ => {}
+        }
+    }
+
+    /// Slice G1: creation dialog — name (+ description for
+    /// supergroups/channels) and the basic-group contact picker.
+    fn create_chat_dialog_overlay(&self, cx: &mut Context<Self>) -> AnyElement {
+        let dialog = match self.create_chat_dialog.as_ref() {
+            Some(dialog) => dialog,
+            None => return div().into_any_element(),
+        };
+        let kind = dialog.kind;
+        let picks_members = kind.picks_members();
+        let query = dialog.search_input.read(cx).value();
+        let rows = if picks_members {
+            self.g1_contact_rows(&query, cx)
+        } else {
+            Vec::new()
+        };
+        let selected = dialog.selected_users.clone();
+        let mut body = div().flex().flex_col().gap_2();
+        body = body
+            .child(
+                div()
+                    .flex_1()
+                    .child(Textarea::new(&dialog.title_input).h(px(40.))),
+            )
+            .when(kind != CreateChatKind::BasicGroup, |this| {
+                this.child(
+                    div()
+                        .flex_1()
+                        .child(Textarea::new(&dialog.description_input).h(px(64.))),
+                )
+            });
+        if picks_members {
+            body = body.child(
+                div().flex().items_center().gap_2().child(
+                    div()
+                        .flex_1()
+                        .child(Textarea::new(&dialog.search_input).h(px(40.))),
+                ),
+            );
+            let mut list = div()
+                .id("g1-create-contacts")
+                .flex()
+                .flex_col()
+                .gap_1()
+                .max_h(px(220.))
+                .overflow_y_scroll();
+            if rows.is_empty() {
+                list = list.child(
+                    div()
+                        .text_sm()
+                        .text_color(cx.theme().muted_foreground)
+                        .child("No contacts found"),
+                );
+            }
+            for row in rows.iter().take(50) {
+                let is_selected = selected.contains(&row.user_id);
+                list = list.child(self.g1_contact_checkbox(
+                    "g1-create".to_string(),
+                    row,
+                    is_selected,
+                    row.user_id,
+                    cx,
+                ));
+            }
+            body = body.child(list);
+            if !selected.is_empty() {
+                body = body.child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(format!("{} members selected", selected.len())),
+                );
+            }
+        }
+        body = body.child(
+            div()
+                .flex()
+                .justify_end()
+                .gap_2()
+                .child(
+                    Button::new("g1-create-cancel")
+                        .label("Cancel")
+                        .ghost()
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.close_create_chat_dialog(cx);
+                        })),
+                )
+                .child(
+                    Button::new("g1-create-submit")
+                        .label(format!("Create {}", kind.title().to_lowercase()))
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.submit_create_chat_dialog(cx);
+                        })),
+                ),
+        );
+        self.g1_modal(
+            "g1-create",
+            G1DialogClose::CreateChat,
+            kind.title(),
+            body.into_any_element(),
+            cx,
+        )
+    }
+
+    /// Slice G1: the member page the dialog's current tab shows.
+    fn member_dialog_fetch(&self, cx: &mut Context<Self>) -> Option<SupergroupMembersFetch> {
+        let dialog = self.member_dialog.as_ref()?;
+        let session = self.session()?;
+        if dialog.is_basic_group {
+            session.basic_group_members.get(&dialog.chat_id.0).cloned()
+        } else {
+            let query = dialog.search_input.read(cx).value();
+            let filter = match dialog.tab.filter() {
+                Some(filter) => filter,
+                None if query.trim().is_empty() => MemberListFilter::Recent,
+                None => MemberListFilter::Search,
+            };
+            // Slice G1 fix-up: a Restricted/Banned tab left open after
+            // the viewer lost restrict rights has no fetchable page —
+            // fall back to Recent instead of spinning forever.
+            let filter = if !session.chat_can_restrict_members(dialog.chat_id)
+                && matches!(
+                    filter,
+                    MemberListFilter::Restricted | MemberListFilter::Banned
+                ) {
+                MemberListFilter::Recent
+            } else {
+                filter
+            };
+            session
+                .supergroup_members
+                .get(&(dialog.chat_id.0, filter))
+                .cloned()
+        }
+    }
+
+    fn member_status_label(status: ChannelMemberStatus) -> &'static str {
+        match status {
+            ChannelMemberStatus::Creator => "owner",
+            ChannelMemberStatus::Administrator => "admin",
+            ChannelMemberStatus::Member => "member",
+            ChannelMemberStatus::Restricted => "restricted",
+            ChannelMemberStatus::Banned => "banned",
+            ChannelMemberStatus::Left => "left",
+            ChannelMemberStatus::Unknown => "",
+        }
+    }
+
+    /// Slice G1: member-management dialog — tab bar, search, member
+    /// rows with per-tab actions, and the add-members section.
+    fn member_dialog_overlay(&self, cx: &mut Context<Self>) -> AnyElement {
+        let dialog = match self.member_dialog.as_ref() {
+            Some(dialog) => dialog,
+            None => return div().into_any_element(),
+        };
+        let chat_id = dialog.chat_id;
+        let is_basic_group = dialog.is_basic_group;
+        let tab = dialog.tab;
+        let add_open = dialog.add_open;
+        let add_query = dialog.add_search.read(cx).value();
+        let add_selected = dialog.add_selected.clone();
+        let can_restrict = self
+            .session()
+            .is_some_and(|session| session.chat_can_restrict_members(chat_id));
+        let can_add = self
+            .session()
+            .is_some_and(|session| session.chat_can_add_members(chat_id));
+        let fetch = self.member_dialog_fetch(cx);
+
+        let mut body = div().flex().flex_col().gap_2();
+        // Tab bar.
+        let mut tabs = div().id("g1-member-tabs").flex().gap_1();
+        for member_tab in [
+            MemberTab::All,
+            MemberTab::Administrators,
+            MemberTab::Restricted,
+            MemberTab::Banned,
+        ] {
+            // Restricted/banned tabs only exist for supergroups
+            // (`getSupergroupMembers` filters, schema 1.8.67 lines
+            // 2571/2574) — and only for viewers who can restrict
+            // members; the driver refuses the fetch otherwise and the
+            // tab would spin on "Loading members…" forever.
+            if is_basic_group && member_tab != MemberTab::All {
+                continue;
+            }
+            if !can_restrict && matches!(member_tab, MemberTab::Restricted | MemberTab::Banned) {
+                continue;
+            }
+            let label = if member_tab == tab {
+                format!("✓ {}", member_tab.label())
+            } else {
+                member_tab.label().to_string()
+            };
+            tabs = tabs.child(
+                Button::new(format!("g1-member-tab-{}", member_tab.label()))
+                    .label(label)
+                    .ghost()
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.member_dialog_tab(member_tab, cx);
+                    })),
+            );
+        }
+        body = body.child(tabs);
+        // Slice G1: surface member-action failures (custom title,
+        // restrict/ban) where the action was taken — the dialog reads
+        // the member-list fetch states, not `admin_lists`.
+        if let Some(error) = self
+            .session()
+            .and_then(|session| session.member_action_error.get(&chat_id.0))
+            .cloned()
+        {
+            body = body.child(
+                div()
+                    .w_full()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .gap_2()
+                    .p_2()
+                    .rounded_md()
+                    .bg(rgb(0x3a1414))
+                    .child(div().text_sm().text_color(rgb(0xff8a8a)).child(error))
+                    .child(
+                        Button::new("g1-member-action-error-dismiss")
+                            .label("Dismiss")
+                            .ghost()
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.dismiss_member_action_error(chat_id, cx);
+                            })),
+                    ),
+            );
+        }
+        // Search (supergroups only — basic groups list everyone).
+        if !is_basic_group {
+            body = body.child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .child(
+                        div()
+                            .flex_1()
+                            .child(Textarea::new(&dialog.search_input).h(px(40.))),
+                    )
+                    .child(
+                        Button::new("g1-member-search")
+                            .label("Search")
+                            .ghost()
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.refresh_member_dialog(cx);
+                            })),
+                    ),
+            );
+        }
+        // Member rows.
+        let mut list = div()
+            .id("g1-member-list")
+            .flex()
+            .flex_col()
+            .gap_1()
+            .max_h(px(240.))
+            .overflow_y_scroll();
+        match fetch {
+            None | Some(SupergroupMembersFetch::Loading) => {
+                list = list.child(
+                    div()
+                        .text_sm()
+                        .text_color(cx.theme().muted_foreground)
+                        .child("Loading members…"),
+                );
+            }
+            Some(SupergroupMembersFetch::Failed(message)) => {
+                list = list.child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap_2()
+                        .child(
+                            div()
+                                .flex_1()
+                                .text_sm()
+                                .text_color(cx.theme().muted_foreground)
+                                .child(message),
+                        )
+                        .child(
+                            Button::new("g1-member-retry")
+                                .label("Retry")
+                                .ghost()
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.refresh_member_dialog(cx);
+                                })),
+                        ),
+                );
+            }
+            Some(SupergroupMembersFetch::Loaded { members, .. }) => {
+                if members.is_empty() {
+                    list = list.child(
+                        div()
+                            .text_sm()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("No members"),
+                    );
+                }
+                for member in members.iter().take(200) {
+                    list = list.child(self.member_row(chat_id, member, tab, can_restrict, cx));
+                }
+            }
+        }
+        body = body.child(list);
+        // Add-members section.
+        if can_add && tab == MemberTab::All {
+            let toggle_label = if add_open {
+                "▾ Add members"
+            } else {
+                "▸ Add members"
+            };
+            body = body.child(
+                Button::new("g1-add-toggle")
+                    .label(toggle_label)
+                    .ghost()
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        if let Some(dialog) = this.member_dialog.as_mut() {
+                            dialog.add_open = !dialog.add_open;
+                            cx.notify();
+                        }
+                    })),
+            );
+            if add_open {
+                // Surface bulk-add failures (`failedToAddMembers`,
+                // schema 1.8.67 line 3640).
+                if let Some(failed) = self
+                    .session()
+                    .and_then(|session| session.add_members_failed.get(&chat_id.0))
+                    .copied()
+                    .filter(|count| *count > 0)
+                {
+                    body = body.child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .text_xs()
+                                    .text_color(rgb(0xf85149))
+                                    .child(format!("{failed} member(s) could not be added")),
+                            )
+                            .child(
+                                Button::new("g1-add-failed-dismiss")
+                                    .label("Dismiss")
+                                    .ghost()
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        if let Some(live) = this.live.as_mut() {
+                                            live.driver
+                                                .session
+                                                .add_members_failed
+                                                .remove(&chat_id.0);
+                                        }
+                                        cx.notify();
+                                    })),
+                            ),
+                    );
+                }
+                body = body.child(
+                    div()
+                        .flex_1()
+                        .child(Textarea::new(&dialog.add_search).h(px(40.))),
+                );
+                let mut add_list = div()
+                    .id("g1-add-contacts")
+                    .flex()
+                    .flex_col()
+                    .gap_1()
+                    .max_h(px(160.))
+                    .overflow_y_scroll();
+                let rows = self.g1_contact_rows(&add_query, cx);
+                for row in rows.iter().take(50) {
+                    let is_selected = add_selected.contains(&row.user_id);
+                    add_list = add_list.child(self.g1_contact_checkbox(
+                        "g1-add".to_string(),
+                        row,
+                        is_selected,
+                        row.user_id,
+                        cx,
+                    ));
+                }
+                body = body.child(add_list);
+                body = body.child(
+                    Button::new("g1-add-submit")
+                        .label(if add_selected.is_empty() {
+                            "Add members".to_string()
+                        } else {
+                            format!("Add {} member(s)", add_selected.len())
+                        })
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.submit_member_add(cx);
+                        })),
+                );
+            }
+        }
+        self.g1_modal(
+            "g1-members",
+            G1DialogClose::Member,
+            if is_basic_group {
+                "Group members"
+            } else {
+                "Manage members"
+            },
+            body.into_any_element(),
+            cx,
+        )
+    }
+
+    /// Slice G1: one member row — name, status, and the tab's actions
+    /// (restrict/ban on All, edit/unrestrict on Restricted, unban on
+    /// Banned; admins are read-only here — promotion lives in the
+    /// admin dialog). Actions only render for user senders and when
+    /// the viewer may restrict members.
+    fn member_row(
+        &self,
+        chat_id: ChatId,
+        member: &quill::telegram::envelope::ParsedChatMember,
+        tab: MemberTab,
+        can_restrict: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let user_id = match member.member_id {
+            MessageSender::User { user_id } => Some(user_id),
+            MessageSender::Chat { .. } => None,
+        };
+        let name = user_id
+            .and_then(|id| {
+                self.session()
+                    .and_then(|session| session.user(id))
+                    .map(|user| user.display_name())
+            })
+            .unwrap_or_else(|| match member.member_id {
+                MessageSender::User { user_id } => format!("User {user_id}"),
+                MessageSender::Chat { chat_id } => format!("Channel {chat_id}"),
+            });
+        let status_label = Self::member_status_label(member.status);
+        // Slice G1: show the admin custom title (`chatMember.tag`,
+        // schema 1.8.67 line 2526) next to the status when set.
+        let tag_label = (!member.tag.is_empty()).then(|| format!("❝{}❞", member.tag));
+        let mut row = div()
+            .flex()
+            .items_center()
+            .gap_2()
+            .child(div().flex_1().text_sm().child(name))
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(status_label),
+            )
+            .when_some(tag_label, |this, label| {
+                this.child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().accent_foreground)
+                        .child(label),
+                )
+            });
+        // Slice G1: admin custom titles (`setChatMemberTag`, schema
+        // 1.8.67 line 13598 — the setter Telegram X's
+        // `EditRightsController` drives). Offered for admin/creator
+        // rows when the viewer may manage tags, or for the viewer's
+        // own row (any admin may retitle themselves). Not for
+        // channels (schema: basic groups and supergroups only).
+        let is_adminish = matches!(
+            member.status,
+            quill::telegram::envelope::ChannelMemberStatus::Administrator
+                | quill::telegram::envelope::ChannelMemberStatus::Creator
+        );
+        if is_adminish {
+            if let Some(user_id) = user_id {
+                let me = self.session().and_then(|s| s.my_user_id);
+                let can_title = Some(user_id) == me
+                    || self
+                        .session()
+                        .is_some_and(|s| s.chat_can_manage_tags(chat_id));
+                if can_title {
+                    let tag = member.tag.clone();
+                    row = row.child(
+                        Button::new(format!("g1-member-title-{user_id}"))
+                            .label("Custom title")
+                            .ghost()
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                this.open_custom_title_dialog(chat_id, user_id, &tag, window, cx);
+                            })),
+                    );
+                }
+            }
+        }
+        if can_restrict {
+            // Slice G1 fix-up: restricted status is not supported in
+            // channels (schema 1.8.67, line 2506) — channel rows offer
+            // Ban only, never Restrict.
+            let is_channel = self.session().is_some_and(|s| {
+                matches!(
+                    s.chats.get(&chat_id.0),
+                    Some(chat)
+                        if matches!(chat.kind, ChatKind::Supergroup { is_channel: true, .. })
+                )
+            });
+            if let Some(user_id) = user_id {
+                // Slice G1: never offer restrict/ban against the viewer,
+                // the owner, or a non-editable administrator — TDLib
+                // rejects all three (Telegram X `ProfileController`
+                // `YouCantBanX`).
+                let me = self.session().and_then(|s| s.my_user_id);
+                let actionable = Some(user_id) != me
+                    && !matches!(
+                        member.status,
+                        quill::telegram::envelope::ChannelMemberStatus::Creator
+                    )
+                    && (member.status
+                        != quill::telegram::envelope::ChannelMemberStatus::Administrator
+                        || member.can_be_edited);
+                if actionable {
+                    match tab {
+                        MemberTab::All => {
+                            if !is_channel {
+                                row = row.child(
+                                    Button::new(format!("g1-member-restrict-{user_id}"))
+                                        .label("Restrict")
+                                        .ghost()
+                                        .on_click(cx.listener(move |this, _, _, cx| {
+                                            this.open_restrict_dialog(chat_id, user_id, false, cx);
+                                        })),
+                                );
+                            }
+                            row = row.child(
+                                Button::new(format!("g1-member-ban-{user_id}"))
+                                    .label("Ban")
+                                    .ghost()
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        this.open_restrict_dialog(chat_id, user_id, true, cx);
+                                    })),
+                            );
+                        }
+                        MemberTab::Restricted => {
+                            if !is_channel {
+                                row = row.child(
+                                    Button::new(format!("g1-member-edit-{user_id}"))
+                                        .label("Edit")
+                                        .ghost()
+                                        .on_click(cx.listener(move |this, _, _, cx| {
+                                            this.open_restrict_dialog(chat_id, user_id, false, cx);
+                                        })),
+                                );
+                            }
+                            row = row.child(
+                                Button::new(format!("g1-member-unrestrict-{user_id}"))
+                                    .label("Unrestrict")
+                                    .ghost()
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        this.unban_member(chat_id, user_id, cx);
+                                    })),
+                            );
+                        }
+                        MemberTab::Banned => {
+                            row = row.child(
+                                Button::new(format!("g1-member-unban-{user_id}"))
+                                    .label("Unban")
+                                    .ghost()
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        this.unban_member(chat_id, user_id, cx);
+                                    })),
+                            );
+                        }
+                        MemberTab::Administrators => {}
+                    }
+                }
+            }
+        }
+        row.into_any_element()
+    }
+
+    /// Slice G1: 16 permission checkboxes bound to the dialog's staged
+    /// copy (mirrors `rights_checkboxes`).
+    fn permission_checkboxes(
+        &self,
+        permissions: &ChatPermissions,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let mut list = div().flex().flex_col().gap_1();
+        let mut row = div().flex().gap_2();
+        for (index, label) in CHAT_PERMISSION_LABELS.iter().enumerate() {
+            let enabled = chat_permission_get(permissions, index);
+            row = row.child(
+                div().flex_1().child(
+                    Button::new(format!("g1-permission-{index}"))
+                        .label(if enabled {
+                            format!("☑ {label}")
+                        } else {
+                            format!("☐ {label}")
+                        })
+                        .ghost()
+                        .text_color(rgb(0xffffff))
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.toggle_permission(index, cx);
+                        })),
+                ),
+            );
+            if index % 2 == 1 {
+                list = list.child(row);
+                row = div().flex().gap_2();
+            }
+        }
+        list.into_any_element()
+    }
+
+    /// Slice G1: default-permissions editor (`setChatPermissions`).
+    fn permissions_dialog_overlay(&self, cx: &mut Context<Self>) -> AnyElement {
+        let dialog = match self.permissions_dialog.as_ref() {
+            Some(dialog) => dialog,
+            None => return div().into_any_element(),
+        };
+        let body = div()
+            .flex()
+            .flex_col()
+            .gap_2()
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("What new members may do by default"),
+            )
+            .child(self.permission_checkboxes(&dialog.permissions, cx))
+            .child(
+                div()
+                    .flex()
+                    .justify_end()
+                    .gap_2()
+                    .child(
+                        Button::new("g1-permissions-cancel")
+                            .label("Cancel")
+                            .ghost()
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.close_permissions_dialog(cx);
+                            })),
+                    )
+                    .child(Button::new("g1-permissions-submit").label("Save").on_click(
+                        cx.listener(|this, _, _, cx| {
+                            this.submit_permissions_dialog(cx);
+                        }),
+                    )),
+            )
+            .into_any_element();
+        self.g1_modal(
+            "g1-permissions",
+            G1DialogClose::Permissions,
+            "Default permissions",
+            body,
+            cx,
+        )
+    }
+
+    /// Slice G1: public-username editor (`setSupergroupUsername`).
+    fn username_dialog_overlay(&self, cx: &mut Context<Self>) -> AnyElement {
+        let dialog = match self.username_dialog.as_ref() {
+            Some(dialog) => dialog,
+            None => return div().into_any_element(),
+        };
+        let (title, hint) = match dialog.kind {
+            TextPromptKind::Username => (
+                "Public username",
+                "Public link t.me/username — empty removes it",
+            ),
+            TextPromptKind::CustomTitle { .. } => (
+                "Custom title",
+                "Admin title shown instead of \"admin\" — empty removes it",
+            ),
+        };
+        let body =
+            div()
+                .flex()
+                .flex_col()
+                .gap_2()
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(hint),
+                )
+                .child(
+                    div()
+                        .flex_1()
+                        .child(Textarea::new(&dialog.input).h(px(40.))),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .justify_end()
+                        .gap_2()
+                        .child(
+                            Button::new("g1-username-cancel")
+                                .label("Cancel")
+                                .ghost()
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.close_username_dialog(cx);
+                                })),
+                        )
+                        .child(Button::new("g1-username-submit").label("Save").on_click(
+                            cx.listener(|this, _, _, cx| {
+                                this.submit_username_dialog(cx);
+                            }),
+                        )),
+                )
+                .into_any_element();
+        self.g1_modal("g1-username", G1DialogClose::Username, title, body, cx)
+    }
+
+    /// Slice G1: restrict/ban dialog — permission checkboxes (restrict
+    /// mode) plus a duration cycler (forever / 1d / 7d / 30d).
+    fn restrict_dialog_overlay(&self, cx: &mut Context<Self>) -> AnyElement {
+        let dialog = match self.restrict_dialog.as_ref() {
+            Some(dialog) => dialog,
+            None => return div().into_any_element(),
+        };
+        let name = self
+            .session()
+            .and_then(|session| session.user(dialog.user_id))
+            .map(|user| user.display_name())
+            .unwrap_or_else(|| format!("User {}", dialog.user_id));
+        let duration_label = match dialog.banned_until_days {
+            0 => "Forever".to_string(),
+            1 => "1 day".to_string(),
+            days => format!("{days} days"),
+        };
+        let mut body = div().flex().flex_col().gap_2();
+        if !dialog.ban {
+            body = body
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child("Allowed while restricted"),
+                )
+                .child(self.restrict_permission_checkboxes(&dialog.permissions, cx));
+        }
+        body = body
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("Duration:"),
+                    )
+                    .child(
+                        Button::new("g1-restrict-duration")
+                            .label(duration_label)
+                            .ghost()
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.cycle_restrict_duration(cx);
+                            })),
+                    ),
+            )
+            .child(
+                div()
+                    .flex()
+                    .justify_end()
+                    .gap_2()
+                    .child(
+                        Button::new("g1-restrict-cancel")
+                            .label("Cancel")
+                            .ghost()
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.close_restrict_dialog(cx);
+                            })),
+                    )
+                    .child(
+                        Button::new("g1-restrict-submit")
+                            .label(if dialog.ban { "Ban" } else { "Restrict" })
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.submit_restrict_dialog(cx);
+                            })),
+                    ),
+            );
+        self.g1_modal(
+            "g1-restrict",
+            G1DialogClose::Restrict,
+            &format!("{} {name}", if dialog.ban { "Ban" } else { "Restrict" }),
+            body.into_any_element(),
+            cx,
+        )
+    }
+
+    /// Slice G1: permission checkboxes for the restrict dialog (same
+    /// labels, separate toggle handler).
+    fn restrict_permission_checkboxes(
+        &self,
+        permissions: &ChatPermissions,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let mut list = div().flex().flex_col().gap_1();
+        let mut row = div().flex().gap_2();
+        for (index, label) in CHAT_PERMISSION_LABELS.iter().enumerate() {
+            let enabled = chat_permission_get(permissions, index);
+            row = row.child(
+                div().flex_1().child(
+                    Button::new(format!("g1-restrict-permission-{index}"))
+                        .label(if enabled {
+                            format!("☑ {label}")
+                        } else {
+                            format!("☐ {label}")
+                        })
+                        .ghost()
+                        .text_color(rgb(0xffffff))
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.toggle_restrict_permission(index, cx);
+                        })),
+                ),
+            );
+            if index % 2 == 1 {
+                list = list.child(row);
+                row = div().flex().gap_2();
+            }
+        }
+        list.into_any_element()
+    }
+
+    /// Slice G1: delete / leave / broadcast-upgrade confirmation.
+    fn group_confirm_overlay(&self, cx: &mut Context<Self>) -> AnyElement {
+        let dialog = match self.group_confirm_dialog.as_ref() {
+            Some(dialog) => dialog,
+            None => return div().into_any_element(),
+        };
+        let (title, message, confirm_label) = match dialog.action {
+            GroupConfirmAction::DeleteChat => (
+                "Delete group",
+                "Delete this group for everyone? This cannot be undone.",
+                "Delete",
+            ),
+            GroupConfirmAction::LeaveChat => (
+                "Leave chat",
+                "Leave this chat? You can rejoin with an invite link.",
+                "Leave",
+            ),
+            GroupConfirmAction::BroadcastUpgrade => (
+                "Convert to broadcast group",
+                "Only admins will be able to post. Non-admin members become \
+                 subscribers. This cannot be undone.",
+                "Convert",
+            ),
+        };
+        let body = div()
+            .flex()
+            .flex_col()
+            .gap_3()
+            .child(div().text_sm().child(message))
+            .child(
+                div()
+                    .flex()
+                    .justify_end()
+                    .gap_2()
+                    .child(
+                        Button::new("g1-confirm-cancel")
+                            .label("Cancel")
+                            .ghost()
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.close_group_confirm(cx);
+                            })),
+                    )
+                    .child(
+                        Button::new("g1-confirm-submit")
+                            .label(confirm_label)
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.submit_group_confirm(cx);
+                            })),
+                    ),
+            )
+            .into_any_element();
+        self.g1_modal("g1-confirm", G1DialogClose::GroupConfirm, title, body, cx)
+    }
+
+    /// Slice G1: partial-quote dialog — the input starts as the full
+    /// message text; the user trims it to the quoted part.
+    fn quote_reply_dialog_overlay(&self, cx: &mut Context<Self>) -> AnyElement {
+        let dialog = match self.quote_reply_dialog.as_ref() {
+            Some(dialog) => dialog,
+            None => return div().into_any_element(),
+        };
+        let body = div()
+            .flex()
+            .flex_col()
+            .gap_2()
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("Trim the text below to the part you want to quote"),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .child(Textarea::new(&dialog.input).h(px(120.))),
+            )
+            .child(
+                div()
+                    .flex()
+                    .justify_end()
+                    .gap_2()
+                    .child(
+                        Button::new("g1-quote-cancel")
+                            .label("Cancel")
+                            .ghost()
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.close_quote_reply_dialog(cx);
+                            })),
+                    )
+                    .child(
+                        Button::new("g1-quote-submit")
+                            .label("Quote reply")
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.submit_quote_reply_dialog(window, cx);
+                            })),
+                    ),
+            )
+            .into_any_element();
+        self.g1_modal(
+            "g1-quote",
+            G1DialogClose::QuoteReply,
+            "Quote part of message",
+            body,
+            cx,
+        )
     }
 
     /// Phase D3b: the admin-management dialog, rendered above the
@@ -18511,10 +21053,20 @@ impl QuillApp {
             })
             .map(|list| list.iter().map(|entry| entry.user_id).collect())
             .unwrap_or_default();
-        let members = self
-            .session()
-            .and_then(|session| session.supergroup_members.get(&chat_id.0))
-            .cloned();
+        let members = self.session().and_then(|session| {
+            // Slice G1: the promote picker browses Recent / Search
+            // pages; show whichever matches the current query.
+            let query = search_input.read(cx).value();
+            let filter = if query.trim().is_empty() {
+                MemberListFilter::Recent
+            } else {
+                MemberListFilter::Search
+            };
+            session
+                .supergroup_members
+                .get(&(chat_id.0, filter))
+                .cloned()
+        });
         let mut panel = div()
             .id("admin-promote-dialog")
             .flex()
@@ -20280,7 +22832,8 @@ impl QuillApp {
                     let reply_to = stored.as_ref().and(reply);
                     let draft = stored.map(|body| ChatDraft {
                         text: body,
-                        reply_to_message_id: reply_to,
+                        reply_to_message_id: reply_to.as_ref().map(|reply| reply.message_id),
+                        quote: reply_to.and_then(|reply| reply.quote),
                     });
                     session.store_composer_draft(prev, draft);
                 }
@@ -20319,7 +22872,8 @@ impl QuillApp {
                     let reply_to = stored.as_ref().and(reply);
                     let draft = stored.map(|body| ChatDraft {
                         text: body,
-                        reply_to_message_id: reply_to,
+                        reply_to_message_id: reply_to.as_ref().map(|reply| reply.message_id),
+                        quote: reply_to.and_then(|reply| reply.quote),
                     });
                     session.store_composer_draft(prev, draft);
                 }
@@ -20804,6 +23358,12 @@ impl Render for QuillApp {
             })
             // Phase 6: add-contact dialog above everything else.
             .when_some(self.add_contact_dialog_overlay(cx), |this, overlay| {
+                this.child(overlay)
+            })
+            // Slice G1: group/channel management dialogs (create,
+            // members, permissions, username, restrict/ban, confirms,
+            // quote reply) above everything else.
+            .when_some(self.g1_dialogs_overlay(cx), |this, overlay| {
                 this.child(overlay)
             })
             // Parity slice: folder manage / editor / delete-confirm above
@@ -22372,6 +24932,32 @@ impl QuillApp {
                     if self.new_secret_picker_open {
                         list = list.child(self.new_secret_picker_panel(cx));
                     }
+                    // Slice G1: group/supergroup/channel creation
+                    // entries (TGX main-menu "New Group" / "New
+                    // Channel"). Each opens the creation dialog.
+                    list = list.child(Button::new("g1-new-group").label("👥 New group").on_click(
+                        cx.listener(|this, _, window, cx| {
+                            this.open_create_chat_dialog(CreateChatKind::BasicGroup, window, cx);
+                        }),
+                    ));
+                    list = list.child(
+                        Button::new("g1-new-supergroup")
+                            .label("📣 New supergroup")
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.open_create_chat_dialog(
+                                    CreateChatKind::Supergroup,
+                                    window,
+                                    cx,
+                                );
+                            })),
+                    );
+                    list = list.child(
+                        Button::new("g1-new-channel")
+                            .label("📢 New channel")
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.open_create_chat_dialog(CreateChatKind::Channel, window, cx);
+                            })),
+                    );
                     // Phase S2: storage-usage overlay entry (TGX Settings →
                     // Data and Storage → Storage Usage). Quill has no
                     // settings screen, so it sits next to the secret-chat
@@ -24185,7 +26771,12 @@ fn apply_ready_admin_management(session: &mut Session, sink: &Arc<MemorySink>, s
     apply_ready_channels_admin(session, sink, seq);
     let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
     let admins_extra = session.request(RequestPurpose::GetChatAdministrators, Some(ChatId(13)));
-    let members_extra = session.request(RequestPurpose::GetSupergroupMembers, Some(ChatId(13)));
+    let members_extra = session.request(
+        RequestPurpose::GetSupergroupMembers {
+            filter: MemberListFilter::Recent,
+        },
+        Some(ChatId(13)),
+    );
     let user = |id: i64, first: &str, last: &str| {
         format!(
             r#"{{"@type":"updateUser","user":{{"@type":"user","id":{id},"first_name":"{first}","last_name":"{last}","usernames":null,"phone_number":"","status":null,"profile_photo":null,"is_contact":false,"is_mutual_contact":false,"is_close_friend":false,"is_verified":false,"is_premium":false,"is_support":false,"restriction_reason":"","is_scam":false,"is_fake":false,"is_bot":false,"type":{{"@type":"userTypeRegular"}}}}}}"#
@@ -24342,6 +26933,101 @@ fn apply_ready_admin_log(session: &mut Session, sink: &Arc<MemorySink>, seq: &At
             session.apply(owned);
         }
     }
+}
+
+/// `ReadyGroupManage` fixture (Slice G1): a demo supergroup ("Demo
+/// supergroup", chat id 61, not a channel) with the viewer (777) as an
+/// administrator holding `can_restrict_members`, `can_invite_users`,
+/// and `can_manage_tags`, plus a loaded `chatMembers` (Recent filter)
+/// page: the viewer, an admin with a custom title, a restricted member,
+/// and two plain members — all through the real reducer paths, no live
+/// Telegram. The caller opens the member dialog on the All tab.
+fn apply_ready_group_manage(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let chat_id = 61i64;
+    let me_extra = session.request(RequestPurpose::GetMe, None);
+    let member_extra = session.request(RequestPurpose::GetChatMember, Some(ChatId(chat_id)));
+    let members_extra = session.request(
+        RequestPurpose::GetSupergroupMembers {
+            filter: MemberListFilter::Recent,
+        },
+        Some(ChatId(chat_id)),
+    );
+    // TDLib 1.8.67 `chatAdministratorRights` field order.
+    let admin_rights = |manage_tags: bool| {
+        format!(
+            r#"{{"@type":"chatAdministratorRights","can_manage_chat":true,"can_change_info":true,"can_post_messages":true,"can_edit_messages":true,"can_delete_messages":true,"can_invite_users":true,"can_restrict_members":true,"can_pin_messages":true,"can_manage_topics":false,"can_promote_members":false,"can_manage_video_chats":false,"can_post_stories":false,"can_edit_stories":false,"can_delete_stories":false,"can_manage_direct_messages":false,"can_manage_tags":{manage_tags},"can_send_welcome_messages":false,"is_anonymous":false}}"#
+        )
+    };
+    let user = |id: i64, first: &str, last: &str| {
+        format!(
+            r#"{{"@type":"updateUser","user":{{"@type":"user","id":{id},"first_name":"{first}","last_name":"{last}","usernames":null,"phone_number":"","status":null,"profile_photo":null,"is_contact":false,"is_mutual_contact":false,"is_close_friend":false,"is_verified":false,"is_premium":false,"is_scam":false,"is_fake":false,"is_bot":false,"type":{{"@type":"userTypeRegular"}}}}}}"#
+        )
+    };
+    let member = |id: i64, tag: &str, status: &str| {
+        format!(
+            r#"{{"@type":"chatMember","member_id":{{"@type":"messageSenderUser","user_id":{id}}},"tag":"{tag}","inviter_user_id":0,"joined_chat_date":0,"status":{status}}}"#
+        )
+    };
+    let jsons = [
+        format!(
+            r#"{{"@type":"updateNewChat","chat":{{"id":{chat_id},"title":"Demo supergroup","type":{{"@type":"chatTypeSupergroup","supergroup_id":{chat_id},"is_channel":false}},"unread_count":0}}}}"#
+        ),
+        format!(
+            r#"{{"@type":"updateChatPosition","chat_id":{chat_id},"position":{{"@type":"chatPosition","list":{{"@type":"chatListMain"}},"order":"80","is_pinned":false}}}}"#
+        ),
+        // The viewer's own status: administrator with the rights the
+        // gates read (`updateSupergroup` derives rights from the status
+        // admin block — the `supergroup` object carries no top-level
+        // rights fields, schema 1.8.67 line 2746).
+        format!(
+            r#"{{"@type":"updateSupergroup","supergroup":{{"@type":"supergroup","id":{chat_id},"is_forum":false,"status":{{"@type":"chatMemberStatusAdministrator","can_be_edited":true,"rights":{}}}}}}}"#,
+            admin_rights(true),
+        ),
+        user(777, "Demo", "Viewer"),
+        format!(
+            r#"{{"@type":"user","@extra":"{}","id":777,"first_name":"Demo","last_name":"Viewer","usernames":null,"phone_number":"","status":null,"profile_photo":null,"is_contact":false,"is_mutual_contact":false,"is_close_friend":false,"is_verified":false,"is_premium":false,"is_support":false,"restriction_reason":"","is_scam":false,"is_fake":false,"is_bot":false,"type":{{"@type":"userTypeRegular"}}}}"#,
+            me_extra.0,
+        ),
+        format!(
+            r#"{{"@type":"chatMember","@extra":"{}","member_id":{{"@type":"messageSenderUser","user_id":777}},"tag":"","inviter_user_id":0,"joined_chat_date":0,"status":{{"@type":"chatMemberStatusAdministrator","can_be_edited":true,"rights":{}}}}}"#,
+            member_extra.0,
+            admin_rights(true),
+        ),
+        user(1, "Idan", "Founder"),
+        user(2, "Dana", "Levi"),
+        user(5, "Omar", "Haddad"),
+        user(6, "Maya", "Sharon"),
+        format!(
+            r#"{{"@type":"chatMembers","@extra":"{}","total_count":5,"members":[{},{},{},{},{}]}}"#,
+            members_extra.0,
+            member(
+                777,
+                "",
+                &format!(
+                    r#"{{"@type":"chatMemberStatusAdministrator","can_be_edited":true,"rights":{}}}"#,
+                    admin_rights(true)
+                ),
+            ),
+            member(
+                1,
+                "Founder",
+                &format!(
+                    r#"{{"@type":"chatMemberStatusAdministrator","can_be_edited":false,"rights":{}}}"#,
+                    admin_rights(false)
+                ),
+            ),
+            member(2, "", r#"{"@type":"chatMemberStatusRestricted"}"#),
+            member(5, "", r#"{"@type":"chatMemberStatusMember"}"#),
+            member(6, "", r#"{"@type":"chatMemberStatusMember"}"#),
+        ),
+    ];
+    for json in jsons {
+        if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
+            session.apply(owned);
+        }
+    }
+    session.open_chat(ChatId(chat_id));
 }
 
 fn chat_search_jump_note(session: &Session) -> String {

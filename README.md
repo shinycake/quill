@@ -20,6 +20,8 @@ Toolchain: Rust **1.98.1**. UI pin: **gpui-kit 0.6.1**. TDLib schema: **1.8.67**
 
 This is the comprehensive Telegram-parity checklist: one checkbox per user-visible feature/behavior, grouped by area, each with a stable `parity:<area>-<slug>` anchor. `[x]` means the feature genuinely works in Quill today; partial implementations stay unchecked with a note. The parity percentage is computed from this section by `scripts/parity_pct.sh` — never estimated. Newly discovered gaps are added here, so the percentage may drop when audits find new gaps. Every merged feature PR checks its boxes in this list.
 
+A weekly `telegram-update-watch` scheduled job keeps this checklist current with official Telegram releases: new release features are verified against the pinned TDLib schema and added here as unchecked items with `parity:` anchors. Items blocked on missing TDLib APIs are marked `(blocked:)` with the reason.
+
 ### Auth & accounts
 
 - [x] Phone-number login: country code, invalid/banned-number errors, SMS hint <!-- parity:auth-phone-login --> (README:24; telegram/requests.rs:51)
@@ -72,7 +74,7 @@ This is the comprehensive Telegram-parity checklist: one checkbox per user-visib
 - [x] Create text link (textUrl) authoring (entities apply to message text and captions) <!-- parity:msg-text-link --> (M1: toolbar link inserts [label](url); send converts to textEntityTypeTextUrl)
 - [x] Clear formatting on selection (applies to message text and captions) <!-- parity:msg-clear-formatting --> (M1: toolbar clear strips markup on selection or whole text, composer.rs)
 - [x] Reply to a message <!-- parity:msg-reply --> (begin_reply_to ui/mod.rs:4269)
-- [ ] Quote selected text in a reply (partial: incoming quotes render state.rs:6531; send always quote:null requests.rs:1552) <!-- parity:msg-reply-quote -->
+- [x] Quote selected text in a reply — "Quote reply" menu item → quote picker → validated UTF-16 offset → `inputTextQuote` on every send path (text, media, albums, voice notes, GIFs/stickers, polls); ❝quote❞ shown in the reply banner (src/composer.rs, src/telegram/requests.rs, src/ui/mod.rs) <!-- parity:msg-reply-quote -->
 - [x] Reply bar in composer with cancel <!-- parity:msg-reply-bar-cancel --> (cancel_reply_draft composer.rs:131)
 - [x] Swipe-to-reply gesture <!-- parity:msg-swipe-reply --> (M1: leftward drag >24px on a message starts a reply, ui/mod.rs)
 - [x] Forward with "Forwarded from" attribution <!-- parity:msg-forward-attribution --> (forward_messages, send_copy:false requests.rs:2172)
@@ -211,28 +213,28 @@ This is the comprehensive Telegram-parity checklist: one checkbox per user-visib
 ### Groups, supergroups & channels
 
 - [x] Group/channel info panel with description and member/subscriber count (src/ui/mod.rs:8280) <!-- parity:groups-info-panel -->
-- [ ] Create new group — no `createNewBasicGroupChat` request in Quill <!-- parity:groups-create-group -->
-- [ ] Create new channel — no `createNewSupergroupChat` request in Quill <!-- parity:groups-create-channel -->
-- [ ] Convert group to broadcast group (`toggleSupergroupIsBroadcastGroup`) <!-- parity:groups-convert-broadcast -->
-- [ ] Add members via contact picker — no `addChatMember`/`addChatMembers` request <!-- parity:groups-add-members -->
-- [ ] Browse/search member list (non-admin view) (partial: member list exists only inside the promote picker, src/ui/mod.rs:14430) <!-- parity:groups-member-list -->
-- [ ] Restricted-members and banned-members lists (member-status filters) <!-- parity:groups-restricted-banned-lists -->
+- [x] Create new group via `createNewBasicGroupChat` (title + member picker, sidebar "New group") (src/ui/mod.rs) <!-- parity:groups-create-group -->
+- [x] Create new supergroup/channel via `createNewSupergroupChat` (title + description only — no forum toggle, no member picker; `is_forum` is sent false and the schema takes no member IDs, so members are added after creation from the member dialog; sidebar "New supergroup" / "New channel") (src/ui/mod.rs) <!-- parity:groups-create-channel -->
+- [x] Convert supergroup to broadcast group — one-way (`toggleSupergroupIsBroadcastGroup`, no reverse in schema :15221 or Telegram X; owner-only, destructive confirm) (src/ui/mod.rs) <!-- parity:groups-convert-broadcast -->
+- [x] Add members via contact picker — `addChatMember` (basic groups) / `addChatMembers` (supergroups/channels), privacy failures surfaced from `failedToAddMembers` (src/connect.rs, src/ui/mod.rs) <!-- parity:groups-add-members -->
+- [x] Browse/search real member lists — `getBasicGroupFullInfo` (basic groups) and `getSupergroupMembers` with All/Admins/Restricted/Banned tabs + server-side search; first 200 members only (offset 0 / limit 200, no load-more) (src/ui/mod.rs) <!-- parity:groups-member-list -->
+- [x] Restricted-members and banned-members lists via `getSupergroupMembers` status filters (:2571/:2574), first 200 only, with edit/unrestrict/unban actions (src/ui/mod.rs) <!-- parity:groups-restricted-banned-lists -->
 - [x] Administrator list with refresh, owner shown, custom titles displayed (src/ui/mod.rs:8748) <!-- parity:groups-admin-list -->
 - [x] Promote member via searchable picker with 18 granular rights checkboxes (src/ui/mod.rs:266-415) <!-- parity:groups-promote -->
 - [x] Edit existing admin rights, pre-filled from `getChatMember` (src/state.rs:209, src/ui/mod.rs:363) <!-- parity:groups-edit-rights -->
 - [x] Demote admin with confirmation dialog (src/ui/mod.rs:363) <!-- parity:groups-demote -->
-- [ ] Set/edit admin custom title (partial: titles are parsed and shown in the admin list) <!-- parity:groups-admin-title -->
-- [ ] Ban/restrict member with duration, mute-until, and unban (partial: only promote/edit/demote via `setChatMemberStatus` exist, src/state.rs:29) <!-- parity:groups-restrict-ban -->
-- [ ] Chat permissions editor — default "what members can do" toggles (send, stickers, polls, embed links, reactions) — no `setChatPermissions` request <!-- parity:groups-chat-permissions -->
+- [x] Set/edit admin custom title via `setChatMemberTag` (schema :13598 — the setter Telegram X uses; 0-16 chars, no emoji, basic groups + supergroups only; titles shown next to admin rows) (src/ui/mod.rs) <!-- parity:groups-admin-title -->
+- [x] Ban/restrict member with duration (forever/1d/7d/30d) and unban via `setChatMemberStatus` (src/ui/mod.rs) <!-- parity:groups-restrict-ban -->
+- [x] Chat permissions editor — all 16 `chatPermissions` toggles via `setChatPermissions`, admin-gated (src/ui/mod.rs) <!-- parity:groups-chat-permissions -->
 - [x] Slow-mode delay picker (Off/5s/10s/30s/1m/5m/15m/1h, admin-gated) (src/ui/mod.rs:8309) <!-- parity:groups-slow-mode -->
 - [x] Slow-mode send gate with countdown, applies to sends/forwards/voice (src/ui/mod.rs:3099) <!-- parity:groups-slow-mode-enforcement -->
 - [x] Slow-mode bypass when viewer boosts meet the unrestrict threshold (src/state.rs:3034) <!-- parity:groups-slow-mode-boost-bypass -->
 - [x] Invite-link list with expiry/humanised "Never expires"/"Expired" labels and pending-join-request counts (src/ui/mod.rs:8397) <!-- parity:groups-invite-link-list -->
 - [x] Create invite link dialog — name, expiration, member limit, join-request toggle (src/ui/mod.rs:222) <!-- parity:groups-invite-link-create -->
 - [x] Edit, copy and revoke invite links (src/ui/mod.rs:6341) <!-- parity:groups-invite-link-edit-revoke -->
-- [ ] Replace primary invite link — no `replacePrimaryChatInviteLink` request <!-- parity:groups-invite-link-primary -->
+- [x] Primary invite link displayed with replace via `replacePrimaryChatInviteLink` (src/ui/mod.rs) <!-- parity:groups-invite-link-primary -->
 - [x] Join-request list with approve/decline buttons and pending-count badge (src/ui/mod.rs:8596) <!-- parity:groups-join-requests -->
-- [ ] "Approve new members" join-by-request toggle (`toggleSupergroupJoinByRequest`) <!-- parity:groups-join-by-request-toggle -->
+- [x] "Approve new members" join-by-request toggle (`toggleSupergroupJoinByRequest`) (src/ui/mod.rs) <!-- parity:groups-join-by-request-toggle -->
 - [x] Recent-actions event log with refresh and load-more (src/ui/mod.rs:8914) <!-- parity:groups-event-log -->
 - [ ] Event-log filter picker (per-event-type / per-admin) and in-log text search (partial: `getChatEventLog` accepts filters in the request builder, src/telegram/requests.rs:725, but no UI picker) <!-- parity:groups-event-log-filters -->
 - [x] Channel/group statistics panel with graphs and top senders/administrators/inviters, gated on `can_get_statistics` (src/ui/mod.rs:9195) <!-- parity:groups-statistics -->
@@ -244,9 +246,9 @@ This is the comprehensive Telegram-parity checklist: one checkbox per user-visib
 - [ ] Channel comments viewer ("view comments" in the discussion group) (partial: only the jump to the discussion group exists) <!-- parity:groups-channel-comments -->
 - [ ] Aggressive anti-spam toggle (`toggleSupergroupHasAggressiveAntiSpamEnabled`) <!-- parity:groups-anti-spam -->
 - [ ] Boost status/level display and boost action (partial: boost counts are parsed only for the slow-mode bypass) <!-- parity:groups-boost -->
-- [ ] Public username management for group/channel (`setSupergroupUsername`) <!-- parity:groups-public-username -->
-- [x] Leave channel (src/ui/mod.rs:17302) <!-- parity:groups-leave -->
-- [ ] Delete group/channel for everyone <!-- parity:groups-delete -->
+- [x] Public username management (`setSupergroupUsername`, owner-only, empty clears) (src/ui/mod.rs) <!-- parity:groups-public-username -->
+- [x] Leave channel / leave group (src/ui/mod.rs) <!-- parity:groups-leave -->
+- [x] Delete group/channel for everyone (`deleteChat`, gated by `can_be_deleted_for_all_users`) with confirmation (src/ui/mod.rs) <!-- parity:groups-delete -->
 - [ ] Welcome messages: render the welcome pack shown only to new joiners (updateChatWelcomeMessages, welcomeMessage content) <!-- parity:groups-welcome-view -->
 - [ ] Welcome messages: add/edit/delete via addChatWelcomeMessage, editChatWelcomeMessage, deleteChatWelcomeMessage, loadChatWelcomeMessages (can_send_welcome_messages right) <!-- parity:groups-welcome-manage -->
 - [ ] Welcome message setup: Edit → Welcome Message entry in group/channel profile <!-- parity:groups-welcome-setup -->
@@ -538,7 +540,11 @@ This is the comprehensive Telegram-parity checklist: one checkbox per user-visib
 - [ ] Spellcheck in composer <!-- parity:platform-spellcheck -->
 - [ ] Chat history export to file (partial: getChatHistory fetching exists; no export-to-file; implementable client-side — no exportHistory constructor in schema, not schema-blocked) <!-- parity:platform-history-export -->
 - [ ] Full account data export (Telegram Desktop "Export Telegram data") <!-- parity:platform-data-export -->
-- [ ] In-app update check/download/install <!-- parity:platform-app-updates -->
+- [ ] Check for updates automatically on launch against GitHub Releases (latest tag vs compiled-in `CARGO_PKG_VERSION`), with an opt-out toggle in Settings <!-- parity:platform-update-check-auto -->
+- [ ] Manual "Check for updates" action in Settings/menu <!-- parity:platform-update-check-manual -->
+- [ ] Update-available UI: non-intrusive banner/dialog showing the new version and release notes <!-- parity:platform-update-available-ui -->
+- [ ] One-click download, install, and restart (replace own binary, relaunch; user confirms — no silent auto-install) <!-- parity:platform-update-install -->
+- [ ] Honest updater states: already up to date, no network, download/install failed with retry <!-- parity:platform-update-states -->
 - [ ] Outdated-feature placeholder: placeholder card with one-tap update button when the app can't render a new feature <!-- parity:platform-update-placeholder -->
 - [ ] Update changelog display after updates <!-- parity:platform-update-changelog -->
 - [ ] Offline connection indicator in UI (partial: updateConnectionState parsed at telegram/envelope.rs:5506 and stored in state.rs:2199, but never rendered) <!-- parity:platform-offline-indicator -->
