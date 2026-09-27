@@ -307,6 +307,9 @@ pub enum RequestPurpose {
     /// Phase C1: `acceptCall`. Response is `ok`; the answered state
     /// arrives as `updateCall`.
     AcceptCall,
+    /// Phase C2b: `sendCallSignalingData`. Response is `ok`; this is a
+    /// fire-and-forget bridge from the call engine to TDLib.
+    SendCallSignalingData,
     /// Phase C1: `discardCall`. Response is `ok`; the hangup states
     /// (`callStateHangingUp` → `callStateDiscarded`) arrive as
     /// `updateCall`.
@@ -1979,8 +1982,9 @@ pub struct ActiveCall {
     /// When `callStateReady` arrived — the call-duration clock starts
     /// here.
     pub ready_at: Option<Instant>,
-    /// Chunks from `updateNewCallSignalingData` — queued honestly;
-    /// nothing consumes them yet (C2). Capped at
+    /// Phase C2b: chunks from `updateNewCallSignalingData`; the engine now
+    /// consumes them too, while this queue remains the honest diagnostic
+    /// record. Capped at
     /// `MAX_QUEUED_SIGNALING_CHUNKS`; overflow is counted, not kept.
     pub signaling_queue: Vec<Vec<u8>>,
     pub signaling_dropped: usize,
@@ -3570,9 +3574,9 @@ impl Session {
             }
             // Phase C1: call signaling (schema 1.8.67, lines 10816 /
             // 10862). `updateCall` drives the single-call state machine;
-            // signaling data is queued honestly (no transport consumes it
-            // yet — C2); `callId` is the `createCall` answer that starts
-            // tracking the outgoing call.
+            // signaling data is queued as a diagnostic record and also fed
+            // to the engine by the C2b driver bridge; `callId` is the answer
+            // that starts tracking the outgoing call.
             EnvelopePayload::UpdateCall { call } => {
                 self.accept_call_update(&call);
             }
@@ -5368,10 +5372,10 @@ impl Session {
         self.call_error = None;
     }
 
-    /// Phase C1: `updateNewCallSignalingData`. Queued honestly — there
-    /// is no media transport to feed it to yet (C2 libtgvoip spike).
-    /// Data for an unknown call id is dropped (never buffered without
-    /// a tracked call).
+    /// Phase C2b: `updateNewCallSignalingData`. The driver also feeds these
+    /// bytes into the engine; this bounded queue remains the honest
+    /// diagnostic record. Data for an unknown call id is dropped (never
+    /// buffered without a tracked call).
     fn accept_call_signaling_data(&mut self, call_id: i32, data: Vec<u8>) {
         let Some(active) = self.active_call.as_mut() else {
             return;
@@ -5395,7 +5399,7 @@ impl Session {
 
     /// Phase C1: end the tracked call on a terminal `updateCall` and
     /// record the summary shown on the call-end screen. Any queued
-    /// signaling data is dropped with the call (no consumer exists).
+    /// signaling diagnostic data is dropped with the call.
     fn end_active_call(&mut self, call: &ParsedCall) {
         let Some(active) = self.active_call.take() else {
             return;

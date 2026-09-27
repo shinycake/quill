@@ -1,12 +1,13 @@
 //! Live TDLib connect gate: credentials + tdjson → setTdlibParameters → auth updates.
 //! Never logs api_hash, phone numbers, or codes.
 
+use crate::calls::engine::CallEngine;
 use crate::composer::{
     AttachmentKind, ComposerEdit, ComposerEditKind, ComposerSnapshot, DeleteConfirm,
     DraftSaveClock, DraftSaveStep, ForwardDraft, draft_text_to_store, schedule_draft_save,
 };
 use crate::credentials::TelegramCredentials;
-use crate::diagnostics::DiagnosticSink;
+use crate::diagnostics::{Diagnostic, DiagnosticSink};
 use crate::folders::spec_without_chat;
 use crate::ids::{AccountKey, ChatId, FileId, MessageId, RequestId, TopicId};
 use crate::lifecycle::{RestoreBlocker, plan_restore};
@@ -29,16 +30,17 @@ use crate::telegram::envelope::{
 use crate::telegram::ffi::{LibraryOrigin, TdJsonError, resolve_tdjson_path};
 use crate::telegram::requests::{
     AnimationSend, GroupCallJoinParams, MessageSenderRef, PollSend, SetTdlibParameters,
-    StickerSend, VideoNoteSend, VideoNoteThumbnailSend, VideoSend, VoiceNoteSend, accept_call,
-    add_chat_to_list, add_chat_to_list_value, add_contact, add_message_reaction,
-    add_recently_found_chat, chat_member_status_administrator_json, chat_member_status_member_json,
-    check_authentication_code, check_authentication_password, click_chat_sponsored_message,
-    close_chat, close_request, close_secret_chat as close_secret_chat_request, close_story,
-    create_call, create_chat_folder, create_chat_invite_link, create_new_secret_chat,
-    create_video_chat, delete_chat_folder, delete_messages, delete_story,
-    discard_call as discard_call_request, download_file as download_file_request, edit_chat_folder,
-    edit_chat_invite_link, edit_message_caption, edit_message_text, end_group_call,
-    forward_messages, get_authorization_state, get_callback_query_answer, get_chat_active_stories,
+    StickerSend, VideoNoteSend, VideoNoteThumbnailSend, VideoSend, VoiceNoteSend,
+    accept_call_with_protocol, add_chat_to_list, add_chat_to_list_value, add_contact,
+    add_message_reaction, add_recently_found_chat, chat_member_status_administrator_json,
+    chat_member_status_member_json, check_authentication_code, check_authentication_password,
+    click_chat_sponsored_message, close_chat, close_request,
+    close_secret_chat as close_secret_chat_request, close_story, create_call_with_protocol,
+    create_chat_folder, create_chat_invite_link, create_new_secret_chat, create_video_chat,
+    delete_chat_folder, delete_messages, delete_story, discard_call as discard_call_request,
+    download_file as download_file_request, edit_chat_folder, edit_chat_invite_link,
+    edit_message_caption, edit_message_text, end_group_call, forward_messages,
+    get_authorization_state, get_callback_query_answer, get_chat_active_stories,
     get_chat_administrators, get_chat_event_log, get_chat_folder, get_chat_history,
     get_chat_invite_links, get_chat_join_requests, get_chat_lists_to_add_chat, get_chat_member,
     get_chat_sponsored_messages, get_chat_statistics, get_commands, get_contacts, get_forum_topics,
@@ -52,19 +54,20 @@ use crate::telegram::requests::{
     pin_chat_message, process_chat_join_request, remove_message_reaction, reorder_chat_folders,
     report_chat_sponsored_message, revoke_chat_invite_link, search_chat_messages, search_chats,
     search_messages, search_public_chats, search_recently_found_chats, send_animation,
-    send_call_rating, send_chat_action, send_chat_action_kind, send_document, send_message_album,
-    send_photo, send_poll, send_sticker, send_text, send_text_story_reply, send_video,
-    send_video_note, send_voice_note, set_authentication_phone_number, set_chat_draft_message,
-    set_chat_member_status, set_chat_message_auto_delete_time, set_chat_notification_settings,
-    set_chat_slow_mode_delay, set_poll_answer, set_scope_notification_settings, set_story_reaction,
-    set_video_chat_title, supergroup_members_filter_recent_json,
-    supergroup_members_filter_search_json, toggle_chat_folder_tags,
-    toggle_group_call_is_my_video_enabled, toggle_group_call_is_my_video_paused,
-    toggle_group_call_participant_is_hand_raised, toggle_group_call_participant_is_muted,
-    toggle_video_chat_mute_new_participants, unpin_chat_message, view_messages,
-    view_sponsored_chat,
+    send_call_rating, send_call_signaling_data, send_chat_action, send_chat_action_kind,
+    send_document, send_message_album, send_photo, send_poll, send_sticker, send_text,
+    send_text_story_reply, send_video, send_video_note, send_voice_note,
+    set_authentication_phone_number, set_chat_draft_message, set_chat_member_status,
+    set_chat_message_auto_delete_time, set_chat_notification_settings, set_chat_slow_mode_delay,
+    set_poll_answer, set_scope_notification_settings, set_story_reaction, set_video_chat_title,
+    supergroup_members_filter_recent_json, supergroup_members_filter_search_json,
+    toggle_chat_folder_tags, toggle_group_call_is_my_video_enabled,
+    toggle_group_call_is_my_video_paused, toggle_group_call_participant_is_hand_raised,
+    toggle_group_call_participant_is_muted, toggle_video_chat_mute_new_participants,
+    unpin_chat_message, view_messages, view_sponsored_chat,
 };
 use crate::voice::VoiceDraft;
+use std::collections::VecDeque;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -347,10 +350,15 @@ impl JsonSender for LiveSender {
     }
 }
 
+/// Phase C2b: worker-safe queue for engine-emitted signaling.
+type SignalingOutbox = Arc<Mutex<VecDeque<(i32, Vec<u8>)>>>;
+
 /// Session + outbound sender that auto-replies to `WaitTdlibParameters`.
 pub struct ConnectDriver<S: JsonSender> {
     pub session: Session,
     sender: S,
+    call_engine: Option<Box<dyn CallEngine>>,
+    signaling_outbox: SignalingOutbox,
     credentials: TelegramCredentials,
     paths: AccountPaths,
     database_key: DatabaseKey,
@@ -399,6 +407,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         Self {
             session,
             sender,
+            call_engine: None,
+            signaling_outbox: Arc::new(Mutex::new(VecDeque::new())),
             credentials,
             paths: prepared.paths,
             database_key: prepared.database_key,
@@ -423,6 +433,30 @@ impl<S: JsonSender> ConnectDriver<S> {
         &self.paths.tdlib_files
     }
 
+    /// Phase C2b: install the driver-thread call engine and route its
+    /// worker-thread signaling emissions into the driver's TDLib outbox.
+    pub fn set_call_engine(&mut self, mut engine: Box<dyn CallEngine>) {
+        let outbox = self.signaling_outbox.clone();
+        engine.set_signaling_emitted_callback(Arc::new(move |call_id, data| {
+            outbox
+                .lock()
+                .expect("call signaling outbox")
+                .push_back((call_id, data));
+        }));
+        self.call_engine = Some(engine);
+    }
+
+    /// Phase C2b: advertise the engine's protocol only when an engine is
+    /// installed AND available; otherwise fall back to the honest
+    /// signaling-only shape.
+    fn engine_protocol_json(&self) -> serde_json::Value {
+        self.call_engine
+            .as_ref()
+            .filter(|engine| engine.is_available())
+            .map(|engine| engine.protocol().to_json())
+            .unwrap_or_else(crate::telegram::requests::call_protocol)
+    }
+
     /// Kick the JSON client so authorization updates start flowing.
     pub fn kickoff(&mut self) -> Result<RequestId, ConnectSendError> {
         let extra = self
@@ -434,6 +468,13 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     pub fn ingest(&mut self, owned: OwnedEnvelope) -> Result<(), ConnectSendError> {
         let was_ready = matches!(self.session.auth, AuthorizationState::Ready);
+        let active_call_before = self.session.active_call.as_ref().map(|call| call.id);
+        let bridge_signaling = match &owned.envelope.payload {
+            EnvelopePayload::UpdateNewCallSignalingData { call_id, data } => {
+                Some((*call_id, data.clone()))
+            }
+            _ => None,
+        };
         // Continue paging only when this envelope completes an in-flight loadChats
         // with ok. Unrelated ingest ticks and non-404 errors must not re-issue.
         let load_chats_ok = matches!(owned.envelope.payload, EnvelopePayload::Ok)
@@ -477,6 +518,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             EnvelopePayload::FoundChatMessages { .. }
         );
         self.session.apply(owned);
+        self.pump_call_engine(active_call_before, bridge_signaling)?;
         self.maybe_send_parameters()?;
         self.maybe_probe_channel_membership()?;
         let became_ready = !was_ready && matches!(self.session.auth, AuthorizationState::Ready);
@@ -526,6 +568,73 @@ impl<S: JsonSender> ConnectDriver<S> {
         if chat_search_hits {
             // Unigram ChatSearchViewModel: first hit → LoadMessageSliceAsync.
             self.jump_selected_chat_search_hit()?;
+        }
+        Ok(())
+    }
+
+    /// Phase C2b: synchronize reducer call lifecycle/signaling with the
+    /// engine and flush engine-emitted bytes through TDLib.
+    fn pump_call_engine(
+        &mut self,
+        active_call_before: Option<i32>,
+        bridge_signaling: Option<(i32, Vec<u8>)>,
+    ) -> Result<(), ConnectSendError> {
+        let active_call_after = self
+            .session
+            .active_call
+            .as_ref()
+            .map(|call| (call.id, call.user_id, call.is_outgoing));
+        let tracked_call_id = active_call_after.map(|(call_id, _, _)| call_id);
+
+        if let Some((call_id, user_id, is_outgoing)) = active_call_after
+            && Some(call_id) != active_call_before
+            && let Some(engine) = self.call_engine.as_deref_mut()
+        {
+            // TDLib remains the source of truth; engine startup failures must
+            // not erase the reducer's honest signaling-only call state.
+            let _ = engine.start_call(call_id, user_id, is_outgoing);
+        }
+        if tracked_call_id.is_none()
+            && let Some(call_id) = active_call_before
+            && let Some(engine) = self.call_engine.as_deref_mut()
+        {
+            let _ = engine.hangup(call_id);
+        }
+        if let Some((call_id, data)) = bridge_signaling
+            && tracked_call_id == Some(call_id)
+            && let Some(engine) = self.call_engine.as_deref_mut()
+        {
+            // Gate on the reducer-tracked call: the reducer drops signaling
+            // for unknown or ended calls, and this bridge follows the same
+            // gate. The session queue remains the honest diagnostic record
+            // if the optional engine rejects or cannot consume these bytes.
+            let _ = engine.send_signaling_data(call_id, &data);
+        }
+
+        loop {
+            let emitted = self
+                .signaling_outbox
+                .lock()
+                .expect("call signaling outbox")
+                .pop_front();
+            let Some((call_id, data)) = emitted else {
+                break;
+            };
+            let extra = self
+                .session
+                .request(RequestPurpose::SendCallSignalingData, None);
+            let payload = send_call_signaling_data(extra, call_id, &data);
+            if let Err(err) = self.sender.send_json(&payload) {
+                // Keep request bookkeeping honest and return the unsent
+                // bytes to the head of the outbox so a later ingest retries
+                // them in order instead of dropping them.
+                self.session.requests.take(extra);
+                self.signaling_outbox
+                    .lock()
+                    .expect("call signaling outbox")
+                    .push_front((call_id, data));
+                return Err(err);
+            }
         }
         Ok(())
     }
@@ -1444,10 +1553,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request_for_user(RequestPurpose::CreateCall { is_video }, user_id);
-        if let Err(err) = self
-            .sender
-            .send_json(&create_call(extra, user_id, is_video))
-        {
+        let protocol = self.engine_protocol_json();
+        if let Err(err) = self.sender.send_json(&create_call_with_protocol(
+            extra, user_id, is_video, &protocol,
+        )) {
             self.session.requests.take(extra);
             return Err(err);
         }
@@ -1468,9 +1577,18 @@ impl<S: JsonSender> ConnectDriver<S> {
             _ => return Err(ConnectSendError::InvalidRequest),
         };
         let extra = self.session.request(RequestPurpose::AcceptCall, None);
-        if let Err(err) = self.sender.send_json(&accept_call(extra, call_id)) {
+        let protocol = self.engine_protocol_json();
+        if let Err(err) = self
+            .sender
+            .send_json(&accept_call_with_protocol(extra, call_id, &protocol))
+        {
             self.session.requests.take(extra);
             return Err(err);
+        }
+        if let Some(engine) = self.call_engine.as_deref_mut() {
+            // TDLib remains the call-state source of truth; this only marks
+            // the already-tracked engine-side call accepted.
+            let _ = engine.accept_call(call_id);
         }
         Ok(extra)
     }
@@ -1500,6 +1618,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         if let Some(call) = self.session.active_call.as_mut() {
             call.state = CallState::HangingUp;
+        }
+        if let Some(engine) = self.call_engine.as_deref_mut() {
+            // Prompt teardown; the later terminal updateCall repeats this
+            // idempotently through `pump_call_engine`.
+            let _ = engine.hangup(call_id);
         }
         Ok(extra)
     }
@@ -5786,8 +5909,27 @@ pub fn start_live_connect(
     })?;
     let sender = LiveSender::from_live(&live);
     let bridge = ReceiveBridge::spawn_live(live.api.clone(), diagnostics.clone());
-    let session = Session::new(prepared.account.clone(), diagnostics);
+    let session = Session::new(prepared.account.clone(), diagnostics.clone());
     let mut driver = ConnectDriver::new(session, sender, credentials, prepared);
+    match crate::calls::engine::NtgcallsEngine::load() {
+        Ok(engine) => {
+            driver.set_call_engine(Box::new(engine));
+            diagnostics.record(Diagnostic {
+                category: "call",
+                type_name: None,
+                extra: None,
+                seq: None,
+                note: "call-engine-ready",
+            });
+        }
+        Err(_) => diagnostics.record(Diagnostic {
+            category: "call",
+            type_name: None,
+            extra: None,
+            seq: None,
+            note: "call-engine-unavailable-signaling-only",
+        }),
+    }
     driver.kickoff().map_err(|_| ConnectBlocker::TdjsonLoad)?;
     Ok(LiveConnect {
         driver,
@@ -5799,6 +5941,7 @@ pub fn start_live_connect(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::calls::engine::{CallEngine, MockEngine};
     use crate::diagnostics::MemorySink;
     use crate::platform::MemorySecretStore;
     use crate::telegram::client::copy_and_parse;
@@ -11033,6 +11176,407 @@ mod tests {
         driver.session.active_group_call.as_mut().unwrap().is_joined = true;
         assert_invalid(driver.join_video_chat(555));
 
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    type CallDriverHarness = (
+        std::path::PathBuf,
+        ConnectDriver<Arc<RecordingSender>>,
+        Arc<RecordingSender>,
+        Arc<dyn DiagnosticSink>,
+        AtomicU64,
+    );
+
+    fn call_driver() -> CallDriverHarness {
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+        let recorder = Arc::new(RecordingSender::new());
+        let session = Session::new(AccountKey::primary(), sink.clone());
+        let driver = ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+        (dir, driver, recorder, sink, AtomicU64::new(0))
+    }
+
+    fn ingest_call_json(
+        driver: &mut ConnectDriver<Arc<RecordingSender>>,
+        seq: &AtomicU64,
+        sink: &Arc<dyn DiagnosticSink>,
+        json: &str,
+    ) {
+        driver
+            .ingest(copy_and_parse(json, seq, sink).unwrap())
+            .unwrap();
+    }
+
+    fn sent_request(recorder: &RecordingSender, type_name: &str) -> Value {
+        recorder
+            .snapshot()
+            .into_iter()
+            .rev()
+            .map(|json| serde_json::from_str::<Value>(&json).unwrap())
+            .find(|value| value["@type"] == type_name)
+            .unwrap_or_else(|| panic!("missing {type_name} request"))
+    }
+
+    #[test]
+    fn call_engine_lifecycle_bridge() {
+        let (dir, mut driver, recorder, sink, seq) = call_driver();
+        let mock = MockEngine::new();
+        let handle = mock.clone();
+        driver.set_call_engine(Box::new(mock));
+        ingest_call_json(
+            &mut driver,
+            &seq,
+            &sink,
+            r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+        );
+        ingest_call_json(
+            &mut driver,
+            &seq,
+            &sink,
+            r#"{"@type":"updateCall","call":{"@type":"call","id":77,"unique_id":"99","user_id":41,"is_outgoing":false,"is_video":false,"state":{"@type":"callStatePending","is_created":true,"is_received":false}}}"#,
+        );
+        assert_eq!(handle.started_calls(), vec![(77, 41, false)]);
+
+        ingest_call_json(
+            &mut driver,
+            &seq,
+            &sink,
+            r#"{"@type":"updateNewCallSignalingData","call_id":77,"data":"aW5ib3VuZA=="}"#,
+        );
+        assert_eq!(handle.signaling_received(), vec![(77, b"inbound".to_vec())]);
+
+        driver.accept_call().unwrap();
+        assert_eq!(handle.accepted_calls(), vec![77]);
+        let accept = sent_request(&recorder, "acceptCall");
+        assert_eq!(accept["protocol"]["udp_p2p"], true);
+        assert_eq!(accept["protocol"]["udp_reflector"], true);
+        assert_eq!(accept["protocol"]["min_layer"], 92);
+        assert_eq!(accept["protocol"]["max_layer"], 92);
+        assert_eq!(
+            accept["protocol"]["library_versions"],
+            serde_json::json!(["8.0.0", "9.0.0", "12.0.0", "13.0.0"])
+        );
+
+        ingest_call_json(
+            &mut driver,
+            &seq,
+            &sink,
+            r#"{"@type":"updateCall","call":{"@type":"call","id":77,"unique_id":"99","user_id":41,"is_outgoing":false,"is_video":false,"state":{"@type":"callStateDiscarded","reason":{"@type":"callDiscardReasonHungUp"},"need_rating":false,"need_debug_information":false,"need_log":false}}}"#,
+        );
+        assert_eq!(handle.hung_up_calls(), vec![77]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn call_engine_emission_sends_signaling_data() {
+        let (dir, mut driver, recorder, sink, seq) = call_driver();
+        let mock = MockEngine::new();
+        let handle = mock.clone();
+        driver.set_call_engine(Box::new(mock));
+        ingest_call_json(
+            &mut driver,
+            &seq,
+            &sink,
+            r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+        );
+        ingest_call_json(
+            &mut driver,
+            &seq,
+            &sink,
+            r#"{"@type":"updateCall","call":{"@type":"call","id":77,"unique_id":"99","user_id":41,"is_outgoing":false,"is_video":false,"state":{"@type":"callStatePending","is_created":true,"is_received":false}}}"#,
+        );
+
+        handle.receive_signaling_data(77, b"emit-bytes");
+        ingest_call_json(
+            &mut driver,
+            &seq,
+            &sink,
+            r#"{"@type":"updateConnectionState","state":{"@type":"connectionStateReady"}}"#,
+        );
+        let sent = sent_request(&recorder, "sendCallSignalingData");
+        assert_eq!(sent["call_id"], 77);
+        assert_eq!(sent["data"], "ZW1pdC1ieXRlcw==");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn seed_ready_call_user(
+        driver: &mut ConnectDriver<Arc<RecordingSender>>,
+        seq: &AtomicU64,
+        sink: &Arc<dyn DiagnosticSink>,
+    ) {
+        ingest_call_json(
+            driver,
+            seq,
+            sink,
+            r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+        );
+        ingest_call_json(
+            driver,
+            seq,
+            sink,
+            r#"{"@type":"updateUser","user":{"id":41,"first_name":"Ada","type":{"@type":"userTypeRegular"}}}"#,
+        );
+    }
+
+    #[test]
+    fn create_call_uses_engine_protocol_when_present() {
+        let (dir, mut driver, recorder, sink, seq) = call_driver();
+        driver.set_call_engine(Box::new(MockEngine::new()));
+        seed_ready_call_user(&mut driver, &seq, &sink);
+
+        driver.start_call(41, false).unwrap();
+        let create = sent_request(&recorder, "createCall");
+        assert_eq!(create["protocol"]["udp_p2p"], true);
+        assert_eq!(create["protocol"]["udp_reflector"], true);
+        assert_eq!(create["protocol"]["min_layer"], 92);
+        assert_eq!(create["protocol"]["max_layer"], 92);
+        assert_eq!(
+            create["protocol"]["library_versions"],
+            serde_json::json!(["8.0.0", "9.0.0", "12.0.0", "13.0.0"])
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn create_call_keeps_signaling_only_protocol_without_engine() {
+        let (dir, mut driver, recorder, sink, seq) = call_driver();
+        seed_ready_call_user(&mut driver, &seq, &sink);
+
+        driver.start_call(41, false).unwrap();
+        let create = sent_request(&recorder, "createCall");
+        assert_eq!(create["protocol"]["udp_p2p"], false);
+        assert_eq!(create["protocol"]["udp_reflector"], false);
+        assert_eq!(create["protocol"]["min_layer"], 65);
+        assert_eq!(create["protocol"]["max_layer"], 92);
+        assert_eq!(
+            create["protocol"]["library_versions"],
+            serde_json::json!([])
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn call_engine_absent_keeps_signaling_only() {
+        let (dir, mut driver, _recorder, sink, seq) = call_driver();
+        ingest_call_json(
+            &mut driver,
+            &seq,
+            &sink,
+            r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+        );
+        ingest_call_json(
+            &mut driver,
+            &seq,
+            &sink,
+            r#"{"@type":"updateCall","call":{"@type":"call","id":77,"unique_id":"99","user_id":41,"is_outgoing":false,"is_video":false,"state":{"@type":"callStatePending","is_created":true,"is_received":false}}}"#,
+        );
+        ingest_call_json(
+            &mut driver,
+            &seq,
+            &sink,
+            r#"{"@type":"updateNewCallSignalingData","call_id":77,"data":"ZGlhZ25vc3RpYw=="}"#,
+        );
+        assert_eq!(
+            driver.session.active_call.as_ref().unwrap().signaling_queue,
+            vec![b"diagnostic".to_vec()]
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn create_call_uses_signaling_only_protocol_when_engine_unavailable() {
+        let (dir, mut driver, recorder, sink, seq) = call_driver();
+        driver.set_call_engine(Box::new(MockEngine::unavailable()));
+        seed_ready_call_user(&mut driver, &seq, &sink);
+
+        driver.start_call(41, false).unwrap();
+        let create = sent_request(&recorder, "createCall");
+        assert_eq!(create["protocol"]["udp_p2p"], false);
+        assert_eq!(create["protocol"]["udp_reflector"], false);
+        assert_eq!(create["protocol"]["min_layer"], 65);
+        assert_eq!(create["protocol"]["max_layer"], 92);
+        assert_eq!(
+            create["protocol"]["library_versions"],
+            serde_json::json!([])
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn call_engine_ignores_signaling_for_untracked_call() {
+        let (dir, mut driver, _recorder, sink, seq) = call_driver();
+        let mock = MockEngine::new();
+        let handle = mock.clone();
+        driver.set_call_engine(Box::new(mock));
+        ingest_call_json(
+            &mut driver,
+            &seq,
+            &sink,
+            r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+        );
+        // No tracked call: signaling must stay diagnostic-only.
+        ingest_call_json(
+            &mut driver,
+            &seq,
+            &sink,
+            r#"{"@type":"updateNewCallSignalingData","call_id":77,"data":"aW5ib3VuZA=="}"#,
+        );
+        assert!(driver.session.active_call.is_none());
+        assert!(handle.signaling_received().is_empty());
+
+        // Tracked call 77, then signaling for a different call id: gated.
+        ingest_call_json(
+            &mut driver,
+            &seq,
+            &sink,
+            r#"{"@type":"updateCall","call":{"@type":"call","id":77,"unique_id":"99","user_id":41,"is_outgoing":false,"is_video":false,"state":{"@type":"callStatePending","is_created":true,"is_received":false}}}"#,
+        );
+        ingest_call_json(
+            &mut driver,
+            &seq,
+            &sink,
+            r#"{"@type":"updateNewCallSignalingData","call_id":78,"data":"aW5ib3VuZA=="}"#,
+        );
+        assert!(handle.signaling_received().is_empty());
+
+        // Signaling for the tracked call still bridges.
+        ingest_call_json(
+            &mut driver,
+            &seq,
+            &sink,
+            r#"{"@type":"updateNewCallSignalingData","call_id":77,"data":"aW5ib3VuZA=="}"#,
+        );
+        assert_eq!(handle.signaling_received(), vec![(77, b"inbound".to_vec())]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Phase C2b: sender that fails the next sendCallSignalingData send once,
+    /// then records. Mirrors the `ViewCtlSender` fail-one-message pattern.
+    struct FailFirstCallSender {
+        sent: Mutex<Vec<String>>,
+        fail_next: Mutex<bool>,
+    }
+
+    impl FailFirstCallSender {
+        fn new() -> Self {
+            Self {
+                sent: Mutex::new(Vec::new()),
+                fail_next: Mutex::new(true),
+            }
+        }
+
+        fn snapshot(&self) -> Vec<String> {
+            self.sent.lock().expect("failing sender").clone()
+        }
+    }
+
+    impl JsonSender for Arc<FailFirstCallSender> {
+        fn send_json(&self, request: &str) -> Result<(), ConnectSendError> {
+            if request.contains("sendCallSignalingData")
+                && *self.fail_next.lock().expect("failing sender")
+            {
+                *self.fail_next.lock().expect("failing sender") = false;
+                return Err(ConnectSendError::Native);
+            }
+            self.sent
+                .lock()
+                .expect("failing sender")
+                .push(request.to_string());
+            Ok(())
+        }
+    }
+
+    /// Phase C2b: driver harness with a failing-first sender.
+    type FailingCallDriverHarness = (
+        std::path::PathBuf,
+        ConnectDriver<Arc<FailFirstCallSender>>,
+        Arc<FailFirstCallSender>,
+        Arc<dyn DiagnosticSink>,
+        AtomicU64,
+    );
+
+    fn failing_call_driver() -> FailingCallDriverHarness {
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+        let sender = Arc::new(FailFirstCallSender::new());
+        let session = Session::new(AccountKey::primary(), sink.clone());
+        let driver = ConnectDriver::new(session, sender.clone(), test_credentials(), prepared);
+        (dir, driver, sender, sink, AtomicU64::new(0))
+    }
+
+    fn ingest_failing(
+        driver: &mut ConnectDriver<Arc<FailFirstCallSender>>,
+        seq: &AtomicU64,
+        sink: &Arc<dyn DiagnosticSink>,
+        json: &str,
+    ) -> Result<(), ConnectSendError> {
+        driver.ingest(copy_and_parse(json, seq, sink).unwrap())
+    }
+
+    #[test]
+    fn signaling_send_failure_requeues_and_cleans_request() {
+        let (dir, mut driver, sender, sink, seq) = failing_call_driver();
+        let mock = MockEngine::new();
+        let handle = mock.clone();
+        driver.set_call_engine(Box::new(mock));
+        ingest_failing(
+            &mut driver,
+            &seq,
+            &sink,
+            r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+        )
+        .unwrap();
+        ingest_failing(
+            &mut driver,
+            &seq,
+            &sink,
+            r#"{"@type":"updateCall","call":{"@type":"call","id":77,"unique_id":"99","user_id":41,"is_outgoing":false,"is_video":false,"state":{"@type":"callStatePending","is_created":true,"is_received":false}}}"#,
+        )
+        .unwrap();
+
+        handle.receive_signaling_data(77, b"emit-bytes");
+        let signaling_sent = || {
+            sender
+                .snapshot()
+                .into_iter()
+                .filter(|json| json.contains("sendCallSignalingData"))
+                .map(|json| serde_json::from_str::<Value>(&json).unwrap())
+                .collect::<Vec<_>>()
+        };
+        assert!(signaling_sent().is_empty());
+
+        let failed = ingest_failing(
+            &mut driver,
+            &seq,
+            &sink,
+            r#"{"@type":"updateConnectionState","state":{"@type":"connectionStateReady"}}"#,
+        );
+        assert!(matches!(failed, Err(ConnectSendError::Native)));
+        // The failed request was removed from bookkeeping and the unsent
+        // bytes returned to the outbox: nothing sent, nothing lost.
+        assert!(
+            !driver
+                .session
+                .requests
+                .has_purpose(RequestPurpose::SendCallSignalingData)
+        );
+        assert!(signaling_sent().is_empty());
+
+        // The next ingest retries the same bytes exactly once.
+        ingest_failing(
+            &mut driver,
+            &seq,
+            &sink,
+            r#"{"@type":"updateConnectionState","state":{"@type":"connectionStateReady"}}"#,
+        )
+        .unwrap();
+        let sent = signaling_sent();
+        assert_eq!(sent.len(), 1);
+        assert_eq!(sent[0]["@type"], "sendCallSignalingData");
+        assert_eq!(sent[0]["call_id"], 77);
+        assert_eq!(sent[0]["data"], "ZW1pdC1ieXRlcw==");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

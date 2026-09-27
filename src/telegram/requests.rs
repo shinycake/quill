@@ -812,11 +812,21 @@ pub fn call_protocol() -> Value {
 /// allowed — it starts video-call *signaling*; media transport is
 /// still Phase C2, so the call carries no audio or video.
 pub fn create_call(extra: RequestId, user_id: i64, is_video: bool) -> String {
+    create_call_with_protocol(extra, user_id, is_video, &call_protocol())
+}
+
+/// Phase C2b: `createCall` with the protocol reported by the loaded engine.
+pub fn create_call_with_protocol(
+    extra: RequestId,
+    user_id: i64,
+    is_video: bool,
+    protocol: &Value,
+) -> String {
     json!({
         "@type": "createCall",
         "@extra": extra.as_extra(),
         "user_id": user_id,
-        "protocol": call_protocol(),
+        "protocol": protocol,
         "is_video": is_video,
     })
     .to_string()
@@ -826,11 +836,30 @@ pub fn create_call(extra: RequestId, user_id: i64, is_video: bool) -> String {
 /// `acceptCall call_id:int32 protocol:callProtocol = Ok;`
 /// "Accepts an incoming call".
 pub fn accept_call(extra: RequestId, call_id: i32) -> String {
+    accept_call_with_protocol(extra, call_id, &call_protocol())
+}
+
+/// Phase C2b: `acceptCall` with the protocol reported by the loaded engine.
+pub fn accept_call_with_protocol(extra: RequestId, call_id: i32, protocol: &Value) -> String {
     json!({
         "@type": "acceptCall",
         "@extra": extra.as_extra(),
         "call_id": call_id,
-        "protocol": call_protocol(),
+        "protocol": protocol,
+    })
+    .to_string()
+}
+
+/// Phase C2b: forward engine-emitted signaling through TDLib
+/// (`sendCallSignalingData`, `schema/td_api.tl:14218`). TDLib JSON `bytes`
+/// fields use standard base64.
+pub fn send_call_signaling_data(extra: RequestId, call_id: i32, data: &[u8]) -> String {
+    use base64::Engine;
+    json!({
+        "@type": "sendCallSignalingData",
+        "@extra": extra.as_extra(),
+        "call_id": call_id,
+        "data": base64::engine::general_purpose::STANDARD.encode(data),
     })
     .to_string()
 }
@@ -4402,6 +4431,16 @@ mod channel_requests_tests {
         assert_eq!(v["rating"], 5);
         assert_eq!(v["comment"], "");
         assert_eq!(v["problems"].as_array().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn send_call_signaling_data_shape() {
+        let v: serde_json::Value =
+            serde_json::from_str(&send_call_signaling_data(RequestId(7), 77, b"signal-bytes"))
+                .unwrap();
+        assert_eq!(v["@type"], "sendCallSignalingData");
+        assert_eq!(v["call_id"], 77);
+        assert_eq!(v["data"], "c2lnbmFsLWJ5dGVz");
     }
 
     /// Phase C3a: group-call request shapes — verified against the
