@@ -1512,21 +1512,7 @@ Research snapshot 2026-09-16, pin recheck **2026-09-17**.
   (quick-react + picker), interaction counters, text replies to the
   poster, and deleting an own story. Story *posting* stays out — see the
   schema blocker below.
-- **Schema blocker (verified, not inferred).** The pinned vendored schema
-  (`schema/td_api.tl`, official TDLib commit
-  `d1085f9cebc5a62379991ae1652673954f229c1f`, CMake version 1.8.67) was
-  re-downloaded from the pinned GitHub URL and hash-verified (1,152,505
-  bytes, SHA-256
-  `326b65b41442901ad6bf0ca2f7c356ae54365d6c343956a62e06a8b3cb305e87`):
-  it contains **no `sendStory` constructor** anywhere, even though
-  `inputStoryContentPhoto` (line 6673) exists. There is no posting
-  function that accepts it, so a photo-story composer, caption/privacy
-  selector, and any "post" flow **cannot be built honestly** against the
-  pinned schema/binary — inventing the JSON would diverge from what
-  TDLib 1.8.67 accepts. Posting (composer, caption, privacy, video
-  uploads) is blocked until a TDLib upgrade brings a `sendStory`-like
-  constructor. The repo's rule stands: never mix schema and `tdjson`
-  binary versions.
+- **Schema blocker RETRACTED (2026-09-27 — the original "verified" claim was wrong).** The original note searched for a `sendStory` constructor and concluded story posting was blocked on a TDLib upgrade. That was the wrong name: TDLib names the function **`postStory`**, and it is present in the pinned vendored schema (`schema/td_api.tl`, 1.8.67) at **line 13715**: `postStory chat_id:int53 content:InputStoryContent areas:inputStoryAreas caption:formattedText privacy_settings:StoryPrivacySettings album_ids:vector<int32> active_period:int32 from_story_full_id:storyFullId is_posted_to_chat_page:Bool protect_content:Bool = Story;` — identical signature to current TDLib master, where `td_api::postStory` routes to `StoryManager::send_story` → raw `stories.sendStory`. The full posting surface is also present: `canPostStory` (line 13702), `inputStoryContentPhoto` (line 6673), `inputStoryContentVideo` (line 6681), all four `storyPrivacySettings*` types (lines 8928–8937), `inputStoryAreas` + area types (line 6619). No TDLib upgrade is needed — posting was never blocked; the verifier assumed the constructor name instead of discovering it. Story posting becomes an implementable slice (queued after the current call work): photo/video composer → `canPostStory` eligibility → `postStory` with caption + privacy selector → honest pending/failed/succeeded states via `updateStoryPostSucceeded` (line 10901) / `updateStoryPostFailed` (line 10907).
 - **Schema (1.8.67, verified in `schema/td_api.tl` — no invented
   constructors/fields):** `reactionTypeEmoji emoji:string =
   ReactionType` (line 2915); `inputMessageReplyToStory
@@ -1586,10 +1572,12 @@ Research snapshot 2026-09-16, pin recheck **2026-09-17**.
   cache). Escape closes the story viewer (resetting picker flags inside
   `close_story_viewer`). Screenshot proof:
   `docs/screenshots/ready-story-post.png` (`ready-story-post` demo —
-  picker + reply row open on an own story; its caption states the
-  `sendStory` blocker).
+  picker + reply row open on an own story; its caption previously stated
+  a `sendStory` blocker — retracted 2026-09-27, the function is
+  `postStory`, line 13715).
 - **Out of this slice (→ future):** story posting / photo composer /
-  caption + privacy selector (blocked on a TDLib with `sendStory`);
+  caption + privacy selector (now unblocked — queued as its own slice
+  after the call work, see retraction above);
   video uploads; story albums; privacy/close-friends management beyond
   the per-story read of `can_be_*`; joining/playing live stories;
   `getStoryInteractions` detailed viewer list; the archive-list tray.
