@@ -59,13 +59,14 @@ use quill::telegram::envelope::{
     MessageSender, NotificationSettingsScope, NotificationSound, ParsedChatEvent, ParsedFile,
     ParsedGroupCallParticipant, ParsedMessage, ParsedSecretChat, ParsedStory, ParsedWelcomeMessage,
     PollContent, PollOption, PollType, ScopeNotificationSettings, SecretChatState,
-    SponsoredMessage, StatisticalGraph, StatisticalValue, StorageFileTypeStats, StorageStats,
-    call_entry_label, chat_ttl_service_label, effective_content, format_ttl_setting,
+    SpeechRecognition, SponsoredMessage, StatisticalGraph, StatisticalValue, StorageFileTypeStats,
+    StorageStats, call_entry_label, chat_ttl_service_label, effective_content, format_ttl_setting,
     toggle_chosen_emoji_reaction,
 };
 use quill::telegram::requests::SelfDestructSend;
 use quill::telegram::requests::{CallPrivacySetting, ChatEventLogFilterSet, PrivacyWho};
 use quill::text::{TextEntity, styled_runs, utf8_to_utf16_offset};
+use quill::video::VideoNoteCapture;
 use quill::voice::{self, VoiceCapture, format_voice_duration};
 use smallvec::SmallVec;
 use std::collections::{HashMap, HashSet};
@@ -1216,8 +1217,16 @@ pub struct QuillApp {
     /// Parity slice: in-flight notification-sound workers; capped so a
     /// message burst cannot stack players.
     notify_sound_inflight: Arc<AtomicUsize>,
-    /// tdesktop `VoiceRecordBar` (click mic to record; Esc / Cancel discards).
+    /// tdesktop `VoiceRecordBar` (click the record button to record in the
+    /// current mode; Cancel / Esc asks for confirmation first).
     voice_capture: Option<VoiceCapture>,
+    /// MED2: in-progress round video-note camera capture (video mode).
+    video_note_capture: Option<VideoNoteCapture>,
+    /// MED2: lock-to-record — a locked recording ignores Esc; only Send
+    /// or Cancel (with confirmation) ends it.
+    record_locked: bool,
+    /// MED2: the record bar is showing the discard-confirmation row.
+    record_discard_confirm: bool,
     voice_tick: bool,
     /// Phase A1: the open chat whose slow-mode countdown is ticking
     /// (`Some` exactly while the 1s tick task runs). Mirrors `voice_tick`.
@@ -1894,6 +1903,32 @@ enum ForumTopicAction {
     Delete,
     HideGeneral,
     ShowGeneral,
+}
+
+/// MED2: the record button's mode (TGX `preferVideoMode`, persisted in
+/// `MediaPrefs`). Desktop mapping of TGX's hold-to-record / tap-to-switch:
+/// click records in the current mode, right-click switches mode (tdesktop's
+/// mapping) — a touch hold gesture has no honest mouse equivalent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RecordMode {
+    Audio,
+    Video,
+}
+
+impl RecordMode {
+    fn label(self) -> &'static str {
+        match self {
+            RecordMode::Audio => "🎤 Voice",
+            RecordMode::Video => "📹 Video",
+        }
+    }
+    fn hint(self) -> &'static str {
+        match self {
+            // TGX strings, desktop-mapped.
+            RecordMode::Audio => "Click to record audio · right-click for video",
+            RecordMode::Video => "Click to record video · right-click for audio",
+        }
+    }
 }
 
 impl QuillApp {
@@ -2955,6 +2990,9 @@ impl QuillApp {
             defaults_sound_picker: None,
             notify_sound_inflight: Arc::new(AtomicUsize::new(0)),
             voice_capture: None,
+            video_note_capture: None,
+            record_locked: false,
+            record_discard_confirm: false,
             voice_tick: false,
             slow_mode_tick_chat: None,
             self_destruct_tick_chat: None,
@@ -3184,7 +3222,10 @@ impl QuillApp {
                 bars,
             ));
             app.playing_voice = Some(MessageId(91));
-            app.status_note = "screenshot demo — recording voice · playing voice note".into();
+            // MED2: demo shows the locked record bar + a transcribed note.
+            app.record_locked = true;
+            app.status_note =
+                "screenshot demo — recording voice · locked · playing voice note".into();
         }
         if matches!(demo, Some(ScreenshotDemo::ReadyGifs)) {
             if let Some(session) = app.demo_session.as_mut() {
@@ -3984,6 +4025,17 @@ impl QuillApp {
             .live
             .as_mut()
             .and_then(|live| live.driver.session.message_link_error.take())
+        {
+            self.status_note = err;
+            progressed = true;
+        }
+        // MED2 fix-up: a refused `recognizeSpeech` surfaces in the status
+        // note instead of silently doing nothing after
+        // "transcription requested".
+        if let Some(err) = self
+            .live
+            .as_mut()
+            .and_then(|live| live.driver.session.recognize_speech_error.take())
         {
             self.status_note = err;
             progressed = true;
@@ -5835,8 +5887,8 @@ impl QuillApp {
         {
             self.pending_react = None;
         }
-        if self.voice_capture.is_some() {
-            self.cancel_voice_recording(cx);
+        if self.recording_active() {
+            self.cancel_recording(cx);
         }
         self.stop_voice_playback();
         self.stop_audio_playback();
@@ -6478,8 +6530,21 @@ impl QuillApp {
             self.close_poll_dialog(cx);
             return;
         }
-        if self.voice_capture.is_some() {
-            self.cancel_voice_recording(cx);
+        // MED2: Esc never discards a recording silently. With the confirm
+        // row open, Esc dismisses it and keeps recording; otherwise Esc
+        // opens the confirm row (locked recordings ignore Esc entirely).
+        if self.record_discard_confirm {
+            self.record_discard_confirm = false;
+            cx.notify();
+            return;
+        }
+        if self.recording_active() {
+            if self.record_locked {
+                self.status_note = "recording is locked — unlock it or use Cancel".into();
+                cx.notify();
+            } else {
+                self.request_discard_recording(cx);
+            }
             return;
         }
         if self.gif_panel_open() {
@@ -8767,8 +8832,57 @@ impl QuillApp {
         }
     }
 
+    /// MED2: the record button's mode (TGX `preferVideoMode`, persisted in
+    /// `MediaPrefs`). Desktop mapping of TGX's hold-to-record /
+    /// tap-to-switch: click records in the current mode, right-click
+    /// switches mode (tdesktop's mapping) — a touch hold gesture has no
+    /// honest mouse equivalent.
+    fn record_mode(&self) -> RecordMode {
+        if self
+            .session()
+            .is_some_and(|session| session.media_prefs.prefer_video_mode)
+        {
+            RecordMode::Video
+        } else {
+            RecordMode::Audio
+        }
+    }
+
+    fn recording_active(&self) -> bool {
+        self.voice_capture.is_some() || self.video_note_capture.is_some()
+    }
+
+    /// MED2: right-click on the record button flips audio/video mode
+    /// (TGX tap-to-switch, desktop-mapped). Ignored while recording.
+    fn toggle_record_mode(&mut self, cx: &mut Context<Self>) {
+        if self.recording_active() {
+            self.status_note = "finish the recording first".into();
+            cx.notify();
+            return;
+        }
+        let next = !matches!(self.record_mode(), RecordMode::Video);
+        self.set_media_pref(|prefs| prefs.prefer_video_mode = next, cx);
+        self.status_note = format!(
+            "{} — {}",
+            if next {
+                "video note mode"
+            } else {
+                "voice note mode"
+            },
+            self.record_mode().hint()
+        );
+        cx.notify();
+    }
+
+    fn start_recording(&mut self, cx: &mut Context<Self>) {
+        match self.record_mode() {
+            RecordMode::Audio => self.start_voice_recording(cx),
+            RecordMode::Video => self.start_video_note_recording(cx),
+        }
+    }
+
     fn start_voice_recording(&mut self, cx: &mut Context<Self>) {
-        if self.pending_edit.is_some() || self.voice_capture.is_some() {
+        if self.pending_edit.is_some() || self.recording_active() {
             return;
         }
         if self.gif_panel_open() {
@@ -8791,12 +8905,84 @@ impl QuillApp {
         cx.notify();
     }
 
-    fn cancel_voice_recording(&mut self, cx: &mut Context<Self>) {
+    /// MED2: start a round video-note camera capture (ffmpeg V4L2, squared
+    /// at finish; HQ size from media prefs). Needs a camera, honest error
+    /// otherwise.
+    fn start_video_note_recording(&mut self, cx: &mut Context<Self>) {
+        if self.pending_edit.is_some() || self.recording_active() {
+            return;
+        }
+        if self.gif_panel_open() {
+            self.close_gif_panel(cx);
+        }
+        if self.sticker_panel_open() {
+            self.close_sticker_panel(cx);
+        }
+        let hq = self
+            .session()
+            .is_some_and(|session| session.media_prefs.hq_round_videos);
+        match VideoNoteCapture::start(hq) {
+            Ok(capture) => {
+                self.video_note_capture = Some(capture);
+                self.sync_voice_action();
+                self.spawn_voice_tick(cx);
+                self.status_note = "recording video note".into();
+            }
+            Err(err) => {
+                self.status_note = err;
+            }
+        }
+        cx.notify();
+    }
+
+    /// MED2: Cancel / Esc on an unlocked recording opens the confirm row
+    /// instead of discarding silently.
+    fn request_discard_recording(&mut self, cx: &mut Context<Self>) {
+        // MED2 fix-up: locked recordings CAN be cancelled — the confirm
+        // row still guards against accidental discards. Esc stays locked.
+        if !self.recording_active() {
+            return;
+        }
+        self.record_discard_confirm = true;
+        cx.notify();
+    }
+
+    /// MED2: the confirm row's Discard button — performs the discard.
+    fn confirm_discard_recording(&mut self, cx: &mut Context<Self>) {
+        self.cancel_recording(cx);
+    }
+
+    /// MED2: Lock ↔ unlock the in-progress recording (TGX `RecordLockView`,
+    /// desktop-mapped to a Lock button). A locked recording ignores Esc.
+    fn toggle_record_lock(&mut self, cx: &mut Context<Self>) {
+        if !self.recording_active() {
+            return;
+        }
+        self.record_locked = !self.record_locked;
+        self.status_note = if self.record_locked {
+            "recording locked — Esc won't cancel it".into()
+        } else {
+            "recording unlocked".into()
+        };
+        cx.notify();
+    }
+
+    fn cancel_recording(&mut self, cx: &mut Context<Self>) {
+        let was_video = self.video_note_capture.is_some();
         if let Some(capture) = self.voice_capture.take() {
             capture.discard();
         }
+        if let Some(capture) = self.video_note_capture.take() {
+            capture.discard();
+        }
+        self.record_locked = false;
+        self.record_discard_confirm = false;
         self.sync_voice_action();
-        self.status_note = "voice recording cancelled".into();
+        self.status_note = if was_video {
+            "video recording cancelled".into()
+        } else {
+            "voice recording cancelled".into()
+        };
         cx.notify();
     }
 
@@ -8813,6 +8999,10 @@ impl QuillApp {
         let Some(capture) = self.voice_capture.take() else {
             return;
         };
+        // MED2 fix-up: the send consumes the recording — locked state must
+        // not leak into the next recording.
+        self.record_locked = false;
+        self.record_discard_confirm = false;
         let caption = self.composer.read(cx).value().to_string();
         let draft = match capture.finish() {
             Ok(draft) => draft,
@@ -8825,20 +9015,7 @@ impl QuillApp {
         };
         let reply = self.pending_reply.clone();
         if self.live.is_some() {
-            let reply_to = reply
-                .as_ref()
-                .filter(|reply| {
-                    self.live
-                        .as_ref()
-                        .is_some_and(|live| live.driver.session.open_chat == Some(reply.chat_id))
-                })
-                .map(|reply| quill::telegram::SendReply {
-                    message_id: reply.message_id,
-                    quote: reply
-                        .quote
-                        .as_ref()
-                        .map(|quote| (quote.text.clone(), quote.position)),
-                });
+            let reply_to = self.recording_send_reply();
             let result = self.live.as_mut().expect("live").driver.send_voice_note(
                 &draft,
                 caption.trim(),
@@ -8876,6 +9053,135 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// Reply target for a recording send: the pending reply when it belongs
+    /// to the open chat.
+    fn recording_send_reply(&self) -> Option<quill::telegram::SendReply> {
+        let reply = self.pending_reply.as_ref()?;
+        self.live
+            .as_ref()
+            .filter(|live| live.driver.session.open_chat == Some(reply.chat_id))?;
+        Some(quill::telegram::SendReply {
+            message_id: reply.message_id,
+            quote: reply
+                .quote
+                .as_ref()
+                .map(|quote| (quote.text.clone(), quote.position)),
+        })
+    }
+
+    /// MED2: send the finished recording, whichever mode is active.
+    fn send_recording(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.video_note_capture.is_some() {
+            self.send_video_note_recording(window, cx);
+        } else {
+            self.send_voice_recording(window, cx);
+        }
+    }
+
+    /// MED2: finish the round video-note capture and send it
+    /// (`inputMessageVideoNote`). Same lifecycle as `send_voice_recording`:
+    /// slow-mode gate first, the capture is only consumed when the send
+    /// goes ahead, demo mode routes locally.
+    fn send_video_note_recording(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self
+            .open_chat_id()
+            .is_some_and(|chat_id| self.slow_mode_blocked(chat_id, cx))
+        {
+            return;
+        }
+        let Some(capture) = self.video_note_capture.take() else {
+            return;
+        };
+        // MED2 fix-up: the send consumes the recording — locked state must
+        // not leak into the next recording.
+        self.record_locked = false;
+        self.record_discard_confirm = false;
+        let draft = match capture.finish() {
+            Ok(draft) => draft,
+            Err(err) => {
+                self.sync_voice_action();
+                self.status_note = err;
+                cx.notify();
+                return;
+            }
+        };
+        let reply = self.pending_reply.clone();
+        if self.live.is_some() {
+            let reply_to = self.recording_send_reply();
+            let result = self
+                .live
+                .as_mut()
+                .expect("live")
+                .driver
+                .send_recorded_video_note(&draft, reply_to);
+            self.status_note = match result {
+                Ok(_) => "sending video note".into(),
+                Err(_) => "could not send video note".into(),
+            };
+            if self.status_note == "sending video note" {
+                self.pending_reply = None;
+                self.clear_draft_on_success = Some(
+                    self.live
+                        .as_ref()
+                        .and_then(|live| live.driver.session.open_chat)
+                        .unwrap_or(ChatId(0)),
+                );
+                self.composer
+                    .update(cx, |input, cx| input.set_value("", window, cx));
+                if let Some(open) = self.open_chat_id() {
+                    self.forget_local_draft(open);
+                }
+            }
+        } else if self.demo_session.is_some() {
+            if let Some(att) = ComposerAttachment::pick(&draft.path, AttachmentKind::VideoNote) {
+                self.apply_demo_outgoing("", Some(&att), reply.as_ref());
+                self.pending_reply = None;
+                self.composer
+                    .update(cx, |input, cx| input.set_value("", window, cx));
+                if let Some(open) = self.demo_session.as_ref().and_then(|s| s.open_chat) {
+                    self.forget_local_draft(open);
+                }
+                self.status_note = "demo video note applied locally (no live Telegram)".into();
+            } else {
+                self.status_note = "demo: recorded clip is outside the sendable paths".into();
+            }
+        }
+        self.sync_voice_action();
+        cx.notify();
+    }
+
+    /// MED2: ask TDLib to recognize speech in a voice/video note
+    /// (`recognizeSpeech`, 1.8.67). The transcript arrives later via
+    /// `updateMessageContent`; a refusal is surfaced, never faked.
+    fn request_transcription(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(live) = self.live.as_mut() {
+            match live.driver.recognize_speech(chat_id, message_id) {
+                Ok(_) => self.status_note = "transcription requested".into(),
+                Err(_) => self.status_note = "couldn't request transcription".into(),
+            }
+        } else {
+            self.status_note = "demo: transcription needs a live connection".into();
+        }
+        cx.notify();
+    }
+
+    fn toggle_hq_round_videos(&mut self, cx: &mut Context<Self>) {
+        let next = !self
+            .session()
+            .is_some_and(|session| session.media_prefs.hq_round_videos);
+        self.set_media_pref(|prefs| prefs.hq_round_videos = next, cx);
+        self.status_note = if next {
+            "HQ round videos on — 480px captures".into()
+        } else {
+            "HQ round videos off — 280px captures".into()
+        };
+        cx.notify();
+    }
     fn apply_demo_voice(
         &mut self,
         draft: &quill::voice::VoiceDraft,
@@ -8914,14 +9220,22 @@ impl QuillApp {
         }
     }
 
+    /// While a recording bar is active, sync `chatActionRecordingVoiceNote`
+    /// / `chatActionRecordingVideoNote` to the open chat (Unigram record
+    /// actions). Cancels when recording stops.
     fn sync_voice_action(&mut self) {
-        let active = self.voice_capture.is_some();
+        let voice = self.voice_capture.is_some();
+        let video = self.video_note_capture.is_some();
         let now_ms = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_millis() as u64)
             .unwrap_or(0);
         if let Some(live) = self.live.as_mut() {
-            let _ = live.driver.sync_voice_recording(active, now_ms);
+            if video {
+                let _ = live.driver.sync_video_note_recording(true, now_ms);
+            } else {
+                let _ = live.driver.sync_voice_recording(voice, now_ms);
+            }
         }
     }
 
@@ -9181,9 +9495,11 @@ impl QuillApp {
                     .await;
                 let cont = this
                     .update(cx, |this, cx| {
-                        let recording = this.voice_capture.is_some();
+                        let recording = this.recording_active();
                         if let Some(capture) = this.voice_capture.as_mut() {
                             capture.sample_bar();
+                        }
+                        if recording {
                             this.sync_voice_action();
                             cx.notify();
                         }
@@ -11392,8 +11708,8 @@ impl QuillApp {
     }
 
     fn toggle_gif_panel(&mut self, cx: &mut Context<Self>) {
-        if self.voice_capture.is_some() {
-            self.cancel_voice_recording(cx);
+        if self.recording_active() {
+            self.cancel_recording(cx);
         }
         if self.gif_panel_open() {
             self.close_gif_panel(cx);
@@ -11487,8 +11803,8 @@ impl QuillApp {
     }
 
     fn toggle_sticker_panel(&mut self, cx: &mut Context<Self>) {
-        if self.voice_capture.is_some() {
-            self.cancel_voice_recording(cx);
+        if self.recording_active() {
+            self.cancel_recording(cx);
         }
         if self.sticker_panel_open() {
             self.close_sticker_panel(cx);
@@ -12241,6 +12557,7 @@ impl QuillApp {
             }
         }
         list = list.child(self.call_settings_section(cx));
+        list = list.child(self.media_settings_section(cx));
         list
     }
 
@@ -12542,6 +12859,50 @@ impl QuillApp {
                     ))
                     .into_any_element()
             })
+    }
+
+    /// MED2: media settings section — the HQ round-video toggle (TGX
+    /// "Record HQ Round Videos" / `UseHqRoundVideos`). Persisted in
+    /// `MediaPrefs`; 480px captures when on, 280px otherwise.
+    fn media_settings_section(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let hq = self
+            .session()
+            .is_some_and(|session| session.media_prefs.hq_round_videos);
+        div()
+            .flex()
+            .flex_col()
+            .gap_1()
+            .mt_2()
+            .child(
+                div()
+                    .text_sm()
+                    .font_semibold()
+                    .px_1()
+                    .child("Media settings"),
+            )
+            .child(
+                div()
+                    .id("media-pref-hq-round")
+                    .cursor_pointer()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .px_2()
+                    .py_1()
+                    .rounded_md()
+                    .child(div().text_xs().child(if hq { "●" } else { "○" }))
+                    .child(
+                        div().text_sm().child("Record HQ round videos").child(
+                            div()
+                                .text_xs()
+                                .text_color(cx.theme().muted_foreground)
+                                .child("Capture round video notes at 480px instead of 280px"),
+                        ),
+                    )
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.toggle_hq_round_videos(cx);
+                    })),
+            )
     }
 
     fn open_user_panel(&mut self, user_id: i64, window: &mut Window, cx: &mut Context<Self>) {
@@ -19206,8 +19567,8 @@ impl QuillApp {
         // Phase 3.3: the `/` menu never survives a chat switch.
         self.command_menu_open = false;
         self.command_menu_selected = 0;
-        if self.voice_capture.is_some() {
-            self.cancel_voice_recording(cx);
+        if self.recording_active() {
+            self.cancel_recording(cx);
         }
     }
 
@@ -26151,8 +26512,8 @@ impl QuillApp {
                         .flex()
                         .flex_col()
                         .gap_2()
-                        .when(self.voice_capture.is_some(), |this| {
-                            this.child(self.voice_record_bar(cx))
+                        .when(self.recording_active(), |this| {
+                            this.child(self.record_bar(cx))
                         })
                         .when(show_attach, |box_| {
                             box_.child(
@@ -26216,15 +26577,30 @@ impl QuillApp {
                                             })),
                                     )
                                     .child(
-                                        Button::new("record-voice")
-                                            .label(if self.voice_capture.is_some() {
-                                                "Recording"
-                                            } else {
-                                                "Voice"
-                                            })
-                                            .on_click(cx.listener(|this, _, _, cx| {
-                                                this.start_voice_recording(cx);
-                                            })),
+                                        // MED2: click records in the current
+                                        // mode; right-click flips audio/video
+                                        // mode (TGX tap-to-switch,
+                                        // desktop-mapped).
+                                        div()
+                                            .id("record-mode-wrap")
+                                            .on_mouse_down(
+                                                MouseButton::Right,
+                                                cx.listener(|this, _, _, cx| {
+                                                    this.toggle_record_mode(cx);
+                                                }),
+                                            )
+                                            .child(
+                                                Button::new("record-voice")
+                                                    .label(if self.recording_active() {
+                                                        "Recording"
+                                                    } else {
+                                                        self.record_mode().label()
+                                                    })
+                                                    .tooltip(self.record_mode().hint())
+                                                    .on_click(cx.listener(|this, _, _, cx| {
+                                                        this.start_recording(cx);
+                                                    })),
+                                            ),
                                     )
                                     .when(!self.pending_attachments.is_empty(), |row| {
                                         row.child(
@@ -26564,17 +26940,34 @@ impl QuillApp {
         cx.notify();
     }
 
-    fn voice_record_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let seconds = self
-            .voice_capture
-            .as_ref()
-            .map(|capture| capture.elapsed_secs())
-            .unwrap_or(0);
+    /// MED2: the record bar for voice and round video-note captures:
+    /// elapsed time + waveform (voice only), Lock/Unlock (TGX `RecordLockView`,
+    /// desktop-mapped), Cancel (asks for confirmation), Send. A locked
+    /// recording ignores Esc.
+    fn record_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let video = self.video_note_capture.is_some();
+        let seconds = if video {
+            self.video_note_capture
+                .as_ref()
+                .map(|capture| capture.elapsed_secs())
+                .unwrap_or(0)
+        } else {
+            self.voice_capture
+                .as_ref()
+                .map(|capture| capture.elapsed_secs())
+                .unwrap_or(0)
+        };
         let bars = self
             .voice_capture
             .as_ref()
             .map(|capture| capture.bars.clone())
             .unwrap_or_default();
+        let title = format!(
+            "Recording {} · {}{}",
+            if video { "video" } else { "voice" },
+            format_voice_duration(seconds),
+            if self.record_locked { " · locked" } else { "" },
+        );
         div()
             .id("voice-record-bar")
             .px_3()
@@ -26596,30 +26989,70 @@ impl QuillApp {
                             .text_sm()
                             .font_medium()
                             .text_color(rgb(0xffffff))
-                            .child(format!(
-                                "Recording voice · {}",
-                                format_voice_duration(seconds)
-                            )),
+                            .child(title),
                     )
-                    .child(
-                        div()
-                            .flex()
-                            .gap_2()
-                            .child(Button::new("cancel-voice").label("Cancel").on_click(
-                                cx.listener(|this, _, _, cx| {
-                                    this.cancel_voice_recording(cx);
-                                }),
-                            ))
-                            .child(
-                                Button::new("send-voice")
-                                    .label("Send")
-                                    .on_click(cx.listener(|this, _, window, cx| {
-                                        this.send_voice_recording(window, cx);
-                                    })),
-                            ),
-                    ),
+                    .child(self.record_bar_actions(cx)),
             )
-            .child(waveform_row(0, &bars))
+            .when(!video, |this| this.child(waveform_row(0, &bars)))
+    }
+
+    /// MED2: the record bar's right-side row — either the normal
+    /// Lock/Cancel/Send buttons or the discard-confirmation row.
+    fn record_bar_actions(&self, cx: &mut Context<Self>) -> AnyElement {
+        if self.record_discard_confirm {
+            return div()
+                .flex()
+                .items_center()
+                .gap_2()
+                .child(
+                    div()
+                        .text_sm()
+                        .text_color(rgb(0xffffff))
+                        .child("Discard this recording?"),
+                )
+                .child(
+                    Button::new("discard-record-confirm")
+                        .label("Discard")
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.confirm_discard_recording(cx);
+                        })),
+                )
+                .child(
+                    Button::new("keep-recording")
+                        .label("Keep recording")
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.record_discard_confirm = false;
+                            cx.notify();
+                        })),
+                )
+                .into_any_element();
+        }
+        div()
+            .flex()
+            .gap_2()
+            .child(
+                Button::new("lock-record")
+                    .label(if self.record_locked { "Unlock" } else { "Lock" })
+                    .tooltip("Lock: hands-free recording — Esc won't cancel")
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.toggle_record_lock(cx);
+                    })),
+            )
+            .child(
+                Button::new("cancel-record")
+                    .label("Cancel")
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.request_discard_recording(cx);
+                    })),
+            )
+            .child(
+                Button::new("send-record")
+                    .label("Send")
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.send_recording(window, cx);
+                    })),
+            )
+            .into_any_element()
     }
 
     /// Phase S1: peer display name for a secret chat — the user's
@@ -30139,8 +30572,10 @@ fn apply_ready_voice(session: &mut Session, sink: &Arc<MemorySink>, seq: &Atomic
     let incoming_file = demo_file_json(81, &path, true);
     let outgoing_file = demo_file_json(82, &path, true);
     let wave_json = serde_json::to_string(&wave).unwrap_or_else(|_| "\"\"".into());
+    // MED2: the incoming note carries a real transcript so the demo
+    // shows the transcription row.
     let incoming = format!(
-        r#"{{"@type":"updateNewMessage","message":{{"id":90,"chat_id":11,"is_outgoing":false,"content":{{"@type":"messageVoiceNote","voice_note":{{"@type":"voiceNote","duration":12,"waveform":{wave_json},"mime_type":"audio/ogg","speech_recognition_result":null,"voice":{incoming_file}}},"caption":{{"@type":"formattedText","text":"","entities":[]}},"is_listened":false}}}}}}"#
+        r#"{{"@type":"updateNewMessage","message":{{"id":90,"chat_id":11,"is_outgoing":false,"content":{{"@type":"messageVoiceNote","voice_note":{{"@type":"voiceNote","duration":12,"waveform":{wave_json},"mime_type":"audio/ogg","speech_recognition_result":{{"@type":"speechRecognitionResultText","text":"don't forget the milk"}},"voice":{incoming_file}}},"caption":{{"@type":"formattedText","text":"","entities":[]}},"is_listened":false}}}}}}"#
     );
     let outgoing = format!(
         r#"{{"@type":"updateNewMessage","message":{{"id":91,"chat_id":11,"is_outgoing":true,"content":{{"@type":"messageVoiceNote","voice_note":{{"@type":"voiceNote","duration":3,"waveform":{wave_json},"mime_type":"audio/ogg","speech_recognition_result":null,"voice":{outgoing_file}}},"caption":{{"@type":"formattedText","text":"","entities":[]}},"is_listened":true}}}}}}"#
@@ -33362,6 +33797,62 @@ fn video_attachment(
 /// circle (JPEG thumb, duration, play). Quill uses the same ffmpeg frames as
 /// `messageVideo`, clipped to a circle. Diameter on screen is fixed; schema
 /// `length` is the sender's pixel size, shown when the file is not local yet.
+/// MED2: the transcription row under a voice/video note. When TDLib has
+/// delivered a `speechRecognitionResult` (via `updateMessageContent`), the
+/// transcript shows; otherwise the row offers a real `recognizeSpeech`
+/// request — pending/error states are shown honestly, never faked.
+fn transcription_row(
+    chat_id: ChatId,
+    message_id: MessageId,
+    transcription: &Option<SpeechRecognition>,
+    cx: &mut Context<QuillApp>,
+) -> AnyElement {
+    match transcription {
+        None => div()
+            .child(
+                Button::new(format!("transcribe-{row}", row = message_id.0))
+                    .label("Transcribe")
+                    .tooltip("Send speech-recognition request to Telegram")
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.request_transcription(chat_id, message_id, cx);
+                    })),
+            )
+            .into_any_element(),
+        Some(SpeechRecognition::Pending { partial_text }) => div()
+            .text_xs()
+            .text_color(rgb(0x8b949e))
+            .child(if partial_text.is_empty() {
+                "Transcribing…".to_string()
+            } else {
+                format!("Transcribing… {partial_text}")
+            })
+            .into_any_element(),
+        Some(SpeechRecognition::Text { text }) => div()
+            .text_xs()
+            .text_color(rgb(0xffffff))
+            .child(format!("“{text}”"))
+            .into_any_element(),
+        Some(SpeechRecognition::Error { message }) => div()
+            .flex()
+            .flex_col()
+            .gap_1()
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(rgb(0xf85149))
+                    .child(format!("Transcription failed: {message}")),
+            )
+            .child(
+                Button::new(format!("transcribe-retry-{row}", row = message_id.0))
+                    .label("Retry")
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.request_transcription(chat_id, message_id, cx);
+                    })),
+            )
+            .into_any_element(),
+    }
+}
+
 fn video_note_attachment(
     chat_id: ChatId,
     message_id: MessageId,
@@ -33525,6 +34016,14 @@ fn video_note_attachment(
                     );
                 })),
         )
+        // MED2: transcription under the play button (schema 1.8.67
+        // `speechRecognitionResult` on `videoNote`).
+        .child(transcription_row(
+            chat_id,
+            message_id,
+            &note.transcription,
+            cx,
+        ))
         .into_any_element()
 }
 
@@ -33779,6 +34278,14 @@ fn voice_note_row(
         )
         .child(waveform_row(message_id.0 as u64, &bars))
         .child(seek_bar_element(message_id.0 as u64, seek))
+        // MED2: transcription (schema 1.8.67 `speechRecognitionResult`
+        // on `voiceNote`).
+        .child(transcription_row(
+            chat_id,
+            message_id,
+            &note.transcription,
+            cx,
+        ))
         // MED1: speed + mute on the active row.
         .when(active, |this| {
             this.child(row_playback_controls(

@@ -5122,6 +5122,56 @@ pub struct VoiceNoteContent {
     pub caption_entities: Vec<TextEntity>,
     pub is_listened: bool,
     pub file_id: FileId,
+    /// MED2: `speech_recognition_result` (`SpeechRecognitionResult`;
+    /// `None` when TDLib sent null / the field is absent).
+    pub transcription: Option<SpeechRecognition>,
+}
+
+/// `speechRecognitionResult` (TDLib 1.8.67, schema lines 7390-7399):
+/// the outcome of `recognizeSpeech` on a voice or video note.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SpeechRecognition {
+    /// `speechRecognitionResultPending` — TDLib is still recognizing.
+    Pending { partial_text: String },
+    /// `speechRecognitionResultText` — final transcript.
+    Text { text: String },
+    /// `speechRecognitionResultError` — recognition failed server-side.
+    Error { message: String },
+}
+
+/// Parse `speech_recognition_result` (`SpeechRecognitionResult`, may be
+/// null). Unknown `@type` values map to `None` — never a fake result.
+fn parse_speech_recognition(value: Option<&Value>) -> Option<SpeechRecognition> {
+    let result = value?;
+    if result.is_null() {
+        return None;
+    }
+    let kind = result.get("@type").and_then(Value::as_str)?;
+    match kind {
+        "speechRecognitionResultPending" => Some(SpeechRecognition::Pending {
+            partial_text: result
+                .get("partial_text")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string(),
+        }),
+        "speechRecognitionResultText" => Some(SpeechRecognition::Text {
+            text: result
+                .get("text")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string(),
+        }),
+        "speechRecognitionResultError" => Some(SpeechRecognition::Error {
+            message: result
+                .get("error")
+                .and_then(|error| error.get("message"))
+                .and_then(Value::as_str)
+                .unwrap_or("transcription failed")
+                .to_string(),
+        }),
+        _ => None,
+    }
 }
 
 /// `messageSticker` (TDLib 1.8.67). Display uses `thumbnail` (WEBP/JPEG) or a WEBP `sticker` file.
@@ -5248,12 +5298,15 @@ impl VideoContent {
 /// `videoNote` inside `messageVideoNote` (TDLib 1.8.67).
 ///
 /// Schema: square MPEG4 cropped to a circle. Fields stored are `duration`,
-/// `waveform`, `length` (width and height), `thumbnail`, `video`, plus
-/// `is_viewed` and `is_secret` on the message. `minithumbnail` and
-/// `speech_recognition_result` are left unused.
+/// `waveform`, `length` (width and height), `thumbnail`, `video`,
+/// `speech_recognition_result`, plus `is_viewed` and `is_secret` on the
+/// message. `minithumbnail` is left unused.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VideoNoteContent {
     pub duration: i32,
+    /// MED2: `speech_recognition_result` (`SpeechRecognitionResult`;
+    /// `None` when TDLib sent null / the field is absent).
+    pub transcription: Option<SpeechRecognition>,
     /// Raw `waveform` bytes (5-bit packed). Empty when unknown.
     pub waveform: Vec<u8>,
     /// Video width and height, as defined by the sender.
@@ -8602,6 +8655,7 @@ fn parse_message_video_note(value: &Value) -> (MessageContent, Vec<ParsedFile>) 
             thumb_file_id,
             thumb_width,
             thumb_height,
+            transcription: parse_speech_recognition(note.get("speech_recognition_result")),
         }),
         files,
     )
@@ -8928,6 +8982,9 @@ fn parse_message_voice_note(value: &Value) -> (MessageContent, Vec<ParsedFile>) 
                 .and_then(Value::as_bool)
                 .unwrap_or(false),
             file_id,
+            transcription: parse_speech_recognition(
+                voice_note.and_then(|note| note.get("speech_recognition_result")),
+            ),
         }),
         files,
     )
@@ -10864,6 +10921,68 @@ mod tests {
             }
             other => panic!("{other:?}"),
         }
+    }
+
+    #[test]
+    fn speech_recognition_result_shapes_parse() {
+        // MED2: what the parser is ultimately validating — the three
+        // TDLib `SpeechRecognitionResult` shapes land on the enum, null
+        // and unknown types stay `None` (never a fake result).
+        let pending = serde_json::json!({
+            "@type": "speechRecognitionResultPending",
+            "partial_text": "hel"
+        });
+        assert_eq!(
+            parse_speech_recognition(Some(&pending)),
+            Some(SpeechRecognition::Pending {
+                partial_text: "hel".into()
+            })
+        );
+        let text = serde_json::json!({
+            "@type": "speechRecognitionResultText",
+            "text": "hello world"
+        });
+        assert_eq!(
+            parse_speech_recognition(Some(&text)),
+            Some(SpeechRecognition::Text {
+                text: "hello world".into()
+            })
+        );
+        let error = serde_json::json!({
+            "@type": "speechRecognitionResultError",
+            "error": { "@type": "error", "code": 400, "message": "SPEECH_RECOGNITION_TOO_MANY" }
+        });
+        assert_eq!(
+            parse_speech_recognition(Some(&error)),
+            Some(SpeechRecognition::Error {
+                message: "SPEECH_RECOGNITION_TOO_MANY".into()
+            })
+        );
+        assert_eq!(
+            parse_speech_recognition(Some(&serde_json::Value::Null)),
+            None
+        );
+        assert_eq!(parse_speech_recognition(None), None);
+        let unknown = serde_json::json!({ "@type": "speechRecognitionResultFuture" });
+        assert_eq!(parse_speech_recognition(Some(&unknown)), None);
+    }
+
+    #[test]
+    fn voice_note_transcription_text_parses_end_to_end() {
+        let json = r#"{"@type":"updateNewMessage","message":{"id":8,"chat_id":11,"is_outgoing":false,"content":{"@type":"messageVoiceNote","voice_note":{"@type":"voiceNote","duration":12,"waveform":"","mime_type":"audio/ogg","speech_recognition_result":{"@type":"speechRecognitionResultText","text":"buy milk"},"voice":{"@type":"file","id":4,"size":9,"expected_size":9,"local":{"@type":"localFile","path":"","can_be_downloaded":true,"can_be_deleted":false,"is_downloading_active":false,"is_downloading_completed":false,"download_offset":0,"downloaded_prefix_size":0,"downloaded_size":0},"remote":{"@type":"remoteFile","id":"r","unique_id":"u","is_uploading_active":false,"is_uploading_completed":true,"uploaded_size":9}}}},"caption":{"@type":"formattedText","text":"","entities":[]},"is_listened":false}}"#;
+        let env = parse_envelope(json).unwrap();
+        let EnvelopePayload::UpdateNewMessage(message) = env.payload else {
+            panic!("voice note");
+        };
+        let MessageContent::VoiceNote(note) = &message.content else {
+            panic!("content");
+        };
+        assert_eq!(
+            note.transcription,
+            Some(SpeechRecognition::Text {
+                text: "buy milk".into()
+            })
+        );
     }
 
     #[test]

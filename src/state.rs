@@ -177,6 +177,10 @@ pub enum RequestPurpose {
     /// Response is `ok`. `is_listened` / `is_viewed` arrive as
     /// `updateMessageContentOpened`.
     OpenMessageContent,
+    /// MED2: `recognizeSpeech`. Response is `ok`; the transcript arrives
+    /// later via `updateMessageContent` on the message's
+    /// `speech_recognition_result`.
+    RecognizeSpeech,
     /// `getInstalledStickerSets` (`stickerTypeRegular`). Response is `stickerSets`.
     GetInstalledStickerSets,
     /// `getStickerSet`. Response is `stickerSet`.
@@ -2825,6 +2829,11 @@ pub struct Session {
     /// request errors. The UI drains it into the status note so the
     /// click never silently does nothing.
     pub message_link_error: Option<String>,
+    /// MED2 fix-up: one-shot; set when TDLib refuses a `recognizeSpeech`
+    /// request. The UI drains it into the status note — previously the
+    /// error fell into the `_ => {}` swallower and the user saw
+    /// "transcription requested" followed by silence.
+    pub recognize_speech_error: Option<String>,
     /// M1 fix-up: one-shot; set when a `resendMessages` request errors.
     /// The UI drains it into the status note — previously the error fell
     /// into the `_ => {}` swallower and the user saw "retrying send…"
@@ -3490,6 +3499,7 @@ impl Session {
             histories: HashMap::new(),
             message_link_result: None,
             message_link_error: None,
+            recognize_speech_error: None,
             resend_error: None,
             invite_link_error: None,
             scheduled_messages: Vec::new(),
@@ -6585,6 +6595,16 @@ impl Session {
                         self.message_link_error =
                             Some(call_request_error_line(&err, "Could not get message link"));
                     }
+                    // MED2 fix-up: a refused `recognizeSpeech` surfaces in
+                    // the status note instead of vanishing into `_ => {}` —
+                    // the row says "transcription requested" and the user
+                    // deserves an answer either way.
+                    Some(RequestPurpose::RecognizeSpeech) => {
+                        self.recognize_speech_error = Some(call_request_error_line(
+                            &err,
+                            "Could not transcribe this message",
+                        ));
+                    }
                     _ => {}
                 }
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::LoadChats) && err.code == 404
@@ -8902,6 +8922,28 @@ mod tests {
             .message_link_error
             .expect("message link error surfaced");
         assert!(err.contains("Could not get message link"), "{err}");
+    }
+
+    /// MED2 fix-up: a refused `recognizeSpeech` surfaces in
+    /// `Session::recognize_speech_error` instead of silently doing nothing.
+    #[test]
+    fn recognize_speech_error_surfaces_instead_of_silence() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        let extra = session.request(RequestPurpose::RecognizeSpeech, Some(ChatId(1)));
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"error","@extra":"{}","code":400,"message":"SPEECH_NOT_RECOGNIZED"}}"#,
+                extra.0,
+            ),
+        );
+        let err = session
+            .recognize_speech_error
+            .expect("recognize speech error surfaced");
+        assert!(err.contains("Could not transcribe this message"), "{err}");
     }
 
     #[test]
