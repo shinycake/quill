@@ -520,6 +520,57 @@ fn viewer_fps_for_duration(duration_secs: i32) -> f64 {
     fps.max(1.0)
 }
 
+fn wait_for_cancelable_child(
+    command: &mut Command,
+    slot: &std::sync::Arc<std::sync::Mutex<Option<std::process::Child>>>,
+    cancelled: &std::sync::atomic::AtomicBool,
+) -> Result<std::process::ExitStatus, String> {
+    use std::sync::atomic::Ordering;
+    if cancelled.load(Ordering::SeqCst) {
+        return Err("ffmpeg extraction was cancelled".to_string());
+    }
+    let child = command
+        .spawn()
+        .map_err(|err| format!("video playback needs ffmpeg ({err})"))?;
+    // Publish the running child so the UI can kill an abandoned
+    // extraction (viewer closed/stepped). The worker polls
+    // `try_wait` instead of blocking in `wait` so it never holds
+    // the slot lock while the UI killer needs it.
+    if let Ok(mut guard) = slot.lock() {
+        *guard = Some(child);
+    }
+    if cancelled.load(Ordering::SeqCst) {
+        // The UI abandoned the run between spawn and publish and
+        // already took the (empty) slot: kill our own child instead
+        // of orphaning it.
+        if let Ok(mut guard) = slot.lock()
+            && let Some(mut child) = guard.take()
+        {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+        return Err("ffmpeg extraction was cancelled".to_string());
+    }
+    loop {
+        let mut guard = slot
+            .lock()
+            .map_err(|_| "extraction slot poisoned".to_string())?;
+        let Some(child) = guard.as_mut() else {
+            // Slot emptied by the UI killer: it took the child and
+            // is killing/reaping it — report cancellation. (The UI
+            // drops stale completions by epoch instead of showing
+            // an error.)
+            return Err("ffmpeg extraction was cancelled".to_string());
+        };
+        if let Some(status) = child.try_wait().map_err(|err| err.to_string())? {
+            guard.take();
+            return Ok(status);
+        }
+        drop(guard);
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+}
+
 fn extract_frames(
     src: &Path,
     cache_dir: &Path,
@@ -553,52 +604,7 @@ fn extract_frames(
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null());
     let status = match child_slot {
-        Some((slot, cancelled)) => {
-            use std::sync::atomic::Ordering;
-            if cancelled.load(Ordering::SeqCst) {
-                return Err("ffmpeg extraction was cancelled".to_string());
-            }
-            let child = command
-                .spawn()
-                .map_err(|err| format!("video playback needs ffmpeg ({err})"))?;
-            // Publish the running child so the UI can kill an abandoned
-            // extraction (viewer closed/stepped). The worker polls
-            // `try_wait` instead of blocking in `wait` so it never holds
-            // the slot lock while the UI killer needs it.
-            if let Ok(mut guard) = slot.lock() {
-                *guard = Some(child);
-            }
-            if cancelled.load(Ordering::SeqCst) {
-                // The UI abandoned the run between spawn and publish and
-                // already took the (empty) slot: kill our own child instead
-                // of orphaning it.
-                if let Ok(mut guard) = slot.lock()
-                    && let Some(mut child) = guard.take()
-                {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                }
-                return Err("ffmpeg extraction was cancelled".to_string());
-            }
-            loop {
-                let mut guard = slot
-                    .lock()
-                    .map_err(|_| "extraction slot poisoned".to_string())?;
-                let Some(child) = guard.as_mut() else {
-                    // Slot emptied by the UI killer: it took the child and
-                    // is killing/reaping it — report cancellation. (The UI
-                    // drops stale completions by epoch instead of showing
-                    // an error.)
-                    return Err("ffmpeg extraction was cancelled".to_string());
-                };
-                if let Some(status) = child.try_wait().map_err(|err| err.to_string())? {
-                    guard.take();
-                    break status;
-                }
-                drop(guard);
-                std::thread::sleep(std::time::Duration::from_millis(50));
-            }
-        }
+        Some((slot, cancelled)) => wait_for_cancelable_child(&mut command, slot, cancelled)?,
         None => command
             .status()
             .map_err(|err| format!("video playback needs ffmpeg ({err})"))?,
@@ -624,6 +630,18 @@ fn extract_frames(
 mod tests {
     use super::*;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn ffmpeg_can_extract(src: &Path) -> bool {
+        Command::new("ffmpeg")
+            .args(["-v", "error", "-i"])
+            .arg(src)
+            .args(["-frames:v", "1", "-f", "null", "-"])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .is_ok_and(|status| status.success())
+    }
 
     #[test]
     fn non_video_is_rejected() {
@@ -728,9 +746,23 @@ mod tests {
     }
 
     #[test]
+    fn viewer_fps_adapts_to_duration_and_frame_budget() {
+        assert_eq!(viewer_fps_for_duration(0), 8.0);
+        assert_eq!(viewer_fps_for_duration(75), 8.0);
+        assert_eq!(viewer_fps_for_duration(76), 600.0 / 76.0);
+        assert_eq!(viewer_fps_for_duration(300), 2.0);
+        assert_eq!(viewer_fps_for_duration(600), 1.0);
+        assert_eq!(viewer_fps_for_duration(601), 1.0);
+    }
+
+    #[test]
     fn viewer_frames_cover_full_clip_with_adaptive_fps() {
         let clip = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("docs/screenshots/fixtures/demo-clip-12s.mp4");
+        if !ffmpeg_can_extract(&clip) {
+            eprintln!("skipping ffmpeg smoke test: ffmpeg cannot extract the demo clip");
+            return;
+        }
         let nanos = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("time")
@@ -740,10 +772,6 @@ mod tests {
         let vf = viewer_playback_frames(&clip, "video/mp4", &cache, 0, 12).expect("frames");
         assert_eq!(vf.fps, 8.0);
         assert_eq!(vf.frames.len(), 96);
-        // A long clip gets a lower fps so the full duration stays covered.
-        let vf_long = viewer_playback_frames(&clip, "video/mp4", &cache, 0, 300).expect("frames");
-        assert_eq!(vf_long.fps, 2.0);
-        assert!(vf_long.frames.len() <= 600);
         let _ = std::fs::remove_dir_all(&cache);
     }
 
@@ -784,54 +812,38 @@ mod tests {
 
     #[test]
     fn cancelable_extraction_kill_aborts_and_reports_cancelled() {
-        let clip = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("docs/screenshots/fixtures/demo-clip-12s.mp4");
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("time")
-            .as_nanos();
-        let cache = std::env::temp_dir().join(format!("quill-viewer-cancel-test-{nanos}"));
         let slot = std::sync::Arc::new(std::sync::Mutex::new(None));
-        let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let worker_slot = slot.clone();
-        let worker_cancel = cancel.clone();
-        let worker_cache = cache.clone();
-        let handle = std::thread::spawn(move || {
-            viewer_playback_frames_cancelable(
-                &clip,
-                "video/mp4",
-                &worker_cache,
-                0,
-                12,
-                &worker_slot,
-                &worker_cancel,
-            )
-        });
-        // Wait for ffmpeg to be published, then kill it the way the UI
-        // does on viewer close/step.
-        let mut published = false;
-        for _ in 0..200 {
-            if slot.lock().map(|guard| guard.is_some()).unwrap_or(false) {
-                published = true;
-                break;
+        let cancel = std::sync::atomic::AtomicBool::new(false);
+        std::thread::scope(|scope| {
+            let handle = scope.spawn(|| {
+                let mut command = Command::new("sleep");
+                command.arg("30");
+                wait_for_cancelable_child(&mut command, &slot, &cancel)
+            });
+            // Wait for the child to be published, then kill it the way the UI
+            // does on viewer close/step.
+            let mut published = false;
+            for _ in 0..200 {
+                if slot.lock().map(|guard| guard.is_some()).unwrap_or(false) {
+                    published = true;
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(50));
             }
-            std::thread::sleep(std::time::Duration::from_millis(50));
-        }
-        assert!(published, "ffmpeg child was published to the slot");
-        let mut child = slot
-            .lock()
-            .ok()
-            .and_then(|mut guard| guard.take())
-            .expect("child present");
-        child.kill().expect("kill extraction");
-        child.wait().expect("reap extraction");
-        drop(child);
-        let err = handle.join().expect("worker thread").unwrap_err();
-        assert!(
-            err.contains("cancelled"),
-            "expected a cancellation error, got: {err}"
-        );
-        let _ = std::fs::remove_dir_all(&cache);
+            assert!(published, "child was published to the slot");
+            let mut child = slot
+                .lock()
+                .ok()
+                .and_then(|mut guard| guard.take())
+                .expect("child present");
+            child.kill().expect("kill extraction");
+            child.wait().expect("reap extraction");
+            let err = handle.join().expect("worker thread").unwrap_err();
+            assert!(
+                err.contains("cancelled"),
+                "expected a cancellation error, got: {err}"
+            );
+        });
     }
 
     #[test]
