@@ -16,10 +16,11 @@ use crate::telegram::envelope::{
     MessageAutoDelete, MessageContent, MessageForwardInfo, MessageInteractionInfo, MessageOrigin,
     MessageReaction, MessageReplyTo, MessageSelfDestruct, MessageSender, NotificationSettingsScope,
     NotificationSound, ParsedCall, ParsedChatEvent, ParsedChatInviteLink, ParsedChatJoinRequest,
-    ParsedChatMember, ParsedFile, ParsedGroupCall, ParsedGroupCallParticipant, ParsedMessage,
-    ParsedSecretChat, ParsedStory, ParsedUser, ParsedVideoChat, Poll, ReportOption,
-    ReportSponsoredResult, ScopeNotificationSettings, SecretChatState, SponsoredMessage,
-    StickerFormat, StickerItem, StickerSetInfo, StoryAvailableReactionView, StoryListView, TdError,
+    ParsedChatMember, ParsedFile, ParsedGroupCall, ParsedGroupCallMessage,
+    ParsedGroupCallParticipant, ParsedMessage, ParsedSecretChat, ParsedStory, ParsedUser,
+    ParsedVideoChat, Poll, ReportOption, ReportSponsoredResult, ScopeNotificationSettings,
+    SecretChatState, SponsoredMessage, StickerFormat, StickerItem, StickerSetInfo,
+    StoryAvailableReactionView, StoryListView, TdError,
 };
 use crate::telegram::envelope::{CallState, ReadyParams};
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -367,6 +368,47 @@ pub enum RequestPurpose {
     /// Phase C3a: `setVideoChatTitle`. Response is `ok`; the new title
     /// arrives as `updateGroupCall`.
     SetVideoChatTitle {
+        group_call_id: i32,
+    },
+    /// Phase C2h: `revokeGroupCallInviteLink`. Response is `ok`;
+    /// clears the cached invite link.
+    RevokeVideoChatInviteLink {
+        group_call_id: i32,
+    },
+    /// Phase C2h: `startGroupCallRecording`. Response is `ok`;
+    /// recording state arrives as `updateGroupCall`
+    /// (`record_duration` / `is_video_recorded`).
+    StartGroupCallRecording {
+        group_call_id: i32,
+    },
+    /// Phase C2h: `endGroupCallRecording`. Response is `ok`;
+    /// recording state arrives as `updateGroupCall`.
+    EndGroupCallRecording {
+        group_call_id: i32,
+    },
+    /// Phase C2h: `startScheduledVideoChat`. Response is `ok`;
+    /// the call goes live via `updateGroupCall` /
+    /// `updateNewVideoChat`.
+    StartScheduledVideoChat {
+        group_call_id: i32,
+    },
+    /// Phase C2h: `getVideoChatRtmpUrl`. Response is `rtmpUrl`.
+    GetVideoChatRtmpUrl {
+        chat_id: i64,
+    },
+    /// Phase C2h: `replaceVideoChatRtmpUrl`. Response is `rtmpUrl`.
+    ReplaceVideoChatRtmpUrl {
+        chat_id: i64,
+    },
+    /// Phase C2h: `sendGroupCallMessage`. Response is `ok`; the
+    /// message arrives back as `updateNewGroupCallMessage` (echo),
+    /// or `updateGroupCallMessageSendFailed` on failure.
+    SendGroupCallMessage {
+        group_call_id: i32,
+    },
+    /// Phase C2h: `toggleGroupCallAreMessagesAllowed`. Response is
+    /// `ok`; the new flag arrives as `updateGroupCall`.
+    ToggleGroupCallAreMessagesAllowed {
         group_call_id: i32,
     },
     /// Phase C3a: `toggleGroupCallIsMyVideoEnabled` /
@@ -2158,12 +2200,34 @@ pub struct ActiveGroupCall {
     pub screen_share_answer: String,
     /// `HttpUrl` from `getVideoChatInviteLink`, fetched on demand.
     pub invite_link: Option<String>,
+    /// Phase C2h: `scheduled_start_date` of a not-yet-started video
+    /// chat (0 = live or unknown). Drives the "starts in …" card.
+    pub scheduled_start_date: i32,
+    /// Phase C2h: `rtmpUrl` from `getVideoChatRtmpUrl` /
+    /// `replaceVideoChatRtmpUrl`, fetched on demand by an admin.
+    pub rtmp_url: Option<String>,
+    pub rtmp_stream_key: Option<String>,
+    /// Phase C2h: in-call chat flags (schema 1.8.67, lines
+    /// 7147-7150).
+    pub can_send_messages: bool,
+    pub are_messages_allowed: bool,
+    pub can_toggle_are_messages_allowed: bool,
+    pub can_delete_messages: bool,
+    /// Phase C2h: in-call chat messages — append-only live feed from
+    /// `updateNewGroupCallMessage` (TDLib has no history getter for
+    /// group-call messages, so only messages seen while joined are
+    /// shown; capped).
+    pub messages: Vec<ParsedGroupCallMessage>,
+    /// Phase C2h: recording state from `updateGroupCall`
+    /// (`record_duration` seconds, 0 = not recording).
+    pub record_duration: i32,
+    pub is_video_recorded: bool,
 }
 
 impl ActiveGroupCall {
     /// Blank tracked call for a newly seen call id. Participant state
     /// repopulates from updates.
-    fn fresh(id: i32) -> Self {
+    pub(crate) fn fresh(id: i32) -> Self {
         ActiveGroupCall {
             id,
             title: String::new(),
@@ -2192,6 +2256,16 @@ impl ActiveGroupCall {
             screen_sharing: false,
             screen_share_answer: String::new(),
             invite_link: None,
+            scheduled_start_date: 0,
+            rtmp_url: None,
+            rtmp_stream_key: None,
+            can_send_messages: false,
+            are_messages_allowed: false,
+            can_toggle_are_messages_allowed: false,
+            can_delete_messages: false,
+            messages: Vec::new(),
+            record_duration: 0,
+            is_video_recorded: false,
         }
     }
 
@@ -3774,6 +3848,58 @@ impl Session {
             } => {
                 self.accept_chat_video_chat(ChatId(chat_id), &video_chat);
             }
+            // Phase C2h: in-call chat message updates.
+            EnvelopePayload::UpdateNewGroupCallMessage {
+                group_call_id,
+                message,
+            } => {
+                self.accept_new_group_call_message(group_call_id, &message);
+            }
+            EnvelopePayload::UpdateGroupCallMessageSendFailed {
+                group_call_id,
+                message_id: _,
+                error,
+            } => {
+                if self
+                    .active_group_call
+                    .as_ref()
+                    .is_some_and(|c| c.id == group_call_id)
+                {
+                    self.group_call_error = Some(call_request_error_line(
+                        &error,
+                        "Could not send the message",
+                    ));
+                }
+            }
+            EnvelopePayload::UpdateGroupCallMessagesDeleted {
+                group_call_id,
+                message_ids,
+            } => {
+                self.accept_group_call_messages_deleted(group_call_id, &message_ids);
+            }
+            // Phase C2h: `rtmpUrl` — the `getVideoChatRtmpUrl` /
+            // `replaceVideoChatRtmpUrl` answer. Stored on the tracked
+            // call whose chat the request targeted.
+            EnvelopePayload::RtmpUrl { url, stream_key } => {
+                if let Some(
+                    RequestPurpose::GetVideoChatRtmpUrl { chat_id }
+                    | RequestPurpose::ReplaceVideoChatRtmpUrl { chat_id },
+                ) = pending.map(|p| p.purpose)
+                {
+                    let call_id = self
+                        .chats
+                        .get(&chat_id)
+                        .and_then(|c| c.video_chat.as_ref())
+                        .map(|vc| vc.group_call_id);
+                    if let (Some(call_id), Some(tracked)) =
+                        (call_id, self.active_group_call.as_mut())
+                        && tracked.id == call_id
+                    {
+                        tracked.rtmp_url = Some(url);
+                        tracked.rtmp_stream_key = Some(stream_key);
+                    }
+                }
+            }
             EnvelopePayload::UpdateChatTitle { chat_id, title } => {
                 self.chats
                     .entry(chat_id.0)
@@ -4594,6 +4720,18 @@ impl Session {
                     {
                         self.leave_group_call_local();
                     }
+                    // Phase C2h: the server confirmed revocation — drop
+                    // the cached link so the UI stops showing it.
+                    Some(RequestPurpose::RevokeVideoChatInviteLink { group_call_id })
+                        if self
+                            .active_group_call
+                            .as_ref()
+                            .is_some_and(|c| c.id == group_call_id) =>
+                    {
+                        if let Some(tracked) = self.active_group_call.as_mut() {
+                            tracked.invite_link = None;
+                        }
+                    }
                     _ => {}
                 }
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::LoadChats) {
@@ -4780,6 +4918,14 @@ impl Session {
                         | RequestPurpose::LoadGroupCallParticipants { .. }
                         | RequestPurpose::GetVideoChatInviteLink { .. }
                         | RequestPurpose::SetVideoChatTitle { .. }
+                        | RequestPurpose::RevokeVideoChatInviteLink { .. }
+                        | RequestPurpose::StartGroupCallRecording { .. }
+                        | RequestPurpose::EndGroupCallRecording { .. }
+                        | RequestPurpose::StartScheduledVideoChat { .. }
+                        | RequestPurpose::GetVideoChatRtmpUrl { .. }
+                        | RequestPurpose::ReplaceVideoChatRtmpUrl { .. }
+                        | RequestPurpose::SendGroupCallMessage { .. }
+                        | RequestPurpose::ToggleGroupCallAreMessagesAllowed { .. }
                         | RequestPurpose::ToggleGroupCallVideo { .. }
                         | RequestPurpose::ToggleGroupCallParticipantMute { .. }
                         | RequestPurpose::ToggleGroupCallParticipantHand { .. }
@@ -5652,6 +5798,26 @@ impl Session {
     /// consumed (no media transport until Phase C2).
     fn accept_group_call_update(&mut self, group_call: &ParsedGroupCall) {
         if !group_call.is_active {
+            // Phase C2h: a scheduled (not yet started) video chat is
+            // still tracked — the overlay shows "starts in …" plus an
+            // admin-only "Start now" (startScheduledVideoChat,
+            // schema/td_api.tl:14277). Join appears once TDLib
+            // activates the call.
+            if group_call.scheduled_start_date > 0 {
+                let tracked = self
+                    .active_group_call
+                    .get_or_insert_with(|| ActiveGroupCall::fresh(group_call.id));
+                if tracked.id != group_call.id {
+                    *tracked = ActiveGroupCall::fresh(group_call.id);
+                }
+                let tracked = self.active_group_call.as_mut().expect("just inserted");
+                tracked.title = group_call.title.clone();
+                tracked.can_be_managed = group_call.can_be_managed;
+                tracked.is_owned = group_call.is_owned;
+                tracked.is_video_chat = group_call.is_video_chat;
+                tracked.scheduled_start_date = group_call.scheduled_start_date;
+                return;
+            }
             if self
                 .active_group_call
                 .as_ref()
@@ -5679,6 +5845,7 @@ impl Session {
         let tracked = self.active_group_call.as_mut().expect("just inserted");
         tracked.title = group_call.title.clone();
         tracked.is_video_chat = group_call.is_video_chat;
+        tracked.scheduled_start_date = 0;
         tracked.is_joined = group_call.is_joined;
         tracked.need_rejoin = group_call.need_rejoin;
         tracked.can_be_managed = group_call.can_be_managed;
@@ -5690,6 +5857,14 @@ impl Session {
         tracked.can_enable_video = group_call.can_enable_video;
         tracked.mute_new_participants = group_call.mute_new_participants;
         tracked.can_toggle_mute_new_participants = group_call.can_toggle_mute_new_participants;
+        // Phase C2h: in-call chat flags + recording state drive the
+        // management UI.
+        tracked.can_send_messages = group_call.can_send_messages;
+        tracked.are_messages_allowed = group_call.are_messages_allowed;
+        tracked.can_toggle_are_messages_allowed = group_call.can_toggle_are_messages_allowed;
+        tracked.can_delete_messages = group_call.can_delete_messages;
+        tracked.record_duration = group_call.record_duration;
+        tracked.is_video_recorded = group_call.is_video_recorded;
         tracked.recent_speaker_order = group_call
             .recent_speakers
             .iter()
@@ -5760,6 +5935,47 @@ impl Session {
             MessageSender::Chat { .. } => true,
         });
         tracked.sort_participants();
+    }
+
+    /// Phase C2h: `updateNewGroupCallMessage`. Appends to the
+    /// in-call chat feed (dedup by message_id; capped — TDLib offers
+    /// no history getter for group-call messages).
+    fn accept_new_group_call_message(
+        &mut self,
+        group_call_id: i32,
+        message: &ParsedGroupCallMessage,
+    ) {
+        let Some(tracked) = self.active_group_call.as_mut() else {
+            return;
+        };
+        if tracked.id != group_call_id {
+            return;
+        }
+        if !tracked
+            .messages
+            .iter()
+            .any(|m| m.message_id == message.message_id)
+        {
+            tracked.messages.push(message.clone());
+            // ponytail: hard cap — no history API exists to backfill.
+            if tracked.messages.len() > 200 {
+                tracked.messages.remove(0);
+            }
+        }
+    }
+
+    /// Phase C2h: `updateGroupCallMessagesDeleted`. Drops the
+    /// deleted ids from the in-call chat feed.
+    fn accept_group_call_messages_deleted(&mut self, group_call_id: i32, message_ids: &[i32]) {
+        let Some(tracked) = self.active_group_call.as_mut() else {
+            return;
+        };
+        if tracked.id != group_call_id {
+            return;
+        }
+        tracked
+            .messages
+            .retain(|m| !message_ids.contains(&m.message_id));
     }
 
     /// Phase C3a: `updateGroupCallVerificationState`. Stores the E2E
@@ -11441,5 +11657,94 @@ mod tests {
         assert_eq!(members.len(), 2);
         assert_eq!(members[0].status, ChannelMemberStatus::Member);
         assert_eq!(members[1].status, ChannelMemberStatus::Administrator);
+    }
+
+    /// Phase C2h: group-call message updates route to the tracked call —
+    /// new messages append (deduped), deletions remove them, and updates
+    /// for other call ids are ignored.
+    #[test]
+    fn group_call_messages_route_to_tracked_call() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        session.active_group_call = Some(ActiveGroupCall::fresh(555));
+        let new_message = |id: i32, call: i32| {
+            format!(
+                r#"{{"@type":"updateNewGroupCallMessage","group_call_id":{call},"message":{{"@type":"groupCallMessage","message_id":{id},"sender_id":{{"@type":"messageSenderUser","user_id":41}},"date":1788000000,"text":{{"@type":"formattedText","text":"hello {id}","entities":[]}},"paid_message_star_count":0,"is_from_owner":false,"can_be_deleted":true}}}}"#
+            )
+        };
+        apply_json(&mut session, &seq, &sink, &new_message(1, 555));
+        apply_json(&mut session, &seq, &sink, &new_message(2, 999));
+        let messages = &session.active_group_call.as_ref().unwrap().messages;
+        assert_eq!(messages.len(), 1, "foreign call id must not append");
+        assert_eq!(messages[0].message_id, 1);
+        assert_eq!(messages[0].text, "hello 1");
+        // Re-delivery of the same id dedupes rather than duplicating.
+        apply_json(&mut session, &seq, &sink, &new_message(1, 555));
+        assert_eq!(
+            session.active_group_call.as_ref().unwrap().messages.len(),
+            1
+        );
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateGroupCallMessagesDeleted","group_call_id":555,"message_ids":[1]}"#,
+        );
+        assert!(
+            session
+                .active_group_call
+                .as_ref()
+                .unwrap()
+                .messages
+                .is_empty()
+        );
+    }
+
+    /// Phase C2h: a scheduled (not yet active) video chat tracks its
+    /// `scheduled_start_date` so the UI can show the start time.
+    #[test]
+    fn scheduled_group_call_tracks_start_date() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateGroupCall","group_call":{"@type":"groupCall","id":555,"unique_id":"999","title":"Planned sync","invite_link":"","paid_message_star_count":0,"scheduled_start_date":1788003600,"enabled_start_notification":false,"is_active":false,"is_video_chat":true,"is_live_story":false,"is_rtmp_stream":false,"is_joined":false,"need_rejoin":false,"is_owned":true,"can_be_managed":true,"participant_count":0,"has_hidden_listeners":false,"loaded_all_participants":false,"message_sender_id":null,"recent_speakers":[],"is_my_video_enabled":false,"is_my_video_paused":false,"can_enable_video":true,"mute_new_participants":false,"can_toggle_mute_new_participants":true,"can_send_messages":true,"are_messages_allowed":true,"can_toggle_are_messages_allowed":true,"can_delete_messages":false,"record_duration":0,"is_video_recorded":false,"duration":0}}"#,
+        );
+        let call = session.active_group_call.as_ref().expect("tracked");
+        assert_eq!(call.scheduled_start_date, 1788003600);
+        assert!(!call.is_joined);
+    }
+
+    /// Phase C2h: the `rtmpUrl` answer caches on the tracked call whose
+    /// chat the request targeted.
+    #[test]
+    fn rtmp_url_answer_caches_on_tracked_call() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        let mut chat = placeholder_chat(ChatId(51));
+        chat.video_chat = Some(VideoChatInfo {
+            group_call_id: 555,
+            has_participants: false,
+        });
+        session.chats.insert(51, chat);
+        session.active_group_call = Some(ActiveGroupCall::fresh(555));
+        let extra = session.request(RequestPurpose::GetVideoChatRtmpUrl { chat_id: 51 }, None);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"rtmpUrl","@extra":"{}","url":"rtmp://dc1-rtmp.telegram.org:443/live","stream_key":"secret-key"}}"#,
+                extra.0
+            ),
+        );
+        let call = session.active_group_call.as_ref().unwrap();
+        assert_eq!(
+            call.rtmp_url.as_deref(),
+            Some("rtmp://dc1-rtmp.telegram.org:443/live")
+        );
+        assert_eq!(call.rtmp_stream_key.as_deref(), Some("secret-key"));
     }
 }

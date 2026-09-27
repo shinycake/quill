@@ -413,6 +413,81 @@ impl AdminDialog {
     }
 }
 
+/// Phase C2h: voice-chat start dialog (`createVideoChat`, schema
+/// 1.8.67, line 14256) — title plus schedule presets. `start_date: 0`
+/// starts immediately; otherwise a Unix timestamp. Presets are
+/// relative offsets so no timezone handling is needed.
+pub struct GroupCallStartDialog {
+    chat_id: ChatId,
+    title_input: Entity<TextareaState>,
+    /// Seconds in the future (0 = now).
+    schedule_offset: i64,
+}
+
+impl GroupCallStartDialog {
+    fn new(
+        window: &mut Window,
+        cx: &mut Context<QuillApp>,
+        chat_id: ChatId,
+        chat_title: &str,
+    ) -> Self {
+        let title_input = cx.new(|cx| {
+            TextareaState::new(window, cx)
+                .placeholder("Voice chat title (empty = chat title)")
+                .auto_grow(1, 2)
+                .submit_on_enter(false)
+        });
+        title_input.update(cx, |input, cx| {
+            input.set_value(chat_title, window, cx);
+        });
+        Self {
+            chat_id,
+            title_input,
+            schedule_offset: 0,
+        }
+    }
+}
+
+/// Phase C2h: schedule presets for `createVideoChat.start_date`
+/// (schema 1.8.67, line 14256: 0 = immediate, otherwise ≥10s and ≤8d
+/// in the future).
+const GROUP_CALL_SCHEDULE_PRESETS: [(i64, &str); 5] = [
+    (0, "Now"),
+    (3600, "In 1 hour"),
+    (3 * 3600, "In 3 hours"),
+    (12 * 3600, "In 12 hours"),
+    (24 * 3600, "In 24 hours"),
+];
+
+/// Phase C2h: "in 3h" / "in 2d 4h" countdown for a scheduled video
+/// chat — relative only, no timezone math.
+fn format_starts_in(start_date: i64) -> String {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    let mut secs = (start_date - now).max(0);
+    if secs < 3600 {
+        return format!("in {}m", (secs / 60).max(1));
+    }
+    secs /= 3600;
+    if secs < 48 {
+        format!("in {}h", secs)
+    } else {
+        format!("in {}d {}h", secs / 24, secs % 24)
+    }
+}
+
+/// Phase C2h: mm:ss / h:mm:ss for the recording indicator.
+fn format_record_duration(secs: i32) -> String {
+    let secs = secs.max(0);
+    if secs < 3600 {
+        format!("{:02}:{:02}", secs / 60, secs % 60)
+    } else {
+        format!("{}:{:02}:{:02}", secs / 3600, (secs / 60) % 60, secs % 60)
+    }
+}
+
 /// Phase C3a: voice-chat title rename dialog (`setVideoChatTitle`,
 /// schema 1.8.67, line 14312). Created when the dialog opens with the
 /// current title pre-filled.
@@ -655,6 +730,10 @@ pub struct QuillApp {
     ttl_picker_open: bool,
     /// Phase C3a: voice-chat title rename dialog (`setVideoChatTitle`).
     group_call_title_dialog: Option<GroupCallTitleDialog>,
+    /// Phase C2h: `createVideoChat` start/schedule dialog.
+    group_call_start_dialog: Option<GroupCallStartDialog>,
+    /// Phase C2h: in-call chat composer (sendGroupCallMessage).
+    group_call_composer: Entity<TextareaState>,
     /// Phase C2f: voice-chat invite picker overlay (contacts list).
     group_call_invite_open: bool,
     /// Parity slice: the notifications panel's sound picker sub-view is open.
@@ -1073,6 +1152,12 @@ pub enum ScreenshotDemo {
     /// group chat's history, with Accept / Decline (injected, no live
     /// Telegram).
     ReadyGroupCallInvitation,
+    /// Phase C2h: group-call management surface (injected, no live
+    /// Telegram) — the Ready voice chat with the rename dialog's
+    /// sibling state: invite link fetched (Copy/Revoke), recording
+    /// indicator live, RTMP URL + key fetched, and two in-call chat
+    /// messages with the composer.
+    ReadyGroupCallManage,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1147,6 +1232,14 @@ impl QuillApp {
                 .auto_grow(2, 6)
                 .submit_on_enter(true)
         });
+        // Phase C2h: in-call group-chat composer for the voice-chat
+        // overlay (sendGroupCallMessage).
+        let group_call_composer = cx.new(|cx| {
+            TextareaState::new(window, cx)
+                .placeholder("Message the voice chat — Enter sends")
+                .auto_grow(1, 3)
+                .submit_on_enter(true)
+        });
         let phone_input = cx.new(|cx| {
             TextareaState::new(window, cx)
                 .placeholder("Phone (+country code)")
@@ -1215,6 +1308,21 @@ impl QuillApp {
                         } else if !text.trim().is_empty() {
                             this.submit_composer(text, window, cx);
                         }
+                    }
+                }
+            },
+        )
+        .detach();
+        cx.subscribe_in(
+            &group_call_composer,
+            window,
+            |this, state, event: &InputEvent, window, cx| {
+                if let InputEvent::PressEnter { secondary, shift } = event {
+                    let marked = state.update(cx, |input, cx| input.marked_text_range(window, cx));
+                    if should_send_on_enter(quill::composer::enter_event_from_kit(
+                        *shift, *secondary, marked,
+                    )) {
+                        this.send_group_call_message(window, cx);
                     }
                 }
             },
@@ -1933,6 +2041,15 @@ impl QuillApp {
                     AuthorizationState::Ready,
                 )
             }
+            Some(ScreenshotDemo::ReadyGroupCallManage) => {
+                demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
+                (
+                    ConnectUiStatus::DemoReadyChats,
+                    None,
+                    "screenshot demo — voice chat management (injected, no live Telegram)".into(),
+                    AuthorizationState::Ready,
+                )
+            }
             None => bootstrap_connect(credentials),
         };
 
@@ -1990,6 +2107,7 @@ impl QuillApp {
         let mut app = Self {
             chat,
             composer,
+            group_call_composer,
             command_menu_open: false,
             command_menu_selected: 0,
             phone_input,
@@ -2042,6 +2160,7 @@ impl QuillApp {
             mute_menu_open: false,
             ttl_picker_open: false,
             group_call_title_dialog: None,
+            group_call_start_dialog: None,
             group_call_invite_open: false,
             notif_sound_picker_open: false,
             notification_defaults_open: false,
@@ -2560,6 +2679,15 @@ impl QuillApp {
             }
             app.status_note =
                 "screenshot demo — incoming voice-chat invitation (injected, no live Telegram)"
+                    .into();
+        }
+        if matches!(demo, Some(ScreenshotDemo::ReadyGroupCallManage)) {
+            if let Some(session) = app.demo_session.as_mut() {
+                app.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_group_call_manage(session, &app.demo_sink, &app.demo_seq);
+            }
+            app.status_note =
+                "screenshot demo — voice chat management: title, invite link, recording, RTMP, chat (injected, no live Telegram)"
                     .into();
         }
         if matches!(demo, Some(ScreenshotDemo::ReadyVideoSend)) {
@@ -10557,6 +10685,80 @@ impl QuillApp {
         Some(self.group_call_card(&call, cx).into_any_element())
     }
 
+    /// Phase C2h: the `createVideoChat` start/schedule dialog —
+    /// title plus relative schedule presets.
+    fn group_call_start_overlay(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let dialog = self.group_call_start_dialog.as_ref()?;
+        let selected = dialog.schedule_offset;
+        let mut presets = div().flex().flex_wrap().gap_2();
+        for (offset, label) in GROUP_CALL_SCHEDULE_PRESETS {
+            let active = offset == selected;
+            presets = presets.child(
+                Button::new(format!("group-call-start-preset-{offset}"))
+                    .label(label)
+                    .when(!active, |b| b.ghost())
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.set_group_call_start_schedule(offset, cx);
+                    })),
+            );
+        }
+        Some(
+            div()
+                .id("group-call-start-dialog")
+                .absolute()
+                .inset_0()
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(
+                    div()
+                        .w(px(420.))
+                        .flex()
+                        .flex_col()
+                        .gap_3()
+                        .p_4()
+                        .rounded_lg()
+                        .border_1()
+                        .border_color(cx.theme().border)
+                        .bg(cx.theme().sidebar)
+                        .child(div().text_sm().font_semibold().child("Start voice chat"))
+                        .child(Textarea::new(&dialog.title_input).h(px(40.)))
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(cx.theme().muted_foreground)
+                                .child("When should it start?"),
+                        )
+                        .child(presets)
+                        .child(
+                            div()
+                                .flex()
+                                .gap_2()
+                                .child(
+                                    Button::new("group-call-start-confirm")
+                                        .label(if selected == 0 {
+                                            "Start now"
+                                        } else {
+                                            "Schedule"
+                                        })
+                                        .on_click(cx.listener(|this, _, _, cx| {
+                                            this.confirm_group_call_start(cx);
+                                        })),
+                                )
+                                .child(
+                                    Button::new("group-call-start-cancel")
+                                        .label("Cancel")
+                                        .ghost()
+                                        .on_click(cx.listener(|this, _, _, cx| {
+                                            this.close_group_call_start_dialog(cx);
+                                        })),
+                                ),
+                        ),
+                )
+                .into_any_element(),
+        )
+    }
+
     fn group_call_participant_name(&self, sender: &MessageSender) -> String {
         match sender {
             MessageSender::User { user_id } => self
@@ -10813,7 +11015,47 @@ impl QuillApp {
             );
         }
 
-        if !call.is_joined {
+        if call.scheduled_start_date > 0 && !call.is_joined {
+            // Phase C2h: scheduled (not yet started) video chat —
+            // admins (`can_be_managed`) get a Start-now button
+            // (`startScheduledVideoChat`, schema 1.8.67 :14277); Join
+            // appears once TDLib activates the call.
+            card = card.child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .gap_2()
+                    .p_4()
+                    .rounded_md()
+                    .border_1()
+                    .border_color(cx.theme().border)
+                    .child(
+                        div()
+                            .text_sm()
+                            .font_semibold()
+                            .child("Scheduled voice chat"),
+                    )
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(format!(
+                                "Starts {}",
+                                format_starts_in(call.scheduled_start_date as i64)
+                            )),
+                    )
+                    .when(call.can_be_managed, |this| {
+                        this.child(
+                            Button::new("group-call-start-now")
+                                .label("Start now")
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.start_scheduled_video_chat(cx);
+                                })),
+                        )
+                    }),
+            );
+        } else if !call.is_joined {
             card = card.child(self.group_call_join_prompt(call, cx));
         } else {
             card = self.group_call_joined_card(card, call, cx);
@@ -11057,12 +11299,55 @@ impl QuillApp {
                             this.open_group_call_title_dialog(window, cx);
                         })),
                 );
+                // Phase C2h: recording toggle (`startGroupCallRecording`
+                // / `endGroupCallRecording`) — video chats only.
+                if call.is_video_chat {
+                    let recording = call.record_duration > 0;
+                    admin = admin.child(
+                        Button::new("group-call-record")
+                            .label(if recording {
+                                "■ Stop recording"
+                            } else {
+                                "● Record"
+                            })
+                            .ghost()
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.toggle_group_call_recording(cx);
+                            })),
+                    );
+                }
+                // Phase C2h: RTMP stream key (`getVideoChatRtmpUrl`).
+                admin = admin.child(
+                    Button::new("group-call-rtmp")
+                        .label("Stream key")
+                        .ghost()
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.fetch_video_chat_rtmp_url(cx);
+                        })),
+                );
                 admin = admin.child(
                     Button::new("group-call-end")
                         .label("End voice chat")
                         .ghost()
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.end_active_group_call(cx);
+                        })),
+                );
+            }
+            // Phase C2h: in-call chat on/off
+            // (`toggleGroupCallAreMessagesAllowed`).
+            if call.can_toggle_are_messages_allowed {
+                let label = if call.are_messages_allowed {
+                    "Chat: on"
+                } else {
+                    "Chat: off"
+                };
+                admin = admin.child(
+                    Button::new("group-call-chat-toggle")
+                        .label(label)
+                        .ghost()
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.toggle_group_call_chat(cx);
                         })),
                 );
             }
@@ -11084,13 +11369,138 @@ impl QuillApp {
             card = card.child(admin);
         }
 
-        // Invite link once fetched.
-        if let Some(link) = &call.invite_link {
+        // Phase C2h: recording indicator — `record_duration` from
+        // `updateGroupCall` (0 = not recording).
+        if call.record_duration > 0 {
+            let label = if call.is_video_recorded {
+                "video"
+            } else {
+                "audio"
+            };
             card = card.child(
                 div()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(format!("Invite link: {link}")),
+                    .text_sm()
+                    .font_semibold()
+                    .text_color(rgb(0xff6b6b))
+                    .child(format!(
+                        "● Recording ({}) {}",
+                        label,
+                        format_record_duration(call.record_duration)
+                    )),
+            );
+        }
+
+        // Invite link once fetched — show, copy, revoke.
+        if let Some(link) = &call.invite_link {
+            let link = link.clone();
+            card = card.child(
+                div()
+                    .w_full()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .child(
+                        div()
+                            .flex_1()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(format!("Invite link: {link}")),
+                    )
+                    .child(
+                        Button::new("group-call-invite-copy")
+                            .label("Copy")
+                            .ghost()
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.copy_video_chat_invite_link(&link, cx);
+                            })),
+                    )
+                    .when(call.can_be_managed, |this| {
+                        this.child(
+                            Button::new("group-call-invite-revoke")
+                                .label("Revoke")
+                                .ghost()
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.revoke_group_call_invite_link(cx);
+                                })),
+                        )
+                    }),
+            );
+        }
+
+        // Phase C2h: RTMP URL + stream key once fetched
+        // (`getVideoChatRtmpUrl` / `replaceVideoChatRtmpUrl`).
+        if let (Some(url), Some(key)) = (&call.rtmp_url, &call.rtmp_stream_key) {
+            let url = url.clone();
+            let key = key.clone();
+            let is_owned = call.is_owned;
+            card = card.child(
+                div()
+                    .w_full()
+                    .flex()
+                    .flex_col()
+                    .gap_1()
+                    .p_2()
+                    .rounded_md()
+                    .border_1()
+                    .border_color(cx.theme().border)
+                    .child(
+                        div()
+                            .text_xs()
+                            .font_semibold()
+                            .child("RTMP stream (admins only)"),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .text_xs()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(format!("URL: {url}")),
+                            )
+                            .child(
+                                Button::new("group-call-rtmp-copy-url")
+                                    .label("Copy")
+                                    .ghost()
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        this.copy_rtmp_value("Stream URL", &url, cx);
+                                    })),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .text_xs()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(format!("Key: {key}")),
+                            )
+                            .child(
+                                Button::new("group-call-rtmp-copy-key")
+                                    .label("Copy")
+                                    .ghost()
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        this.copy_rtmp_value("Stream key", &key, cx);
+                                    })),
+                            ),
+                    )
+                    .when(is_owned, |this| {
+                        this.child(
+                            Button::new("group-call-rtmp-regenerate")
+                                .label("Regenerate key")
+                                .ghost()
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.replace_video_chat_rtmp_url(cx);
+                                })),
+                        )
+                    }),
             );
         }
 
@@ -11134,7 +11544,79 @@ impl QuillApp {
             card = card.child(self.group_call_invite_panel(call, cx));
         }
 
+        // Phase C2h: in-call chat (`sendGroupCallMessage`) — a simple
+        // message list + composer; TDLib has no history getter, so this
+        // is the live feed only.
+        card = self.group_call_messages_section(card, call, cx);
+
         card
+    }
+
+    /// Phase C2h: in-call group-chat section for the joined call card.
+    fn group_call_messages_section(
+        &self,
+        card: Stateful<Div>,
+        call: &ActiveGroupCall,
+        cx: &mut Context<Self>,
+    ) -> Stateful<Div> {
+        if !call.are_messages_allowed
+            && call.messages.is_empty()
+            && !call.can_toggle_are_messages_allowed
+        {
+            return card;
+        }
+        let mut section = div()
+            .w_full()
+            .flex()
+            .flex_col()
+            .gap_1()
+            .p_2()
+            .rounded_md()
+            .border_1()
+            .border_color(cx.theme().border)
+            .child(div().text_xs().font_semibold().child("Chat"));
+        if !call.are_messages_allowed {
+            section = section.child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("Chat is turned off in this voice chat."),
+            );
+        }
+        if !call.messages.is_empty() {
+            let mut list = div()
+                .id("group-call-messages")
+                .w_full()
+                .flex()
+                .flex_col()
+                .gap_1()
+                .max_h(px(180.))
+                .overflow_y_scroll();
+            for message in call.messages.iter().rev().take(50).rev() {
+                let sender = self.group_call_participant_name(&message.sender_id);
+                list = list.child(div().text_xs().child(format!("{sender}: {}", message.text)));
+            }
+            section = section.child(list);
+        }
+        if call.are_messages_allowed && call.can_send_messages {
+            section = section
+                .child(Textarea::new(&self.group_call_composer).h(px(40.)))
+                .child(
+                    Button::new("group-call-message-send")
+                        .label("Send")
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.send_group_call_message(window, cx);
+                        })),
+                );
+        } else if call.are_messages_allowed {
+            section = section.child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("You can't send messages in this voice chat."),
+            );
+        }
+        card.child(section)
     }
 
     /// Phase C2f: the invite picker panel — contact rows with Invite
@@ -11304,17 +11786,17 @@ impl QuillApp {
 
     /// Phase C3a: header voice-chat affordance — join a live voice chat,
     /// or start one for a group/channel with none.
-    fn start_or_join_video_chat(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
+    fn start_or_join_video_chat(
+        &mut self,
+        chat_id: ChatId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let group_call_id = self
             .session()
             .and_then(|s| s.chats.get(&chat_id.0))
             .and_then(|c| c.video_chat.clone())
             .map(|vc| vc.group_call_id);
-        let title = self
-            .session()
-            .and_then(|s| s.chats.get(&chat_id.0))
-            .map(|c| c.title.clone())
-            .unwrap_or_default();
         if let Some(group_call_id) = group_call_id {
             if let Some(live) = self.live.as_mut() {
                 self.status_note = match live.driver.fetch_group_call(group_call_id) {
@@ -11327,11 +11809,10 @@ impl QuillApp {
                 let _ = session;
                 self.status_note = "screenshot demo — voice chat (no audio yet)".into();
             }
-        } else if let Some(live) = self.live.as_mut() {
-            self.status_note = match live.driver.start_video_chat(chat_id.0, title) {
-                Ok(_) => "Starting voice chat…".into(),
-                Err(_) => "Couldn't start a voice chat here.".into(),
-            };
+        } else if self.live.is_some() {
+            // Phase C2h: starting goes through the title/schedule
+            // dialog (`createVideoChat` with `start_date`).
+            self.open_group_call_start_dialog(chat_id, window, cx);
         } else {
             self.status_note = "Voice chats need a live connection.".into();
         }
@@ -11762,6 +12243,213 @@ impl QuillApp {
             };
         } else {
             self.status_note = "Renaming needs a live connection.".into();
+        }
+        cx.notify();
+    }
+
+    /// Phase C2h: open the start/schedule dialog (`createVideoChat`).
+    fn open_group_call_start_dialog(
+        &mut self,
+        chat_id: ChatId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let chat_title = self
+            .session()
+            .and_then(|s| s.chats.get(&chat_id.0))
+            .map(|c| c.title.clone())
+            .unwrap_or_default();
+        self.group_call_start_dialog =
+            Some(GroupCallStartDialog::new(window, cx, chat_id, &chat_title));
+        cx.notify();
+    }
+
+    fn close_group_call_start_dialog(&mut self, cx: &mut Context<Self>) {
+        self.group_call_start_dialog = None;
+        cx.notify();
+    }
+
+    fn set_group_call_start_schedule(&mut self, offset: i64, cx: &mut Context<Self>) {
+        if let Some(dialog) = self.group_call_start_dialog.as_mut() {
+            dialog.schedule_offset = offset;
+        }
+        cx.notify();
+    }
+
+    /// Phase C2h: confirm the start dialog — `createVideoChat` with
+    /// the chosen title and `start_date` (0 = immediate).
+    fn confirm_group_call_start(&mut self, cx: &mut Context<Self>) {
+        let (chat_id, title, offset) = match self.group_call_start_dialog.as_ref() {
+            Some(d) => (
+                d.chat_id,
+                d.title_input.read(cx).value().to_string(),
+                d.schedule_offset,
+            ),
+            None => return,
+        };
+        self.group_call_start_dialog = None;
+        let start_date = if offset == 0 {
+            0
+        } else {
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs() as i64 + offset)
+                .unwrap_or(0)
+        };
+        if let Some(live) = self.live.as_mut() {
+            self.status_note = match live.driver.start_video_chat(chat_id.0, title, start_date) {
+                Ok(_) => {
+                    if offset == 0 {
+                        "Starting voice chat…".into()
+                    } else {
+                        "Scheduling voice chat…".into()
+                    }
+                }
+                Err(_) => "Couldn't start a voice chat here.".into(),
+            };
+        } else {
+            self.status_note = "Voice chats need a live connection.".into();
+        }
+        cx.notify();
+    }
+
+    /// Phase C2h: revoke the video-chat invite link
+    /// (`revokeGroupCallInviteLink`); the cached link clears on `ok`.
+    fn revoke_group_call_invite_link(&mut self, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            self.status_note = match live.driver.revoke_video_chat_invite_link() {
+                Ok(_) => "Revoking invite link…".into(),
+                Err(_) => "Couldn't revoke the invite link.".into(),
+            };
+        } else {
+            self.status_note = "Invite links need a live connection.".into();
+        }
+        cx.notify();
+    }
+
+    /// Phase C2h: copy the video-chat invite link.
+    fn copy_video_chat_invite_link(&mut self, link: &str, cx: &mut Context<Self>) {
+        cx.write_to_clipboard(ClipboardItem::new_string(link.to_string()));
+        self.status_note = "Invite link copied".into();
+        cx.notify();
+    }
+
+    /// Phase C2h: toggle group-call recording
+    /// (`startGroupCallRecording` / `endGroupCallRecording`); the
+    /// `record_duration` indicator refreshes via `updateGroupCall`.
+    fn toggle_group_call_recording(&mut self, cx: &mut Context<Self>) {
+        let recording = self
+            .session()
+            .and_then(|s| s.active_group_call.as_ref())
+            .is_some_and(|c| c.record_duration > 0);
+        let title = self
+            .session()
+            .and_then(|s| s.active_group_call.as_ref())
+            .map(|c| c.title.clone())
+            .unwrap_or_default();
+        if let Some(live) = self.live.as_mut() {
+            self.status_note = if recording {
+                match live.driver.stop_group_call_recording() {
+                    Ok(_) => "Stopping the recording…".into(),
+                    Err(_) => "Couldn't stop the recording.".into(),
+                }
+            } else {
+                match live.driver.start_group_call_recording(title, true) {
+                    Ok(_) => "Starting the recording…".into(),
+                    Err(_) => "Couldn't start the recording.".into(),
+                }
+            };
+        } else {
+            self.status_note = "Recording needs a live connection.".into();
+        }
+        cx.notify();
+    }
+
+    /// Phase C2h: `startScheduledVideoChat` — start the tracked
+    /// scheduled video chat now (admins only; driver-gated on
+    /// `can_be_managed`). Failures surface via the group-call error
+    /// line on the card.
+    fn start_scheduled_video_chat(&mut self, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            self.status_note = match live.driver.start_scheduled_video_chat() {
+                Ok(_) => "Starting the video chat…".into(),
+                Err(_) => "Couldn't start the video chat.".into(),
+            };
+        } else {
+            self.status_note = "Start now needs a live connection.".into();
+        }
+        cx.notify();
+    }
+
+    /// Phase C2h: `getVideoChatRtmpUrl` — fetch the RTMP URL + key.
+    fn fetch_video_chat_rtmp_url(&mut self, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            self.status_note = match live.driver.fetch_video_chat_rtmp_url() {
+                Ok(_) => "Fetching the stream key…".into(),
+                Err(_) => "Couldn't fetch the stream key.".into(),
+            };
+        } else {
+            self.status_note = "Stream keys need a live connection.".into();
+        }
+        cx.notify();
+    }
+
+    /// Phase C2h: `replaceVideoChatRtmpUrl` — regenerate URL + key
+    /// (owner only).
+    fn replace_video_chat_rtmp_url(&mut self, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            self.status_note = match live.driver.replace_video_chat_rtmp_url() {
+                Ok(_) => "Regenerating the stream key…".into(),
+                Err(_) => "Couldn't regenerate the stream key.".into(),
+            };
+        } else {
+            self.status_note = "Stream keys need a live connection.".into();
+        }
+        cx.notify();
+    }
+
+    /// Phase C2h: copy the RTMP URL or stream key.
+    fn copy_rtmp_value(&mut self, label: &str, value: &str, cx: &mut Context<Self>) {
+        cx.write_to_clipboard(ClipboardItem::new_string(value.to_string()));
+        self.status_note = format!("{label} copied");
+        cx.notify();
+    }
+
+    /// Phase C2h: send the in-call chat composer
+    /// (`sendGroupCallMessage`); the echo arrives as
+    /// `updateNewGroupCallMessage`. Clears on send — a send failure
+    /// surfaces via `group_call_error`.
+    fn send_group_call_message(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let text = self.group_call_composer.read(cx).value().to_string();
+        if text.trim().is_empty() {
+            return;
+        }
+        if let Some(live) = self.live.as_mut() {
+            match live.driver.send_group_call_message(text) {
+                Ok(_) => {
+                    self.group_call_composer.update(cx, |input, cx| {
+                        input.set_value("", window, cx);
+                    });
+                }
+                Err(_) => {
+                    self.status_note = "Couldn't send the message.".into();
+                }
+            }
+        } else {
+            self.status_note = "Messages need a live connection.".into();
+        }
+        cx.notify();
+    }
+
+    /// Phase C2h: `toggleGroupCallAreMessagesAllowed`.
+    fn toggle_group_call_chat(&mut self, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            self.status_note = match live.driver.toggle_group_call_are_messages_allowed() {
+                Ok(_) => "Toggling in-call chat…".into(),
+                Err(_) => "Couldn't toggle in-call chat.".into(),
+            };
+        } else {
+            self.status_note = "In-call chat needs a live connection.".into();
         }
         cx.notify();
     }
@@ -13560,8 +14248,8 @@ impl QuillApp {
                                         "Start voice chat"
                                     })
                                     .ghost()
-                                    .on_click(cx.listener(move |this, _, _, cx| {
-                                        this.start_or_join_video_chat(chat_id, cx);
+                                    .on_click(cx.listener(move |this, _, window, cx| {
+                                        this.start_or_join_video_chat(chat_id, window, cx);
                                     })),
                             )
                         })
@@ -17767,6 +18455,11 @@ impl Render for QuillApp {
             .when_some(self.group_call_overlay(cx), |this, overlay| {
                 this.child(overlay)
             })
+            // Phase C2h: start/schedule dialog above the group-call
+            // overlay.
+            .when_some(self.group_call_start_overlay(cx), |this, overlay| {
+                this.child(overlay)
+            })
     }
 }
 
@@ -19558,6 +20251,38 @@ fn apply_ready_group_call_invite(session: &mut Session, sink: &Arc<MemorySink>, 
         }
     }
     session.contacts = Some(vec![44, 45, 41]);
+}
+
+/// Phase C2h: management-surface fixture — the Ready group voice
+/// chat with invite link, an active recording, RTMP credentials, and
+/// two in-call chat messages (all injected, no live Telegram).
+fn apply_ready_group_call_manage(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
+    apply_ready_group_call(session, sink, seq);
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let call_id = 555i32;
+    session.set_group_call_invite_link(call_id, "https://t.me/+DemoVoiceChat42".to_string());
+    let jsons = [
+        // Recording live + chat toggle permitted.
+        format!(
+            r#"{{"@type":"updateGroupCall","group_call":{{"@type":"groupCall","id":{call_id},"unique_id":"999","title":"Weekly design sync","invite_link":"","paid_message_star_count":0,"scheduled_start_date":0,"enabled_start_notification":false,"is_active":true,"is_video_chat":true,"is_live_story":false,"is_rtmp_stream":false,"is_joined":true,"need_rejoin":false,"is_owned":true,"can_be_managed":true,"participant_count":4,"has_hidden_listeners":false,"loaded_all_participants":true,"message_sender_id":null,"recent_speakers":[],"is_my_video_enabled":false,"is_my_video_paused":false,"can_enable_video":true,"mute_new_participants":false,"can_toggle_mute_new_participants":true,"can_send_messages":true,"are_messages_allowed":true,"can_toggle_are_messages_allowed":true,"can_delete_messages":false,"record_duration":125,"is_video_recorded":true,"duration":0}}}}"#
+        ),
+        format!(
+            r#"{{"@type":"updateNewGroupCallMessage","group_call_id":{call_id},"message":{{"@type":"groupCallMessage","message_id":1,"sender_id":{{"@type":"messageSenderUser","user_id":41}},"date":1788000000,"text":{{"@type":"formattedText","text":"Can everyone hear me?","entities":[]}},"paid_message_star_count":0,"is_from_owner":false,"can_be_deleted":false}}}}"#
+        ),
+        format!(
+            r#"{{"@type":"updateNewGroupCallMessage","group_call_id":{call_id},"message":{{"@type":"groupCallMessage","message_id":2,"sender_id":{{"@type":"messageSenderUser","user_id":42}},"date":1788000060,"text":{{"@type":"formattedText","text":"Loud and clear — sharing my screen next","entities":[]}},"paid_message_star_count":0,"is_from_owner":false,"can_be_deleted":true}}}}"#
+        ),
+    ];
+    for json in jsons {
+        if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
+            session.apply(owned);
+        }
+    }
+    if let Some(call) = session.active_group_call.as_mut() {
+        call.rtmp_url = Some("rtmp://dc1-rtmp.telegram.org:443/live".to_string());
+        call.rtmp_stream_key = Some("demo-stream-key-9f3a2b1c".to_string());
+    }
+    session.open_chat(ChatId(51));
 }
 
 /// Phase C2f: incoming `messageGroupCall` invitation fixture — a Ready

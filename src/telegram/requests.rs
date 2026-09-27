@@ -1360,6 +1360,145 @@ pub fn get_video_chat_invite_link(
     .to_string()
 }
 
+/// Phase C2h: `revokeGroupCallInviteLink` (TDLib 1.8.67,
+/// `schema/td_api.tl:14398`):
+/// `revokeGroupCallInviteLink group_call_id:int32 = Ok;`
+/// "Revokes invite link for a group call. Requires
+/// groupCall.can_be_managed right for video chats or
+/// groupCall.is_owned otherwise".
+pub fn revoke_group_call_invite_link(extra: RequestId, group_call_id: i32) -> String {
+    json!({
+        "@type": "revokeGroupCallInviteLink",
+        "@extra": extra.as_extra(),
+        "group_call_id": group_call_id,
+    })
+    .to_string()
+}
+
+/// Phase C2h: `startGroupCallRecording` (TDLib 1.8.67,
+/// `schema/td_api.tl:14405`):
+/// `startGroupCallRecording group_call_id:int32 title:string
+/// record_video:Bool use_portrait_orientation:Bool = Ok;`
+/// "Starts recording of an active group call; for video chats only.
+/// Requires groupCall.can_be_managed right". Title is 0-64
+/// characters; ongoing state arrives as `groupCall.record_duration`
+/// / `is_video_recorded` (schema 1.8.67, lines 7151-7152).
+pub fn start_group_call_recording(
+    extra: RequestId,
+    group_call_id: i32,
+    title: &str,
+    record_video: bool,
+    use_portrait_orientation: bool,
+) -> String {
+    json!({
+        "@type": "startGroupCallRecording",
+        "@extra": extra.as_extra(),
+        "group_call_id": group_call_id,
+        "title": title,
+        "record_video": record_video,
+        "use_portrait_orientation": use_portrait_orientation,
+    })
+    .to_string()
+}
+
+/// Phase C2h: `endGroupCallRecording` (TDLib 1.8.67,
+/// `schema/td_api.tl:14408`):
+/// `endGroupCallRecording group_call_id:int32 = Ok;`
+/// "Ends recording of an active group call; for video chats only.
+/// Requires groupCall.can_be_managed right".
+pub fn end_group_call_recording(extra: RequestId, group_call_id: i32) -> String {
+    json!({
+        "@type": "endGroupCallRecording",
+        "@extra": extra.as_extra(),
+        "group_call_id": group_call_id,
+    })
+    .to_string()
+}
+
+/// Phase C2h: `startScheduledVideoChat` (TDLib 1.8.67,
+/// `schema/td_api.tl:14277`):
+/// `startScheduledVideoChat group_call_id:int32 = Ok;`
+/// "Starts a scheduled video chat". The schema names no explicit
+/// right for this constructor; the driver gates it on
+/// `groupCall.can_be_managed` (the tracked proxy for the
+/// `can_manage_video_chats` admin right), same as the other
+/// video-chat admin actions.
+pub fn start_scheduled_video_chat(extra: RequestId, group_call_id: i32) -> String {
+    json!({
+        "@type": "startScheduledVideoChat",
+        "@extra": extra.as_extra(),
+        "group_call_id": group_call_id,
+    })
+    .to_string()
+}
+
+/// Phase C2h: `getVideoChatRtmpUrl` (TDLib 1.8.67,
+/// `schema/td_api.tl:14261`):
+/// `getVideoChatRtmpUrl chat_id:int53 = RtmpUrl;`
+/// "Returns RTMP URL for streaming to the video chat of a chat;
+/// requires can_manage_video_chats administrator right".
+pub fn get_video_chat_rtmp_url(extra: RequestId, chat_id: i64) -> String {
+    json!({
+        "@type": "getVideoChatRtmpUrl",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id,
+    })
+    .to_string()
+}
+
+/// Phase C2h: `replaceVideoChatRtmpUrl` (TDLib 1.8.67,
+/// `schema/td_api.tl:14264`):
+/// `replaceVideoChatRtmpUrl chat_id:int53 = RtmpUrl;`
+/// "Replaces the current RTMP URL for streaming to the video chat of
+/// a chat; requires owner privileges in the chat".
+pub fn replace_video_chat_rtmp_url(extra: RequestId, chat_id: i64) -> String {
+    json!({
+        "@type": "replaceVideoChatRtmpUrl",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id,
+    })
+    .to_string()
+}
+
+/// Phase C2h: `sendGroupCallMessage` (TDLib 1.8.67,
+/// `schema/td_api.tl:14341`):
+/// `sendGroupCallMessage group_call_id:int32 text:formattedText
+/// paid_message_star_count:int53 = Ok;`
+/// "Sends a message to other participants of a group call. Requires
+/// groupCall.can_send_messages right". Plain text only (empty
+/// entities); `paid_message_star_count` is 0 — paid messages are a
+/// live-story-only feature Quill doesn't surface.
+pub fn send_group_call_message(extra: RequestId, group_call_id: i32, text: &str) -> String {
+    json!({
+        "@type": "sendGroupCallMessage",
+        "@extra": extra.as_extra(),
+        "group_call_id": group_call_id,
+        "text": { "@type": "formattedText", "text": text, "entities": [] },
+        "paid_message_star_count": 0,
+    })
+    .to_string()
+}
+
+/// Phase C2h: `toggleGroupCallAreMessagesAllowed` (TDLib 1.8.67,
+/// `schema/td_api.tl:14322`):
+/// `toggleGroupCallAreMessagesAllowed group_call_id:int32
+/// are_messages_allowed:Bool = Ok;`
+/// "Toggles whether participants of a group call can send messages
+/// there. Requires groupCall.can_toggle_are_messages_allowed right".
+pub fn toggle_group_call_are_messages_allowed(
+    extra: RequestId,
+    group_call_id: i32,
+    are_messages_allowed: bool,
+) -> String {
+    json!({
+        "@type": "toggleGroupCallAreMessagesAllowed",
+        "@extra": extra.as_extra(),
+        "group_call_id": group_call_id,
+        "are_messages_allowed": are_messages_allowed,
+    })
+    .to_string()
+}
+
 /// Phase C3a: `declineGroupCallInvitation` (TDLib 1.8.67,
 /// `schema/td_api.tl:14380`):
 /// `declineGroupCallInvitation chat_id:int53 message_id:int53 = Ok;`
@@ -4743,6 +4882,63 @@ mod channel_requests_tests {
             serde_json::from_str(&get_video_chat_invite_link(RequestId(18), 555, true)).unwrap();
         assert_eq!(v["@type"], "getVideoChatInviteLink");
         assert_eq!(v["can_self_unmute"], true);
+
+        // Phase C2h: the video-chat management requests.
+        let v: serde_json::Value =
+            serde_json::from_str(&revoke_group_call_invite_link(RequestId(21), 555)).unwrap();
+        assert_eq!(v["@type"], "revokeGroupCallInviteLink");
+        assert_eq!(v["group_call_id"], 555);
+
+        let v: serde_json::Value = serde_json::from_str(&start_group_call_recording(
+            RequestId(22),
+            555,
+            "Sync",
+            true,
+            false,
+        ))
+        .unwrap();
+        assert_eq!(v["@type"], "startGroupCallRecording");
+        assert_eq!(v["group_call_id"], 555);
+        assert_eq!(v["title"], "Sync");
+        assert_eq!(v["record_video"], true);
+        assert_eq!(v["use_portrait_orientation"], false);
+
+        let v: serde_json::Value =
+            serde_json::from_str(&end_group_call_recording(RequestId(23), 555)).unwrap();
+        assert_eq!(v["@type"], "endGroupCallRecording");
+        assert_eq!(v["group_call_id"], 555);
+
+        let v: serde_json::Value =
+            serde_json::from_str(&start_scheduled_video_chat(RequestId(24), 555)).unwrap();
+        assert_eq!(v["@type"], "startScheduledVideoChat");
+        assert_eq!(v["group_call_id"], 555);
+
+        let v: serde_json::Value =
+            serde_json::from_str(&get_video_chat_rtmp_url(RequestId(26), 51)).unwrap();
+        assert_eq!(v["@type"], "getVideoChatRtmpUrl");
+        assert_eq!(v["chat_id"], 51);
+
+        let v: serde_json::Value =
+            serde_json::from_str(&replace_video_chat_rtmp_url(RequestId(27), 51)).unwrap();
+        assert_eq!(v["@type"], "replaceVideoChatRtmpUrl");
+        assert_eq!(v["chat_id"], 51);
+
+        let v: serde_json::Value =
+            serde_json::from_str(&send_group_call_message(RequestId(28), 555, "hello")).unwrap();
+        assert_eq!(v["@type"], "sendGroupCallMessage");
+        assert_eq!(v["group_call_id"], 555);
+        assert_eq!(v["text"]["@type"], "formattedText");
+        assert_eq!(v["text"]["text"], "hello");
+        assert_eq!(v["paid_message_star_count"], 0);
+
+        let v: serde_json::Value = serde_json::from_str(&toggle_group_call_are_messages_allowed(
+            RequestId(29),
+            555,
+            false,
+        ))
+        .unwrap();
+        assert_eq!(v["@type"], "toggleGroupCallAreMessagesAllowed");
+        assert_eq!(v["are_messages_allowed"], false);
 
         let v: serde_json::Value =
             serde_json::from_str(&decline_group_call_invitation(RequestId(19), 100, 7)).unwrap();

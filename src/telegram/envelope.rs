@@ -266,6 +266,26 @@ pub enum EnvelopePayload {
         chat_id: i64,
         video_chat: ParsedVideoChat,
     },
+    /// Phase C2h: `updateNewGroupCallMessage` (schema 1.8.67, line
+    /// 10839) — a message was sent in a group call (including by the
+    /// current user; the echo is the confirmation).
+    UpdateNewGroupCallMessage {
+        group_call_id: i32,
+        message: ParsedGroupCallMessage,
+    },
+    /// Phase C2h: `updateGroupCallMessageSendFailed` (schema 1.8.67,
+    /// line 10851) — a sent group-call message failed.
+    UpdateGroupCallMessageSendFailed {
+        group_call_id: i32,
+        message_id: i32,
+        error: TdError,
+    },
+    /// Phase C2h: `updateGroupCallMessagesDeleted` (schema 1.8.67,
+    /// line 10856) — group-call messages were deleted.
+    UpdateGroupCallMessagesDeleted {
+        group_call_id: i32,
+        message_ids: Vec<i32>,
+    },
     Ok,
     /// Phase C3a: `text` (schema 1.8.67, line 10071) — the
     /// `joinVideoChat` answer (join payload for tgcalls).
@@ -276,6 +296,12 @@ pub enum EnvelopePayload {
     /// `getVideoChatInviteLink` answer.
     HttpUrl {
         url: String,
+    },
+    /// Phase C2h: `rtmpUrl` (schema 1.8.67, line 7113) — the
+    /// `getVideoChatRtmpUrl` / `replaceVideoChatRtmpUrl` answer.
+    RtmpUrl {
+        url: String,
+        stream_key: String,
     },
     /// Phase C2f: `inviteGroupCallParticipantResult*` (schema 1.8.67,
     /// lines 7216-7227) — the `inviteGroupCallParticipant` answer.
@@ -1194,6 +1220,17 @@ pub struct ParsedGroupCall {
     pub mute_new_participants: bool,
     pub can_toggle_mute_new_participants: bool,
     pub scheduled_start_date: i32,
+    /// Phase C2h: message permissions (schema 1.8.67, lines
+    /// 7147-7150) — gate the in-call chat UI.
+    pub can_send_messages: bool,
+    pub are_messages_allowed: bool,
+    pub can_toggle_are_messages_allowed: bool,
+    pub can_delete_messages: bool,
+    /// Phase C2h: recording state (schema 1.8.67, lines 7151-7152):
+    /// ongoing recording duration in seconds (0 = none) and whether a
+    /// video file is being recorded.
+    pub record_duration: i32,
+    pub is_video_recorded: bool,
 }
 
 fn parse_group_call(value: Option<&Value>) -> Option<ParsedGroupCall> {
@@ -1278,6 +1315,65 @@ fn parse_group_call(value: Option<&Value>) -> Option<ParsedGroupCall> {
             .get("scheduled_start_date")
             .and_then(Value::as_i64)
             .unwrap_or(0) as i32,
+        can_send_messages: value
+            .get("can_send_messages")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        are_messages_allowed: value
+            .get("are_messages_allowed")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        can_toggle_are_messages_allowed: value
+            .get("can_toggle_are_messages_allowed")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        can_delete_messages: value
+            .get("can_delete_messages")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        record_duration: value
+            .get("record_duration")
+            .and_then(Value::as_i64)
+            .unwrap_or(0) as i32,
+        is_video_recorded: value
+            .get("is_video_recorded")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+    })
+}
+
+/// Phase C2h: `groupCallMessage` subset (TDLib 1.8.67,
+/// `schema/td_api.tl:7200`):
+/// `groupCallMessage message_id:int32 sender_id:MessageSender date:int32
+/// text:formattedText paid_message_star_count:int53 is_from_owner:Bool
+/// can_be_deleted:Bool = GroupCallMessage;`
+/// Entities are dropped — plain text only (the in-call chat is a
+/// minimal list + composer).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParsedGroupCallMessage {
+    pub message_id: i32,
+    pub sender_id: MessageSender,
+    pub date: i32,
+    pub text: String,
+    pub is_from_owner: bool,
+    pub can_be_deleted: bool,
+}
+
+fn parse_group_call_message(value: Option<&Value>) -> Option<ParsedGroupCallMessage> {
+    let value = value?;
+    Some(ParsedGroupCallMessage {
+        message_id: value.get("message_id").and_then(Value::as_i64)? as i32,
+        sender_id: parse_message_sender(value.get("sender_id")).ok()?,
+        date: value.get("date").and_then(Value::as_i64).unwrap_or(0) as i32,
+        text: parse_formatted_text(value.get("text")),
+        is_from_owner: value
+            .get("is_from_owner")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        can_be_deleted: value
+            .get("can_be_deleted")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
     })
 }
 
@@ -4908,6 +5004,45 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
                     .ok_or(ParseError::MissingField)?,
             })
         }
+        // Phase C2h: group-call message updates (schema 1.8.67,
+        // lines 10839 / 10851 / 10856).
+        "updateNewGroupCallMessage" => Ok(EnvelopePayload::UpdateNewGroupCallMessage {
+            group_call_id: value
+                .get("group_call_id")
+                .and_then(Value::as_i64)
+                .ok_or(ParseError::MissingField)? as i32,
+            message: parse_group_call_message(value.get("message"))
+                .ok_or(ParseError::MissingField)?,
+        }),
+        "updateGroupCallMessageSendFailed" => {
+            Ok(EnvelopePayload::UpdateGroupCallMessageSendFailed {
+                group_call_id: value
+                    .get("group_call_id")
+                    .and_then(Value::as_i64)
+                    .ok_or(ParseError::MissingField)? as i32,
+                message_id: value
+                    .get("message_id")
+                    .and_then(Value::as_i64)
+                    .ok_or(ParseError::MissingField)? as i32,
+                error: parse_error(value.get("error")),
+            })
+        }
+        "updateGroupCallMessagesDeleted" => Ok(EnvelopePayload::UpdateGroupCallMessagesDeleted {
+            group_call_id: value
+                .get("group_call_id")
+                .and_then(Value::as_i64)
+                .ok_or(ParseError::MissingField)? as i32,
+            message_ids: value
+                .get("message_ids")
+                .and_then(Value::as_array)
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|v| v.as_i64())
+                        .map(|id| id as i32)
+                        .collect::<Vec<i32>>()
+                })
+                .ok_or(ParseError::MissingField)?,
+        }),
         "updateChatVideoChat" => Ok(EnvelopePayload::UpdateChatVideoChat {
             chat_id: int53(value.get("chat_id"))?,
             video_chat: parse_video_chat(value.get("video_chat"))
@@ -5099,6 +5234,20 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
         "httpUrl" => Ok(EnvelopePayload::HttpUrl {
             url: value
                 .get("url")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string(),
+        }),
+        // Phase C2h: `rtmpUrl` (schema 1.8.67, line 7113) — the
+        // `getVideoChatRtmpUrl` / `replaceVideoChatRtmpUrl` answer.
+        "rtmpUrl" => Ok(EnvelopePayload::RtmpUrl {
+            url: value
+                .get("url")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string(),
+            stream_key: value
+                .get("stream_key")
                 .and_then(Value::as_str)
                 .unwrap_or("")
                 .to_string(),
@@ -11044,6 +11193,90 @@ mod channel_envelope_tests {
                 );
                 assert!(group_call.recent_speakers[0].1);
                 assert!(group_call.can_toggle_mute_new_participants);
+                // Phase C2h: recording + in-call chat fields are parsed,
+                // not just carried in the fixture.
+                assert_eq!(group_call.scheduled_start_date, 0);
+                assert!(group_call.can_send_messages);
+                assert!(group_call.are_messages_allowed);
+                assert!(!group_call.can_toggle_are_messages_allowed);
+                assert!(!group_call.can_delete_messages);
+                assert_eq!(group_call.record_duration, 0);
+                assert!(!group_call.is_video_recorded);
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn update_group_call_recording_live_parsed() {
+        let json = r#"{"@type":"updateGroupCall","group_call":{"@type":"groupCall","id":555,"title":"Weekly design sync","is_active":true,"is_video_chat":true,"record_duration":125,"is_video_recorded":true}}"#;
+        let env = parse_envelope(json).unwrap();
+        match env.payload {
+            EnvelopePayload::UpdateGroupCall { group_call } => {
+                assert_eq!(group_call.record_duration, 125);
+                assert!(group_call.is_video_recorded);
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn rtmp_url_parsed() {
+        let json = r#"{"@type":"rtmpUrl","url":"rtmp://dc1-rtmp.telegram.org:443/live","stream_key":"demo-stream-key-9f3a2b1c"}"#;
+        let env = parse_envelope(json).unwrap();
+        match env.payload {
+            EnvelopePayload::RtmpUrl { url, stream_key } => {
+                assert_eq!(url, "rtmp://dc1-rtmp.telegram.org:443/live");
+                assert_eq!(stream_key, "demo-stream-key-9f3a2b1c");
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn group_call_message_updates_parsed() {
+        let json = r#"{"@type":"updateNewGroupCallMessage","group_call_id":555,"message":{"@type":"groupCallMessage","message_id":7,"sender_id":{"@type":"messageSenderUser","user_id":41},"date":1788000000,"text":{"@type":"formattedText","text":"Can everyone hear me?","entities":[]},"paid_message_star_count":0,"is_from_owner":false,"can_be_deleted":true}}"#;
+        let env = parse_envelope(json).unwrap();
+        match env.payload {
+            EnvelopePayload::UpdateNewGroupCallMessage {
+                group_call_id,
+                message,
+            } => {
+                assert_eq!(group_call_id, 555);
+                assert_eq!(message.message_id, 7);
+                assert_eq!(message.sender_id, MessageSender::User { user_id: 41 });
+                assert_eq!(message.text, "Can everyone hear me?");
+                assert!(!message.is_from_owner);
+                assert!(message.can_be_deleted);
+            }
+            other => panic!("{other:?}"),
+        }
+
+        let json = r#"{"@type":"updateGroupCallMessageSendFailed","group_call_id":555,"message_id":9,"error":{"@type":"error","code":400,"message":"MESSAGE_TOO_LONG"}}"#;
+        let env = parse_envelope(json).unwrap();
+        match env.payload {
+            EnvelopePayload::UpdateGroupCallMessageSendFailed {
+                group_call_id,
+                message_id,
+                error,
+            } => {
+                assert_eq!(group_call_id, 555);
+                assert_eq!(message_id, 9);
+                assert_eq!(error.code, 400);
+            }
+            other => panic!("{other:?}"),
+        }
+
+        let json =
+            r#"{"@type":"updateGroupCallMessagesDeleted","group_call_id":555,"message_ids":[7,8]}"#;
+        let env = parse_envelope(json).unwrap();
+        match env.payload {
+            EnvelopePayload::UpdateGroupCallMessagesDeleted {
+                group_call_id,
+                message_ids,
+            } => {
+                assert_eq!(group_call_id, 555);
+                assert_eq!(message_ids, vec![7, 8]);
             }
             other => panic!("{other:?}"),
         }
