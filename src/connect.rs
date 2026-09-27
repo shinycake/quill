@@ -15,9 +15,10 @@ use crate::platform::{DatabaseKey, KeyDecision, SecretStore, load_or_create_key}
 use crate::poll::{PollDraft, poll_answer_for_tap};
 use crate::settings::{AccountPaths, default_app_root};
 use crate::state::{
-    AdminListFetch, AdminRightsFetch, ChatSearchJumpNeed, ChatStatisticsFetch, ForwardFlight,
-    InfoPanelTarget, InviteLinkFetch, JoinRequestFetch, MemberStatusChange, RequestPurpose,
-    SearchStatus, Session, ShutdownPhase, SupergroupMembersFetch,
+    AdminListFetch, AdminRightsFetch, CHAT_EVENT_LOG_PAGE_SIZE, ChatEventLogFetch,
+    ChatSearchJumpNeed, ChatStatisticsFetch, ForwardFlight, InfoPanelTarget, InviteLinkFetch,
+    JoinRequestFetch, MemberStatusChange, RequestPurpose, SearchStatus, Session, ShutdownPhase,
+    SupergroupMembersFetch,
 };
 use crate::telegram::client::{LiveTdJson, OwnedEnvelope, ReceiveBridge};
 use crate::telegram::envelope::{
@@ -38,8 +39,8 @@ use crate::telegram::requests::{
     discard_call as discard_call_request, download_file as download_file_request, edit_chat_folder,
     edit_chat_invite_link, edit_message_caption, edit_message_text, end_group_call,
     forward_messages, get_authorization_state, get_callback_query_answer, get_chat_active_stories,
-    get_chat_administrators, get_chat_folder, get_chat_history, get_chat_invite_links,
-    get_chat_join_requests, get_chat_lists_to_add_chat, get_chat_member,
+    get_chat_administrators, get_chat_event_log, get_chat_folder, get_chat_history,
+    get_chat_invite_links, get_chat_join_requests, get_chat_lists_to_add_chat, get_chat_member,
     get_chat_sponsored_messages, get_chat_statistics, get_commands, get_contacts, get_forum_topics,
     get_group_call, get_installed_sticker_sets, get_me, get_saved_animations,
     get_saved_notification_sounds, get_scope_notification_settings, get_secret_chat,
@@ -2862,6 +2863,99 @@ impl<S: JsonSender> ConnectDriver<S> {
     ) -> Result<Option<RequestId>, ConnectSendError> {
         self.session.admin_lists.remove(&chat_id.0);
         self.fetch_chat_administrators(chat_id)
+    }
+
+    /// Phase D3c: `getChatEventLog` first page (TDLib 1.8.67,
+    /// `schema/td_api.tl:15252`). Idempotent: a cached `Loaded` page is
+    /// kept until an explicit refresh clears it, and no second request
+    /// goes out while one is in flight. The driver no-ops unless the
+    /// viewer may view the log (`chat_can_view_event_log` — TDLib
+    /// "requires administrator rights"). Returns `Ok(None)` when nothing
+    /// was sent.
+    pub fn fetch_chat_event_log(
+        &mut self,
+        chat_id: ChatId,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        self.fetch_chat_event_log_page(chat_id, 0)
+    }
+
+    /// Phase D3c: explicit refresh of `getChatEventLog` — clears the
+    /// cached page and re-sends (the plain fetch keeps `Loaded`).
+    pub fn refresh_chat_event_log(
+        &mut self,
+        chat_id: ChatId,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        self.session.event_logs.remove(&chat_id.0);
+        self.fetch_chat_event_log(chat_id)
+    }
+
+    /// Phase D3c: the next older page of the event log. The paging cursor
+    /// is the oldest cached event's id (results arrive in decreasing
+    /// event-id order); the driver no-ops unless a `Loaded` page reports
+    /// `has_more` — a short page means the log is exhausted.
+    pub fn fetch_chat_event_log_more(
+        &mut self,
+        chat_id: ChatId,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        let from_event_id = match self.session.event_logs.get(&chat_id.0) {
+            Some(ChatEventLogFetch::Loaded(page)) if page.has_more => {
+                page.events.last().map(|event| event.id).unwrap_or(0)
+            }
+            _ => return Ok(None),
+        };
+        self.fetch_chat_event_log_page(chat_id, from_event_id)
+    }
+
+    /// Phase D3c: one `getChatEventLog` page (`from_event_id` 0 = latest).
+    /// Deduped on any in-flight `GetChatEventLog` for the chat, whatever
+    /// its cursor.
+    fn fetch_chat_event_log_page(
+        &mut self,
+        chat_id: ChatId,
+        from_event_id: i64,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if !self.session.chat_can_view_event_log(chat_id) {
+            return Ok(None);
+        }
+        if from_event_id == 0
+            && matches!(
+                self.session.event_logs.get(&chat_id.0),
+                Some(ChatEventLogFetch::Loading | ChatEventLogFetch::Loaded(_))
+            )
+        {
+            return Ok(None);
+        }
+        if self.session.requests.has_event_log_in_flight(chat_id) {
+            return Ok(None);
+        }
+        if from_event_id == 0 {
+            self.session
+                .event_logs
+                .insert(chat_id.0, ChatEventLogFetch::Loading);
+        }
+        let extra = self.session.request(
+            RequestPurpose::GetChatEventLog { from_event_id },
+            Some(chat_id),
+        );
+        if let Err(err) = self.sender.send_json(&get_chat_event_log(
+            extra,
+            chat_id.0,
+            "",
+            from_event_id,
+            CHAT_EVENT_LOG_PAGE_SIZE,
+            None,
+            &[],
+        )) {
+            self.session.requests.take(extra);
+            if from_event_id == 0 {
+                self.session.event_logs.remove(&chat_id.0);
+            }
+            return Err(err);
+        }
+        Ok(Some(extra))
     }
 
     /// Phase D3b: shared `setChatMemberStatus` sender (TDLib 1.8.67,
@@ -5708,6 +5802,7 @@ mod tests {
     use crate::diagnostics::MemorySink;
     use crate::platform::MemorySecretStore;
     use crate::telegram::client::copy_and_parse;
+    use crate::telegram::envelope::ChannelMemberStatus;
     use serde_json::Value;
     use std::sync::Mutex as StdMutex;
     use std::sync::atomic::AtomicU64;
@@ -5872,6 +5967,158 @@ mod tests {
             driver.set_chat_message_auto_delete_time(ChatId(999), 3600),
             Err(ConnectSendError::InvalidRequest)
         );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Phase D3c: `fetch_chat_event_log` sends one `getChatEventLog`
+    /// (null filters, 100-event page, cursor 0), dedupes while a request
+    /// is in flight, pages older via `fetch_chat_event_log_more`, and
+    /// no-ops for non-admins / unknown chats / an inactive chats path
+    /// (schema 1.8.67, line 15252).
+    #[test]
+    fn driver_fetch_chat_event_log_sends_dedupes_and_gates() {
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = Arc::new(RecordingSender::new());
+        let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+        let mut driver =
+            ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+        let seq = AtomicU64::new(0);
+
+        // Chats path inactive before authorization is Ready: rejected.
+        assert_eq!(
+            driver.fetch_chat_event_log(ChatId(13)),
+            Err(ConnectSendError::InvalidRequest)
+        );
+
+        driver
+            .ingest(
+                copy_and_parse(
+                    r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        driver
+            .ingest(
+                copy_and_parse(
+                    r#"{"@type":"updateNewChat","chat":{"id":13,"title":"Demo channel","type":{"@type":"chatTypeSupergroup","supergroup_id":13,"is_channel":true},"unread_count":0}}"#,
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+
+        // Unknown chat and non-admin channel: quiet no-ops (other Ready
+        // bookkeeping like loadChats may still send).
+        assert_eq!(driver.fetch_chat_event_log(ChatId(999)), Ok(None));
+        assert_eq!(driver.fetch_chat_event_log(ChatId(13)), Ok(None));
+        let event_log_sends = || {
+            recorder
+                .snapshot()
+                .into_iter()
+                .filter(|sent| sent.contains("getChatEventLog"))
+                .collect::<Vec<_>>()
+        };
+        assert!(event_log_sends().is_empty());
+
+        // Become an administrator: the first page goes out.
+        driver
+            .session
+            .chats
+            .get_mut(&13)
+            .unwrap()
+            .set_member_status(ChannelMemberStatus::Administrator, None);
+        let extra = driver
+            .fetch_chat_event_log(ChatId(13))
+            .expect("event log fetch")
+            .expect("request id");
+        let sent = event_log_sends();
+        assert_eq!(sent.len(), 1);
+        let first: Value = serde_json::from_str(&sent[0]).unwrap();
+        assert_eq!(first["@type"], "getChatEventLog");
+        assert_eq!(first["@extra"], extra.0.to_string());
+        assert_eq!(first["chat_id"], 13);
+        assert_eq!(first["query"], "");
+        assert_eq!(first["from_event_id"], 0);
+        assert_eq!(first["limit"], 100);
+        assert!(first["filters"].is_null());
+        assert!(first["user_ids"].as_array().unwrap().is_empty());
+
+        // In-flight dedupe: further fetches no-op while the first is out.
+        assert_eq!(driver.fetch_chat_event_log(ChatId(13)), Ok(None));
+        assert_eq!(driver.fetch_chat_event_log_more(ChatId(13)), Ok(None));
+        assert_eq!(event_log_sends().len(), 1);
+
+        // Feed a full page (100 events) back through the reducer; the
+        // next older page goes out with the oldest event id as cursor.
+        let events: Vec<String> = (401..=500)
+            .rev()
+            .map(|id| {
+                format!(
+                    r#"{{"@type":"chatEvent","id":{id},"date":1700000000,"member_id":{{"@type":"messageSenderUser","user_id":777}},"action":{{"@type":"chatEventMemberJoined"}}}}"#
+                )
+            })
+            .collect();
+        driver
+            .ingest(
+                copy_and_parse(
+                    &format!(
+                        r#"{{"@type":"chatEvents","@extra":"{}","events":[{}]}}"#,
+                        extra.0,
+                        events.join(",")
+                    ),
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        let extra_more = driver
+            .fetch_chat_event_log_more(ChatId(13))
+            .expect("event log more")
+            .expect("request id");
+        let sent = event_log_sends();
+        assert_eq!(sent.len(), 2);
+        let more: Value = serde_json::from_str(&sent[1]).unwrap();
+        assert_eq!(more["@type"], "getChatEventLog");
+        assert_eq!(more["@extra"], extra_more.0.to_string());
+        assert_eq!(more["from_event_id"], 401);
+
+        // A plain fetch after a load is cached: no-op.
+        assert_eq!(driver.fetch_chat_event_log(ChatId(13)), Ok(None));
+        assert_eq!(event_log_sends().len(), 2);
+
+        // Complete the "more" request with a short page (log exhausted),
+        // then refresh clears the cache and re-sends from the top.
+        driver
+            .ingest(
+                copy_and_parse(
+                    &format!(
+                        r#"{{"@type":"chatEvents","@extra":"{}","events":[]}}"#,
+                        extra_more.0
+                    ),
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        assert_eq!(driver.fetch_chat_event_log_more(ChatId(13)), Ok(None));
+        let extra_refresh = driver
+            .refresh_chat_event_log(ChatId(13))
+            .expect("event log refresh")
+            .expect("request id");
+        let sent = event_log_sends();
+        assert_eq!(sent.len(), 3);
+        let refresh: Value = serde_json::from_str(&sent[2]).unwrap();
+        assert_eq!(refresh["@extra"], extra_refresh.0.to_string());
+        assert_eq!(refresh["from_event_id"], 0);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

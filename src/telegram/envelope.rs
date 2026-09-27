@@ -494,6 +494,13 @@ pub enum EnvelopePayload {
     ChatAdministrators {
         administrators: Vec<ChatAdministratorEntry>,
     },
+    /// Phase D3c: `chatEvents` (TDLib 1.8.67, line 7938) — the response
+    /// of `getChatEventLog` (line 15252). Carries no chat id; correlated
+    /// to the chat by the request's `PendingRequest::chat_id`. Events
+    /// arrive in reverse chronological order (decreasing event `id`).
+    ChatEvents {
+        events: Vec<ParsedChatEvent>,
+    },
     /// Phase D3b: `chatMembers` (TDLib 1.8.67, line 2529) — the response
     /// of `getSupergroupMembers` (line 15238). Drives the promote flow's
     /// member picker. Carries no supergroup id; correlated by the
@@ -2140,6 +2147,92 @@ pub struct ParsedChatJoinRequest {
     pub bio: String,
 }
 
+/// Phase D3c: `chatEventAction` (TDLib 1.8.67, schema lines 7764–7928).
+/// The 16 high-value constructors are typed below; every other
+/// constructor maps to `Unsupported` carrying its constructor name, so
+/// the UI renders an honest generic row instead of invented details.
+/// (The schema has no `chatEventInviteLinkCreated` — link creation has
+/// no event constructor in 1.8.67.)
+#[derive(Debug, Clone, PartialEq)]
+pub enum ChatEventAction {
+    /// `chatEventMessageEdited` (line 7764). `text` is a short excerpt of
+    /// the new message's text (empty for non-text content).
+    MessageEdited { message_id: i64, text: String },
+    /// `chatEventMessageDeleted` (line 7767).
+    MessageDeleted { message_id: i64, text: String },
+    /// `chatEventMessagePinned` (line 7770).
+    MessagePinned { message_id: i64, text: String },
+    /// `chatEventMessageUnpinned` (line 7773).
+    MessageUnpinned { message_id: i64, text: String },
+    /// `chatEventMemberJoined` (line 7779).
+    MemberJoined,
+    /// `chatEventMemberJoinedByInviteLink` (line 7782).
+    MemberJoinedByInviteLink {
+        invite_link: String,
+        invite_link_name: String,
+    },
+    /// `chatEventMemberJoinedByRequest` (line 7785).
+    MemberJoinedByRequest {
+        approver_user_id: i64,
+        invite_link: String,
+    },
+    /// `chatEventMemberInvited` (line 7788). The invitee's resulting
+    /// status is carried for honest phrasing ("invited"/"added").
+    MemberInvited {
+        user_id: i64,
+        status: ChannelMemberStatus,
+    },
+    /// `chatEventMemberPromoted` (line 7794).
+    MemberPromoted {
+        user_id: i64,
+        old_status: ChannelMemberStatus,
+        new_status: ChannelMemberStatus,
+    },
+    /// `chatEventMemberRestricted` (line 7797). Covers restrictions,
+    /// bans, and their reversals (old/new statuses distinguish them).
+    MemberRestricted {
+        member_id: MessageSender,
+        old_status: ChannelMemberStatus,
+        new_status: ChannelMemberStatus,
+    },
+    /// `chatEventDescriptionChanged` (line 7812).
+    DescriptionChanged {
+        old_description: String,
+        new_description: String,
+    },
+    /// `chatEventPhotoChanged` (line 7830).
+    PhotoChanged,
+    /// `chatEventTitleChanged` (line 7842).
+    TitleChanged {
+        old_title: String,
+        new_title: String,
+    },
+    /// `chatEventInviteLinkEdited` (line 7886).
+    InviteLinkEdited {
+        old_url: String,
+        old_name: String,
+        new_url: String,
+        new_name: String,
+    },
+    /// `chatEventInviteLinkRevoked` (line 7889).
+    InviteLinkRevoked { url: String, name: String },
+    /// `chatEventInviteLinkDeleted` (line 7892).
+    InviteLinkDeleted { url: String, name: String },
+    /// Any other `chatEvent*` constructor — the schema defines 53 (lines
+    /// 7764–7928); the remainder render as generic rows.
+    Unsupported { type_name: String },
+}
+
+/// Phase D3c: `chatEvent` (TDLib 1.8.67, `schema/td_api.tl:7935`):
+/// `chatEvent id:int64 date:int32 member_id:MessageSender action:ChatEventAction = ChatEvent;`
+#[derive(Debug, Clone, PartialEq)]
+pub struct ParsedChatEvent {
+    pub id: i64,
+    pub date: i32,
+    pub member_id: MessageSender,
+    pub action: ChatEventAction,
+}
+
 fn parse_star_subscription_pricing(value: Option<&Value>) -> Option<StarSubscriptionPricing> {
     let value = value?;
     if value.get("@type").and_then(Value::as_str) != Some("starSubscriptionPricing") {
@@ -2202,6 +2295,156 @@ fn parse_chat_join_request(value: Option<&Value>) -> Option<ParsedChatJoinReques
             .and_then(Value::as_str)
             .unwrap_or_default()
             .to_owned(),
+    })
+}
+
+/// Phase D3c: short text excerpt of a `message` object inside a
+/// `chatEvent*` action (edited/deleted/pinned). Only `messageText`
+/// content yields text; anything else is an empty string so the UI
+/// falls back to an honest media-neutral phrasing.
+fn chat_event_message_excerpt(message: Option<&Value>) -> (i64, String) {
+    let message = match message {
+        Some(message) => message,
+        None => return (0, String::new()),
+    };
+    let id = int53(message.get("id")).unwrap_or(0);
+    let raw = message
+        .get("content")
+        .filter(|content| content.get("@type").and_then(Value::as_str) == Some("messageText"))
+        .and_then(|content| content.get("text"))
+        .and_then(|text| text.get("text"))
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let mut excerpt: String = raw.chars().take(80).collect();
+    if raw.chars().count() > 80 {
+        excerpt.push('…');
+    }
+    (id, excerpt)
+}
+
+/// Phase D3c: `chatEventAction` object → typed action. The 16 handled
+/// constructors (schema lines 7764/7767/7770/7773/7779/7782/7785/7788/
+/// 7794/7797/7812/7830/7842/7886/7889/7892) parse their fields; every
+/// other constructor degrades to `ChatEventAction::Unsupported` with its
+/// constructor name (never invented details).
+fn parse_chat_event_action(value: Option<&Value>) -> ChatEventAction {
+    let value = match value {
+        Some(value) => value,
+        None => {
+            return ChatEventAction::Unsupported {
+                type_name: String::new(),
+            };
+        }
+    };
+    let type_name = value
+        .get("@type")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_owned();
+    let member_status = |value: Option<&Value>| {
+        parse_channel_member_status(value)
+            .map(|(status, _)| status)
+            .unwrap_or(ChannelMemberStatus::Unknown)
+    };
+    let invite_link_url_name = |value: Option<&Value>| {
+        parse_chat_invite_link(value)
+            .map(|link| (link.invite_link, link.name))
+            .unwrap_or_default()
+    };
+    let string_field = |value: &Value, field: &str| {
+        value
+            .get(field)
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned()
+    };
+    match type_name.as_str() {
+        "chatEventMessageEdited" => {
+            let (message_id, text) = chat_event_message_excerpt(value.get("new_message"));
+            ChatEventAction::MessageEdited { message_id, text }
+        }
+        "chatEventMessageDeleted" => {
+            let (message_id, text) = chat_event_message_excerpt(value.get("message"));
+            ChatEventAction::MessageDeleted { message_id, text }
+        }
+        "chatEventMessagePinned" => {
+            let (message_id, text) = chat_event_message_excerpt(value.get("message"));
+            ChatEventAction::MessagePinned { message_id, text }
+        }
+        "chatEventMessageUnpinned" => {
+            let (message_id, text) = chat_event_message_excerpt(value.get("message"));
+            ChatEventAction::MessageUnpinned { message_id, text }
+        }
+        "chatEventMemberJoined" => ChatEventAction::MemberJoined,
+        "chatEventMemberJoinedByInviteLink" => {
+            let (invite_link, invite_link_name) = invite_link_url_name(value.get("invite_link"));
+            ChatEventAction::MemberJoinedByInviteLink {
+                invite_link,
+                invite_link_name,
+            }
+        }
+        "chatEventMemberJoinedByRequest" => {
+            let (invite_link, _) = invite_link_url_name(value.get("invite_link"));
+            ChatEventAction::MemberJoinedByRequest {
+                approver_user_id: int53(value.get("approver_user_id")).unwrap_or(0),
+                invite_link,
+            }
+        }
+        "chatEventMemberInvited" => ChatEventAction::MemberInvited {
+            user_id: int53(value.get("user_id")).unwrap_or(0),
+            status: member_status(value.get("status")),
+        },
+        "chatEventMemberPromoted" => ChatEventAction::MemberPromoted {
+            user_id: int53(value.get("user_id")).unwrap_or(0),
+            old_status: member_status(value.get("old_status")),
+            new_status: member_status(value.get("new_status")),
+        },
+        "chatEventMemberRestricted" => ChatEventAction::MemberRestricted {
+            member_id: parse_message_sender(value.get("member_id"))
+                .unwrap_or(MessageSender::User { user_id: 0 }),
+            old_status: member_status(value.get("old_status")),
+            new_status: member_status(value.get("new_status")),
+        },
+        "chatEventDescriptionChanged" => ChatEventAction::DescriptionChanged {
+            old_description: string_field(value, "old_description"),
+            new_description: string_field(value, "new_description"),
+        },
+        "chatEventPhotoChanged" => ChatEventAction::PhotoChanged,
+        "chatEventTitleChanged" => ChatEventAction::TitleChanged {
+            old_title: string_field(value, "old_title"),
+            new_title: string_field(value, "new_title"),
+        },
+        "chatEventInviteLinkEdited" => {
+            let (old_url, old_name) = invite_link_url_name(value.get("old_invite_link"));
+            let (new_url, new_name) = invite_link_url_name(value.get("new_invite_link"));
+            ChatEventAction::InviteLinkEdited {
+                old_url,
+                old_name,
+                new_url,
+                new_name,
+            }
+        }
+        "chatEventInviteLinkRevoked" => {
+            let (url, name) = invite_link_url_name(value.get("invite_link"));
+            ChatEventAction::InviteLinkRevoked { url, name }
+        }
+        "chatEventInviteLinkDeleted" => {
+            let (url, name) = invite_link_url_name(value.get("invite_link"));
+            ChatEventAction::InviteLinkDeleted { url, name }
+        }
+        _ => ChatEventAction::Unsupported { type_name },
+    }
+}
+
+/// Phase D3c: `chatEvent` (schema 1.8.67, line 7935). Events whose
+/// `member_id` (the actor) fails to parse are dropped rather than
+/// misattributed; `id` and `date` are required.
+fn parse_chat_event(value: &Value) -> Option<ParsedChatEvent> {
+    Some(ParsedChatEvent {
+        id: int53(value.get("id")).ok()?,
+        date: int53(value.get("date")).ok()? as i32,
+        member_id: parse_message_sender(value.get("member_id")).ok()?,
+        action: parse_chat_event_action(value.get("action")),
     })
 }
 
@@ -5004,6 +5247,16 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
                         .filter_map(|entry| parse_chat_administrator(Some(entry)))
                         .collect()
                 })
+                .unwrap_or_default(),
+        }),
+        // Phase D3c: `chatEvents` (schema 1.8.67, line 7938) — the
+        // `getChatEventLog` response. Events whose actor fails to parse
+        // are dropped in `parse_chat_event`, never misattributed.
+        "chatEvents" => Ok(EnvelopePayload::ChatEvents {
+            events: value
+                .get("events")
+                .and_then(Value::as_array)
+                .map(|events| events.iter().filter_map(parse_chat_event).collect())
                 .unwrap_or_default(),
         }),
         "chatMembers" => Ok(EnvelopePayload::SupergroupMembers {
@@ -11292,6 +11545,393 @@ mod notification_sound_tests {
                 .lines()
                 .any(|l| l.starts_with("setChatAdministratorCustomTitle ")),
             "setChatAdministratorCustomTitle must not exist in 1.8.67"
+        );
+    }
+
+    /// Phase D3c: `chatEvents` parses all 16 handled action constructors
+    /// (schema lines 7764/7767/7770/7773/7779/7782/7785/7788/7794/7797/
+    /// 7812/7830/7842/7886/7889/7892), including promote vs demote and
+    /// restrict vs ban vs unban distinctions from old/new statuses.
+    #[test]
+    fn chat_events_parse_handled_actions() {
+        let link = |url: &str, name: &str| {
+            format!(
+                r#"{{"@type":"chatInviteLink","invite_link":"{url}","name":"{name}","creator_user_id":777,"date":1700000000,"edit_date":0,"expiration_date":0,"member_limit":0,"member_count":0,"expired_member_count":0,"pending_join_request_count":0,"creates_join_request":false,"is_primary":false,"is_revoked":false}}"#
+            )
+        };
+        let msg = |id: i64, text: &str| {
+            format!(
+                r#"{{"id":{id},"chat_id":13,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"{text}","entities":[]}}}}}}"#
+            )
+        };
+        let member_status = r#"{"@type":"chatMemberStatusMember","member_until_date":0}"#;
+        let admin_status = r#"{"@type":"chatMemberStatusAdministrator","can_be_edited":true}"#;
+        let restricted_status = r#"{"@type":"chatMemberStatusRestricted"}"#;
+        let banned_status = r#"{"@type":"chatMemberStatusBanned"}"#;
+        let user = |id: i64| format!(r#"{{"@type":"messageSenderUser","user_id":{id}}}"#);
+        let event = |id: i64, actor: i64, action: &str| {
+            format!(
+                r#"{{"@type":"chatEvent","id":{id},"date":1700000000,"member_id":{},"action":{}}}"#,
+                user(actor),
+                action
+            )
+        };
+        let json = format!(
+            r#"{{"@type":"chatEvents","events":[{}]}}"#,
+            [
+                event(
+                    101,
+                    777,
+                    &format!(
+                        r#"{{"@type":"chatEventMessageEdited","old_message":{},"new_message":{}}}"#,
+                        msg(55, "before"),
+                        msg(55, "after")
+                    )
+                ),
+                event(
+                    102,
+                    777,
+                    &format!(
+                        r#"{{"@type":"chatEventMessageDeleted","message":{},"can_report_anti_spam_false_positive":false}}"#,
+                        msg(56, "gone")
+                    )
+                ),
+                event(
+                    103,
+                    777,
+                    &format!(
+                        r#"{{"@type":"chatEventMessagePinned","message":{}}}"#,
+                        msg(57, "pinned post")
+                    )
+                ),
+                event(
+                    104,
+                    777,
+                    &format!(
+                        r#"{{"@type":"chatEventMessageUnpinned","message":{}}}"#,
+                        msg(57, "pinned post")
+                    )
+                ),
+                event(105, 5, r#"{"@type":"chatEventMemberJoined"}"#),
+                event(
+                    106,
+                    6,
+                    &format!(
+                        r#"{{"@type":"chatEventMemberJoinedByInviteLink","invite_link":{},"via_chat_folder_invite_link":false}}"#,
+                        link("https://t.me/+mods", "Mods")
+                    )
+                ),
+                event(
+                    107,
+                    7,
+                    &format!(
+                        r#"{{"@type":"chatEventMemberJoinedByRequest","approver_user_id":777,"invite_link":{}}}"#,
+                        link("https://t.me/+req", "")
+                    )
+                ),
+                event(
+                    108,
+                    777,
+                    &format!(
+                        r#"{{"@type":"chatEventMemberInvited","user_id":8,"status":{}}}"#,
+                        member_status
+                    )
+                ),
+                event(
+                    109,
+                    777,
+                    &format!(
+                        r#"{{"@type":"chatEventMemberPromoted","user_id":8,"old_status":{member_status},"new_status":{admin_status}}}"#
+                    )
+                ),
+                event(
+                    110,
+                    777,
+                    &format!(
+                        r#"{{"@type":"chatEventMemberPromoted","user_id":9,"old_status":{admin_status},"new_status":{member_status}}}"#
+                    )
+                ),
+                event(
+                    111,
+                    777,
+                    &format!(
+                        r#"{{"@type":"chatEventMemberRestricted","member_id":{},"old_status":{member_status},"new_status":{restricted_status}}}"#,
+                        user(10)
+                    )
+                ),
+                event(
+                    112,
+                    777,
+                    &format!(
+                        r#"{{"@type":"chatEventMemberRestricted","member_id":{},"old_status":{member_status},"new_status":{banned_status}}}"#,
+                        user(11)
+                    )
+                ),
+                event(
+                    113,
+                    777,
+                    &format!(
+                        r#"{{"@type":"chatEventMemberRestricted","member_id":{},"old_status":{restricted_status},"new_status":{member_status}}}"#,
+                        user(12)
+                    )
+                ),
+                event(
+                    114,
+                    777,
+                    r#"{"@type":"chatEventDescriptionChanged","old_description":"old","new_description":"new"}"#
+                ),
+                event(
+                    115,
+                    777,
+                    r#"{"@type":"chatEventPhotoChanged","old_photo":{"@type":"chatPhoto"},"new_photo":{"@type":"chatPhoto"}}"#
+                ),
+                event(
+                    116,
+                    777,
+                    r#"{"@type":"chatEventTitleChanged","old_title":"Old name","new_title":"New name"}"#
+                ),
+                event(
+                    117,
+                    777,
+                    &format!(
+                        r#"{{"@type":"chatEventInviteLinkEdited","old_invite_link":{},"new_invite_link":{}}}"#,
+                        link("https://t.me/+old", "Old"),
+                        link("https://t.me/+new", "New")
+                    )
+                ),
+                event(
+                    118,
+                    777,
+                    &format!(
+                        r#"{{"@type":"chatEventInviteLinkRevoked","invite_link":{}}}"#,
+                        link("https://t.me/+gone", "Gone")
+                    )
+                ),
+                event(
+                    119,
+                    777,
+                    &format!(
+                        r#"{{"@type":"chatEventInviteLinkDeleted","invite_link":{}}}"#,
+                        link("https://t.me/+del", "Del")
+                    )
+                ),
+            ]
+            .join(",")
+        );
+        let env = parse_envelope(&json).unwrap();
+        let events = match env.payload {
+            EnvelopePayload::ChatEvents { events } => events,
+            other => panic!("unexpected {other:?}"),
+        };
+        assert_eq!(events.len(), 19);
+        assert_eq!(
+            events[0].action,
+            ChatEventAction::MessageEdited {
+                message_id: 55,
+                text: "after".to_owned()
+            }
+        );
+        assert_eq!(
+            events[1].action,
+            ChatEventAction::MessageDeleted {
+                message_id: 56,
+                text: "gone".to_owned()
+            }
+        );
+        assert_eq!(
+            events[2].action,
+            ChatEventAction::MessagePinned {
+                message_id: 57,
+                text: "pinned post".to_owned()
+            }
+        );
+        assert_eq!(
+            events[3].action,
+            ChatEventAction::MessageUnpinned {
+                message_id: 57,
+                text: "pinned post".to_owned()
+            }
+        );
+        assert_eq!(events[4].action, ChatEventAction::MemberJoined);
+        assert_eq!(
+            events[5].action,
+            ChatEventAction::MemberJoinedByInviteLink {
+                invite_link: "https://t.me/+mods".to_owned(),
+                invite_link_name: "Mods".to_owned(),
+            }
+        );
+        assert_eq!(
+            events[6].action,
+            ChatEventAction::MemberJoinedByRequest {
+                approver_user_id: 777,
+                invite_link: "https://t.me/+req".to_owned(),
+            }
+        );
+        assert_eq!(
+            events[7].action,
+            ChatEventAction::MemberInvited {
+                user_id: 8,
+                status: ChannelMemberStatus::Member,
+            }
+        );
+        assert_eq!(
+            events[8].action,
+            ChatEventAction::MemberPromoted {
+                user_id: 8,
+                old_status: ChannelMemberStatus::Member,
+                new_status: ChannelMemberStatus::Administrator,
+            }
+        );
+        assert_eq!(
+            events[9].action,
+            ChatEventAction::MemberPromoted {
+                user_id: 9,
+                old_status: ChannelMemberStatus::Administrator,
+                new_status: ChannelMemberStatus::Member,
+            }
+        );
+        assert_eq!(
+            events[10].action,
+            ChatEventAction::MemberRestricted {
+                member_id: MessageSender::User { user_id: 10 },
+                old_status: ChannelMemberStatus::Member,
+                new_status: ChannelMemberStatus::Restricted,
+            }
+        );
+        assert_eq!(
+            events[11].action,
+            ChatEventAction::MemberRestricted {
+                member_id: MessageSender::User { user_id: 11 },
+                old_status: ChannelMemberStatus::Member,
+                new_status: ChannelMemberStatus::Banned,
+            }
+        );
+        assert_eq!(
+            events[12].action,
+            ChatEventAction::MemberRestricted {
+                member_id: MessageSender::User { user_id: 12 },
+                old_status: ChannelMemberStatus::Restricted,
+                new_status: ChannelMemberStatus::Member,
+            }
+        );
+        assert_eq!(
+            events[13].action,
+            ChatEventAction::DescriptionChanged {
+                old_description: "old".to_owned(),
+                new_description: "new".to_owned(),
+            }
+        );
+        assert_eq!(events[14].action, ChatEventAction::PhotoChanged);
+        assert_eq!(
+            events[15].action,
+            ChatEventAction::TitleChanged {
+                old_title: "Old name".to_owned(),
+                new_title: "New name".to_owned(),
+            }
+        );
+        assert_eq!(
+            events[16].action,
+            ChatEventAction::InviteLinkEdited {
+                old_url: "https://t.me/+old".to_owned(),
+                old_name: "Old".to_owned(),
+                new_url: "https://t.me/+new".to_owned(),
+                new_name: "New".to_owned(),
+            }
+        );
+        assert_eq!(
+            events[17].action,
+            ChatEventAction::InviteLinkRevoked {
+                url: "https://t.me/+gone".to_owned(),
+                name: "Gone".to_owned(),
+            }
+        );
+        assert_eq!(
+            events[18].action,
+            ChatEventAction::InviteLinkDeleted {
+                url: "https://t.me/+del".to_owned(),
+                name: "Del".to_owned(),
+            }
+        );
+        assert_eq!(events[0].id, 101);
+        assert_eq!(events[0].date, 1_700_000_000);
+        assert_eq!(events[0].member_id, MessageSender::User { user_id: 777 });
+    }
+
+    /// Phase D3c: unhandled `chatEvent*` constructors degrade to an honest
+    /// generic `Unsupported` (the constructor name is kept for the
+    /// schema-pin test, never rendered as fabricated details), and events
+    /// whose `member_id` fails to parse are dropped, never misattributed.
+    #[test]
+    fn chat_events_unsupported_and_actorless() {
+        let json = r#"{"@type":"chatEvents","events":[
+            {"@type":"chatEvent","id":201,"date":1700000000,"member_id":{"@type":"messageSenderUser","user_id":777},"action":{"@type":"chatEventPollStopped","message":{"id":60}}},
+            {"@type":"chatEvent","id":202,"date":1700000000,"member_id":{"@type":"messageSenderChat","chat_id":13},"action":{"@type":"chatEventMemberLeft"}},
+            {"@type":"chatEvent","id":203,"date":1700000000,"member_id":{"@type":"bogus"},"action":{"@type":"chatEventMemberLeft"}},
+            {"@type":"chatEvent","id":204,"date":1700000000,"action":{"@type":"chatEventMemberLeft"}}
+        ]}"#;
+        let env = parse_envelope(json).unwrap();
+        let events = match env.payload {
+            EnvelopePayload::ChatEvents { events } => events,
+            other => panic!("unexpected {other:?}"),
+        };
+        // The two actor-less events are dropped; `chatEventPollStopped`
+        // and `chatEventMemberLeft` are not among the 16 handled
+        // constructors, so both parse as honest generic `Unsupported`.
+        assert_eq!(events.len(), 2);
+        assert_eq!(
+            events[0].action,
+            ChatEventAction::Unsupported {
+                type_name: "chatEventPollStopped".to_owned()
+            }
+        );
+        assert_eq!(
+            events[1].action,
+            ChatEventAction::Unsupported {
+                type_name: "chatEventMemberLeft".to_owned()
+            }
+        );
+        assert_eq!(events[1].member_id, MessageSender::Chat { chat_id: 13 });
+    }
+
+    /// Phase D3c: every constructor this slice relies on must exist verbatim
+    /// in the pinned schema (1.8.67) — never invent constructors or fields.
+    /// (`chatEventInviteLinkCreated` is deliberately absent: link creation
+    /// has no event constructor in this schema version.)
+    #[test]
+    fn d3c_schema_pins_exist_verbatim() {
+        let schema = include_str!("../../schema/td_api.tl");
+        for line in [
+            "chatEventMessageEdited old_message:message new_message:message = ChatEventAction;",
+            "chatEventMessageDeleted message:message can_report_anti_spam_false_positive:Bool = ChatEventAction;",
+            "chatEventMessagePinned message:message = ChatEventAction;",
+            "chatEventMessageUnpinned message:message = ChatEventAction;",
+            "chatEventMemberJoined = ChatEventAction;",
+            "chatEventMemberJoinedByInviteLink invite_link:chatInviteLink via_chat_folder_invite_link:Bool = ChatEventAction;",
+            "chatEventMemberJoinedByRequest approver_user_id:int53 invite_link:chatInviteLink = ChatEventAction;",
+            "chatEventMemberInvited user_id:int53 status:ChatMemberStatus = ChatEventAction;",
+            "chatEventMemberPromoted user_id:int53 old_status:ChatMemberStatus new_status:ChatMemberStatus = ChatEventAction;",
+            "chatEventMemberRestricted member_id:MessageSender old_status:ChatMemberStatus new_status:ChatMemberStatus = ChatEventAction;",
+            "chatEventDescriptionChanged old_description:string new_description:string = ChatEventAction;",
+            "chatEventPhotoChanged old_photo:chatPhoto new_photo:chatPhoto = ChatEventAction;",
+            "chatEventTitleChanged old_title:string new_title:string = ChatEventAction;",
+            "chatEventInviteLinkEdited old_invite_link:chatInviteLink new_invite_link:chatInviteLink = ChatEventAction;",
+            "chatEventInviteLinkRevoked invite_link:chatInviteLink = ChatEventAction;",
+            "chatEventInviteLinkDeleted invite_link:chatInviteLink = ChatEventAction;",
+            "chatEvent id:int64 date:int32 member_id:MessageSender action:ChatEventAction = ChatEvent;",
+            "chatEvents events:vector<chatEvent> = ChatEvents;",
+            "chatEventLogFilters message_edits:Bool message_deletions:Bool message_pins:Bool member_joins:Bool member_leaves:Bool member_invites:Bool member_promotions:Bool member_restrictions:Bool member_tag_changes:Bool info_changes:Bool setting_changes:Bool invite_link_changes:Bool video_chat_changes:Bool forum_changes:Bool subscription_extensions:Bool = ChatEventLogFilters;",
+            "getChatEventLog chat_id:int53 query:string from_event_id:int64 limit:int32 filters:chatEventLogFilters user_ids:vector<int53> = ChatEvents;",
+        ] {
+            assert!(
+                schema.lines().any(|l| l == line),
+                "schema pin missing: {line}"
+            );
+        }
+        assert!(
+            !schema
+                .lines()
+                .any(|l| l.starts_with("chatEventInviteLinkCreated ")),
+            "chatEventInviteLinkCreated must not exist in 1.8.67"
         );
     }
 }

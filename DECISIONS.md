@@ -3065,9 +3065,160 @@ Failing cases become regression tests/screenshots in E5.
   invalidates + own gate opens/closes on right grant/revoke; per-admin
   rights lookup + demote `ok` invalidates; member picker cache +
   error marks `Failed`.
-- **Out of this slice (→ D3c/future):** `getChatEventLog` (admin
-  activity log — the natural D3c); custom-title editing if a future
-  TDLib adds the setter; message/story statistics
-  (`getMessageStatistics`, `getStoryStatistics`); channel
-  title/description/photo editing; invite-link editing UI (deferred
-  from D3a).
+## Phase D3c — channel/supergroup admin activity log (2026-09-27)
+
+- **Rationale.** D3b closed admin management but the natural D3c was
+  the admin activity log: who did what and when in a channel or
+  supergroup. This slice adds `getChatEventLog` end to end — request
+  builder, `chatEvent`/`chatEvents` parsing, the deny-by-default
+  admin gate, paging, and a "Recent actions" section in the
+  channel/group info panel. All constructors and fields were verified
+  verbatim against `schema/td_api.tl` (TDLib 1.8.67); anything not
+  explicitly handled renders an honest generic row — never fabricated
+  details.
+- **Schema (1.8.67, verified verbatim in `schema/td_api.tl`):**
+  `chatEvent` (:7935, `id:int64 date:int32 member_id:MessageSender
+  action:ChatEventAction`); `chatEvents` (:7938);
+  `chatEventLogFilters` (:7956, all 15 fields:
+  `message_edits message_deletions message_pins member_joins
+  member_leaves member_invites member_promotions member_restrictions
+  member_tag_changes info_changes setting_changes invite_link_changes
+  video_chat_changes forum_changes subscription_extensions`);
+  `getChatEventLog` (:15252,
+  `chat_id:int53 query:string from_event_id:int64 limit:int32
+  filters:chatEventLogFilters user_ids:vector<int53> = ChatEvents` —
+  "available only in supergroups and channels; requires administrator
+  rights; last 48 hours; reverse chronological / decreasing event id;
+  limit up to 100; pass null filters for all types").
+  Handled actions: `chatEventMessageEdited` (:7764),
+  `chatEventMessageDeleted` (:7767),
+  `chatEventMessagePinned` (:7770),
+  `chatEventMessageUnpinned` (:7773),
+  `chatEventMemberJoined` (:7779),
+  `chatEventMemberJoinedByInviteLink` (:7782),
+  `chatEventMemberJoinedByRequest` (:7785),
+  `chatEventMemberInvited` (:7788),
+  `chatEventMemberPromoted` (:7794),
+  `chatEventMemberRestricted` (:7797),
+  `chatEventDescriptionChanged` (:7812),
+  `chatEventPhotoChanged` (:7830),
+  `chatEventTitleChanged` (:7842),
+  `chatEventInviteLinkEdited` (:7886),
+  `chatEventInviteLinkRevoked` (:7889),
+  `chatEventInviteLinkDeleted` (:7892).
+- **No `chatEventInviteLinkCreated` in 1.8.67.** Link *creation* is
+  not a constructor in the pinned schema (verified by absence —
+  `grep` returns 0 hits), so the parser handles edited/revoked/deleted
+  only; a unit test asserts this absence so a future schema bump with
+  the constructor fails loudly instead of silently falling through to
+  the generic row.
+- **Request.** `get_chat_event_log` (`src/telegram/requests.rs`)
+  sends `from_event_id` (0 = latest), `limit` 100, `filters: null`
+  (all event types — Quill does not filter in this slice), empty
+  `query`, empty `user_ids`. A `ChatEventLogFilterSet` mirrors all 15
+  schema fields in order (JSON-shape test asserts every field exists
+  by reading the pinned schema) for future filtering. The JSON-shape
+  test covers the initial all-events request and a paged filtered
+  request.
+- **Parsing.** `ChatEventAction` / `ParsedChatEvent` /
+  `EnvelopePayload::ChatEvents` (`src/telegram/envelope.rs`).
+  Promotion vs demotion and restriction vs ban/unban are derived by
+  comparing old/new `ChatMemberStatus` constructor names (both
+  `chatMemberStatusAdministrator` → "changed admin rights"; to
+  `chatMemberStatusMember` → demoted; to
+  `chatMemberStatusRestricted`/`Banned` → restricted/banned; away from
+  those → "removed restrictions"/"unbanned"). Message rows use the
+  new message's `messageText` excerpt capped at 80 chars; invite-link
+  rows show the link name or raw URL. Events whose actor `member_id`
+  cannot be parsed are dropped (never misattributed); every other
+  unhandled constructor becomes `Unsupported { type_name }` and
+  renders "performed an action". Tests cover all 16 handled
+  constructors, the status-transition distinctions, unsupported
+  constructors, and actorless events.
+- **Gate, same two paths as D3b.** `Session::chat_can_view_event_log`
+  is deny-by-default: unknown chat → false; non-supergroup → false.
+  Channels probe via the `ChatSummary` path (`getChatMember` → new
+  `ChatSummary::is_admin_or_creator`); supergroups via the
+  `updateSupergroup`/`getSupergroup` status block. Unlike D3b (needs
+  `can_promote_members`), *any* administrator or the creator qualifies
+  — the schema only requires "administrator rights". The driver
+  returns `Ok(None)` (no request sent) when the gate is closed, and
+  the info-panel section stays hidden.
+- **Fetch / cache / paging / dedupe.** `RequestPurpose::GetChatEventLog
+  { from_event_id }`; `Session.event_logs: HashMap<i64,
+  ChatEventLogFetch>` (`Loading` / `Loaded(ChatEventLogPage)` /
+  `Failed`). Driver: `fetch_chat_event_log` (first page, idempotent),
+  `refresh_chat_event_log` (clears cache, re-sends), and
+  `fetch_chat_event_log_more` — cursor is the oldest cached event id;
+  only fires when the loaded page is full (`has_more`: 100 events
+  received). In-flight dedupe across cursors via
+  `RequestRegistry::has_event_log_in_flight`. Reducer: cursor 0
+  replaces; nonzero cursor appends, dedupes by event id, sorts
+  decreasing; first-page failure → visible `Failed` ("Could not load
+  recent actions"); load-more failure keeps the loaded page.
+- **Honest UI.** The info-panel **Recent actions** section renders
+  loading / failed-with-retry / loaded / empty states plus Refresh
+  and (when `has_more`) Load more. Rows show the actor's display name
+  (or "User \<id\>"), the action description, and a relative
+  timestamp ("just now" / "Nm ago" / "Nh ago" / "Nd ago" — the log only
+  covers 48h). Unhandled actions read "performed an action". Element
+  ids namespaced (`event-log-*`, `("event-log-row", event_id)`).
+  The section auto-loads when the info panel opens for a supergroup.
+- **Screenshot.** `quill --screenshot-demo ready-admin-log`: demo
+  channel 13 (viewer 777 administrator) with a `chatEvents` fixture
+  covering the handled action types plus one unhandled
+  (`chatEventMemberLeft`) as a generic row, through the real reducer
+  paths, info panel open →
+  `docs/screenshots/ready-admin-log.png`.
+- **Tests.** Request JSON shapes vs schema (initial + paged/filtered,
+  all 15 filter fields asserted from the schema); envelope: all 16
+  handled constructors, promote/demote and restrict/ban/unban
+  distinctions, unsupported constructors, actorless/invalid-actor
+  events dropped, exact schema pins, `chatEventInviteLinkCreated`
+  absence; state unit: gate matrix (unknown / non-supergroup /
+  member / admin / creator × channel and supergroup paths),
+  first-page replace, load-more append/dedupe/order, refresh replace,
+  short page clears `has_more`, initial vs load-more failure states,
+  relative-time buckets; driver replay: inactive path rejected,
+  non-admin/unknown no-ops, request shape (null filters, limit 100,
+  cursor 0), in-flight dedupe, older-page cursor, refresh re-send.
+- **Out of this slice (→ future):** the ~40 deferred action
+  constructors, all rendering as generic rows today —
+  `chatEventPollStopped` (:7776), `chatEventMemberLeft` (:7791),
+  `chatEventMemberTagChanged` (:7800),
+  `chatEventMemberSubscriptionExtended` (:7803),
+  `chatEventAvailableReactionsChanged` (:7806),
+  `chatEventBackgroundChanged` (:7809),
+  `chatEventEmojiStatusChanged` (:7815),
+  `chatEventLinkedChatChanged` (:7818),
+  `chatEventLocationChanged` (:7821),
+  `chatEventMessageAutoDeleteTimeChanged` (:7824),
+  `chatEventPermissionsChanged` (:7827),
+  `chatEventSlowModeDelayChanged` (:7833),
+  `chatEventStickerSetChanged` (:7836),
+  `chatEventCustomEmojiStickerSetChanged` (:7839),
+  `chatEventUsernameChanged` (:7845),
+  `chatEventActiveUsernamesChanged` (:7848),
+  `chatEventAccentColorChanged` (:7855),
+  `chatEventProfileAccentColorChanged` (:7862),
+  `chatEventHasProtectedContentToggled` (:7865),
+  `chatEventInvitesToggled` (:7868),
+  `chatEventIsAllHistoryAvailableToggled` (:7871),
+  `chatEventHasAggressiveAntiSpamEnabledToggled` (:7874),
+  `chatEventSignMessagesToggled` (:7877),
+  `chatEventShowMessageSenderToggled` (:7880),
+  `chatEventAutomaticTranslationToggled` (:7883),
+  `chatEventVideoChatCreated` (:7895),
+  `chatEventVideoChatEnded` (:7898),
+  `chatEventVideoChatMuteNewParticipantsToggled` (:7901),
+  `chatEventVideoChatParticipantIsMutedToggled` (:7904),
+  `chatEventVideoChatParticipantVolumeLevelChanged` (:7907),
+  `chatEventIsForumToggled` (:7910),
+  `chatEventForumTopicCreated` (:7913),
+  `chatEventForumTopicEdited` (:7916),
+  `chatEventForumTopicToggleIsClosed` (:7919),
+  `chatEventForumTopicToggleIsHidden` (:7922),
+  `chatEventForumTopicDeleted` (:7925),
+  `chatEventForumTopicPinned` (:7928); event-log filtering/search UI
+  (the request builder already supports filters/query/user_ids);
+  channel title/description/photo editing (deferred from D3b).
