@@ -23,7 +23,7 @@ use crate::state::{
     AdminListFetch, AdminRightsFetch, CHAT_EVENT_LOG_PAGE_SIZE, ChatEventLogFetch,
     ChatSearchJumpNeed, ChatStatisticsFetch, ForwardFlight, InfoPanelTarget, InviteLinkFetch,
     JoinRequestFetch, MemberListFilter, MemberStatusChange, RequestPurpose, RequestRollback,
-    SearchStatus, Session, ShutdownPhase, SupergroupMembersFetch,
+    SearchStatus, Session, ShutdownPhase, SupergroupMembersFetch, WelcomeMessagesFetch,
 };
 use crate::telegram::client::{LiveTdJson, OwnedEnvelope, ReceiveBridge};
 use crate::telegram::envelope::{
@@ -34,56 +34,61 @@ use crate::telegram::envelope::{
 };
 use crate::telegram::ffi::{LibraryOrigin, TdJsonError, resolve_tdjson_path};
 use crate::telegram::requests::{
-    AnimationSend, CallPrivacySetting, GroupCallJoinParams, InputGroupCallRef, MessageSenderRef,
-    PollSend, PrivacyWho, SendReply, SetTdlibParameters, StickerSend, VideoNoteSend,
-    VideoNoteThumbnailSend, VideoSend, VoiceNoteSend, accept_call_with_protocol, add_chat_member,
-    add_chat_members, add_chat_to_list, add_chat_to_list_value, add_contact, add_message_reaction,
-    add_recently_found_chat, ban_group_call_participants, chat_member_status_administrator_json,
-    chat_member_status_banned_json, chat_member_status_member_json,
-    chat_member_status_restricted_json, check_authentication_code, check_authentication_password,
-    click_chat_sponsored_message, close_chat, close_request,
+    AnimationSend, CallPrivacySetting, ChatEventLogFilterSet, GroupCallJoinParams,
+    InputGroupCallRef, MessageSenderRef, PollSend, PrivacyWho, SendReply, SetTdlibParameters,
+    StickerSend, VideoNoteSend, VideoNoteThumbnailSend, VideoSend, VoiceNoteSend,
+    accept_call_with_protocol, add_chat_member, add_chat_members, add_chat_to_list,
+    add_chat_to_list_value, add_chat_welcome_message, add_contact, add_message_reaction,
+    add_recently_found_chat, ban_group_call_participants, boost_chat,
+    chat_member_status_administrator_json, chat_member_status_banned_json,
+    chat_member_status_member_json, chat_member_status_restricted_json, check_authentication_code,
+    check_authentication_password, click_chat_sponsored_message, close_chat, close_request,
     close_secret_chat as close_secret_chat_request, close_story, create_call_with_protocol,
-    create_chat_folder, create_chat_invite_link, create_new_basic_group_chat,
+    create_chat_folder, create_chat_invite_link, create_forum_topic, create_new_basic_group_chat,
     create_new_secret_chat, create_new_supergroup_chat, create_video_chat,
-    decline_group_call_invitation, delete_chat, delete_chat_folder, delete_messages, delete_story,
-    discard_call as discard_call_request, download_file as download_file_request, edit_chat_folder,
-    edit_chat_invite_link, edit_message_caption, edit_message_text, end_group_call,
-    end_group_call_recording, end_group_call_screen_sharing, forward_messages,
-    get_authorization_state, get_basic_group_full_info, get_callback_query_answer,
-    get_chat_active_stories, get_chat_administrators, get_chat_event_log, get_chat_folder,
-    get_chat_history, get_chat_invite_links, get_chat_join_requests, get_chat_lists_to_add_chat,
-    get_chat_member, get_chat_scheduled_messages, get_chat_sponsored_messages, get_chat_statistics,
-    get_commands, get_contacts, get_forum_topics, get_group_call, get_installed_sticker_sets,
-    get_me, get_message_link, get_message_properties, get_saved_animations,
+    decline_group_call_invitation, delete_chat, delete_chat_folder, delete_chat_welcome_message,
+    delete_forum_topic, delete_messages, delete_story, discard_call as discard_call_request,
+    download_file as download_file_request, edit_chat_folder, edit_chat_invite_link,
+    edit_chat_welcome_message, edit_forum_topic, edit_message_caption, edit_message_text,
+    end_group_call, end_group_call_recording, end_group_call_screen_sharing, forward_messages,
+    get_authorization_state, get_available_chat_boost_slots, get_basic_group_full_info,
+    get_callback_query_answer, get_chat_active_stories, get_chat_administrators,
+    get_chat_boost_status, get_chat_event_log, get_chat_folder, get_chat_history,
+    get_chat_invite_links, get_chat_join_requests, get_chat_lists_to_add_chat, get_chat_member,
+    get_chat_scheduled_messages, get_chat_sponsored_messages, get_chat_statistics, get_commands,
+    get_contacts, get_forum_topics, get_group_call, get_installed_sticker_sets, get_me,
+    get_message_link, get_message_properties, get_message_thread_history, get_saved_animations,
     get_saved_notification_sounds, get_scope_notification_settings, get_secret_chat,
     get_sticker_set, get_storage_statistics, get_story, get_story_available_reactions,
     get_supergroup, get_supergroup_full_info, get_supergroup_members, get_user_full_info,
     get_user_privacy_setting_rules, get_video_chat_invite_link, get_video_chat_rtmp_url,
     input_message_photo, input_message_video, invite_group_call_participant, join_chat,
     join_group_call, join_video_chat, leave_chat, leave_group_call, load_active_stories,
-    load_chats, load_chats_list, load_group_call_participants, open_chat, open_message_content,
-    open_story, pin_chat_message, process_chat_join_request, remove_message_reaction,
-    reorder_chat_folders, replace_primary_chat_invite_link, replace_video_chat_rtmp_url,
-    report_chat_sponsored_message, resend_messages, revoke_chat_invite_link,
-    revoke_group_call_invite_link, search_call_messages, search_chat_messages, search_chats,
-    search_messages, search_public_chats, search_recently_found_chats, send_animation,
-    send_call_debug_information, send_call_log, send_call_rating_detail, send_call_signaling_data,
-    send_chat_action, send_chat_action_kind, send_document, send_group_call_message,
-    send_message_album, send_photo, send_poll, send_sticker, send_text, send_text_story_reply,
-    send_video, send_video_note, send_voice_note, set_authentication_phone_number,
-    set_chat_draft_message, set_chat_member_status, set_chat_member_tag,
-    set_chat_message_auto_delete_time, set_chat_notification_settings, set_chat_permissions,
-    set_chat_slow_mode_delay, set_group_call_participant_volume_level, set_poll_answer,
-    set_scope_notification_settings, set_story_reaction, set_supergroup_username,
+    load_chat_welcome_messages, load_chats, load_chats_list, load_group_call_participants,
+    open_chat, open_message_content, open_story, pin_chat_message, process_chat_join_request,
+    remove_message_reaction, reorder_chat_folders, replace_primary_chat_invite_link,
+    replace_video_chat_rtmp_url, report_chat_sponsored_message, resend_messages,
+    revoke_chat_invite_link, revoke_group_call_invite_link, search_call_messages,
+    search_chat_messages, search_chats, search_messages, search_public_chats,
+    search_recently_found_chats, send_animation, send_call_debug_information, send_call_log,
+    send_call_rating_detail, send_call_signaling_data, send_chat_action, send_chat_action_kind,
+    send_document, send_group_call_message, send_message_album, send_photo, send_poll,
+    send_sticker, send_text, send_text_story_reply, send_video, send_video_note, send_voice_note,
+    set_authentication_phone_number, set_chat_draft_message, set_chat_member_status,
+    set_chat_member_tag, set_chat_message_auto_delete_time, set_chat_notification_settings,
+    set_chat_permissions, set_chat_slow_mode_delay, set_group_call_participant_volume_level,
+    set_poll_answer, set_scope_notification_settings, set_story_reaction, set_supergroup_username,
     set_user_privacy_setting_rules, set_video_chat_title, start_group_call_recording,
     start_group_call_screen_sharing, start_scheduled_video_chat,
     supergroup_members_filter_administrators_json, supergroup_members_filter_banned_json,
     supergroup_members_filter_recent_json, supergroup_members_filter_restricted_json,
-    supergroup_members_filter_search_json, toggle_chat_folder_tags,
+    supergroup_members_filter_search_json, toggle_chat_folder_tags, toggle_forum_topic_closed,
+    toggle_forum_topic_pinned, toggle_general_forum_topic_hidden,
     toggle_group_call_are_messages_allowed, toggle_group_call_is_my_video_enabled,
     toggle_group_call_is_my_video_paused, toggle_group_call_participant_is_hand_raised,
-    toggle_group_call_participant_is_muted, toggle_supergroup_is_broadcast_group,
-    toggle_supergroup_join_by_request, toggle_video_chat_mute_new_participants,
+    toggle_group_call_participant_is_muted, toggle_supergroup_aggressive_anti_spam,
+    toggle_supergroup_is_broadcast_group, toggle_supergroup_join_by_request,
+    toggle_supergroup_sign_messages, toggle_video_chat_mute_new_participants,
     unpin_all_chat_messages, unpin_chat_message, view_messages, view_sponsored_chat,
 };
 use crate::voice::VoiceDraft;
@@ -883,11 +888,66 @@ impl<S: JsonSender> ConnectDriver<S> {
                 }),
             _ => None,
         };
+        // Slice G2: capture forum/welcome/boost mutations before `apply`
+        // takes the pending request. The state drops the stale cache on
+        // confirmed success; the post-apply refetch reloads it now that
+        // the server has applied the change (never pre-confirmation).
+        let mutation_refetch: Option<(RequestPurpose, ChatId)> = owned
+            .envelope
+            .extra
+            .and_then(|id| self.session.requests.get(id))
+            .and_then(|pending| match pending.purpose {
+                RequestPurpose::CreateForumTopic
+                | RequestPurpose::EditForumTopic { .. }
+                | RequestPurpose::ToggleForumTopicClosed { .. }
+                | RequestPurpose::ToggleForumTopicPinned { .. }
+                | RequestPurpose::DeleteForumTopic { .. }
+                | RequestPurpose::ToggleGeneralForumTopicHidden
+                | RequestPurpose::AddChatWelcomeMessage
+                | RequestPurpose::EditChatWelcomeMessage { .. }
+                | RequestPurpose::DeleteChatWelcomeMessage { .. }
+                | RequestPurpose::BoostChat => {
+                    pending.chat_id.map(|chat_id| (pending.purpose, chat_id))
+                }
+                _ => None,
+            });
         self.session.apply(owned);
         self.pump_call_engine(active_call_before, bridge_signaling)?;
         self.pump_group_call_transport(active_group_call_before)?;
         self.maybe_send_parameters()?;
         self.maybe_probe_channel_membership()?;
+        // Slice G2: chain `boostChat` once the slots answer arrives.
+        self.maybe_continue_boost()?;
+        // Slice G2: refetch caches the state dropped after a confirmed
+        // mutation. A dropped cache is the success signal — on a TDLib
+        // error the cache stays and nothing refetches.
+        if let Some((purpose, chat_id)) = mutation_refetch {
+            match purpose {
+                RequestPurpose::CreateForumTopic
+                | RequestPurpose::EditForumTopic { .. }
+                | RequestPurpose::ToggleForumTopicClosed { .. }
+                | RequestPurpose::ToggleForumTopicPinned { .. }
+                | RequestPurpose::DeleteForumTopic { .. }
+                | RequestPurpose::ToggleGeneralForumTopicHidden
+                    if !self.session.forum_topics.contains_key(&chat_id.0) =>
+                {
+                    let _ = self.refresh_forum_topics(chat_id);
+                }
+                RequestPurpose::AddChatWelcomeMessage
+                | RequestPurpose::EditChatWelcomeMessage { .. }
+                | RequestPurpose::DeleteChatWelcomeMessage { .. }
+                    if !self.session.welcome_messages.contains_key(&chat_id.0) =>
+                {
+                    let _ = self.load_chat_welcome_messages(chat_id);
+                }
+                RequestPurpose::BoostChat
+                    if !self.session.chat_boost_status.contains_key(&chat_id.0) =>
+                {
+                    let _ = self.fetch_chat_boost_status(chat_id);
+                }
+                _ => {}
+            }
+        }
         let became_ready = !was_ready && matches!(self.session.auth, AuthorizationState::Ready);
         if became_ready || load_chats_ok {
             self.maybe_load_main_chats()?;
@@ -1945,6 +2005,18 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// Phase 5.1: `getForumTopics` (first page) for a known forum supergroup.
     /// Fires once per chat (deduped by cache + in-flight purpose). No-op
     /// until `is_forum` resolves true.
+    /// Slice G2: force a `getForumTopics` refresh (the manage dialog
+    /// calls this after a mutation so the list shows the new state;
+    /// the state layer already drops the cache on confirmed
+    /// create/delete).
+    pub fn refresh_forum_topics(&mut self, chat_id: ChatId) -> Result<(), ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        self.session.forum_topics.remove(&chat_id.0);
+        self.maybe_fetch_forum_topics(chat_id)
+    }
+
     fn maybe_fetch_forum_topics(&mut self, chat_id: ChatId) -> Result<(), ConnectSendError> {
         if !self.chats_path_active() {
             return Ok(());
@@ -4718,6 +4790,41 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.fetch_chat_event_log(chat_id)
     }
 
+    /// Slice G2: store the event-log search query for the chat (sent
+    /// by the next `getChatEventLog`; empty clears it). Editing the
+    /// query does not refetch by itself — the UI follows with
+    /// `refresh_chat_event_log`.
+    pub fn set_chat_event_log_query(&mut self, chat_id: ChatId, query: &str) {
+        let query = query.trim().to_string();
+        if query.is_empty() {
+            self.session.event_log_queries.remove(&chat_id.0);
+        } else {
+            self.session.event_log_queries.insert(chat_id.0, query);
+        }
+    }
+
+    /// Slice G2: flip one event-log filter category for the chat
+    /// (`toggle` flips one field of the set; clearing the last active
+    /// category removes the set so the log shows all types again).
+    pub fn toggle_chat_event_log_filter(
+        &mut self,
+        chat_id: ChatId,
+        toggle: impl FnOnce(&mut ChatEventLogFilterSet),
+    ) {
+        let mut set = self
+            .session
+            .event_log_filters
+            .get(&chat_id.0)
+            .copied()
+            .unwrap_or_default();
+        toggle(&mut set);
+        if set.any_enabled() {
+            self.session.event_log_filters.insert(chat_id.0, set);
+        } else {
+            self.session.event_log_filters.remove(&chat_id.0);
+        }
+    }
+
     /// Phase D3c: the next older page of the event log. The paging cursor
     /// is the oldest cached event's id (results arrive in decreasing
     /// event-id order); the driver no-ops unless a `Loaded` page reports
@@ -4737,7 +4844,9 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// Phase D3c: one `getChatEventLog` page (`from_event_id` 0 = latest).
     /// Deduped on any in-flight `GetChatEventLog` for the chat, whatever
-    /// its cursor.
+    /// its cursor. Slice G2: sends the cached filter set / search query
+    /// for the chat (both edited from the event-log dialog; changing them
+    /// goes through `refresh_chat_event_log`, which clears the cache).
     fn fetch_chat_event_log_page(
         &mut self,
         chat_id: ChatId,
@@ -4765,6 +4874,18 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .event_logs
                 .insert(chat_id.0, ChatEventLogFetch::Loading);
         }
+        let filters = self
+            .session
+            .event_log_filters
+            .get(&chat_id.0)
+            .copied()
+            .filter(|filters| filters.any_enabled());
+        let query = self
+            .session
+            .event_log_queries
+            .get(&chat_id.0)
+            .cloned()
+            .unwrap_or_default();
         let extra = self.session.request(
             RequestPurpose::GetChatEventLog { from_event_id },
             Some(chat_id),
@@ -4772,10 +4893,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         if let Err(err) = self.sender.send_json(&get_chat_event_log(
             extra,
             chat_id.0,
-            "",
+            &query,
             from_event_id,
             CHAT_EVENT_LOG_PAGE_SIZE,
-            None,
+            filters,
             &[],
         )) {
             self.session.requests.take(extra);
@@ -5529,6 +5650,635 @@ impl<S: JsonSender> ConnectDriver<S> {
                 supergroup_id,
                 previous,
             });
+        }
+        Ok(Some(extra))
+    }
+
+    /// Slice G2: `toggleSupergroupSignMessages` (schema 1.8.67, line
+    /// 15175). Channels only; gated on `can_change_info` (creator or an
+    /// admin with the right, like Telegram X's `ProfileController`).
+    /// Optimistic — the error arm rolls back via `RequestRollback`.
+    pub fn toggle_sign_messages(
+        &mut self,
+        chat_id: ChatId,
+        sign_messages: bool,
+        show_message_sender: bool,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let supergroup_id = match self.session.chats.get(&chat_id.0) {
+            Some(chat) => match chat.kind {
+                ChatKind::Supergroup {
+                    supergroup_id,
+                    is_channel: true,
+                } => supergroup_id,
+                _ => return Ok(None),
+            },
+            None => return Ok(None),
+        };
+        if !self.session.chat_can_change_info(chat_id) {
+            return Ok(None);
+        }
+        let purpose = RequestPurpose::ToggleSupergroupSignMessages;
+        if self.session.requests.has_purpose_for_chat(purpose, chat_id) {
+            return Ok(None);
+        }
+        let extra = self.session.request(purpose, Some(chat_id));
+        if let Err(err) = self.sender.send_json(&toggle_supergroup_sign_messages(
+            extra,
+            supergroup_id,
+            sign_messages,
+            show_message_sender,
+        )) {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        // Optimistic: the previous flags ride on the pending entry so
+        // the error arm can roll back.
+        let previous_sign = self
+            .session
+            .supergroup_sign_messages
+            .get(&supergroup_id)
+            .copied();
+        let previous_show = self
+            .session
+            .supergroup_show_message_sender
+            .get(&supergroup_id)
+            .copied();
+        self.session
+            .supergroup_sign_messages
+            .insert(supergroup_id, sign_messages);
+        self.session
+            .supergroup_show_message_sender
+            .insert(supergroup_id, sign_messages && show_message_sender);
+        if let Some(pending) = self.session.requests.pending_mut(extra) {
+            pending.rollback = Some(RequestRollback::SignMessages {
+                supergroup_id,
+                previous_sign,
+                previous_show,
+            });
+        }
+        Ok(Some(extra))
+    }
+
+    /// Slice G2: `toggleSupergroupHasAggressiveAntiSpamEnabled` (schema
+    /// 1.8.67, line 15212). Non-channel supergroups only; the schema
+    /// requires `supergroupFullInfo.can_toggle_aggressive_anti_spam`.
+    /// Optimistic — the error arm rolls back via `RequestRollback`.
+    pub fn toggle_aggressive_anti_spam(
+        &mut self,
+        chat_id: ChatId,
+        enabled: bool,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let supergroup_id = match self.session.chats.get(&chat_id.0) {
+            Some(chat) => match chat.kind {
+                ChatKind::Supergroup {
+                    supergroup_id,
+                    is_channel: false,
+                } => supergroup_id,
+                _ => return Ok(None),
+            },
+            None => return Ok(None),
+        };
+        if !self.session.chat_can_toggle_anti_spam(chat_id) {
+            return Ok(None);
+        }
+        let purpose = RequestPurpose::ToggleSupergroupAggressiveAntiSpam;
+        if self.session.requests.has_purpose_for_chat(purpose, chat_id) {
+            return Ok(None);
+        }
+        let extra = self.session.request(purpose, Some(chat_id));
+        if let Err(err) = self
+            .sender
+            .send_json(&toggle_supergroup_aggressive_anti_spam(
+                extra,
+                supergroup_id,
+                enabled,
+            ))
+        {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        // Optimistic: the previous flag rides on the pending entry so
+        // the error arm can roll back.
+        let previous = self
+            .session
+            .supergroup_anti_spam_enabled
+            .get(&supergroup_id)
+            .copied();
+        self.session
+            .supergroup_anti_spam_enabled
+            .insert(supergroup_id, enabled);
+        if let Some(pending) = self.session.requests.pending_mut(extra) {
+            pending.rollback = Some(RequestRollback::AntiSpam {
+                supergroup_id,
+                previous,
+            });
+        }
+        Ok(Some(extra))
+    }
+
+    /// Slice G2: supergroup id for a non-channel supergroup chat —
+    /// `None` for everything else (channels, basic groups, unknowns).
+    fn forum_supergroup(&self, chat_id: ChatId) -> Option<i64> {
+        self.session
+            .chats
+            .get(&chat_id.0)
+            .and_then(|chat| match chat.kind {
+                ChatKind::Supergroup {
+                    supergroup_id,
+                    is_channel: false,
+                } => Some(supergroup_id),
+                _ => None,
+            })
+    }
+
+    /// Slice G2: gate shared by every forum-topic mutation — requires
+    /// the viewer to hold `can_manage_topics` in a non-channel
+    /// supergroup.
+    fn forum_topic_gate(&self, chat_id: ChatId) -> bool {
+        self.forum_supergroup(chat_id).is_some() && self.session.chat_can_manage_topics(chat_id)
+    }
+
+    /// Slice G2: `createForumTopic` (schema 1.8.67, line 12665).
+    /// Answers `forumTopicInfo`; the cached topic list is refetched on
+    /// success. Returns `Err` for an empty name.
+    pub fn create_forum_topic(
+        &mut self,
+        chat_id: ChatId,
+        name: &str,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if name.trim().is_empty() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if !self.forum_topic_gate(chat_id) {
+            return Ok(None);
+        }
+        if self
+            .session
+            .requests
+            .has_purpose(RequestPurpose::CreateForumTopic)
+        {
+            return Ok(None);
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::CreateForumTopic, Some(chat_id));
+        if let Err(err) = self
+            .sender
+            .send_json(&create_forum_topic(extra, chat_id, name.trim()))
+        {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(Some(extra))
+    }
+
+    /// Slice G2: `editForumTopic` (schema 1.8.67, line 12674) — renames
+    /// the topic. Answers `ok`; the topic list is refetched on success.
+    pub fn edit_forum_topic(
+        &mut self,
+        chat_id: ChatId,
+        forum_topic_id: i32,
+        name: &str,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if name.trim().is_empty() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if !self.forum_topic_gate(chat_id) {
+            return Ok(None);
+        }
+        let purpose = RequestPurpose::EditForumTopic { forum_topic_id };
+        if self.session.requests.has_purpose_for_chat(purpose, chat_id) {
+            return Ok(None);
+        }
+        let extra = self.session.request(purpose, Some(chat_id));
+        if let Err(err) = self.sender.send_json(&edit_forum_topic(
+            extra,
+            chat_id,
+            forum_topic_id,
+            name.trim(),
+        )) {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(Some(extra))
+    }
+
+    /// Slice G2: `toggleForumTopicIsClosed` (schema 1.8.67, line 12713).
+    /// Answers `ok`; the topic list is refetched on success.
+    pub fn toggle_forum_topic_closed(
+        &mut self,
+        chat_id: ChatId,
+        forum_topic_id: i32,
+        closed: bool,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        self.toggle_forum_topic_flag(
+            chat_id,
+            forum_topic_id,
+            RequestPurpose::ToggleForumTopicClosed { forum_topic_id },
+            closed,
+        )
+    }
+
+    /// Slice G2: `toggleForumTopicIsPinned` (schema 1.8.67, line 12725).
+    /// Answers `ok`; the topic list is refetched on success.
+    pub fn toggle_forum_topic_pinned(
+        &mut self,
+        chat_id: ChatId,
+        forum_topic_id: i32,
+        pinned: bool,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        self.toggle_forum_topic_flag(
+            chat_id,
+            forum_topic_id,
+            RequestPurpose::ToggleForumTopicPinned { forum_topic_id },
+            pinned,
+        )
+    }
+
+    /// Slice G2: shared sender for the two boolean forum-topic toggles.
+    fn toggle_forum_topic_flag(
+        &mut self,
+        chat_id: ChatId,
+        forum_topic_id: i32,
+        purpose: RequestPurpose,
+        flag: bool,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if !self.forum_topic_gate(chat_id) {
+            return Ok(None);
+        }
+        if self.session.requests.has_purpose_for_chat(purpose, chat_id) {
+            return Ok(None);
+        }
+        let extra = self.session.request(purpose, Some(chat_id));
+        let sent = if matches!(purpose, RequestPurpose::ToggleForumTopicClosed { .. }) {
+            self.sender.send_json(&toggle_forum_topic_closed(
+                extra,
+                chat_id,
+                forum_topic_id,
+                flag,
+            ))
+        } else {
+            self.sender.send_json(&toggle_forum_topic_pinned(
+                extra,
+                chat_id,
+                forum_topic_id,
+                flag,
+            ))
+        };
+        if let Err(err) = sent {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(Some(extra))
+    }
+
+    /// Slice G2: `deleteForumTopic` (schema 1.8.67, line 12736).
+    /// Answers `ok`; the topic list is refetched on success.
+    pub fn delete_forum_topic(
+        &mut self,
+        chat_id: ChatId,
+        forum_topic_id: i32,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if !self.forum_topic_gate(chat_id) {
+            return Ok(None);
+        }
+        let purpose = RequestPurpose::DeleteForumTopic { forum_topic_id };
+        if self.session.requests.has_purpose_for_chat(purpose, chat_id) {
+            return Ok(None);
+        }
+        let extra = self.session.request(purpose, Some(chat_id));
+        if let Err(err) = self
+            .sender
+            .send_json(&delete_forum_topic(extra, chat_id, forum_topic_id))
+        {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(Some(extra))
+    }
+
+    /// Slice G2: `toggleGeneralForumTopicIsHidden` (schema 1.8.67, line
+    /// 12718). Answers `ok`; the topic list is refetched on success.
+    pub fn toggle_general_forum_topic_hidden(
+        &mut self,
+        chat_id: ChatId,
+        hidden: bool,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if !self.forum_topic_gate(chat_id) {
+            return Ok(None);
+        }
+        let purpose = RequestPurpose::ToggleGeneralForumTopicHidden;
+        if self.session.requests.has_purpose_for_chat(purpose, chat_id) {
+            return Ok(None);
+        }
+        let extra = self.session.request(purpose, Some(chat_id));
+        if let Err(err) = self
+            .sender
+            .send_json(&toggle_general_forum_topic_hidden(extra, chat_id, hidden))
+        {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(Some(extra))
+    }
+
+    /// Slice G2: `getMessageThreadHistory` (schema 1.8.67, line 11839)
+    /// for the channel-comments viewer — the first page of the comment
+    /// thread under a channel post. Deduped per channel post while one
+    /// is in flight.
+    pub fn fetch_message_thread_history(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let purpose = RequestPurpose::GetMessageThreadHistory {
+            message_id: message_id.0,
+        };
+        if self.session.requests.has_purpose_for_chat(purpose, chat_id) {
+            return Ok(None);
+        }
+        let extra = self.session.request(purpose, Some(chat_id));
+        if let Err(err) = self.sender.send_json(&get_message_thread_history(
+            extra,
+            chat_id,
+            message_id,
+            MessageId(0),
+            50,
+        )) {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(Some(extra))
+    }
+
+    /// Slice G2: `getChatBoostStatus` (schema 1.8.67, line 13917) —
+    /// cached per chat (level + boost count) for the boost dialog.
+    pub fn fetch_chat_boost_status(
+        &mut self,
+        chat_id: ChatId,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if !matches!(
+            self.session.chats.get(&chat_id.0).map(|chat| &chat.kind),
+            Some(ChatKind::Supergroup { .. })
+        ) {
+            return Ok(None);
+        }
+        if self.session.chat_boost_status.contains_key(&chat_id.0)
+            || self
+                .session
+                .requests
+                .has_purpose_for_chat(RequestPurpose::GetChatBoostStatus, chat_id)
+        {
+            return Ok(None);
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::GetChatBoostStatus, Some(chat_id));
+        if let Err(err) = self
+            .sender
+            .send_json(&get_chat_boost_status(extra, chat_id))
+        {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(Some(extra))
+    }
+
+    /// Slice G2: boost the chat. Sends `getAvailableChatBoostSlots`
+    /// (schema 1.8.67, line 13914); the driver chains `boostChat` with
+    /// the first slot once the answer arrives (`maybe_continue_boost`).
+    /// Deduped while an intent or either request is in flight.
+    pub fn request_chat_boost(
+        &mut self,
+        chat_id: ChatId,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if !matches!(
+            self.session.chats.get(&chat_id.0).map(|chat| &chat.kind),
+            Some(ChatKind::Supergroup { .. })
+        ) {
+            return Ok(None);
+        }
+        if self.session.boost_intent == Some(chat_id.0)
+            || self
+                .session
+                .requests
+                .has_purpose_for_chat(RequestPurpose::GetBoostSlotsForBoost, chat_id)
+        {
+            return Ok(None);
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::GetBoostSlotsForBoost, Some(chat_id));
+        if let Err(err) = self
+            .sender
+            .send_json(&get_available_chat_boost_slots(extra))
+        {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        self.session.boost_intent = Some(chat_id.0);
+        Ok(Some(extra))
+    }
+
+    /// Slice G2: `boostChat` chain — once the slots answer for a pending
+    /// boost intent arrives, send `boostChat` with the first slot id.
+    /// An empty slot list (or a failed slots request) just drops the
+    /// intent; `boostChat` errors are reported by the reducer.
+    fn maybe_continue_boost(&mut self) -> Result<(), ConnectSendError> {
+        let Some(chat_id) = self.session.boost_intent else {
+            return Ok(());
+        };
+        let Some(slots) = self.session.boost_slots_by_chat.remove(&chat_id) else {
+            return Ok(());
+        };
+        self.session.boost_intent = None;
+        let Some(slot_id) = slots.into_iter().next() else {
+            return Ok(());
+        };
+        let chat = ChatId(chat_id);
+        let extra = self.session.request(RequestPurpose::BoostChat, Some(chat));
+        if let Err(err) = self.sender.send_json(&boost_chat(extra, chat, &[slot_id])) {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(())
+    }
+
+    /// Slice G2: `loadChatWelcomeMessages` (schema 1.8.67, line 12630).
+    /// The pack also arrives spontaneously as `updateChatWelcomeMessages`;
+    /// deduped on a cached pack or an in-flight fetch.
+    pub fn load_chat_welcome_messages(
+        &mut self,
+        chat_id: ChatId,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if !matches!(
+            self.session.chats.get(&chat_id.0).map(|chat| &chat.kind),
+            Some(ChatKind::Supergroup { .. })
+        ) {
+            return Ok(None);
+        }
+        if self.session.welcome_messages.contains_key(&chat_id.0)
+            || self
+                .session
+                .requests
+                .has_purpose_for_chat(RequestPurpose::LoadChatWelcomeMessages, chat_id)
+        {
+            return Ok(None);
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::LoadChatWelcomeMessages, Some(chat_id));
+        if let Err(err) = self
+            .sender
+            .send_json(&load_chat_welcome_messages(extra, chat_id))
+        {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        self.session
+            .welcome_message_fetches
+            .insert(chat_id.0, WelcomeMessagesFetch::Loading);
+        Ok(Some(extra))
+    }
+
+    /// Slice G2: shared gate for welcome-message mutations — requires
+    /// `can_send_welcome_messages` (creator or an admin with the right)
+    /// in a supergroup or channel.
+    fn welcome_mutation_gate(&self, chat_id: ChatId) -> bool {
+        matches!(
+            self.session.chats.get(&chat_id.0).map(|chat| &chat.kind),
+            Some(ChatKind::Supergroup { .. })
+        ) && self.session.chat_can_send_welcome_messages(chat_id)
+    }
+
+    /// Slice G2: `addChatWelcomeMessage` (schema 1.8.67, line 12639).
+    /// Answers `ok`; the pack is refetched on success.
+    pub fn add_chat_welcome_message(
+        &mut self,
+        chat_id: ChatId,
+        text: &str,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if text.trim().is_empty() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if !self.welcome_mutation_gate(chat_id) {
+            return Ok(None);
+        }
+        if self
+            .session
+            .requests
+            .has_purpose(RequestPurpose::AddChatWelcomeMessage)
+        {
+            return Ok(None);
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::AddChatWelcomeMessage, Some(chat_id));
+        if let Err(err) =
+            self.sender
+                .send_json(&add_chat_welcome_message(extra, chat_id, text.trim()))
+        {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(Some(extra))
+    }
+
+    /// Slice G2: `editChatWelcomeMessage` (schema 1.8.67, line 12646).
+    /// Answers `ok`; the pack is refetched on success.
+    pub fn edit_chat_welcome_message(
+        &mut self,
+        chat_id: ChatId,
+        welcome_message_id: i32,
+        text: &str,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if text.trim().is_empty() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if !self.welcome_mutation_gate(chat_id) {
+            return Ok(None);
+        }
+        let purpose = RequestPurpose::EditChatWelcomeMessage { welcome_message_id };
+        if self.session.requests.has_purpose_for_chat(purpose, chat_id) {
+            return Ok(None);
+        }
+        let extra = self.session.request(purpose, Some(chat_id));
+        if let Err(err) = self.sender.send_json(&edit_chat_welcome_message(
+            extra,
+            chat_id,
+            welcome_message_id,
+            text.trim(),
+        )) {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(Some(extra))
+    }
+
+    /// Slice G2: `deleteChatWelcomeMessage` (schema 1.8.67, line 12651).
+    /// Answers `ok`; the pack is refetched on success.
+    pub fn delete_chat_welcome_message(
+        &mut self,
+        chat_id: ChatId,
+        welcome_message_id: i32,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if !self.welcome_mutation_gate(chat_id) {
+            return Ok(None);
+        }
+        let purpose = RequestPurpose::DeleteChatWelcomeMessage { welcome_message_id };
+        if self.session.requests.has_purpose_for_chat(purpose, chat_id) {
+            return Ok(None);
+        }
+        let extra = self.session.request(purpose, Some(chat_id));
+        if let Err(err) = self.sender.send_json(&delete_chat_welcome_message(
+            extra,
+            chat_id,
+            welcome_message_id,
+        )) {
+            self.session.requests.take(extra);
+            return Err(err);
         }
         Ok(Some(extra))
     }
@@ -16090,6 +16840,601 @@ mod tests {
                 .iter()
                 .all(|json| !json.contains("startGroupCallScreenSharing"))
         );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Slice G2: `toggle_sign_messages` gates on `can_change_info` in a
+    /// channel, sends the right JSON, applies optimistically, and rolls
+    /// back on a TDLib error.
+    #[test]
+    fn driver_toggle_sign_messages_sends_and_rolls_back() {
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = Arc::new(RecordingSender::new());
+        let seq = AtomicU64::new(0);
+        let mut driver = ready_driver(&recorder, prepared, &dyn_sink, &seq);
+        let ingest_json = |driver: &mut ConnectDriver<Arc<RecordingSender>>, json: &str| {
+            driver
+                .ingest(copy_and_parse(json, &seq, &dyn_sink).unwrap())
+                .unwrap();
+        };
+        ingest_json(
+            &mut driver,
+            r#"{"@type":"updateNewChat","chat":{"id":13,"title":"c","type":{"@type":"chatTypeSupergroup","supergroup_id":13,"is_channel":true},"unread_count":0}}"#,
+        );
+        // A plain member is gated out.
+        ingest_json(
+            &mut driver,
+            r#"{"@type":"updateSupergroup","supergroup":{"@type":"supergroup","id":13,"status":{"@type":"chatMemberStatusMember"}}}"#,
+        );
+        assert_eq!(
+            driver.toggle_sign_messages(ChatId(13), true, true).unwrap(),
+            None
+        );
+        // An admin with `can_change_info` passes the gate.
+        ingest_json(
+            &mut driver,
+            r#"{"@type":"updateSupergroup","supergroup":{"@type":"supergroup","id":13,"status":{"@type":"chatMemberStatusAdministrator","rights":{"@type":"chatAdministratorRights","can_change_info":true}}}}"#,
+        );
+        let extra = driver
+            .toggle_sign_messages(ChatId(13), true, true)
+            .unwrap()
+            .expect("toggle sent");
+        let sent = recorder
+            .snapshot()
+            .into_iter()
+            .find(|j| j.contains("toggleSupergroupSignMessages"))
+            .expect("toggle JSON sent");
+        let value: Value = serde_json::from_str(&sent).unwrap();
+        assert_eq!(value["@type"], "toggleSupergroupSignMessages");
+        assert_eq!(value["supergroup_id"], 13);
+        assert_eq!(value["sign_messages"], true);
+        assert_eq!(value["show_message_sender"], true);
+        // Optimistic state.
+        assert_eq!(
+            driver.session.supergroup_sign_messages.get(&13),
+            Some(&true)
+        );
+        // In flight → no-op.
+        assert_eq!(
+            driver.toggle_sign_messages(ChatId(13), true, true).unwrap(),
+            None
+        );
+        // A TDLib error rolls the flags back.
+        ingest_json(
+            &mut driver,
+            &format!(
+                r#"{{"@type":"error","@extra":"{}","code":400,"message":"CHAT_ADMIN_REQUIRED"}}"#,
+                extra.0
+            ),
+        );
+        assert_eq!(
+            driver.session.supergroup_sign_messages.get(&13),
+            Some(&false)
+        );
+        assert_eq!(
+            driver.session.supergroup_show_message_sender.get(&13),
+            Some(&false)
+        );
+        // A non-channel supergroup is not eligible at all.
+        ingest_json(
+            &mut driver,
+            r#"{"@type":"updateNewChat","chat":{"id":14,"title":"g","type":{"@type":"chatTypeSupergroup","supergroup_id":14,"is_channel":false},"unread_count":0}}"#,
+        );
+        assert_eq!(
+            driver.toggle_sign_messages(ChatId(14), true, true).unwrap(),
+            None
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Slice G2: `toggle_aggressive_anti_spam` is gated on
+    /// `supergroupFullInfo.can_toggle_aggressive_anti_spam`.
+    #[test]
+    fn driver_toggle_anti_spam_gated_on_full_info_capability() {
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = Arc::new(RecordingSender::new());
+        let seq = AtomicU64::new(0);
+        let mut driver = ready_driver(&recorder, prepared, &dyn_sink, &seq);
+        let ingest_json = |driver: &mut ConnectDriver<Arc<RecordingSender>>, json: &str| {
+            driver
+                .ingest(copy_and_parse(json, &seq, &dyn_sink).unwrap())
+                .unwrap();
+        };
+        ingest_json(
+            &mut driver,
+            r#"{"@type":"updateNewChat","chat":{"id":13,"title":"g","type":{"@type":"chatTypeSupergroup","supergroup_id":13,"is_channel":false},"unread_count":0}}"#,
+        );
+        // No full info → the toggle is not offered (quiet no-op).
+        assert_eq!(
+            driver
+                .toggle_aggressive_anti_spam(ChatId(13), true)
+                .unwrap(),
+            None
+        );
+        ingest_json(
+            &mut driver,
+            r#"{"@type":"updateSupergroupFullInfo","supergroup_id":13,"supergroup_full_info":{"@type":"supergroupFullInfo","has_aggressive_anti_spam_enabled":false,"can_toggle_aggressive_anti_spam":true}}"#,
+        );
+        let extra = driver
+            .toggle_aggressive_anti_spam(ChatId(13), true)
+            .unwrap()
+            .expect("toggle sent");
+        let sent = recorder
+            .snapshot()
+            .into_iter()
+            .find(|j| j.contains("toggleSupergroupHasAggressiveAntiSpamEnabled"))
+            .expect("anti-spam JSON sent");
+        let value: Value = serde_json::from_str(&sent).unwrap();
+        assert_eq!(value["supergroup_id"], 13);
+        assert_eq!(value["has_aggressive_anti_spam_enabled"], true);
+        assert_eq!(
+            driver.session.supergroup_anti_spam_enabled.get(&13),
+            Some(&true)
+        );
+        ingest_json(
+            &mut driver,
+            &format!(
+                r#"{{"@type":"error","@extra":"{}","code":400,"message":"CHAT_ADMIN_REQUIRED"}}"#,
+                extra.0
+            ),
+        );
+        assert_eq!(
+            driver.session.supergroup_anti_spam_enabled.get(&13),
+            Some(&false)
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Slice G2: forum-topic mutations gate on `can_manage_topics`,
+    /// reject empty names, and send the right constructors.
+    #[test]
+    fn driver_forum_topic_mutations_send_and_gate() {
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = Arc::new(RecordingSender::new());
+        let seq = AtomicU64::new(0);
+        let mut driver = ready_driver(&recorder, prepared, &dyn_sink, &seq);
+        let ingest_json = |driver: &mut ConnectDriver<Arc<RecordingSender>>, json: &str| {
+            driver
+                .ingest(copy_and_parse(json, &seq, &dyn_sink).unwrap())
+                .unwrap();
+        };
+        ingest_json(
+            &mut driver,
+            r#"{"@type":"updateNewChat","chat":{"id":13,"title":"g","type":{"@type":"chatTypeSupergroup","supergroup_id":13,"is_channel":false},"unread_count":0}}"#,
+        );
+        ingest_json(
+            &mut driver,
+            r#"{"@type":"updateSupergroup","supergroup":{"@type":"supergroup","id":13,"status":{"@type":"chatMemberStatusMember"}}}"#,
+        );
+        // A plain member is gated out.
+        assert_eq!(driver.create_forum_topic(ChatId(13), "news").unwrap(), None);
+        // Empty names are rejected.
+        assert!(driver.create_forum_topic(ChatId(13), "  ").is_err());
+        // An admin with `can_manage_topics` passes.
+        ingest_json(
+            &mut driver,
+            r#"{"@type":"updateSupergroup","supergroup":{"@type":"supergroup","id":13,"status":{"@type":"chatMemberStatusAdministrator","rights":{"@type":"chatAdministratorRights","can_manage_topics":true}}}}"#,
+        );
+        let extra = driver
+            .create_forum_topic(ChatId(13), "news")
+            .unwrap()
+            .expect("create sent");
+        let sent: Vec<Value> = recorder
+            .snapshot()
+            .into_iter()
+            .filter(|j| j.contains("createForumTopic"))
+            .map(|j| serde_json::from_str(&j).unwrap())
+            .collect();
+        assert_eq!(sent.len(), 1);
+        assert_eq!(sent[0]["chat_id"], 13);
+        assert_eq!(sent[0]["name"], "news");
+        assert_eq!(sent[0]["@extra"], extra.0.to_string());
+        // The other mutations send their constructors.
+        driver
+            .edit_forum_topic(ChatId(13), 5, "announcements")
+            .unwrap()
+            .expect("edit sent");
+        driver
+            .toggle_forum_topic_closed(ChatId(13), 5, true)
+            .unwrap()
+            .expect("close sent");
+        driver
+            .toggle_forum_topic_pinned(ChatId(13), 5, true)
+            .unwrap()
+            .expect("pin sent");
+        driver
+            .delete_forum_topic(ChatId(13), 5)
+            .unwrap()
+            .expect("delete sent");
+        driver
+            .toggle_general_forum_topic_hidden(ChatId(13), true)
+            .unwrap()
+            .expect("hide sent");
+        let types: Vec<String> = recorder
+            .snapshot()
+            .into_iter()
+            .map(|j| {
+                serde_json::from_str::<Value>(&j).unwrap()["@type"]
+                    .as_str()
+                    .unwrap()
+                    .to_string()
+            })
+            .collect();
+        for expected in [
+            "editForumTopic",
+            "toggleForumTopicIsClosed",
+            "toggleForumTopicIsPinned",
+            "deleteForumTopic",
+            "toggleGeneralForumTopicIsHidden",
+        ] {
+            assert!(types.iter().any(|t| t == expected), "{expected} sent");
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Slice G2: confirmed mutations refetch the dropped cache — forum
+    /// topic create (answers `forumTopicInfo`), welcome add (answers
+    /// `ok`), and `boostChat` (answers `chatBoostSlots`). A failed
+    /// mutation leaves the cache alone and refetches nothing.
+    #[test]
+    fn driver_mutation_confirmed_refetches_dropped_cache() {
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = Arc::new(RecordingSender::new());
+        let seq = AtomicU64::new(0);
+        let mut driver = ready_driver(&recorder, prepared, &dyn_sink, &seq);
+        let ingest_json = |driver: &mut ConnectDriver<Arc<RecordingSender>>, json: &str| {
+            driver
+                .ingest(copy_and_parse(json, &seq, &dyn_sink).unwrap())
+                .unwrap();
+        };
+        ingest_json(
+            &mut driver,
+            r#"{"@type":"updateNewChat","chat":{"id":13,"title":"g","type":{"@type":"chatTypeSupergroup","supergroup_id":13,"is_channel":false},"unread_count":0}}"#,
+        );
+        ingest_json(
+            &mut driver,
+            r#"{"@type":"updateSupergroup","supergroup":{"@type":"supergroup","id":13,"is_forum":true,"status":{"@type":"chatMemberStatusAdministrator","rights":{"@type":"chatAdministratorRights","can_manage_topics":true,"can_send_welcome_messages":true}}}}"#,
+        );
+        // Seed the caches the way the dialogs load them before mutating.
+        driver.session.forum_topics.insert(13, vec![]);
+        driver.session.welcome_messages.insert(13, vec![]);
+        driver.session.chat_boost_status.insert(13, (0, 0));
+        let sent_types = || {
+            recorder
+                .snapshot()
+                .into_iter()
+                .map(|j| {
+                    serde_json::from_str::<Value>(&j).unwrap()["@type"]
+                        .as_str()
+                        .unwrap()
+                        .to_string()
+                })
+                .collect::<Vec<_>>()
+        };
+
+        // Forum create confirmed: cache dropped, `getForumTopics` refetch.
+        let extra = driver
+            .create_forum_topic(ChatId(13), "news")
+            .unwrap()
+            .expect("create sent");
+        ingest_json(
+            &mut driver,
+            &format!(
+                r#"{{"@type":"forumTopicInfo","@extra":"{}","chat_id":13}}"#,
+                extra.0
+            ),
+        );
+        assert!(!driver.session.forum_topics.contains_key(&13));
+        assert!(
+            sent_types().iter().any(|t| t == "getForumTopics"),
+            "forum list refetched after confirmed create"
+        );
+
+        // Forum create failed: cache kept, nothing refetched.
+        driver.session.forum_topics.insert(13, vec![]);
+        let refetches_before = sent_types()
+            .iter()
+            .filter(|t| *t == "getForumTopics")
+            .count();
+        let extra = driver
+            .create_forum_topic(ChatId(13), "news")
+            .unwrap()
+            .expect("create sent");
+        ingest_json(
+            &mut driver,
+            &format!(
+                r#"{{"@type":"error","@extra":"{}","code":400,"message":"TOPIC_INVALID"}}"#,
+                extra.0
+            ),
+        );
+        assert!(driver.session.forum_topics.contains_key(&13));
+        assert_eq!(
+            sent_types()
+                .iter()
+                .filter(|t| *t == "getForumTopics")
+                .count(),
+            refetches_before,
+            "no refetch on failure"
+        );
+
+        // Welcome add confirmed: pack dropped, reload sent.
+        let extra = driver
+            .add_chat_welcome_message(ChatId(13), "hi")
+            .unwrap()
+            .expect("add sent");
+        ingest_json(
+            &mut driver,
+            &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
+        );
+        assert!(!driver.session.welcome_messages.contains_key(&13));
+        assert!(
+            sent_types().iter().any(|t| t == "loadChatWelcomeMessages"),
+            "welcome pack reloaded after confirmed add"
+        );
+
+        // Boost confirmed: status dropped, `getChatBoostStatus` refetch.
+        let slots_extra = driver
+            .request_chat_boost(ChatId(13))
+            .unwrap()
+            .expect("slots sent");
+        ingest_json(
+            &mut driver,
+            &format!(
+                r#"{{"@type":"chatBoostSlots","@extra":"{}","slots":[{{"slot_id":3}}]}}"#,
+                slots_extra.0
+            ),
+        );
+        let boost_extra = driver
+            .session
+            .requests
+            .pending_extra_for(RequestPurpose::BoostChat, Some(ChatId(13)))
+            .expect("boostChat chained");
+        ingest_json(
+            &mut driver,
+            &format!(
+                r#"{{"@type":"chatBoostSlots","@extra":"{}","slots":[]}}"#,
+                boost_extra.0
+            ),
+        );
+        assert!(!driver.session.chat_boost_status.contains_key(&13));
+        assert!(
+            sent_types().iter().any(|t| t == "getChatBoostStatus"),
+            "boost status refetched after confirmed boost"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Slice G2: `request_chat_boost` sends `getAvailableChatBoostSlots`;
+    /// the driver chains `boostChat` with the first slot id once the
+    /// answer arrives.
+    #[test]
+    fn driver_boost_chain_sends_slots_then_boost() {
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = Arc::new(RecordingSender::new());
+        let seq = AtomicU64::new(0);
+        let mut driver = ready_driver(&recorder, prepared, &dyn_sink, &seq);
+        driver
+            .ingest(
+                copy_and_parse(
+                    r#"{"@type":"updateNewChat","chat":{"id":13,"title":"c","type":{"@type":"chatTypeSupergroup","supergroup_id":13,"is_channel":true},"unread_count":0}}"#,
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        let extra = driver
+            .request_chat_boost(ChatId(13))
+            .unwrap()
+            .expect("slots request sent");
+        // A second intent while the first is in flight → no-op.
+        assert_eq!(driver.request_chat_boost(ChatId(13)).unwrap(), None);
+        let sent = recorder.snapshot();
+        assert!(
+            sent.iter()
+                .any(|j| j.contains("getAvailableChatBoostSlots"))
+        );
+        // The slots answer chains `boostChat` with the first slot id.
+        driver
+            .ingest(
+                copy_and_parse(
+                    &format!(
+                        r#"{{"@type":"chatBoostSlots","@extra":"{}","slots":[{{"slot_id":3}},{{"slot_id":7}}]}}"#,
+                        extra.0
+                    ),
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        let boost = recorder
+            .snapshot()
+            .into_iter()
+            .find(|j| j.contains(r#""@type":"boostChat""#))
+            .expect("boostChat chained");
+        let value: Value = serde_json::from_str(&boost).unwrap();
+        assert_eq!(value["chat_id"], 13);
+        assert_eq!(value["slot_ids"], serde_json::json!([3]));
+        assert_eq!(driver.session.boost_intent, None);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Slice G2: `fetch_message_thread_history` sends
+    /// `getMessageThreadHistory` and dedupes per channel post.
+    #[test]
+    fn driver_thread_history_sends_and_dedupes() {
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = Arc::new(RecordingSender::new());
+        let seq = AtomicU64::new(0);
+        let mut driver = ready_driver(&recorder, prepared, &dyn_sink, &seq);
+        driver
+            .ingest(
+                copy_and_parse(
+                    r#"{"@type":"updateNewChat","chat":{"id":13,"title":"c","type":{"@type":"chatTypeSupergroup","supergroup_id":13,"is_channel":true},"unread_count":0}}"#,
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        let extra = driver
+            .fetch_message_thread_history(ChatId(13), MessageId(99))
+            .unwrap()
+            .expect("thread history sent");
+        assert_eq!(
+            driver
+                .fetch_message_thread_history(ChatId(13), MessageId(99))
+                .unwrap(),
+            None
+        );
+        let sent = recorder
+            .snapshot()
+            .into_iter()
+            .find(|j| j.contains("getMessageThreadHistory"))
+            .expect("thread history JSON sent");
+        let value: Value = serde_json::from_str(&sent).unwrap();
+        assert_eq!(value["chat_id"], 13);
+        assert_eq!(value["message_id"], 99);
+        assert_eq!(value["@extra"], extra.0.to_string());
+        // Success ingestion: the thread cache is populated for the post.
+        driver
+            .ingest(
+                copy_and_parse(
+                    &format!(
+                        r#"{{"@type":"messages","@extra":"{}","messages":[{{"id":11,"chat_id":13,"is_outgoing":false,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"hi","entities":[]}}}}}}]}}"#,
+                        extra.0
+                    ),
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        let thread = driver
+            .session
+            .comment_thread
+            .as_ref()
+            .expect("thread cached");
+        assert_eq!(thread.message_id, MessageId(99));
+        assert_eq!(thread.messages.len(), 1);
+        assert_eq!(thread.failed, None);
+        // Failure ingestion: the viewer records the error for a retry.
+        let extra = driver
+            .fetch_message_thread_history(ChatId(13), MessageId(99))
+            .unwrap()
+            .expect("thread history retry sent");
+        driver
+            .ingest(
+                copy_and_parse(
+                    &format!(
+                        r#"{{"@type":"error","@extra":"{}","code":400,"message":"MESSAGE_NOT_MODIFIED"}}"#,
+                        extra.0
+                    ),
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        let thread = driver.session.comment_thread.as_ref().expect("thread kept");
+        assert!(thread.failed.is_some(), "failure recorded for the viewer");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Slice G2: welcome-message send methods gate on the right and
+    /// send the right constructors.
+    #[test]
+    fn driver_welcome_message_mutations_send_and_gate() {
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = Arc::new(RecordingSender::new());
+        let seq = AtomicU64::new(0);
+        let mut driver = ready_driver(&recorder, prepared, &dyn_sink, &seq);
+        let ingest_json = |driver: &mut ConnectDriver<Arc<RecordingSender>>, json: &str| {
+            driver
+                .ingest(copy_and_parse(json, &seq, &dyn_sink).unwrap())
+                .unwrap();
+        };
+        ingest_json(
+            &mut driver,
+            r#"{"@type":"updateNewChat","chat":{"id":13,"title":"g","type":{"@type":"chatTypeSupergroup","supergroup_id":13,"is_channel":false},"unread_count":0}}"#,
+        );
+        ingest_json(
+            &mut driver,
+            r#"{"@type":"updateSupergroup","supergroup":{"@type":"supergroup","id":13,"status":{"@type":"chatMemberStatusMember"}}}"#,
+        );
+        // Plain member: gated out; empty text: rejected.
+        assert_eq!(
+            driver.add_chat_welcome_message(ChatId(13), "hi").unwrap(),
+            None
+        );
+        assert!(driver.add_chat_welcome_message(ChatId(13), "  ").is_err());
+        ingest_json(
+            &mut driver,
+            r#"{"@type":"updateSupergroup","supergroup":{"@type":"supergroup","id":13,"status":{"@type":"chatMemberStatusAdministrator","rights":{"@type":"chatAdministratorRights","can_send_welcome_messages":true}}}}"#,
+        );
+        driver
+            .add_chat_welcome_message(ChatId(13), "welcome!")
+            .unwrap()
+            .expect("add sent");
+        driver
+            .edit_chat_welcome_message(ChatId(13), 7, "welcome back")
+            .unwrap()
+            .expect("edit sent");
+        driver
+            .delete_chat_welcome_message(ChatId(13), 7)
+            .unwrap()
+            .expect("delete sent");
+        driver
+            .load_chat_welcome_messages(ChatId(13))
+            .unwrap()
+            .expect("load sent");
+        let types: Vec<String> = recorder
+            .snapshot()
+            .into_iter()
+            .map(|j| {
+                serde_json::from_str::<Value>(&j).unwrap()["@type"]
+                    .as_str()
+                    .unwrap()
+                    .to_string()
+            })
+            .collect();
+        for expected in [
+            "addChatWelcomeMessage",
+            "editChatWelcomeMessage",
+            "deleteChatWelcomeMessage",
+            "loadChatWelcomeMessages",
+        ] {
+            assert!(types.iter().any(|t| t == expected), "{expected} sent");
+        }
+        let add = recorder
+            .snapshot()
+            .into_iter()
+            .find(|j| j.contains("addChatWelcomeMessage"))
+            .unwrap();
+        let value: Value = serde_json::from_str(&add).unwrap();
+        assert_eq!(value["chat_id"], 13);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

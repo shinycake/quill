@@ -142,6 +142,10 @@ pub enum EnvelopePayload {
         /// lines 3576 / 3579 / 3627). `None` when `group_call_id` is 0
         /// (no active video chat).
         video_chat: Option<ParsedVideoChat>,
+        /// Slice G2: `chat.has_welcome_messages` (schema 1.8.67, line 3627)
+        /// — true when the chat has welcome messages; only sent for chat
+        /// administrators with the `can_change_info` right.
+        has_welcome_messages: bool,
     },
     /// `updateChatDraftMessage`. Positions are the new chat-list orders.
     UpdateChatDraftMessage {
@@ -393,12 +397,36 @@ pub enum EnvelopePayload {
         /// Changing another member's custom title requires this right
         /// (or creator status); changing your own tag is always allowed.
         can_manage_tags: Option<bool>,
+        /// Slice G2: `rights.can_manage_topics` from own
+        /// `chatMemberStatusAdministrator` (schema 1.8.67, line 1092);
+        /// `None` for any other status or a missing rights block.
+        /// Forum topic management requires this right (or creator
+        /// status).
+        can_manage_topics: Option<bool>,
+        /// Slice G2: `rights.can_change_info` from own
+        /// `chatMemberStatusAdministrator` (schema 1.8.67, line 1092);
+        /// `None` for any other status or a missing rights block.
+        /// `toggleSupergroupSignMessages` requires this right.
+        can_change_info: Option<bool>,
+        /// Slice G2: `rights.can_send_welcome_messages` from own
+        /// `chatMemberStatusAdministrator` (schema 1.8.67, line 1090);
+        /// `None` for any other status or a missing rights block.
+        /// Welcome-message management requires this right (or creator
+        /// status).
+        can_send_welcome_messages: Option<bool>,
         /// Slice G1: `supergroup.join_by_request` (schema 1.8.67, lines
         /// 2733/2746) — drives the "Approve new members" toggle.
         join_by_request: bool,
         /// Slice G1: `supergroup.is_broadcast_group` (schema 1.8.67,
         /// lines 2736/2746) — drives the broadcast-group toggle.
         is_broadcast_group: bool,
+        /// Slice G2: `supergroup.sign_messages` (schema 1.8.67, line 2746)
+        /// — channel author signatures.
+        sign_messages: bool,
+        /// Slice G2: `supergroup.show_message_sender` (schema 1.8.67, line
+        /// 2746) — sender shown alongside the signature; only meaningful
+        /// when `sign_messages` is true.
+        show_message_sender: bool,
     },
     /// `supergroup` — `getSupergroup` response. Phase A1: also keeps own
     /// `status` (`supergroup.status`, schema 1.8.67 line 2746) for the
@@ -428,18 +456,40 @@ pub enum EnvelopePayload {
         /// Changing another member's custom title requires this right
         /// (or creator status); changing your own tag is always allowed.
         can_manage_tags: Option<bool>,
+        /// Slice G2: `rights.can_manage_topics` from own
+        /// `chatMemberStatusAdministrator` (schema 1.8.67, line 1092);
+        /// `None` for any other status or a missing rights block.
+        can_manage_topics: Option<bool>,
+        /// Slice G2: `rights.can_change_info` from own
+        /// `chatMemberStatusAdministrator` (schema 1.8.67, line 1092);
+        /// `None` for any other status or a missing rights block.
+        can_change_info: Option<bool>,
+        /// Slice G2: `rights.can_send_welcome_messages` from own
+        /// `chatMemberStatusAdministrator` (schema 1.8.67, line 1090);
+        /// `None` for any other status or a missing rights block.
+        can_send_welcome_messages: Option<bool>,
         /// Slice G1: `supergroup.join_by_request` (schema 1.8.67, lines
         /// 2733/2746) — drives the "Approve new members" toggle.
         join_by_request: bool,
         /// Slice G1: `supergroup.is_broadcast_group` (schema 1.8.67,
         /// lines 2736/2746) — drives the broadcast-group toggle.
         is_broadcast_group: bool,
+        /// Slice G2: `supergroup.sign_messages` (schema 1.8.67, line 2746).
+        sign_messages: bool,
+        /// Slice G2: `supergroup.show_message_sender` (schema 1.8.67, line
+        /// 2746).
+        show_message_sender: bool,
     },
     /// `forumTopics` — `getForumTopics` response. Only the first page is
     /// fetched; `next_offset_*` are dropped (see Phase 5.1 DECISIONS).
     ForumTopics {
         total_count: i32,
         topics: Vec<ForumTopic>,
+    },
+    /// `forumTopicInfo` — `createForumTopic` answer. Only the chat id is
+    /// kept; the topic list is refetched on success.
+    ForumTopic {
+        chat_id: i64,
     },
     UpdateFile(ParsedFile),
     File(ParsedFile),
@@ -577,6 +627,38 @@ pub enum EnvelopePayload {
         /// line 2792) — true when chat statistics are available via
         /// `getChatStatistics`. Gates the statistics entry point.
         can_get_statistics: bool,
+        /// Slice G2: `supergroupFullInfo.has_aggressive_anti_spam_enabled`
+        /// (schema 1.8.67, line 2792).
+        has_aggressive_anti_spam_enabled: bool,
+        /// Slice G2: `supergroupFullInfo.can_toggle_aggressive_anti_spam`
+        /// (schema 1.8.67, line 2792) — gates the anti-spam toggle.
+        can_toggle_aggressive_anti_spam: bool,
+    },
+    /// Slice G2: `updateChatWelcomeMessages` (schema 1.8.67, line 10649)
+    /// — the chat's welcome-message pack, sent after
+    /// `loadChatWelcomeMessages` and whenever the pack changes.
+    UpdateChatWelcomeMessages {
+        chat_id: i64,
+        messages: Vec<ParsedWelcomeMessage>,
+    },
+    /// Slice G2: `updateChatHasWelcomeMessages` (schema 1.8.67, line
+    /// 10600) — the chat's `has_welcome_messages` field changed.
+    UpdateChatHasWelcomeMessages {
+        chat_id: i64,
+        has_welcome_messages: bool,
+    },
+    /// Slice G2: `chatBoostStatus` (schema 1.8.67, line 6943) — the
+    /// `getChatBoostStatus` response. Only `level` and `boost_count`
+    /// drive the channel profile row.
+    ChatBoostStatus {
+        level: i32,
+        boost_count: i32,
+    },
+    /// Slice G2: `chatBoostSlots` (schema 1.8.67, line 6968) — the
+    /// `getAvailableChatBoostSlots` / `boostChat` response; only the slot
+    /// ids are kept.
+    ChatBoostSlots {
+        slots: Vec<i32>,
     },
     /// Phase D2: `chatStatisticsChannel` / `chatStatisticsSupergroup` —
     /// `getChatStatistics` response (schema 1.8.67, line 15760). The
@@ -692,6 +774,12 @@ pub enum EnvelopePayload {
         /// Phase D2: `supergroupFullInfo.can_get_statistics` (schema 1.8.67,
         /// line 2792).
         can_get_statistics: bool,
+        /// Slice G2: `supergroupFullInfo.has_aggressive_anti_spam_enabled`
+        /// (schema 1.8.67, line 2792).
+        has_aggressive_anti_spam_enabled: bool,
+        /// Slice G2: `supergroupFullInfo.can_toggle_aggressive_anti_spam`
+        /// (schema 1.8.67, line 2792) — gates the anti-spam toggle.
+        can_toggle_aggressive_anti_spam: bool,
     },
     /// `botCommands` — `getCommands` response (TDLib 1.8.67,
     /// `schema/td_api.tl:829`): the bot's commands for the requested scope
@@ -3708,14 +3796,30 @@ fn parse_auto_delete_in(value: Option<&Value>) -> Option<MessageAutoDelete> {
     })
 }
 
+/// Slice G2: one parsed `welcomeMessage` (TDLib 1.8.67, line 6839:
+/// `welcomeMessage id:int32 content:MessageContent = WelcomeMessage`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ParsedWelcomeMessage {
+    pub id: i32,
+    pub content: MessageContent,
+}
+
+fn parse_welcome_message(value: &Value) -> Option<ParsedWelcomeMessage> {
+    let id = value.get("id")?.as_i64()? as i32;
+    let (content, _) = parse_content(value.get("content"));
+    Some(ParsedWelcomeMessage { id, content })
+}
+
 /// One `forumTopic` (TDLib 1.8.67, `schema/td_api.tl:3968` + `forumTopicInfo`
 /// at 3953). Only the fields the topic list / topic view need are kept;
 /// dropped fields are documented in the Phase 5.1 DECISIONS entry:
 /// `icon` (custom-emoji topic icons are not rendered), `creation_date`,
-/// `creator_id`, `is_outgoing`, `is_hidden`, `is_name_implicit`,
+/// `creator_id`, `is_outgoing`, `is_name_implicit`,
 /// `last_read_inbox/outbox_message_id`, `unread_mention_count`,
 /// `unread_reaction_count`, `unread_poll_vote_count`,
-/// `notification_settings`, `draft_message`.
+/// `notification_settings`, `draft_message`. Slice G2 added
+/// `is_hidden` back (`forumTopicInfo.is_hidden`, schema line 3953)
+/// for the General topic Hide/Show action.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ForumTopic {
     pub forum_topic_id: i32,
@@ -3723,6 +3827,10 @@ pub struct ForumTopic {
     pub is_general: bool,
     pub is_closed: bool,
     pub is_pinned: bool,
+    /// Slice G2: `forumTopicInfo.is_hidden` (schema 1.8.67, line 3953)
+    /// — "True, if the topic is hidden above the topic list and
+    /// closed; for General topic only". Drives the Hide/Show action.
+    pub is_hidden: bool,
     pub unread_count: i32,
     /// Schema `forumTopic.order` — topics sort by order descending.
     pub order: i64,
@@ -3745,6 +3853,10 @@ fn parse_forum_topic(value: &Value) -> Option<ForumTopic> {
         .get("is_closed")
         .and_then(Value::as_bool)
         .unwrap_or(false);
+    let is_hidden = info
+        .get("is_hidden")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
     let is_pinned = value
         .get("is_pinned")
         .and_then(Value::as_bool)
@@ -3764,6 +3876,7 @@ fn parse_forum_topic(value: &Value) -> Option<ForumTopic> {
         name,
         is_general,
         is_closed,
+        is_hidden,
         is_pinned,
         unread_count,
         order,
@@ -5626,6 +5739,12 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
                 // (no active video chat).
                 video_chat: parse_video_chat(chat.get("video_chat"))
                     .filter(|v| v.group_call_id != 0),
+                // Slice G2: `chat.has_welcome_messages` (schema 1.8.67,
+                // lines 3603/3627).
+                has_welcome_messages: chat
+                    .get("has_welcome_messages")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
             })
         }
         "updateChatPermissions" => {
@@ -5873,6 +5992,13 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
                 can_invite_users: parse_invite_users_right(supergroup.get("status")),
                 can_promote_members: parse_promote_members_right(supergroup.get("status")),
                 can_manage_tags: parse_manage_tags_right(supergroup.get("status")),
+                // Slice G2: forum-topic / sign-messages / welcome-message
+                // rights (schema 1.8.67, lines 1090/1092).
+                can_manage_topics: parse_manage_topics_right(supergroup.get("status")),
+                can_change_info: parse_change_info_right(supergroup.get("status")),
+                can_send_welcome_messages: parse_send_welcome_messages_right(
+                    supergroup.get("status"),
+                ),
                 // Slice G1: `supergroup.join_by_request` /
                 // `supergroup.is_broadcast_group` (schema 1.8.67, lines
                 // 2733/2736/2746).
@@ -5882,6 +6008,17 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
                     .unwrap_or(false),
                 is_broadcast_group: supergroup
                     .get("is_broadcast_group")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
+                // Slice G2: `supergroup.sign_messages` /
+                // `supergroup.show_message_sender` (schema 1.8.67, lines
+                // 2731/2746).
+                sign_messages: supergroup
+                    .get("sign_messages")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
+                show_message_sender: supergroup
+                    .get("show_message_sender")
                     .and_then(Value::as_bool)
                     .unwrap_or(false),
             })
@@ -5901,6 +6038,11 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
             can_invite_users: parse_invite_users_right(value.get("status")),
             can_promote_members: parse_promote_members_right(value.get("status")),
             can_manage_tags: parse_manage_tags_right(value.get("status")),
+            // Slice G2: forum-topic / sign-messages / welcome-message
+            // rights (schema 1.8.67, lines 1090/1092).
+            can_manage_topics: parse_manage_topics_right(value.get("status")),
+            can_change_info: parse_change_info_right(value.get("status")),
+            can_send_welcome_messages: parse_send_welcome_messages_right(value.get("status")),
             // Slice G1: `supergroup.join_by_request` /
             // `supergroup.is_broadcast_group` (schema 1.8.67, lines
             // 2733/2736/2746).
@@ -5910,6 +6052,17 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
                 .unwrap_or(false),
             is_broadcast_group: value
                 .get("is_broadcast_group")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            // Slice G2: `supergroup.sign_messages` /
+            // `supergroup.show_message_sender` (schema 1.8.67, lines
+            // 2731/2746).
+            sign_messages: value
+                .get("sign_messages")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            show_message_sender: value
+                .get("show_message_sender")
                 .and_then(Value::as_bool)
                 .unwrap_or(false),
         }),
@@ -5932,6 +6085,12 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
             })
         }
         "message" => Ok(EnvelopePayload::Message(parse_message(&value)?)),
+        // Slice G2: `forumTopicInfo` — the `createForumTopic` answer
+        // (schema 1.8.67, line 12665). Only the chat id is kept; the
+        // topic list is refetched on success.
+        "forumTopicInfo" => Ok(EnvelopePayload::ForumTopic {
+            chat_id: value.get("chat_id").and_then(Value::as_i64).unwrap_or(0),
+        }),
         "updateFile" => Ok(EnvelopePayload::UpdateFile(parse_file(value.get("file"))?)),
         "file" => Ok(EnvelopePayload::File(parse_file(Some(&value))?)),
         "stickerSets" => Ok(parse_sticker_sets(&value)),
@@ -6136,6 +6295,15 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
                 .get("can_get_statistics")
                 .and_then(Value::as_bool)
                 .unwrap_or(false),
+            // Slice G2: anti-spam fields (schema 1.8.67, line 2792).
+            has_aggressive_anti_spam_enabled: value
+                .get("has_aggressive_anti_spam_enabled")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            can_toggle_aggressive_anti_spam: value
+                .get("can_toggle_aggressive_anti_spam")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
         }),
         // Parity slice: `updateSupergroupFullInfo` (schema 1.8.67, line
         // 10750) — same fields as the `supergroupFullInfo` response, with
@@ -6188,6 +6356,18 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
                 .and_then(|info| info.get("can_get_statistics"))
                 .and_then(Value::as_bool)
                 .unwrap_or(false),
+            // Slice G2: anti-spam fields (schema 1.8.67, line 2792),
+            // nested like the other fields.
+            has_aggressive_anti_spam_enabled: value
+                .get("supergroup_full_info")
+                .and_then(|info| info.get("has_aggressive_anti_spam_enabled"))
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            can_toggle_aggressive_anti_spam: value
+                .get("supergroup_full_info")
+                .and_then(|info| info.get("can_toggle_aggressive_anti_spam"))
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
         }),
         // Phase D2: `getChatStatistics` response (schema 1.8.67, line
         // 15760) — `chatStatisticsChannel` / `chatStatisticsSupergroup`.
@@ -6198,6 +6378,43 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
                 statistics: parse_chat_statistics(&value)?,
             })
         }
+        // Slice G2: welcome-message updates (schema 1.8.67, lines
+        // 10599/10649) and boost responses (lines 6943/6968).
+        "updateChatWelcomeMessages" => Ok(EnvelopePayload::UpdateChatWelcomeMessages {
+            chat_id: int53(value.get("chat_id"))?,
+            messages: value
+                .get("messages")
+                .and_then(Value::as_array)
+                .map(|messages| messages.iter().filter_map(parse_welcome_message).collect())
+                .unwrap_or_default(),
+        }),
+        "updateChatHasWelcomeMessages" => Ok(EnvelopePayload::UpdateChatHasWelcomeMessages {
+            chat_id: int53(value.get("chat_id"))?,
+            has_welcome_messages: value
+                .get("has_welcome_messages")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+        }),
+        "chatBoostStatus" => Ok(EnvelopePayload::ChatBoostStatus {
+            level: value.get("level").and_then(Value::as_i64).unwrap_or(0) as i32,
+            boost_count: value
+                .get("boost_count")
+                .and_then(Value::as_i64)
+                .unwrap_or(0) as i32,
+        }),
+        "chatBoostSlots" => Ok(EnvelopePayload::ChatBoostSlots {
+            slots: value
+                .get("slots")
+                .and_then(Value::as_array)
+                .map(|slots| {
+                    slots
+                        .iter()
+                        .filter_map(|slot| slot.get("slot_id").and_then(Value::as_i64))
+                        .map(|id| id as i32)
+                        .collect()
+                })
+                .unwrap_or_default(),
+        }),
         // Phase D3a: invite-link / join-request responses and updates
         // (schema 1.8.67, lines 2627/2630/2688/2691/10555/11210). The
         // responses carry no chat id; `Session::apply` correlates them via
@@ -6587,6 +6804,52 @@ fn parse_manage_tags_right(value: Option<&Value>) -> Option<bool> {
     value
         .get("rights")
         .and_then(|rights| rights.get("can_manage_tags"))
+        .and_then(Value::as_bool)
+}
+
+/// Slice G2: `rights.can_manage_topics` from own
+/// `chatMemberStatusAdministrator` (schema 1.8.67, line 1092); `None`
+/// for any other status or a missing rights block. Forum topic
+/// management requires this right (or creator status).
+fn parse_manage_topics_right(value: Option<&Value>) -> Option<bool> {
+    let value = value?;
+    if value.get("@type").and_then(Value::as_str) != Some("chatMemberStatusAdministrator") {
+        return None;
+    }
+    value
+        .get("rights")
+        .and_then(|rights| rights.get("can_manage_topics"))
+        .and_then(Value::as_bool)
+}
+
+/// Slice G2: `rights.can_change_info` from own
+/// `chatMemberStatusAdministrator` (schema 1.8.67, line 1092); `None`
+/// for any other status or a missing rights block.
+/// `toggleSupergroupSignMessages` requires this right (schema 1.8.67,
+/// line 15175).
+fn parse_change_info_right(value: Option<&Value>) -> Option<bool> {
+    let value = value?;
+    if value.get("@type").and_then(Value::as_str) != Some("chatMemberStatusAdministrator") {
+        return None;
+    }
+    value
+        .get("rights")
+        .and_then(|rights| rights.get("can_change_info"))
+        .and_then(Value::as_bool)
+}
+
+/// Slice G2: `rights.can_send_welcome_messages` from own
+/// `chatMemberStatusAdministrator` (schema 1.8.67, line 1090); `None`
+/// for any other status or a missing rights block. Welcome-message
+/// management requires this right (or creator status).
+fn parse_send_welcome_messages_right(value: Option<&Value>) -> Option<bool> {
+    let value = value?;
+    if value.get("@type").and_then(Value::as_str) != Some("chatMemberStatusAdministrator") {
+        return None;
+    }
+    value
+        .get("rights")
+        .and_then(|rights| rights.get("can_send_welcome_messages"))
         .and_then(Value::as_bool)
 }
 
@@ -9243,7 +9506,12 @@ mod tests {
                 can_invite_users,
                 can_promote_members,
                 can_manage_tags: _,
+                can_manage_topics: _,
+                can_change_info: _,
+                can_send_welcome_messages: _,
                 join_by_request,
+                sign_messages: _,
+                show_message_sender: _,
                 is_broadcast_group,
             } => {
                 assert_eq!(supergroup_id, 16);
@@ -9282,7 +9550,12 @@ mod tests {
                 can_invite_users,
                 can_promote_members,
                 can_manage_tags: _,
+                can_manage_topics: _,
+                can_change_info: _,
+                can_send_welcome_messages: _,
                 join_by_request,
+                sign_messages: _,
+                show_message_sender: _,
                 is_broadcast_group,
             } => {
                 assert_eq!(supergroup_id, 18);
@@ -9316,7 +9589,12 @@ mod tests {
                 can_invite_users,
                 can_promote_members,
                 can_manage_tags: _,
+                can_manage_topics: _,
+                can_change_info: _,
+                can_send_welcome_messages: _,
                 join_by_request,
+                sign_messages: _,
+                show_message_sender: _,
                 is_broadcast_group,
             } => {
                 assert_eq!(supergroup_id, 17);
@@ -11153,6 +11431,8 @@ mod channel_envelope_tests {
                 unrestrict_boost_count,
                 // Phase D2: absent → false (gates the statistics entry point).
                 can_get_statistics,
+                has_aggressive_anti_spam_enabled: _,
+                can_toggle_aggressive_anti_spam: _,
             } => {
                 assert_eq!(description, "CANARY group description");
                 assert_eq!(member_count, 1234);
@@ -11259,6 +11539,130 @@ mod channel_envelope_tests {
             EnvelopePayload::SupergroupFullInfo {
                 can_get_statistics, ..
             } => assert!(!can_get_statistics),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn g2_supergroup_parses_sign_and_anti_spam_fields() {
+        // Slice G2: `supergroup.sign_messages` / `show_message_sender`
+        // (schema 1.8.67, lines 2731/2746) and
+        // `supergroupFullInfo.has_aggressive_anti_spam_enabled` /
+        // `can_toggle_aggressive_anti_spam` (line 2792); absent → false.
+        let env = parse_envelope(
+            r#"{"@type":"supergroup","id":25,"sign_messages":true,"show_message_sender":true}"#,
+        )
+        .unwrap();
+        match env.payload {
+            EnvelopePayload::Supergroup {
+                sign_messages,
+                show_message_sender,
+                ..
+            } => {
+                assert!(sign_messages);
+                assert!(show_message_sender);
+            }
+            other => panic!("{other:?}"),
+        }
+        let env = parse_envelope(
+            r#"{"@type":"updateSupergroup","supergroup":{"id":25,"sign_messages":false}}"#,
+        )
+        .unwrap();
+        match env.payload {
+            EnvelopePayload::UpdateSupergroup {
+                sign_messages,
+                show_message_sender,
+                ..
+            } => {
+                assert!(!sign_messages);
+                assert!(!show_message_sender);
+            }
+            other => panic!("{other:?}"),
+        }
+        let env = parse_envelope(
+            r#"{"@type":"supergroupFullInfo","@extra":"5","description":"d","member_count":10,"has_aggressive_anti_spam_enabled":true,"can_toggle_aggressive_anti_spam":true}"#,
+        )
+        .unwrap();
+        match env.payload {
+            EnvelopePayload::SupergroupFullInfo {
+                has_aggressive_anti_spam_enabled,
+                can_toggle_aggressive_anti_spam,
+                ..
+            } => {
+                assert!(has_aggressive_anti_spam_enabled);
+                assert!(can_toggle_aggressive_anti_spam);
+            }
+            other => panic!("{other:?}"),
+        }
+        let env = parse_envelope(
+            r#"{"@type":"updateSupergroupFullInfo","supergroup_id":13,"supergroup_full_info":{"has_aggressive_anti_spam_enabled":true}}"#,
+        )
+        .unwrap();
+        match env.payload {
+            EnvelopePayload::UpdateSupergroupFullInfo {
+                has_aggressive_anti_spam_enabled,
+                can_toggle_aggressive_anti_spam,
+                ..
+            } => {
+                assert!(has_aggressive_anti_spam_enabled);
+                assert!(!can_toggle_aggressive_anti_spam);
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn g2_welcome_and_boost_payloads_parse() {
+        // Slice G2: `updateChatWelcomeMessages` (schema 1.8.67, line
+        // 10649) and `updateChatHasWelcomeMessages` (line 10600).
+        let env = parse_envelope(
+            r#"{"@type":"updateChatWelcomeMessages","chat_id":7,"messages":[{"id":3,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"Hello, newcomer!","entities":[]}}}]}"#,
+        )
+        .unwrap();
+        match env.payload {
+            EnvelopePayload::UpdateChatWelcomeMessages { chat_id, messages } => {
+                assert_eq!(chat_id, 7);
+                assert_eq!(messages.len(), 1);
+                assert_eq!(messages[0].id, 3);
+                assert_eq!(messages[0].content.preview(), "Hello, newcomer!");
+            }
+            other => panic!("{other:?}"),
+        }
+        let env = parse_envelope(
+            r#"{"@type":"updateChatHasWelcomeMessages","chat_id":7,"has_welcome_messages":true}"#,
+        )
+        .unwrap();
+        match env.payload {
+            EnvelopePayload::UpdateChatHasWelcomeMessages {
+                chat_id,
+                has_welcome_messages,
+            } => {
+                assert_eq!(chat_id, 7);
+                assert!(has_welcome_messages);
+            }
+            other => panic!("{other:?}"),
+        }
+        // Slice G2: `chatBoostStatus` (line 6943) and `chatBoostSlots`
+        // (line 6968).
+        let env = parse_envelope(
+            r#"{"@type":"chatBoostStatus","@extra":"9","boost_url":"https://t.me/x","level":3,"boost_count":42}"#,
+        )
+        .unwrap();
+        match env.payload {
+            EnvelopePayload::ChatBoostStatus { level, boost_count } => {
+                assert_eq!(level, 3);
+                assert_eq!(boost_count, 42);
+            }
+            other => panic!("{other:?}"),
+        }
+        let env = parse_envelope(
+            r#"{"@type":"chatBoostSlots","@extra":"9","slots":[{"slot_id":1,"currently_boosted_chat_id":0,"start_date":0,"expiration_date":0,"cooldown_until_date":0}]}"#,
+        )
+        .unwrap();
+        match env.payload {
+            EnvelopePayload::ChatBoostSlots { slots } => {
+                assert_eq!(slots, vec![1]);
+            }
             other => panic!("{other:?}"),
         }
     }

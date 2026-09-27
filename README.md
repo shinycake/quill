@@ -236,22 +236,22 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Join-request list with approve/decline buttons and pending-count badge (src/ui/mod.rs:8596) <!-- parity:groups-join-requests -->
 - [x] "Approve new members" join-by-request toggle (`toggleSupergroupJoinByRequest`) (src/ui/mod.rs) <!-- parity:groups-join-by-request-toggle -->
 - [x] Recent-actions event log with refresh and load-more (src/ui/mod.rs:8914) <!-- parity:groups-event-log -->
-- [ ] Event-log filter picker (per-event-type / per-admin) and in-log text search (partial: `getChatEventLog` accepts filters in the request builder, src/telegram/requests.rs:725, but no UI picker) <!-- parity:groups-event-log-filters -->
+- [x] Event-log filter picker (per-event-type chips sent in `getChatEventLog`, per-admin chips filtering the loaded page client-side) and in-log text search (src/ui/mod.rs) <!-- parity:groups-event-log-filters -->
 - [x] Channel/group statistics panel with graphs and top senders/administrators/inviters, gated on `can_get_statistics` (src/ui/mod.rs:9195) <!-- parity:groups-statistics -->
 - [x] Author signatures rendered on channel posts (src/ui/mod.rs:22014) <!-- parity:groups-author-signatures-display -->
-- [ ] Author-signatures toggle for channel (`toggleSupergroupSignMessages`) <!-- parity:groups-author-signatures-toggle -->
+- [x] Author-signatures toggle for channel (`toggleSupergroupSignMessages`, plus show-authors flag forced to `sign && show` per Telegram X, gated on `can_change_info`) (src/ui/mod.rs) <!-- parity:groups-author-signatures-toggle -->
 - [x] Forum topic list with per-topic history and posting to topics (src/connect.rs:1443) <!-- parity:groups-forum-browse -->
-- [ ] Create/edit/close/pin/hide forum topics — no `createForumTopic` family requests <!-- parity:groups-forum-manage -->
+- [x] Create/rename/close/reopen/pin/unpin/delete forum topics and hide/show the General topic (`createForumTopic` family requests exist in src/telegram/requests.rs; forum dialog in src/ui/mod.rs, gated on `can_manage_topics`; custom topic icons out of scope) <!-- parity:groups-forum-manage -->
 - [x] "Discuss" jump to the linked discussion group (src/ui/mod.rs:12638) <!-- parity:groups-discussion-jump -->
-- [ ] Channel comments viewer ("view comments" in the discussion group) (partial: only the jump to the discussion group exists) <!-- parity:groups-channel-comments -->
-- [ ] Aggressive anti-spam toggle (`toggleSupergroupHasAggressiveAntiSpamEnabled`) <!-- parity:groups-anti-spam -->
-- [ ] Boost status/level display and boost action (partial: boost counts are parsed only for the slow-mode bypass) <!-- parity:groups-boost -->
+- [x] Channel comments viewer ("View comments" message-menu action opens the thread dialog via `getMessageThreadHistory`, src/ui/mod.rs) <!-- parity:groups-channel-comments -->
+- [x] Aggressive anti-spam toggle (`toggleSupergroupHasAggressiveAntiSpamEnabled`, supergroups only, gated on `supergroupFullInfo.can_toggle_aggressive_anti_spam`) (src/ui/mod.rs) <!-- parity:groups-anti-spam -->
+- [x] Boost status/level display (`getChatBoostStatus`) and boost action (`boostChat` → `chatBoostSlots` response handling, status cache invalidated and refetched after the confirmed boost) in the channel info panel (src/ui/mod.rs, src/state.rs, src/connect.rs) <!-- parity:groups-boost -->
 - [x] Public username management (`setSupergroupUsername`, owner-only, empty clears) (src/ui/mod.rs) <!-- parity:groups-public-username -->
 - [x] Leave channel / leave group (src/ui/mod.rs) <!-- parity:groups-leave -->
 - [x] Delete group/channel for everyone (`deleteChat`, gated by `can_be_deleted_for_all_users`) with confirmation (src/ui/mod.rs) <!-- parity:groups-delete -->
-- [ ] Welcome messages: render the welcome pack shown only to new joiners (updateChatWelcomeMessages, welcomeMessage content) <!-- parity:groups-welcome-view -->
-- [ ] Welcome messages: add/edit/delete via addChatWelcomeMessage, editChatWelcomeMessage, deleteChatWelcomeMessage, loadChatWelcomeMessages (can_send_welcome_messages right) <!-- parity:groups-welcome-manage -->
-- [ ] Welcome message setup: Edit → Welcome Message entry in group/channel profile <!-- parity:groups-welcome-setup -->
+- [ ] Welcome messages: render the welcome pack shown only to new joiners (partial: admin-side pack load/add/edit/delete is done — parity:groups-welcome-manage — but joiner-side rendering of `updateChatWelcomeMessages` is not implemented) <!-- parity:groups-welcome-view -->
+- [x] Welcome messages: add/edit/delete via addChatWelcomeMessage, editChatWelcomeMessage, deleteChatWelcomeMessage, loadChatWelcomeMessages (gated on `can_send_welcome_messages`; pack refetched after each confirmed mutation) (src/ui/mod.rs, src/connect.rs) <!-- parity:groups-welcome-manage -->
+- [x] Welcome message setup: Welcome-message row in the group/channel info panel opens the pack editor dialog (src/ui/mod.rs) <!-- parity:groups-welcome-setup -->
 
 ### Secret chats
 

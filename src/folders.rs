@@ -218,6 +218,8 @@ mod tests {
             my_member_status: None,
             my_admin_can_post_messages: None,
             my_admin_can_invite_users: None,
+            my_admin_can_change_info: None,
+            my_admin_can_send_welcome_messages: None,
             my_admin_can_promote_members: None,
             my_admin_can_restrict_members: None,
             is_forum: None,

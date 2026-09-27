@@ -42,7 +42,8 @@ use quill::state::{
     ChatSearchJump, ChatStatisticsFetch, ChatSummary, ContactRow, ForwardResult, HistoryMessage,
     InfoPanelTarget, InviteLinkFetch, JoinRequestFetch, MemberListFilter, OutboxReceipt,
     RequestPurpose, SearchStatus, Session, SponsoredReportFlight, SupergroupMembersFetch,
-    event_log_relative_time, outgoing_status_label, unix_ms_now, unread_badge_text,
+    WelcomeMessagesFetch, event_log_relative_time, outgoing_status_label, unix_ms_now,
+    unread_badge_text,
 };
 use quill::story_viewer::{StoryViewer, StoryViewerItem, StoryViewerKind, collect_story_items};
 use quill::telegram::client::copy_and_parse;
@@ -54,13 +55,13 @@ use quill::telegram::envelope::{
     InlineKeyboardButtonStyle, InlineKeyboardButtonType, MUTE_FOR_1_HOUR, MUTE_FOR_2_DAYS,
     MUTE_FOR_8_HOURS, MUTE_FOREVER, MessageContent, MessageInteractionInfo, MessageSchedulingState,
     MessageSender, NotificationSettingsScope, NotificationSound, ParsedChatEvent, ParsedFile,
-    ParsedGroupCallParticipant, ParsedMessage, ParsedSecretChat, ParsedStory, PollContent,
-    PollOption, PollType, ScopeNotificationSettings, SecretChatState, SponsoredMessage,
-    StatisticalGraph, StatisticalValue, StorageFileTypeStats, StorageStats, call_entry_label,
-    chat_ttl_service_label, format_ttl_setting, toggle_chosen_emoji_reaction,
+    ParsedGroupCallParticipant, ParsedMessage, ParsedSecretChat, ParsedStory, ParsedWelcomeMessage,
+    PollContent, PollOption, PollType, ScopeNotificationSettings, SecretChatState,
+    SponsoredMessage, StatisticalGraph, StatisticalValue, StorageFileTypeStats, StorageStats,
+    call_entry_label, chat_ttl_service_label, format_ttl_setting, toggle_chosen_emoji_reaction,
 };
 use quill::telegram::requests::SelfDestructSend;
-use quill::telegram::requests::{CallPrivacySetting, PrivacyWho};
+use quill::telegram::requests::{CallPrivacySetting, ChatEventLogFilterSet, PrivacyWho};
 use quill::text::{TextEntity, styled_runs, utf8_to_utf16_offset};
 use quill::voice::{self, VoiceCapture, format_voice_duration};
 use smallvec::SmallVec;
@@ -755,6 +756,12 @@ enum G1DialogClose {
     Restrict,
     GroupConfirm,
     QuoteReply,
+    /// Slice G2: forum-topic management dialog.
+    ForumManage,
+    /// Slice G2: channel-post comment-thread viewer.
+    CommentThread,
+    /// Slice G2: chat welcome-message editor.
+    WelcomeMessage,
 }
 
 /// Slice G1: partial-quote dialog (message menu → "Quote reply").
@@ -1282,6 +1289,19 @@ pub struct QuillApp {
     restrict_dialog: Option<RestrictDialog>,
     /// Slice G1: delete / leave / broadcast-upgrade / ban confirmations.
     group_confirm_dialog: Option<GroupConfirmDialog>,
+    /// Slice G2: forum-topic management dialog.
+    forum_manage_dialog: Option<ForumManageDialog>,
+    /// Slice G2: channel-post comment-thread viewer.
+    comment_thread_dialog: Option<CommentThreadDialog>,
+    /// Slice G2: chat welcome-message editor.
+    welcome_dialog: Option<WelcomeDialog>,
+    /// Slice G2: event-log search input for the info panel's
+    /// "Recent actions" section (created lazily when the panel opens).
+    event_log_search: Option<Entity<TextareaState>>,
+    /// Slice G2: per-admin filter for the event log (client-side — TDLib's
+    /// `chatEventLogFilters` has no user field, schema 1.8.67 line 7956).
+    /// `None` shows all admins.
+    event_log_admin_filter: Option<i64>,
     /// Slice G1: partial-quote dialog (message menu → "Quote reply").
     quote_reply_dialog: Option<QuoteReplyDialog>,
     /// Phase 4.5: fullscreen media viewer (photo/video overlay).
@@ -1467,6 +1487,14 @@ pub enum ScreenshotDemo {
     /// loaded `chatEvents` fixture covering the handled action types, so
     /// the info panel's "Recent actions" section renders directly.
     ReadyAdminLog,
+    /// Slice G2: channel-management surface (no live TDLib): like
+    /// `ReadyAdminLog` (demo channel id 13, viewer 777 is an admin), plus
+    /// signature flags (`sign_messages` on, `show_message_sender` off),
+    /// a seeded boost status, the `can_send_welcome_messages` right, and
+    /// a loaded one-message welcome pack, so the info panel's signatures,
+    /// boost, welcome-message, and recent-actions sections render
+    /// directly.
+    ReadyGroups2,
     /// Slice G1: synthetic group-management surface (no live TDLib):
     /// demo supergroup (id 61) with the viewer as an administrator
     /// (`can_restrict_members`, `can_invite_users`, `can_manage_tags`),
@@ -1716,6 +1744,100 @@ impl SeekBarView {
         }
         (self.display_secs / self.duration_secs).clamp(0.0, 1.0)
     }
+}
+
+/// Slice G2: forum-topic management dialog (info panel → "Manage
+/// topics", admins with `can_manage_topics` only). `new_topic_input`
+/// feeds `createForumTopic`; `editing_topic` + `edit_input` drive the
+/// inline rename row (`editForumTopic`); the rest are one-shot action
+/// buttons per row (`toggleForumTopicIsClosed`,
+/// `toggleForumTopicIsPinned`, `deleteForumTopic`,
+/// `toggleGeneralForumTopicIsHidden`).
+pub struct ForumManageDialog {
+    chat_id: ChatId,
+    new_topic_input: Entity<TextareaState>,
+    editing_topic: Option<i32>,
+    edit_input: Entity<TextareaState>,
+}
+
+impl ForumManageDialog {
+    fn new(window: &mut Window, cx: &mut Context<QuillApp>, chat_id: ChatId) -> Self {
+        let new_topic_input = cx.new(|cx| {
+            TextareaState::new(window, cx)
+                .placeholder("New topic name")
+                .auto_grow(1, 1)
+                .submit_on_enter(false)
+        });
+        let edit_input = cx.new(|cx| {
+            TextareaState::new(window, cx)
+                .placeholder("Topic name")
+                .auto_grow(1, 1)
+                .submit_on_enter(false)
+        });
+        Self {
+            chat_id,
+            new_topic_input,
+            editing_topic: None,
+            edit_input,
+        }
+    }
+}
+
+/// Slice G2: channel-post comment-thread viewer (message menu →
+/// "View comments"). The dialog shows the
+/// `Session::comment_thread` fetch (`Loading` / `Failed` / loaded
+/// `MessageThreadHistory`) for the tapped post.
+pub struct CommentThreadDialog {
+    chat_id: ChatId,
+    message_id: MessageId,
+}
+
+/// Slice G2: chat welcome-message editor (info panel → "Welcome
+/// message", admins with `can_send_welcome_messages` only).
+/// `new_input` feeds `addChatWelcomeMessage`; `editing` +
+/// `edit_input` drive the inline edit row
+/// (`editChatWelcomeMessage`); each row also offers
+/// `deleteChatWelcomeMessage`.
+pub struct WelcomeDialog {
+    chat_id: ChatId,
+    new_input: Entity<TextareaState>,
+    editing: Option<i32>,
+    edit_input: Entity<TextareaState>,
+}
+
+impl WelcomeDialog {
+    fn new(window: &mut Window, cx: &mut Context<QuillApp>, chat_id: ChatId) -> Self {
+        let new_input = cx.new(|cx| {
+            TextareaState::new(window, cx)
+                .placeholder("New welcome message")
+                .auto_grow(1, 3)
+                .submit_on_enter(false)
+        });
+        let edit_input = cx.new(|cx| {
+            TextareaState::new(window, cx)
+                .placeholder("Welcome message")
+                .auto_grow(1, 3)
+                .submit_on_enter(false)
+        });
+        Self {
+            chat_id,
+            new_input,
+            editing: None,
+            edit_input,
+        }
+    }
+}
+
+/// Slice G2: one-shot forum-topic actions from the management dialog.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ForumTopicAction {
+    Close,
+    Reopen,
+    Pin,
+    Unpin,
+    Delete,
+    HideGeneral,
+    ShowGeneral,
 }
 
 impl QuillApp {
@@ -2280,6 +2402,15 @@ impl QuillApp {
                     AuthorizationState::Ready,
                 )
             }
+            Some(ScreenshotDemo::ReadyGroups2) => {
+                demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
+                (
+                    ConnectUiStatus::DemoReadyChats,
+                    None,
+                    "screenshot demo — groups/channels G2".into(),
+                    AuthorizationState::Ready,
+                )
+            }
             Some(ScreenshotDemo::ReadyBotChat) => {
                 demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
                 (
@@ -2728,6 +2859,11 @@ impl QuillApp {
             pending_close_secret_chat: None,
             pending_inline_bot_alert: None,
             inline_bot_alert_shown: false,
+            forum_manage_dialog: None,
+            comment_thread_dialog: None,
+            welcome_dialog: None,
+            event_log_search: None,
+            event_log_admin_filter: None,
             storage_usage_open: false,
             new_secret_picker_open: false,
             pending_forward: None,
@@ -3562,6 +3698,18 @@ impl QuillApp {
             }
             app.open_info_panel_target(InfoPanelTarget::Supergroup(13), window, cx);
             app.status_note = "screenshot demo — recent actions".into();
+        }
+        // Slice G2: channel-management fixture, then open the info panel
+        // on the demo channel so the signatures, boost, welcome-message,
+        // and recent-actions sections render directly.
+        if matches!(demo, Some(ScreenshotDemo::ReadyGroups2)) {
+            if let Some(session) = app.demo_session.as_mut() {
+                app.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_groups2(session, &app.demo_sink, &app.demo_seq);
+            }
+            app.open_info_panel_target(InfoPanelTarget::Supergroup(13), window, cx);
+            app.status_note = "screenshot demo — groups/channels G2".into();
+            cx.notify();
         }
         // Slice G1: group-management fixture, then open the member
         // dialog on the demo supergroup (viewer 777 is an admin with
@@ -4740,6 +4888,27 @@ impl QuillApp {
             this.message_menu = None;
             cx.notify();
         });
+        // Slice G2: channel-post comment threads (`getMessageThreadHistory`,
+        // schema 1.8.67, line 11839). The dialog shows an honest error
+        // when the post has no discussion thread.
+        let is_channel_post = self.session().is_some_and(|session| {
+            session.chats.get(&chat_id.0).is_some_and(|chat| {
+                matches!(
+                    chat.kind,
+                    ChatKind::Supergroup {
+                        is_channel: true,
+                        ..
+                    }
+                )
+            })
+        });
+        if is_channel_post {
+            item!("menu-comments", "View comments", this, window, cx, {
+                this.open_comment_thread_dialog(chat_id, message_id, window, cx);
+                this.message_menu = None;
+                cx.notify();
+            });
+        }
         if failed && message.can_retry {
             item!("menu-retry", "Retry send", this, _window, cx, {
                 this.retry_failed_message(chat_id, message_id, cx);
@@ -8525,6 +8694,372 @@ impl QuillApp {
 
     /// Phase D3c: re-request the event log (bypasses the dedupe cache so
     /// the Refresh button always hits the server).
+    /// Slice G2: channel signature toggles (info panel → Manage
+    /// channel). Gated on `chat_can_change_info`; the driver no-ops
+    /// (quiet `Ok(None)`) otherwise.
+    fn set_sign_messages(
+        &mut self,
+        chat_id: ChatId,
+        sign_messages: bool,
+        show_message_sender: bool,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(live) = self.live.as_mut() {
+            match live
+                .driver
+                .toggle_sign_messages(chat_id, sign_messages, show_message_sender)
+            {
+                Ok(_) => self.status_note = "signatures updated".into(),
+                Err(_) => self.status_note = "could not change signatures".into(),
+            }
+        } else {
+            self.status_note = "signatures need a live connection (demo)".into();
+        }
+        cx.notify();
+    }
+
+    /// Slice G2: aggressive anti-spam toggle (info panel → Manage
+    /// group). Gated on `supergroupFullInfo.can_toggle_aggressive_anti_spam`.
+    fn set_anti_spam(&mut self, chat_id: ChatId, enabled: bool, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            match live.driver.toggle_aggressive_anti_spam(chat_id, enabled) {
+                Ok(_) => self.status_note = "anti-spam updated".into(),
+                Err(_) => self.status_note = "could not change anti-spam".into(),
+            }
+        } else {
+            self.status_note = "anti-spam needs a live connection (demo)".into();
+        }
+        cx.notify();
+    }
+
+    /// Slice G2: open the forum-topic management dialog.
+    fn open_forum_manage_dialog(
+        &mut self,
+        chat_id: ChatId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.forum_manage_dialog = Some(ForumManageDialog::new(window, cx, chat_id));
+        if let Some(live) = self.live.as_mut() {
+            let _ = live.driver.refresh_forum_topics(chat_id);
+        }
+        cx.notify();
+    }
+
+    fn close_forum_manage_dialog(&mut self, cx: &mut Context<Self>) {
+        self.forum_manage_dialog = None;
+        cx.notify();
+    }
+
+    /// Slice G2: create the topic named in the dialog's input
+    /// (`createForumTopic`); empty names are refused up front.
+    fn submit_forum_topic_create(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let (chat_id, name) = match self.forum_manage_dialog.as_ref() {
+            Some(dialog) => (
+                dialog.chat_id,
+                dialog.new_topic_input.read(cx).value().trim().to_string(),
+            ),
+            None => return,
+        };
+        if name.is_empty() {
+            self.status_note = "topic name cannot be empty".into();
+            cx.notify();
+            return;
+        }
+        if let Some(live) = self.live.as_mut() {
+            match live.driver.create_forum_topic(chat_id, &name) {
+                // The topic list refetches after the server confirms
+                // (the render path reloads when the cache is dropped).
+                Ok(_) => {
+                    self.status_note = "topic created".into();
+                }
+                Err(_) => self.status_note = "could not create topic".into(),
+            }
+        } else {
+            self.status_note = "topics need a live connection (demo)".into();
+        }
+        if let Some(dialog) = self.forum_manage_dialog.as_mut() {
+            dialog.new_topic_input.update(cx, |input, cx| {
+                input.set_value("", window, cx);
+            });
+        }
+        cx.notify();
+    }
+
+    /// Slice G2: one-shot forum-topic action (close/reopen,
+    /// pin/unpin, delete, hide/show General).
+    fn forum_topic_action(
+        &mut self,
+        chat_id: ChatId,
+        topic_id: i32,
+        action: ForumTopicAction,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(live) = self.live.as_mut() {
+            let result = match action {
+                ForumTopicAction::Close => live
+                    .driver
+                    .toggle_forum_topic_closed(chat_id, topic_id, true),
+                ForumTopicAction::Reopen => live
+                    .driver
+                    .toggle_forum_topic_closed(chat_id, topic_id, false),
+                ForumTopicAction::Pin => live
+                    .driver
+                    .toggle_forum_topic_pinned(chat_id, topic_id, true),
+                ForumTopicAction::Unpin => live
+                    .driver
+                    .toggle_forum_topic_pinned(chat_id, topic_id, false),
+                ForumTopicAction::Delete => live.driver.delete_forum_topic(chat_id, topic_id),
+                ForumTopicAction::HideGeneral => {
+                    live.driver.toggle_general_forum_topic_hidden(chat_id, true)
+                }
+                ForumTopicAction::ShowGeneral => live
+                    .driver
+                    .toggle_general_forum_topic_hidden(chat_id, false),
+            };
+            match result {
+                // The topic list refetches after the server confirms
+                // (the render path reloads when the cache is dropped).
+                Ok(_) => {
+                    self.status_note = "topic updated".into();
+                }
+                Err(_) => self.status_note = "could not update topic".into(),
+            }
+        } else {
+            self.status_note = "topics need a live connection (demo)".into();
+        }
+        cx.notify();
+    }
+
+    /// Slice G2: begin an inline rename for one topic row.
+    fn begin_forum_topic_rename(
+        &mut self,
+        topic_id: i32,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(dialog) = self.forum_manage_dialog.as_mut() {
+            dialog.editing_topic = Some(topic_id);
+            dialog.edit_input.update(cx, |input, cx| {
+                input.set_value("", window, cx);
+            });
+        }
+        cx.notify();
+    }
+
+    /// Slice G2: submit the inline rename (`editForumTopic`).
+    fn submit_forum_topic_rename(&mut self, cx: &mut Context<Self>) {
+        let (chat_id, topic_id, name) = match self.forum_manage_dialog.as_ref() {
+            Some(dialog) => match dialog.editing_topic {
+                Some(topic_id) => (
+                    dialog.chat_id,
+                    topic_id,
+                    dialog.edit_input.read(cx).value().trim().to_string(),
+                ),
+                None => return,
+            },
+            None => return,
+        };
+        if name.is_empty() {
+            self.status_note = "topic name cannot be empty".into();
+            cx.notify();
+            return;
+        }
+        if let Some(live) = self.live.as_mut() {
+            match live.driver.edit_forum_topic(chat_id, topic_id, &name) {
+                // The topic list refetches after the server confirms
+                // (the render path reloads when the cache is dropped).
+                Ok(_) => {
+                    self.status_note = "topic renamed".into();
+                }
+                Err(_) => self.status_note = "could not rename topic".into(),
+            }
+        } else {
+            self.status_note = "topics need a live connection (demo)".into();
+        }
+        if let Some(dialog) = self.forum_manage_dialog.as_mut() {
+            dialog.editing_topic = None;
+        }
+        cx.notify();
+    }
+
+    /// Slice G2: open the channel-post comment-thread viewer and
+    /// fetch the thread history.
+    fn open_comment_thread_dialog(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.comment_thread_dialog = Some(CommentThreadDialog {
+            chat_id,
+            message_id,
+        });
+        if let Some(live) = self.live.as_mut() {
+            if live
+                .driver
+                .fetch_message_thread_history(chat_id, message_id)
+                .is_err()
+            {
+                self.status_note = "could not load comments".into();
+            }
+        }
+        cx.notify();
+    }
+
+    fn close_comment_thread_dialog(&mut self, cx: &mut Context<Self>) {
+        self.comment_thread_dialog = None;
+        cx.notify();
+    }
+
+    /// Slice G2: open the welcome-message editor and load the pack.
+    fn open_welcome_dialog(
+        &mut self,
+        chat_id: ChatId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.welcome_dialog = Some(WelcomeDialog::new(window, cx, chat_id));
+        if let Some(live) = self.live.as_mut() {
+            if live.driver.load_chat_welcome_messages(chat_id).is_err() {
+                self.status_note = "could not load welcome messages".into();
+            }
+        }
+        cx.notify();
+    }
+
+    fn close_welcome_dialog(&mut self, cx: &mut Context<Self>) {
+        self.welcome_dialog = None;
+        cx.notify();
+    }
+
+    /// Slice G2: add the welcome message typed in the dialog
+    /// (`addChatWelcomeMessage`); empty text is refused up front.
+    fn submit_welcome_add(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let (chat_id, text) = match self.welcome_dialog.as_ref() {
+            Some(dialog) => (
+                dialog.chat_id,
+                dialog.new_input.read(cx).value().trim().to_string(),
+            ),
+            None => return,
+        };
+        if text.is_empty() {
+            self.status_note = "welcome message cannot be empty".into();
+            cx.notify();
+            return;
+        }
+        if let Some(live) = self.live.as_mut() {
+            match live.driver.add_chat_welcome_message(chat_id, &text) {
+                Ok(_) => self.status_note = "welcome message added".into(),
+                Err(_) => self.status_note = "could not add welcome message".into(),
+            }
+        } else {
+            self.status_note = "welcome messages need a live connection (demo)".into();
+        }
+        if let Some(dialog) = self.welcome_dialog.as_mut() {
+            dialog.new_input.update(cx, |input, cx| {
+                input.set_value("", window, cx);
+            });
+        }
+        cx.notify();
+    }
+
+    /// Slice G2: submit the inline welcome-message edit.
+    fn submit_welcome_edit(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+        let (chat_id, welcome_id, text) = match self.welcome_dialog.as_ref() {
+            Some(dialog) => match dialog.editing {
+                Some(welcome_id) => (
+                    dialog.chat_id,
+                    welcome_id,
+                    dialog.edit_input.read(cx).value().trim().to_string(),
+                ),
+                None => return,
+            },
+            None => return,
+        };
+        if text.is_empty() {
+            self.status_note = "welcome message cannot be empty".into();
+            cx.notify();
+            return;
+        }
+        if let Some(live) = self.live.as_mut() {
+            match live
+                .driver
+                .edit_chat_welcome_message(chat_id, welcome_id, &text)
+            {
+                Ok(_) => self.status_note = "welcome message updated".into(),
+                Err(_) => self.status_note = "could not edit welcome message".into(),
+            }
+        } else {
+            self.status_note = "welcome messages need a live connection (demo)".into();
+        }
+        if let Some(dialog) = self.welcome_dialog.as_mut() {
+            dialog.editing = None;
+        }
+        cx.notify();
+    }
+
+    /// Slice G2: delete one welcome message (`deleteChatWelcomeMessage`).
+    fn delete_welcome_message(&mut self, chat_id: ChatId, welcome_id: i32, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            match live.driver.delete_chat_welcome_message(chat_id, welcome_id) {
+                Ok(_) => self.status_note = "welcome message deleted".into(),
+                Err(_) => self.status_note = "could not delete welcome message".into(),
+            }
+        } else {
+            self.status_note = "welcome messages need a live connection (demo)".into();
+        }
+        cx.notify();
+    }
+
+    /// Slice G2: apply the event-log search box value (the driver
+    /// stores it per chat; an empty box clears it).
+    fn apply_event_log_search(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
+        let query = self
+            .event_log_search
+            .as_ref()
+            .map(|input| input.read(cx).value().trim().to_string())
+            .unwrap_or_default();
+        if let Some(live) = self.live.as_mut() {
+            live.driver.set_chat_event_log_query(chat_id, &query);
+            if live.driver.refresh_chat_event_log(chat_id).is_err() {
+                self.status_note = "could not search recent actions".into();
+            }
+        }
+        cx.notify();
+    }
+
+    /// Slice G2: flip one event-log filter category and refetch.
+    fn toggle_event_log_filter(
+        &mut self,
+        chat_id: ChatId,
+        toggle: impl FnOnce(&mut ChatEventLogFilterSet) + 'static,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(live) = self.live.as_mut() {
+            live.driver.toggle_chat_event_log_filter(chat_id, toggle);
+            if live.driver.refresh_chat_event_log(chat_id).is_err() {
+                self.status_note = "could not filter recent actions".into();
+            }
+        }
+        cx.notify();
+    }
+
+    /// Slice G2: boost the channel (`getAvailableChatBoostSlots` →
+    /// `boostChat` with the first slot; the driver chains them).
+    fn boost_channel(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            match live.driver.request_chat_boost(chat_id) {
+                Ok(_) => self.status_note = "boost requested".into(),
+                Err(_) => self.status_note = "could not boost channel".into(),
+            }
+        } else {
+            self.status_note = "boosts need a live connection (demo)".into();
+        }
+        cx.notify();
+    }
+
     fn refresh_event_log(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             match live.driver.refresh_chat_event_log(chat_id) {
@@ -11266,6 +11801,33 @@ impl QuillApp {
                                 result = fetch;
                             }
                         }
+                        // Slice G2: channel boost status (channels only;
+                        // cached and deduped by the driver).
+                        let is_channel =
+                            live.driver
+                                .session
+                                .chats
+                                .get(&chat_id.0)
+                                .is_some_and(|chat| {
+                                    matches!(
+                                        chat.kind,
+                                        ChatKind::Supergroup {
+                                            is_channel: true,
+                                            ..
+                                        }
+                                    )
+                                });
+                        if is_channel && let Err(err) = live.driver.fetch_chat_boost_status(chat_id)
+                        {
+                            result = Err(err);
+                        }
+                        // Slice G2: welcome-message pack for admins who may
+                        // send them (the driver dedupes on a cached pack).
+                        if live.driver.session.chat_can_send_welcome_messages(chat_id)
+                            && let Err(err) = live.driver.load_chat_welcome_messages(chat_id)
+                        {
+                            result = Err(err);
+                        }
                     }
                     result
                 }
@@ -11293,7 +11855,27 @@ impl QuillApp {
         } else if let Some(session) = self.demo_session.as_mut() {
             session.open_info_panel = Some(target);
         }
-        let _ = window;
+        // Slice G2: the event-log section's search box (created lazily;
+        // its value syncs to the panel chat's stored query). The per-admin
+        // filter resets whenever the panel target changes.
+        self.event_log_admin_filter = None;
+        if self.event_log_search.is_none() {
+            self.event_log_search = Some(cx.new(|cx| {
+                TextareaState::new(window, cx)
+                    .placeholder("Search recent actions")
+                    .auto_grow(1, 1)
+                    .submit_on_enter(false)
+            }));
+        }
+        if let Some(chat_id) = invite_panel_chat_id {
+            let query = self
+                .session()
+                .and_then(|session| session.event_log_queries.get(&chat_id.0).cloned())
+                .unwrap_or_default();
+            if let Some(input) = self.event_log_search.clone() {
+                input.update(cx, |state, cx| state.set_value(&query, window, cx));
+            }
+        }
         cx.notify();
     }
 
@@ -11838,7 +12420,117 @@ impl QuillApp {
         // Phase D3c: recent-actions admin log (administrators and the
         // creator only; the section no-ops otherwise).
         body = body.child(self.event_log_section(chat_id, cx));
+        // Slice G2: channel boost status + boost action.
+        body = body.child(self.boost_section(chat_id, cx));
         body.into_any_element()
+    }
+
+    /// Slice G2: channel boost status (`getChatBoostStatus`, schema
+    /// 1.8.67, line 13917) with the one-tap `boostChat` action. Shown
+    /// for channels only; honest states: loading (request in flight),
+    /// failed-with-retry, loaded "Level N · M boosts". `getChatBoostStatus`
+    /// errors when boosts are unavailable for the chat — the failure
+    /// renders instead of a fake number.
+    fn boost_section(&self, chat_id: ChatId, cx: &mut Context<Self>) -> AnyElement {
+        let is_channel = self.session().is_some_and(|session| {
+            session.chats.get(&chat_id.0).is_some_and(|chat| {
+                matches!(
+                    chat.kind,
+                    ChatKind::Supergroup {
+                        is_channel: true,
+                        ..
+                    }
+                )
+            })
+        });
+        if !is_channel {
+            return div().into_any_element();
+        }
+        let status = self
+            .session()
+            .and_then(|session| session.chat_boost_status.get(&chat_id.0).copied());
+        let in_flight = self.session().is_some_and(|session| {
+            session
+                .requests
+                .has_purpose_for_chat(RequestPurpose::GetChatBoostStatus, chat_id)
+        });
+        let mut section = div().flex().flex_col().w_full().gap_1().child(
+            div()
+                .text_xs()
+                .font_semibold()
+                .text_color(cx.theme().muted_foreground)
+                .child("Channel boosts"),
+        );
+        match status {
+            Some((level, boost_count)) => {
+                section = section.child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .w_full()
+                        .gap_2()
+                        .child(
+                            div()
+                                .flex_1()
+                                .text_sm()
+                                .text_color(cx.theme().muted_foreground)
+                                .child(format!("Level {level} · {boost_count} boosts")),
+                        )
+                        .child(
+                            Button::new("g2-boost-channel")
+                                .label("Boost channel")
+                                .ghost()
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.boost_channel(chat_id, cx);
+                                })),
+                        ),
+                );
+            }
+            None if in_flight => {
+                section = section.child(
+                    div()
+                        .text_sm()
+                        .text_color(cx.theme().muted_foreground)
+                        .child("Loading boost status…"),
+                );
+            }
+            None => {
+                section = section.child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .w_full()
+                        .gap_1()
+                        .child(
+                            div()
+                                .flex_1()
+                                .text_sm()
+                                .text_color(cx.theme().muted_foreground)
+                                .child("Boost status unavailable."),
+                        )
+                        .child(
+                            Button::new("g2-boost-retry")
+                                .label("Retry")
+                                .ghost()
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.refresh_boost_status(chat_id, cx);
+                                })),
+                        ),
+                );
+            }
+        }
+        section.into_any_element()
+    }
+
+    /// Slice G2: re-request the boost status (bypasses the cache).
+    fn refresh_boost_status(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            live.driver.session.chat_boost_status.remove(&chat_id.0);
+            if live.driver.fetch_chat_boost_status(chat_id).is_err() {
+                self.status_note = "could not load boost status".into();
+            }
+        }
+        cx.notify();
     }
 
     /// Slice G1: group/channel management section for the info panel.
@@ -11850,6 +12542,33 @@ impl QuillApp {
     /// join-request toggle, username, and the one-way broadcast
     /// upgrade; channels get members (subscribers), username, invite
     /// link, leave / delete.
+    /// Slice G2: `(sign_messages, show_message_sender)` for the
+    /// channel's supergroup (`updateSupergroup` flags; unset = off).
+    fn sign_flags(&self, chat_id: ChatId) -> (bool, bool) {
+        self.session()
+            .and_then(|session| {
+                session
+                    .chats
+                    .get(&chat_id.0)
+                    .and_then(|chat| match chat.kind {
+                        ChatKind::Supergroup { supergroup_id, .. } => Some((
+                            session
+                                .supergroup_sign_messages
+                                .get(&supergroup_id)
+                                .copied()
+                                .unwrap_or(false),
+                            session
+                                .supergroup_show_message_sender
+                                .get(&supergroup_id)
+                                .copied()
+                                .unwrap_or(false),
+                        )),
+                        _ => None,
+                    })
+            })
+            .unwrap_or((false, false))
+    }
+
     fn group_management_section(
         &self,
         chat_id: ChatId,
@@ -11971,6 +12690,115 @@ impl QuillApp {
                     );
                 }
             }
+        }
+        // Slice G2: channel signatures + show authors (Telegram X
+        // ProfileController: two toggles, gated on `can_change_info`;
+        // disabling signatures also hides authors, mirroring
+        // `ToggleSupergroupSignMessages(id, sign, sign && show)`).
+        if is_channel && session.is_some_and(|session| session.chat_can_change_info(chat_id)) {
+            let (sign, show) = self.sign_flags(chat_id);
+            let label = if sign {
+                "✓ Sign messages"
+            } else {
+                "Sign messages"
+            };
+            row!("g2-toggle-sign-messages", label, |this, _window, cx| {
+                let (sign, show) = this.sign_flags(chat_id);
+                this.set_sign_messages(chat_id, !sign, !sign && show, cx);
+            });
+            let show_label = if show && sign {
+                "✓ Show message authors"
+            } else {
+                "Show message authors"
+            };
+            row!("g2-toggle-show-authors", show_label, |this, _window, cx| {
+                let (_, show) = this.sign_flags(chat_id);
+                // Enabling authors implies signatures (Telegram X forces
+                // `show = sign && show`).
+                this.set_sign_messages(chat_id, true, !show, cx);
+            });
+        }
+        // Slice G2: aggressive anti-spam toggle (supergroups only;
+        // gated on `supergroupFullInfo.can_toggle_aggressive_anti_spam`).
+        if !is_channel
+            && !is_basic_group
+            && session.is_some_and(|session| session.chat_can_toggle_anti_spam(chat_id))
+        {
+            let enabled = self
+                .session()
+                .and_then(|session| {
+                    session
+                        .chats
+                        .get(&chat_id.0)
+                        .and_then(|chat| match chat.kind {
+                            ChatKind::Supergroup { supergroup_id, .. } => session
+                                .supergroup_anti_spam_enabled
+                                .get(&supergroup_id)
+                                .copied(),
+                            _ => None,
+                        })
+                })
+                .unwrap_or(false);
+            let label = if enabled {
+                "✓ Aggressive anti-spam"
+            } else {
+                "Aggressive anti-spam"
+            };
+            row!("g2-toggle-anti-spam", label, |this, _window, cx| {
+                let enabled = this
+                    .session()
+                    .and_then(|session| {
+                        session
+                            .chats
+                            .get(&chat_id.0)
+                            .and_then(|chat| match chat.kind {
+                                ChatKind::Supergroup { supergroup_id, .. } => session
+                                    .supergroup_anti_spam_enabled
+                                    .get(&supergroup_id)
+                                    .copied(),
+                                _ => None,
+                            })
+                    })
+                    .unwrap_or(false);
+                this.set_anti_spam(chat_id, !enabled, cx);
+            });
+        }
+        // Slice G2: forum-topic management (admins with
+        // `can_manage_topics` in forum supergroups).
+        if !is_channel
+            && !is_basic_group
+            && session.is_some_and(|session| {
+                session
+                    .chats
+                    .get(&chat_id.0)
+                    .is_some_and(|chat| chat.is_forum_chat())
+                    && session.chat_can_manage_topics(chat_id)
+            })
+        {
+            row!(
+                "g2-open-forum-manage",
+                "Manage topics",
+                |this, window, cx| {
+                    this.open_forum_manage_dialog(chat_id, window, cx);
+                }
+            );
+        }
+        // Slice G2: welcome-message editor (admins with
+        // `can_send_welcome_messages`; the check mark reflects
+        // `Session::chat_has_welcome_messages`).
+        if session.is_some_and(|session| session.chat_can_send_welcome_messages(chat_id)) {
+            let has_welcome = session
+                .as_ref()
+                .and_then(|session| session.chat_has_welcome_messages.get(&chat_id.0).copied())
+                .unwrap_or(false);
+            let label = if has_welcome {
+                "✓ Welcome message"
+            } else {
+                "Welcome message"
+            };
+            row!("g2-open-welcome", label, |this, window, cx| {
+                this.open_welcome_dialog(chat_id, window, cx);
+            });
         }
         if is_member {
             let label = if is_channel {
@@ -12607,6 +13435,29 @@ impl QuillApp {
                             })),
                     ),
             );
+        // Slice G2: compact search + filter controls. The search box
+        // feeds `getChatEventLog.query` (schema 1.8.67, line 15252);
+        // the chips flip `chatEventLogFilters` categories (line 7956).
+        // An empty selection means "all types" (the driver passes
+        // `null`), so "Clear" just removes every active chip.
+        let mut controls = div().flex().items_center().w_full().gap_1();
+        if let Some(input) = self.event_log_search.clone() {
+            controls = controls.child(div().flex_1().child(Textarea::new(&input).h(px(32.))));
+        }
+        controls = controls.child(
+            Button::new("event-log-search")
+                .label("Search")
+                .ghost()
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.apply_event_log_search(chat_id, cx);
+                })),
+        );
+        section = section.child(controls);
+        let active_filters = self
+            .session()
+            .and_then(|session| session.event_log_filters.get(&chat_id.0).copied())
+            .unwrap_or_default();
+        section = section.child(self.event_log_filter_chips(chat_id, active_filters, cx));
         match fetch {
             None | Some(ChatEventLogFetch::Loading) => {
                 section = section.child(
@@ -12649,7 +13500,19 @@ impl QuillApp {
                             .child("No recent actions."),
                     );
                 } else {
-                    for event in &page.events {
+                    // Slice G2: per-admin filter chips (client-side).
+                    let admins = page.admin_user_ids();
+                    if admins.len() > 1 {
+                        section = section.child(self.event_log_admin_chips(&admins, cx));
+                    }
+                    let admin_filter = self.event_log_admin_filter;
+                    let visible = page.events.iter().filter(|event| match admin_filter {
+                        None => true,
+                        Some(user_id) => {
+                            matches!(event.member_id, MessageSender::User { user_id: id } if id == user_id)
+                        }
+                    });
+                    for event in visible {
                         section = section.child(self.event_log_row(event, cx));
                     }
                     if page.has_more {
@@ -12666,6 +13529,176 @@ impl QuillApp {
             }
         }
         section.into_any_element()
+    }
+
+    /// Slice G2: per-admin filter chips for the event log. `None`
+    /// (the "All admins" chip) shows every row; picking one admin filters
+    /// the loaded page client-side.
+    fn event_log_admin_chips(&self, admins: &[i64], cx: &mut Context<Self>) -> AnyElement {
+        let current = self.event_log_admin_filter;
+        let mut chips = div()
+            .id("event-log-admin-filters")
+            .flex()
+            .flex_wrap()
+            .w_full()
+            .gap_1();
+        let all_label = if current.is_none() {
+            "✓ All admins".to_string()
+        } else {
+            "All admins".to_string()
+        };
+        chips = chips.child(
+            Button::new("event-log-admin-all")
+                .label(all_label)
+                .ghost()
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.event_log_admin_filter = None;
+                    cx.notify();
+                })),
+        );
+        for user_id in admins.iter().copied() {
+            let selected = current == Some(user_id);
+            let name = self.group_call_participant_name(&MessageSender::User { user_id });
+            let label = if selected {
+                format!("✓ {name}")
+            } else {
+                name
+            };
+            chips = chips.child(
+                Button::new(format!("event-log-admin-{user_id}"))
+                    .label(label)
+                    .ghost()
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.event_log_admin_filter = Some(user_id);
+                        cx.notify();
+                    })),
+            );
+        }
+        chips.into_any_element()
+    }
+
+    /// Slice G2: one toggle chip per `chatEventLogFilters` category
+    /// (schema 1.8.67, line 7956). Active chips show a check mark; the
+    /// "Clear" chip appears when any category is active (an empty
+    /// selection means "all types" — the driver passes `null`).
+    fn event_log_filter_chips(
+        &self,
+        chat_id: ChatId,
+        active: ChatEventLogFilterSet,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let categories: Vec<(&str, &str, bool, fn(&mut ChatEventLogFilterSet))> = vec![
+            ("message-edits", "Edits", active.message_edits, |f| {
+                f.message_edits = !f.message_edits
+            }),
+            (
+                "message-deletions",
+                "Deletions",
+                active.message_deletions,
+                |f| f.message_deletions = !f.message_deletions,
+            ),
+            ("message-pins", "Pins", active.message_pins, |f| {
+                f.message_pins = !f.message_pins
+            }),
+            ("member-joins", "Joins", active.member_joins, |f| {
+                f.member_joins = !f.member_joins
+            }),
+            ("member-leaves", "Leaves", active.member_leaves, |f| {
+                f.member_leaves = !f.member_leaves
+            }),
+            ("member-invites", "Invites", active.member_invites, |f| {
+                f.member_invites = !f.member_invites
+            }),
+            (
+                "member-promotions",
+                "Promotions",
+                active.member_promotions,
+                |f| f.member_promotions = !f.member_promotions,
+            ),
+            (
+                "member-restrictions",
+                "Restrictions",
+                active.member_restrictions,
+                |f| f.member_restrictions = !f.member_restrictions,
+            ),
+            (
+                "member-tag-changes",
+                "Tags",
+                active.member_tag_changes,
+                |f| f.member_tag_changes = !f.member_tag_changes,
+            ),
+            ("info-changes", "Info", active.info_changes, |f| {
+                f.info_changes = !f.info_changes
+            }),
+            ("setting-changes", "Settings", active.setting_changes, |f| {
+                f.setting_changes = !f.setting_changes
+            }),
+            (
+                "invite-link-changes",
+                "Invite links",
+                active.invite_link_changes,
+                |f| f.invite_link_changes = !f.invite_link_changes,
+            ),
+            (
+                "video-chat-changes",
+                "Video chats",
+                active.video_chat_changes,
+                |f| f.video_chat_changes = !f.video_chat_changes,
+            ),
+            ("forum-changes", "Forum", active.forum_changes, |f| {
+                f.forum_changes = !f.forum_changes
+            }),
+            (
+                "subscription-extensions",
+                "Stars",
+                active.subscription_extensions,
+                |f| f.subscription_extensions = !f.subscription_extensions,
+            ),
+        ];
+        let mut chips = div()
+            .id("event-log-filters")
+            .flex()
+            .flex_wrap()
+            .w_full()
+            .gap_1();
+        for (id, label, enabled, toggle) in categories {
+            let label = if enabled {
+                format!("✓ {label}")
+            } else {
+                label.to_string()
+            };
+            chips = chips.child(
+                Button::new(format!("event-log-filter-{id}"))
+                    .label(label)
+                    .ghost()
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.toggle_event_log_filter(chat_id, toggle, cx);
+                    })),
+            );
+        }
+        if active.any_enabled() {
+            chips = chips.child(
+                Button::new("event-log-filter-clear")
+                    .label("Clear")
+                    .ghost()
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.clear_event_log_filters(chat_id, cx);
+                    })),
+            );
+        }
+        chips.into_any_element()
+    }
+
+    /// Slice G2: clear every event-log filter category for the chat and
+    /// refetch (empty selection = all types).
+    fn clear_event_log_filters(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            live.driver.session.event_log_filters.remove(&chat_id.0);
+            if live.driver.refresh_chat_event_log(chat_id).is_err() {
+                self.status_note = "could not clear filters".into();
+            }
+        }
+        cx.notify();
     }
 
     /// Phase D3c: one admin-log row — actor name, action description, and
@@ -19846,6 +20879,9 @@ impl QuillApp {
                         G1DialogClose::Restrict => this.close_restrict_dialog(cx),
                         G1DialogClose::GroupConfirm => this.close_group_confirm(cx),
                         G1DialogClose::QuoteReply => this.close_quote_reply_dialog(cx),
+                        G1DialogClose::ForumManage => this.close_forum_manage_dialog(cx),
+                        G1DialogClose::CommentThread => this.close_comment_thread_dialog(cx),
+                        G1DialogClose::WelcomeMessage => this.close_welcome_dialog(cx),
                     })),
             )
             .child(
@@ -19891,6 +20927,15 @@ impl QuillApp {
                                         G1DialogClose::QuoteReply => {
                                             this.close_quote_reply_dialog(cx)
                                         }
+                                        G1DialogClose::ForumManage => {
+                                            this.close_forum_manage_dialog(cx)
+                                        }
+                                        G1DialogClose::CommentThread => {
+                                            this.close_comment_thread_dialog(cx)
+                                        }
+                                        G1DialogClose::WelcomeMessage => {
+                                            this.close_welcome_dialog(cx)
+                                        }
                                     })),
                             ),
                     )
@@ -19921,6 +20966,16 @@ impl QuillApp {
         }
         if self.quote_reply_dialog.is_some() {
             return Some(self.quote_reply_dialog_overlay(cx));
+        }
+        // Slice G2 dialogs.
+        if self.forum_manage_dialog.is_some() {
+            return Some(self.forum_manage_dialog_overlay(cx));
+        }
+        if self.comment_thread_dialog.is_some() {
+            return Some(self.comment_thread_dialog_overlay(cx));
+        }
+        if self.welcome_dialog.is_some() {
+            return Some(self.welcome_dialog_overlay(cx));
         }
         None
     }
@@ -20914,6 +21969,484 @@ impl QuillApp {
             body,
             cx,
         )
+    }
+
+    /// Slice G2: forum-topic management dialog (`createForumTopic`
+    /// / `editForumTopic` / close-reopen / pin-unpin / delete /
+    /// General hide-show; schema 1.8.67, lines 12665–12736). The topic
+    /// list is the cached `getForumTopics` result; the General topic
+    /// gets Hide/Show instead of close/pin/delete.
+    fn forum_manage_dialog_overlay(&self, cx: &mut Context<Self>) -> AnyElement {
+        let dialog = match self.forum_manage_dialog.as_ref() {
+            Some(dialog) => dialog,
+            None => return div().into_any_element(),
+        };
+        let chat_id = dialog.chat_id;
+        let topics: Vec<ForumTopic> = self
+            .session()
+            .map(|session| session.ordered_forum_topics(chat_id))
+            .unwrap_or_default();
+        let editing = dialog.editing_topic;
+        let mut body = div().flex().flex_col().gap_2().child(
+            div()
+                .flex()
+                .items_center()
+                .gap_1()
+                .child(
+                    div()
+                        .flex_1()
+                        .child(Textarea::new(&dialog.new_topic_input).h(px(36.))),
+                )
+                .child(
+                    Button::new("g2-topic-create")
+                        .label("Create")
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.submit_forum_topic_create(window, cx);
+                        })),
+                ),
+        );
+        let mut list = div()
+            .id("g2-topic-list")
+            .flex()
+            .flex_col()
+            .gap_1()
+            .max_h(px(320.))
+            .overflow_y_scroll();
+        for topic in &topics {
+            list = list.child(self.forum_topic_manage_row(chat_id, topic, editing, cx));
+        }
+        body = body.child(list);
+        self.g1_modal(
+            "g2-forum-manage",
+            G1DialogClose::ForumManage,
+            "Manage topics",
+            body.into_any_element(),
+            cx,
+        )
+    }
+
+    /// Slice G2: one topic row in the management dialog — name +
+    /// state badges and the applicable actions (General only gets
+    /// Hide/Show).
+    fn forum_topic_manage_row(
+        &self,
+        chat_id: ChatId,
+        topic: &ForumTopic,
+        editing: Option<i32>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let topic_id = topic.forum_topic_id;
+        let mut badges = String::new();
+        if topic.is_general {
+            badges.push_str(" · General");
+        }
+        if topic.is_closed {
+            badges.push_str(" · closed");
+        }
+        if topic.is_pinned {
+            badges.push_str(" · pinned");
+        }
+        let mut row = div().flex().flex_col().w_full().gap_1().child(
+            div()
+                .flex()
+                .items_center()
+                .gap_2()
+                .child(
+                    div()
+                        .flex_1()
+                        .text_sm()
+                        .font_medium()
+                        .child(topic.name.clone()),
+                )
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(badges.trim_start_matches(" · ").to_string()),
+                ),
+        );
+        if editing == Some(topic_id) {
+            let edit_input = self
+                .forum_manage_dialog
+                .as_ref()
+                .map(|dialog| dialog.edit_input.clone());
+            let mut edit_row = div().flex().items_center().gap_1();
+            if let Some(input) = edit_input {
+                edit_row = edit_row.child(div().flex_1().child(Textarea::new(&input).h(px(32.))));
+            }
+            edit_row = edit_row
+                .child(
+                    Button::new(format!("g2-topic-save-{topic_id}"))
+                        .label("Save")
+                        .on_click(cx.listener(|this, _, _window, cx| {
+                            this.submit_forum_topic_rename(cx);
+                        })),
+                )
+                .child(
+                    Button::new(format!("g2-topic-cancel-{topic_id}"))
+                        .label("Cancel")
+                        .ghost()
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            if let Some(dialog) = this.forum_manage_dialog.as_mut() {
+                                dialog.editing_topic = None;
+                            }
+                            cx.notify();
+                        })),
+                );
+            row = row.child(edit_row);
+        } else {
+            let mut actions = div().flex().flex_wrap().gap_1();
+            // Rename opens the inline editor rather than sending.
+            actions = actions.child(
+                Button::new(format!("g2-topic-rename-{topic_id}"))
+                    .label("Rename")
+                    .ghost()
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.begin_forum_topic_rename(topic_id, window, cx);
+                    })),
+            );
+            if topic.is_general {
+                let hide_label = if topic.is_hidden { "Show" } else { "Hide" };
+                let hide_action = if topic.is_hidden {
+                    ForumTopicAction::ShowGeneral
+                } else {
+                    ForumTopicAction::HideGeneral
+                };
+                actions = actions.child(
+                    Button::new(format!("g2-topic-hide-{topic_id}"))
+                        .label(hide_label)
+                        .ghost()
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.forum_topic_action(chat_id, topic_id, hide_action, cx);
+                        })),
+                );
+            } else {
+                let close_label = if topic.is_closed { "Reopen" } else { "Close" };
+                let close_action = if topic.is_closed {
+                    ForumTopicAction::Reopen
+                } else {
+                    ForumTopicAction::Close
+                };
+                let pin_label = if topic.is_pinned { "Unpin" } else { "Pin" };
+                let pin_action = if topic.is_pinned {
+                    ForumTopicAction::Unpin
+                } else {
+                    ForumTopicAction::Pin
+                };
+                for (id, label, action_kind) in [
+                    ("close", close_label, close_action),
+                    ("pin", pin_label, pin_action),
+                    ("delete", "Delete", ForumTopicAction::Delete),
+                ] {
+                    actions = actions.child(
+                        Button::new(format!("g2-topic-{id}-{topic_id}"))
+                            .label(label)
+                            .ghost()
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.forum_topic_action(chat_id, topic_id, action_kind, cx);
+                            })),
+                    );
+                }
+            }
+            row = row.child(actions);
+        }
+        row.into_any_element()
+    }
+
+    /// Slice G2: channel-post comment-thread viewer (`getMessageThreadHistory`,
+    /// schema 1.8.67, line 11839). Honest states: loading / failed-with-retry /
+    /// loaded comments (sender attribution falls back to "You" / the
+    /// post's author signature — `ParsedMessage` keeps neither sender
+    /// id nor date).
+    fn comment_thread_dialog_overlay(&self, cx: &mut Context<Self>) -> AnyElement {
+        let (chat_id, message_id) = match self.comment_thread_dialog.as_ref() {
+            Some(dialog) => (dialog.chat_id, dialog.message_id),
+            None => return div().into_any_element(),
+        };
+        let fetch = self
+            .session()
+            .and_then(|session| session.comment_thread.clone());
+        let mut body = div().flex().flex_col().gap_2();
+        match fetch {
+            Some(thread) if thread.chat_id == chat_id && thread.message_id == message_id => {
+                if let Some(error) = thread.failed {
+                    body = body.child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .w_full()
+                            .gap_1()
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .text_sm()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(error),
+                            )
+                            .child(
+                                Button::new("g2-comments-retry")
+                                    .label("Retry")
+                                    .ghost()
+                                    .on_click(cx.listener(move |this, _, window, cx| {
+                                        this.open_comment_thread_dialog(
+                                            chat_id, message_id, window, cx,
+                                        );
+                                    })),
+                            ),
+                    );
+                } else if thread.messages.is_empty() {
+                    body = body.child(
+                        div()
+                            .text_sm()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("No comments yet."),
+                    );
+                } else {
+                    let mut list = div()
+                        .id("g2-comment-list")
+                        .flex()
+                        .flex_col()
+                        .gap_2()
+                        .max_h(px(360.))
+                        .overflow_y_scroll();
+                    for message in &thread.messages {
+                        let name = if message.is_outgoing {
+                            "You".to_string()
+                        } else {
+                            message
+                                .author_signature
+                                .clone()
+                                .unwrap_or_else(|| "Comment".to_string())
+                        };
+                        let text = Self::message_copyable_text(&message.content)
+                            .unwrap_or_else(|| "(no text)".to_string());
+                        list = list.child(
+                            div()
+                                .flex()
+                                .flex_col()
+                                .gap_1()
+                                .child(
+                                    div()
+                                        .text_xs()
+                                        .font_semibold()
+                                        .text_color(cx.theme().muted_foreground)
+                                        .child(name),
+                                )
+                                .child(div().text_sm().child(text)),
+                        );
+                    }
+                    body = body.child(list);
+                }
+            }
+            _ => {
+                body = body.child(
+                    div()
+                        .text_sm()
+                        .text_color(cx.theme().muted_foreground)
+                        .child("Loading comments…"),
+                );
+            }
+        }
+        self.g1_modal(
+            "g2-comments",
+            G1DialogClose::CommentThread,
+            "Comments",
+            body.into_any_element(),
+            cx,
+        )
+    }
+
+    /// Slice G2: chat welcome-message editor (`loadChatWelcomeMessages`
+    /// / `addChatWelcomeMessage` / `editChatWelcomeMessage` /
+    /// `deleteChatWelcomeMessage`; schema 1.8.67, lines 12630–12654).
+    /// Honest states: loading / failed-with-retry / the pack list with
+    /// inline edit and delete per row. Only text content is supported
+    /// in this slice — `ParsedWelcomeMessage` keeps text only.
+    fn welcome_dialog_overlay(&self, cx: &mut Context<Self>) -> AnyElement {
+        let dialog = match self.welcome_dialog.as_ref() {
+            Some(dialog) => dialog,
+            None => return div().into_any_element(),
+        };
+        let chat_id = dialog.chat_id;
+        let editing = dialog.editing;
+        let fetch = self
+            .session()
+            .and_then(|session| session.welcome_message_fetches.get(&chat_id.0).cloned());
+        let messages: Vec<ParsedWelcomeMessage> = self
+            .session()
+            .and_then(|session| session.welcome_messages.get(&chat_id.0).cloned())
+            .unwrap_or_default();
+        let mut body = div().flex().flex_col().gap_2().child(
+            div()
+                .flex()
+                .items_center()
+                .gap_1()
+                .child(
+                    div()
+                        .flex_1()
+                        .child(Textarea::new(&dialog.new_input).h(px(64.))),
+                )
+                .child(
+                    Button::new("g2-welcome-add")
+                        .label("Add")
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.submit_welcome_add(window, cx);
+                        })),
+                ),
+        );
+        match fetch {
+            Some(WelcomeMessagesFetch::Failed(error)) => {
+                body = body.child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .w_full()
+                        .gap_1()
+                        .child(
+                            div()
+                                .flex_1()
+                                .text_sm()
+                                .text_color(cx.theme().muted_foreground)
+                                .child(error),
+                        )
+                        .child(
+                            Button::new("g2-welcome-retry")
+                                .label("Retry")
+                                .ghost()
+                                .on_click(cx.listener(move |this, _, window, cx| {
+                                    this.open_welcome_dialog(chat_id, window, cx);
+                                })),
+                        ),
+                );
+            }
+            Some(WelcomeMessagesFetch::Loaded) | None => {
+                if messages.is_empty() {
+                    body = body.child(
+                        div()
+                            .text_sm()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("No welcome messages yet."),
+                    );
+                } else {
+                    let mut list = div()
+                        .id("g2-welcome-list")
+                        .flex()
+                        .flex_col()
+                        .gap_2()
+                        .max_h(px(300.))
+                        .overflow_y_scroll();
+                    for message in &messages {
+                        list = list.child(self.welcome_message_row(chat_id, message, editing, cx));
+                    }
+                    body = body.child(list);
+                }
+            }
+            Some(WelcomeMessagesFetch::Loading) => {
+                body = body.child(
+                    div()
+                        .text_sm()
+                        .text_color(cx.theme().muted_foreground)
+                        .child("Loading welcome messages…"),
+                );
+            }
+        }
+        self.g1_modal(
+            "g2-welcome",
+            G1DialogClose::WelcomeMessage,
+            "Welcome message",
+            body.into_any_element(),
+            cx,
+        )
+    }
+
+    /// Slice G2: one welcome-message row — text preview, inline edit,
+    /// and delete.
+    fn welcome_message_row(
+        &self,
+        chat_id: ChatId,
+        message: &ParsedWelcomeMessage,
+        editing: Option<i32>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let welcome_id = message.id;
+        let text = Self::message_copyable_text(&message.content)
+            .unwrap_or_else(|| "(no text)".to_string());
+        let mut row = div()
+            .flex()
+            .flex_col()
+            .w_full()
+            .gap_1()
+            .child(div().text_sm().child(text));
+        if editing == Some(welcome_id) {
+            let edit_input = self
+                .welcome_dialog
+                .as_ref()
+                .map(|dialog| dialog.edit_input.clone());
+            let mut edit_row = div().flex().items_center().gap_1();
+            if let Some(input) = edit_input {
+                edit_row = edit_row.child(div().flex_1().child(Textarea::new(&input).h(px(56.))));
+            }
+            edit_row = edit_row
+                .child(
+                    Button::new(format!("g2-welcome-save-{welcome_id}"))
+                        .label("Save")
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.submit_welcome_edit(window, cx);
+                        })),
+                )
+                .child(
+                    Button::new(format!("g2-welcome-cancel-{welcome_id}"))
+                        .label("Cancel")
+                        .ghost()
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            if let Some(dialog) = this.welcome_dialog.as_mut() {
+                                dialog.editing = None;
+                            }
+                            cx.notify();
+                        })),
+                );
+            row = row.child(edit_row);
+        } else {
+            row = row.child(
+                div()
+                    .flex()
+                    .gap_1()
+                    .child(
+                        Button::new(format!("g2-welcome-edit-{welcome_id}"))
+                            .label("Edit")
+                            .ghost()
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                let text = this
+                                    .session()
+                                    .and_then(|session| {
+                                        session.welcome_messages.get(&chat_id.0).and_then(
+                                            |messages| messages.iter().find(|m| m.id == welcome_id),
+                                        )
+                                    })
+                                    .and_then(|message| {
+                                        Self::message_copyable_text(&message.content)
+                                    })
+                                    .unwrap_or_default();
+                                if let Some(dialog) = this.welcome_dialog.as_mut() {
+                                    dialog.editing = Some(welcome_id);
+                                    dialog.edit_input.update(cx, |input, cx| {
+                                        input.set_value(&text, window, cx);
+                                    });
+                                }
+                                cx.notify();
+                            })),
+                    )
+                    .child(
+                        Button::new(format!("g2-welcome-delete-{welcome_id}"))
+                            .label("Delete")
+                            .ghost()
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.delete_welcome_message(chat_id, welcome_id, cx);
+                            })),
+                    ),
+            );
+        }
+        row.into_any_element()
     }
 
     /// Phase D3b: the admin-management dialog, rendered above the
@@ -26933,6 +28466,41 @@ fn apply_ready_admin_log(session: &mut Session, sink: &Arc<MemorySink>, seq: &At
             session.apply(owned);
         }
     }
+}
+
+/// `ReadyGroups2` fixture (Slice G2): on top of `apply_ready_admin_log`
+/// (channel 13, viewer 777 admin, loaded event log), flips the channel
+/// signature flags on via `updateSupergroup`, grants
+/// `can_send_welcome_messages` via `updateSupergroup` admin status, and
+/// seeds boost status + a loaded one-message welcome pack directly.
+fn apply_ready_groups2(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
+    apply_ready_admin_log(session, sink, seq);
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let jsons = [
+        r#"{"@type":"updateSupergroup","supergroup":{"@type":"supergroup","id":13,"sign_messages":true,"show_message_sender":false,"status":{"@type":"chatMemberStatusAdministrator","can_be_edited":true}}}"#.to_string(),
+    ];
+    for json in jsons {
+        if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
+            session.apply(owned);
+        }
+    }
+    session.supergroup_send_welcome_right.insert(13, true);
+    session.chat_boost_status.insert(13, (4, 38));
+    session
+        .welcome_message_fetches
+        .insert(13, WelcomeMessagesFetch::Loaded);
+    session.welcome_messages.insert(
+        13,
+        vec![ParsedWelcomeMessage {
+            id: 5,
+            content: MessageContent::Text(quill::telegram::envelope::TextContent {
+                text: "Welcome to Demo channel! Read the pinned post first.".to_string(),
+                entities: Vec::new(),
+                link_preview: None,
+            }),
+        }],
+    );
+    session.chat_has_welcome_messages.insert(13, true);
 }
 
 /// `ReadyGroupManage` fixture (Slice G1): a demo supergroup ("Demo

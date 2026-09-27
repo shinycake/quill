@@ -887,6 +887,310 @@ pub fn toggle_supergroup_join_by_request(
     .to_string()
 }
 
+/// Slice G2: `toggleSupergroupSignMessages` (TDLib 1.8.67,
+/// `schema/td_api.tl:15175`):
+/// `toggleSupergroupSignMessages supergroup_id:int53 sign_messages:Bool
+/// show_message_sender:Bool = Ok;`
+/// "Toggles whether sender signature or link to the account is added to
+/// sent messages in a channel; requires can_change_info member right".
+/// `show_message_sender` only takes effect when `sign_messages` is true
+/// (Telegram X sends `sign && show`).
+pub fn toggle_supergroup_sign_messages(
+    extra: RequestId,
+    supergroup_id: i64,
+    sign_messages: bool,
+    show_message_sender: bool,
+) -> String {
+    json!({
+        "@type": "toggleSupergroupSignMessages",
+        "@extra": extra.as_extra(),
+        "supergroup_id": supergroup_id,
+        "sign_messages": sign_messages,
+        "show_message_sender": sign_messages && show_message_sender,
+    })
+    .to_string()
+}
+
+/// Slice G2: `toggleSupergroupHasAggressiveAntiSpamEnabled` (TDLib 1.8.67,
+/// `schema/td_api.tl:15212`):
+/// `toggleSupergroupHasAggressiveAntiSpamEnabled supergroup_id:int53
+/// has_aggressive_anti_spam_enabled:Bool = Ok;`
+/// "Toggles whether aggressive anti-spam checks are enabled in the
+/// supergroup. Can be called only if
+/// supergroupFullInfo.can_toggle_aggressive_anti_spam == true".
+pub fn toggle_supergroup_aggressive_anti_spam(
+    extra: RequestId,
+    supergroup_id: i64,
+    enabled: bool,
+) -> String {
+    json!({
+        "@type": "toggleSupergroupHasAggressiveAntiSpamEnabled",
+        "@extra": extra.as_extra(),
+        "supergroup_id": supergroup_id,
+        "has_aggressive_anti_spam_enabled": enabled,
+    })
+    .to_string()
+}
+
+/// Slice G2: `createForumTopic` (TDLib 1.8.67, `schema/td_api.tl:12665`):
+/// `createForumTopic chat_id:int53 name:string is_name_implicit:Bool
+/// icon:forumTopicIcon = ForumTopicInfo;`
+/// "Creates a topic in a forum supergroup chat ...; requires
+/// can_manage_topics administrator or can_create_topics member right".
+/// Icon is a required parameter; Quill sends the default blue
+/// (0x6FB9F0) with no custom emoji (Telegram X default icon color).
+pub fn create_forum_topic(extra: RequestId, chat_id: ChatId, name: &str) -> String {
+    json!({
+        "@type": "createForumTopic",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0,
+        "name": name,
+        "is_name_implicit": false,
+        "icon": {
+            "@type": "forumTopicIcon",
+            "color": 0x6FB9F0,
+            "custom_emoji_id": 0
+        },
+    })
+    .to_string()
+}
+
+/// Slice G2: `editForumTopic` (TDLib 1.8.67, `schema/td_api.tl:12674`):
+/// `editForumTopic chat_id:int53 forum_topic_id:int32 name:string
+/// edit_icon_custom_emoji:Bool icon_custom_emoji_id:int64 = Ok;`
+/// Quill edits the name only (`edit_icon_custom_emoji: false`).
+pub fn edit_forum_topic(
+    extra: RequestId,
+    chat_id: ChatId,
+    forum_topic_id: i32,
+    name: &str,
+) -> String {
+    json!({
+        "@type": "editForumTopic",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0,
+        "forum_topic_id": forum_topic_id,
+        "name": name,
+        "edit_icon_custom_emoji": false,
+        "icon_custom_emoji_id": 0,
+    })
+    .to_string()
+}
+
+/// Slice G2: `toggleForumTopicIsClosed` (TDLib 1.8.67,
+/// `schema/td_api.tl:12713`):
+/// `toggleForumTopicIsClosed chat_id:int53 forum_topic_id:int32
+/// is_closed:Bool = Ok;`
+pub fn toggle_forum_topic_closed(
+    extra: RequestId,
+    chat_id: ChatId,
+    forum_topic_id: i32,
+    is_closed: bool,
+) -> String {
+    json!({
+        "@type": "toggleForumTopicIsClosed",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0,
+        "forum_topic_id": forum_topic_id,
+        "is_closed": is_closed,
+    })
+    .to_string()
+}
+
+/// Slice G2: `toggleForumTopicIsPinned` (TDLib 1.8.67,
+/// `schema/td_api.tl:12725`):
+/// `toggleForumTopicIsPinned chat_id:int53 forum_topic_id:int32
+/// is_pinned:Bool = Ok;`
+pub fn toggle_forum_topic_pinned(
+    extra: RequestId,
+    chat_id: ChatId,
+    forum_topic_id: i32,
+    is_pinned: bool,
+) -> String {
+    json!({
+        "@type": "toggleForumTopicIsPinned",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0,
+        "forum_topic_id": forum_topic_id,
+        "is_pinned": is_pinned,
+    })
+    .to_string()
+}
+
+/// Slice G2: `deleteForumTopic` (TDLib 1.8.67, `schema/td_api.tl:12736`):
+/// `deleteForumTopic chat_id:int53 forum_topic_id:int32 = Ok;`
+pub fn delete_forum_topic(extra: RequestId, chat_id: ChatId, forum_topic_id: i32) -> String {
+    json!({
+        "@type": "deleteForumTopic",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0,
+        "forum_topic_id": forum_topic_id,
+    })
+    .to_string()
+}
+
+/// Slice G2: `toggleGeneralForumTopicIsHidden` (TDLib 1.8.67,
+/// `schema/td_api.tl:12718`): "Toggles whether a General topic is hidden
+/// in a forum supergroup chat; requires can_manage_topics administrator
+/// right". There is no per-topic hide constructor in the pinned schema —
+/// only the General topic can be hidden.
+pub fn toggle_general_forum_topic_hidden(
+    extra: RequestId,
+    chat_id: ChatId,
+    is_hidden: bool,
+) -> String {
+    json!({
+        "@type": "toggleGeneralForumTopicIsHidden",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0,
+        "is_hidden": is_hidden,
+    })
+    .to_string()
+}
+
+/// Slice G2: `getMessageThreadHistory` (TDLib 1.8.67,
+/// `schema/td_api.tl:11839`):
+/// `getMessageThreadHistory chat_id:int53 message_id:int53
+/// from_message_id:int53 offset:int32 limit:int32 = Messages;`
+/// "Returns messages in a message thread of a message. ... Message
+/// thread of a channel message is in the channel's linked supergroup."
+/// Used for the channel-comments viewer.
+pub fn get_message_thread_history(
+    extra: RequestId,
+    chat_id: ChatId,
+    message_id: MessageId,
+    from_message_id: MessageId,
+    limit: i32,
+) -> String {
+    json!({
+        "@type": "getMessageThreadHistory",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0,
+        "message_id": message_id.0,
+        "from_message_id": from_message_id.0,
+        "offset": 0,
+        "limit": limit,
+    })
+    .to_string()
+}
+
+/// Slice G2: `getChatBoostStatus` (TDLib 1.8.67, `schema/td_api.tl:13917`):
+/// `getChatBoostStatus chat_id:int53 = ChatBoostStatus;`
+/// "Returns the current boost status for a supergroup or a channel chat".
+pub fn get_chat_boost_status(extra: RequestId, chat_id: ChatId) -> String {
+    json!({
+        "@type": "getChatBoostStatus",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0,
+    })
+    .to_string()
+}
+
+/// Slice G2: `getAvailableChatBoostSlots` (TDLib 1.8.67,
+/// `schema/td_api.tl:13914`): "Returns the list of available chat boost
+/// slots for the current user".
+pub fn get_available_chat_boost_slots(extra: RequestId) -> String {
+    json!({
+        "@type": "getAvailableChatBoostSlots",
+        "@extra": extra.as_extra(),
+    })
+    .to_string()
+}
+
+/// Slice G2: `boostChat` (TDLib 1.8.67, `schema/td_api.tl:13922`):
+/// `boostChat chat_id:int53 slot_ids:vector<int32> = ChatBoostSlots;`
+/// "Boosts a chat and returns the list of available chat boost slots for
+/// the current user after the boost".
+pub fn boost_chat(extra: RequestId, chat_id: ChatId, slot_ids: &[i32]) -> String {
+    json!({
+        "@type": "boostChat",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0,
+        "slot_ids": slot_ids,
+    })
+    .to_string()
+}
+
+/// Slice G2: shared `inputMessageText` block for the welcome-message
+/// requests — same markup→entities treatment as sends.
+fn welcome_message_input_content(text: &str) -> Value {
+    let (clean_text, entities) = parse_format_markup(text);
+    let entities_json: Vec<Value> = entities.iter().map(format_entity_json).collect();
+    json!({
+        "@type": "inputMessageText",
+        "text": {
+            "@type": "formattedText",
+            "text": clean_text,
+            "entities": entities_json
+        },
+        "link_preview_options": Value::Null,
+        "clear_draft": false
+    })
+}
+
+/// Slice G2: `loadChatWelcomeMessages` (TDLib 1.8.67,
+/// `schema/td_api.tl:12630`): "Loads welcome messages of a chat; requires
+/// can_send_welcome_messages administrator right in the chat. The loaded
+/// messages will be sent through updateChatWelcomeMessages".
+pub fn load_chat_welcome_messages(extra: RequestId, chat_id: ChatId) -> String {
+    json!({
+        "@type": "loadChatWelcomeMessages",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0,
+    })
+    .to_string()
+}
+
+/// Slice G2: `addChatWelcomeMessage` (TDLib 1.8.67, `schema/td_api.tl:12639`):
+/// `addChatWelcomeMessage chat_id:int53
+/// input_message_content:InputMessageContent = Ok;`
+pub fn add_chat_welcome_message(extra: RequestId, chat_id: ChatId, text: &str) -> String {
+    json!({
+        "@type": "addChatWelcomeMessage",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0,
+        "input_message_content": welcome_message_input_content(text),
+    })
+    .to_string()
+}
+
+/// Slice G2: `editChatWelcomeMessage` (TDLib 1.8.67,
+/// `schema/td_api.tl:12646`):
+/// `editChatWelcomeMessage chat_id:int53 welcome_message_id:int32
+/// input_message_content:InputMessageContent = Ok;`
+pub fn edit_chat_welcome_message(
+    extra: RequestId,
+    chat_id: ChatId,
+    welcome_message_id: i32,
+    text: &str,
+) -> String {
+    json!({
+        "@type": "editChatWelcomeMessage",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0,
+        "welcome_message_id": welcome_message_id,
+        "input_message_content": welcome_message_input_content(text),
+    })
+    .to_string()
+}
+
+/// Slice G2: `deleteChatWelcomeMessage` (TDLib 1.8.67,
+/// `schema/td_api.tl:12651`):
+/// `deleteChatWelcomeMessage chat_id:int53 welcome_message_id:int32 = Ok;`
+pub fn delete_chat_welcome_message(
+    extra: RequestId,
+    chat_id: ChatId,
+    welcome_message_id: i32,
+) -> String {
+    json!({
+        "@type": "deleteChatWelcomeMessage",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0,
+        "welcome_message_id": welcome_message_id,
+    })
+    .to_string()
+}
+
 /// Slice G1: `setSupergroupUsername` (TDLib 1.8.67, `schema/td_api.tl:15136`):
 /// `setSupergroupUsername supergroup_id:int53 username:string = Ok;`
 /// "Changes the editable username of a supergroup or channel, requires
@@ -1006,10 +1310,11 @@ pub fn input_message_reply_to_with_quote(
 }
 
 /// Phase D3c: `chatEventLogFilters` (TDLib 1.8.67,
-/// `schema/td_api.tl:7956`). Mirrors the schema field order exactly so a
-/// future slice can request filtered logs; Quill's event log always
-/// passes `null` (all event types — the schema's "pass null to get chat
-/// events of all types", line 15252).
+/// `schema/td_api.tl:7956`). Mirrors the schema field order exactly.
+/// Slice G2: the event-log section's filter chips edit a per-chat set;
+/// when no category is enabled the driver passes `null` (all event
+/// types — the schema's "pass null to get chat events of all types",
+/// line 15252).
 #[derive(Debug, Clone, Copy, Default)]
 pub struct ChatEventLogFilterSet {
     pub message_edits: bool,
@@ -1030,6 +1335,28 @@ pub struct ChatEventLogFilterSet {
 }
 
 impl ChatEventLogFilterSet {
+    /// Slice G2: true when at least one category is enabled. The driver
+    /// sends `null` (all event types) when none are, mirroring the
+    /// schema's "pass null to get chat events of all types" (1.8.67,
+    /// line 15252).
+    pub fn any_enabled(self) -> bool {
+        self.message_edits
+            || self.message_deletions
+            || self.message_pins
+            || self.member_joins
+            || self.member_leaves
+            || self.member_invites
+            || self.member_promotions
+            || self.member_restrictions
+            || self.member_tag_changes
+            || self.info_changes
+            || self.setting_changes
+            || self.invite_link_changes
+            || self.video_chat_changes
+            || self.forum_changes
+            || self.subscription_extensions
+    }
+
     fn to_json(self) -> Value {
         json!({
             "@type": "chatEventLogFilters",
@@ -6443,5 +6770,118 @@ mod channel_requests_tests {
         let json = set_chat_member_tag(RequestId(3), ChatId(7), 42, "");
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(v["tag"], "");
+    }
+
+    #[test]
+    fn g2_toggle_sign_messages_shape_matches_1_8_67() {
+        // Slice G2: `toggleSupergroupSignMessages supergroup_id:int53
+        // sign_messages:Bool show_message_sender:Bool = Ok` (schema 1.8.67,
+        // line 15175). `show_message_sender` is forced false when
+        // `sign_messages` is false (Telegram X behavior).
+        let json = toggle_supergroup_sign_messages(RequestId(3), 42, true, true);
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "toggleSupergroupSignMessages");
+        assert_eq!(v["supergroup_id"], 42);
+        assert_eq!(v["sign_messages"], true);
+        assert_eq!(v["show_message_sender"], true);
+        let json = toggle_supergroup_sign_messages(RequestId(3), 42, false, true);
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["sign_messages"], false);
+        assert_eq!(v["show_message_sender"], false);
+    }
+
+    #[test]
+    fn g2_toggle_anti_spam_shape_matches_1_8_67() {
+        // Slice G2: `toggleSupergroupHasAggressiveAntiSpamEnabled
+        // supergroup_id:int53 has_aggressive_anti_spam_enabled:Bool = Ok`
+        // (schema 1.8.67, line 15212).
+        let json = toggle_supergroup_aggressive_anti_spam(RequestId(3), 42, true);
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "toggleSupergroupHasAggressiveAntiSpamEnabled");
+        assert_eq!(v["supergroup_id"], 42);
+        assert_eq!(v["has_aggressive_anti_spam_enabled"], true);
+    }
+
+    #[test]
+    fn g2_forum_topic_request_shapes_match_1_8_67() {
+        // createForumTopic (schema 1.8.67, line 12665).
+        let json = create_forum_topic(RequestId(3), ChatId(7), "Announcements");
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "createForumTopic");
+        assert_eq!(v["chat_id"], 7);
+        assert_eq!(v["name"], "Announcements");
+        assert_eq!(v["is_name_implicit"], false);
+        assert_eq!(v["icon"]["@type"], "forumTopicIcon");
+        // editForumTopic (line 12674) — name only.
+        let json = edit_forum_topic(RequestId(3), ChatId(7), 2, "News");
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "editForumTopic");
+        assert_eq!(v["forum_topic_id"], 2);
+        assert_eq!(v["name"], "News");
+        assert_eq!(v["edit_icon_custom_emoji"], false);
+        // toggleForumTopicIsClosed (line 12713).
+        let json = toggle_forum_topic_closed(RequestId(3), ChatId(7), 2, true);
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "toggleForumTopicIsClosed");
+        assert_eq!(v["is_closed"], true);
+        // toggleForumTopicIsPinned (line 12725).
+        let json = toggle_forum_topic_pinned(RequestId(3), ChatId(7), 2, true);
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "toggleForumTopicIsPinned");
+        assert_eq!(v["is_pinned"], true);
+        // deleteForumTopic (line 12736).
+        let json = delete_forum_topic(RequestId(3), ChatId(7), 2);
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "deleteForumTopic");
+        assert_eq!(v["forum_topic_id"], 2);
+        // toggleGeneralForumTopicIsHidden (line 12718) — General only.
+        let json = toggle_general_forum_topic_hidden(RequestId(3), ChatId(7), true);
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "toggleGeneralForumTopicIsHidden");
+        assert_eq!(v["is_hidden"], true);
+    }
+
+    #[test]
+    fn g2_thread_boost_welcome_request_shapes_match_1_8_67() {
+        // getMessageThreadHistory (schema 1.8.67, line 11839).
+        let json =
+            get_message_thread_history(RequestId(3), ChatId(7), MessageId(101), MessageId(0), 50);
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "getMessageThreadHistory");
+        assert_eq!(v["chat_id"], 7);
+        assert_eq!(v["message_id"], 101);
+        assert_eq!(v["from_message_id"], 0);
+        assert_eq!(v["limit"], 50);
+        // getChatBoostStatus (line 13917) / getAvailableChatBoostSlots
+        // (line 13914) / boostChat (line 13922).
+        let json = get_chat_boost_status(RequestId(3), ChatId(7));
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "getChatBoostStatus");
+        let json = get_available_chat_boost_slots(RequestId(3));
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "getAvailableChatBoostSlots");
+        let json = boost_chat(RequestId(3), ChatId(7), &[1, 2]);
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "boostChat");
+        assert_eq!(v["slot_ids"], serde_json::json!([1, 2]));
+        // loadChatWelcomeMessages (line 12630) /
+        // addChatWelcomeMessage (line 12639) /
+        // editChatWelcomeMessage (line 12646) /
+        // deleteChatWelcomeMessage (line 12651).
+        let json = load_chat_welcome_messages(RequestId(3), ChatId(7));
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "loadChatWelcomeMessages");
+        let json = add_chat_welcome_message(RequestId(3), ChatId(7), "Welcome!");
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "addChatWelcomeMessage");
+        assert_eq!(v["input_message_content"]["text"]["text"], "Welcome!");
+        let json = edit_chat_welcome_message(RequestId(3), ChatId(7), 5, "Hello!");
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "editChatWelcomeMessage");
+        assert_eq!(v["welcome_message_id"], 5);
+        let json = delete_chat_welcome_message(RequestId(3), ChatId(7), 5);
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "deleteChatWelcomeMessage");
+        assert_eq!(v["welcome_message_id"], 5);
     }
 }
