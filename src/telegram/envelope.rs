@@ -309,6 +309,14 @@ pub enum EnvelopePayload {
     Error(TdError),
     Messages(Vec<ParsedMessage>),
     Message(ParsedMessage),
+    /// M1: `messageLink` (TDLib 1.8.67, `schema/td_api.tl:9666` —
+    /// `messageLink link is_public`) — the `getMessageLink` answer. The
+    /// driver stashes `link` in `Session::message_link_result`; the UI
+    /// copies it to the clipboard.
+    MessageLink {
+        link: String,
+        is_public: bool,
+    },
     /// `chats` — `searchChats` / `searchRecentlyFoundChats` / similar.
     Chats {
         total_count: i32,
@@ -3227,6 +3235,31 @@ impl MessageReplyTo {
     }
 }
 
+/// M1: `messageSchedulingState` (TDLib 1.8.67, `schema/td_api.tl:5902` /
+/// `:5905`); `message.scheduling_state` is null when not scheduled
+/// (schema line 3124).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MessageSchedulingState {
+    SendAtDate { send_date: i32 },
+    SendWhenOnline,
+}
+
+fn parse_message_scheduling_state(value: Option<&Value>) -> Option<MessageSchedulingState> {
+    let value = value?;
+    if value.is_null() {
+        return None;
+    }
+    match value.get("@type").and_then(Value::as_str) {
+        Some("messageSchedulingStateSendAtDate") => Some(MessageSchedulingState::SendAtDate {
+            send_date: value.get("send_date").and_then(Value::as_i64).unwrap_or(0) as i32,
+        }),
+        Some("messageSchedulingStateSendWhenOnline") => {
+            Some(MessageSchedulingState::SendWhenOnline)
+        }
+        _ => None,
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParsedMessage {
     pub id: MessageId,
@@ -3248,6 +3281,10 @@ pub struct ParsedMessage {
     /// the small signature line under the post (suppressed under
     /// forwarded-message headers, which already attribute it).
     pub author_signature: Option<String>,
+    /// M1: `message.scheduling_state` (TDLib 1.8.67, lines 3124 / 3165).
+    /// `Some` only on scheduled sends; the UI's scheduled list reads the
+    /// planned time from here.
+    pub scheduling_state: Option<MessageSchedulingState>,
     pub content: MessageContent,
     pub files: Vec<ParsedFile>,
     pub reply_to: Option<MessageReplyTo>,
@@ -5410,6 +5447,17 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
             })
         }
         "ok" => Ok(EnvelopePayload::Ok),
+        "messageLink" => Ok(EnvelopePayload::MessageLink {
+            link: value
+                .get("link")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string(),
+            is_public: value
+                .get("is_public")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+        }),
         // Phase C3a: `text` (schema 1.8.67, line 10071) — the
         // `joinVideoChat` / `joinGroupCall` answer ("join response
         // payload for tgcalls"). Quill stores it, never consumes it
@@ -6829,6 +6877,7 @@ fn parse_message(value: &Value) -> Result<ParsedMessage, ParseError> {
             value.get("self_destruct_in"),
         ),
         auto_delete: parse_auto_delete_in(value.get("auto_delete_in")),
+        scheduling_state: parse_message_scheduling_state(value.get("scheduling_state")),
     })
 }
 

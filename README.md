@@ -61,51 +61,51 @@ This is the comprehensive Telegram-parity checklist: one checkbox per user-visib
 ### Messaging core
 
 - [x] Send plain text message (`sendMessage`, Enter to send) <!-- parity:msg-send-text --> (telegram/requests.rs:1574; send-on-Enter gate composer.rs:20)
-- [ ] Bold formatting authoring (partial: incoming bold renders text.rs:203; composer sends entities: [] — requests.rs:1587) <!-- parity:msg-bold -->
-- [ ] Italic formatting authoring (partial: incoming renders; no composer entry) <!-- parity:msg-italic -->
-- [ ] Underline formatting authoring (partial: incoming renders; no composer entry) <!-- parity:msg-underline -->
-- [ ] Strikethrough formatting authoring (partial: incoming renders; no composer entry) <!-- parity:msg-strikethrough -->
-- [ ] Inline code / monospace authoring (partial: incoming renders; no composer entry) <!-- parity:msg-inline-code -->
-- [ ] Code block / pre (with language) authoring (partial: incoming renders; no composer entry) <!-- parity:msg-code-block -->
-- [ ] Spoiler authoring (partial: renders hidden-until-tapped on incoming, text.rs:134) <!-- parity:msg-spoiler -->
-- [ ] Quote/blockquote formatting authoring (partial: incoming renders; no composer entry) <!-- parity:msg-quote-block -->
-- [ ] Create text link (textUrl) authoring (partial: incoming textUrl rendered/opened text.rs:78; no composer entry) <!-- parity:msg-text-link -->
-- [ ] Clear formatting on selection (no formatting toolbar at all in composer) <!-- parity:msg-clear-formatting -->
+- [x] Bold formatting authoring (partial: incoming bold renders text.rs:203; composer sends entities: [] — requests.rs:1587) <!-- parity:msg-bold --> (M1: toolbar B / Ctrl-B inserts **bold**; send converts to textEntityTypeBold requests.rs)
+- [x] Italic formatting authoring (partial: incoming renders; no composer entry) <!-- parity:msg-italic --> (M1: toolbar I / Ctrl-I inserts *italic*; send converts to textEntityTypeItalic)
+- [x] Underline formatting authoring (partial: incoming renders; no composer entry) <!-- parity:msg-underline --> (M1: toolbar U / Ctrl-U inserts __underline__; send converts to textEntityTypeUnderline)
+- [x] Strikethrough formatting authoring (partial: incoming renders; no composer entry) <!-- parity:msg-strikethrough --> (M1: toolbar S inserts ~~strike~~; send converts to textEntityTypeStrikethrough)
+- [x] Inline code / monospace authoring (partial: incoming renders; no composer entry) <!-- parity:msg-inline-code --> (M1: toolbar </> inserts `code`; send converts to textEntityTypeCode)
+- [x] Code block / pre (with language) authoring (partial: incoming renders; no composer entry) <!-- parity:msg-code-block --> (M1: toolbar pre inserts fenced block, optional language; send converts to textEntityTypePre/PreCode)
+- [x] Spoiler authoring (partial: renders hidden-until-tapped on incoming, text.rs:134) <!-- parity:msg-spoiler --> (M1: toolbar spoiler inserts ||spoiler||; send converts to textEntityTypeSpoiler)
+- [x] Quote/blockquote formatting authoring (partial: incoming renders; no composer entry) <!-- parity:msg-quote-block --> (M1: toolbar quote prefixes > lines; send converts to textEntityTypeBlockQuote)
+- [x] Create text link (textUrl) authoring (partial: incoming textUrl rendered/opened text.rs:78; no composer entry) <!-- parity:msg-text-link --> (M1: toolbar link inserts [label](url); send converts to textEntityTypeTextUrl)
+- [x] Clear formatting on selection (no formatting toolbar at all in composer) <!-- parity:msg-clear-formatting --> (M1: toolbar clear strips markup on selection or whole text, composer.rs)
 - [x] Reply to a message <!-- parity:msg-reply --> (begin_reply_to ui/mod.rs:4269)
 - [ ] Quote selected text in a reply (partial: incoming quotes render state.rs:6531; send always quote:null requests.rs:1552) <!-- parity:msg-reply-quote -->
 - [x] Reply bar in composer with cancel <!-- parity:msg-reply-bar-cancel --> (cancel_reply_draft composer.rs:131)
-- [ ] Swipe-to-reply gesture <!-- parity:msg-swipe-reply -->
+- [x] Swipe-to-reply gesture <!-- parity:msg-swipe-reply --> (M1: leftward drag >24px on a message starts a reply, ui/mod.rs)
 - [x] Forward with "Forwarded from" attribution <!-- parity:msg-forward-attribution --> (forward_messages, send_copy:false requests.rs:2172)
-- [ ] Forward as copy / hide sender (send_copy hardcoded false, requests.rs:2184) <!-- parity:msg-forward-hide-sender -->
-- [ ] Remove caption on forward copy (remove_caption hardcoded false) <!-- parity:msg-forward-remove-caption -->
+- [x] Forward as copy / hide sender (send_copy hardcoded false, requests.rs:2184) <!-- parity:msg-forward-hide-sender --> (M1: forward picker "Hide sender name" -> forwardMessages send_copy:true, requests.rs)
+- [x] Remove caption on forward copy (remove_caption hardcoded false) <!-- parity:msg-forward-remove-caption --> (M1: forward picker "Remove caption" (with send-copy) -> remove_caption:true)
 - [x] Multi-select forward (per-message Select) <!-- parity:msg-forward-multiselect --> (toggle_forward_select ui/mod.rs:4682; 100-msg cap connect.rs)
 - [x] Forward destination picker <!-- parity:msg-forward-picker --> (forward_destinations state.rs:6585; begin_forward_one ui/mod.rs:4654)
 - [x] Edit own message text <!-- parity:msg-edit-text --> (edit_message_text requests.rs:2097; begin_edit ui/mod.rs:21954)
 - [x] Edit media caption <!-- parity:msg-edit-caption --> (edit_message_caption requests.rs:2125; wired connect.rs:4989)
 - [x] Cancel edit restores prior draft <!-- parity:msg-edit-cancel-restores --> (cancel_edit_draft composer.rs:213)
 - [x] Delete own message for everyone (confirm dialog) <!-- parity:msg-delete-everyone --> (delete_confirmed, revoke:true connect.rs:5043; confirm_delete ui/mod.rs:4371)
-- [ ] Delete for me / delete incoming messages (DeleteConfirm::own requires own-outgoing composer.rs:243; revoke always true) <!-- parity:msg-delete-for-me -->
+- [x] Delete for me / delete incoming messages (DeleteConfirm::own requires own-outgoing composer.rs:243; revoke always true) <!-- parity:msg-delete-for-me --> (M1: incoming messages deletable with revoke:false; banner toggles for-me/everyone, gated on can_revoke)
 - [x] Pin message <!-- parity:msg-pin --> (toggle_pin_message ui/mod.rs:11464)
 - [x] Unpin message (same toggle, Pin/Unpin row button ui/mod.rs:21992) <!-- parity:msg-unpin -->
-- [ ] Silent pin toggle (partial: pin_chat_message takes disable_notification requests.rs:2274; UI toggles without the option) <!-- parity:msg-pin-silent -->
-- [ ] Unpin all messages (unpinAllChatMessages unwired in UI) <!-- parity:msg-unpin-all -->
-- [ ] Copy message text (only inline-button CopyText ui/mod.rs:3932 and invite-link copy exist) <!-- parity:msg-copy-text -->
-- [ ] Share message / copy t.me link (getMessageLink unused) <!-- parity:msg-share-link -->
-- [ ] Scheduled send (send at date; options:null, schema messageSchedulingStateSendAtDate td_api.tl:5902) <!-- parity:msg-scheduled-send -->
-- [ ] Scheduled messages list / edit / delete <!-- parity:msg-scheduled-list -->
-- [ ] Send when online (schema messageSchedulingStateSendWhenOnline td_api.tl:5905) <!-- parity:msg-send-when-online -->
-- [ ] Silent send / disable notification (send options always null) <!-- parity:msg-silent-send -->
+- [x] Silent pin toggle (partial: pin_chat_message takes disable_notification requests.rs:2274; UI toggles without the option) <!-- parity:msg-pin-silent --> (M1: composer silent toggle feeds disable_notification to pinChatMessage)
+- [x] Unpin all messages (unpinAllChatMessages unwired in UI) <!-- parity:msg-unpin-all --> (M1: "Unpin all" button in pinned banner when >1 pinned, unpinAllChatMessages)
+- [x] Copy message text (only inline-button CopyText ui/mod.rs:3932 and invite-link copy exist) <!-- parity:msg-copy-text --> (M1: right-click context menu Copy on text/caption messages)
+- [x] Share message / copy t.me link (getMessageLink unused) <!-- parity:msg-share-link --> (M1: right-click Share link -> getMessageLink -> clipboard)
+- [x] Scheduled send (send at date; options:null, schema messageSchedulingStateSendAtDate td_api.tl:5902) <!-- parity:msg-scheduled-send --> (M1: schedule popup +1h/+8h/+24h via messageSchedulingStateSendAtDate)
+- [x] Scheduled messages list / edit / delete <!-- parity:msg-scheduled-list --> (M1: getChatScheduledMessages dialog with list, edit (editMessageText), delete)
+- [x] Send when online (schema messageSchedulingStateSendWhenOnline td_api.tl:5905) <!-- parity:msg-send-when-online --> (M1: schedule popup "when online" via messageSchedulingStateSendWhenOnline)
+- [x] Silent send / disable notification (send options always null) <!-- parity:msg-silent-send --> (M1: silent toggle -> messageSendOptions.disable_notification; non-null options on every sendMessage)
 - [x] Cloud drafts synced via setChatDraftMessage (debounced save) <!-- parity:msg-cloud-drafts --> (requests.rs:1537; DraftSaveClock composer.rs:333; ui/mod.rs:12226)
 - [x] Draft preserves reply context <!-- parity:msg-draft-reply-context --> (begin_edit_draft composer.rs:221; updateChatDraftMessage handled)
 - [x] Delivery status on outgoing (sending / sent / read) <!-- parity:msg-delivery-status --> (outgoing_status_label state.rs:893; outbox_receipt state.rs:1177)
 - [x] Mark history read (viewMessages after openChat) <!-- parity:msg-mark-read --> (requests.rs:1470, 306)
 - [x] Typing indicator from peer <!-- parity:msg-typing-receive --> (updateChatAction → typing_senders state.rs:930)
 - [x] Send typing indicator <!-- parity:msg-typing-send --> (sendChatAction requests.rs:2392)
-- [ ] Retry/resend failed message (resendMessages unwired) <!-- parity:msg-retry-failed -->
+- [x] Retry/resend failed message (resendMessages unwired) <!-- parity:msg-retry-failed --> (M1: failed sends marked red with retry hint; right-click Retry -> resendMessages)
 - [x] In-chat message search <!-- parity:msg-in-chat-search --> (search_chat_messages requests.rs:213; chat_search_input ui/mod.rs:575)
 - [x] Per-message hover actions (Reply/Forward/Select/Edit/Delete/React/Pin) <!-- parity:msg-row-actions --> (ui/mod.rs:21917+)
-- [ ] Right-click context menu (no right-click handlers; hover buttons only) <!-- parity:msg-context-menu -->
-- [ ] Link preview options on send (partial: received previews render card ui/mod.rs:22404; send has link_preview_options:null, no toggle) <!-- parity:msg-link-preview-toggle -->
+- [x] Right-click context menu (no right-click handlers; hover buttons only) <!-- parity:msg-context-menu --> (M1: right-click menu Reply/Copy/Forward/Pin/Unpin/Share link/Retry/Delete)
+- [x] Link preview options on send (partial: received previews render card ui/mod.rs:22404; send has link_preview_options:null, no toggle) <!-- parity:msg-link-preview-toggle --> (M1: previews toggle -> linkPreviewOptions.is_disabled; secret chats force off)
 
 ### Chat list
 

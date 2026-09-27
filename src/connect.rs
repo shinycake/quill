@@ -49,17 +49,18 @@ use crate::telegram::requests::{
     get_authorization_state, get_callback_query_answer, get_chat_active_stories,
     get_chat_administrators, get_chat_event_log, get_chat_folder, get_chat_history,
     get_chat_invite_links, get_chat_join_requests, get_chat_lists_to_add_chat, get_chat_member,
-    get_chat_sponsored_messages, get_chat_statistics, get_commands, get_contacts, get_forum_topics,
-    get_group_call, get_installed_sticker_sets, get_me, get_saved_animations,
-    get_saved_notification_sounds, get_scope_notification_settings, get_secret_chat,
-    get_sticker_set, get_storage_statistics, get_story, get_story_available_reactions,
-    get_supergroup, get_supergroup_full_info, get_supergroup_members, get_user_full_info,
-    get_user_privacy_setting_rules, get_video_chat_invite_link, get_video_chat_rtmp_url,
-    input_message_photo, input_message_video, invite_group_call_participant, join_chat,
-    join_group_call, join_video_chat, leave_chat, leave_group_call, load_active_stories,
-    load_chats, load_chats_list, load_group_call_participants, open_chat, open_message_content,
-    open_story, pin_chat_message, process_chat_join_request, remove_message_reaction,
-    reorder_chat_folders, replace_video_chat_rtmp_url, report_chat_sponsored_message,
+    get_chat_scheduled_messages, get_chat_sponsored_messages, get_chat_statistics, get_commands,
+    get_contacts, get_forum_topics, get_group_call, get_installed_sticker_sets, get_me,
+    get_message_link, get_saved_animations, get_saved_notification_sounds,
+    get_scope_notification_settings, get_secret_chat, get_sticker_set, get_storage_statistics,
+    get_story, get_story_available_reactions, get_supergroup, get_supergroup_full_info,
+    get_supergroup_members, get_user_full_info, get_user_privacy_setting_rules,
+    get_video_chat_invite_link, get_video_chat_rtmp_url, input_message_photo, input_message_video,
+    invite_group_call_participant, join_chat, join_group_call, join_video_chat, leave_chat,
+    leave_group_call, load_active_stories, load_chats, load_chats_list,
+    load_group_call_participants, open_chat, open_message_content, open_story, pin_chat_message,
+    process_chat_join_request, remove_message_reaction, reorder_chat_folders,
+    replace_video_chat_rtmp_url, report_chat_sponsored_message, resend_messages,
     revoke_chat_invite_link, revoke_group_call_invite_link, search_call_messages,
     search_chat_messages, search_chats, search_messages, search_public_chats,
     search_recently_found_chats, send_animation, send_call_debug_information, send_call_log,
@@ -75,8 +76,8 @@ use crate::telegram::requests::{
     toggle_chat_folder_tags, toggle_group_call_are_messages_allowed,
     toggle_group_call_is_my_video_enabled, toggle_group_call_is_my_video_paused,
     toggle_group_call_participant_is_hand_raised, toggle_group_call_participant_is_muted,
-    toggle_video_chat_mute_new_participants, unpin_chat_message, view_messages,
-    view_sponsored_chat,
+    toggle_video_chat_mute_new_participants, unpin_all_chat_messages, unpin_chat_message,
+    view_messages, view_sponsored_chat,
 };
 use crate::voice::VoiceDraft;
 use std::collections::{HashMap, VecDeque};
@@ -847,6 +848,18 @@ impl<S: JsonSender> ConnectDriver<S> {
             owned.envelope.payload,
             EnvelopePayload::FoundChatMessages { .. }
         );
+        // M1: capture the `getMessageLink` answer before `apply` takes the
+        // pending request; the UI drains `Session::message_link_result`
+        // into the clipboard.
+        let message_link_answer: Option<String> = match &owned.envelope.payload {
+            EnvelopePayload::MessageLink { link, .. } => owned
+                .envelope
+                .extra
+                .and_then(|id| self.session.requests.purpose(id))
+                .is_some_and(|purpose| purpose == RequestPurpose::GetMessageLink)
+                .then(|| link.clone()),
+            _ => None,
+        };
         self.session.apply(owned);
         self.pump_call_engine(active_call_before, bridge_signaling)?;
         self.pump_group_call_transport(active_group_call_before)?;
@@ -877,6 +890,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         let _ = self.refresh_notification_sounds_if_stale();
         if view_after {
             self.maybe_view_open_messages()?;
+        }
+        // M1: stash the `getMessageLink` answer for the UI clipboard drain.
+        if let Some(link) = message_link_answer {
+            self.session.message_link_result = Some(link);
         }
         if thumbs_after || self.session.stickers.open || self.session.gifs.open {
             self.maybe_download_open_thumbs()?;
@@ -5877,7 +5894,13 @@ impl<S: JsonSender> ConnectDriver<S> {
                     .chats
                     .get(&chat_id.0)
                     .is_some_and(|chat| matches!(chat.kind, ChatKind::Secret { .. }));
-                send_text(extra, chat_id, topic_id, caption, reply_to, is_secret)
+                // M1: the composer send options ride the snapshot; secret
+                // chats force the preview toggle off regardless.
+                let mut send_options = snapshot.send_options;
+                if is_secret {
+                    send_options.link_preview_disabled = true;
+                }
+                send_text(extra, chat_id, topic_id, caption, reply_to, &send_options)
             }
             _ => {
                 self.session.requests.take(extra);
@@ -6249,22 +6272,28 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !supported {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let Some(message) = self
-            .session
-            .histories
-            .get(&edit.chat_id.0)
-            .and_then(|history| history.messages.get(&edit.message_id.0))
-        else {
+        // M1: scheduled sends live in `session.scheduled_messages`
+        // (`ParsedMessage`, never pending), not in history
+        // (`HistoryMessage`) — same `editMessageText` request, different
+        // validation source.
+        let owned = if edit.scheduled {
+            self.session
+                .scheduled_messages
+                .iter()
+                .find(|m| m.chat_id == edit.chat_id && m.id == edit.message_id)
+                .map(|m| (m.chat_id, m.id, m.is_outgoing, false, &m.content))
+        } else {
+            self.session
+                .histories
+                .get(&edit.chat_id.0)
+                .and_then(|history| history.messages.get(&edit.message_id.0))
+                .map(|m| (m.chat_id, m.id, m.is_outgoing, m.pending, &m.content))
+        };
+        let Some((chat_id, message_id, is_outgoing, pending, content)) = owned else {
             return Err(ConnectSendError::InvalidRequest);
         };
-        if ComposerEdit::from_own_content(
-            message.chat_id,
-            message.id,
-            message.is_outgoing,
-            message.pending,
-            &message.content,
-        )
-        .is_none()
+        if ComposerEdit::from_own_content(chat_id, message_id, is_outgoing, pending, content)
+            .is_none()
         {
             return Err(ConnectSendError::InvalidRequest);
         }
@@ -6293,7 +6322,8 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     /// After UI confirm (tdesktop `DeleteMessagesBox`), send `deleteMessages`.
-    /// `revoke: true` matches official desktop default for own outgoing.
+    /// `revoke: true` deletes for everyone (own outgoing default), false only
+    /// for the current user (schema 1.8.67 line 12282).
     pub fn delete_confirmed(
         &mut self,
         confirm: &DeleteConfirm,
@@ -6317,7 +6347,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         else {
             return Err(ConnectSendError::InvalidRequest);
         };
-        if DeleteConfirm::own(
+        // M1: any sent message may be deleted; the for-everyone toggle is
+        // only honored for own outgoing (schema 1.8.67 lines 6228–6229).
+        if DeleteConfirm::for_message(
             message.chat_id,
             message.id,
             message.is_outgoing,
@@ -6327,10 +6359,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             return Err(ConnectSendError::InvalidRequest);
         }
+        // M1: extract the borrow before the mutable `request` call below.
+        let revoke = confirm.revoke && message.is_outgoing;
         let extra = self
             .session
             .request(RequestPurpose::DeleteMessages, Some(confirm.chat_id));
-        let json = delete_messages(extra, confirm.chat_id, &[confirm.message_id], true);
+        let json = delete_messages(extra, confirm.chat_id, &[confirm.message_id], revoke);
         match self.sender.send_json(&json) {
             Ok(()) => Ok(extra),
             Err(err) => {
@@ -6388,7 +6422,14 @@ impl<S: JsonSender> ConnectDriver<S> {
             from_chat_id: draft.from_chat_id,
             requested: draft.message_ids.len(),
         });
-        let json = forward_messages(extra, dest, draft.from_chat_id, &draft.message_ids);
+        let json = forward_messages(
+            extra,
+            dest,
+            draft.from_chat_id,
+            &draft.message_ids,
+            draft.send_copy,
+            draft.remove_caption,
+        );
         match self.sender.send_json(&json) {
             Ok(()) => Ok(extra),
             Err(err) => {
@@ -6488,14 +6529,16 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
     }
 
-    /// Pin a history message (tdesktop / Unigram Pin). Official defaults:
-    /// `disable_notification` false, `only_for_self` false.
+    /// Pin a history message (tdesktop / Unigram Pin). `silent` maps to
+    /// `pinChatMessage.disable_notification` (TDLib 1.8.67 line 13559);
+    /// `only_for_self` stays false.
     pub fn pin_chat_message(
         &mut self,
         chat_id: ChatId,
         message_id: MessageId,
+        silent: bool,
     ) -> Result<RequestId, ConnectSendError> {
-        self.send_pin_chat_message(chat_id, message_id, false)
+        self.send_pin_chat_message(chat_id, message_id, false, silent)
     }
 
     /// Unpin one pinned message (tdesktop PinnedBar cancel / Unpin).
@@ -6504,7 +6547,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         chat_id: ChatId,
         message_id: MessageId,
     ) -> Result<RequestId, ConnectSendError> {
-        self.send_pin_chat_message(chat_id, message_id, true)
+        self.send_pin_chat_message(chat_id, message_id, true, false)
     }
 
     /// Toggle pin for an already-sent message.
@@ -6519,7 +6562,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .get(&chat_id.0)
             .and_then(|history| history.messages.get(&message_id.0))
             .is_some_and(|message| message.is_pinned);
-        self.send_pin_chat_message(chat_id, message_id, pinned)
+        self.send_pin_chat_message(chat_id, message_id, pinned, false)
     }
 
     fn send_pin_chat_message(
@@ -6527,6 +6570,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         chat_id: ChatId,
         message_id: MessageId,
         unpin: bool,
+        silent: bool,
     ) -> Result<RequestId, ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
@@ -6559,8 +6603,169 @@ impl<S: JsonSender> ConnectDriver<S> {
         let json = if unpin {
             unpin_chat_message(extra, chat_id, message_id)
         } else {
-            pin_chat_message(extra, chat_id, message_id, false, false)
+            pin_chat_message(extra, chat_id, message_id, silent, false)
         };
+        match self.sender.send_json(&json) {
+            Ok(()) => Ok(extra),
+            Err(err) => {
+                self.session.requests.take(extra);
+                Err(err)
+            }
+        }
+    }
+
+    /// M1: unpin every pinned message in a chat (tdesktop pinned-bar menu /
+    /// context action; TDLib 1.8.67 `schema/td_api.tl:13565`).
+    pub fn unpin_all_chat_messages(
+        &mut self,
+        chat_id: ChatId,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let supported = self
+            .session
+            .chats
+            .get(&chat_id.0)
+            .is_some_and(|chat| chat.supported());
+        if !supported {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::UnpinAllChatMessages, Some(chat_id));
+        let json = unpin_all_chat_messages(extra, chat_id);
+        match self.sender.send_json(&json) {
+            Ok(()) => Ok(extra),
+            Err(err) => {
+                self.session.requests.take(extra);
+                Err(err)
+            }
+        }
+    }
+
+    /// M1: share a message link (tdesktop context menu "Copy Message Link").
+    /// The parsed `messageLink.link` lands in
+    /// `session.message_link_result` for the UI to copy to the clipboard.
+    pub fn get_message_link(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let message = self
+            .session
+            .histories
+            .get(&chat_id.0)
+            .and_then(|history| history.messages.get(&message_id.0));
+        let Some(message) = message else {
+            return Err(ConnectSendError::InvalidRequest);
+        };
+        if message.pending || message.id.0 <= 0 {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::GetMessageLink, Some(chat_id));
+        let json = get_message_link(extra, chat_id, message_id);
+        match self.sender.send_json(&json) {
+            Ok(()) => Ok(extra),
+            Err(err) => {
+                self.session.requests.take(extra);
+                Err(err)
+            }
+        }
+    }
+
+    /// M1: delete a scheduled send. Scheduled messages live in
+    /// `session.scheduled_messages`, not in history, so the
+    /// history-validated `delete_confirmed` can't take them. `revoke` is
+    /// always false (no for-everyone distinction before sending).
+    pub fn delete_scheduled_message(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let known = self
+            .session
+            .scheduled_messages
+            .iter()
+            .any(|m| m.chat_id == chat_id && m.id == message_id);
+        if !known {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::DeleteMessages, Some(chat_id));
+        let json = delete_messages(extra, chat_id, &[message_id], false);
+        match self.sender.send_json(&json) {
+            Ok(()) => Ok(extra),
+            Err(err) => {
+                self.session.requests.take(extra);
+                Err(err)
+            }
+        }
+    }
+
+    /// M1: retry a failed send (`resendMessages`, TDLib 1.8.67,
+    /// `schema/td_api.tl:12251`; `message.can_retry`, schema line 3038).
+    pub fn resend_failed_message(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let can_retry = self
+            .session
+            .histories
+            .get(&chat_id.0)
+            .and_then(|history| history.messages.get(&message_id.0))
+            .is_some_and(|message| message.failed);
+        if !can_retry {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::ResendMessages, Some(chat_id));
+        let json = resend_messages(extra, chat_id, &[message_id]);
+        match self.sender.send_json(&json) {
+            Ok(()) => Ok(extra),
+            Err(err) => {
+                self.session.requests.take(extra);
+                Err(err)
+            }
+        }
+    }
+
+    /// M1: load a chat's scheduled (pending) sends into
+    /// `session.scheduled_messages` (TDLib 1.8.67,
+    /// `schema/td_api.tl:12000`).
+    pub fn get_chat_scheduled_messages(
+        &mut self,
+        chat_id: ChatId,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let supported = self
+            .session
+            .chats
+            .get(&chat_id.0)
+            .is_some_and(|chat| chat.supported());
+        if !supported {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::GetChatScheduledMessages, Some(chat_id));
+        let json = get_chat_scheduled_messages(extra, chat_id);
         match self.sender.send_json(&json) {
             Ok(()) => Ok(extra),
             Err(err) => {
@@ -8018,14 +8223,14 @@ mod tests {
         let snap = crate::composer::ComposerSnapshot::capture(
             ChatId(31),
             driver.session.view_generation,
-            "CANARY_SECRET_SEND",
+            "CANARYSECRETSEND",
         );
         let extra = driver.send_text_snapshot(&snap).unwrap();
         let sent = recorder.snapshot();
         let send_json = sent.last().unwrap();
         assert!(send_json.contains("sendMessage"));
         assert!(send_json.contains("\"chat_id\":31"));
-        assert!(send_json.contains("CANARY_SECRET_SEND"));
+        assert!(send_json.contains("CANARYSECRETSEND"));
         assert!(send_json.contains(&format!("\"@extra\":\"{}\"", extra.0)));
 
         driver.select_chat(ChatId(33)).unwrap();
@@ -8454,16 +8659,16 @@ mod tests {
         let snap = crate::composer::ComposerSnapshot::capture(
             ChatId(7),
             driver.session.view_generation,
-            "CANARY_SEND_ping",
+            "CANARYSENDping",
         );
         let send_extra = driver.send_text_snapshot(&snap).unwrap();
         let sent = recorder.snapshot();
         let send_json = sent.last().unwrap();
         assert!(send_json.contains("sendMessage"));
         assert!(send_json.contains("\"topic_id\":null"));
-        assert!(send_json.contains("CANARY_SEND_ping"));
+        assert!(send_json.contains("CANARYSENDping"));
         assert!(send_json.contains(&format!("\"@extra\":\"{}\"", send_extra.0)));
-        assert!(!sink.rendered().contains("CANARY_SEND"));
+        assert!(!sink.rendered().contains("CANARYSEND"));
 
         let channel_no_post = copy_and_parse(
             r#"{"@type":"updateNewChat","chat":{"id":8,"title":"News","type":{"@type":"chatTypeSupergroup","supergroup_id":8,"is_channel":true},"unread_count":0}}"#,
@@ -8481,7 +8686,7 @@ mod tests {
             driver.send_text_snapshot(&channel_snap),
             Err(ConnectSendError::InvalidRequest)
         );
-        assert!(!sink.rendered().contains("CANARY_SEND"));
+        assert!(!sink.rendered().contains("CANARYSEND"));
 
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -8551,7 +8756,7 @@ mod tests {
         let snap = crate::composer::ComposerSnapshot::capture(
             ChatId(16),
             driver.session.view_generation,
-            "CANARY_TOPIC_ping",
+            "CANARYTOPICping",
         );
         let send_extra = driver.send_text_snapshot(&snap).unwrap();
         let sent = recorder.snapshot();
@@ -8561,7 +8766,7 @@ mod tests {
         assert_eq!(v["chat_id"], 16);
         assert_eq!(v["topic_id"]["@type"], "messageTopicForum");
         assert_eq!(v["topic_id"]["forum_topic_id"], 2);
-        assert!(send_json.contains("CANARY_TOPIC_ping"));
+        assert!(send_json.contains("CANARYTOPICping"));
         assert!(send_json.contains(&format!("\"@extra\":\"{}\"", send_extra.0)));
 
         // A closed topic rejects the send (the composer is hidden there;
@@ -9149,14 +9354,14 @@ mod tests {
         let snap = crate::composer::ComposerSnapshot::capture(
             ChatId(9),
             driver.session.view_generation,
-            "CANARY_ADMIN_post",
+            "CANARYADMINpost",
         );
         let send_extra = driver.send_text_snapshot(&snap).unwrap();
         let sent = recorder.snapshot();
         let send_json = sent.last().unwrap();
         assert!(send_json.contains("sendMessage"));
         assert!(send_json.contains("\"chat_id\":9"));
-        assert!(send_json.contains("CANARY_ADMIN_post"));
+        assert!(send_json.contains("CANARYADMINpost"));
         assert!(send_json.contains(&format!("\"@extra\":\"{}\"", send_extra.0)));
 
         // Channel 10: membership unknown → composer hidden, send rejected.
@@ -11572,7 +11777,7 @@ mod tests {
         let snap = crate::composer::ComposerSnapshot::capture(
             ChatId(7),
             driver.session.view_generation,
-            "CANARY_REPLY_text",
+            "CANARYREPLYtext",
         )
         .with_reply(Some(ComposerReplyTo::new(
             ChatId(7),
@@ -11589,12 +11794,12 @@ mod tests {
         assert_eq!(v["reply_to"]["quote"], Value::Null);
         assert_eq!(v["reply_to"]["checklist_task_id"], 0);
         assert_eq!(v["reply_to"]["poll_option_id"], "");
-        assert!(send_json.contains("CANARY_REPLY_text"));
+        assert!(send_json.contains("CANARYREPLYtext"));
 
         driver
             .ingest(
                 copy_and_parse(
-                    r#"{"@type":"updateNewMessage","message":{"id":60,"chat_id":7,"is_outgoing":true,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"CANARY_REPLY_text","entities":[]}},"reply_to":{"@type":"messageReplyToMessage","chat_id":7,"message_id":50}}}"#,
+                    r#"{"@type":"updateNewMessage","message":{"id":60,"chat_id":7,"is_outgoing":true,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"CANARYREPLYtext","entities":[]}},"reply_to":{"@type":"messageReplyToMessage","chat_id":7,"message_id":50}}}"#,
                     &seq,
                     &dyn_sink,
                 )
@@ -11631,7 +11836,7 @@ mod tests {
                 .unwrap()
                 .is_some()
         );
-        assert!(!sink.rendered().contains("CANARY_REPLY"));
+        assert!(!sink.rendered().contains("CANARYREPLY"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -11665,6 +11870,7 @@ mod tests {
             message_id: MessageId(50),
             original_text: "hello already here".into(),
             kind: ComposerEditKind::Text,
+            scheduled: false,
         };
         assert_eq!(
             driver.edit_snapshot(&incoming, "nope"),
@@ -11676,12 +11882,13 @@ mod tests {
             message_id: MessageId(60),
             original_text: "own outgoing".into(),
             kind: ComposerEditKind::Text,
+            scheduled: false,
         };
         assert_eq!(
             driver.edit_snapshot(&edit, "   "),
             Err(ConnectSendError::InvalidRequest)
         );
-        let extra = driver.edit_snapshot(&edit, "CANARY_EDIT_text").unwrap();
+        let extra = driver.edit_snapshot(&edit, "CANARYEDITtext").unwrap();
         let json = recorder
             .snapshot()
             .last()
@@ -11694,16 +11901,13 @@ mod tests {
         assert_eq!(v["message_id"], 60);
         assert_eq!(v["reply_markup"], Value::Null);
         assert_eq!(v["input_message_content"]["@type"], "inputMessageText");
-        assert_eq!(
-            v["input_message_content"]["text"]["text"],
-            "CANARY_EDIT_text"
-        );
+        assert_eq!(v["input_message_content"]["text"]["text"], "CANARYEDITtext");
         assert_eq!(v["input_message_content"]["clear_draft"], false);
 
         driver
             .ingest(
                 copy_and_parse(
-                    r#"{"@type":"updateMessageContent","chat_id":7,"message_id":60,"new_content":{"@type":"messageText","text":{"@type":"formattedText","text":"CANARY_EDIT_text","entities":[]}}}"#,
+                    r#"{"@type":"updateMessageContent","chat_id":7,"message_id":60,"new_content":{"@type":"messageText","text":{"@type":"formattedText","text":"CANARYEDITtext","entities":[]}}}"#,
                     &seq,
                     &dyn_sink,
                 )
@@ -11721,9 +11925,85 @@ mod tests {
                 .unwrap()
                 .content
                 .preview(),
-            "CANARY_EDIT_text"
+            "CANARYEDITtext"
         );
-        assert!(!sink.rendered().contains("CANARY_EDIT"));
+        assert!(!sink.rendered().contains("CANARYEDIT"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn driver_edit_scheduled_message_uses_scheduled_list() {
+        use crate::composer::{ComposerEdit, ComposerEditKind};
+        use crate::ids::{ChatId, MessageId};
+        use crate::telegram::envelope::{
+            MessageContent, MessageSchedulingState, ParsedMessage, TextContent,
+        };
+
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = Arc::new(RecordingSender::new());
+        let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+        let mut driver =
+            ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+        let seq = AtomicU64::new(0);
+        seed_ready_alice(&mut driver, &seq, &dyn_sink);
+        // A scheduled send lives in `session.scheduled_messages`, not history.
+        driver.session.scheduled_messages.push(ParsedMessage {
+            id: MessageId(70),
+            chat_id: ChatId(7),
+            is_outgoing: true,
+            is_pinned: false,
+            topic_id: None,
+            media_album_id: 0,
+            author_signature: None,
+            scheduling_state: Some(MessageSchedulingState::SendAtDate { send_date: 999 }),
+            content: MessageContent::Text(TextContent::plain("scheduled draft")),
+            files: Vec::new(),
+            reply_to: None,
+            forward_info: None,
+            interaction_info: None,
+            reply_markup: None,
+            self_destruct: None,
+            auto_delete: None,
+        });
+
+        // A non-scheduled edit for the same id finds nothing in history.
+        let plain = ComposerEdit {
+            chat_id: ChatId(7),
+            message_id: MessageId(70),
+            original_text: "scheduled draft".into(),
+            kind: ComposerEditKind::Text,
+            scheduled: false,
+        };
+        assert_eq!(
+            driver.edit_snapshot(&plain, "nope"),
+            Err(ConnectSendError::InvalidRequest)
+        );
+
+        // The scheduled edit validates against the scheduled list and sends
+        // the same `editMessageText` request.
+        let scheduled = ComposerEdit {
+            scheduled: true,
+            ..plain
+        };
+        let extra = driver.edit_snapshot(&scheduled, "CANARYSCHEDedit").unwrap();
+        let json = recorder
+            .snapshot()
+            .last()
+            .cloned()
+            .expect("editMessageText");
+        let v: Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "editMessageText");
+        assert_eq!(v["@extra"], extra.0.to_string());
+        assert_eq!(v["chat_id"], 7);
+        assert_eq!(v["message_id"], 70);
+        assert_eq!(
+            v["input_message_content"]["text"]["text"],
+            "CANARYSCHEDedit"
+        );
+        assert!(!sink.rendered().contains("CANARYSCHED"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -11755,9 +12035,37 @@ mod tests {
         let incoming = DeleteConfirm {
             chat_id: ChatId(7),
             message_id: MessageId(50),
+            revoke: false,
+            can_revoke: false,
+        };
+        // M1: incoming messages are deletable for the current user
+        // (`revoke: false`); the for-everyone toggle degrades to for-me.
+        let extra = driver.delete_confirmed(&incoming).unwrap();
+        let json = recorder.snapshot().last().cloned().expect("deleteMessages");
+        let v: Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "deleteMessages");
+        assert_eq!(v["@extra"], extra.0.to_string());
+        assert_eq!(v["chat_id"], 7);
+        assert_eq!(v["message_ids"], serde_json::json!([50]));
+        assert_eq!(v["revoke"], false);
+
+        let mut incoming_revoke = incoming.clone();
+        incoming_revoke.revoke = true;
+        let extra = driver.delete_confirmed(&incoming_revoke).unwrap();
+        let json = recorder.snapshot().last().cloned().expect("deleteMessages");
+        let v: Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@extra"], extra.0.to_string());
+        assert_eq!(v["message_ids"], serde_json::json!([50]));
+        assert_eq!(v["revoke"], false, "revoke is never sent for incoming");
+
+        let missing = DeleteConfirm {
+            chat_id: ChatId(7),
+            message_id: MessageId(999),
+            revoke: false,
+            can_revoke: false,
         };
         assert_eq!(
-            driver.delete_confirmed(&incoming),
+            driver.delete_confirmed(&missing),
             Err(ConnectSendError::InvalidRequest)
         );
 
@@ -12262,7 +12570,9 @@ mod tests {
         let seq = AtomicU64::new(0);
         seed_ready_alice(&mut driver, &seq, &dyn_sink);
 
-        let extra = driver.pin_chat_message(ChatId(7), MessageId(50)).unwrap();
+        let extra = driver
+            .pin_chat_message(ChatId(7), MessageId(50), false)
+            .unwrap();
         let json = recorder.snapshot().last().cloned().expect("pinChatMessage");
         let v: Value = serde_json::from_str(&json).unwrap();
         assert_eq!(v["@type"], "pinChatMessage");

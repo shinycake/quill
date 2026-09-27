@@ -89,6 +89,17 @@ pub enum RequestPurpose {
     SetPollAnswer,
     /// `unpinChatMessage`. Response is `ok`; pin via `updateMessageIsPinned`.
     UnpinChatMessage,
+    /// M1: `unpinAllChatMessages`. Response is `ok`; pins clear via
+    /// `updateChatPinnedMessages`.
+    UnpinAllChatMessages,
+    /// M1: `getMessageLink`. Response is `messageLink`; the parsed link is
+    /// stored in `Session::message_link_result` for the UI to copy.
+    GetMessageLink,
+    /// M1: `resendMessages`. Response is `messages` (the retried sends).
+    ResendMessages,
+    /// M1: `getChatScheduledMessages`. Response is `messages`, stored in
+    /// `Session::scheduled_messages` instead of merged into history.
+    GetChatScheduledMessages,
     /// `setChatNotificationSettings`. Response is `ok`; mute via
     /// `updateChatNotificationSettings`.
     SetChatNotificationSettings,
@@ -1397,6 +1408,10 @@ pub struct HistoryMessage {
     /// messages. Rendered as a small signature line under the post, except
     /// under forwarded-message headers (which already attribute it).
     pub author_signature: Option<String>,
+    /// M1: the send failed and TDLib allows a retry (`message.can_retry`,
+    /// schema 1.8.67 line 3038). Renders a "failed — retry" state; the
+    /// retry action sends `resendMessages`.
+    pub failed: bool,
 }
 
 impl HistoryMessage {
@@ -1629,6 +1644,7 @@ impl SearchMessageHit {
             self_destruct: self.self_destruct,
             auto_delete: self.auto_delete,
             author_signature: self.author_signature,
+            failed: false,
         }
     }
 }
@@ -2419,6 +2435,12 @@ pub struct Session {
     /// chats the delete-confirm dialog offers to leave with the folder.
     pub folder_chats_to_leave: HashMap<i32, Vec<i64>>,
     pub histories: HashMap<i64, HistoryState>,
+    /// M1: parsed `messageLink.link` from the last `getMessageLink` response
+    /// (one-shot; the UI copies it to the clipboard and clears it).
+    pub message_link_result: Option<String>,
+    /// M1: `getChatScheduledMessages` results — the chat's scheduled sends,
+    /// with `scheduling_state` showing the planned send time.
+    pub scheduled_messages: Vec<ParsedMessage>,
     pub open_chat: Option<ChatId>,
     /// Phase 8.1: whether the OS considers our window focused. The UI sets
     /// this from `Window::is_window_active` on every render; it defaults to
@@ -2940,6 +2962,8 @@ impl Session {
             folder_remove_queue: Vec::new(),
             folder_chats_to_leave: HashMap::new(),
             histories: HashMap::new(),
+            message_link_result: None,
+            scheduled_messages: Vec::new(),
             open_chat: None,
             app_active: true,
             hide_notification_previews: true,
@@ -4232,7 +4256,10 @@ impl Session {
                 let chat_id = message.chat_id;
                 let topic_id = message.topic_id;
                 self.remember_files(&message.files);
-                let row = history_message(message, true);
+                // M1: mark the row failed so the UI can offer a retry
+                // (`resendMessages` via `driver.resend_failed_message`).
+                let mut row = history_message(message, true);
+                row.failed = true;
                 let history = self.histories.entry(chat_id.0).or_default();
                 history.replace_id(old_message_id, row.clone());
                 // Parity slice 4: the failed pending row shows in the topic
@@ -4527,6 +4554,13 @@ impl Session {
                     for message in messages {
                         self.upsert_message(message, true);
                     }
+                    return;
+                }
+                // M1: scheduled sends go to the scheduled list, not history.
+                if let Some(pending) = pending
+                    && pending.purpose == RequestPurpose::GetChatScheduledMessages
+                {
+                    self.scheduled_messages = messages.to_vec();
                     return;
                 }
                 if let Some(pending) = pending
@@ -4832,6 +4866,10 @@ impl Session {
                     self.set_group_call_invite_link(group_call_id, url);
                 }
             }
+            // M1: `getMessageLink` returns `messageLink`. The driver
+            // stashes the link in `Session::message_link_result` before
+            // `apply` takes the pending request; nothing to reduce here.
+            EnvelopePayload::MessageLink { .. } => {}
             // Phase C2f: `inviteGroupCallParticipant` answer. A success
             // clears any earlier invite error; the three failure
             // variants surface honestly via `group_call_error` (shown
@@ -7144,6 +7182,7 @@ fn history_message(message: ParsedMessage, pending: bool) -> HistoryMessage {
         self_destruct: message.self_destruct,
         auto_delete: message.auto_delete,
         author_signature: message.author_signature,
+        failed: false,
     }
 }
 

@@ -381,6 +381,7 @@ mod tests {
             self_destruct: None,
             auto_delete: None,
             author_signature: None,
+            failed: false,
         }
     }
 

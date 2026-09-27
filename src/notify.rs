@@ -453,6 +453,7 @@ mod tests {
             reply_markup: None,
             self_destruct: None,
             auto_delete: None,
+            scheduling_state: None,
         }
     }
 

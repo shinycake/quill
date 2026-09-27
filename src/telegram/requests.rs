@@ -1,3 +1,6 @@
+use crate::composer::{
+    ComposerEntity, ComposerScheduling, FormatKind, SendOptions, parse_format_markup,
+};
 use crate::ids::{ChatId, FileId, MessageId, RequestId, TopicId};
 use crate::pins::{TDLIB_CMAKE_VERSION, TDLIB_GIT_COMMIT};
 use serde_json::{Value, json};
@@ -1995,6 +1998,73 @@ pub fn input_message_reply_to(message_id: Option<MessageId>) -> Value {
     }
 }
 
+/// M1: `textEntity` JSON for a parsed composer entity (TDLib 1.8.67,
+/// `schema/td_api.tl:5743`–`:5773` — `textEntityTypeBold`,
+/// `textEntityTypeItalic`, `textEntityTypeUnderline`,
+/// `textEntityTypeStrikethrough`, `textEntityTypeSpoiler`,
+/// `textEntityTypeCode`, `textEntityTypePre` / `textEntityTypePreCode
+/// language`, `textEntityTypeBlockQuote`, `textEntityTypeTextUrl url`).
+/// Offsets/lengths are UTF-16 code units, per the schema.
+pub fn format_entity_json(entity: &ComposerEntity) -> Value {
+    let entity_type = match entity.kind {
+        FormatKind::Bold => json!({"@type": "textEntityTypeBold"}),
+        FormatKind::Italic => json!({"@type": "textEntityTypeItalic"}),
+        FormatKind::Underline => json!({"@type": "textEntityTypeUnderline"}),
+        FormatKind::Strikethrough => json!({"@type": "textEntityTypeStrikethrough"}),
+        FormatKind::Code => json!({"@type": "textEntityTypeCode"}),
+        FormatKind::Pre if entity.language.is_empty() => {
+            json!({"@type": "textEntityTypePre"})
+        }
+        FormatKind::Pre => json!({
+            "@type": "textEntityTypePreCode",
+            "language": entity.language,
+        }),
+        FormatKind::Spoiler => json!({"@type": "textEntityTypeSpoiler"}),
+        FormatKind::BlockQuote => json!({"@type": "textEntityTypeBlockQuote"}),
+        FormatKind::TextUrl => json!({
+            "@type": "textEntityTypeTextUrl",
+            "url": entity.url,
+        }),
+    };
+    json!({
+        "@type": "textEntity",
+        "offset": entity.offset,
+        "length": entity.length,
+        "type": entity_type,
+    })
+}
+
+/// M1: `messageSendOptions` JSON (TDLib 1.8.67, `schema/td_api.tl:5934`).
+/// `scheduling_state` is `messageSchedulingStateSendAtDate` (`:5902`) or
+/// `messageSchedulingStateSendWhenOnline` (`:5905`); null otherwise.
+pub fn message_send_options(options: &SendOptions) -> Value {
+    let scheduling_state = match options.scheduling {
+        ComposerScheduling::None => Value::Null,
+        ComposerScheduling::SendAtDate(send_date) => json!({
+            "@type": "messageSchedulingStateSendAtDate",
+            "send_date": send_date as i32,
+            "repeat_period": 0,
+        }),
+        ComposerScheduling::SendWhenOnline => {
+            json!({"@type": "messageSchedulingStateSendWhenOnline"})
+        }
+    };
+    json!({
+        "@type": "messageSendOptions",
+        "suggested_post_info": Value::Null,
+        "disable_notification": options.disable_notification,
+        "from_background": false,
+        "protect_content": false,
+        "allow_paid_broadcast": false,
+        "paid_message_star_count": 0,
+        "update_order_of_installed_sticker_sets": false,
+        "scheduling_state": scheduling_state,
+        "effect_id": 0,
+        "sending_id": 0,
+        "only_preview": false,
+    })
+}
+
 /// `sendMessage` for the pinned 1.8.67 schema: typed `topic_id`, not `message_thread_id`.
 /// Parity slice 4: posting into a forum topic passes
 /// `topic_id = messageTopicForum{forum_topic_id}` (schema 1.8.67, lines
@@ -2015,13 +2085,17 @@ pub fn send_text(
     topic_id: Option<i32>,
     text: &str,
     reply_to: Option<MessageId>,
-    disable_link_preview: bool,
+    options: &SendOptions,
 ) -> String {
+    // M1: composer markup (`**bold**` etc.) becomes `textEntities` here,
+    // so formatting genuinely reaches the wire on every text send.
+    let (clean_text, entities) = parse_format_markup(text);
+    let entities_json: Vec<Value> = entities.iter().map(format_entity_json).collect();
     // Phase S1: secret chats never get link previews (TGX default-off —
     // previews are generated on Telegram servers, which can't see E2E
     // content). `is_disabled: true` makes the default-off explicit on the
     // wire instead of relying on TDLib to skip it.
-    let link_preview_options = if disable_link_preview {
+    let link_preview_options = if options.link_preview_disabled {
         json!({
             "@type": "linkPreviewOptions",
             "is_disabled": true,
@@ -2039,14 +2113,14 @@ pub fn send_text(
         "chat_id": chat_id.0,
         "topic_id": message_topic_value(topic_id),
         "reply_to": input_message_reply_to(reply_to),
-        "options": Value::Null,
+        "options": message_send_options(options),
         "reply_markup": Value::Null,
         "input_message_content": {
             "@type": "inputMessageText",
             "text": {
                 "@type": "formattedText",
-                "text": text,
-                "entities": []
+                "text": clean_text,
+                "entities": entities_json
             },
             "link_preview_options": link_preview_options,
             "clear_draft": true
@@ -2555,6 +2629,9 @@ pub fn edit_message_text(
     message_id: MessageId,
     text: &str,
 ) -> String {
+    // M1: edits carry the same markup→entities conversion as sends.
+    let (clean_text, entities) = parse_format_markup(text);
+    let entities_json: Vec<Value> = entities.iter().map(format_entity_json).collect();
     json!({
         "@type": "editMessageText",
         "@extra": extra.as_extra(),
@@ -2565,8 +2642,8 @@ pub fn edit_message_text(
             "@type": "inputMessageText",
             "text": {
                 "@type": "formattedText",
-                "text": text,
-                "entities": []
+                "text": clean_text,
+                "entities": entities_json
             },
             "link_preview_options": Value::Null,
             "clear_draft": false
@@ -2620,15 +2697,19 @@ pub fn delete_messages(
     .to_string()
 }
 
-/// `forwardMessages` (TDLib 1.8.67). `send_copy` false keeps attribution
-/// (`message.forward_info`) — official default, not hide-sender copy.
-/// `remove_caption` is ignored unless `send_copy` is true. `topic_id` /
+/// `forwardMessages` (TDLib 1.8.67, `schema/td_api.tl:12237` —
+/// `forwardMessages chat_id topic_id from_chat_id message_ids options
+/// send_copy remove_caption`). `send_copy` true drops the "Forwarded from"
+/// attribution (TGX "Hide sender name"); `remove_caption` strips captions
+/// on the copies (ignored unless `send_copy` is true). `topic_id` /
 /// `options` null. Ids must already be strictly increasing (≤ 100).
 pub fn forward_messages(
     extra: RequestId,
     chat_id: ChatId,
     from_chat_id: ChatId,
     message_ids: &[MessageId],
+    send_copy: bool,
+    remove_caption: bool,
 ) -> String {
     json!({
         "@type": "forwardMessages",
@@ -2638,8 +2719,65 @@ pub fn forward_messages(
         "from_chat_id": from_chat_id.0,
         "message_ids": message_ids.iter().map(|id| id.0).collect::<Vec<_>>(),
         "options": Value::Null,
-        "send_copy": false,
-        "remove_caption": false
+        "send_copy": send_copy,
+        "remove_caption": remove_caption && send_copy
+    })
+    .to_string()
+}
+
+/// M1: `unpinAllChatMessages` (TDLib 1.8.67, `schema/td_api.tl:13565` —
+/// `unpinAllChatMessages chat_id:int53 = Ok;`).
+pub fn unpin_all_chat_messages(extra: RequestId, chat_id: ChatId) -> String {
+    json!({
+        "@type": "unpinAllChatMessages",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0,
+    })
+    .to_string()
+}
+
+/// M1: `getMessageLink` (TDLib 1.8.67, `schema/td_api.tl:12064` —
+/// `getMessageLink chat_id message_id media_timestamp checklist_task_id
+/// poll_option_id for_album in_message_thread = MessageLink`). Plain
+/// message link: no timestamp / album / thread.
+pub fn get_message_link(extra: RequestId, chat_id: ChatId, message_id: MessageId) -> String {
+    json!({
+        "@type": "getMessageLink",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0,
+        "message_id": message_id.0,
+        "media_timestamp": 0,
+        "checklist_task_id": 0,
+        "poll_option_id": "",
+        "for_album": false,
+        "in_message_thread": false,
+    })
+    .to_string()
+}
+
+/// M1: `resendMessages` (TDLib 1.8.67, `schema/td_api.tl:12251` —
+/// `resendMessages chat_id message_ids quote paid_message_star_count =
+/// Messages;`). Re-sends messages that failed to send (`message.can_retry`,
+/// schema line 3038); `quote` null keeps the original reply context.
+pub fn resend_messages(extra: RequestId, chat_id: ChatId, message_ids: &[MessageId]) -> String {
+    json!({
+        "@type": "resendMessages",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0,
+        "message_ids": message_ids.iter().map(|id| id.0).collect::<Vec<_>>(),
+        "quote": Value::Null,
+        "paid_message_star_count": 0,
+    })
+    .to_string()
+}
+
+/// M1: `getChatScheduledMessages` (TDLib 1.8.67, `schema/td_api.tl:12000` —
+/// `getChatScheduledMessages chat_id:int53 = Messages;`).
+pub fn get_chat_scheduled_messages(extra: RequestId, chat_id: ChatId) -> String {
+    json!({
+        "@type": "getChatScheduledMessages",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0,
     })
     .to_string()
 }
@@ -3325,7 +3463,14 @@ mod tests {
 
     #[test]
     fn send_text_includes_topic_id_null() {
-        let json = send_text(RequestId(9), ChatId(1), None, "hi", None, false);
+        let json = send_text(
+            RequestId(9),
+            ChatId(1),
+            None,
+            "hi",
+            None,
+            &SendOptions::default(),
+        );
         assert!(json.contains("\"topic_id\":null"));
         assert!(!json.contains("message_thread_id"));
         assert!(json.contains("\"@extra\":\"9\""));
@@ -3336,7 +3481,14 @@ mod tests {
     fn send_text_topic_id_uses_message_topic_forum() {
         // Parity slice 4: `sendMessage.topic_id` (schema 1.8.67, line 12200)
         // takes `messageTopicForum{forum_topic_id}` (line 3004).
-        let json = send_text(RequestId(9), ChatId(16), Some(2), "hi", None, false);
+        let json = send_text(
+            RequestId(9),
+            ChatId(16),
+            Some(2),
+            "hi",
+            None,
+            &SendOptions::default(),
+        );
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(v["@type"], "sendMessage");
         assert_eq!(v["chat_id"], 16);
@@ -3352,7 +3504,7 @@ mod tests {
             None,
             "sounds good",
             Some(MessageId(101)),
-            false,
+            &SendOptions::default(),
         );
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(v["@type"], "sendMessage");
@@ -3374,7 +3526,10 @@ mod tests {
             None,
             "see https://example.com",
             None,
-            true,
+            &SendOptions {
+                link_preview_disabled: true,
+                ..SendOptions::default()
+            },
         );
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
         let opts = &v["input_message_content"]["link_preview_options"];
@@ -3387,7 +3542,7 @@ mod tests {
             None,
             "see https://example.com",
             None,
-            false,
+            &SendOptions::default(),
         );
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(
@@ -4425,6 +4580,8 @@ mod tests {
             ChatId(12),
             ChatId(11),
             &[MessageId(101), MessageId(102)],
+            false,
+            false,
         );
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(v["@type"], "forwardMessages");
@@ -5367,5 +5524,183 @@ mod channel_requests_tests {
         assert_eq!(v["participant_id"]["@type"], "messageSenderUser");
         assert_eq!(v["participant_id"]["user_id"], 42);
         assert_eq!(v["volume_level"], 15000);
+    }
+
+    // M1: composer markup reaches the wire as `textEntities` with UTF-16
+    // offsets (schema 1.8.67 lines 5743–5773); the marker syntax never
+    // leaks into the sent text.
+    #[test]
+    fn send_text_converts_markup_to_entities() {
+        let json = send_text(
+            RequestId(50),
+            ChatId(11),
+            None,
+            "😀 **bold** and `code`",
+            None,
+            &SendOptions::default(),
+        );
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let content = &v["input_message_content"]["text"];
+        assert_eq!(content["text"], "😀 bold and code");
+        let entities = content["entities"].as_array().unwrap();
+        assert_eq!(entities.len(), 2);
+        assert_eq!(entities[0]["type"]["@type"], "textEntityTypeBold");
+        assert_eq!(entities[0]["offset"], 3); // 😀 = 2 UTF-16 units + space
+        assert_eq!(entities[0]["length"], 4);
+        assert_eq!(entities[1]["type"]["@type"], "textEntityTypeCode");
+        assert_eq!(entities[1]["offset"], 12);
+        assert_eq!(entities[1]["length"], 4);
+    }
+
+    #[test]
+    fn send_text_link_preview_disabled_on_wire() {
+        let json = send_text(
+            RequestId(51),
+            ChatId(11),
+            None,
+            "see https://example.com",
+            None,
+            &SendOptions {
+                link_preview_disabled: true,
+                ..SendOptions::default()
+            },
+        );
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let opts = &v["input_message_content"]["link_preview_options"];
+        assert_eq!(opts["@type"], "linkPreviewOptions");
+        assert_eq!(opts["is_disabled"], true);
+    }
+
+    #[test]
+    fn send_text_silent_and_scheduled_options() {
+        let json = send_text(
+            RequestId(52),
+            ChatId(11),
+            None,
+            "hi",
+            None,
+            &SendOptions {
+                disable_notification: true,
+                scheduling: ComposerScheduling::SendAtDate(1_700_000_000),
+                ..SendOptions::default()
+            },
+        );
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let options = &v["options"];
+        assert_eq!(options["@type"], "messageSendOptions");
+        assert_eq!(options["disable_notification"], true);
+        assert_eq!(
+            options["scheduling_state"]["@type"],
+            "messageSchedulingStateSendAtDate"
+        );
+        assert_eq!(options["scheduling_state"]["send_date"], 1_700_000_000);
+        assert_eq!(options["scheduling_state"]["repeat_period"], 0);
+
+        let json = send_text(
+            RequestId(53),
+            ChatId(11),
+            None,
+            "hi",
+            None,
+            &SendOptions {
+                scheduling: ComposerScheduling::SendWhenOnline,
+                ..SendOptions::default()
+            },
+        );
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(
+            v["options"]["scheduling_state"]["@type"],
+            "messageSchedulingStateSendWhenOnline"
+        );
+
+        let json = send_text(
+            RequestId(54),
+            ChatId(11),
+            None,
+            "hi",
+            None,
+            &SendOptions::default(),
+        );
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["options"]["disable_notification"], false);
+        assert_eq!(v["options"]["scheduling_state"], Value::Null);
+    }
+
+    #[test]
+    fn forward_messages_send_copy_and_remove_caption() {
+        let v: serde_json::Value = serde_json::from_str(&forward_messages(
+            RequestId(60),
+            ChatId(11),
+            ChatId(12),
+            &[MessageId(101)],
+            true,
+            true,
+        ))
+        .unwrap();
+        assert_eq!(v["@type"], "forwardMessages");
+        assert_eq!(v["send_copy"], true);
+        assert_eq!(v["remove_caption"], true);
+        // `remove_caption` is ignored unless `send_copy` is true.
+        let v: serde_json::Value = serde_json::from_str(&forward_messages(
+            RequestId(61),
+            ChatId(11),
+            ChatId(12),
+            &[MessageId(101)],
+            false,
+            true,
+        ))
+        .unwrap();
+        assert_eq!(v["send_copy"], false);
+        assert_eq!(v["remove_caption"], false);
+    }
+
+    #[test]
+    fn delete_messages_revoke_flag() {
+        let v: serde_json::Value = serde_json::from_str(&delete_messages(
+            RequestId(62),
+            ChatId(11),
+            &[MessageId(101)],
+            true,
+        ))
+        .unwrap();
+        assert_eq!(v["@type"], "deleteMessages");
+        assert_eq!(v["revoke"], true);
+        let v: serde_json::Value = serde_json::from_str(&delete_messages(
+            RequestId(63),
+            ChatId(11),
+            &[MessageId(101)],
+            false,
+        ))
+        .unwrap();
+        assert_eq!(v["revoke"], false);
+    }
+
+    #[test]
+    fn m1_message_action_requests() {
+        let v: serde_json::Value =
+            serde_json::from_str(&unpin_all_chat_messages(RequestId(64), ChatId(11))).unwrap();
+        assert_eq!(v["@type"], "unpinAllChatMessages");
+        assert_eq!(v["chat_id"], 11);
+
+        let v: serde_json::Value =
+            serde_json::from_str(&get_message_link(RequestId(65), ChatId(11), MessageId(101)))
+                .unwrap();
+        assert_eq!(v["@type"], "getMessageLink");
+        assert_eq!(v["chat_id"], 11);
+        assert_eq!(v["message_id"], 101);
+
+        let v: serde_json::Value = serde_json::from_str(&resend_messages(
+            RequestId(66),
+            ChatId(11),
+            &[MessageId(101)],
+        ))
+        .unwrap();
+        assert_eq!(v["@type"], "resendMessages");
+        assert_eq!(v["message_ids"], serde_json::json!([101]));
+
+        let v: serde_json::Value =
+            serde_json::from_str(&get_chat_scheduled_messages(RequestId(67), ChatId(11))).unwrap();
+        assert_eq!(v["@type"], "getChatScheduledMessages");
+        assert_eq!(v["chat_id"], 11);
     }
 }
