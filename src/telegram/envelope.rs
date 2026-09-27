@@ -1,5 +1,6 @@
 use crate::ids::{ChatId, FileId, MessageId, RequestId, UserId};
 use crate::rich::{RichBlock, parse_rich_message};
+use crate::telegram::requests::ArchiveChatListSettings;
 use crate::text::{TextEntity, TextEntityKind, utf16_to_utf8_offset};
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
@@ -582,6 +583,13 @@ pub enum EnvelopePayload {
     StorageStatistics {
         total_size: i64,
         by_file_type: Vec<StorageFileTypeStats>,
+    },
+    /// Slice CL2: `archiveChatListSettings` — `getArchiveChatListSettings`
+    /// response (schema 1.8.67, line 3512); stored in
+    /// `Session::archive_chat_list_settings` when the pending purpose is
+    /// `GetArchiveChatListSettings`.
+    ArchiveChatListSettings {
+        settings: ArchiveChatListSettings,
     },
     /// `updateSavedNotificationSounds` — the saved-sound list changed;
     /// the reducer marks the cached list stale (schema line 10947).
@@ -5501,6 +5509,83 @@ fn parse_extra(value: Option<&Value>) -> Option<RequestId> {
     }
 }
 
+/// Slice CL2: parse a bare chat object (the createPrivateChat
+/// answer, schema 1.8.67 line 13312) exactly like the inner chat of
+/// updateNewChat, so the reducer inserts it into the model through
+/// the existing path.
+fn parse_new_chat(chat: &Value) -> Result<EnvelopePayload, ParseError> {
+    Ok(EnvelopePayload::UpdateNewChat {
+        chat_id: ChatId(int53(chat.get("id"))?),
+        title: chat
+            .get("title")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string(),
+        kind: parse_chat_kind(chat.get("type")),
+        unread_count: chat
+            .get("unread_count")
+            .and_then(Value::as_i64)
+            .unwrap_or(0) as i32,
+        last_read_inbox_message_id: MessageId(int53_or_zero(
+            chat.get("last_read_inbox_message_id"),
+        )),
+        last_read_outbox_message_id: MessageId(int53_or_zero(
+            chat.get("last_read_outbox_message_id"),
+        )),
+        notification_settings: parse_chat_notification_settings(chat.get("notification_settings")),
+        draft: parse_chat_draft(chat.get("draft_message")),
+        // Parity slice: `chat.photo.small` (`chatPhotoInfo`, schema
+        // 1.8.67, lines 762 and 3627).
+        photo: parse_chat_photo_small(chat.get("photo")),
+        // Parity slice 4: `chat.permissions.can_send_basic_messages`
+        // (schema 1.8.67, line 1070). Lenient default true — the
+        // real `chat` object always carries `permissions`.
+        can_send_basic_messages: chat
+            .get("permissions")
+            .and_then(|p| p.get("can_send_basic_messages"))
+            .and_then(Value::as_bool)
+            .unwrap_or(true),
+        // Slice G1: full `chatPermissions` block for the editor.
+        permissions: parse_chat_permissions(chat.get("permissions")),
+        // Slice G1: delete gate for `deleteChat` (schema 1.8.67,
+        // lines 3616/11848).
+        can_be_deleted_for_all_users: chat
+            .get("can_be_deleted_for_all_users")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        // Slice CL1: clear-history gate for `deleteChatHistory`
+        // (schema 1.8.67, lines 3616/11845).
+        can_be_deleted_only_for_self: chat
+            .get("can_be_deleted_only_for_self")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        // Slice CL1: `chat.is_marked_as_unread` (schema 1.8.67,
+        // lines 3600/3627).
+        is_marked_as_unread: chat
+            .get("is_marked_as_unread")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        // Phase B4: `chat.message_auto_delete_time` (schema 1.8.67,
+        // lines 3616 / 3627). Defaults to 0 (disabled) when
+        // absent — the field is new enough that older TDLib
+        // builds may omit it.
+        message_auto_delete_time: chat
+            .get("message_auto_delete_time")
+            .and_then(Value::as_i64)
+            .unwrap_or(0) as i32,
+        // Phase C3a: `chat.video_chat` (`videoChat`, schema
+        // 1.8.67, lines 3576 / 3579). `group_call_id` 0 → None
+        // (no active video chat).
+        video_chat: parse_video_chat(chat.get("video_chat")).filter(|v| v.group_call_id != 0),
+        // Slice G2: `chat.has_welcome_messages` (schema 1.8.67,
+        // lines 3603/3627).
+        has_welcome_messages: chat
+            .get("has_welcome_messages")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+    })
+}
+
 fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseError> {
     let value: Value = serde_json::from_str(json).map_err(|_| ParseError::InvalidJson)?;
     match type_name {
@@ -5917,79 +6002,7 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
         ))),
         "updateNewChat" => {
             let chat = value.get("chat").ok_or(ParseError::MissingField)?;
-            Ok(EnvelopePayload::UpdateNewChat {
-                chat_id: ChatId(int53(chat.get("id"))?),
-                title: chat
-                    .get("title")
-                    .and_then(Value::as_str)
-                    .unwrap_or("")
-                    .to_string(),
-                kind: parse_chat_kind(chat.get("type")),
-                unread_count: chat
-                    .get("unread_count")
-                    .and_then(Value::as_i64)
-                    .unwrap_or(0) as i32,
-                last_read_inbox_message_id: MessageId(int53_or_zero(
-                    chat.get("last_read_inbox_message_id"),
-                )),
-                last_read_outbox_message_id: MessageId(int53_or_zero(
-                    chat.get("last_read_outbox_message_id"),
-                )),
-                notification_settings: parse_chat_notification_settings(
-                    chat.get("notification_settings"),
-                ),
-                draft: parse_chat_draft(chat.get("draft_message")),
-                // Parity slice: `chat.photo.small` (`chatPhotoInfo`, schema
-                // 1.8.67, lines 762 and 3627).
-                photo: parse_chat_photo_small(chat.get("photo")),
-                // Parity slice 4: `chat.permissions.can_send_basic_messages`
-                // (schema 1.8.67, line 1070). Lenient default true — the
-                // real `chat` object always carries `permissions`.
-                can_send_basic_messages: chat
-                    .get("permissions")
-                    .and_then(|p| p.get("can_send_basic_messages"))
-                    .and_then(Value::as_bool)
-                    .unwrap_or(true),
-                // Slice G1: full `chatPermissions` block for the editor.
-                permissions: parse_chat_permissions(chat.get("permissions")),
-                // Slice G1: delete gate for `deleteChat` (schema 1.8.67,
-                // lines 3616/11848).
-                can_be_deleted_for_all_users: chat
-                    .get("can_be_deleted_for_all_users")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(false),
-                // Slice CL1: clear-history gate for `deleteChatHistory`
-                // (schema 1.8.67, lines 3616/11845).
-                can_be_deleted_only_for_self: chat
-                    .get("can_be_deleted_only_for_self")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(false),
-                // Slice CL1: `chat.is_marked_as_unread` (schema 1.8.67,
-                // lines 3600/3627).
-                is_marked_as_unread: chat
-                    .get("is_marked_as_unread")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(false),
-                // Phase B4: `chat.message_auto_delete_time` (schema 1.8.67,
-                // lines 3616 / 3627). Defaults to 0 (disabled) when
-                // absent — the field is new enough that older TDLib
-                // builds may omit it.
-                message_auto_delete_time: chat
-                    .get("message_auto_delete_time")
-                    .and_then(Value::as_i64)
-                    .unwrap_or(0) as i32,
-                // Phase C3a: `chat.video_chat` (`videoChat`, schema
-                // 1.8.67, lines 3576 / 3579). `group_call_id` 0 → None
-                // (no active video chat).
-                video_chat: parse_video_chat(chat.get("video_chat"))
-                    .filter(|v| v.group_call_id != 0),
-                // Slice G2: `chat.has_welcome_messages` (schema 1.8.67,
-                // lines 3603/3627).
-                has_welcome_messages: chat
-                    .get("has_welcome_messages")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(false),
-            })
+            parse_new_chat(chat)
         }
         "updateChatPermissions" => {
             // Parity slice 4: `updateChatPermissions` (schema 1.8.67, line
@@ -6476,6 +6489,33 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
                 None => Err(ParseError::MissingField),
             }
         }
+        // Slice CL2: `createPrivateChat` answer — a bare `chat`
+        // object (schema 1.8.67, line 13312). Parsed exactly like
+        // `updateNewChat`'s inner chat so the reducer inserts it into
+        // the model; the driver opens it through the normal
+        // `select_chat` flow when the `@extra` matches our
+        // `CreatePrivateChat` request.
+        "chat" => parse_new_chat(&value),
+        // Slice CL2: `archiveChatListSettings` — the
+        // `getArchiveChatListSettings` answer (schema 1.8.67, line
+        // 3512). Missing fields default to false (never fail the
+        // parse — a partial answer still beats no settings).
+        "archiveChatListSettings" => Ok(EnvelopePayload::ArchiveChatListSettings {
+            settings: ArchiveChatListSettings {
+                archive_and_mute_new_chats_from_unknown_users: value
+                    .get("archive_and_mute_new_chats_from_unknown_users")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
+                keep_unmuted_chats_archived: value
+                    .get("keep_unmuted_chats_archived")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
+                keep_chats_from_folders_archived: value
+                    .get("keep_chats_from_folders_archived")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
+            },
+        }),
         "updateMessageInteractionInfo" => Ok(EnvelopePayload::UpdateMessageInteractionInfo {
             chat_id: ChatId(int53(value.get("chat_id"))?),
             message_id: MessageId(int53(value.get("message_id"))?),
@@ -9755,6 +9795,25 @@ mod tests {
         .unwrap();
         match plain.payload {
             EnvelopePayload::Message(message) => assert_eq!(message.topic_id, None),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn cl2_bare_chat_answer_parses_as_update_new_chat() {
+        // Slice CL2: the `createPrivateChat` answer is a bare `chat`
+        // object (schema 1.8.67, line 13312), not wrapped in
+        // `updateNewChat`. It parses exactly like the inner chat so
+        // the reducer inserts it into the model.
+        let env = parse_envelope(
+            r#"{"@type":"chat","@extra":"58","id":777001,"title":"Saved Messages","type":{"@type":"chatTypePrivate","user_id":777},"unread_count":0}"#,
+        )
+        .unwrap();
+        match env.payload {
+            EnvelopePayload::UpdateNewChat { chat_id, title, .. } => {
+                assert_eq!(chat_id, ChatId(777001));
+                assert_eq!(title, "Saved Messages");
+            }
             other => panic!("{other:?}"),
         }
     }

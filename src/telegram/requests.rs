@@ -181,6 +181,107 @@ pub fn search_recently_found_chats(extra: RequestId, query: &str, limit: i32) ->
     .to_string()
 }
 
+/// Slice CL2: settings for automatic moving of chats to and from the
+/// Archive chat list (TDLib 1.8.67, `schema/td_api.tl:3512`):
+/// `archiveChatListSettings archive_and_mute_new_chats_from_unknown_users:Bool
+/// keep_unmuted_chats_archived:Bool keep_chats_from_folders_archived:Bool =
+/// ArchiveChatListSettings;`
+/// The schema's field docs note `archive_and_mute_new_chats_from_unknown_users`
+/// can only be set when the option
+/// `can_archive_and_mute_new_chats_from_unknown_users` is true, and
+/// `keep_chats_from_folders_archived` is ignored when
+/// `keep_unmuted_chats_archived` is true.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ArchiveChatListSettings {
+    pub archive_and_mute_new_chats_from_unknown_users: bool,
+    pub keep_unmuted_chats_archived: bool,
+    pub keep_chats_from_folders_archived: bool,
+}
+
+/// Slice CL2: `setPinnedChats chat_list:ChatList chat_ids:vector<int53> = Ok;`
+/// (schema 1.8.67, line 13681). `chat_ids` is the **full new order** of
+/// pinned chats in the list (TGX `ChatsAdapter.movePinnedChat` sends the
+/// reordered array the same way); `archived` selects `chatListArchive`,
+/// otherwise `chatListMain`.
+pub fn set_pinned_chats(extra: RequestId, archived: bool, chat_ids: &[i64]) -> String {
+    json!({
+        "@type": "setPinnedChats",
+        "@extra": extra.as_extra(),
+        "chat_list": { "@type": if archived { "chatListArchive" } else { "chatListMain" } },
+        "chat_ids": chat_ids,
+    })
+    .to_string()
+}
+
+/// Slice CL2: `readChatList chat_list:ChatList = Ok;` (schema 1.8.67,
+/// line 13684) — "Traverses all chats in a chat list and marks all
+/// messages in the chats as read". `archived` selects `chatListArchive`,
+/// otherwise `chatListMain`.
+pub fn read_chat_list(extra: RequestId, archived: bool) -> String {
+    json!({
+        "@type": "readChatList",
+        "@extra": extra.as_extra(),
+        "chat_list": { "@type": if archived { "chatListArchive" } else { "chatListMain" } },
+    })
+    .to_string()
+}
+
+/// Slice CL2: `clearRecentlyFoundChats = Ok;` (schema 1.8.67, line
+/// 11671). Clears the recently-found chats (the empty-search Recent
+/// surface); the schema defines no update for this, so the client
+/// clears its local copy optimistically (TGX `SearchManager` does the
+/// same).
+pub fn clear_recently_found_chats(extra: RequestId) -> String {
+    json!({
+        "@type": "clearRecentlyFoundChats",
+        "@extra": extra.as_extra(),
+    })
+    .to_string()
+}
+
+/// Slice CL2: `getArchiveChatListSettings = ArchiveChatListSettings;`
+/// (schema 1.8.67, line 13421).
+pub fn get_archive_chat_list_settings(extra: RequestId) -> String {
+    json!({
+        "@type": "getArchiveChatListSettings",
+        "@extra": extra.as_extra(),
+    })
+    .to_string()
+}
+
+/// Slice CL2: `setArchiveChatListSettings
+/// settings:archiveChatListSettings = Ok;` (schema 1.8.67, line 13424).
+pub fn set_archive_chat_list_settings(
+    extra: RequestId,
+    settings: ArchiveChatListSettings,
+) -> String {
+    json!({
+        "@type": "setArchiveChatListSettings",
+        "@extra": extra.as_extra(),
+        "settings": {
+            "@type": "archiveChatListSettings",
+            "archive_and_mute_new_chats_from_unknown_users": settings.archive_and_mute_new_chats_from_unknown_users,
+            "keep_unmuted_chats_archived": settings.keep_unmuted_chats_archived,
+            "keep_chats_from_folders_archived": settings.keep_chats_from_folders_archived,
+        },
+    })
+    .to_string()
+}
+
+/// Slice CL2: `createPrivateChat user_id:int53 force:Bool = Chat;`
+/// (schema 1.8.67, line 13312). Saved Messages calls this with the own
+/// user id (`getOption("my_id")`, schema line 9590); `force: false`
+/// fetches the real chat.
+pub fn create_private_chat(extra: RequestId, user_id: i64, force: bool) -> String {
+    json!({
+        "@type": "createPrivateChat",
+        "@extra": extra.as_extra(),
+        "user_id": user_id,
+        "force": force,
+    })
+    .to_string()
+}
+
 /// Typed `topic_id` JSON for TDLib 1.8.67 requests (schema: `MessageTopic`
 /// constructors at `schema/td_api.tl:3001-3010`). `TopicId::None` encodes as
 /// JSON null ("all topics"), matching the existing null-encoding convention.
@@ -4248,6 +4349,91 @@ pub fn expected_runtime_label() -> String {
 mod tests {
     use super::*;
     use crate::ids::RequestId;
+
+    #[test]
+    fn cl2_set_pinned_chats_shape_matches_1_8_67() {
+        // Slice CL2: `setPinnedChats chat_list:ChatList
+        // chat_ids:vector<int53> = Ok;` (schema 1.8.67, line 13681) —
+        // the full new pinned order, not a delta.
+        let json = set_pinned_chats(RequestId(51), false, &[11, 12, 13]);
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "setPinnedChats");
+        assert_eq!(v["@extra"], "51");
+        assert_eq!(v["chat_list"]["@type"], "chatListMain");
+        assert_eq!(v["chat_ids"], serde_json::json!([11, 12, 13]));
+
+        let archived = set_pinned_chats(RequestId(52), true, &[7]);
+        let v: serde_json::Value = serde_json::from_str(&archived).unwrap();
+        assert_eq!(v["chat_list"]["@type"], "chatListArchive");
+        assert_eq!(v["chat_ids"], serde_json::json!([7]));
+    }
+
+    #[test]
+    fn cl2_read_chat_list_shape_matches_1_8_67() {
+        // Slice CL2: `readChatList chat_list:ChatList = Ok;` (schema
+        // 1.8.67, line 13684).
+        let json = read_chat_list(RequestId(53), false);
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "readChatList");
+        assert_eq!(v["@extra"], "53");
+        assert_eq!(v["chat_list"]["@type"], "chatListMain");
+
+        let archived = read_chat_list(RequestId(54), true);
+        let v: serde_json::Value = serde_json::from_str(&archived).unwrap();
+        assert_eq!(v["chat_list"]["@type"], "chatListArchive");
+    }
+
+    #[test]
+    fn cl2_clear_recently_found_chats_shape_matches_1_8_67() {
+        // Slice CL2: `clearRecentlyFoundChats = Ok;` (schema 1.8.67,
+        // line 11671) — no fields.
+        let json = clear_recently_found_chats(RequestId(55));
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "clearRecentlyFoundChats");
+        assert_eq!(v["@extra"], "55");
+        assert!(v.get("query").is_none());
+    }
+
+    #[test]
+    fn cl2_create_private_chat_shape_matches_1_8_67() {
+        // Slice CL2: `createPrivateChat user_id:int53 force:Bool =
+        // Chat;` (schema 1.8.67, line 13312).
+        let json = create_private_chat(RequestId(58), 777, false);
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "createPrivateChat");
+        assert_eq!(v["@extra"], "58");
+        assert_eq!(v["user_id"], 777);
+        assert_eq!(v["force"], false);
+    }
+
+    #[test]
+    fn cl2_archive_chat_list_settings_shapes_match_1_8_67() {
+        // Slice CL2: `getArchiveChatListSettings =
+        // ArchiveChatListSettings;` (schema 1.8.67, line 13421) and
+        // `setArchiveChatListSettings settings:archiveChatListSettings =
+        // Ok;` (line 13424); the settings object shape is line 3512.
+        let json = get_archive_chat_list_settings(RequestId(56));
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "getArchiveChatListSettings");
+        assert_eq!(v["@extra"], "56");
+
+        let settings = ArchiveChatListSettings {
+            archive_and_mute_new_chats_from_unknown_users: true,
+            keep_unmuted_chats_archived: false,
+            keep_chats_from_folders_archived: true,
+        };
+        let json = set_archive_chat_list_settings(RequestId(57), settings);
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "setArchiveChatListSettings");
+        assert_eq!(v["@extra"], "57");
+        assert_eq!(v["settings"]["@type"], "archiveChatListSettings");
+        assert_eq!(
+            v["settings"]["archive_and_mute_new_chats_from_unknown_users"],
+            true
+        );
+        assert_eq!(v["settings"]["keep_unmuted_chats_archived"], false);
+        assert_eq!(v["settings"]["keep_chats_from_folders_archived"], true);
+    }
 
     #[test]
     fn set_chat_message_auto_delete_time_shape_matches_1_8_67() {
