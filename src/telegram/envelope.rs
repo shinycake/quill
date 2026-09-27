@@ -146,10 +146,15 @@ pub enum EnvelopePayload {
         /// editor; `None` when the block is absent or malformed.
         permissions: Option<ChatPermissions>,
         /// Slice G1: `chat.can_be_deleted_for_all_users` (schema 1.8.67,
-        /// line 3616). Gates `deleteChat` (schema line 11848: "Use the
+        /// line 3605). Gates `deleteChat` (schema line 11850: "Use the
         /// field chat.can_be_deleted_for_all_users to find whether the
         /// method can be applied to the chat").
         can_be_deleted_for_all_users: bool,
+        /// Slice CL1: `chat.can_be_deleted_only_for_self` (schema 1.8.67,
+        /// line 3604). Together with `can_be_deleted_for_all_users` it
+        /// tells "whether and how" `deleteChatHistory` (schema line
+        /// 11845) can be applied.
+        can_be_deleted_only_for_self: bool,
         /// Phase B4: `chat.message_auto_delete_time` (schema 1.8.67,
         /// lines 3616 / 3627) — the chat-level auto-delete or
         /// self-destruct (secret chats) timer, in seconds; 0 when
@@ -163,6 +168,10 @@ pub enum EnvelopePayload {
         /// — true when the chat has welcome messages; only sent for chat
         /// administrators with the `can_change_info` right.
         has_welcome_messages: bool,
+        /// Slice CL1: `chat.is_marked_as_unread` (schema 1.8.67, lines
+        /// 3600 / 3627). Refreshed by `updateChatIsMarkedAsUnread`
+        /// (schema line 10588).
+        is_marked_as_unread: bool,
     },
     /// `updateChatDraftMessage`. Positions are the new chat-list orders.
     UpdateChatDraftMessage {
@@ -209,6 +218,12 @@ pub enum EnvelopePayload {
     UpdateChatNotificationSettings {
         chat_id: ChatId,
         notification_settings: ChatNotificationSettings,
+    },
+    /// Slice CL1: `updateChatIsMarkedAsUnread` (schema 1.8.67, line
+    /// 10588) — the chat was marked as unread or was read.
+    UpdateChatIsMarkedAsUnread {
+        chat_id: ChatId,
+        is_marked_as_unread: bool,
     },
     /// Parity slice: `updateChatPhoto` (schema 1.8.67, line 10488) — the
     /// chat's photo changed. `photo` is the new `chatPhotoInfo.small`
@@ -5853,6 +5868,13 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
                 value.get("notification_settings"),
             ),
         }),
+        "updateChatIsMarkedAsUnread" => Ok(EnvelopePayload::UpdateChatIsMarkedAsUnread {
+            chat_id: ChatId(int53(value.get("chat_id"))?),
+            is_marked_as_unread: value
+                .get("is_marked_as_unread")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+        }),
         "updateChatAction" => Ok(EnvelopePayload::UpdateChatAction {
             chat_id: ChatId(int53(value.get("chat_id"))?),
             sender: parse_message_sender(value.get("sender_id"))?,
@@ -5934,6 +5956,18 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
                 // lines 3616/11848).
                 can_be_deleted_for_all_users: chat
                     .get("can_be_deleted_for_all_users")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
+                // Slice CL1: clear-history gate for `deleteChatHistory`
+                // (schema 1.8.67, lines 3616/11845).
+                can_be_deleted_only_for_self: chat
+                    .get("can_be_deleted_only_for_self")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
+                // Slice CL1: `chat.is_marked_as_unread` (schema 1.8.67,
+                // lines 3600/3627).
+                is_marked_as_unread: chat
+                    .get("is_marked_as_unread")
                     .and_then(Value::as_bool)
                     .unwrap_or(false),
                 // Phase B4: `chat.message_auto_delete_time` (schema 1.8.67,

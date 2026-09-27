@@ -23,7 +23,7 @@ use quill::connect::{
 use quill::credentials::TelegramCredentials;
 use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::folders::FolderEditor;
-use quill::ids::{AccountKey, ChatId, FileId, MessageId};
+use quill::ids::{AccountKey, ChatId, FileId, MessageId, RequestId};
 use quill::key_fingerprint;
 use quill::local_path::sandboxed_display_path;
 use quill::media_viewer::{
@@ -745,6 +745,15 @@ pub enum GroupConfirmAction {
     DeleteChat,
     LeaveChat,
     BroadcastUpgrade,
+    /// Slice CL1: `deleteChatHistory` (schema 1.8.67, line 11845);
+    /// `revoke` clears for everyone (`chat.can_be_deleted_for_all_users`).
+    ClearHistory {
+        revoke: bool,
+    },
+    /// Slice CL1: chat-list "Delete chat" — `deleteChatHistory` with
+    /// `remove_from_chat_list: true` (Telegram X `Tdlib.deleteChat`),
+    /// not the destructive `deleteChat` constructor.
+    RemoveFromList,
 }
 
 pub struct GroupConfirmDialog {
@@ -1048,6 +1057,14 @@ pub struct MessageMenuState {
     pub position: Point<Pixels>,
 }
 
+/// Slice CL1: right-click chat-row context menu target + window
+/// position (same pattern as `MessageMenuState`).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ChatMenuState {
+    pub chat_id: ChatId,
+    pub position: Point<Pixels>,
+}
+
 /// Phase C2i: the nine `CallProblem` constructors (TDLib 1.8.67,
 /// `schema/td_api.tl:7253`-`:7277`) with their schema descriptions,
 /// in schema order. Index-aligned with `RatingDetail::problems`.
@@ -1163,6 +1180,9 @@ pub struct QuillApp {
     rich_editor_open: bool,
     /// M1: right-click context menu target + window position.
     message_menu: Option<MessageMenuState>,
+    /// Slice CL1: right-click chat-row context menu target + window
+    /// position.
+    chat_menu: Option<ChatMenuState>,
     /// M1: swipe-to-reply press origin (chat, message, press x).
     swipe_reply_start: Option<(ChatId, MessageId, Pixels)>,
     /// Same-chat reply draft (tdesktop `FieldHeader::replyToMessage`).
@@ -1484,6 +1504,10 @@ pub enum ScreenshotDemo {
     ReadyPin,
     /// Mute presets + muted icon + archive section (injected, no live Telegram).
     ReadyMuteArchive,
+    /// Slice CL1: chat list with a pinned chat, archived section,
+    /// marked-as-unread row, and the row context menu open (injected,
+    /// no live Telegram).
+    ReadyChatListMenu,
     /// Peer `chatActionTyping` in the open-chat header and sidebar row.
     ReadyTyping,
     /// Sticker panel + sticker in history (injected, no live Telegram).
@@ -2337,6 +2361,15 @@ impl QuillApp {
                     AuthorizationState::Ready,
                 )
             }
+            Some(ScreenshotDemo::ReadyChatListMenu) => {
+                demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
+                (
+                    ConnectUiStatus::DemoReadyChats,
+                    None,
+                    "screenshot demo — chat list: pinned, archived, marked unread, row menu".into(),
+                    AuthorizationState::Ready,
+                )
+            }
             Some(ScreenshotDemo::ReadyNotificationSound) => {
                 demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
                 (
@@ -3022,6 +3055,7 @@ impl QuillApp {
             scheduled_dialog_open: false,
             rich_editor_open: false,
             message_menu: None,
+            chat_menu: None,
             swipe_reply_start: None,
             pending_reply: None,
             clear_draft_on_success: None,
@@ -3248,6 +3282,19 @@ impl QuillApp {
             }
             app.mute_menu_open = true;
             app.status_note = "screenshot demo — mute presets · muted icon · archive".into();
+        }
+        // Slice CL1: pinned + archived + marked-as-unread rows, with the
+        // row context menu open over the pinned chat.
+        if matches!(demo, Some(ScreenshotDemo::ReadyChatListMenu)) {
+            if let Some(session) = app.demo_session.as_mut() {
+                app.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_chat_list_menu(session, &app.demo_sink, &app.demo_seq);
+            }
+            app.chat_menu = Some(ChatMenuState {
+                chat_id: ChatId(11),
+                position: Point::new(px(120.), px(490.)),
+            });
+            app.status_note = "screenshot demo — pin · archive · marked unread · row menu".into();
         }
         if matches!(demo, Some(ScreenshotDemo::ReadyNotificationSound)) {
             if let Some(session) = app.demo_session.as_mut() {
@@ -4112,6 +4159,17 @@ impl QuillApp {
             .live
             .as_mut()
             .and_then(|live| live.driver.session.message_link_error.take())
+        {
+            self.status_note = err;
+            progressed = true;
+        }
+        // Slice CL1: a refused chat-list action (`toggleChatIsPinned`,
+        // `toggleChatIsMarkedAsUnread`, `deleteChatHistory`) surfaces
+        // here instead of silently doing nothing.
+        if let Some(err) = self
+            .live
+            .as_mut()
+            .and_then(|live| live.driver.session.chat_action_error.take())
         {
             self.status_note = err;
             progressed = true;
@@ -5476,6 +5534,165 @@ impl QuillApp {
             .into_any_element()
     }
 
+    /// Slice CL1: right-click chat-row context menu — Pin/Unpin, Mark
+    /// as read/unread, Mute/Unmute, Archive/Unarchive, Clear history,
+    /// Delete. Rendered absolute at the click position; any click on
+    /// the backdrop closes it. Same structure as
+    /// `message_menu_overlay`.
+    fn chat_menu_overlay(&self, menu: ChatMenuState, cx: &mut Context<Self>) -> impl IntoElement {
+        let chat_id = menu.chat_id;
+        let chat = self
+            .session()
+            .and_then(|session| session.chats.get(&chat_id.0))
+            .cloned();
+        let Some(chat) = chat else {
+            return div().into_any_element();
+        };
+        let pinned = if chat.in_archive {
+            chat.archive_is_pinned
+        } else {
+            chat.is_pinned
+        };
+        let unread = chat.is_marked_as_unread || chat.unread_count > 0;
+        let muted = chat.is_muted();
+        let archived = chat.in_archive;
+        let can_clear = chat.can_be_deleted_only_for_self || chat.can_be_deleted_for_all_users;
+        let can_revoke = chat.can_be_deleted_for_all_users;
+
+        let mut panel = div()
+            .id("chat-menu-panel")
+            .flex()
+            .flex_col()
+            .min_w(px(180.))
+            .px_1()
+            .py_1()
+            .rounded_md()
+            .border_1()
+            .border_color(rgb(0x58a6ff))
+            .bg(rgb(0x161b22));
+        macro_rules! item {
+            ($id:expr, $label:expr, $this:ident, $cx:ident, $body:block) => {
+                panel = panel.child(
+                    Button::new($id)
+                        .label($label)
+                        .ghost()
+                        .text_color(rgb(0xe6edf3))
+                        .on_click($cx.listener(move |$this, _, _, $cx| $body)),
+                );
+            };
+        }
+        item!(
+            "chat-menu-pin",
+            if pinned { "Unpin" } else { "Pin" },
+            this,
+            cx,
+            {
+                this.toggle_chat_pin(chat_id, cx);
+                this.chat_menu = None;
+                cx.notify();
+            }
+        );
+        item!(
+            "chat-menu-read",
+            if unread {
+                "Mark as read"
+            } else {
+                "Mark as unread"
+            },
+            this,
+            cx,
+            {
+                this.toggle_chat_marked_as_unread(chat_id, cx);
+                this.chat_menu = None;
+                cx.notify();
+            }
+        );
+        item!(
+            "chat-menu-mute",
+            if muted { "Unmute" } else { "Mute" },
+            this,
+            cx,
+            {
+                this.apply_chat_mute(chat_id, if muted { 0 } else { MUTE_FOREVER }, cx);
+                this.chat_menu = None;
+                cx.notify();
+            }
+        );
+        item!(
+            "chat-menu-archive",
+            if archived { "Unarchive" } else { "Archive" },
+            this,
+            cx,
+            {
+                this.toggle_archive(chat_id, cx);
+                this.chat_menu = None;
+                cx.notify();
+            }
+        );
+        if can_clear {
+            item!("chat-menu-clear", "Clear history", this, cx, {
+                this.open_group_confirm(
+                    chat_id,
+                    GroupConfirmAction::ClearHistory { revoke: false },
+                    cx,
+                );
+                this.chat_menu = None;
+                cx.notify();
+            });
+        }
+        if can_revoke {
+            item!(
+                "chat-menu-clear-all",
+                "Clear history for everyone",
+                this,
+                cx,
+                {
+                    this.open_group_confirm(
+                        chat_id,
+                        GroupConfirmAction::ClearHistory { revoke: true },
+                        cx,
+                    );
+                    this.chat_menu = None;
+                    cx.notify();
+                }
+            );
+        }
+        if can_clear {
+            item!("chat-menu-delete", "Delete chat", this, cx, {
+                this.open_group_confirm(chat_id, GroupConfirmAction::RemoveFromList, cx);
+                this.chat_menu = None;
+                cx.notify();
+            });
+        }
+        div()
+            .id("chat-menu-overlay")
+            .absolute()
+            .top_0()
+            .left_0()
+            .right_0()
+            .bottom_0()
+            .child(
+                div()
+                    .id("chat-menu-backdrop")
+                    .absolute()
+                    .top_0()
+                    .left_0()
+                    .right_0()
+                    .bottom_0()
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.chat_menu = None;
+                        cx.notify();
+                    })),
+            )
+            .child(
+                div()
+                    .absolute()
+                    .left(menu.position.x)
+                    .top(menu.position.y)
+                    .child(panel),
+            )
+            .into_any_element()
+    }
     /// MED4: Instant View reader overlay (TGX behavior — attempt IV
     /// when the card offers it, fall back to the browser on 404 /
     /// unsupported). Drains `Session::instant_view_fallback_url` into
@@ -11272,13 +11489,22 @@ impl QuillApp {
         let Some(dialog) = self.group_confirm_dialog.take() else {
             return;
         };
+        // A driver's `Ok(None)` means the request was refused or is
+        // already in flight — never report it as sent.
+        fn sent_note(sent: Option<RequestId>, note: &str) -> String {
+            if sent.is_some() {
+                note.to_string()
+            } else {
+                "request already in flight".to_string()
+            }
+        }
         let note = match self.live.as_mut() {
             Some(live) => {
                 let result = match dialog.action {
                     GroupConfirmAction::DeleteChat => live
                         .driver
                         .delete_chat(dialog.chat_id)
-                        .map(|_| "chat deleted".to_string()),
+                        .map(|sent| sent_note(sent, "chat deleted")),
                     GroupConfirmAction::LeaveChat => live
                         .driver
                         .leave_channel(dialog.chat_id)
@@ -11289,7 +11515,22 @@ impl QuillApp {
                         // Ongoing, not done: TDLib answers `ok`/`error`
                         // asynchronously; the error arm rolls the
                         // optimistic flag back.
-                        .map(|_| "converting to broadcast group…".to_string()),
+                        .map(|sent| sent_note(sent, "converting to broadcast group…")),
+                    // Slice CL1: `deleteChatHistory` (schema 1.8.67,
+                    // line 11845). TDLib answers `ok`/`error`
+                    // asynchronously; a refusal surfaces via
+                    // `Session::chat_action_error`.
+                    GroupConfirmAction::ClearHistory { revoke } => live
+                        .driver
+                        .clear_chat_history(dialog.chat_id, revoke)
+                        .map(|sent| sent_note(sent, "clearing history…")),
+                    // Slice CL1: chat-list "Delete chat" —
+                    // `deleteChatHistory` with `remove_from_chat_list:
+                    // true` (Telegram X `Tdlib.deleteChat`).
+                    GroupConfirmAction::RemoveFromList => live
+                        .driver
+                        .remove_chat_from_list(dialog.chat_id)
+                        .map(|sent| sent_note(sent, "deleting chat…")),
                 };
                 match result {
                     Ok(note) => note,
@@ -19748,6 +19989,154 @@ impl QuillApp {
         }
     }
 
+    /// Slice CL1: Pin / Unpin from the chat-row context menu
+    /// (`toggleChatIsPinned`, schema 1.8.67, line 13678). The pin-limit
+    /// pre-check mirrors TGX `ChatsController`: count pinned chats of
+    /// the same secrecy class in the target list against
+    /// `pinned_chat_count_max` / `pinned_archived_chat_count_max`
+    /// (`updateOption`); at the limit the request is never sent and the
+    /// TGX message shows instead.
+    fn toggle_chat_pin(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
+        let session = match self.session() {
+            Some(session) => session,
+            None => return,
+        };
+        let chat = match session.chats.get(&chat_id.0) {
+            Some(chat) => chat,
+            None => return,
+        };
+        let archived = chat.in_archive;
+        let pinned = if archived {
+            chat.archive_is_pinned
+        } else {
+            chat.is_pinned
+        };
+        let secret = matches!(chat.kind, ChatKind::Secret { .. });
+        if !pinned {
+            let limit = if archived {
+                session.pinned_archived_chat_count_max
+            } else {
+                session.pinned_chat_count_max
+            };
+            let pinned_count = session
+                .chats
+                .values()
+                .filter(|c| {
+                    let is_pinned = if archived {
+                        c.in_archive && c.archive_is_pinned
+                    } else {
+                        c.in_main_list && c.is_pinned
+                    };
+                    is_pinned && matches!(c.kind, ChatKind::Secret { .. }) == secret
+                })
+                .count() as i32;
+            if pinned_count >= limit.max(0) {
+                self.status_note = if archived {
+                    format!(
+                        "Sorry, you can pin up to {limit} chats and {limit} secret chats at once"
+                    )
+                } else {
+                    format!(
+                        "Sorry, you can only pin {limit} chats in your main list. If you're \
+                         looking for more organization, try archiving some chats — the \
+                         Archived Chats folder allows unlimited pins"
+                    )
+                };
+                cx.notify();
+                return;
+            }
+        }
+        if self.live.is_some() {
+            let result = self
+                .live
+                .as_mut()
+                .expect("live")
+                .driver
+                .toggle_chat_pin(chat_id, !pinned);
+            self.status_note = match result {
+                Ok(Some(_)) if pinned => "unpinning…".into(),
+                Ok(Some(_)) => "pinning…".into(),
+                Ok(None) => "pin request already in flight".into(),
+                Err(_) => "could not change pin".into(),
+            };
+            cx.notify();
+            return;
+        }
+        if self.demo_session.is_some() {
+            self.apply_demo_pin(chat_id, !pinned, archived);
+            self.status_note = if pinned {
+                "unpinned".into()
+            } else {
+                "pinned".into()
+            };
+            cx.notify();
+        }
+    }
+
+    /// Slice CL1: Mark as read / Mark as unread from the chat-row
+    /// context menu. Mark-as-read follows Telegram X
+    /// (`Tdlib.markChatAsRead` with `MessageSourceChatList`):
+    /// `viewMessages` over the newest known message reads real unread
+    /// history, plus `toggleChatIsMarkedAsUnread(false)` clears the
+    /// manual marker. Mark-as-unread is the plain toggle (TGX only
+    /// offers it when `unreadCount == 0`, which the menu label gates).
+    fn toggle_chat_marked_as_unread(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
+        let marked = self
+            .session()
+            .and_then(|session| session.chats.get(&chat_id.0))
+            .is_some_and(|chat| chat.is_marked_as_unread || chat.unread_count > 0);
+        // Slice CL1 review nit: server-side unread with no cached history
+        // can't be marked read (the driver has nothing to view and sends
+        // nothing); say so honestly instead of "request already in flight".
+        let nothing_to_view = self.session().is_some_and(|session| {
+            session
+                .chats
+                .get(&chat_id.0)
+                .is_some_and(|c| c.unread_count > 0 && !c.is_marked_as_unread)
+                && !session
+                    .histories
+                    .get(&chat_id.0)
+                    .is_some_and(|h| !h.messages.is_empty())
+        });
+        if marked && nothing_to_view && self.live.is_some() {
+            self.status_note = "open the chat to mark it as read".into();
+            cx.notify();
+            return;
+        }
+        if self.live.is_some() {
+            let result = if marked {
+                self.live
+                    .as_mut()
+                    .expect("live")
+                    .driver
+                    .mark_chat_as_read(chat_id)
+            } else {
+                self.live
+                    .as_mut()
+                    .expect("live")
+                    .driver
+                    .toggle_chat_marked_as_unread(chat_id, true)
+            };
+            self.status_note = match result {
+                Ok(Some(_)) if marked => "marking as read…".into(),
+                Ok(Some(_)) => "marking as unread…".into(),
+                Ok(None) => "request already in flight".into(),
+                Err(_) => "could not change read state".into(),
+            };
+            cx.notify();
+            return;
+        }
+        if self.demo_session.is_some() {
+            self.apply_demo_marked_as_unread(chat_id, !marked);
+            self.status_note = if marked {
+                "marked as read".into()
+            } else {
+                "marked as unread".into()
+            };
+            cx.notify();
+        }
+    }
+
     // ------------------------------------------------------------------
     // Parity slice: folder management (create / edit / delete / reorder /
     // tags / per-chat membership).
@@ -20116,6 +20505,72 @@ impl QuillApp {
                 if let Some(owned) = copy_and_parse(&json, &self.demo_seq, &dyn_sink) {
                     session.apply(owned);
                 }
+            }
+        }
+    }
+
+    /// Slice CL1: demo pin/unpin through the real `updateChatPosition`
+    /// reducer (screenshot demos have no TDLib).
+    fn apply_demo_pin(&mut self, chat_id: ChatId, pin: bool, archived: bool) {
+        let Some(session) = self.demo_session.as_mut() else {
+            return;
+        };
+        let list = if archived {
+            "chatListArchive"
+        } else {
+            "chatListMain"
+        };
+        let order = session
+            .chats
+            .get(&chat_id.0)
+            .map(|chat| {
+                if archived {
+                    chat.archive_order
+                } else {
+                    chat.order
+                }
+            })
+            .unwrap_or(1)
+            .max(1);
+        let json = format!(
+            r#"{{"@type":"updateChatPosition","chat_id":{},"position":{{"@type":"chatPosition","list":{{"@type":"{list}"}},"order":"{order}","is_pinned":{pin}}}}}"#,
+            chat_id.0
+        );
+        let dyn_sink: Arc<dyn DiagnosticSink> = self.demo_sink.clone();
+        if let Some(owned) = copy_and_parse(&json, &self.demo_seq, &dyn_sink) {
+            session.apply(owned);
+        }
+    }
+
+    /// Slice CL1: demo mark-as-unread through the real
+    /// `updateChatIsMarkedAsUnread` reducer.
+    fn apply_demo_marked_as_unread(&mut self, chat_id: ChatId, marked: bool) {
+        let Some(session) = self.demo_session.as_mut() else {
+            return;
+        };
+        // Mark-as-read also clears real unread, like TDLib's
+        // `updateChatReadInbox` would after `viewMessages`.
+        let jsons = if marked {
+            vec![format!(
+                r#"{{"@type":"updateChatIsMarkedAsUnread","chat_id":{},"is_marked_as_unread":{marked}}}"#,
+                chat_id.0
+            )]
+        } else {
+            vec![
+                format!(
+                    r#"{{"@type":"updateChatIsMarkedAsUnread","chat_id":{},"is_marked_as_unread":false}}"#,
+                    chat_id.0
+                ),
+                format!(
+                    r#"{{"@type":"updateChatReadInbox","chat_id":{},"last_read_inbox_message_id":0,"unread_count":0}}"#,
+                    chat_id.0
+                ),
+            ]
+        };
+        let dyn_sink: Arc<dyn DiagnosticSink> = self.demo_sink.clone();
+        for json in jsons {
+            if let Some(owned) = copy_and_parse(&json, &self.demo_seq, &dyn_sink) {
+                session.apply(owned);
             }
         }
     }
@@ -23910,6 +24365,11 @@ impl QuillApp {
                 "Delete this group for everyone? This cannot be undone.",
                 "Delete",
             ),
+            GroupConfirmAction::RemoveFromList => (
+                "Delete chat",
+                "Delete this chat and its history from your chat list?",
+                "Delete",
+            ),
             GroupConfirmAction::LeaveChat => (
                 "Leave chat",
                 "Leave this chat? You can rejoin with an invite link.",
@@ -23920,6 +24380,15 @@ impl QuillApp {
                 "Only admins will be able to post. Non-admin members become \
                  subscribers. This cannot be undone.",
                 "Convert",
+            ),
+            GroupConfirmAction::ClearHistory { revoke } => (
+                "Clear history",
+                if revoke {
+                    "Delete all messages in this chat for everyone? This cannot be undone."
+                } else {
+                    "Delete all messages in this chat for you? This cannot be undone."
+                },
+                "Clear",
             ),
         };
         let body = div()
@@ -27160,6 +27629,10 @@ impl Render for QuillApp {
             // M1: right-click message context menu.
             .when_some(self.message_menu, |this, menu| {
                 this.child(self.message_menu_overlay(menu, cx))
+            })
+            // Slice CL1: right-click chat-row context menu.
+            .when_some(self.chat_menu, |this, menu| {
+                this.child(self.chat_menu_overlay(menu, cx))
             })
             // MED4: Instant View reader overlay (above the menu).
             .when_some(self.instant_view_overlay(cx), |this, overlay| {
@@ -31612,6 +32085,35 @@ fn apply_ready_mute_archive(session: &mut Session, sink: &Arc<MemorySink>, seq: 
     }
 }
 
+/// Slice CL1: chat-list screenshot fixture — chat 11 stays pinned
+/// (base seed), chat 12 moves to the archive section, chat 13 is
+/// marked as unread (badge dot). Injected, no live Telegram.
+fn apply_ready_chat_list_menu(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let jsons = [
+        r#"{"@type":"updateChatPosition","chat_id":12,"position":{"@type":"chatPosition","list":{"@type":"chatListMain"},"order":"0","is_pinned":false}}"#
+            .to_string(),
+        r#"{"@type":"updateChatRemovedFromList","chat_id":12,"chat_list":{"@type":"chatListMain"}}"#
+            .to_string(),
+        r#"{"@type":"updateChatPosition","chat_id":12,"position":{"@type":"chatPosition","list":{"@type":"chatListArchive"},"order":"20","is_pinned":false}}"#
+            .to_string(),
+        r#"{"@type":"updateChatAddedToList","chat_id":12,"chat_list":{"@type":"chatListArchive"}}"#
+            .to_string(),
+        r#"{"@type":"updateChatIsMarkedAsUnread","chat_id":13,"is_marked_as_unread":true}"#.to_string(),
+    ];
+    for json in jsons {
+        if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
+            session.apply(owned);
+        }
+    }
+    // The demo seed doesn't carry delete-capability flags; TDLib sends
+    // them for real private chats — set directly so the fixture shows
+    // the full row menu (Clear history / Delete chat).
+    if let Some(chat) = session.chats.get_mut(&11) {
+        chat.can_be_deleted_only_for_self = true;
+    }
+}
+
 /// `ReadySlowMode` fixture (Phase A1): a dedicated supergroup
 /// ("Slow-mode demo group", chat id 17) with slow mode enabled
 /// (`slow_mode_delay: 30`, `slow_mode_delay_expires_in: 25.0`) and the
@@ -32223,7 +32725,14 @@ fn session_chat_row(
     let id = chat.id;
     let title = chat.title.clone();
     let preview = chat.sidebar_preview();
-    let badge = unread_badge_text(chat.unread_count);
+    // Slice CL1: a marked-as-unread chat shows the unread badge even
+    // with zero unread messages (official clients show a dot); the count
+    // wins when there are unread messages (TGX TGChat.java:396).
+    let badge = if chat.unread_count == 0 && chat.is_marked_as_unread {
+        Some("●".to_string())
+    } else {
+        unread_badge_text(chat.unread_count)
+    };
     let tags: Vec<String> = if show_tags {
         folders
             .iter()
@@ -32247,6 +32756,18 @@ fn session_chat_row(
         .on_click(cx.listener(move |this, _, window, cx| {
             this.select_listed_chat(id, window, cx);
         }))
+        // Slice CL1: right-click opens the chat-row context menu at the
+        // click position (window coordinates).
+        .on_mouse_down(
+            MouseButton::Right,
+            cx.listener(move |this, event: &MouseDownEvent, _, cx| {
+                this.chat_menu = Some(ChatMenuState {
+                    chat_id: id,
+                    position: event.position,
+                });
+                cx.notify();
+            }),
+        )
         .child(
             div()
                 .flex()

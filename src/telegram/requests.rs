@@ -1238,6 +1238,65 @@ pub fn delete_chat(extra: RequestId, chat_id: i64) -> String {
     .to_string()
 }
 
+/// Slice CL1: `toggleChatIsPinned` (TDLib 1.8.67, `schema/td_api.tl:13678`):
+/// `toggleChatIsPinned chat_list:ChatList chat_id:int53 is_pinned:Bool = Ok;`
+/// The pinned state is per list — `archived` selects `chatListArchive`,
+/// otherwise `chatListMain` (pinning is only defined for main/archive per
+/// the schema doc).
+pub fn toggle_chat_is_pinned(
+    extra: RequestId,
+    chat_id: i64,
+    archived: bool,
+    is_pinned: bool,
+) -> String {
+    json!({
+        "@type": "toggleChatIsPinned",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id,
+        "chat_list": { "@type": if archived { "chatListArchive" } else { "chatListMain" } },
+        "is_pinned": is_pinned,
+    })
+    .to_string()
+}
+
+/// Slice CL1: `toggleChatIsMarkedAsUnread` (TDLib 1.8.67,
+/// `schema/td_api.tl:13519`):
+/// `toggleChatIsMarkedAsUnread chat_id:int53 is_marked_as_unread:Bool = Ok;`
+pub fn toggle_chat_is_marked_as_unread(
+    extra: RequestId,
+    chat_id: i64,
+    is_marked_as_unread: bool,
+) -> String {
+    json!({
+        "@type": "toggleChatIsMarkedAsUnread",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id,
+        "is_marked_as_unread": is_marked_as_unread,
+    })
+    .to_string()
+}
+
+/// Slice CL1: `deleteChatHistory` (TDLib 1.8.67, `schema/td_api.tl:11845`):
+/// `deleteChatHistory chat_id:int53 remove_from_chat_list:Bool revoke:Bool = Ok;`
+/// The chat stays in the chat list (`remove_from_chat_list: false`, TGX
+/// clear-history behavior); `revoke` clears for everyone when
+/// `chat.can_be_deleted_for_all_users`.
+pub fn delete_chat_history(
+    extra: RequestId,
+    chat_id: i64,
+    remove_from_chat_list: bool,
+    revoke: bool,
+) -> String {
+    json!({
+        "@type": "deleteChatHistory",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id,
+        "remove_from_chat_list": remove_from_chat_list,
+        "revoke": revoke,
+    })
+    .to_string()
+}
+
 /// Slice G1: `inputTextQuote` JSON (TDLib 1.8.67, `schema/td_api.tl:3056`):
 /// `inputTextQuote text:formattedText position:int32 = InputTextQuote;`
 /// `position` is the offset of the quoted text in the original message in
@@ -2576,6 +2635,7 @@ pub fn view_messages(
     extra: RequestId,
     chat_id: ChatId,
     message_ids: &[MessageId],
+    source: &str,
     force_read: bool,
 ) -> String {
     json!({
@@ -2583,7 +2643,7 @@ pub fn view_messages(
         "@extra": extra.as_extra(),
         "chat_id": chat_id.0,
         "message_ids": message_ids.iter().map(|id| id.0).collect::<Vec<_>>(),
-        "source": { "@type": "messageSourceChatHistory" },
+        "source": { "@type": source },
         "force_read": force_read,
     })
     .to_string()
@@ -5101,6 +5161,7 @@ mod tests {
             RequestId(6),
             ChatId(7),
             &[MessageId(11), MessageId(12)],
+            "messageSourceChatHistory",
             true,
         );
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
@@ -5111,6 +5172,24 @@ mod tests {
         assert_eq!(v["source"]["@type"], "messageSourceChatHistory");
         assert_eq!(v["force_read"], true);
         assert!(!json.contains("CANARY"));
+    }
+
+    #[test]
+    fn view_messages_chat_list_source_for_mark_as_read() {
+        // Slice CL1: "Mark as read" from the chat list views with
+        // `messageSourceChatList`, like Telegram X's
+        // `Tdlib.markChatAsRead(..., new MessageSourceChatList(), ...)`.
+        let json = view_messages(
+            RequestId(6),
+            ChatId(7),
+            &[MessageId(42)],
+            "messageSourceChatList",
+            true,
+        );
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["source"]["@type"], "messageSourceChatList");
+        assert_eq!(v["message_ids"], serde_json::json!([42]));
+        assert_eq!(v["force_read"], true);
     }
 
     #[test]
@@ -6871,6 +6950,43 @@ mod channel_requests_tests {
         let v: serde_json::Value = serde_json::from_str(&delete_chat(RequestId(78), 11)).unwrap();
         assert_eq!(v["@type"], "deleteChat");
         assert_eq!(v["chat_id"], 11);
+
+        // Slice CL1: `toggleChatIsPinned chat_list:ChatList chat_id:int53
+        // is_pinned:Bool = Ok` (schema 1.8.67, line 13678).
+        let v: serde_json::Value =
+            serde_json::from_str(&toggle_chat_is_pinned(RequestId(79), 12, false, true)).unwrap();
+        assert_eq!(v["@type"], "toggleChatIsPinned");
+        assert_eq!(v["chat_id"], 12);
+        assert_eq!(v["chat_list"]["@type"], "chatListMain");
+        assert_eq!(v["is_pinned"], true);
+        let v: serde_json::Value =
+            serde_json::from_str(&toggle_chat_is_pinned(RequestId(80), 12, true, false)).unwrap();
+        assert_eq!(v["chat_list"]["@type"], "chatListArchive");
+        assert_eq!(v["is_pinned"], false);
+
+        // Slice CL1: `toggleChatIsMarkedAsUnread chat_id:int53
+        // is_marked_as_unread:Bool = Ok` (schema 1.8.67, line 13519).
+        let v: serde_json::Value =
+            serde_json::from_str(&toggle_chat_is_marked_as_unread(RequestId(81), 13, true))
+                .unwrap();
+        assert_eq!(v["@type"], "toggleChatIsMarkedAsUnread");
+        assert_eq!(v["chat_id"], 13);
+        assert_eq!(v["is_marked_as_unread"], true);
+
+        // Slice CL1: `deleteChatHistory chat_id:int53
+        // remove_from_chat_list:Bool revoke:Bool = Ok` (schema 1.8.67,
+        // line 11845). Clear-history keeps the chat in the list;
+        // remove-from-list drops it (Telegram X `Tdlib.deleteChat`).
+        let v: serde_json::Value =
+            serde_json::from_str(&delete_chat_history(RequestId(82), 14, false, true)).unwrap();
+        assert_eq!(v["@type"], "deleteChatHistory");
+        assert_eq!(v["chat_id"], 14);
+        assert_eq!(v["remove_from_chat_list"], false);
+        assert_eq!(v["revoke"], true);
+        let v: serde_json::Value =
+            serde_json::from_str(&delete_chat_history(RequestId(83), 15, true, false)).unwrap();
+        assert_eq!(v["remove_from_chat_list"], true);
+        assert_eq!(v["revoke"], false);
     }
 
     #[test]
