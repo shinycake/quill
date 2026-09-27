@@ -18,7 +18,7 @@ use crate::lifecycle::{RestoreBlocker, plan_restore};
 use crate::notify::NotificationSoundKind;
 use crate::platform::{DatabaseKey, KeyDecision, SecretStore, load_or_create_key};
 use crate::poll::{PollDraft, poll_answer_for_tap};
-use crate::settings::{AccountPaths, default_app_root};
+use crate::settings::{AccountPaths, default_app_root, load_call_prefs, save_call_prefs};
 use crate::state::{
     AdminListFetch, AdminRightsFetch, CHAT_EVENT_LOG_PAGE_SIZE, ChatEventLogFetch,
     ChatSearchJumpNeed, ChatStatisticsFetch, ForwardFlight, InfoPanelTarget, InviteLinkFetch,
@@ -34,9 +34,9 @@ use crate::telegram::envelope::{
 };
 use crate::telegram::ffi::{LibraryOrigin, TdJsonError, resolve_tdjson_path};
 use crate::telegram::requests::{
-    AnimationSend, GroupCallJoinParams, InputGroupCallRef, MessageSenderRef, PollSend,
-    SetTdlibParameters, StickerSend, VideoNoteSend, VideoNoteThumbnailSend, VideoSend,
-    VoiceNoteSend, accept_call_with_protocol, add_chat_to_list, add_chat_to_list_value,
+    AnimationSend, CallPrivacySetting, GroupCallJoinParams, InputGroupCallRef, MessageSenderRef,
+    PollSend, PrivacyWho, SetTdlibParameters, StickerSend, VideoNoteSend, VideoNoteThumbnailSend,
+    VideoSend, VoiceNoteSend, accept_call_with_protocol, add_chat_to_list, add_chat_to_list_value,
     add_contact, add_message_reaction, add_recently_found_chat, ban_group_call_participants,
     chat_member_status_administrator_json, chat_member_status_member_json,
     check_authentication_code, check_authentication_password, click_chat_sponsored_message,
@@ -54,22 +54,23 @@ use crate::telegram::requests::{
     get_saved_notification_sounds, get_scope_notification_settings, get_secret_chat,
     get_sticker_set, get_story, get_story_available_reactions, get_supergroup,
     get_supergroup_full_info, get_supergroup_members, get_user_full_info,
-    get_video_chat_invite_link, get_video_chat_rtmp_url, input_message_photo, input_message_video,
-    invite_group_call_participant, join_chat, join_group_call, join_video_chat, leave_chat,
-    leave_group_call, load_active_stories, load_chats, load_chats_list,
-    load_group_call_participants, open_chat, open_message_content, open_story, pin_chat_message,
-    process_chat_join_request, remove_message_reaction, reorder_chat_folders,
-    replace_video_chat_rtmp_url, report_chat_sponsored_message, revoke_chat_invite_link,
-    revoke_group_call_invite_link, search_chat_messages, search_chats, search_messages,
-    search_public_chats, search_recently_found_chats, send_animation, send_call_debug_information,
-    send_call_rating, send_call_signaling_data, send_chat_action, send_chat_action_kind,
+    get_user_privacy_setting_rules, get_video_chat_invite_link, get_video_chat_rtmp_url,
+    input_message_photo, input_message_video, invite_group_call_participant, join_chat,
+    join_group_call, join_video_chat, leave_chat, leave_group_call, load_active_stories,
+    load_chats, load_chats_list, load_group_call_participants, open_chat, open_message_content,
+    open_story, pin_chat_message, process_chat_join_request, remove_message_reaction,
+    reorder_chat_folders, replace_video_chat_rtmp_url, report_chat_sponsored_message,
+    revoke_chat_invite_link, revoke_group_call_invite_link, search_call_messages,
+    search_chat_messages, search_chats, search_messages, search_public_chats,
+    search_recently_found_chats, send_animation, send_call_debug_information, send_call_log,
+    send_call_rating_detail, send_call_signaling_data, send_chat_action, send_chat_action_kind,
     send_document, send_group_call_message, send_message_album, send_photo, send_poll,
     send_sticker, send_text, send_text_story_reply, send_video, send_video_note, send_voice_note,
     set_authentication_phone_number, set_chat_draft_message, set_chat_member_status,
     set_chat_message_auto_delete_time, set_chat_notification_settings, set_chat_slow_mode_delay,
     set_group_call_participant_volume_level, set_poll_answer, set_scope_notification_settings,
-    set_story_reaction, set_video_chat_title, start_group_call_recording,
-    start_group_call_screen_sharing, start_scheduled_video_chat,
+    set_story_reaction, set_user_privacy_setting_rules, set_video_chat_title,
+    start_group_call_recording, start_group_call_screen_sharing, start_scheduled_video_chat,
     supergroup_members_filter_recent_json, supergroup_members_filter_search_json,
     toggle_chat_folder_tags, toggle_group_call_are_messages_allowed,
     toggle_group_call_is_my_video_enabled, toggle_group_call_is_my_video_paused,
@@ -2360,7 +2361,15 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// Phase C1: `sendCallRating` for the last ended call (the 1–5
     /// rating card, `callStateDiscarded.need_rating`). Marks the summary
     /// so the card can show "Thanks" while the `ok` confirms.
-    pub fn send_call_rating(&mut self, rating: i32) -> Result<RequestId, ConnectSendError> {
+    /// Phase C2i: `sendCallRating` with problems + comment (schema
+    /// 1.8.67 :14234). `problems` are `CallProblem` constructor names
+    /// (`callProblemEcho`, …).
+    pub fn send_call_rating(
+        &mut self,
+        rating: i32,
+        comment: &str,
+        problems: &[&str],
+    ) -> Result<RequestId, ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
@@ -2368,12 +2377,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             Some(summary) if summary.need_rating && !summary.rating_sent => summary.call_id,
             _ => return Err(ConnectSendError::InvalidRequest),
         };
-        let rating = rating.clamp(1, 5);
         let extra = self.session.request(RequestPurpose::SendCallRating, None);
-        if let Err(err) = self
-            .sender
-            .send_json(&send_call_rating(extra, call_id, rating))
-        {
+        if let Err(err) = self.sender.send_json(&send_call_rating_detail(
+            extra, call_id, rating, comment, problems,
+        )) {
             self.session.requests.take(extra);
             return Err(err);
         }
@@ -2390,6 +2397,15 @@ impl<S: JsonSender> ConnectDriver<S> {
             .as_ref()
             .filter(|summary| summary.need_debug_information && !summary.debug_information_sent)
             .ok_or(ConnectSendError::InvalidRequest)?;
+        Ok(self.call_log_payload(summary).to_string())
+    }
+
+    /// Phase C2i: the local call-log payload shared by
+    /// `sendCallDebugInformation` (inline text) and `sendCallLog` (the
+    /// same text as a file). The honest local record: app/engine
+    /// identity, call outcome, transport states — never invented media
+    /// stats.
+    fn call_log_payload(&self, summary: &crate::state::CallSummary) -> serde_json::Value {
         let engine_available = self
             .call_engine
             .as_ref()
@@ -2429,7 +2445,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 "library_versions": protocol.library_versions,
             });
         }
-        Ok(payload.to_string())
+        payload
     }
 
     /// Phase C2d: upload real local call diagnostics for the last discarded
@@ -2470,6 +2486,143 @@ impl<S: JsonSender> ConnectDriver<S> {
             summary.debug_information_sent = true;
             summary.debug_information_error = None;
         }
+        Ok(extra)
+    }
+
+    /// Phase C2i: `sendCallLog` (schema 1.8.67 :14240) — uploads the
+    /// ended call's log file. The file is the local diagnostics
+    /// payload written under the account's exports dir (schema allows
+    /// only `inputFileLocal` / `inputFileGenerated`).
+    pub fn send_call_log(&mut self) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let summary = self
+            .session
+            .call_summary
+            .as_ref()
+            .filter(|s| s.need_log && !s.log_sent)
+            .ok_or(ConnectSendError::InvalidRequest)?;
+        let log_text = self.call_log_payload(summary).to_string();
+        let call_id = summary.call_id;
+        let path = self.paths.exports.join(format!("call-{call_id}.log"));
+        std::fs::create_dir_all(&self.paths.exports).map_err(|_| ConnectSendError::Native)?;
+        std::fs::write(&path, log_text).map_err(|_| ConnectSendError::Native)?;
+        let extra = self.session.request(RequestPurpose::SendCallLog, None);
+        let path_str = path.to_string_lossy().into_owned();
+        if let Err(err) = self
+            .sender
+            .send_json(&send_call_log(extra, call_id, &path_str))
+        {
+            self.session.requests.take(extra);
+            if let Some(summary) = self.session.call_summary.as_mut() {
+                summary.log_error = Some("Could not upload the call log".into());
+            }
+            return Err(err);
+        }
+        Ok(extra)
+    }
+
+    /// Phase C2i: `searchCallMessages` (schema 1.8.67 :11903) — first
+    /// page of the server-side recent-calls list. Called when the
+    /// Recent-calls tab opens.
+    pub fn fetch_call_history(&mut self) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        self.session.recent_calls.clear();
+        self.session.recent_calls_offset.clear();
+        self.session.recent_calls_error = false;
+        self.fetch_call_history_page()
+    }
+
+    /// Phase C2i: next `searchCallMessages` page, continuing from the
+    /// stored `next_offset`.
+    pub fn fetch_more_call_history(&mut self) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        self.fetch_call_history_page()
+    }
+
+    fn fetch_call_history_page(&mut self) -> Result<RequestId, ConnectSendError> {
+        if self.session.recent_calls_loading {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::SearchCallMessages, None);
+        let offset = self.session.recent_calls_offset.clone();
+        if let Err(err) = self
+            .sender
+            .send_json(&search_call_messages(extra, &offset, 40))
+        {
+            self.session.requests.take(extra);
+            self.session.recent_calls_error = true;
+            return Err(err);
+        }
+        self.session.recent_calls_loading = true;
+        Ok(extra)
+    }
+
+    /// Phase C2i: fetch both call privacy settings
+    /// (`userPrivacySettingAllowCalls` /
+    /// `userPrivacySettingAllowPeerToPeerCalls`, schema 1.8.67
+    /// :15620).
+    pub fn fetch_call_privacy(&mut self) -> Result<(), ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        self.session.call_privacy_loading = true;
+        self.session.call_privacy_error = false;
+        for setting in [
+            CallPrivacySetting::AllowCalls,
+            CallPrivacySetting::PeerToPeer,
+        ] {
+            let extra = self
+                .session
+                .request(RequestPurpose::GetCallPrivacyRules { setting }, None);
+            if let Err(err) = self
+                .sender
+                .send_json(&get_user_privacy_setting_rules(extra, setting))
+            {
+                self.session.requests.take(extra);
+                self.session.call_privacy_loading = false;
+                self.session.call_privacy_error = true;
+                return Err(err);
+            }
+        }
+        Ok(())
+    }
+
+    /// Phase C2i: change a call privacy setting (schema 1.8.67
+    /// :15617). Applied optimistically; the `ok` / error response
+    /// confirms or clears it.
+    pub fn set_call_privacy(
+        &mut self,
+        setting: CallPrivacySetting,
+        who: PrivacyWho,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::SetCallPrivacyRules { setting }, None);
+        if let Err(err) = self
+            .sender
+            .send_json(&set_user_privacy_setting_rules(extra, setting, who))
+        {
+            self.session.requests.take(extra);
+            self.session.call_privacy_loading = false;
+            self.session.call_privacy_error = true;
+            return Err(err);
+        }
+        match setting {
+            CallPrivacySetting::AllowCalls => self.session.call_privacy_allow_calls = Some(who),
+            CallPrivacySetting::PeerToPeer => self.session.call_privacy_p2p = Some(who),
+        }
+        self.session.call_privacy_loading = true;
         Ok(extra)
     }
 
@@ -3575,12 +3728,17 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// Phase C1: drain `Session::call_busy_decline_queue` — incoming
     /// calls that arrived while another call was active are declined
     /// (busy) with `discardCall`. Called from `ingest`.
+    /// Phase C2i: the declined peer is recorded in
+    /// `Session::call_busy_declined` so the UI can say so honestly
+    /// instead of declining silently (TDLib has no hold/swap API —
+    /// hold-and-answer is not possible).
     fn maybe_decline_busy_calls(&mut self) -> Result<(), ConnectSendError> {
         if !self.chats_path_active() {
             return Ok(());
         }
-        let queued: Vec<(i32, bool)> = std::mem::take(&mut self.session.call_busy_decline_queue);
-        for (call_id, is_video) in queued {
+        let queued: Vec<(i32, i64, bool)> =
+            std::mem::take(&mut self.session.call_busy_decline_queue);
+        for (call_id, user_id, is_video) in queued {
             let extra = self.session.request(RequestPurpose::DiscardCall, None);
             if let Err(err) = self
                 .sender
@@ -3588,6 +3746,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             {
                 self.session.requests.take(extra);
                 return Err(err);
+            }
+            // ponytail: cap the banner list — it is drained by the UI.
+            if self.session.call_busy_declined.len() < 4 {
+                self.session.call_busy_declined.push((user_id, is_video));
             }
         }
         Ok(())
@@ -7397,6 +7559,10 @@ pub fn start_live_connect(
     let sender = LiveSender::from_live(&live);
     let bridge = ReceiveBridge::spawn_live(live.api.clone(), diagnostics.clone());
     let session = Session::new(prepared.account.clone(), diagnostics.clone());
+    // Phase C2i: local call prefs (confirm-before-calling, less-data)
+    // are loaded once here; the UI saves them back on toggle.
+    let mut session = session;
+    session.call_prefs = load_call_prefs(&prepared.paths);
     let mut driver = ConnectDriver::new(session, sender, credentials, prepared);
     match crate::calls::engine::NtgcallsEngine::load() {
         Ok(engine) => {
@@ -7423,6 +7589,14 @@ pub fn start_live_connect(
         bridge,
         _live: live,
     })
+}
+
+impl<S: JsonSender> ConnectDriver<S> {
+    /// Phase C2i: persist the call preferences edited from the Calls
+    /// tab (same account-scoped dir as the other settings files).
+    pub fn save_call_prefs(&mut self) -> std::io::Result<()> {
+        save_call_prefs(&self.paths, &self.session.call_prefs)
+    }
 }
 
 #[cfg(test)]

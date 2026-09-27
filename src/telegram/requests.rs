@@ -897,18 +897,7 @@ pub fn discard_call(
 /// The simple rating card sends no comment and no problem list (the
 /// per-problem checklist is a documented follow-up).
 pub fn send_call_rating(extra: RequestId, call_id: i32, rating: i32) -> String {
-    json!({
-        "@type": "sendCallRating",
-        "@extra": extra.as_extra(),
-        "call_id": {
-            "@type": "inputCallDiscarded",
-            "call_id": call_id,
-        },
-        "rating": rating,
-        "comment": "",
-        "problems": [],
-    })
-    .to_string()
+    send_call_rating_detail(extra, call_id, rating, "", &[])
 }
 
 /// Phase C2d: `sendCallDebugInformation` (TDLib 1.8.67,
@@ -927,6 +916,174 @@ pub fn send_call_debug_information(
             "call_id": call_id,
         },
         "debug_information": debug_information,
+    })
+    .to_string()
+}
+
+/// Phase C2i: `sendCallRating` with the full detail (TDLib 1.8.67,
+/// `schema/td_api.tl:14234`):
+/// `sendCallRating call_id:InputCall rating:int32 comment:string
+/// problems:vector<CallProblem> = Ok;`
+/// "comment: An optional user comment if the rating is less than 5;
+/// problems: List of the exact types of problems with the call,
+/// specified by the user". `problems` are `CallProblem` constructor
+/// names (`callProblemEcho`, …, schema `:7253`-`:7277`); the call has
+/// ended so it is identified with `inputCallDiscarded` (:7043).
+pub fn send_call_rating_detail(
+    extra: RequestId,
+    call_id: i32,
+    rating: i32,
+    comment: &str,
+    problems: &[&str],
+) -> String {
+    json!({
+        "@type": "sendCallRating",
+        "@extra": extra.as_extra(),
+        "call_id": {
+            "@type": "inputCallDiscarded",
+            "call_id": call_id,
+        },
+        "rating": rating.clamp(1, 5),
+        "comment": comment,
+        "problems": problems.iter().map(|name| json!({"@type": name})).collect::<Vec<_>>(),
+    })
+    .to_string()
+}
+
+/// Phase C2i: `sendCallLog` (TDLib 1.8.67, `schema/td_api.tl:14240`):
+/// `sendCallLog call_id:InputCall log_file:InputFile = Ok;`
+/// "Only inputFileLocal and inputFileGenerated are supported".
+pub fn send_call_log(extra: RequestId, call_id: i32, log_path: &str) -> String {
+    json!({
+        "@type": "sendCallLog",
+        "@extra": extra.as_extra(),
+        "call_id": {
+            "@type": "inputCallDiscarded",
+            "call_id": call_id,
+        },
+        "log_file": {
+            "@type": "inputFileLocal",
+            "path": log_path,
+        },
+    })
+    .to_string()
+}
+
+/// Phase C2i: `searchCallMessages` (TDLib 1.8.67,
+/// `schema/td_api.tl:11903`): "Searches for call and group call
+/// messages. Returns the results in reverse chronological order".
+/// `searchCallMessages offset:string limit:int32 only_missed:Bool =
+/// FoundMessages;`
+pub fn search_call_messages(extra: RequestId, offset: &str, limit: i32) -> String {
+    json!({
+        "@type": "searchCallMessages",
+        "@extra": extra.as_extra(),
+        "offset": offset,
+        "limit": limit,
+        "only_missed": false,
+    })
+    .to_string()
+}
+
+/// Phase C2i: which call privacy setting a request targets —
+/// `userPrivacySettingAllowCalls` (who can call me, schema 1.8.67
+/// `:9006`) or `userPrivacySettingAllowPeerToPeerCalls` (P2P relay,
+/// `:9009`). Both are standard privacy settings (Telegram X lists
+/// both in its privacy screen).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CallPrivacySetting {
+    AllowCalls,
+    PeerToPeer,
+}
+
+impl CallPrivacySetting {
+    pub fn td_type(self) -> &'static str {
+        match self {
+            CallPrivacySetting::AllowCalls => "userPrivacySettingAllowCalls",
+            CallPrivacySetting::PeerToPeer => "userPrivacySettingAllowPeerToPeerCalls",
+        }
+    }
+}
+
+/// Phase C2i: Everybody / Contacts / Nobody mapping for the two call
+/// privacy settings. Telegram clients expose these as rule lists;
+/// the three simple cases are `[AllowAll]`, `[AllowContacts]`,
+/// `[RestrictAll]` (schema 1.8.67, `:8943`-`:8964`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PrivacyWho {
+    Everybody,
+    Contacts,
+    Nobody,
+}
+
+impl PrivacyWho {
+    /// The `userPrivacySettingRules` JSON for this choice.
+    pub fn rules(self) -> Vec<Value> {
+        let name = match self {
+            PrivacyWho::Everybody => "userPrivacySettingRuleAllowAll",
+            PrivacyWho::Contacts => "userPrivacySettingRuleAllowContacts",
+            PrivacyWho::Nobody => "userPrivacySettingRuleRestrictAll",
+        };
+        vec![json!({"@type": name})]
+    }
+
+    /// Map server-returned rule constructor names back to the simple
+    /// choice; `None` when the account has mixed/custom rules the
+    /// three-option UI cannot represent.
+    pub fn from_rule_names(names: &[String]) -> Option<Self> {
+        if names.iter().any(|n| n == "userPrivacySettingRuleAllowAll") {
+            Some(PrivacyWho::Everybody)
+        } else if names
+            .iter()
+            .any(|n| n == "userPrivacySettingRuleRestrictAll")
+        {
+            Some(PrivacyWho::Nobody)
+        } else if names
+            .iter()
+            .any(|n| n == "userPrivacySettingRuleAllowContacts")
+        {
+            Some(PrivacyWho::Contacts)
+        } else {
+            None
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            PrivacyWho::Everybody => "Everybody",
+            PrivacyWho::Contacts => "My contacts",
+            PrivacyWho::Nobody => "Nobody",
+        }
+    }
+}
+
+/// Phase C2i: `getUserPrivacySettingRules` (TDLib 1.8.67,
+/// `schema/td_api.tl:15620`): "Returns the current privacy settings".
+/// `getUserPrivacySettingRules setting:UserPrivacySetting =
+/// UserPrivacySettingRules;`
+pub fn get_user_privacy_setting_rules(extra: RequestId, setting: CallPrivacySetting) -> String {
+    json!({
+        "@type": "getUserPrivacySettingRules",
+        "@extra": extra.as_extra(),
+        "setting": {"@type": setting.td_type()},
+    })
+    .to_string()
+}
+
+/// Phase C2i: `setUserPrivacySettingRules` (TDLib 1.8.67,
+/// `schema/td_api.tl:15617`): "Changes user privacy settings".
+/// `setUserPrivacySettingRules setting:UserPrivacySetting
+/// rules:userPrivacySettingRules = Ok;`
+pub fn set_user_privacy_setting_rules(
+    extra: RequestId,
+    setting: CallPrivacySetting,
+    who: PrivacyWho,
+) -> String {
+    json!({
+        "@type": "setUserPrivacySettingRules",
+        "@extra": extra.as_extra(),
+        "setting": {"@type": setting.td_type()},
+        "rules": {"@type": "userPrivacySettingRules", "rules": who.rules()},
     })
     .to_string()
 }
@@ -4689,6 +4846,109 @@ mod channel_requests_tests {
         assert_eq!(v["rating"], 5);
         assert_eq!(v["comment"], "");
         assert_eq!(v["problems"].as_array().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn call_history_and_settings_shapes_match_1_8_67() {
+        // Phase C2i: `searchCallMessages offset:string limit:int32
+        // only_missed:Bool = FoundMessages` (schema 1.8.67 line 11903).
+        let v: serde_json::Value =
+            serde_json::from_str(&search_call_messages(RequestId(10), "", 40)).unwrap();
+        assert_eq!(v["@type"], "searchCallMessages");
+        assert_eq!(v["offset"], "");
+        assert_eq!(v["limit"], 40);
+        assert_eq!(v["only_missed"], false);
+
+        // Phase C2i: full rating detail — `sendCallRating
+        // call_id:InputCall rating:int32 comment:string
+        // problems:vector<CallProblem> = Ok` (schema 1.8.67 line 14234).
+        let v: serde_json::Value = serde_json::from_str(&send_call_rating_detail(
+            RequestId(11),
+            77,
+            2,
+            "robotic voice",
+            &["callProblemEcho", "callProblemDistortedSpeech"],
+        ))
+        .unwrap();
+        assert_eq!(v["@type"], "sendCallRating");
+        assert_eq!(v["call_id"]["@type"], "inputCallDiscarded");
+        assert_eq!(v["rating"], 2);
+        assert_eq!(v["comment"], "robotic voice");
+        let problems = v["problems"].as_array().unwrap();
+        assert_eq!(problems.len(), 2);
+        assert_eq!(problems[0]["@type"], "callProblemEcho");
+        assert_eq!(problems[1]["@type"], "callProblemDistortedSpeech");
+
+        // Phase C2i: `sendCallLog call_id:InputCall log_file:InputFile
+        // = Ok` (schema 1.8.67 line 14240); only inputFileLocal /
+        // inputFileGenerated are supported.
+        let v: serde_json::Value =
+            serde_json::from_str(&send_call_log(RequestId(12), 77, "/tmp/quill-call-77.log"))
+                .unwrap();
+        assert_eq!(v["@type"], "sendCallLog");
+        assert_eq!(v["call_id"]["@type"], "inputCallDiscarded");
+        assert_eq!(v["log_file"]["@type"], "inputFileLocal");
+        assert_eq!(v["log_file"]["path"], "/tmp/quill-call-77.log");
+
+        // Phase C2i: `getUserPrivacySettingRules
+        // setting:UserPrivacySetting = UserPrivacySettingRules` (schema
+        // 1.8.67 line 15620); `userPrivacySettingAllowCalls` (:9006).
+        let v: serde_json::Value = serde_json::from_str(&get_user_privacy_setting_rules(
+            RequestId(13),
+            CallPrivacySetting::AllowCalls,
+        ))
+        .unwrap();
+        assert_eq!(v["@type"], "getUserPrivacySettingRules");
+        assert_eq!(v["setting"]["@type"], "userPrivacySettingAllowCalls");
+        let v: serde_json::Value = serde_json::from_str(&get_user_privacy_setting_rules(
+            RequestId(14),
+            CallPrivacySetting::PeerToPeer,
+        ))
+        .unwrap();
+        assert_eq!(
+            v["setting"]["@type"],
+            "userPrivacySettingAllowPeerToPeerCalls"
+        );
+
+        // Phase C2i: `setUserPrivacySettingRules
+        // setting:UserPrivacySetting rules:userPrivacySettingRules = Ok`
+        // (schema 1.8.67 line 15617); Nobody =
+        // `[userPrivacySettingRuleRestrictAll]` (:8961).
+        let v: serde_json::Value = serde_json::from_str(&set_user_privacy_setting_rules(
+            RequestId(15),
+            CallPrivacySetting::AllowCalls,
+            PrivacyWho::Nobody,
+        ))
+        .unwrap();
+        assert_eq!(v["@type"], "setUserPrivacySettingRules");
+        assert_eq!(v["setting"]["@type"], "userPrivacySettingAllowCalls");
+        assert_eq!(v["rules"]["@type"], "userPrivacySettingRules");
+        let rules = v["rules"]["rules"].as_array().unwrap();
+        assert_eq!(rules.len(), 1);
+        assert_eq!(rules[0]["@type"], "userPrivacySettingRuleRestrictAll");
+
+        // Everybody / Contacts map to AllowAll / AllowContacts; server
+        // rule names map back, mixed/custom rules map to None.
+        assert_eq!(
+            PrivacyWho::Everybody.rules()[0]["@type"],
+            "userPrivacySettingRuleAllowAll"
+        );
+        assert_eq!(
+            PrivacyWho::Contacts.rules()[0]["@type"],
+            "userPrivacySettingRuleAllowContacts"
+        );
+        assert_eq!(
+            PrivacyWho::from_rule_names(&["userPrivacySettingRuleAllowContacts".to_string()]),
+            Some(PrivacyWho::Contacts)
+        );
+        assert_eq!(
+            PrivacyWho::from_rule_names(&[
+                "userPrivacySettingRuleAllowUsers".to_string(),
+                "userPrivacySettingRuleRestrictAll".to_string()
+            ]),
+            Some(PrivacyWho::Nobody)
+        );
+        assert_eq!(PrivacyWho::from_rule_names(&[]), None);
     }
 
     #[test]

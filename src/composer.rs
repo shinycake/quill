@@ -189,6 +189,8 @@ impl ComposerEdit {
             | MessageContent::ChatTtlChanged { .. }
             // Phase C2f: group-call invitations are not editable.
             | MessageContent::GroupCallInvitation { .. }
+            // Phase C2i: call entries are not editable.
+            | MessageContent::Call { .. }
             | MessageContent::Unsupported { .. } => return None,
         };
         Some(Self {

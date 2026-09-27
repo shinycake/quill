@@ -2605,7 +2605,7 @@ fn replay_call_signaling_lifecycle() {
         ],
     );
     assert_eq!(session.active_call.as_ref().expect("still call 77").id, 77);
-    assert_eq!(session.call_busy_decline_queue, vec![(78, false)]);
+    assert_eq!(session.call_busy_decline_queue, vec![(78, 42, false)]);
 
     // Keys exchange, then Ready; signaling data is queued honestly.
     apply_all_seq(
@@ -2781,7 +2781,7 @@ fn replay_video_call_signaling() {
         ],
     );
     assert_eq!(session.active_call.as_ref().expect("still call 90").id, 90);
-    assert_eq!(session.call_busy_decline_queue, vec![(91, true)]);
+    assert_eq!(session.call_busy_decline_queue, vec![(91, 42, true)]);
 
     // Remote hangup → the summary keeps `is_video: true` (the driver
     // sends it back in `discardCall`).

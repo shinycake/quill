@@ -35,6 +35,7 @@ use quill::playback::PlaybackClock;
 use quill::poll::{
     POLL_OPTIONS_MAX, POLL_OPTIONS_MIN, PollDraft, poll_bar_fraction, voter_count_label,
 };
+use quill::settings::CallPrefs;
 use quill::state::{
     ActiveCall, ActiveGroupCall, AdminListFetch, AdminRightsFetch, CallSummary, ChatEventLogFetch,
     ChatSearchJump, ChatStatisticsFetch, ChatSummary, ContactRow, ForwardResult, HistoryMessage,
@@ -45,18 +46,19 @@ use quill::state::{
 use quill::story_viewer::{StoryViewer, StoryViewerItem, StoryViewerKind, collect_story_items};
 use quill::telegram::client::copy_and_parse;
 use quill::telegram::envelope::{
-    AuthorizationState, BotInfo, CallState, CallbackQueryAnswer, ChannelMemberStatus,
-    ChatAdminRights, ChatAdministratorEntry, ChatDraft, ChatEventAction, ChatFolderInfo,
-    ChatFolderSpec, ChatKind, ChatList, ChatNotificationSettings, ChatStatistics,
+    AuthorizationState, BotInfo, CallDiscardReason, CallState, CallbackQueryAnswer,
+    ChannelMemberStatus, ChatAdminRights, ChatAdministratorEntry, ChatDraft, ChatEventAction,
+    ChatFolderInfo, ChatFolderSpec, ChatKind, ChatList, ChatNotificationSettings, ChatStatistics,
     DEFAULT_EMOJI_REACTIONS, ForumTopic, InlineKeyboardButton, InlineKeyboardButtonStyle,
     InlineKeyboardButtonType, MUTE_FOR_1_HOUR, MUTE_FOR_2_DAYS, MUTE_FOR_8_HOURS, MUTE_FOREVER,
     MessageContent, MessageInteractionInfo, MessageSender, NotificationSettingsScope,
-    NotificationSound, ParsedChatEvent, ParsedFile, ParsedGroupCallParticipant, ParsedSecretChat,
-    ParsedStory, PollContent, PollOption, PollType, ScopeNotificationSettings, SecretChatState,
-    SponsoredMessage, StatisticalGraph, StatisticalValue, chat_ttl_service_label,
-    format_ttl_setting, toggle_chosen_emoji_reaction,
+    NotificationSound, ParsedChatEvent, ParsedFile, ParsedGroupCallParticipant, ParsedMessage,
+    ParsedSecretChat, ParsedStory, PollContent, PollOption, PollType, ScopeNotificationSettings,
+    SecretChatState, SponsoredMessage, StatisticalGraph, StatisticalValue, call_entry_label,
+    chat_ttl_service_label, format_ttl_setting, toggle_chosen_emoji_reaction,
 };
 use quill::telegram::requests::SelfDestructSend;
+use quill::telegram::requests::{CallPrivacySetting, PrivacyWho};
 use quill::text::{TextEntity, styled_runs, utf8_to_utf16_offset};
 use quill::voice::{self, VoiceCapture, format_voice_duration};
 use smallvec::SmallVec;
@@ -635,6 +637,40 @@ pub struct FolderDeleteConfirm {
     leave_with_folder: bool,
 }
 
+/// Phase C2i: rating-detail draft for the call-end card. `problems` is
+/// indexed by `CALL_PROBLEMS` (schema 1.8.67, `:7253`-`:7277`).
+pub struct RatingDetail {
+    stars: i32,
+    problems: [bool; 9],
+}
+
+/// Phase C2i: the nine `CallProblem` constructors (TDLib 1.8.67,
+/// `schema/td_api.tl:7253`-`:7277`) with their schema descriptions,
+/// in schema order. Index-aligned with `RatingDetail::problems`.
+pub const CALL_PROBLEMS: [(&str, &str); 9] = [
+    ("callProblemEcho", "Echo — I heard my own voice"),
+    ("callProblemNoise", "Noise — background noise"),
+    (
+        "callProblemInterruptions",
+        "Interruptions — the other side kept disappearing",
+    ),
+    ("callProblemDistortedSpeech", "Distorted speech"),
+    (
+        "callProblemSilentLocal",
+        "Silent — I couldn't hear the other side",
+    ),
+    (
+        "callProblemSilentRemote",
+        "Silent — the other side couldn't hear me",
+    ),
+    (
+        "callProblemDropped",
+        "Dropped — the call ended unexpectedly",
+    ),
+    ("callProblemDistortedVideo", "Distorted video"),
+    ("callProblemPixelatedVideo", "Pixelated video"),
+];
+
 pub struct QuillApp {
     chat: Entity<SyntheticChat>,
     composer: Entity<TextareaState>,
@@ -882,6 +918,19 @@ pub struct QuillApp {
     /// Phase 6: sidebar tab — `true` shows the contacts list instead of
     /// the chat list.
     contacts_tab_open: bool,
+    /// Phase C2i: sidebar tab — `true` shows the recent-calls list +
+    /// call settings instead of the chat list. Mutually exclusive with
+    /// `contacts_tab_open`.
+    calls_tab_open: bool,
+    /// Phase C2i: pending "call again" / profile-call confirmation when
+    /// the confirm-before-calling pref is on: `(user_id, is_video)`.
+    call_confirm: Option<(i64, bool)>,
+    /// Phase C2i: rating detail draft for the call-end card — the star
+    /// tap opens the problems checklist + comment field instead of
+    /// sending immediately.
+    rating_detail: Option<RatingDetail>,
+    /// Phase C2i: comment input for the rating detail card.
+    rating_comment_input: Entity<TextareaState>,
     /// Phase 7.1: selected folder tab (`None` = Main). Folder membership
     /// comes from chat positions (`chatListFolder`); the tab only filters.
     folder_tab: Option<i32>,
@@ -1158,6 +1207,10 @@ pub enum ScreenshotDemo {
     /// indicator live, RTMP URL + key fetched, and two in-call chat
     /// messages with the composer.
     ReadyGroupCallManage,
+    /// Phase C2i: Recent-calls tab — server-side `searchCallMessages`
+    /// history (missed / declined / answered) + call settings
+    /// (injected, no live Telegram).
+    ReadyCallsSettings,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1239,6 +1292,13 @@ impl QuillApp {
                 .placeholder("Message the voice chat — Enter sends")
                 .auto_grow(1, 3)
                 .submit_on_enter(true)
+        });
+        // Phase C2i: comment field for the call-rating detail card.
+        let rating_comment_input = cx.new(|cx| {
+            TextareaState::new(window, cx)
+                .placeholder("What went wrong? (optional)")
+                .auto_grow(1, 3)
+                .submit_on_enter(false)
         });
         let phone_input = cx.new(|cx| {
             TextareaState::new(window, cx)
@@ -2050,6 +2110,16 @@ impl QuillApp {
                     AuthorizationState::Ready,
                 )
             }
+            Some(ScreenshotDemo::ReadyCallsSettings) => {
+                demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
+                (
+                    ConnectUiStatus::DemoReadyChats,
+                    None,
+                    "screenshot demo — recent calls + call settings (injected, no live Telegram)"
+                        .into(),
+                    AuthorizationState::Ready,
+                )
+            }
             None => bootstrap_connect(credentials),
         };
 
@@ -2221,6 +2291,10 @@ impl QuillApp {
             story_reaction_picker_open: false,
             story_reply_open: false,
             contacts_tab_open: false,
+            calls_tab_open: false,
+            call_confirm: None,
+            rating_detail: None,
+            rating_comment_input,
             folder_tab: None,
             folder_manage_open: false,
             folder_editor: None,
@@ -2688,6 +2762,19 @@ impl QuillApp {
             }
             app.status_note =
                 "screenshot demo — voice chat management: title, invite link, recording, RTMP, chat (injected, no live Telegram)"
+                    .into();
+        }
+        // Phase C2i: Recent-calls tab with injected `foundMessages`
+        // (through the real reducer), privacy values, and the
+        // confirm-before-calling pref on.
+        if matches!(demo, Some(ScreenshotDemo::ReadyCallsSettings)) {
+            if let Some(session) = app.demo_session.as_mut() {
+                app.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_calls_settings(session, &app.demo_sink, &app.demo_seq);
+            }
+            app.calls_tab_open = true;
+            app.status_note =
+                "screenshot demo — recent calls + call settings (injected, no live Telegram)"
                     .into();
         }
         if matches!(demo, Some(ScreenshotDemo::ReadyVideoSend)) {
@@ -3817,6 +3904,7 @@ impl QuillApp {
                         | MessageContent::Contact(_)
                         | MessageContent::Dice(_)
                         | MessageContent::GroupCallInvitation { .. }
+                        | MessageContent::Call { .. }
                         | MessageContent::ChatTtlChanged { .. }
                         | MessageContent::Unsupported { .. } => {}
                     }
@@ -4684,7 +4772,25 @@ impl QuillApp {
     /// The outgoing call is tracked once the `callId` answer arrives
     /// (with `is_video` derived from the request args); its states
     /// arrive as `updateCall`.
+    /// Phase C2i: preference-aware entry point for starting a call
+    /// from a profile / user panel / history row. When the
+    /// confirm-before-calling pref is on, the call waits for the user
+    /// to confirm in the dialog — the actual `startCall` goes through
+    /// `dial_user`.
     fn start_call_for_user(&mut self, user_id: i64, is_video: bool, cx: &mut Context<Self>) {
+        if self
+            .session()
+            .is_some_and(|session| session.call_prefs.confirm_before_calling)
+        {
+            self.call_confirm = Some((user_id, is_video));
+            cx.notify();
+            return;
+        }
+        self.dial_user(user_id, is_video, cx);
+    }
+
+    /// Phase C2i: the actual `startCall` send, after any confirmation.
+    fn dial_user(&mut self, user_id: i64, is_video: bool, cx: &mut Context<Self>) {
         if self.live.is_some() {
             let result = self
                 .live
@@ -4706,6 +4812,57 @@ impl QuillApp {
             self.status_note = "demo: call start (no live Telegram)".into();
         }
         cx.notify();
+    }
+
+    /// Phase C2i: the user confirmed the pending call in the
+    /// confirm-before-calling dialog.
+    fn confirm_pending_call(&mut self, cx: &mut Context<Self>) {
+        if let Some((user_id, is_video)) = self.call_confirm.take() {
+            self.dial_user(user_id, is_video, cx);
+        } else {
+            cx.notify();
+        }
+    }
+
+    /// Phase C2i: the user cancelled the pending call in the
+    /// confirm-before-calling dialog.
+    fn cancel_pending_call(&mut self, cx: &mut Context<Self>) {
+        self.call_confirm = None;
+        cx.notify();
+    }
+
+    /// Phase C2i: update one call pref in the session and persist it
+    /// to the account dir (via `CallDriver::save_call_prefs`).
+    fn set_call_pref(&mut self, update: impl FnOnce(&mut CallPrefs), cx: &mut Context<Self>) {
+        let mut prefs = self
+            .session()
+            .map(|session| session.call_prefs.clone())
+            .unwrap_or_default();
+        update(&mut prefs);
+        if let Some(live) = self.live.as_mut() {
+            live.driver.session.call_prefs = prefs;
+            if let Err(err) = live.driver.save_call_prefs() {
+                self.status_note = format!("couldn’t save call settings: {err}");
+            }
+        } else if let Some(demo) = self.demo_session.as_mut() {
+            demo.call_prefs = prefs;
+            self.status_note = "demo: call settings are not saved".into();
+        }
+        cx.notify();
+    }
+
+    fn toggle_call_pref_confirm(&mut self, cx: &mut Context<Self>) {
+        self.set_call_pref(
+            |prefs| prefs.confirm_before_calling = !prefs.confirm_before_calling,
+            cx,
+        );
+    }
+
+    fn toggle_call_pref_less_data(&mut self, cx: &mut Context<Self>) {
+        self.set_call_pref(
+            |prefs| prefs.less_data_for_calls = !prefs.less_data_for_calls,
+            cx,
+        );
     }
 
     fn toggle_call_mute(&mut self, cx: &mut Context<Self>) {
@@ -4846,15 +5003,53 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// Phase C1: `sendCallRating` from the call-end rating card.
-    fn rate_last_call(&mut self, rating: i32, cx: &mut Context<Self>) {
+    /// Phase C2i: star tap opens the rating-detail editor instead of
+    /// sending immediately — the user picks problems + an optional
+    /// comment, then submits via `submit_call_rating`.
+    fn open_rating_detail(&mut self, rating: i32, window: &mut Window, cx: &mut Context<Self>) {
+        self.rating_detail = Some(RatingDetail {
+            stars: rating,
+            problems: [false; 9],
+        });
+        self.rating_comment_input.update(cx, |input, cx| {
+            input.set_value("", window, cx);
+        });
+        cx.notify();
+    }
+
+    fn toggle_rating_problem(&mut self, index: usize, cx: &mut Context<Self>) {
+        if let Some(detail) = self.rating_detail.as_mut() {
+            detail.problems[index] = !detail.problems[index];
+        }
+        cx.notify();
+    }
+
+    /// Phase C2i: `sendCallRating` with problems + comment (schema
+    /// 1.8.67 :14234). Sends only from the detail editor's Submit
+    /// button — `open_rating_detail` never sends on its own.
+    fn submit_call_rating(&mut self, cx: &mut Context<Self>) {
+        let detail = match self.rating_detail.take() {
+            Some(detail) => detail,
+            None => {
+                cx.notify();
+                return;
+            }
+        };
+        let comment = self.rating_comment_input.read(cx).value().to_string();
+        let problems: Vec<&str> = CALL_PROBLEMS
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| detail.problems[*index])
+            .map(|(_, (constructor, _))| *constructor)
+            .collect();
+        let stars = detail.stars;
         if self.live.is_some() {
             let result = self
                 .live
                 .as_mut()
                 .expect("live")
                 .driver
-                .send_call_rating(rating);
+                .send_call_rating(stars, &comment, &problems);
             self.status_note = match result {
                 Ok(_) => "thanks for your feedback".into(),
                 Err(_) => "could not send the rating".into(),
@@ -4884,6 +5079,26 @@ impl QuillApp {
             summary.debug_information_sent = true;
             summary.debug_information_error = None;
             self.status_note = "demo: diagnostics upload (no live Telegram)".into();
+        }
+        cx.notify();
+    }
+
+    /// Phase C2i: `sendCallLog` from the call-end card — uploads the
+    /// ended call's log file (schema 1.8.67 :14240).
+    fn upload_call_log(&mut self, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            self.status_note = match live.driver.send_call_log() {
+                Ok(_) => "call log upload sent".into(),
+                Err(_) => "could not upload the call log".into(),
+            };
+        } else if let Some(summary) = self
+            .demo_session
+            .as_mut()
+            .and_then(|session| session.call_summary.as_mut())
+        {
+            summary.log_sent = true;
+            summary.log_error = None;
+            self.status_note = "demo: call log upload (no live Telegram)".into();
         }
         cx.notify();
     }
@@ -7919,54 +8134,53 @@ impl QuillApp {
     // Phase 6: Contacts tab, info panels, add-contact dialog.
     // ------------------------------------------------------------------
 
-    /// Sidebar "Chats | Contacts" tabs (Ready mode). Other modes keep the
-    /// plain "Chats" title.
+    /// Sidebar "Chats | Contacts | Calls" tabs (Ready mode). Other modes
+    /// keep the plain "Chats" title.
     fn list_tabs(&self, cx: &mut Context<Self>) -> impl IntoElement {
         if self.pane_mode() != PaneMode::Ready {
             return div().font_semibold().child("Chats").into_any_element();
         }
-        let chats_active = !self.contacts_tab_open;
+        let chats_active = !self.contacts_tab_open && !self.calls_tab_open;
+        let tab = |id: &'static str, label: &'static str, active: bool| {
+            div()
+                .id(id)
+                .cursor_pointer()
+                .px_2()
+                .py_1()
+                .rounded_md()
+                .text_sm()
+                .font_medium()
+                .bg(if active {
+                    cx.theme().accent.opacity(0.15)
+                } else {
+                    cx.theme().sidebar
+                })
+                .child(label)
+        };
         div()
             .flex()
             .items_center()
             .gap_2()
             .child(
-                div()
-                    .id("tab-chats")
-                    .cursor_pointer()
-                    .px_2()
-                    .py_1()
-                    .rounded_md()
-                    .text_sm()
-                    .font_medium()
-                    .bg(if chats_active {
-                        cx.theme().accent.opacity(0.15)
-                    } else {
-                        cx.theme().sidebar
-                    })
-                    .child("Chats")
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.open_chats_tab(cx);
-                    })),
+                tab("tab-chats", "Chats", chats_active).on_click(cx.listener(|this, _, _, cx| {
+                    this.open_chats_tab(cx);
+                })),
             )
             .child(
-                div()
-                    .id("tab-contacts")
-                    .cursor_pointer()
-                    .px_2()
-                    .py_1()
-                    .rounded_md()
-                    .text_sm()
-                    .font_medium()
-                    .bg(if chats_active {
-                        cx.theme().sidebar
-                    } else {
-                        cx.theme().accent.opacity(0.15)
-                    })
-                    .child("Contacts")
-                    .on_click(cx.listener(|this, _, _, cx| {
+                tab("tab-contacts", "Contacts", self.contacts_tab_open).on_click(cx.listener(
+                    |this, _, _, cx| {
                         this.open_contacts_tab(cx);
-                    })),
+                    },
+                )),
+            )
+            // Phase C2i: Recent-calls tab (server-side `searchCallMessages`
+            // history + call settings).
+            .child(
+                tab("tab-calls", "Calls", self.calls_tab_open).on_click(cx.listener(
+                    |this, _, _, cx| {
+                        this.open_calls_tab(cx);
+                    },
+                )),
             )
             .into_any_element()
     }
@@ -8038,15 +8252,34 @@ impl QuillApp {
 
     fn open_chats_tab(&mut self, cx: &mut Context<Self>) {
         self.contacts_tab_open = false;
+        self.calls_tab_open = false;
         cx.notify();
     }
 
     fn open_contacts_tab(&mut self, cx: &mut Context<Self>) {
         self.contacts_tab_open = true;
+        self.calls_tab_open = false;
         if let Some(live) = self.live.as_mut()
             && let Err(err) = live.driver.fetch_contacts()
         {
             self.status_note = format!("contacts request failed: {err:?}");
+        }
+        cx.notify();
+    }
+
+    /// Phase C2i: open the Recent-calls tab — first page of the
+    /// server-side call history plus both call privacy settings. Demo
+    /// mode injects synthetic data instead (screenshot proof).
+    fn open_calls_tab(&mut self, cx: &mut Context<Self>) {
+        self.contacts_tab_open = false;
+        self.calls_tab_open = true;
+        if let Some(live) = self.live.as_mut() {
+            if let Err(err) = live.driver.fetch_call_history() {
+                self.status_note = format!("call history request failed: {err:?}");
+            }
+            if let Err(err) = live.driver.fetch_call_privacy() {
+                self.status_note = format!("call privacy request failed: {err:?}");
+            }
         }
         cx.notify();
     }
@@ -8221,6 +8454,494 @@ impl QuillApp {
                             ),
                     ),
             )
+    }
+
+    /// Phase C2i: the peer (user id + display name) of a call entry,
+    /// when the call message is in a 1:1 chat. Group calls have no
+    /// single peer — `None` hides "Call again".
+    fn recent_call_peer(&self, chat_id: ChatId) -> Option<(i64, String)> {
+        call_message_peer(self.session(), chat_id)
+    }
+
+    /// Phase C2i: `messageCall` service row — the reason-aware label
+    /// (Telegram X `TD.getCallName` style) with duration and a "Call
+    /// again" button for 1:1 chats.
+    fn call_message_row(
+        message: &HistoryMessage,
+        is_video: bool,
+        discard_reason: &CallDiscardReason,
+        duration: i32,
+        session: Option<&Session>,
+        cx: &mut Context<QuillApp>,
+    ) -> impl IntoElement {
+        let label = call_entry_label(is_video, discard_reason, duration, message.is_outgoing);
+        let peer = call_message_peer(session, message.chat_id);
+        let missed = discard_reason == &CallDiscardReason::Missed;
+        div()
+            .id(("call-message-row", message.id.0 as u64))
+            .flex()
+            .items_center()
+            .gap_2()
+            .px_3()
+            .py_1()
+            .child(div().text_sm().child(if is_video { "📹" } else { "📞" }))
+            .child(
+                div().flex().flex_col().min_w_0().flex_1().child(
+                    div()
+                        .text_sm()
+                        .when(missed, |this| this.text_color(rgb(0xe17076)))
+                        .child(label),
+                ),
+            )
+            .child(if let Some((user_id, _)) = peer {
+                Button::new(("call-message-again", message.id.0 as u64))
+                    .label("Call again")
+                    .ghost()
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.call_again(user_id, is_video, cx);
+                    }))
+                    .into_any_element()
+            } else {
+                div().into_any_element()
+            })
+    }
+
+    /// Phase C2i: busy-decline banner for `call_busy_declined` — the
+    /// incoming calls declined while another call was active.
+    fn call_busy_banner(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let declined = self.session()?.call_busy_declined.clone();
+        if declined.is_empty() {
+            return None;
+        }
+        let names: Vec<String> = declined
+            .iter()
+            .map(|(user_id, is_video)| {
+                let name = self
+                    .session()
+                    .and_then(|session| session.user(*user_id))
+                    .map(|user| user.display_name())
+                    .unwrap_or_else(|| format!("User {user_id}"));
+                format!("{name} ({})", if *is_video { "video" } else { "voice" })
+            })
+            .collect();
+        Some(
+            div()
+                .id("call-busy-banner")
+                .flex()
+                .items_center()
+                .gap_2()
+                .px_3()
+                .py_2()
+                .border_b_1()
+                .border_color(cx.theme().border)
+                .bg(cx.theme().accent.opacity(0.12))
+                .child(div().text_sm().flex_1().child(format!(
+                    "Missed call{} from {} — declined because another call was active.",
+                    if declined.len() == 1 { "" } else { "s" },
+                    names.join(", ")
+                )))
+                .child(
+                    Button::new("call-busy-dismiss")
+                        .label("Dismiss")
+                        .ghost()
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            if let Some(live) = this.live.as_mut() {
+                                live.driver.session.call_busy_declined.clear();
+                            } else if let Some(session) = this.demo_session.as_mut() {
+                                session.call_busy_declined.clear();
+                            }
+                            cx.notify();
+                        })),
+                )
+                .into_any_element(),
+        )
+    }
+
+    /// Phase C2i: "Call again" from a history row — honours the
+    /// confirm-before-calling preference before dialling.
+    fn call_again(&mut self, user_id: i64, is_video: bool, cx: &mut Context<Self>) {
+        let confirm = self
+            .session()
+            .is_some_and(|session| session.call_prefs.confirm_before_calling);
+        if confirm {
+            self.call_confirm = Some((user_id, is_video));
+            cx.notify();
+            return;
+        }
+        self.dial_user(user_id, is_video, cx);
+    }
+
+    /// Phase C2i: Recent-calls list + call settings for the Calls tab.
+    fn calls_list(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let mut list = div().id("calls-list").flex().flex_col().gap_1().px_1();
+        list = list.child(div().text_sm().font_semibold().px_1().child("Recent calls"));
+        let (entries, loading, failed, has_more) = self
+            .session()
+            .map(|session| {
+                (
+                    session.recent_calls.clone(),
+                    session.recent_calls_loading,
+                    session.recent_calls_error,
+                    !session.recent_calls_offset.is_empty(),
+                )
+            })
+            .unwrap_or_default();
+        if failed {
+            list = list
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child("Couldn’t load call history."),
+                )
+                .child(
+                    Button::new("calls-retry")
+                        .label("Retry")
+                        .ghost()
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            if let Some(live) = this.live.as_mut()
+                                && let Err(err) = live.driver.fetch_call_history()
+                            {
+                                this.status_note = format!("call history request failed: {err:?}");
+                            }
+                            cx.notify();
+                        })),
+                );
+        } else if loading && entries.is_empty() {
+            list = list.child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("Loading calls…"),
+            );
+        } else if entries.is_empty() {
+            list = list.child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("No recent calls."),
+            );
+        } else {
+            for entry in &entries {
+                list = list.child(self.recent_call_row(entry, cx));
+            }
+            if has_more {
+                list = list.child(
+                    Button::new("calls-load-more")
+                        .label("Load more")
+                        .ghost()
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            if let Some(live) = this.live.as_mut()
+                                && let Err(err) = live.driver.fetch_more_call_history()
+                            {
+                                this.status_note = format!("call history request failed: {err:?}");
+                            }
+                            cx.notify();
+                        })),
+                );
+            }
+        }
+        list = list.child(self.call_settings_section(cx));
+        list
+    }
+
+    /// Phase C2i: one row of the server-side recent-calls list, with a
+    /// reason-aware label (Telegram X `TD.getCallName` style) and
+    /// "Call again" for 1:1 calls.
+    fn recent_call_row(&self, entry: &ParsedMessage, cx: &mut Context<Self>) -> impl IntoElement {
+        let (label, is_video) = match &entry.content {
+            MessageContent::Call {
+                is_video,
+                discard_reason,
+                duration,
+            } => (
+                call_entry_label(*is_video, discard_reason, *duration, entry.is_outgoing),
+                *is_video,
+            ),
+            MessageContent::GroupCallInvitation { .. } => ("Group call".to_owned(), false),
+            _ => ("Call".to_owned(), false),
+        };
+        let peer = self.recent_call_peer(entry.chat_id);
+        let name = peer
+            .as_ref()
+            .map(|(_, name)| name.clone())
+            .unwrap_or_else(|| "Call".to_owned());
+        let missed = matches!(
+            entry.content,
+            MessageContent::Call {
+                discard_reason: CallDiscardReason::Missed,
+                ..
+            }
+        );
+        div()
+            .id(("call-row", entry.id.0 as u64))
+            .px_2()
+            .py_2()
+            .rounded_md()
+            .flex()
+            .items_center()
+            .gap_2()
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .min_w_0()
+                    .flex_1()
+                    .child(div().font_medium().text_sm().child(name))
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(label),
+                    ),
+            )
+            .child(if missed {
+                div()
+                    .text_xs()
+                    .font_medium()
+                    .text_color(rgb(0xe17076))
+                    .child("missed")
+                    .into_any_element()
+            } else {
+                div().into_any_element()
+            })
+            .child(if let Some((user_id, _)) = peer {
+                Button::new(("call-again", entry.id.0 as u64))
+                    .label("Call again")
+                    .ghost()
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.call_again(user_id, is_video, cx);
+                    }))
+                    .into_any_element()
+            } else {
+                div().into_any_element()
+            })
+    }
+
+    /// Phase C2i: call settings — confirm-before-calling (real +
+    /// persisted), who-can-call-me and P2P (real TDLib privacy), and
+    /// the honest "saved, not yet applied" less-data toggle.
+    fn call_settings_section(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let prefs = self
+            .session()
+            .map(|session| session.call_prefs.clone())
+            .unwrap_or_default();
+        let allow_calls = self
+            .session()
+            .and_then(|session| session.call_privacy_allow_calls);
+        let p2p = self.session().and_then(|session| session.call_privacy_p2p);
+        let privacy_loading = self
+            .session()
+            .is_some_and(|session| session.call_privacy_loading);
+        let privacy_failed = self
+            .session()
+            .is_some_and(|session| session.call_privacy_error);
+        let radio_row = |id: &'static str,
+                         label: &'static str,
+                         current: Option<PrivacyWho>,
+                         set: CallPrivacySetting,
+                         who: PrivacyWho| {
+            let selected = current == Some(who);
+            div()
+                .id(id)
+                .cursor_pointer()
+                .flex()
+                .items_center()
+                .gap_2()
+                .px_2()
+                .py_1()
+                .rounded_md()
+                .bg(if selected {
+                    cx.theme().accent.opacity(0.15)
+                } else {
+                    cx.theme().background
+                })
+                .child(div().text_xs().child(if selected { "●" } else { "○" }))
+                .child(div().text_sm().child(label))
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    if let Some(live) = this.live.as_mut()
+                        && let Err(err) = live.driver.set_call_privacy(set, who)
+                    {
+                        this.status_note = format!("privacy update failed: {err:?}");
+                    } else if let Some(demo) = this.demo_session.as_mut() {
+                        // Demo: show the chosen value immediately (no
+                        // live TDLib to confirm it).
+                        match set {
+                            CallPrivacySetting::AllowCalls => {
+                                demo.call_privacy_allow_calls = Some(who)
+                            }
+                            CallPrivacySetting::PeerToPeer => demo.call_privacy_p2p = Some(who),
+                        }
+                    }
+                    cx.notify();
+                }))
+        };
+        div()
+            .flex()
+            .flex_col()
+            .gap_1()
+            .mt_2()
+            .child(
+                div()
+                    .text_sm()
+                    .font_semibold()
+                    .px_1()
+                    .child("Call settings"),
+            )
+            .child(
+                div()
+                    .id("call-pref-confirm")
+                    .cursor_pointer()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .px_2()
+                    .py_1()
+                    .rounded_md()
+                    .child(div().text_xs().child(if prefs.confirm_before_calling {
+                        "●"
+                    } else {
+                        "○"
+                    }))
+                    .child(
+                        div().text_sm().child("Confirm before calling").child(
+                            div()
+                                .text_xs()
+                                .text_color(cx.theme().muted_foreground)
+                                .child("Ask before placing a call"),
+                        ),
+                    )
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.toggle_call_pref_confirm(cx);
+                    })),
+            )
+            .child(
+                div()
+                    .id("call-pref-less-data")
+                    .cursor_pointer()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .px_2()
+                    .py_1()
+                    .rounded_md()
+                    .child(div().text_xs().child(if prefs.less_data_for_calls {
+                        "●"
+                    } else {
+                        "○"
+                    }))
+                    .child(
+                        div().text_sm().child("Use less data for calls").child(
+                            div()
+                                .text_xs()
+                                .text_color(cx.theme().muted_foreground)
+                                .child("Saved here — the call engine doesn’t support it yet"),
+                        ),
+                    )
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.toggle_call_pref_less_data(cx);
+                    })),
+            )
+            .child(
+                div()
+                    .text_xs()
+                    .font_medium()
+                    .px_2()
+                    .pt_1()
+                    .child("Who can call me"),
+            )
+            .child(if privacy_failed {
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .px_2()
+                    .child("Couldn’t load privacy settings.")
+                    .into_any_element()
+            } else if privacy_loading && allow_calls.is_none() {
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .px_2()
+                    .child("Loading privacy settings…")
+                    .into_any_element()
+            } else {
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap_0()
+                    .child(radio_row(
+                        "call-privacy-allow-everybody",
+                        "Everybody",
+                        allow_calls,
+                        CallPrivacySetting::AllowCalls,
+                        PrivacyWho::Everybody,
+                    ))
+                    .child(radio_row(
+                        "call-privacy-allow-contacts",
+                        "My Contacts",
+                        allow_calls,
+                        CallPrivacySetting::AllowCalls,
+                        PrivacyWho::Contacts,
+                    ))
+                    .child(radio_row(
+                        "call-privacy-allow-nobody",
+                        "Nobody",
+                        allow_calls,
+                        CallPrivacySetting::AllowCalls,
+                        PrivacyWho::Nobody,
+                    ))
+                    .into_any_element()
+            })
+            .child(
+                div()
+                    .text_xs()
+                    .font_medium()
+                    .px_2()
+                    .pt_1()
+                    .child("Peer-to-peer calls"),
+            )
+            .child(if privacy_failed {
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .px_2()
+                    .child("Couldn’t load privacy settings.")
+                    .into_any_element()
+            } else if privacy_loading && p2p.is_none() {
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .px_2()
+                    .child("Loading privacy settings…")
+                    .into_any_element()
+            } else {
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap_0()
+                    .child(radio_row(
+                        "call-privacy-p2p-everybody",
+                        "Everybody",
+                        p2p,
+                        CallPrivacySetting::PeerToPeer,
+                        PrivacyWho::Everybody,
+                    ))
+                    .child(radio_row(
+                        "call-privacy-p2p-contacts",
+                        "My Contacts",
+                        p2p,
+                        CallPrivacySetting::PeerToPeer,
+                        PrivacyWho::Contacts,
+                    ))
+                    .child(radio_row(
+                        "call-privacy-p2p-nobody",
+                        "Nobody",
+                        p2p,
+                        CallPrivacySetting::PeerToPeer,
+                        PrivacyWho::Nobody,
+                    ))
+                    .into_any_element()
+            })
     }
 
     fn open_user_panel(&mut self, user_id: i64, window: &mut Window, cx: &mut Context<Self>) {
@@ -10577,8 +11298,10 @@ impl QuillApp {
 
     /// Phase C1: the call-end screen — reason line, duration, and the
     /// optional 1–5 rating card (`callStateDiscarded.need_rating`,
-    /// schema 1.8.67, line 7078). `need_debug_information` /
-    /// `need_log` are out of this slice, stated honestly.
+    /// schema 1.8.67, line 7078). Phase C1 shows the
+    /// `need_debug_information` upload; phase C2i adds the `need_log`
+    /// (`sendCallLog`) upload and the rating-detail editor (problems +
+    /// comment).
     fn call_summary_card(
         &self,
         card: Stateful<Div>,
@@ -10636,26 +11359,60 @@ impl QuillApp {
                     .child(error.clone()),
             );
         }
-        if summary.need_rating && !summary.rating_sent {
-            card = card.child(div().text_sm().child("How was the call quality?"));
-            let mut stars = div().flex().gap_2();
-            for star in 1..=5 {
-                stars = stars.child(
-                    Button::new(format!("call-rate-{star}"))
-                        .label(format!("{star} ★"))
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.rate_last_call(star, cx);
-                        })),
-                );
-            }
-            card = card.child(stars).child(
-                Button::new("call-rate-skip")
-                    .label("Skip")
-                    .ghost()
+        if summary.need_log && !summary.log_sent {
+            card = card.child(
+                Button::new("call-upload-log")
+                    .label("Upload call log")
                     .on_click(cx.listener(|this, _, _, cx| {
-                        this.dismiss_call_summary(cx);
+                        this.upload_call_log(cx);
                     })),
             );
+        }
+        if summary.log_sent {
+            card = card.child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("Call log sent."),
+            );
+        }
+        if let Some(error) = &summary.log_error {
+            card = card.child(
+                div()
+                    .text_xs()
+                    .text_color(rgb(0xe17076))
+                    .child(error.clone()),
+            );
+        }
+        if summary.need_rating && !summary.rating_sent {
+            card = card.child(div().text_sm().child("How was the call quality?"));
+            match &self.rating_detail {
+                // Phase C2i: star tap opens the detail editor (problems
+                // + comment) — nothing is sent until Submit.
+                None => {
+                    let mut stars = div().flex().gap_2();
+                    for star in 1..=5 {
+                        stars = stars.child(
+                            Button::new(format!("call-rate-{star}"))
+                                .label(format!("{star} ★"))
+                                .on_click(cx.listener(move |this, _, window, cx| {
+                                    this.open_rating_detail(star, window, cx);
+                                })),
+                        );
+                    }
+                    card = card.child(stars).child(
+                        Button::new("call-rate-skip")
+                            .label("Skip")
+                            .ghost()
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.dismiss_call_summary(cx);
+                            })),
+                    );
+                }
+                Some(detail) => {
+                    card = card.child(self.rating_detail_editor(detail, cx));
+                }
+            }
         } else {
             if summary.rating_sent {
                 card = card.child(
@@ -10671,7 +11428,90 @@ impl QuillApp {
                 }),
             ));
         }
+        // Phase C2i: call again from the call-end card (honours the
+        // confirm-before-calling pref).
+        {
+            let user_id = summary.user_id;
+            let was_video = summary.is_video;
+            card = card.child(
+                Button::new("call-summary-again")
+                    .label("Call again")
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.dismiss_call_summary(cx);
+                        this.call_again(user_id, was_video, cx);
+                    })),
+            );
+        }
         card
+    }
+
+    /// Phase C2i: the rating-detail editor — re-pickable stars, the
+    /// nine `CallProblem` chips (schema 1.8.67 `:7253`-`:7277`), and
+    /// an optional comment. Nothing leaves the machine until Submit.
+    fn rating_detail_editor(&self, detail: &RatingDetail, cx: &mut Context<Self>) -> AnyElement {
+        let mut stars = div().flex().gap_2();
+        for star in 1..=5 {
+            stars = stars.child(
+                Button::new(format!("call-rate-pick-{star}"))
+                    .label(format!("{star} ★"))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        if let Some(detail) = this.rating_detail.as_mut() {
+                            detail.stars = star;
+                        }
+                        cx.notify();
+                    })),
+            );
+        }
+        let mut chips = div().flex().flex_wrap().gap_1();
+        for (index, (_, description)) in CALL_PROBLEMS.iter().enumerate() {
+            let selected = detail.problems[index];
+            chips = chips.child(
+                Button::new(format!("call-problem-{index}"))
+                    .label(format!(
+                        "{} {}",
+                        if selected { "☑" } else { "☐" },
+                        description
+                    ))
+                    .ghost()
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.toggle_rating_problem(index, cx);
+                    })),
+            );
+        }
+        div()
+            .flex()
+            .flex_col()
+            .gap_2()
+            .child(stars)
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("What went wrong? (optional)"),
+            )
+            .child(chips)
+            .child(self.rating_comment_input.clone())
+            .child(
+                div()
+                    .flex()
+                    .gap_2()
+                    .child(
+                        Button::new("call-rate-submit")
+                            .label("Submit rating")
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.submit_call_rating(cx);
+                            })),
+                    )
+                    .child(
+                        Button::new("call-rate-skip")
+                            .label("Skip")
+                            .ghost()
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.dismiss_call_summary(cx);
+                            })),
+                    ),
+            )
+            .into_any_element()
     }
 
     // ── Phase C3a: group-call (voice chat) signaling UI ──
@@ -13025,6 +13865,78 @@ impl QuillApp {
             .child(self.folder_backdrop(cx, "folder-delete"))
             .child(panel)
             .into_any_element()
+    }
+
+    /// Phase C2i: confirm-before-calling dialog. Shown when the pref
+    /// is on and the user starts a call; the actual `startCall` only
+    /// goes out via `confirm_pending_call`.
+    fn call_confirm_overlay(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let (user_id, is_video) = self.call_confirm?;
+        let name = self
+            .session()
+            .and_then(|session| session.user(user_id))
+            .map(|user| user.display_name())
+            .unwrap_or_else(|| format!("User {user_id}"));
+        let kind = if is_video { "video call" } else { "call" };
+        let panel = div()
+            .id("call-confirm-panel")
+            .flex()
+            .flex_col()
+            .gap_2()
+            .p_4()
+            .w(px(360.))
+            .rounded_md()
+            .border_1()
+            .border_color(cx.theme().border)
+            .bg(cx.theme().sidebar)
+            .child(
+                div()
+                    .text_sm()
+                    .font_semibold()
+                    .child(format!("Start {kind} with {name}?")),
+            )
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("You asked to confirm before calling."),
+            )
+            .child(
+                div()
+                    .flex()
+                    .justify_end()
+                    .gap_2()
+                    .child(
+                        Button::new("call-confirm-cancel")
+                            .label("Cancel")
+                            .ghost()
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.cancel_pending_call(cx);
+                            })),
+                    )
+                    .child(
+                        Button::new("call-confirm-ok")
+                            .label(if is_video { "Video call" } else { "Call" })
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.confirm_pending_call(cx);
+                            })),
+                    ),
+            );
+        Some(
+            div()
+                .id("call-confirm-overlay")
+                .absolute()
+                .top_0()
+                .left_0()
+                .right_0()
+                .bottom_0()
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(self.folder_backdrop(cx, "call-confirm"))
+                .child(panel)
+                .into_any_element(),
+        )
     }
 
     fn add_poll_option_row(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -18444,6 +19356,10 @@ impl Render for QuillApp {
             .when_some(self.folder_overlays(cx), |this, overlay| {
                 this.child(overlay)
             })
+            // Phase C2i: confirm-before-calling dialog.
+            .when_some(self.call_confirm_overlay(cx), |this, overlay| {
+                this.child(overlay)
+            })
             // Parity slice: scope-default notification settings dialog.
             .when(self.notification_defaults_open, |this| {
                 this.child(self.notification_defaults_overlay(cx))
@@ -18572,6 +19488,10 @@ impl QuillApp {
             .min_w_0()
             .min_h_0()
             .child(history)
+            // Phase C2i: busy-decline banner — the calls that arrived
+            // while another call was active were declined with
+            // `discardCall` (TDLib has no hold/swap API). Dismissible.
+            .when_some(self.call_busy_banner(cx), |this, banner| this.child(banner))
             .when(composer.is_some(), |this| {
                 let show_attach = matches!(mode, PaneMode::Ready) && self.pending_edit.is_none();
                 let chips: Vec<String> = if show_attach {
@@ -19328,6 +20248,7 @@ impl QuillApp {
                 // Phase B4: secret chats word the timer-change service
                 // row as "Self-destruct".
                 chat.is_some_and(|c| matches!(c.kind, ChatKind::Secret { .. })),
+                self.session(),
                 cx,
             );
             list = list.child(
@@ -19800,7 +20721,7 @@ impl QuillApp {
             .flex_col()
             .gap_2()
             .child(self.list_tabs(cx))
-            .when(!self.contacts_tab_open, |this| {
+            .when(!self.contacts_tab_open && !self.calls_tab_open, |this| {
                 this.child(
                     div()
                         .text_sm()
@@ -19830,6 +20751,10 @@ impl QuillApp {
             PaneMode::Ready => {
                 if self.contacts_tab_open {
                     list = list.child(self.contacts_list(cx));
+                } else if self.calls_tab_open {
+                    // Phase C2i: Recent-calls tab — server-side call
+                    // history + call settings.
+                    list = list.child(self.calls_list(cx));
                 } else {
                     list = list.child(self.folder_tabs(cx));
                     list = list.child(self.sidebar_search_field(cx));
@@ -20061,6 +20986,84 @@ fn apply_ready_secret_chat(session: &mut Session, sink: &Arc<MemorySink>, seq: &
         }
     }
     session.open_chat(ChatId(chat_id));
+}
+
+/// Phase C2i: synthetic Recent-calls fixture — users + private chats
+/// plus a `foundMessages` payload carrying three `messageCall`
+/// entries (missed / declined / answered video), applied through the
+/// real `SearchCallMessages` reducer. Privacy values and the
+/// confirm-before-calling pref are seeded too. Injected demo data.
+fn apply_ready_calls_settings(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let updates = [
+        r#"{"@type":"updateUser","user":{"id":61,"first_name":"Maya","last_name":"Chen","type":{"@type":"userTypeRegular"}}}"#,
+        r#"{"@type":"updateUser","user":{"id":62,"first_name":"Leo","last_name":"Park","type":{"@type":"userTypeRegular"}}}"#,
+        r#"{"@type":"updateUser","user":{"id":63,"first_name":"Ana","last_name":"Ruiz","type":{"@type":"userTypeRegular"}}}"#,
+        r#"{"@type":"updateNewChat","chat":{"id":71,"title":"Maya Chen","type":{"@type":"chatTypePrivate","user_id":61},"unread_count":0}}"#,
+        r#"{"@type":"updateNewChat","chat":{"id":72,"title":"Leo Park","type":{"@type":"chatTypePrivate","user_id":62},"unread_count":0}}"#,
+        r#"{"@type":"updateNewChat","chat":{"id":73,"title":"Ana Ruiz","type":{"@type":"chatTypePrivate","user_id":63},"unread_count":0}}"#,
+    ];
+    for json in updates {
+        if let Some(owned) = copy_and_parse(json, seq, &dyn_sink) {
+            session.apply(owned);
+        }
+    }
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i32)
+        .unwrap_or(1_700_000_000);
+    let call = |id: i64,
+                chat_id: i64,
+                outgoing: bool,
+                date: i32,
+                video: bool,
+                reason: &str,
+                duration: i32| {
+        format!(
+            r#"{{"id":{id},"chat_id":{chat_id},"is_outgoing":{outgoing},"date":{date},"content":{{"@type":"messageCall","unique_id":{id},"is_video":{video},"discard_reason":{{"@type":"{reason}"}},"duration":{duration}}}}}"#,
+        )
+    };
+    let messages = [
+        call(
+            901,
+            71,
+            false,
+            now - 320,
+            false,
+            "callDiscardReasonMissed",
+            0,
+        ),
+        call(
+            902,
+            72,
+            true,
+            now - 5400,
+            false,
+            "callDiscardReasonDeclined",
+            0,
+        ),
+        call(
+            903,
+            73,
+            false,
+            now - 86400,
+            true,
+            "callDiscardReasonHungUp",
+            372,
+        ),
+    ];
+    let extra = session.request(RequestPurpose::SearchCallMessages, None);
+    let json = format!(
+        r#"{{"@type":"foundMessages","@extra":"{}","total_count":3,"messages":[{}],"next_offset":""}}"#,
+        extra.0,
+        messages.join(",")
+    );
+    if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
+        session.apply(owned);
+    }
+    session.call_privacy_allow_calls = Some(PrivacyWho::Contacts);
+    session.call_privacy_p2p = Some(PrivacyWho::Everybody);
+    session.call_prefs.confirm_before_calling = true;
 }
 
 /// Phase C1: incoming-call fixture — a pending incoming voice call
@@ -23703,6 +24706,23 @@ fn poll_option_row(
     row.into_any_element()
 }
 
+/// Phase C2i: the peer (user id + display name) of a call entry,
+/// when the call message is in a 1:1 chat. Group calls have no single
+/// peer — `None` hides "Call again".
+fn call_message_peer(session: Option<&Session>, chat_id: ChatId) -> Option<(i64, String)> {
+    let session = session?;
+    let chat = session.chats.get(&chat_id.0)?;
+    let user_id = match chat.kind {
+        ChatKind::Private { user_id } | ChatKind::Secret { user_id, .. } => user_id.0,
+        _ => return None,
+    };
+    let name = session
+        .user(user_id)
+        .map(|user| user.display_name())
+        .unwrap_or_else(|| format!("User {user_id}"));
+    Some((user_id, name))
+}
+
 fn session_history_row(
     message: &HistoryMessage,
     files: &HashMap<i32, ParsedFile>,
@@ -23723,6 +24743,9 @@ fn session_history_row(
     // Phase B4: whether the row's chat is a secret chat — selects the
     // "Self-destruct" vs "Auto-delete" service-row wording.
     is_secret: bool,
+    // Phase C2i: session for `messageCall` peer resolution ("Call
+    // again" only for 1:1 chats).
+    session: Option<&Session>,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
     // Phase B4: timer-change service rows (`messageChatSetMessageAutoDeleteTime`,
@@ -23756,6 +24779,24 @@ fn session_history_row(
             *is_active,
             *was_missed,
             *is_video,
+            cx,
+        )
+        .into_any_element();
+    }
+    // Phase C2i: `messageCall` service row (schema 1.8.67, line 5277)
+    // — reason-aware label + "Call again" for 1:1 chats.
+    if let MessageContent::Call {
+        is_video,
+        discard_reason,
+        duration,
+    } = &message.content
+    {
+        return QuillApp::call_message_row(
+            message,
+            *is_video,
+            discard_reason,
+            *duration,
+            session,
             cx,
         )
         .into_any_element();
@@ -24043,6 +25084,7 @@ fn session_history_row(
         MessageContent::Dice(dice) => Some(dice_row(message.id.0 as u64, dice)),
         MessageContent::Text(_)
         | MessageContent::GroupCallInvitation { .. }
+        | MessageContent::Call { .. }
         | MessageContent::ChatTtlChanged { .. }
         | MessageContent::Unsupported { .. } => None,
     };

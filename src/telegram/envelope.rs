@@ -320,6 +320,11 @@ pub enum EnvelopePayload {
         messages: Vec<ParsedMessage>,
         next_offset: String,
     },
+    /// Phase C2i: `userPrivacySettingRules` — `getUserPrivacySettingRules`.
+    /// Rule constructor names (`userPrivacySettingRuleAllowAll`, …).
+    UserPrivacySettingRules {
+        rules: Vec<String>,
+    },
     /// `foundChatMessages` — `searchChatMessages`.
     FoundChatMessages {
         total_count: i32,
@@ -3796,9 +3801,71 @@ pub enum MessageContent {
         was_missed: bool,
         is_video: bool,
     },
+    /// Phase C2i: `messageCall` (TDLib 1.8.67,
+    /// `schema/td_api.tl:5277`) — a 1:1 call entry in chat history.
+    /// `messageCall unique_id:int64 is_video:Bool
+    /// discard_reason:CallDiscardReason duration:int32 = MessageContent;`
+    /// `unique_id` is not kept (the row needs only kind/reason/duration).
+    Call {
+        is_video: bool,
+        discard_reason: CallDiscardReason,
+        duration: i32,
+    },
     Unsupported {
         type_name: String,
     },
+}
+
+/// Phase C2i: service-row label for a `messageCall`, following
+/// Telegram X's `TD.getCallName` convention (short form): missed /
+/// declined / canceled are distinguishable; answered calls show the
+/// direction plus duration. `duration` is seconds (0 when unanswered).
+pub fn call_entry_label(
+    is_video: bool,
+    reason: &CallDiscardReason,
+    duration: i32,
+    is_outgoing: bool,
+) -> String {
+    let kind = if is_video { "video call" } else { "call" };
+    let base = match reason {
+        CallDiscardReason::Missed => {
+            if is_outgoing {
+                "Cancelled"
+            } else {
+                "Missed"
+            }
+        }
+        CallDiscardReason::Declined => {
+            if is_outgoing {
+                "Busy"
+            } else {
+                "Declined"
+            }
+        }
+        _ => {
+            if is_outgoing {
+                "Outgoing"
+            } else {
+                "Incoming"
+            }
+        }
+    };
+    if duration > 0 {
+        format!("{base} {kind} · {}", format_duration(duration))
+    } else {
+        format!("{base} {kind}")
+    }
+}
+
+/// mm:ss (or h:mm:ss) for call durations.
+fn format_duration(total_secs: i32) -> String {
+    let total_secs = total_secs.max(0) as i64;
+    let (h, m, s) = (total_secs / 3600, (total_secs / 60) % 60, total_secs % 60);
+    if h > 0 {
+        format!("{h}:{m:02}:{s:02}")
+    } else {
+        format!("{m}:{s:02}")
+    }
 }
 
 /// `formattedText` plus optional `messageText.link_preview` (TDLib 1.8.67).
@@ -4317,6 +4384,20 @@ impl MessageContent {
                 } else {
                     "📞 Voice chat invitation".to_string()
                 }
+            }
+            // Phase C2i: chat-list last-message preview for a `messageCall`.
+            // Direction is unknown without the message wrapper, so the
+            // neutral "Call" is used; the full label renders in history.
+            MessageContent::Call {
+                is_video,
+                discard_reason,
+                duration,
+            } => {
+                let icon = if *is_video { "📹" } else { "📞" };
+                format!(
+                    "{icon} {}",
+                    call_entry_label(*is_video, discard_reason, *duration, false)
+                )
             }
             MessageContent::Unsupported { type_name } => format!("({type_name})"),
         }
@@ -5351,6 +5432,25 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
                     .and_then(Value::as_str)
                     .unwrap_or("")
                     .to_string(),
+            })
+        }
+        // Phase C2i: `userPrivacySettingRules` (schema 1.8.67, :8976)
+        // answers `getUserPrivacySettingRules` (:15620). Only the rule
+        // constructor names are kept — enough to map Everybody /
+        // Contacts / Nobody.
+        "userPrivacySettingRules" => {
+            let rules = value
+                .get("rules")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default();
+            Ok(EnvelopePayload::UserPrivacySettingRules {
+                rules: rules
+                    .iter()
+                    .filter_map(|r| r.get("@type"))
+                    .filter_map(Value::as_str)
+                    .map(str::to_string)
+                    .collect(),
             })
         }
         "foundChatMessages" => {
@@ -6815,6 +6915,18 @@ fn parse_content(value: Option<&Value>) -> (MessageContent, Vec<ParsedFile>) {
                     .get("is_video")
                     .and_then(Value::as_bool)
                     .unwrap_or(false),
+            },
+            Vec::new(),
+        ),
+        // Phase C2i: `messageCall` (schema 1.8.67, line 5277).
+        Some("messageCall") => (
+            MessageContent::Call {
+                is_video: value
+                    .get("is_video")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
+                discard_reason: CallDiscardReason::from_value(value.get("discard_reason")),
+                duration: value.get("duration").and_then(Value::as_i64).unwrap_or(0) as i32,
             },
             Vec::new(),
         ),
@@ -12590,5 +12702,58 @@ mod notification_sound_tests {
                 join_payload: "tgcalls-payload".to_string(),
             }
         );
+    }
+
+    /// Phase C2i: `call_entry_label` follows Telegram X's
+    /// `TD.getCallName` short form — missed/declined are
+    /// distinguishable by direction; answered calls show direction +
+    /// duration.
+    #[test]
+    fn call_entry_labels_match_telegram_x_convention() {
+        use CallDiscardReason::*;
+        assert_eq!(call_entry_label(false, &Missed, 0, false), "Missed call");
+        assert_eq!(call_entry_label(false, &Missed, 0, true), "Cancelled call");
+        assert_eq!(
+            call_entry_label(false, &Declined, 0, false),
+            "Declined call"
+        );
+        assert_eq!(call_entry_label(false, &Declined, 0, true), "Busy call");
+        assert_eq!(
+            call_entry_label(true, &HungUp, 372, false),
+            "Incoming video call · 6:12"
+        );
+        assert_eq!(
+            call_entry_label(false, &HungUp, 65, true),
+            "Outgoing call · 1:05"
+        );
+        assert_eq!(
+            call_entry_label(false, &Disconnected, 0, false),
+            "Incoming call"
+        );
+    }
+
+    /// Phase C2i: `messageCall` parses (schema 1.8.67 :5277) — the
+    /// service-row data for the Calls tab and in-chat rows.
+    #[test]
+    fn message_call_parses() {
+        let json = r#"{"@type":"message","id":901,"chat_id":71,"is_outgoing":false,"date":1700000000,"content":{"@type":"messageCall","unique_id":901,"is_video":true,"discard_reason":{"@type":"callDiscardReasonHungUp"},"duration":372}}"#;
+        let env = parse_envelope(json).unwrap();
+        match env.payload {
+            EnvelopePayload::Message(message) => {
+                assert_eq!(
+                    message.content,
+                    MessageContent::Call {
+                        is_video: true,
+                        discard_reason: CallDiscardReason::HungUp,
+                        duration: 372,
+                    }
+                );
+                assert_eq!(
+                    call_entry_label(true, &CallDiscardReason::HungUp, 372, false),
+                    "Incoming video call · 6:12"
+                );
+            }
+            other => panic!("unexpected {other:?}"),
+        }
     }
 }

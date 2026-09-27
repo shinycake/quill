@@ -3758,3 +3758,90 @@ device list renders honestly.
 - **Key decisions:** reuse the existing request/driver/state/UI patterns — no new abstractions; `record_video: true` (video file) is the recording default — the start button just says "● Record" and the in-call indicator shows "● Recording (video)"/"(audio)" once the recording is live, so there is no video-labeled start affordance; the 4096-char client-side message cap is a sanity guard only (the true cap is `getOption("group_call_message_text_length_max")`, server-enforced); the scheduled card offers Start now to admins (`startScheduledVideoChat`) and Join once TDLib activates the call; recording duration display may go stale because the schema states `updateGroupCall` is not triggered when `record_duration` changes mid-recording.
 - **Not verifiable without a live Telegram group call:** every actual TDLib round-trip (create/schedule, set title, invite link fetch/revoke, recording start/stop, RTMP fetch/regenerate, message send + echo/delivery), scheduled-call activation via `updateNewVideoChat`/`updateGroupCall`, and admin/peer-visible effects (invite link works for others, recording actually records, RTMP stream is ingestible). Tested instead: request shapes + gates + validation ranges (driver unit tests), message routing/dedup/deletion + scheduled tracking + RTMP caching (state unit tests), envelope parsing of `rtmpUrl` / message updates / recording fields, and the full UI surface in the `ready-group-call-manage` screenshot demo (injected, no live Telegram).
 - **Out of this slice:** live group video frames, screen-share start, message deletion in calls (schema restricts `deleteGroupCallMessages` to live stories), paid-message star counts, RTMP streaming from Quill itself, `toggleVideoChatEnabledStartNotification` (:14280, notify-me-when-a-scheduled-video-chat-starts toggle).
+
+## Phase C2i — call history + call settings (2026-09-27)
+
+Schema discipline: every TDLib request below was verified
+concept-level against the pinned `schema/td_api.tl` (1.8.67); Telegram
+X (`~/workspace/telegram-x`) was the behavior reference for call
+labels (short `TD.getCallName` variants: outgoing-missed →
+"Cancelled", incoming-missed → "Missed", outgoing-declined → "Busy",
+incoming-declined → "Declined") and for listing both call privacy and
+P2P privacy in the privacy settings.
+
+- **Recent calls are server-backed.** `searchCallMessages
+  offset:string limit:int32 only_missed:Bool = FoundMessages;`
+  (schema/td_api.tl:11903) searches call and group-call messages,
+  newest first; the result is `foundMessages total_count:int32
+  messages:vector<message> next_offset:string = FoundMessages;`
+  (:3172). No local fake call log — the Calls tab's first page is
+  `searchCallMessages("", 40, false)`, with "Load more" continuing
+  from the returned `next_offset`. Reducer appends pages to
+  `Session::recent_calls` (request-shape tests cover the wire format).
+- **Call messages.** `messageCall unique_id:int64 is_video:Bool
+  discard_reason:CallDiscardReason duration:int32 = MessageContent;`
+  (:5277); reasons `callDiscardReasonMissed` (:6987),
+  `callDiscardReasonDeclined` (:6990),
+  `callDiscardReasonDisconnected` (:6993), `callDiscardReasonHungUp`
+  (:6996) (plus Empty :6984 / Upgrade-to-group :6999). In-chat
+  `messageCall` rows render the reason-aware label with duration and
+  a "Call again" button for 1:1 chats (group calls have no single
+  peer — the button is hidden).
+- **Rating detail.** `sendCallRating call_id:InputCall rating:int32
+  comment:string problems:vector<CallProblem> = Ok;` (:14234).
+  Problems: `callProblemEcho` (:7253), `callProblemNoise` (:7256),
+  `callProblemInterruptions` (:7259),
+  `callProblemDistortedSpeech` (:7262), `callProblemSilentLocal`
+  (:7265), `callProblemSilentRemote` (:7268), `callProblemDropped`
+  (:7271), `callProblemDistortedVideo` (:7274),
+  `callProblemPixelatedVideo` (:7277). The star tap no longer sends
+  immediately — it opens the detail editor (problems chips +
+  optional comment); Submit sends the full request. The old
+  stars-send-immediately flow is replaced.
+- **Call log upload.** `sendCallLog call_id:InputCall
+  log_file:InputFile = Ok;` (:14240). The schema accepts only
+  `inputFileLocal` / `inputFileGenerated` for the log, so the driver
+  writes the honest local diagnostics payload to the account exports
+  dir and sends it as `inputFileLocal` (`inputFileLocal path:string
+  = InputFile;` at :325). The end screen shows an "Upload
+  call log" button when `need_log` is set, with success/error state.
+  (Existing `sendCallDebugInformation` inline-text upload is kept for
+  `need_debug_information`.)
+- **Call privacy.** `userPrivacySettingAllowCalls` (:9006) and
+  `userPrivacySettingAllowPeerToPeerCalls` (:9009) via
+  `getUserPrivacySettingRules setting:UserPrivacySetting =
+  UserPrivacySettingRules;` (:15620) and `setUserPrivacySettingRules
+  setting:UserPrivacySetting rules:userPrivacySettingRules = Ok;`
+  (:15617). Rules map to Everybody → `userPrivacySettingRuleAllowAll`
+  (:8943), My Contacts → `userPrivacySettingRuleAllowContacts`
+  (:8946), Nobody → `userPrivacySettingRuleRestrictAll` (:8961).
+  Sets are applied optimistically; on error the optimistic value is
+  cleared (`None`) and the section shows "Couldn't load privacy
+  settings" until the tab refetches — the reducer's
+  `SetCallPrivacyRules` error arm clears the optimistic value and
+  flags `call_privacy_error`, and the next successful
+  `getUserPrivacySettingRules` restores the truth.
+- **Confirm before calling.** Persisted per-account
+  (`call_prefs.json`): the preference-aware `start_call_for_user`
+  stashes the pending call and shows a confirm dialog; the actual
+  `startCall` only fires on Confirm. Works from profiles, history
+  rows, and the end screen's "Call again".
+- **Less data for calls.** Persisted the same way, but the toggle is
+  explicitly labeled "saved here — the call engine doesn't support
+  it yet": the current native layer exposes no data-saving control
+  (Telegram X's less-data is engine config, not a TDLib setting).
+  README stays unchecked.
+- **Busy-call honesty.** No TDLib hold/swap request exists
+  (concept-level schema + TDLib source check; native `ntg_pause` /
+  `ntg_resume` only pause local media — not a Telegram-level swap).
+  Incoming calls during an active call are still auto-declined via
+  `discardCall`, but now recorded in
+  `Session::call_busy_declined` and surfaced as a dismissible banner
+  ("Missed calls from X — declined because another call was
+  active."). `parity:calls-swap-prompt` stays unchecked.
+- **Out of this slice:** proxy-for-calls (schema exposes
+  add/edit/enable/disable proxy but no per-call field; Telegram X
+  feeds it to the native VoIP engine client-side — our native layer
+  has no such binding), echo-cancellation / noise-suppression
+  toggles (`ntgcalls-sys` exposes none), call verification emojis
+  for 1:1 calls (already parsed for group calls).
