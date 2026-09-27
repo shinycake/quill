@@ -7342,9 +7342,11 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// Send text, photo, document, or local video via `sendMessage` (TDLib 1.8.67).
     /// MED4: caption-length gate against the runtime
     /// `message_caption_length_max` option (TDLib 1.8.67, `schema/td_api.tl:6088`).
-    /// Counts Unicode scalar values, matching TDLib's limit semantics for
-    /// captions. Plain-text sends use the separate `message_text_length_max`
-    /// option (untracked here — out of this slice).
+    /// Counts Unicode scalar values; TDLib's exact limit unit is not
+    /// source-verified (assumption — TDLib remains the final gate, and a
+    /// server refusal surfaces in the status note). Plain-text sends use the
+    /// separate `message_text_length_max` option (untracked here — out of
+    /// this slice).
     fn check_caption_length(&self, caption: &str) -> Result<(), ConnectSendError> {
         let limit = self.session.message_caption_length_max;
         if caption.chars().count() as i64 > i64::from(limit.max(0)) {
@@ -8156,7 +8158,9 @@ impl<S: JsonSender> ConnectDriver<S> {
                 edit.chat_id,
                 edit.message_id,
                 caption,
-                edit.caption_above,
+                // MED4 review nit: secret chats force caption-below on send
+                // too (TGX `allowShowCaptionAboveMedia`).
+                edit.caption_above && !strip_blockquote,
                 strip_blockquote,
             ),
         };
