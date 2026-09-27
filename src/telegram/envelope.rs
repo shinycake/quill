@@ -309,6 +309,23 @@ pub enum EnvelopePayload {
     Error(TdError),
     Messages(Vec<ParsedMessage>),
     Message(ParsedMessage),
+    /// M1: `messageLink` (TDLib 1.8.67, `schema/td_api.tl:9666` —
+    /// `messageLink link is_public`) — the `getMessageLink` answer. The
+    /// driver stashes `link` in `Session::message_link_result`; the UI
+    /// copies it to the clipboard.
+    MessageLink {
+        link: String,
+        is_public: bool,
+    },
+    /// M1 fix-up: `messageProperties` (TDLib 1.8.67,
+    /// `schema/td_api.tl:11557`) — the `getMessageProperties` answer.
+    /// Only `can_get_link` is kept: `getMessageLink` is "available only
+    /// if messageProperties.can_get_link" (schema line 12056), so the
+    /// driver gates the link request on it instead of letting "Share
+    /// link" silently 400.
+    MessageProperties {
+        can_get_link: bool,
+    },
     /// `chats` — `searchChats` / `searchRecentlyFoundChats` / similar.
     Chats {
         total_count: i32,
@@ -3227,6 +3244,31 @@ impl MessageReplyTo {
     }
 }
 
+/// M1: `messageSchedulingState` (TDLib 1.8.67, `schema/td_api.tl:5902` /
+/// `:5905`); `message.scheduling_state` is null when not scheduled
+/// (schema line 3124).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MessageSchedulingState {
+    SendAtDate { send_date: i32 },
+    SendWhenOnline,
+}
+
+fn parse_message_scheduling_state(value: Option<&Value>) -> Option<MessageSchedulingState> {
+    let value = value?;
+    if value.is_null() {
+        return None;
+    }
+    match value.get("@type").and_then(Value::as_str) {
+        Some("messageSchedulingStateSendAtDate") => Some(MessageSchedulingState::SendAtDate {
+            send_date: value.get("send_date").and_then(Value::as_i64).unwrap_or(0) as i32,
+        }),
+        Some("messageSchedulingStateSendWhenOnline") => {
+            Some(MessageSchedulingState::SendWhenOnline)
+        }
+        _ => None,
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParsedMessage {
     pub id: MessageId,
@@ -3248,6 +3290,16 @@ pub struct ParsedMessage {
     /// the small signature line under the post (suppressed under
     /// forwarded-message headers, which already attribute it).
     pub author_signature: Option<String>,
+    /// M1: `message.scheduling_state` (TDLib 1.8.67, lines 3124 / 3165).
+    /// `Some` only on scheduled sends; the UI's scheduled list reads the
+    /// planned time from here.
+    pub scheduling_state: Option<MessageSchedulingState>,
+    /// M1 fix-up: `message.sending_state.can_retry` (TDLib 1.8.67, lines
+    /// 3038 / 5896) — only `messageSendingStateFailed` carries it.
+    /// `true` means the failed send may be retried via `resendMessages`;
+    /// the reducer gates the retry affordance on this instead of offering
+    /// it on every `updateMessageSendFailed`.
+    pub can_retry: bool,
     pub content: MessageContent,
     pub files: Vec<ParsedFile>,
     pub reply_to: Option<MessageReplyTo>,
@@ -5410,6 +5462,25 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
             })
         }
         "ok" => Ok(EnvelopePayload::Ok),
+        "messageLink" => Ok(EnvelopePayload::MessageLink {
+            link: value
+                .get("link")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string(),
+            is_public: value
+                .get("is_public")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+        }),
+        // M1 fix-up: only `can_get_link` is kept (see the
+        // `MessageProperties` payload docs).
+        "messageProperties" => Ok(EnvelopePayload::MessageProperties {
+            can_get_link: value
+                .get("can_get_link")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+        }),
         // Phase C3a: `text` (schema 1.8.67, line 10071) — the
         // `joinVideoChat` / `joinGroupCall` answer ("join response
         // payload for tgcalls"). Quill stores it, never consumes it
@@ -6829,6 +6900,15 @@ fn parse_message(value: &Value) -> Result<ParsedMessage, ParseError> {
             value.get("self_destruct_in"),
         ),
         auto_delete: parse_auto_delete_in(value.get("auto_delete_in")),
+        scheduling_state: parse_message_scheduling_state(value.get("scheduling_state")),
+        // M1 fix-up: `can_retry` lives on `messageSendingStateFailed`
+        // only (schema 1.8.67 line 5896); absent everywhere else.
+        can_retry: value
+            .get("sending_state")
+            .filter(|s| s.get("@type").and_then(Value::as_str) == Some("messageSendingStateFailed"))
+            .and_then(|s| s.get("can_retry"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
     })
 }
 

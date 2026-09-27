@@ -9,8 +9,9 @@ use gpui_kit::*;
 use quill::auth::{AuthAction, AuthView, view_for};
 use quill::composer::{
     AttachmentKind, CommandMenuItem, ComposerAttachment, ComposerEdit, ComposerReplyTo,
-    ComposerSnapshot, DeleteConfirm, ForwardDraft, begin_edit_keeping_reply, cancel_edit_draft,
-    cancel_edit_keeping_reply, cancel_forward_draft, cancel_reply_draft, command_menu_trigger,
+    ComposerScheduling, ComposerSnapshot, DeleteConfirm, FormatAction, ForwardDraft, SendOptions,
+    apply_format_markup, begin_edit_keeping_reply, cancel_edit_draft, cancel_edit_keeping_reply,
+    cancel_forward_draft, cancel_reply_draft, clear_format_markup, command_menu_trigger,
     draft_text_to_store, filter_command_menu_items, should_send_on_enter,
     strip_command_menu_trigger,
 };
@@ -51,12 +52,12 @@ use quill::telegram::envelope::{
     ChatFolderInfo, ChatFolderSpec, ChatKind, ChatList, ChatNotificationSettings, ChatStatistics,
     DEFAULT_EMOJI_REACTIONS, ForumTopic, InlineKeyboardButton, InlineKeyboardButtonStyle,
     InlineKeyboardButtonType, MUTE_FOR_1_HOUR, MUTE_FOR_2_DAYS, MUTE_FOR_8_HOURS, MUTE_FOREVER,
-    MessageContent, MessageInteractionInfo, MessageSender, NotificationSettingsScope,
-    NotificationSound, ParsedChatEvent, ParsedFile, ParsedGroupCallParticipant, ParsedMessage,
-    ParsedSecretChat, ParsedStory, PollContent, PollOption, PollType, ScopeNotificationSettings,
-    SecretChatState, SponsoredMessage, StatisticalGraph, StatisticalValue, StorageFileTypeStats,
-    StorageStats, call_entry_label, chat_ttl_service_label, format_ttl_setting,
-    toggle_chosen_emoji_reaction,
+    MessageContent, MessageInteractionInfo, MessageSchedulingState, MessageSender,
+    NotificationSettingsScope, NotificationSound, ParsedChatEvent, ParsedFile,
+    ParsedGroupCallParticipant, ParsedMessage, ParsedSecretChat, ParsedStory, PollContent,
+    PollOption, PollType, ScopeNotificationSettings, SecretChatState, SponsoredMessage,
+    StatisticalGraph, StatisticalValue, StorageFileTypeStats, StorageStats, call_entry_label,
+    chat_ttl_service_label, format_ttl_setting, toggle_chosen_emoji_reaction,
 };
 use quill::telegram::requests::SelfDestructSend;
 use quill::telegram::requests::{CallPrivacySetting, PrivacyWho};
@@ -88,6 +89,10 @@ actions!(
         SubmitPhone,
         SubmitCode,
         SubmitPassword,
+        /// M1: composer formatting shortcuts (ctrl-b / ctrl-i / ctrl-u).
+        FormatBold,
+        FormatItalic,
+        FormatUnderline,
         /// Parity slice 5: step the fullscreen media viewer to the
         /// previous / next item (left/right arrows, viewer-open only).
         ViewerPrev,
@@ -151,6 +156,11 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("0", ViewerZoomReset, None),
         KeyBinding::new("=", ViewerZoomIn, None),
         KeyBinding::new("-", ViewerZoomOut, None),
+        // M1: composer formatting shortcuts; the handlers no-op unless
+        // the composer textarea has focus.
+        KeyBinding::new("ctrl-b", FormatBold, None),
+        KeyBinding::new("ctrl-i", FormatItalic, None),
+        KeyBinding::new("ctrl-u", FormatUnderline, None),
     ]);
 }
 
@@ -645,6 +655,16 @@ pub struct RatingDetail {
     problems: [bool; 9],
 }
 
+/// M1: right-click context menu state — the target message plus the
+/// window position where the menu opens (`MouseDownEvent.position` is in
+/// window coordinates, so the panel renders absolute at that point).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MessageMenuState {
+    pub chat_id: ChatId,
+    pub message_id: MessageId,
+    pub position: Point<Pixels>,
+}
+
 /// Phase C2i: the nine `CallProblem` constructors (TDLib 1.8.67,
 /// `schema/td_api.tl:7253`-`:7277`) with their schema descriptions,
 /// in schema order. Index-aligned with `RatingDetail::problems`.
@@ -736,6 +756,23 @@ pub struct QuillApp {
     /// chats only). Cycles Off → 5s → 30s → 1m → View once via the
     /// picker button; captured into `ComposerSnapshot` at submit time.
     composer_self_destruct: Option<SelfDestructSend>,
+    /// M1: silent-send toggle (`messageSendOptions.disable_notification`,
+    /// schema 1.8.67 line 5934). Persists across sends until toggled.
+    composer_silent: bool,
+    /// M1: link-preview toggle (`linkPreviewOptions.is_disabled`, schema
+    /// 1.8.67 line 2237). Persists across sends; secret chats force it on.
+    composer_preview_disabled: bool,
+    /// M1: scheduling choice (`messageSchedulingState*`, schema 1.8.67
+    /// lines 5902/5905). Reset to `None` after each successful send.
+    composer_scheduling: ComposerScheduling,
+    /// M1: the schedule picker popup above the composer.
+    schedule_popup_open: bool,
+    /// M1: the scheduled-messages dialog (view/delete).
+    scheduled_dialog_open: bool,
+    /// M1: right-click context menu target + window position.
+    message_menu: Option<MessageMenuState>,
+    /// M1: swipe-to-reply press origin (chat, message, press x).
+    swipe_reply_start: Option<(ChatId, MessageId, Pixels)>,
     /// Same-chat reply draft (tdesktop `FieldHeader::replyToMessage`).
     pending_reply: Option<ComposerReplyTo>,
     /// Chat whose draft should be cleared after `updateMessageSendSucceeded`
@@ -2275,6 +2312,13 @@ impl QuillApp {
             notify_inflight: Arc::new(AtomicUsize::new(0)),
             pending_attachments,
             composer_self_destruct: None,
+            composer_silent: false,
+            composer_preview_disabled: false,
+            composer_scheduling: ComposerScheduling::None,
+            schedule_popup_open: false,
+            scheduled_dialog_open: false,
+            message_menu: None,
+            swipe_reply_start: None,
             pending_reply: None,
             clear_draft_on_success: None,
             pending_edit: None,
@@ -3243,6 +3287,38 @@ impl QuillApp {
             self.present_forward_result(result, cx);
             progressed = true;
         }
+        // M1: a `messageLink` response lands here (`getMessageLink`) —
+        // copy the link to the clipboard, exactly like tdesktop's "Copy
+        // Message Link".
+        if let Some(link) = self
+            .live
+            .as_mut()
+            .and_then(|live| live.driver.session.message_link_result.take())
+        {
+            cx.write_to_clipboard(ClipboardItem::new_string(link));
+            self.status_note = "message link copied".into();
+            progressed = true;
+        }
+        // M1 fix-up: a "Share link" gated off by
+        // `messageProperties.can_get_link` (or a failed `getMessageLink`)
+        // and a failed `resendMessages` surface here instead of silently
+        // doing nothing.
+        if let Some(err) = self
+            .live
+            .as_mut()
+            .and_then(|live| live.driver.session.message_link_error.take())
+        {
+            self.status_note = err;
+            progressed = true;
+        }
+        if let Some(err) = self
+            .live
+            .as_mut()
+            .and_then(|live| live.driver.session.resend_error.take())
+        {
+            self.status_note = err;
+            progressed = true;
+        }
         // Phase 3.2: bot answers to inline keyboard callback presses.
         if let Some(answer) = self
             .live
@@ -3508,7 +3584,10 @@ impl QuillApp {
                         )
                     }
                     .with_reply(self.pending_reply.clone())
-                    .with_self_destruct(self_destruct);
+                    .with_self_destruct(self_destruct)
+                    // M1: silent / scheduled / when-online / link-preview
+                    // options ride the snapshot to `sendMessage.options`.
+                    .with_send_options(self.composer_send_options());
                     if snap.is_empty() {
                         self.status_note = "type a message or attach a file".into();
                         cx.notify();
@@ -3531,6 +3610,10 @@ impl QuillApp {
                             // Phase B3: the timer choice was consumed by the
                             // snapshot — reset the picker for the next send.
                             self.composer_self_destruct = None;
+                            // M1: a scheduling choice is one-shot (the next
+                            // send goes immediately unless re-scheduled).
+                            self.composer_scheduling = ComposerScheduling::None;
+                            self.schedule_popup_open = false;
                             self.pending_reply = None;
                             self.clear_draft_on_success = Some(chat_id);
                             self.composer
@@ -3738,6 +3821,379 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// M1: the composer's `messageSendOptions` for the next send.
+    fn composer_send_options(&self) -> SendOptions {
+        SendOptions {
+            disable_notification: self.composer_silent,
+            scheduling: self.composer_scheduling,
+            link_preview_disabled: self.composer_preview_disabled,
+            // The driver overrides this for secret chats at send time.
+            is_secret: false,
+        }
+    }
+
+    /// M1: apply a formatting action to the composer selection (or insert
+    /// the marker pair at the cursor when the selection is empty).
+    fn apply_composer_format(
+        &mut self,
+        action: FormatAction,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let text = self.composer.read(cx).value().to_string();
+        let range = self.composer.read(cx).selected_range();
+        let (new_text, new_selection) = apply_format_markup(&text, range, &action);
+        self.composer.update(cx, |input, cx| {
+            input.set_value(&new_text, window, cx);
+            input.set_selected_range(new_selection, cx);
+        });
+        self.composer
+            .update(cx, |input, cx| input.focus(window, cx));
+        cx.notify();
+    }
+
+    /// M1: strip formatting markers in the composer selection (whole text
+    /// when the selection is empty), keeping the inner text.
+    fn clear_composer_format(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let text = self.composer.read(cx).value().to_string();
+        let range = self.composer.read(cx).selected_range();
+        let new_text = clear_format_markup(&text, range);
+        self.composer.update(cx, |input, cx| {
+            input.set_value(&new_text, window, cx);
+        });
+        self.composer
+            .update(cx, |input, cx| input.focus(window, cx));
+        cx.notify();
+    }
+
+    /// M1: schedule the next send `secs` from now
+    /// (`messageSchedulingStateSendAtDate`; `repeat_period` stays 0 —
+    /// premium-only, never surfaced).
+    fn schedule_send_in(&mut self, secs: i64, cx: &mut Context<Self>) {
+        let send_date = unix_ms_now() as i64 / 1000 + secs;
+        self.composer_scheduling = ComposerScheduling::SendAtDate(send_date);
+        self.schedule_popup_open = false;
+        self.status_note = format!("scheduled in {}", format_schedule_delay(secs));
+        cx.notify();
+    }
+
+    /// M1: load the chat's scheduled sends and open the dialog.
+    fn open_scheduled_dialog(&mut self, cx: &mut Context<Self>) {
+        self.schedule_popup_open = false;
+        if let Some(live) = self.live.as_mut() {
+            if let Some(chat_id) = live.driver.session.open_chat {
+                match live.driver.get_chat_scheduled_messages(chat_id) {
+                    Ok(_) => self.status_note = "loading scheduled messages…".into(),
+                    Err(_) => self.status_note = "could not load scheduled messages".into(),
+                }
+            }
+        }
+        self.scheduled_dialog_open = true;
+        cx.notify();
+    }
+
+    /// M1: delete a scheduled send (`deleteMessages`, revoke false —
+    /// scheduled messages are not in history, so this goes through the
+    /// driver's scheduled-message path, not the confirm dialog).
+    fn delete_scheduled_message(&mut self, message_id: MessageId, cx: &mut Context<Self>) {
+        let Some(live) = self.live.as_mut() else {
+            return;
+        };
+        let Some(chat_id) = live.driver.session.open_chat else {
+            return;
+        };
+        match live.driver.delete_scheduled_message(chat_id, message_id) {
+            Ok(_) => {
+                live.driver
+                    .session
+                    .scheduled_messages
+                    .retain(|m| m.id != message_id);
+                self.status_note = "scheduled message deleted".into();
+            }
+            Err(_) => self.status_note = "could not delete scheduled message".into(),
+        }
+        cx.notify();
+    }
+
+    /// M1: composer formatting toolbar (Telegram X `InputView` format menu
+    /// / tdesktop markdown behavior): bold, italic, underline,
+    /// strikethrough, inline code, code block, spoiler, quote, link, and
+    /// clear-formatting, plus the send-options toggles (silent, schedule,
+    /// link preview). Formatting applies to the textarea selection via
+    /// `apply_format_markup`; the send path converts markup to TDLib
+    /// `textEntities` (`parse_format_markup`).
+    fn format_toolbar(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let mut row = div()
+            .id("format-toolbar")
+            .flex()
+            .items_center()
+            .gap_1()
+            .px_1()
+            .py_1();
+        for (id, label, action) in [
+            ("fmt-bold", "B", FormatAction::Bold),
+            ("fmt-italic", "I", FormatAction::Italic),
+            ("fmt-underline", "U", FormatAction::Underline),
+            ("fmt-strike", "S", FormatAction::Strikethrough),
+            ("fmt-code", "</>", FormatAction::Code),
+            ("fmt-pre", "{ }", FormatAction::Pre),
+            ("fmt-spoiler", "◼", FormatAction::Spoiler),
+            ("fmt-quote", "❝", FormatAction::BlockQuote),
+            ("fmt-link", "🔗", FormatAction::Link(String::new())),
+        ] {
+            row = row.child(Button::new(id).label(label).ghost().on_click(cx.listener(
+                move |this, _, window, cx| {
+                    this.apply_composer_format(action.clone(), window, cx);
+                },
+            )));
+        }
+        row = row
+            .child(
+                Button::new("fmt-clear")
+                    .label("✕")
+                    .ghost()
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.clear_composer_format(window, cx);
+                    })),
+            )
+            .child(
+                Button::new("send-silent")
+                    .label(if self.composer_silent {
+                        "🔕 Silent on"
+                    } else {
+                        "🔕 Silent"
+                    })
+                    .ghost()
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.composer_silent = !this.composer_silent;
+                        this.status_note = if this.composer_silent {
+                            "silent send on".into()
+                        } else {
+                            "silent send off".into()
+                        };
+                        cx.notify();
+                    })),
+            )
+            .child(
+                Button::new("schedule-open")
+                    .label(match self.composer_scheduling {
+                        ComposerScheduling::None => "⏰ Schedule".to_string(),
+                        ComposerScheduling::SendAtDate(_) => "⏰ Scheduled".to_string(),
+                        ComposerScheduling::SendWhenOnline => "⏰ When online".to_string(),
+                    })
+                    .ghost()
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.schedule_popup_open = !this.schedule_popup_open;
+                        cx.notify();
+                    })),
+            )
+            .child(
+                Button::new("preview-toggle")
+                    .label(if self.composer_preview_disabled {
+                        "🔗 Preview off"
+                    } else {
+                        "🔗 Preview"
+                    })
+                    .ghost()
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.composer_preview_disabled = !this.composer_preview_disabled;
+                        this.status_note = if this.composer_preview_disabled {
+                            "link previews off for the next send".into()
+                        } else {
+                            "link previews on".into()
+                        };
+                        cx.notify();
+                    })),
+            );
+        row
+    }
+
+    /// M1: schedule picker popup above the composer (duration presets +
+    /// send-when-online, mirroring tdesktop's "Schedule message" options).
+    /// M1 fix-up: "When contact comes online" is offered only in private
+    /// (1:1) chats — `messageSchedulingStateSendWhenOnline` is
+    /// private-chats-only (schema 1.8.67 line 5905).
+    fn schedule_popup(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let mut panel = div()
+            .id("schedule-popup")
+            .flex()
+            .flex_col()
+            .gap_1()
+            .px_3()
+            .py_2()
+            .rounded_md()
+            .border_1()
+            .border_color(rgb(0x58a6ff))
+            .bg(rgb(0x161b22))
+            .child(
+                div()
+                    .text_sm()
+                    .font_semibold()
+                    .text_color(rgb(0x58a6ff))
+                    .child("Schedule message"),
+            );
+        for (id, label, secs) in [
+            ("schedule-1h", "In 1 hour", 3600),
+            ("schedule-8h", "In 8 hours", 8 * 3600),
+            ("schedule-24h", "In 24 hours", 24 * 3600),
+        ] {
+            panel = panel.child(Button::new(id).label(label).ghost().on_click(cx.listener(
+                move |this, _, _, cx| {
+                    this.schedule_send_in(secs, cx);
+                },
+            )));
+        }
+        // M1 fix-up: private chats only (see `open_chat_is_private`).
+        if self.open_chat_is_private() {
+            panel = panel.child(
+                Button::new("schedule-when-online")
+                    .label("When contact comes online")
+                    .ghost()
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.composer_scheduling = ComposerScheduling::SendWhenOnline;
+                        this.schedule_popup_open = false;
+                        this.status_note = "will send when the contact is online".into();
+                        cx.notify();
+                    })),
+            );
+        }
+        panel = panel
+            .child(
+                Button::new("schedule-clear")
+                    .label("Send now (clear schedule)")
+                    .ghost()
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.composer_scheduling = ComposerScheduling::None;
+                        this.schedule_popup_open = false;
+                        this.status_note = "schedule cleared".into();
+                        cx.notify();
+                    })),
+            )
+            .child(
+                Button::new("schedule-view")
+                    .label("View scheduled messages")
+                    .ghost()
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.open_scheduled_dialog(cx);
+                    })),
+            );
+        panel
+    }
+
+    /// M1: start a reply to a message from the context menu — the reply
+    /// header targets the message; the typed text stays untouched.
+    fn begin_reply_from_message(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let preview = self
+            .session()
+            .and_then(|session| session.histories.get(&chat_id.0))
+            .and_then(|history| history.messages.get(&message_id.0))
+            .map(|message| message.content.preview())
+            .unwrap_or_default();
+        self.begin_reply_to(
+            ComposerReplyTo::new(chat_id, message_id, preview),
+            window,
+            cx,
+        );
+    }
+
+    /// M1: pin a message (context menu). `silent` rides the silent-send
+    /// toggle (`pinChatMessage.disable_notification`, schema 1.8.67 line
+    /// 13559) — the Telegram convention for channel pins.
+    fn pin_message(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        silent: bool,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(live) = self.live.as_mut() {
+            self.status_note = match live.driver.pin_chat_message(chat_id, message_id, silent) {
+                Ok(_) => "pinning…".into(),
+                Err(_) => "could not pin".into(),
+            };
+        } else {
+            self.status_note = "no live connection".into();
+        }
+        cx.notify();
+    }
+
+    /// M1: unpin a message (context menu).
+    fn unpin_message(&mut self, chat_id: ChatId, message_id: MessageId, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            self.status_note = match live.driver.unpin_chat_message(chat_id, message_id) {
+                Ok(_) => "unpinning…".into(),
+                Err(_) => "could not unpin".into(),
+            };
+        } else {
+            self.status_note = "no live connection".into();
+        }
+        cx.notify();
+    }
+
+    /// M1: unpin every pinned message in the chat (`unpinAllChatMessages`,
+    /// TDLib 1.8.67, `schema/td_api.tl:13565`) — the pinned-bar "Unpin
+    /// all" action.
+    fn unpin_all_messages(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            self.status_note = match live.driver.unpin_all_chat_messages(chat_id) {
+                Ok(_) => "unpinning all…".into(),
+                Err(_) => "could not unpin all".into(),
+            };
+        } else {
+            self.status_note = "no live connection".into();
+        }
+        cx.notify();
+    }
+
+    /// M1: retry a failed send (`resendMessages`, TDLib 1.8.67,
+    /// `schema/td_api.tl:12251`). Offered only for rows the reducer
+    /// marked `failed` **and** `can_retry` — TDLib does not allow every
+    /// failed send to be retried. A failed `resendMessages` surfaces in
+    /// the status note via `Session::resend_error`.
+    fn retry_failed_message(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(live) = self.live.as_mut() {
+            self.status_note = match live.driver.resend_failed_message(chat_id, message_id) {
+                Ok(_) => "retrying send…".into(),
+                Err(_) => "could not retry".into(),
+            };
+        } else {
+            self.status_note = "no live connection".into();
+        }
+        cx.notify();
+    }
+
+    /// M1: copy a public share link for a message (`getMessageLink`,
+    /// TDLib 1.8.67, `schema/td_api.tl:12064`). The parsed
+    /// `messageLink.link` lands in `session.message_link_result`; the
+    /// per-frame pump copies it to the clipboard.
+    fn share_message_link(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(live) = self.live.as_mut() {
+            self.status_note = match live.driver.get_message_link(chat_id, message_id) {
+                Ok(_) => "fetching message link…".into(),
+                Err(_) => "could not get message link".into(),
+            };
+        } else {
+            self.status_note = "no live connection".into();
+        }
+        cx.notify();
+    }
+
     /// Phase B3: label for the picker button (`⏱` cycle affordance).
     fn self_destruct_button_label(&self) -> String {
         match self.composer_self_destruct {
@@ -3745,6 +4201,289 @@ impl QuillApp {
             Some(SelfDestructSend::Timer(secs)) => format!("⏱ {secs}s"),
             Some(SelfDestructSend::Immediately) => "⏱ Once".to_string(),
         }
+    }
+
+    /// M1: right-click message context menu — Reply, Copy, Forward, Pin,
+    /// Share link, Retry (failed sends), Delete. Rendered absolute at the
+    /// click position; any click on the backdrop closes it.
+    fn message_menu_overlay(
+        &self,
+        menu: MessageMenuState,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let (chat_id, message_id) = (menu.chat_id, menu.message_id);
+        let message = self
+            .session()
+            .and_then(|session| session.histories.get(&chat_id.0))
+            .and_then(|history| history.messages.get(&message_id.0))
+            .cloned();
+        let Some(message) = message else {
+            return div().into_any_element();
+        };
+        let failed = message.failed;
+        let copyable = Self::message_copyable_text(&message.content);
+        let delete_confirm =
+            DeleteConfirm::for_message(chat_id, message_id, message.is_outgoing, message.pending);
+        let pinned = message.is_pinned;
+        let silent_pin = self.composer_silent;
+
+        let mut panel = div()
+            .id("message-menu-panel")
+            .flex()
+            .flex_col()
+            .min_w(px(180.))
+            .px_1()
+            .py_1()
+            .rounded_md()
+            .border_1()
+            .border_color(rgb(0x58a6ff))
+            .bg(rgb(0x161b22));
+        macro_rules! item {
+            ($id:expr, $label:expr, $this:ident, $window:ident, $cx:ident, $body:block) => {
+                panel = panel.child(
+                    Button::new($id)
+                        .label($label)
+                        .ghost()
+                        .on_click($cx.listener(move |$this, _, $window, $cx| $body)),
+                );
+            };
+        }
+        item!("menu-reply", "Reply", this, window, cx, {
+            this.begin_reply_from_message(chat_id, message_id, window, cx);
+            this.message_menu = None;
+            cx.notify();
+        });
+        if let Some(text) = copyable {
+            item!("menu-copy", "Copy", this, _window, cx, {
+                cx.write_to_clipboard(ClipboardItem::new_string(text.clone()));
+                this.status_note = "copied to clipboard".into();
+                this.message_menu = None;
+                cx.notify();
+            });
+        }
+        item!("menu-forward", "Forward", this, window, cx, {
+            this.begin_forward_one(chat_id, message_id, message.pending, window, cx);
+            this.message_menu = None;
+            cx.notify();
+        });
+        if pinned {
+            item!("menu-unpin", "Unpin", this, _window, cx, {
+                this.unpin_message(chat_id, message_id, cx);
+                this.message_menu = None;
+                cx.notify();
+            });
+        } else {
+            item!("menu-pin", "Pin", this, _window, cx, {
+                this.pin_message(chat_id, message_id, silent_pin, cx);
+                this.message_menu = None;
+                cx.notify();
+            });
+        }
+        item!("menu-share", "Share link", this, _window, cx, {
+            this.share_message_link(chat_id, message_id, cx);
+            this.message_menu = None;
+            cx.notify();
+        });
+        if failed && message.can_retry {
+            item!("menu-retry", "Retry send", this, _window, cx, {
+                this.retry_failed_message(chat_id, message_id, cx);
+                this.message_menu = None;
+                cx.notify();
+            });
+        }
+        if let Some(confirm) = delete_confirm {
+            item!("menu-delete", "Delete", this, _window, cx, {
+                this.begin_delete(confirm.clone(), cx);
+                this.message_menu = None;
+                cx.notify();
+            });
+        }
+        div()
+            .id("message-menu-overlay")
+            .absolute()
+            .top_0()
+            .left_0()
+            .right_0()
+            .bottom_0()
+            .child(
+                div()
+                    .id("message-menu-backdrop")
+                    .absolute()
+                    .top_0()
+                    .left_0()
+                    .right_0()
+                    .bottom_0()
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.message_menu = None;
+                        cx.notify();
+                    })),
+            )
+            .child(
+                div()
+                    .absolute()
+                    .left(menu.position.x)
+                    .top(menu.position.y)
+                    .child(panel),
+            )
+            .into_any_element()
+    }
+
+    /// M1: text that "Copy" can copy — the message text, or a non-empty
+    /// media caption.
+    fn message_copyable_text(content: &MessageContent) -> Option<String> {
+        match content {
+            MessageContent::Text(text) if !text.text.is_empty() => Some(text.text.clone()),
+            MessageContent::Photo(photo) if !photo.caption.is_empty() => {
+                Some(photo.caption.clone())
+            }
+            MessageContent::Document(document) if !document.caption.is_empty() => {
+                Some(document.caption.clone())
+            }
+            MessageContent::Animation(animation) if !animation.caption.is_empty() => {
+                Some(animation.caption.clone())
+            }
+            MessageContent::Video(video) if !video.caption.is_empty() => {
+                Some(video.caption.clone())
+            }
+            MessageContent::Audio(audio) if !audio.caption.is_empty() => {
+                Some(audio.caption.clone())
+            }
+            _ => None,
+        }
+    }
+    fn scheduled_dialog(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let messages: Vec<ParsedMessage> = self
+            .session()
+            .map(|session| session.scheduled_messages.clone())
+            .unwrap_or_default();
+        let mut list = div().id("scheduled-list").flex().flex_col().gap_1();
+        if messages.is_empty() {
+            list = list.child(
+                div()
+                    .text_sm()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("No scheduled messages."),
+            );
+        }
+        for message in messages {
+            let id = message.id;
+            let preview = message.content.preview();
+            let label = scheduled_message_label(&message);
+            // M1: scheduled sends are the user's own — editing routes
+            // through the same composer edit flow with `scheduled: true`
+            // so `edit_snapshot` validates against the scheduled list.
+            let edit = ComposerEdit::from_own_content(
+                message.chat_id,
+                message.id,
+                true,
+                false,
+                &message.content,
+            )
+            .map(|mut edit| {
+                edit.scheduled = true;
+                edit
+            });
+            let mut row = div()
+                .id(("scheduled-row", id.0 as u64))
+                .flex()
+                .items_center()
+                .justify_between()
+                .gap_2()
+                .px_2()
+                .py_1()
+                .rounded_md()
+                .bg(cx.theme().sidebar)
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .min_w_0()
+                        .child(div().text_sm().child(preview))
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(cx.theme().muted_foreground)
+                                .child(label),
+                        ),
+                );
+            if let Some(edit) = edit {
+                row = row.child(
+                    Button::new(format!("scheduled-edit-{}", id.0))
+                        .label("Edit")
+                        .ghost()
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            this.scheduled_dialog_open = false;
+                            this.begin_edit(edit.clone(), window, cx);
+                        })),
+                );
+            }
+            list = list.child(
+                row.child(
+                    Button::new(format!("scheduled-delete-{}", id.0))
+                        .label("Delete")
+                        .ghost()
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.delete_scheduled_message(id, cx);
+                        })),
+                ),
+            );
+        }
+        div()
+            .id("scheduled-overlay")
+            .absolute()
+            .top_0()
+            .left_0()
+            .right_0()
+            .bottom_0()
+            .flex()
+            .items_center()
+            .justify_center()
+            .child(
+                div()
+                    .id("scheduled-backdrop")
+                    .absolute()
+                    .top_0()
+                    .left_0()
+                    .right_0()
+                    .bottom_0()
+                    .bg(rgba(0x00000099))
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.scheduled_dialog_open = false;
+                        cx.notify();
+                    })),
+            )
+            .child(
+                div()
+                    .id("scheduled-panel")
+                    .flex()
+                    .flex_col()
+                    .gap_2()
+                    .px_4()
+                    .py_3()
+                    .rounded_lg()
+                    .border_1()
+                    .border_color(cx.theme().border)
+                    .bg(cx.theme().background)
+                    .min_w(px(420.))
+                    .max_h(px(480.))
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .justify_between()
+                            .child(div().font_semibold().child("Scheduled messages"))
+                            .child(
+                                Button::new("scheduled-close")
+                                    .label("Close")
+                                    .ghost()
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.scheduled_dialog_open = false;
+                                        cx.notify();
+                                    })),
+                            ),
+                    )
+                    .child(list),
+            )
     }
 
     fn apply_demo_album(
@@ -4237,6 +4976,20 @@ impl QuillApp {
             .and_then(|s| s.open_chat)
             .and_then(|id| session.as_ref()?.chats.get(&id.0))
             .is_some_and(|chat| matches!(chat.kind, ChatKind::Secret { .. }))
+    }
+
+    /// M1 fix-up: whether the open chat is a 1:1 cloud chat.
+    /// `messageSchedulingStateSendWhenOnline` is private-chats-only
+    /// (schema 1.8.67 line 5905), so the schedule popup offers "When
+    /// contact comes online" only here — elsewhere the server 400s and
+    /// leaves a red failed row.
+    fn open_chat_is_private(&self) -> bool {
+        let session = self.session();
+        session
+            .as_ref()
+            .and_then(|s| s.open_chat)
+            .and_then(|id| session.as_ref()?.chats.get(&id.0))
+            .is_some_and(|chat| matches!(chat.kind, ChatKind::Private { .. }))
     }
 
     /// Phase S2: the inline-bot warning banner shown above the composer
@@ -16892,6 +17645,13 @@ impl QuillApp {
         let chat_id = message.chat_id;
         let message_id = message.id;
         let preview = message.content.preview();
+        // M1: tdesktop shows "Unpin all" when the chat pins more than one
+        // message (`unpinAllChatMessages`, schema 1.8.67 line 13565).
+        let pinned_count = self
+            .session()
+            .and_then(|session| session.histories.get(&chat_id.0))
+            .map(|history| history.messages.values().filter(|m| m.is_pinned).count())
+            .unwrap_or(0);
         div()
             .id("pinned-message-bar")
             .flex()
@@ -16931,6 +17691,16 @@ impl QuillApp {
                         this.unpin_from_banner(chat_id, message_id, cx);
                     })),
             )
+            .when(pinned_count > 1, |this| {
+                this.child(
+                    Button::new("unpin-all-banner")
+                        .label("Unpin all")
+                        .ghost()
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.unpin_all_messages(chat_id, cx);
+                        })),
+                )
+            })
     }
 
     fn reaction_picker_panel(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -17319,6 +18089,20 @@ impl QuillApp {
     }
 
     fn delete_confirm_banner(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let confirm = self.pending_delete.clone();
+        let scope_label = match confirm.as_ref() {
+            // M1: only own outgoing messages offer the for-everyone toggle
+            // (`deleteMessages.revoke`, schema 1.8.67 lines 6228–6229);
+            // incoming deletes are always for-me.
+            Some(c) if c.can_revoke => {
+                if c.revoke {
+                    "Deletes for everyone"
+                } else {
+                    "Deletes for me"
+                }
+            }
+            _ => "Deletes for me",
+        };
         div()
             .id("delete-confirm")
             .flex()
@@ -17347,9 +18131,31 @@ impl QuillApp {
                         div()
                             .text_sm()
                             .text_color(rgb(0xc9d1d9))
-                            .child("Deletes for everyone (official desktop default)."),
+                            .child(scope_label.to_string()),
                     ),
             )
+            .when(confirm.as_ref().is_some_and(|c| c.can_revoke), |this| {
+                this.child(
+                    Button::new("delete-toggle-scope")
+                        .label(if confirm.as_ref().is_some_and(|c| c.revoke) {
+                            "For me"
+                        } else {
+                            "For everyone"
+                        })
+                        .ghost()
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            if let Some(confirm) = this.pending_delete.as_mut() {
+                                confirm.revoke = !confirm.revoke;
+                                this.status_note = if confirm.revoke {
+                                    "delete: for everyone".into()
+                                } else {
+                                    "delete: for me".into()
+                                };
+                            }
+                            cx.notify();
+                        })),
+                )
+            })
             .child(
                 div()
                     .flex()
@@ -19046,6 +19852,50 @@ impl QuillApp {
             )
             .child(div().text_xs().text_color(rgb(0xc9d1d9)).child(heading))
             .child(Textarea::new(&self.forward_search_input).h(px(36.)))
+            // M1: `forwardMessages.send_copy` ("Hide sender name", TGX)
+            // and `forwardMessages.remove_caption` (only applies to
+            // send_copy copies — the checkbox disables itself otherwise).
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .child(
+                        Button::new("forward-send-copy")
+                            .label(if draft.as_ref().is_some_and(|d| d.send_copy) {
+                                "☑ Hide sender name"
+                            } else {
+                                "☐ Hide sender name"
+                            })
+                            .ghost()
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                if let Some(draft) = this.pending_forward.as_mut() {
+                                    draft.send_copy = !draft.send_copy;
+                                    if !draft.send_copy {
+                                        draft.remove_caption = false;
+                                    }
+                                }
+                                cx.notify();
+                            })),
+                    )
+                    .child(
+                        Button::new("forward-remove-caption")
+                            .label(if draft.as_ref().is_some_and(|d| d.remove_caption) {
+                                "☑ Remove caption"
+                            } else {
+                                "☐ Remove caption"
+                            })
+                            .ghost()
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                if let Some(draft) = this.pending_forward.as_mut()
+                                    && draft.send_copy
+                                {
+                                    draft.remove_caption = !draft.remove_caption;
+                                }
+                                cx.notify();
+                            })),
+                    ),
+            )
             .child(list)
     }
 
@@ -19903,6 +20753,24 @@ impl Render for QuillApp {
             .on_action(cx.listener(|this, _: &SubmitPassword, window, cx| {
                 this.submit_password(window, cx);
             }))
+            // M1: formatting shortcuts only apply when the composer has
+            // focus (otherwise the keystroke belongs to whatever is
+            // focused).
+            .on_action(cx.listener(|this, _: &FormatBold, window, cx| {
+                if this.composer.read(cx).focus_handle(cx).is_focused(window) {
+                    this.apply_composer_format(FormatAction::Bold, window, cx);
+                }
+            }))
+            .on_action(cx.listener(|this, _: &FormatItalic, window, cx| {
+                if this.composer.read(cx).focus_handle(cx).is_focused(window) {
+                    this.apply_composer_format(FormatAction::Italic, window, cx);
+                }
+            }))
+            .on_action(cx.listener(|this, _: &FormatUnderline, window, cx| {
+                if this.composer.read(cx).focus_handle(cx).is_focused(window) {
+                    this.apply_composer_format(FormatAction::Underline, window, cx);
+                }
+            }))
             .child(title_bar(
                 self.pane_mode(),
                 self.live.is_some(),
@@ -19966,6 +20834,14 @@ impl Render for QuillApp {
             // overlay.
             .when_some(self.group_call_start_overlay(cx), |this, overlay| {
                 this.child(overlay)
+            })
+            // M1: scheduled-messages dialog.
+            .when(self.scheduled_dialog_open, |this| {
+                this.child(self.scheduled_dialog(cx))
+            })
+            // M1: right-click message context menu.
+            .when_some(self.message_menu, |this, menu| {
+                this.child(self.message_menu_overlay(menu, cx))
             })
     }
 }
@@ -20303,6 +21179,12 @@ impl QuillApp {
                                     ),
                             )
                         })
+                        // M1: formatting toolbar + send options row, above the
+                        // input; the schedule picker opens above the toolbar.
+                        .when(self.schedule_popup_open, |this| {
+                            this.child(self.schedule_popup(cx))
+                        })
+                        .child(self.format_toolbar(cx))
                         .child(Textarea::new(&self.composer).h(px(88.))),
                 )
             })
@@ -20914,6 +21796,9 @@ impl QuillApp {
                 self.session(),
                 cx,
             );
+            // M1: `cx.listener` closures must be `'static`, so the row's
+            // ids are copied out of the borrowed message first.
+            let (row_chat, row_msg) = (message.chat_id, message.id);
             list = list.child(
                 div()
                     .when(highlighted || selected_forward, |this| {
@@ -20926,7 +21811,60 @@ impl QuillApp {
                             })
                             .px_1()
                     })
-                    .child(row),
+                    // M1: failed sends get a red outline so the retry
+                    // affordance is visible (`updateMessageSendFailed`).
+                    .when(message.failed, |this| {
+                        this.rounded_lg()
+                            .border_1()
+                            .border_color(rgb(0xf85149))
+                            .px_1()
+                    })
+                    // M1: right-click opens the message context menu at
+                    // the click position (window coordinates).
+                    .on_mouse_down(
+                        MouseButton::Right,
+                        cx.listener(move |this, event: &MouseDownEvent, _, cx| {
+                            this.message_menu = Some(MessageMenuState {
+                                chat_id: row_chat,
+                                message_id: row_msg,
+                                position: event.position,
+                            });
+                            cx.notify();
+                        }),
+                    )
+                    // M1: swipe-to-reply — press on the row, release >24px
+                    // to the left of the press point starts a reply.
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, event: &MouseDownEvent, _, cx| {
+                            this.swipe_reply_start = Some((row_chat, row_msg, event.position.x));
+                            cx.notify();
+                        }),
+                    )
+                    .on_mouse_up(
+                        MouseButton::Left,
+                        cx.listener(move |this, event: &MouseUpEvent, window, cx| {
+                            if let Some((chat_id, message_id, start_x)) =
+                                this.swipe_reply_start.take()
+                                && chat_id == row_chat
+                                && message_id == row_msg
+                                && start_x - event.position.x > px(24.)
+                            {
+                                this.begin_reply_from_message(chat_id, message_id, window, cx);
+                            }
+                            cx.notify();
+                        }),
+                    )
+                    .child(row)
+                    // M1: explicit failed-send notice with a retry hint.
+                    .when(message.failed, |this| {
+                        this.child(
+                            div()
+                                .text_xs()
+                                .text_color(rgb(0xf85149))
+                                .child("⚠ Failed to send — right-click → Retry send"),
+                        )
+                    }),
             );
         }
         list.into_any_element()
@@ -26239,6 +27177,56 @@ fn forward_dest_row(id: ChatId, title: String, cx: &mut Context<QuillApp>) -> im
             this.submit_forward_to(id, cx);
         }))
         .child(div().font_medium().child(title))
+}
+
+/// M1: short label for a schedule delay ("1h", "8h", "2d").
+fn format_schedule_delay(secs: i64) -> String {
+    if secs % 86400 == 0 {
+        format!("{}d", secs / 86400)
+    } else if secs % 3600 == 0 {
+        format!("{}h", secs / 3600)
+    } else {
+        format!("{}m", secs / 60)
+    }
+}
+
+/// M1: label for a scheduled message's planned send time
+/// (`messageSchedulingState`, schema 1.8.67 lines 5902/5905).
+fn scheduled_message_label(message: &ParsedMessage) -> String {
+    match message.scheduling_state {
+        Some(MessageSchedulingState::SendAtDate { send_date }) => {
+            format!("scheduled for {}", format_unix_date_time(send_date as i64))
+        }
+        Some(MessageSchedulingState::SendWhenOnline) => "scheduled for when online".to_string(),
+        None => "scheduled".to_string(),
+    }
+}
+
+/// M1: `YYYY-MM-DD HH:MM` (UTC) from a unix timestamp, stdlib only — no
+/// chrono dependency for one label. UTC is stated explicitly rather than
+/// pretending at a local timezone the stdlib cannot compute.
+fn format_unix_date_time(unix: i64) -> String {
+    // Days since epoch → civil date (Howard Hinnant's algorithm).
+    let days = unix.div_euclid(86400);
+    let secs_of_day = unix.rem_euclid(86400);
+    let z = days + 719468;
+    let era = z.div_euclid(146097);
+    let doe = z.rem_euclid(146097);
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = if m <= 2 { y + 1 } else { y };
+    format!(
+        "{:04}-{:02}-{:02} {:02}:{:02} UTC",
+        year,
+        m,
+        d,
+        secs_of_day / 3600,
+        (secs_of_day % 3600) / 60
+    )
 }
 
 fn reply_quote_strip(

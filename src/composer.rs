@@ -152,6 +152,10 @@ pub struct ComposerEdit {
     pub message_id: MessageId,
     pub original_text: String,
     pub kind: ComposerEditKind,
+    /// M1: the target is a scheduled send (`session.scheduled_messages`),
+    /// not a history message. `edit_snapshot` validates against the
+    /// scheduled list in that case.
+    pub scheduled: bool,
 }
 
 impl ComposerEdit {
@@ -200,6 +204,7 @@ impl ComposerEdit {
             message_id,
             original_text,
             kind,
+            scheduled: false,
         })
     }
 }
@@ -244,11 +249,16 @@ pub fn cancel_edit_keeping_reply(
 }
 
 /// Pending delete confirm (tdesktop `DeleteMessagesBox` / Unigram
-/// `DeleteMessagesPopup`). Own outgoing only in this slice.
+/// `DeleteMessagesPopup`). `revoke` maps to `deleteMessages.revoke`
+/// (schema 1.8.67 line 12282): true deletes for everyone, false only for
+/// the current user. The revoke toggle is only offered for own outgoing
+/// messages (`can_revoke`); incoming deletes are always for-me.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DeleteConfirm {
     pub chat_id: ChatId,
     pub message_id: MessageId,
+    pub revoke: bool,
+    pub can_revoke: bool,
 }
 
 impl DeleteConfirm {
@@ -262,10 +272,32 @@ impl DeleteConfirm {
             Some(Self {
                 chat_id,
                 message_id,
+                revoke: true,
+                can_revoke: true,
             })
         } else {
             None
         }
+    }
+
+    /// M1: any already-sent message (incoming included) can be deleted
+    /// for the current user (`revoke: false`); the for-everyone toggle
+    /// stays hidden.
+    pub fn for_message(
+        chat_id: ChatId,
+        message_id: MessageId,
+        is_outgoing: bool,
+        pending: bool,
+    ) -> Option<Self> {
+        if pending || message_id.0 <= 0 {
+            return None;
+        }
+        Some(Self {
+            chat_id,
+            message_id,
+            revoke: is_outgoing,
+            can_revoke: is_outgoing,
+        })
     }
 }
 
@@ -275,6 +307,12 @@ impl DeleteConfirm {
 pub struct ForwardDraft {
     pub from_chat_id: ChatId,
     pub message_ids: Vec<MessageId>,
+    /// M1: `forwardMessages.send_copy` — drop the "Forwarded from"
+    /// attribution (TGX "Hide sender name"; schema 1.8.67 line 12237).
+    pub send_copy: bool,
+    /// M1: `forwardMessages.remove_caption` — strip captions on the copies
+    /// (ignored by TDLib unless `send_copy` is true).
+    pub remove_caption: bool,
 }
 
 impl ForwardDraft {
@@ -286,6 +324,8 @@ impl ForwardDraft {
         Some(Self {
             from_chat_id: chat_id,
             message_ids: vec![message_id],
+            send_copy: false,
+            remove_caption: false,
         })
     }
 
@@ -326,6 +366,451 @@ impl ForwardDraft {
 pub fn cancel_forward_draft(draft: Option<ForwardDraft>) -> (Option<ForwardDraft>, bool) {
     let _ = draft;
     (None, false)
+}
+
+/// M1: `messageSendOptions` choices for a send (TDLib 1.8.67,
+/// `schema/td_api.tl:5934` —
+/// `messageSendOptions suggested_post_info disable_notification
+/// from_background protect_content allow_paid_broadcast
+/// paid_message_star_count update_order_of_installed_sticker_sets
+/// scheduling_state effect_id sending_id only_preview`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct SendOptions {
+    /// `disable_notification` — silent send.
+    pub disable_notification: bool,
+    pub scheduling: ComposerScheduling,
+    /// `linkPreviewOptions.is_disabled` — the composer preview toggle.
+    /// Secret chats force this on the driver side regardless.
+    pub link_preview_disabled: bool,
+    /// M1 fix-up: the driver sets this when the target chat is a secret
+    /// chat. `textEntityTypeBlockQuote` is not supported in secret chats
+    /// (schema 1.8.67), so `send_text` strips blockquote entities instead
+    /// of letting TDLib drop them.
+    pub is_secret: bool,
+}
+
+/// M1: `MessageSchedulingState` for a send (TDLib 1.8.67,
+/// `schema/td_api.tl:5902` `messageSchedulingStateSendAtDate
+/// send_date repeat_period` / `:5905` `messageSchedulingStateSendWhenOnline`).
+/// `repeat_period` is always 0 (premium-only, never surfaced).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ComposerScheduling {
+    #[default]
+    None,
+    /// Unix timestamp of the scheduled send.
+    SendAtDate(i64),
+    SendWhenOnline,
+}
+
+/// M1: composer text formatting. The composer stays plain text; formatting
+/// is authored as lightweight markup (Telegram X `InputView` format menu /
+/// tdesktop markdown behavior) and converted to TDLib `textEntities` on
+/// the send path by `parse_format_markup`. Paired delimiters only;
+/// unmatched delimiters stay literal; no nesting (documented, keeps the
+/// parser a single pass):
+/// `**bold**` `*italic*` (or `_italic_`) `__underline__` `~~strike~~`
+/// `` `code` `` `||spoiler||` `[label](url)`; fenced ` ```lang? ` blocks;
+/// `> ` line prefix for quotes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FormatKind {
+    Bold,
+    Italic,
+    Underline,
+    Strikethrough,
+    Code,
+    Pre,
+    Spoiler,
+    BlockQuote,
+    TextUrl,
+}
+
+/// M1: one parsed entity. Offsets are UTF-16 code units — the units TDLib
+/// `textEntity` uses (`src/text.rs` maps them back for rendering).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ComposerEntity {
+    pub offset: i32,
+    pub length: i32,
+    pub kind: FormatKind,
+    /// `TextUrl` target.
+    pub url: String,
+    /// `Pre` language; empty renders as plain `textEntityTypePre`.
+    pub language: String,
+}
+
+/// M1: a formatting action the toolbar / shortcut applies to the composer
+/// selection (byte range; empty = cursor).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FormatAction {
+    Bold,
+    Italic,
+    Underline,
+    Strikethrough,
+    Code,
+    Pre,
+    Spoiler,
+    BlockQuote,
+    Link(String),
+}
+
+impl FormatAction {
+    fn open_marker(&self) -> &'static str {
+        match self {
+            FormatAction::Bold => "**",
+            FormatAction::Italic => "*",
+            FormatAction::Underline => "__",
+            FormatAction::Strikethrough => "~~",
+            FormatAction::Code => "`",
+            FormatAction::Pre => "```\n",
+            FormatAction::Spoiler => "||",
+            FormatAction::BlockQuote => "> ",
+            FormatAction::Link(_) => "[",
+        }
+    }
+
+    fn close_marker(&self) -> &'static str {
+        match self {
+            FormatAction::Bold => "**",
+            FormatAction::Italic => "*",
+            FormatAction::Underline => "__",
+            FormatAction::Strikethrough => "~~",
+            FormatAction::Code => "`",
+            FormatAction::Pre => "\n```",
+            FormatAction::Spoiler => "||",
+            FormatAction::BlockQuote => "",
+            FormatAction::Link(_) => "]()",
+        }
+    }
+}
+
+/// M1: parse composer markup into clean text + entities. Returns the text
+/// with markers stripped and entities with UTF-16 offsets into it.
+pub fn parse_format_markup(text: &str) -> (String, Vec<ComposerEntity>) {
+    let mut parser = MarkupParser {
+        text,
+        out: String::with_capacity(text.len()),
+        out16: 0,
+        entities: Vec::new(),
+    };
+    parser.parse_top();
+    (parser.out, parser.entities)
+}
+
+/// M1: apply a formatting action to `range` (UTF-8 byte range; snapped to
+/// char boundaries). Returns the new text and the new selection: the
+/// wrapped region for a selection, the cursor between markers when empty.
+pub fn apply_format_markup(
+    text: &str,
+    range: std::ops::Range<usize>,
+    action: &FormatAction,
+) -> (String, std::ops::Range<usize>) {
+    let (start, end) = snap_range(text, range);
+    if *action == FormatAction::BlockQuote {
+        return apply_block_quote(text, start, end);
+    }
+    let open = action.open_marker();
+    let close = action.close_marker();
+    if start == end {
+        // Empty selection: insert the marker pair, cursor between them.
+        // Link inserts `[` + `](url)` and lands the cursor in the URL slot.
+        let (insert, cursor_off) = match action {
+            FormatAction::Link(url) if url.is_empty() => ("[]()".to_string(), 3),
+            FormatAction::Link(url) => (format!("[]({url})"), 3 + url.len()),
+            _ => (format!("{open}{close}"), open.len()),
+        };
+        let mut new_text = String::with_capacity(text.len() + insert.len());
+        new_text.push_str(&text[..start]);
+        new_text.push_str(&insert);
+        new_text.push_str(&text[start..]);
+        let cursor = start + cursor_off;
+        (new_text, cursor..cursor)
+    } else {
+        let selected = &text[start..end];
+        let wrapped = match action {
+            FormatAction::Link(url) => format!("[{selected}]({url})"),
+            _ => format!("{open}{selected}{close}"),
+        };
+        let mut new_text = String::with_capacity(text.len() + wrapped.len());
+        new_text.push_str(&text[..start]);
+        new_text.push_str(&wrapped);
+        new_text.push_str(&text[end..]);
+        let new_start = start + open.len();
+        let new_end = new_start + selected.len();
+        (new_text, new_start..new_end)
+    }
+}
+
+/// M1: strip all markup markers in `range` (whole text when empty),
+/// keeping the inner text. `[label](url)` collapses to `label`.
+pub fn clear_format_markup(text: &str, range: std::ops::Range<usize>) -> String {
+    let (start, end) = snap_range(text, range);
+    let (start, end) = if start == end {
+        (0, text.len())
+    } else {
+        (start, end)
+    };
+    let mut result = String::with_capacity(text.len());
+    result.push_str(&text[..start]);
+    result.push_str(&strip_markup(&text[start..end]));
+    result.push_str(&text[end..]);
+    result
+}
+
+fn snap_range(text: &str, range: std::ops::Range<usize>) -> (usize, usize) {
+    let len = text.len();
+    let mut start = range.start.min(len);
+    let mut end = range.end.min(len);
+    while start > 0 && !text.is_char_boundary(start) {
+        start -= 1;
+    }
+    while end < len && !text.is_char_boundary(end) {
+        end += 1;
+    }
+    if start > end {
+        std::mem::swap(&mut start, &mut end);
+    }
+    (start, end)
+}
+
+/// M1: `> ` prefix on every line intersecting the range.
+fn apply_block_quote(text: &str, start: usize, end: usize) -> (String, std::ops::Range<usize>) {
+    let line_start = text[..start].rfind('\n').map(|i| i + 1).unwrap_or(0);
+    let line_end = text[end..]
+        .find('\n')
+        .map(|i| end + i)
+        .unwrap_or(text.len());
+    let mut new_text = String::with_capacity(text.len() + 8);
+    new_text.push_str(&text[..line_start]);
+    let mut added_total = 0;
+    for line in text[line_start..line_end].split_inclusive('\n') {
+        new_text.push_str("> ");
+        added_total += 2;
+        new_text.push_str(line);
+    }
+    new_text.push_str(&text[line_end..]);
+    // Select the quoted lines (predictable; the user can keep typing).
+    (new_text, line_start..line_end + added_total)
+}
+
+struct MarkupParser<'a> {
+    text: &'a str,
+    out: String,
+    /// UTF-16 code-unit length of `out`.
+    out16: i32,
+    entities: Vec<ComposerEntity>,
+}
+
+impl<'a> MarkupParser<'a> {
+    fn parse_top(&mut self) {
+        let bytes = self.text.as_bytes();
+        let mut i = 0;
+        while i < bytes.len() {
+            let line_start = i == 0 || bytes[i - 1] == b'\n';
+            if line_start && self.text[i..].starts_with("> ") {
+                let content_start = i + 2;
+                let line_end = self.text[content_start..]
+                    .find('\n')
+                    .map(|k| content_start + k)
+                    .unwrap_or(self.text.len());
+                let inner = &self.text[content_start..line_end];
+                let entity_start = self.out16;
+                self.push_str(inner);
+                let entity_len = self.out16 - entity_start;
+                if entity_len > 0 {
+                    self.entities.push(ComposerEntity {
+                        offset: entity_start,
+                        length: entity_len,
+                        kind: FormatKind::BlockQuote,
+                        url: String::new(),
+                        language: String::new(),
+                    });
+                }
+                i = line_end;
+                continue;
+            }
+            if let Some(consumed) = self.try_inline(i) {
+                i = consumed;
+                continue;
+            }
+            if let Some(consumed) = self.try_link(i) {
+                i = consumed;
+                continue;
+            }
+            let ch = self.text[i..].chars().next().expect("char boundary");
+            self.push_char(ch);
+            i += ch.len_utf8();
+        }
+    }
+
+    /// Try a paired delimiter at byte offset `i`. Returns the offset just
+    /// past the closing delimiter on success. Check order matters: longer
+    /// delimiters first (`**` before `*`, `__` before `_`, ` ``` ` before
+    /// `` ` ``).
+    fn try_inline(&mut self, i: usize) -> Option<usize> {
+        let rest = &self.text[i..];
+        // Fenced code block first (may span lines, optional language).
+        if let Some(after) = rest.strip_prefix("```") {
+            return self.try_fenced(i, after);
+        }
+        for (open, kind) in [
+            ("**", FormatKind::Bold),
+            ("__", FormatKind::Underline),
+            ("~~", FormatKind::Strikethrough),
+            ("||", FormatKind::Spoiler),
+            ("`", FormatKind::Code),
+            ("*", FormatKind::Italic),
+            ("_", FormatKind::Italic),
+        ] {
+            if let Some(after_open) = rest.strip_prefix(open) {
+                // A lone `*`/`_` that continues a `**`/`__` pair never opens
+                // italic: an unmatched `**bold` must not re-parse the second
+                // `*` as an italic opener (unmatched delimiters stay literal).
+                if open.len() == 1 && i > 0 && self.text.as_bytes()[i - 1] == open.as_bytes()[0] {
+                    continue;
+                }
+                // Inline spans stay on one line (Telegram entities do).
+                let line_end = after_open.find('\n').unwrap_or(after_open.len());
+                let searchable = &after_open[..line_end];
+                if let Some(close_rel) = searchable.find(open) {
+                    let inner = &searchable[..close_rel];
+                    if !inner.is_empty() {
+                        let entity_start = self.out16;
+                        self.push_str(inner);
+                        self.entities.push(ComposerEntity {
+                            offset: entity_start,
+                            length: self.out16 - entity_start,
+                            kind,
+                            url: String::new(),
+                            language: String::new(),
+                        });
+                        return Some(i + open.len() + close_rel + open.len());
+                    }
+                }
+                return None;
+            }
+        }
+        None
+    }
+
+    fn try_fenced(&mut self, i: usize, after: &str) -> Option<usize> {
+        // Language = first line after the fence (may be empty).
+        let first_nl = after.find('\n')?;
+        let language = after[..first_nl].trim().to_string();
+        let body_start = first_nl + 1;
+        let close_rel = after[body_start..].find("```")?;
+        let inner = &after[body_start..body_start + close_rel];
+        // A fenced block with only whitespace is not formatting.
+        if inner.trim().is_empty() {
+            return None;
+        }
+        // The newline before the closing fence is block syntax, not content.
+        let inner = inner
+            .strip_suffix("\r\n")
+            .or_else(|| inner.strip_suffix('\n'))
+            .unwrap_or(inner);
+        let entity_start = self.out16;
+        self.push_str(inner);
+        self.entities.push(ComposerEntity {
+            offset: entity_start,
+            length: self.out16 - entity_start,
+            kind: FormatKind::Pre,
+            url: String::new(),
+            language,
+        });
+        Some(i + 3 + body_start + close_rel + 3)
+    }
+
+    /// `[label](url)` — label stays plain (no nesting).
+    fn try_link(&mut self, i: usize) -> Option<usize> {
+        let rest = &self.text[i..];
+        let after_bracket = rest.strip_prefix('[')?;
+        let close_bracket = after_bracket.find("](")?;
+        let after_paren = &after_bracket[close_bracket + 2..];
+        // URL stays on one line.
+        let line_end = after_paren.find('\n').unwrap_or(after_paren.len());
+        let close_paren = after_paren[..line_end].find(')')?;
+        let label = &after_bracket[..close_bracket];
+        let url = &after_paren[..close_paren];
+        if label.is_empty() || url.is_empty() {
+            return None;
+        }
+        let entity_start = self.out16;
+        self.push_str(label);
+        self.entities.push(ComposerEntity {
+            offset: entity_start,
+            length: self.out16 - entity_start,
+            kind: FormatKind::TextUrl,
+            url: url.to_string(),
+            language: String::new(),
+        });
+        Some(i + 1 + close_bracket + 2 + close_paren + 1)
+    }
+
+    fn push_str(&mut self, s: &str) {
+        for ch in s.chars() {
+            self.push_char(ch);
+        }
+    }
+
+    fn push_char(&mut self, ch: char) {
+        self.out.push(ch);
+        self.out16 += ch.len_utf16() as i32;
+    }
+}
+
+/// M1: strip markup without producing entities (clear-formatting).
+fn strip_markup(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut i = 0;
+    let bytes = text.as_bytes();
+    while i < bytes.len() {
+        let line_start = i == 0 || bytes[i - 1] == b'\n';
+        if line_start && text[i..].starts_with("> ") {
+            i += 2;
+            continue;
+        }
+        let rest = &text[i..];
+        if let Some(after) = rest.strip_prefix("```")
+            && let Some(first_nl) = after.find('\n')
+        {
+            let body_start = first_nl + 1;
+            if let Some(close_rel) = after[body_start..].find("```") {
+                out.push_str(&strip_markup(&after[body_start..body_start + close_rel]));
+                i += 3 + body_start + close_rel + 3;
+                continue;
+            }
+        }
+        let mut stripped = false;
+        for open in ["**", "__", "~~", "||", "`", "*", "_"] {
+            if let Some(after_open) = rest.strip_prefix(open) {
+                let line_end = after_open.find('\n').unwrap_or(after_open.len());
+                if let Some(close_rel) = after_open[..line_end].find(open) {
+                    out.push_str(&strip_markup(&after_open[..close_rel]));
+                    i += open.len() + close_rel + open.len();
+                    stripped = true;
+                    break;
+                }
+            }
+        }
+        if stripped {
+            continue;
+        }
+        // `[label](url)` → `label`.
+        if let Some(after_bracket) = rest.strip_prefix('[')
+            && let Some(close_bracket) = after_bracket.find("](")
+        {
+            let after_paren = &after_bracket[close_bracket + 2..];
+            let line_end = after_paren.find('\n').unwrap_or(after_paren.len());
+            if let Some(close_paren) = after_paren[..line_end].find(')') {
+                out.push_str(&strip_markup(&after_bracket[..close_bracket]));
+                i += 1 + close_bracket + 2 + close_paren + 1;
+                continue;
+            }
+        }
+        let ch = text[i..].chars().next().expect("char boundary");
+        out.push(ch);
+        i += ch.len_utf8();
+    }
+    out
 }
 
 /// tdesktop `ComposeControls::kSaveDraftTimeout` — quiet period before a local draft write.
@@ -513,6 +998,8 @@ pub struct ComposerSnapshot {
     /// TDLib 1.8.67 lines 6117/6128 — "private chats only"). Set from the
     /// composer's timer picker; the driver strips it for non-private chats.
     pub self_destruct: Option<SelfDestructSend>,
+    /// M1: silent / scheduled / when-online / link-preview send options.
+    pub send_options: SendOptions,
 }
 
 impl ComposerSnapshot {
@@ -539,6 +1026,7 @@ impl ComposerSnapshot {
             album: Vec::new(),
             reply_to: None,
             self_destruct: None,
+            send_options: SendOptions::default(),
         }
     }
 
@@ -557,6 +1045,7 @@ impl ComposerSnapshot {
             album,
             reply_to: None,
             self_destruct: None,
+            send_options: SendOptions::default(),
         }
     }
 
@@ -569,6 +1058,13 @@ impl ComposerSnapshot {
     /// sends only; the driver enforces the private-chat gate).
     pub fn with_self_destruct(mut self, choice: Option<SelfDestructSend>) -> Self {
         self.self_destruct = choice;
+        self
+    }
+
+    /// M1: attach the composer's send options (silent / scheduled /
+    /// when-online / link-preview toggle).
+    pub fn with_send_options(mut self, options: SendOptions) -> Self {
+        self.send_options = options;
         self
     }
 
@@ -1000,5 +1496,117 @@ mod tests {
             .collect();
         assert_eq!(caps, vec!["start"]);
         assert!(filter_command_menu_items(&items, "zzz").is_empty());
+    }
+
+    // M1: the markup parser emits TDLib UTF-16 offsets directly. One test
+    // per entity kind, plus the documented edge cases (unmatched stays
+    // literal, no nesting).
+    #[test]
+    fn markup_parses_every_entity_kind() {
+        let cases: &[(&str, &str, FormatKind, i32, i32)] = &[
+            ("**bold**", "bold", FormatKind::Bold, 0, 4),
+            ("*italic*", "italic", FormatKind::Italic, 0, 6),
+            ("_italic_", "italic", FormatKind::Italic, 0, 6),
+            ("__under__", "under", FormatKind::Underline, 0, 5),
+            ("~~strike~~", "strike", FormatKind::Strikethrough, 0, 6),
+            ("`code`", "code", FormatKind::Code, 0, 4),
+            ("||spoiler||", "spoiler", FormatKind::Spoiler, 0, 7),
+            (
+                "[label](https://example.com)",
+                "label",
+                FormatKind::TextUrl,
+                0,
+                5,
+            ),
+        ];
+        for (input, clean, kind, offset, length) in cases {
+            let (text, entities) = parse_format_markup(input);
+            assert_eq!(&text, clean, "clean text for {input}");
+            assert_eq!(entities.len(), 1, "entity count for {input}");
+            assert_eq!(entities[0].kind, *kind);
+            assert_eq!(entities[0].offset, *offset);
+            assert_eq!(entities[0].length, *length);
+        }
+        // Pre without language and with language.
+        let (text, entities) = parse_format_markup("```\nlet x = 1;\n```");
+        assert_eq!(text, "let x = 1;");
+        assert_eq!(entities[0].kind, FormatKind::Pre);
+        assert!(entities[0].language.is_empty());
+        let (text, entities) = parse_format_markup("```rust\nlet x = 1;\n```");
+        assert_eq!(text, "let x = 1;");
+        assert_eq!(entities[0].kind, FormatKind::Pre);
+        assert_eq!(entities[0].language, "rust");
+        // Block quote is a `> ` line prefix.
+        let (text, entities) = parse_format_markup("> quoted");
+        assert_eq!(text, "quoted");
+        assert_eq!(entities[0].kind, FormatKind::BlockQuote);
+        assert_eq!((entities[0].offset, entities[0].length), (0, 6));
+        // URL lands on the entity.
+        let (_, entities) = parse_format_markup("[t](https://t.me/x)");
+        assert_eq!(entities[0].url, "https://t.me/x");
+    }
+
+    #[test]
+    fn markup_unmatched_delimiters_stay_literal() {
+        let (text, entities) = parse_format_markup("a **bold and *half");
+        assert_eq!(text, "a **bold and *half");
+        assert!(entities.is_empty());
+    }
+
+    #[test]
+    fn markup_does_not_nest() {
+        // Documented single-pass behavior: the inner marker pair is literal.
+        let (text, entities) = parse_format_markup("**a *b* c**");
+        assert_eq!(text, "a *b* c");
+        assert_eq!(entities.len(), 1);
+        assert_eq!(entities[0].kind, FormatKind::Bold);
+    }
+
+    #[test]
+    fn markup_offsets_are_utf16_with_emoji() {
+        // 😀 is one char but two UTF-16 code units; TDLib counts those.
+        let (text, entities) = parse_format_markup("😀 **bold**");
+        assert_eq!(text, "😀 bold");
+        assert_eq!(entities.len(), 1);
+        assert_eq!((entities[0].offset, entities[0].length), (3, 4));
+        // Emoji inside the formatted span shifts the length too.
+        let (text, entities) = parse_format_markup("**a😀b**");
+        assert_eq!(text, "a😀b");
+        assert_eq!(entities.len(), 1);
+        assert_eq!((entities[0].offset, entities[0].length), (0, 4));
+        // BMP text after a surrogate pair keeps counting in code units.
+        let (text, entities) = parse_format_markup("😀😀 *it*");
+        assert_eq!(text, "😀😀 it");
+        assert_eq!((entities[0].offset, entities[0].length), (5, 2));
+    }
+
+    #[test]
+    fn apply_format_wraps_selection_and_places_cursor() {
+        // Selection: wrap, selection covers the inner text only.
+        let (text, sel) = apply_format_markup("hello world", 6..11, &FormatAction::Bold);
+        assert_eq!(text, "hello **world**");
+        assert_eq!(&text[sel], "world");
+        // Empty selection: marker pair inserted, cursor between markers.
+        let (text, sel) = apply_format_markup("hi", 2..2, &FormatAction::Italic);
+        assert_eq!(text, "hi**");
+        assert_eq!(sel, 3..3);
+        // Link with empty selection lands the cursor in the URL slot.
+        let (text, sel) = apply_format_markup("hi", 2..2, &FormatAction::Link(String::new()));
+        assert_eq!(text, "hi[]()");
+        assert_eq!(sel, 5..5);
+        // Block quote prefixes each selected line.
+        let (text, _) = apply_format_markup("a\nb", 0..3, &FormatAction::BlockQuote);
+        assert_eq!(text, "> a\n> b");
+    }
+
+    #[test]
+    fn clear_format_strips_markers_keeps_text() {
+        assert_eq!(
+            clear_format_markup("**bold** and `code`", 0..0),
+            "bold and code"
+        );
+        assert_eq!(clear_format_markup("[label](https://x)", 0..0), "label");
+        // A selection only strips inside itself.
+        assert_eq!(clear_format_markup("**a** **b**", 0..5), "a **b**");
     }
 }
