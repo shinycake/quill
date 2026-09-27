@@ -838,6 +838,19 @@ impl RequestRegistry {
         self.pending.remove(&id.0)
     }
 
+    /// Drop the in-flight request with the given purpose, if any (Phase
+    /// S2: storage-stats Refresh must drop the stale in-flight purpose,
+    /// or the immediate refetch no-ops and the overlay shows "No storage
+    /// data yet." until the old answer lands).
+    pub fn take_purpose(&mut self, purpose: RequestPurpose) -> Option<PendingRequest> {
+        let key = self
+            .pending
+            .iter()
+            .find(|(_, req)| req.purpose == purpose)
+            .map(|(key, _)| *key)?;
+        self.pending.remove(&key)
+    }
+
     pub fn invalidate_account(&mut self) {
         self.pending.clear();
     }
@@ -7970,6 +7983,30 @@ mod tests {
         assert!(session.pending_sound_plays.is_empty());
         // The file→sound mapping itself stays (the list refetch prunes it).
         assert_eq!(session.sound_file_ids.get(&91), Some(&7));
+    }
+
+    /// Phase S2: `take_purpose` drops the in-flight storage-stats request
+    /// (the Refresh path) and leaves other purposes alone.
+    #[test]
+    fn take_purpose_drops_only_matching_request() {
+        let (mut session, _) = session();
+        let stats_id = session.request(RequestPurpose::GetStorageStatistics, None);
+        let sounds_id = session.request(RequestPurpose::GetSavedNotificationSounds, None);
+        let dropped = session
+            .requests
+            .take_purpose(RequestPurpose::GetStorageStatistics);
+        assert_eq!(dropped.map(|r| r.id), Some(stats_id));
+        assert!(
+            !session
+                .requests
+                .has_purpose(RequestPurpose::GetStorageStatistics)
+        );
+        assert!(
+            session
+                .requests
+                .has_purpose(RequestPurpose::GetSavedNotificationSounds)
+        );
+        assert!(session.requests.take(sounds_id).is_some());
     }
 
     /// Phase S2: a `storageStatistics` answer lands in

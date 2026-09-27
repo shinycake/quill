@@ -4183,7 +4183,7 @@ impl QuillApp {
     ///
     /// Phase S2: in a secret chat the insertion is gated on the one-time
     /// inline-bot warning (TGX `SecretChatContextBotAlert`,
-    /// `InlineSearchContext.java:792-800`): a `SwitchInline` press is
+    /// `helper/InlineSearchContext.java:792-800`): a `SwitchInline` press is
     /// Quill's only inline-bot invocation point, so the alert fires here
     /// before the query text lands in the composer.
     fn insert_switch_inline_query(
@@ -4197,6 +4197,9 @@ impl QuillApp {
             cx.notify();
             return;
         }
+        // A stash left over from another chat (the open chat changed
+        // since the gated press) never survives an ungated insert.
+        self.pending_inline_bot_alert = None;
         self.composer.update(cx, |input, cx| {
             let next = quill::composer::insert_switch_inline_text(&input.value(), query);
             input.set_value(next, window, cx);
@@ -4208,6 +4211,11 @@ impl QuillApp {
     /// `Confirm`, `ALERT_NO_CANCEL`) — insert the stashed `SwitchInline`
     /// query and don't ask again this session.
     fn confirm_inline_bot_alert(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // The banner only renders in a secret chat; a stale stash must
+        // never confirm into another chat's composer.
+        if !self.open_chat_is_secret() {
+            return;
+        }
         let Some(query) = self.pending_inline_bot_alert.take() else {
             return;
         };
@@ -16428,7 +16436,8 @@ impl QuillApp {
                         .child(div().font_semibold().text_sm().child("Total"))
                         .child(div().text_sm().child(format_bytes(stats.total_size))),
                 );
-                for (label, size, count) in storage_category_rows(&stats) {
+                for (label, size, count) in quill::telegram::envelope::storage_category_rows(&stats)
+                {
                     body = body.child(
                         div()
                             .id(format!("storage-row-{label}"))
@@ -20242,9 +20251,12 @@ impl QuillApp {
                             this.child(self.close_secret_chat_confirm_banner(cx))
                         })
                         // Phase S2: inline-bot warning banner for secret chats.
-                        .when_some(self.pending_inline_bot_alert.clone(), |this, _| {
-                            this.child(self.inline_bot_alert_banner(cx))
-                        })
+                        // Gated on the open chat still being one: a pending
+                        // alert from a previous chat never renders elsewhere.
+                        .when(
+                            self.pending_inline_bot_alert.is_some() && self.open_chat_is_secret(),
+                            |this| this.child(self.inline_bot_alert_banner(cx)),
+                        )
                         .when_some(self.pending_edit.clone(), |this, edit| {
                             this.child(self.composer_edit_banner(&edit, cx))
                         })
@@ -21426,7 +21438,7 @@ impl QuillApp {
                     // Data and Storage → Storage Usage). Quill has no
                     // settings screen, so it sits next to the secret-chat
                     // entry; it fetches `getStorageStatistics` on open
-                    // (guarded: once per Ready).
+                    // (guarded: once per session).
                     list = list.child(
                         Button::new("storage-usage")
                             .label("💾 Storage usage")
@@ -27276,76 +27288,6 @@ fn format_bytes(n: i64) -> String {
     } else {
         format!("{:.1} MB", n as f64 / (1024.0 * 1024.0))
     }
-}
-
-/// Phase S2: storage-usage category order, matching TGX
-/// `SettingsCacheController`'s `switch` over `TGStorageStats` file
-/// types.
-const STORAGE_CATEGORY_ORDER: &[&str] = &[
-    "fileTypePhoto",
-    "fileTypeVideo",
-    "fileTypeVoiceNote",
-    "fileTypeVideoNote",
-    "fileTypeDocument",
-    "fileTypeAudio",
-    "fileTypeAnimation",
-    "fileTypeSecret",
-    "fileTypeThumbnail",
-    "fileTypeSticker",
-    "fileTypeProfilePhoto",
-    "fileTypeWallpaper",
-];
-
-/// Phase S2: storage-usage category labels (TGX copy; `fileTypeSecret`
-/// → `SecretFiles` "Secret media and files",
-/// `app/src/main/res/values/strings.xml:1679`). Unknown types fold
-/// into "Other" (TGX buckets `fileTypeSecretThumbnail` in its
-/// internal database entry — "Other" is the honest minimal
-/// equivalent).
-fn storage_category_label(file_type: &str) -> &'static str {
-    match file_type {
-        "fileTypePhoto" => "Photos",
-        "fileTypeVideo" => "Videos",
-        "fileTypeVoiceNote" => "Voice messages",
-        "fileTypeVideoNote" => "Video messages",
-        "fileTypeDocument" => "Files",
-        "fileTypeAudio" => "Music",
-        "fileTypeAnimation" => "GIFs",
-        "fileTypeSecret" => "Secret media and files",
-        "fileTypeThumbnail" => "Thumbnails",
-        "fileTypeSticker" => "Stickers",
-        "fileTypeProfilePhoto" => "Profile photos",
-        "fileTypeWallpaper" => "Wallpapers",
-        _ => "Other",
-    }
-}
-
-/// Phase S2: category rows for the storage overlay in TGX order,
-/// skipping empty categories (TGX skips zero-size entries). Leftovers
-/// (unknown types, `fileTypeSecretThumbnail`) aggregate into "Other".
-fn storage_category_rows(stats: &StorageStats) -> Vec<(&'static str, i64, i32)> {
-    let mut rows = Vec::new();
-    for file_type in STORAGE_CATEGORY_ORDER {
-        if let Some(entry) = stats
-            .by_file_type
-            .iter()
-            .find(|e| e.file_type == *file_type)
-            && entry.size > 0
-        {
-            rows.push((storage_category_label(file_type), entry.size, entry.count));
-        }
-    }
-    let (other_size, other_count) = stats
-        .by_file_type
-        .iter()
-        .filter(|e| !STORAGE_CATEGORY_ORDER.contains(&e.file_type.as_str()))
-        .fold((0i64, 0i32), |(size, count), e| {
-            (size.saturating_add(e.size), count.saturating_add(e.count))
-        });
-    if other_size > 0 || other_count > 0 {
-        rows.push(("Other", other_size, other_count));
-    }
-    rows
 }
 
 /// Phase S2: storage-stats fixture for the screenshot demo (injected,

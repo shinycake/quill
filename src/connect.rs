@@ -6848,7 +6848,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     /// Phase S2: `getStorageStatistics` for the storage-usage overlay —
-    /// once per Ready unless forced (guarded by the cache and the
+    /// once per session unless forced (guarded by the cache and the
     /// in-flight purpose). `chat_limit` 0: the overlay aggregates by file
     /// type across chats, so per-chat splits are not needed (schema
     /// 1.8.67 line 15781).
@@ -6882,9 +6882,16 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// Phase S2: drop the cached storage stats so the next
     /// `maybe_fetch_storage_statistics` refetches (the overlay's Refresh).
+    /// Also drops the in-flight request: otherwise the immediate refetch
+    /// sees the stale purpose, no-ops, and the overlay shows "No storage
+    /// data yet." until the old answer lands (late answers to the dropped
+    /// `@extra` are ignored by the purpose match).
     pub fn refresh_storage_statistics(&mut self) {
         self.session.storage_stats = None;
         self.session.storage_stats_loading = false;
+        self.session
+            .requests
+            .take_purpose(RequestPurpose::GetStorageStatistics);
     }
 
     /// Parity slice: `getScopeNotificationSettings` for the scopes not yet
