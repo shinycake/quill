@@ -427,6 +427,14 @@ pub enum EnvelopePayload {
     NotificationSounds {
         sounds: Vec<NotificationSound>,
     },
+    /// `storageStatistics` — `getStorageStatistics` response (Phase S2).
+    /// Aggregated by file type across chats; stored in
+    /// `Session::storage_stats` when the pending purpose is
+    /// `GetStorageStatistics`.
+    StorageStatistics {
+        total_size: i64,
+        by_file_type: Vec<StorageFileTypeStats>,
+    },
     /// `updateSavedNotificationSounds` — the saved-sound list changed;
     /// the reducer marks the cached list stale (schema line 10947).
     UpdateSavedNotificationSounds {
@@ -2133,6 +2141,101 @@ pub struct NotificationSound {
     pub sound: ParsedFile,
 }
 
+/// Phase S2: one aggregated file-type entry of a `getStorageStatistics`
+/// answer. `storageStatisticsByFileType file_type:FileType size:int53
+/// count:int32 = StorageStatisticsByFileType;` (schema 1.8.67, line
+/// 9780), summed across the `by_chat` entries (schema line 9787), TGX
+/// `TGStorageStats.Entry` style. `fileTypeSecret` (line 9728, "The file
+/// was sent to a secret chat (the file type is not known to the
+/// server)") is kept as its own entry so the UI can show TGX's
+/// "Secret media and files" category.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StorageFileTypeStats {
+    /// The `fileType` constructor name, e.g. `fileTypeSecret`.
+    pub file_type: String,
+    pub size: i64,
+    pub count: i32,
+}
+
+/// Phase S2: aggregated `getStorageStatistics` answer (`storageStatistics
+/// size:int53 count:int32 by_chat:vector<storageStatisticsByChat> =
+/// StorageStatistics;`, schema 1.8.67, line 9793). Entries are unordered;
+/// the UI orders by its fixed category list.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct StorageStats {
+    pub total_size: i64,
+    pub by_file_type: Vec<StorageFileTypeStats>,
+}
+
+/// Phase S2: storage-usage category order, matching TGX
+/// `SettingsCacheController`'s `switch` over `TGStorageStats` file
+/// types.
+const STORAGE_CATEGORY_ORDER: &[&str] = &[
+    "fileTypePhoto",
+    "fileTypeVideo",
+    "fileTypeVoiceNote",
+    "fileTypeVideoNote",
+    "fileTypeDocument",
+    "fileTypeAudio",
+    "fileTypeAnimation",
+    "fileTypeSecret",
+    "fileTypeThumbnail",
+    "fileTypeSticker",
+    "fileTypeProfilePhoto",
+    "fileTypeWallpaper",
+];
+
+/// Phase S2: storage-usage category labels (TGX copy; `fileTypeSecret`
+/// → `SecretFiles` "Secret media and files",
+/// `app/src/main/res/values/strings.xml:1679`). Unknown types fold
+/// into "Other" (TGX buckets `fileTypeSecretThumbnail` in its
+/// internal database entry — "Other" is the honest minimal
+/// equivalent).
+fn storage_category_label(file_type: &str) -> &'static str {
+    match file_type {
+        "fileTypePhoto" => "Photos",
+        "fileTypeVideo" => "Videos",
+        "fileTypeVoiceNote" => "Voice messages",
+        "fileTypeVideoNote" => "Video messages",
+        "fileTypeDocument" => "Files",
+        "fileTypeAudio" => "Music",
+        "fileTypeAnimation" => "GIFs",
+        "fileTypeSecret" => "Secret media and files",
+        "fileTypeThumbnail" => "Thumbnails",
+        "fileTypeSticker" => "Stickers",
+        "fileTypeProfilePhoto" => "Profile photos",
+        "fileTypeWallpaper" => "Wallpapers",
+        _ => "Other",
+    }
+}
+
+/// Phase S2: category rows for the storage overlay in TGX order,
+/// skipping empty categories (TGX skips zero-size entries). Leftovers
+/// (unknown types, `fileTypeSecretThumbnail`) aggregate into "Other".
+pub fn storage_category_rows(stats: &StorageStats) -> Vec<(&'static str, i64, i32)> {
+    let mut rows = Vec::new();
+    for file_type in STORAGE_CATEGORY_ORDER {
+        if let Some(entry) = stats
+            .by_file_type
+            .iter()
+            .find(|e| e.file_type == *file_type)
+            && entry.size > 0
+        {
+            rows.push((storage_category_label(file_type), entry.size, entry.count));
+        }
+    }
+    let (other_size, other_count) = stats
+        .by_file_type
+        .iter()
+        .filter(|e| !STORAGE_CATEGORY_ORDER.contains(&e.file_type.as_str()))
+        .fold((0i64, 0i32), |(size, count), e| {
+            (size.saturating_add(e.size), count.saturating_add(e.count))
+        });
+    if other_size > 0 || other_count > 0 {
+        rows.push(("Other", other_size, other_count));
+    }
+    rows
+}
 /// `NotificationSettingsScope` (TDLib 1.8.67, lines 3337–3343).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum NotificationSettingsScope {
@@ -5584,6 +5687,56 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
                 .map(|list| list.iter().filter_map(parse_notification_sound).collect())
                 .unwrap_or_default();
             Ok(EnvelopePayload::NotificationSounds { sounds })
+        }
+        // Phase S2: `storageStatistics` — aggregate `by_chat[].by_file_type[]`
+        // into per-`fileType` totals (TGX `TGStorageStats` aggregates the
+        // same way; schema 1.8.67 lines 9780/9787/9793). Zero-size entries
+        // are kept: the UI orders by a fixed category list, not by size.
+        "storageStatistics" => {
+            let total_size = int53_or_zero(value.get("size"));
+            let mut totals: Vec<StorageFileTypeStats> = Vec::new();
+            for chat in value
+                .get("by_chat")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+            {
+                for entry in chat
+                    .get("by_file_type")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                {
+                    let Some(file_type) = entry
+                        .get("file_type")
+                        .and_then(|t| t.get("@type"))
+                        .and_then(Value::as_str)
+                    else {
+                        continue;
+                    };
+                    let size = int53_or_zero(entry.get("size"));
+                    let count = entry
+                        .get("count")
+                        .and_then(Value::as_i64)
+                        .unwrap_or(0)
+                        .clamp(0, i32::MAX as i64) as i32;
+                    match totals.iter_mut().find(|t| t.file_type == file_type) {
+                        Some(existing) => {
+                            existing.size = existing.size.saturating_add(size);
+                            existing.count = existing.count.saturating_add(count);
+                        }
+                        None => totals.push(StorageFileTypeStats {
+                            file_type: file_type.to_string(),
+                            size,
+                            count,
+                        }),
+                    }
+                }
+            }
+            Ok(EnvelopePayload::StorageStatistics {
+                total_size,
+                by_file_type: totals,
+            })
         }
         "updateSavedNotificationSounds" => Ok(EnvelopePayload::UpdateSavedNotificationSounds {
             sound_ids: value
@@ -11743,6 +11896,92 @@ mod channel_envelope_tests {
                 other => panic!("{other:?}"),
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod storage_statistics_tests {
+    use super::*;
+
+    /// Phase S2: `getStorageStatistics` answer (schema 1.8.67 lines
+    /// 9780/9787/9793) — per-chat `by_file_type` entries aggregate into
+    /// one entry per `fileType` constructor, including `fileTypeSecret`
+    /// (line 9728).
+    #[test]
+    fn storage_statistics_aggregates_by_file_type() {
+        let json = r#"{"@type":"storageStatistics","size":7000,"count":3,"by_chat":[{"chat_id":11,"size":5000,"count":2,"by_file_type":[{"file_type":{"@type":"fileTypeSecret"},"size":4000,"count":1},{"file_type":{"@type":"fileTypePhoto"},"size":1000,"count":1}]},{"chat_id":0,"size":2000,"count":1,"by_file_type":[{"file_type":{"@type":"fileTypeSecret"},"size":2000,"count":1}]}]}"#;
+        let env = parse_envelope(json).unwrap();
+        match env.payload {
+            EnvelopePayload::StorageStatistics {
+                total_size,
+                by_file_type,
+            } => {
+                assert_eq!(total_size, 7000);
+                let secret = by_file_type
+                    .iter()
+                    .find(|t| t.file_type == "fileTypeSecret")
+                    .expect("secret category present");
+                assert_eq!(secret.size, 6000);
+                assert_eq!(secret.count, 2);
+                let photo = by_file_type
+                    .iter()
+                    .find(|t| t.file_type == "fileTypePhoto")
+                    .expect("photo category present");
+                assert_eq!(photo.size, 1000);
+                assert_eq!(photo.count, 1);
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+
+    /// Phase S2: every storage-statistics constructor the slice relies
+    /// on must exist verbatim in the pinned schema (1.8.67).
+    #[test]
+    fn schema_pins_storage_statistics_constructors() {
+        let schema = include_str!("../../schema/td_api.tl");
+        for line in [
+            "fileTypeSecret = FileType;",
+            "storageStatisticsByFileType file_type:FileType size:int53 count:int32 = StorageStatisticsByFileType;",
+            "storageStatisticsByChat chat_id:int53 size:int53 count:int32 by_file_type:vector<storageStatisticsByFileType> = StorageStatisticsByChat;",
+            "storageStatistics size:int53 count:int32 by_chat:vector<storageStatisticsByChat> = StorageStatistics;",
+            "getStorageStatistics chat_limit:int32 = StorageStatistics;",
+        ] {
+            assert!(
+                schema.lines().any(|l| l == line),
+                "schema pin missing: {line}"
+            );
+        }
+    }
+
+    /// Phase S2: overlay category rows — TGX order regardless of input
+    /// order, zero-size categories skipped, `fileTypeSecretThumbnail`
+    /// and unknown types folded into "Other".
+    #[test]
+    fn storage_category_rows_tgx_order_skips_empty_and_folds_other() {
+        let entry = |file_type: &str, size: i64, count: i32| StorageFileTypeStats {
+            file_type: file_type.to_string(),
+            size,
+            count,
+        };
+        let stats = StorageStats {
+            total_size: 1000,
+            by_file_type: vec![
+                entry("fileTypeSecret", 200, 2),
+                entry("fileTypeBogus", 50, 5),
+                entry("fileTypeSecretThumbnail", 30, 3),
+                entry("fileTypeVideo", 0, 0),
+                entry("fileTypePhoto", 400, 4),
+            ],
+        };
+        let rows = storage_category_rows(&stats);
+        assert_eq!(
+            rows,
+            vec![
+                ("Photos", 400, 4),
+                ("Secret media and files", 200, 2),
+                ("Other", 80, 8),
+            ]
+        );
     }
 }
 

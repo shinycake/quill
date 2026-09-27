@@ -52,8 +52,8 @@ use crate::telegram::requests::{
     get_chat_sponsored_messages, get_chat_statistics, get_commands, get_contacts, get_forum_topics,
     get_group_call, get_installed_sticker_sets, get_me, get_saved_animations,
     get_saved_notification_sounds, get_scope_notification_settings, get_secret_chat,
-    get_sticker_set, get_story, get_story_available_reactions, get_supergroup,
-    get_supergroup_full_info, get_supergroup_members, get_user_full_info,
+    get_sticker_set, get_storage_statistics, get_story, get_story_available_reactions,
+    get_supergroup, get_supergroup_full_info, get_supergroup_members, get_user_full_info,
     get_user_privacy_setting_rules, get_video_chat_invite_link, get_video_chat_rtmp_url,
     input_message_photo, input_message_video, invite_group_call_participant, join_chat,
     join_group_call, join_video_chat, leave_chat, leave_group_call, load_active_stories,
@@ -6845,6 +6845,53 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         self.session.saved_sounds_loaded = false;
         self.maybe_fetch_notification_sounds()
+    }
+
+    /// Phase S2: `getStorageStatistics` for the storage-usage overlay —
+    /// once per session unless forced (guarded by the cache and the
+    /// in-flight purpose). `chat_limit` 0: the overlay aggregates by file
+    /// type across chats, so per-chat splits are not needed (schema
+    /// 1.8.67 line 15781).
+    pub fn maybe_fetch_storage_statistics(
+        &mut self,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if self.session.storage_stats.is_some()
+            || self
+                .session
+                .requests
+                .has_purpose(RequestPurpose::GetStorageStatistics)
+        {
+            return Ok(None);
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::GetStorageStatistics, None);
+        self.session.storage_stats_loading = true;
+        match self.sender.send_json(&get_storage_statistics(extra, 0)) {
+            Ok(()) => Ok(Some(extra)),
+            Err(err) => {
+                self.session.requests.take(extra);
+                self.session.storage_stats_loading = false;
+                Err(err)
+            }
+        }
+    }
+
+    /// Phase S2: drop the cached storage stats so the next
+    /// `maybe_fetch_storage_statistics` refetches (the overlay's Refresh).
+    /// Also drops the in-flight request: otherwise the immediate refetch
+    /// sees the stale purpose, no-ops, and the overlay shows "No storage
+    /// data yet." until the old answer lands (late answers to the dropped
+    /// `@extra` are ignored by the purpose match).
+    pub fn refresh_storage_statistics(&mut self) {
+        self.session.storage_stats = None;
+        self.session.storage_stats_loading = false;
+        self.session
+            .requests
+            .take_purpose(RequestPurpose::GetStorageStatistics);
     }
 
     /// Parity slice: `getScopeNotificationSettings` for the scopes not yet
