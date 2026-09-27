@@ -281,6 +281,12 @@ pub fn parse_page_block(value: &Value) -> RichBlock {
         "pageBlockHeader" => heading(2, value, "header"),
         "pageBlockSubheader" => heading(3, value, "subheader"),
         "pageBlockKicker" => heading(3, value, "kicker"),
+        "pageBlockSectionHeading" => {
+            // Schema :4213 — size 1 is the largest, 6 the smallest; this is
+            // what the editor's `inputPageBlockSectionHeading` round-trips to.
+            let size = value.get("size").and_then(Value::as_i64).unwrap_or(2);
+            heading(size.clamp(1, 3) as u8, value, "text")
+        }
         "pageBlockParagraph" => paragraph(value),
         "pageBlockPreformatted" => {
             let (text, mut entities, buttons) =
@@ -437,6 +443,9 @@ pub fn parse_page_block(value: &Value) -> RichBlock {
 }
 
 /// Parse an incoming `richMessage` object → (blocks, is_full).
+/// Parse an incoming `richMessage` object into blocks + `is_full`.
+/// Known simplification (DECISIONS.md): `is_rtl` is ignored — Hebrew/Arabic
+/// rich messages render LTR.
 pub fn parse_rich_message(value: &Value) -> (Vec<RichBlock>, bool) {
     let blocks = value
         .get("blocks")
@@ -540,42 +549,15 @@ fn block_rich_text(text: &str) -> Value {
 /// path — never a JSON `local.path`).
 pub fn input_page_block_json(block: &RichBlock) -> Option<Value> {
     match block {
-        RichBlock::Paragraph {
-            text,
-            entities: _,
-            buttons,
-        } => {
+        RichBlock::Paragraph { text, .. } => {
             // Editor paragraphs are built from markup text, not parsed
             // entities — rebuild the RichText from the markup here.
-            let mut rich = block_rich_text(text);
-            if !buttons.is_empty() {
-                let mut texts = vec![rich];
-                for button in buttons {
-                    texts.push(json!({
-                        "@type": "richTextButton",
-                        "button": {
-                            "@type": "inlineButton",
-                            "text": plain(&button.text),
-                            "style": match button.style {
-                                crate::telegram::envelope::InlineKeyboardButtonStyle::Primary => "buttonStylePrimary",
-                                crate::telegram::envelope::InlineKeyboardButtonStyle::Danger => "buttonStyleDanger",
-                                crate::telegram::envelope::InlineKeyboardButtonStyle::Success => "buttonStyleSuccess",
-                                crate::telegram::envelope::InlineKeyboardButtonStyle::Link => "buttonStyleLink",
-                                crate::telegram::envelope::InlineKeyboardButtonStyle::Default => "buttonStyleDefault",
-                            },
-                            "type": { "@type": "inlineKeyboardButtonTypeDisabled" },
-                        },
-                    }));
-                }
-                rich = json!({ "@type": "richTexts", "texts": texts });
-            }
-            Some(json!({ "@type": "inputPageBlockParagraph", "text": rich }))
+            Some(json!({ "@type": "inputPageBlockParagraph", "text": block_rich_text(text) }))
         }
         RichBlock::Heading { level, text, .. } => {
-            // `inputPageBlockSectionHeading size` semantics are
-            // undocumented; 3/2/1 mirrors the three heading levels and is
-            // flagged in DECISIONS.md as live-unverified.
-            let size = (4i32 - *level as i32).clamp(1, 3);
+            // Schema :5978 documents the semantics: size 1-6, 1 is the
+            // largest, 6 the smallest — editor H1/H2/H3 map to sizes 1/2/3.
+            let size = (*level as i32).clamp(1, 6);
             Some(json!({
                 "@type": "inputPageBlockSectionHeading",
                 "text": block_rich_text(text),
@@ -673,6 +655,7 @@ pub fn input_rich_message(blocks: &[RichBlock]) -> Option<Value> {
     Some(json!({
         "@type": "inputRichMessage",
         "source": { "@type": "richMessageSourceBlocks", "blocks": inputs },
+        // Known simplification (DECISIONS.md): always LTR.
         "is_rtl": false,
         "detect_automatic_blocks": true,
     }))
@@ -1127,6 +1110,18 @@ mod tests {
         let json = input_page_block_json(&heading).expect("heading");
         assert_eq!(json["@type"], "inputPageBlockSectionHeading");
 
+        // Schema :5978 documents the semantics: size 1-6, 1 is the largest.
+        // Editor H1/H2/H3 map to sizes 1/2/3 (regression: H1 once sent size 3).
+        for (level, size) in [(1u8, 1), (2u8, 2), (3u8, 3)] {
+            let json = input_page_block_json(&RichBlock::Heading {
+                level,
+                text: "T".into(),
+                entities: Vec::new(),
+            })
+            .expect("heading");
+            assert_eq!(json["size"], size);
+        }
+
         // No local path → no honest input mapping.
         let doc = RichBlock::Document {
             file_name: "n.txt".into(),
@@ -1144,6 +1139,27 @@ mod tests {
         assert_eq!(json["@type"], "inputPageBlockDocument");
         assert_eq!(json["document"]["@type"], "inputDocument");
         assert_eq!(json["document"]["document"]["@type"], "inputFileLocal");
+    }
+
+    #[test]
+    fn section_heading_parses_and_round_trips() {
+        // `pageBlockSectionHeading` (schema :4213) is what the editor's
+        // `inputPageBlockSectionHeading` round-trips to in TDLib — size 1
+        // (the largest) parses to level 1, and the editor's H1 sends size 1.
+        let parsed = parse_page_block(&json!({
+            "@type": "pageBlockSectionHeading",
+            "text": { "@type": "richTextPlain", "text": "Title" },
+            "size": 1,
+        }));
+        assert!(matches!(parsed, RichBlock::Heading { level: 1, .. }));
+        let json = input_page_block_json(&RichBlock::Heading {
+            level: 1,
+            text: "Title".into(),
+            entities: Vec::new(),
+        })
+        .expect("heading");
+        assert_eq!(json["@type"], "inputPageBlockSectionHeading");
+        assert_eq!(json["size"], 1);
     }
 
     #[test]

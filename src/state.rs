@@ -22,7 +22,7 @@ use crate::telegram::envelope::{
     ParsedSecretChat, ParsedStory, ParsedUser, ParsedVideoChat, ParsedWelcomeMessage, Poll,
     ReportOption, ReportSponsoredResult, ScopeNotificationSettings, SecretChatState,
     SponsoredMessage, StickerFormat, StickerItem, StickerSetInfo, StorageStats,
-    StoryAvailableReactionView, StoryListView, TdError,
+    StoryAvailableReactionView, StoryListView, TdError, effective_content,
 };
 use crate::telegram::envelope::{CallState, ReadyParams};
 use crate::telegram::requests::{CallPrivacySetting, ChatEventLogFilterSet, PrivacyWho};
@@ -1699,8 +1699,11 @@ fn placeholder_chat(chat_id: ChatId) -> ChatSummary {
     }
 }
 
-fn preview_from_content(content: &MessageContent) -> String {
-    content.preview()
+/// M2 fix-up: the preview text of a history row — the content it actually
+/// shows, so `ephemeral_content` wins over the regular content (schema
+/// 1.8.67, line 3161: "must be shown instead of the regular content").
+pub fn effective_preview(message: &HistoryMessage) -> String {
+    effective_content(&message.content, message.ephemeral.as_ref()).preview()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1951,7 +1954,7 @@ impl SearchMessageHit {
         Self {
             chat_id: message.chat_id,
             message_id: message.id,
-            preview: message.content.preview(),
+            preview: effective_content(&message.content, message.ephemeral.as_ref()).preview(),
             is_outgoing: message.is_outgoing,
             content: message.content.clone(),
             reply_to: message.reply_to.clone(),
@@ -4970,7 +4973,9 @@ impl Session {
                     .or_insert_with(|| placeholder_chat(chat_id));
                 chat.last_preview = last_message
                     .as_ref()
-                    .map(|message| preview_from_content(&message.content))
+                    .map(|message| {
+                        effective_content(&message.content, message.ephemeral.as_ref()).preview()
+                    })
                     .unwrap_or_default();
                 // `positions` is the full set of lists this chat belongs to.
                 self.replace_main_list_from_positions(chat_id, &positions);
@@ -8323,7 +8328,7 @@ impl Session {
                     .map(|message| SearchMessageHit {
                         chat_id: message.chat_id,
                         message_id: message.id,
-                        preview: message.content.preview(),
+                        preview: effective_preview(message),
                         is_outgoing: message.is_outgoing,
                         content: message.content.clone(),
                         author_signature: message.author_signature.clone(),
@@ -8480,7 +8485,7 @@ impl Session {
             .get(&chat_id.0)
             .and_then(|history| history.messages.get(&reply.message_id.0))
         {
-            return original.content.preview();
+            return effective_preview(original);
         }
         reply
             .content_preview
@@ -8597,6 +8602,41 @@ mod tests {
         let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
         let owned = copy_and_parse(json, seq, &dyn_sink).unwrap();
         session.apply(owned);
+    }
+
+    #[test]
+    fn effective_preview_prefers_ephemeral_content() {
+        // M2 fix-up: preview surfaces (reply-to header, chat-list snippet,
+        // search hits, pinned/scheduled labels, notifications) must show the
+        // ephemeral content instead of the regular content (schema 1.8.67,
+        // line 3161).
+        let parsed = ParsedMessage {
+            id: MessageId(602),
+            chat_id: ChatId(14),
+            is_outgoing: false,
+            is_pinned: false,
+            topic_id: None,
+            ephemeral: Some(EphemeralMessageContent {
+                content: Box::new(MessageContent::Text("secret flow".into())),
+                reply_markup: None,
+            }),
+            media_album_id: 0,
+            author_signature: None,
+            scheduling_state: None,
+            can_retry: false,
+            content: MessageContent::Text("public".into()),
+            files: Vec::new(),
+            reply_to: None,
+            forward_info: None,
+            interaction_info: None,
+            reply_markup: None,
+            self_destruct: None,
+            auto_delete: None,
+        };
+        assert_eq!(
+            effective_preview(&history_message(parsed, false)),
+            "secret flow"
+        );
     }
 
     #[test]

@@ -4049,8 +4049,12 @@ greps.
   - Screenshot demos: `ReadyRichMessage` (blocks + document + buttons +
     ephemeral override), `ReadyRichEditor` (editor open with preview).
 - **Key decisions:**
-  - `inputPageBlockSectionHeading.size` semantics are undocumented in the
-    schema; levels 1/2/3 map to sizes 3/2/1 — flagged live-unverified.
+  - `inputPageBlockSectionHeading.size` is schema-documented (:5978): 1-6,
+    1 is the largest — the editor's H1/H2/H3 map to sizes 1/2/3, and incoming
+    `pageBlockSectionHeading` (:4213) sizes clamp to levels 1-3.
+  - `is_rtl` is a known simplification: `parse_rich_message` ignores the
+    `richMessage.is_rtl` flag and `input_rich_message` always sends `false`
+    — Hebrew/Arabic rich messages render LTR. RTL layout is out of slice.
   - Collapsible blocks render expanded with an indented body; no
     collapse toggle in this slice (queued).
   - The editor is markup-source based (the composer textarea is the
@@ -4071,5 +4075,5 @@ greps.
   no-optimistic-row / retain-on-failure behavior are unit- and
   driver-tested; the wire beyond that is live-only.
 - **Out of this slice:** collapsible toggle; rich-message re-edit;
-  `pageBlockSectionHeading.size` semantics verification against a live
-  send; WYSIWYG block editing; ephemeral countdown/expiry UI.
+  WYSIWYG block editing; ephemeral countdown/expiry UI; RTL layout for rich
+  messages (`is_rtl` renders LTR, see above).

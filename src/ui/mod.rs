@@ -43,8 +43,8 @@ use quill::state::{
     ChatSearchJump, ChatStatisticsFetch, ChatSummary, ContactRow, ForwardResult, HistoryMessage,
     InfoPanelTarget, InviteLinkFetch, JoinRequestFetch, MemberListFilter, OutboxReceipt,
     RequestPurpose, SearchStatus, Session, SponsoredReportFlight, SupergroupMembersFetch,
-    WelcomeMessagesFetch, event_log_relative_time, outgoing_status_label, unix_ms_now,
-    unread_badge_text,
+    WelcomeMessagesFetch, effective_preview, event_log_relative_time, outgoing_status_label,
+    unix_ms_now, unread_badge_text,
 };
 use quill::story_viewer::{StoryViewer, StoryViewerItem, StoryViewerKind, collect_story_items};
 use quill::telegram::client::copy_and_parse;
@@ -4354,11 +4354,10 @@ impl QuillApp {
     /// the text path; on failure the editor keeps its text (nothing is
     /// lost) and the error surfaces as a status note — never as success.
     fn submit_rich_composer(&mut self, text: String, window: &mut Window, cx: &mut Context<Self>) {
-        let (open_chat, view_generation, supported) = {
+        let (open_chat, supported) = {
             let session = &self.live.as_ref().expect("live").driver.session;
             (
                 session.open_chat,
-                session.view_generation,
                 session
                     .open_chat
                     .and_then(|id| session.chats.get(&id.0).map(|chat| chat.supported())),
@@ -4377,7 +4376,6 @@ impl QuillApp {
         if self.slow_mode_blocked(chat_id, cx) {
             return;
         }
-        let _ = view_generation;
         let mut blocks = quill::rich::markup_to_blocks(&text);
         // M2: an explicitly attached document becomes an inline document
         // block (`pageBlockDocument`) — the file picker's local path, never
@@ -4930,7 +4928,7 @@ impl QuillApp {
             .session()
             .and_then(|session| session.histories.get(&chat_id.0))
             .and_then(|history| history.messages.get(&message_id.0))
-            .map(|message| message.content.preview())
+            .map(|message| effective_preview(message))
             .unwrap_or_default();
         self.begin_reply_to(
             ComposerReplyTo::new(chat_id, message_id, preview),
@@ -5242,7 +5240,7 @@ impl QuillApp {
         }
         for message in messages {
             let id = message.id;
-            let preview = message.content.preview();
+            let preview = effective_content(&message.content, message.ephemeral.as_ref()).preview();
             let label = scheduled_message_label(&message);
             // M1: scheduled sends are the user's own — editing routes
             // through the same composer edit flow with `scheduled: true`
@@ -7183,7 +7181,7 @@ impl QuillApp {
                 .histories
                 .get(&draft.from_chat_id.0)
                 .and_then(|history| history.messages.get(&id.0))
-                .map(|message| message.content.preview())
+                .map(|message| effective_preview(message))
                 .unwrap_or_else(|| "Message".into());
             let body = serde_json::to_string(&preview).unwrap_or_else(|_| "\"\"".into());
             copies.push(format!(
@@ -18676,7 +18674,7 @@ impl QuillApp {
                         .histories
                         .get(&chat_id.0)
                         .and_then(|history| history.messages.get(&id.0))
-                        .map(|message| message.content.preview())
+                        .map(|message| effective_preview(message))
                         .filter(|text| !text.is_empty())
                         .unwrap_or_else(|| "message".into());
                     (id, text)
@@ -20360,7 +20358,7 @@ impl QuillApp {
     ) -> impl IntoElement {
         let chat_id = message.chat_id;
         let message_id = message.id;
-        let preview = message.content.preview();
+        let preview = effective_preview(message);
         // M1: tdesktop shows "Unpin all" when the chat pins more than one
         // message (`unpinAllChatMessages`, schema 1.8.67 line 13565).
         let pinned_count = self
@@ -31041,7 +31039,8 @@ fn session_history_row(
         (None, None) => None,
     };
     let reply_id = format!("reply-{}", message.id.0);
-    let reply_target = ComposerReplyTo::new(message.chat_id, message.id, message.content.preview());
+    let reply_target =
+        ComposerReplyTo::new(message.chat_id, message.id, effective_preview(message));
     let reply_btn = Button::new(reply_id)
         .label("Reply")
         .ghost()

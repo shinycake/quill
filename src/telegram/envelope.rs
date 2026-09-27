@@ -3880,7 +3880,7 @@ fn parse_forum_topic(value: &Value) -> Option<ForumTopic> {
     let last_message_preview = value
         .get("last_message")
         .and_then(|m| parse_message(m).ok())
-        .map(|m| m.content.preview())
+        .map(|m| effective_content(&m.content, m.ephemeral.as_ref()).preview())
         .unwrap_or_default();
     Some(ForumTopic {
         forum_topic_id,

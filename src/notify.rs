@@ -21,7 +21,7 @@
 //! dispatch runs on UI-thread-spawned worker threads.
 
 use crate::ids::{ChatId, MessageId};
-use crate::telegram::envelope::ParsedMessage;
+use crate::telegram::envelope::{ParsedMessage, effective_content};
 
 /// Generic body used when previews are hidden (user setting or per-chat
 /// `chatNotificationSettings`), or when the content has no preview text.
@@ -157,7 +157,7 @@ pub fn decide_notify(input: &NotifyInput) -> Option<OsNotification> {
     let body = if input.hide_previews || !input.chat_preview_allowed {
         GENERIC_BODY.to_string()
     } else {
-        let preview = message.content.preview();
+        let preview = effective_content(&message.content, message.ephemeral.as_ref()).preview();
         if preview.trim().is_empty() {
             GENERIC_BODY.to_string()
         } else {
