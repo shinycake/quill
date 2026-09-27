@@ -250,6 +250,8 @@ impl ComposerEdit {
             | MessageContent::Call { .. }
             // Phase S1: screenshot-taken service rows are not editable.
             | MessageContent::ScreenshotTaken
+            // M2: rich messages are edited in the rich editor, not here.
+            | MessageContent::RichMessage(_)
             | MessageContent::Unsupported { .. } => return None,
         };
         Some(Self {

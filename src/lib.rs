@@ -22,6 +22,7 @@ pub mod pins;
 pub mod platform;
 pub mod playback;
 pub mod poll;
+pub mod rich;
 pub mod settings;
 pub mod state;
 pub mod story_viewer;

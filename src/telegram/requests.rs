@@ -2780,6 +2780,47 @@ pub fn send_text(
     .to_string()
 }
 
+/// M2: `sendMessage` + `inputMessageRichMessage` (TDLib 1.8.67, line 6084).
+/// `rich` is the `inputRichMessage` object built by
+/// `quill::rich::input_rich_message`. Reply / scheduling / silent options
+/// ride the same `sendMessage` envelope as text sends.
+pub fn send_rich_message(
+    extra: RequestId,
+    chat_id: ChatId,
+    topic_id: Option<i32>,
+    rich: &Value,
+    reply_to: Option<SendReply>,
+    options: &SendOptions,
+) -> String {
+    json!({
+        "@type": "sendMessage",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0,
+        "topic_id": message_topic_value(topic_id),
+        "reply_to": send_reply_value(reply_to.as_ref()),
+        "options": message_send_options(options),
+        "reply_markup": Value::Null,
+        "input_message_content": {
+            "@type": "inputMessageRichMessage",
+            "message": rich,
+            "clear_draft": true
+        }
+    })
+    .to_string()
+}
+
+/// M2: `getFullRichMessage` (TDLib 1.8.67, line 11554) — fetch the full
+/// blocks of a partially received `richMessage` (`is_full == false`).
+pub fn get_full_rich_message(extra: RequestId, chat_id: ChatId, message_id: MessageId) -> String {
+    json!({
+        "@type": "getFullRichMessage",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0,
+        "message_id": message_id.0,
+    })
+    .to_string()
+}
+
 fn formatted_caption(caption: &str, strip_blockquote: bool) -> Value {
     // M1 fix-up: captions get the same markup→entities treatment as
     // message text (the toolbar is always visible above the composer,
@@ -4174,6 +4215,54 @@ mod tests {
         assert!(!json.contains("message_thread_id"));
         assert!(json.contains("\"@extra\":\"9\""));
         assert!(json.contains("\"reply_to\":null"));
+    }
+
+    #[test]
+    fn send_rich_message_shape_matches_1_8_67() {
+        // M2: `sendMessage` + `inputMessageRichMessage message:inputRichMessage
+        // clear_draft:Bool = InputMessageContent` (schema 1.8.67, line 6084).
+        let rich = crate::rich::input_rich_message(&[crate::rich::RichBlock::Paragraph {
+            text: "hi".into(),
+            entities: Vec::new(),
+            buttons: Vec::new(),
+        }])
+        .expect("blocks");
+        let json = send_rich_message(
+            RequestId(60),
+            ChatId(11),
+            None,
+            &rich,
+            None,
+            &SendOptions {
+                disable_notification: true,
+                ..SendOptions::default()
+            },
+        );
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "sendMessage");
+        assert_eq!(v["@extra"], "60");
+        let content = &v["input_message_content"];
+        assert_eq!(content["@type"], "inputMessageRichMessage");
+        assert_eq!(content["clear_draft"], true);
+        assert_eq!(content["message"]["@type"], "inputRichMessage");
+        assert_eq!(
+            content["message"]["source"]["blocks"][0]["@type"],
+            "inputPageBlockParagraph"
+        );
+        assert_eq!(v["options"]["disable_notification"], true);
+        assert!(v["reply_markup"].is_null());
+    }
+
+    #[test]
+    fn get_full_rich_message_shape_matches_1_8_67() {
+        // M2: `getFullRichMessage chat_id:int53 message_id:int53 =
+        // RichMessage` (schema 1.8.67, line 11554).
+        let json = get_full_rich_message(RequestId(61), ChatId(11), MessageId(22));
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "getFullRichMessage");
+        assert_eq!(v["@extra"], "61");
+        assert_eq!(v["chat_id"], 11);
+        assert_eq!(v["message_id"], 22);
     }
 
     #[test]

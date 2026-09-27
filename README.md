@@ -108,12 +108,12 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Per-message hover actions (Reply/Forward/Select/Edit/Delete/React/Pin) <!-- parity:msg-row-actions --> (ui/mod.rs:21917+)
 - [x] Right-click context menu (no right-click handlers; hover buttons only) <!-- parity:msg-context-menu --> (M1: right-click menu Reply/Copy/Forward/Pin/Unpin/Share link/Retry/Delete)
 - [x] Link preview options on send (partial: received previews render card ui/mod.rs:22404; send has link_preview_options:null, no toggle) <!-- parity:msg-link-preview-toggle --> (M1: previews toggle -> linkPreviewOptions.is_disabled; secret chats force off)
-- [ ] Rich text editor: expand icon after 3+ lines, produces inputRichMessage <!-- parity:msg-richtext-editor -->
-- [ ] Inline documents/files/music inside text blocks (pageBlockDocument / inputPageBlockDocument) <!-- parity:msg-richtext-inline-doc -->
-- [ ] Send rich messages (inputMessageRichMessage) <!-- parity:msg-richmessage-send -->
-- [ ] Render richMessage PageBlocks in message bubbles (messageRichMessage, getFullRichMessage) <!-- parity:msg-richmessage-render -->
-- [ ] In-message buttons: render pageBlockButtonRow + richTextButton, taps fire bot callbacks <!-- parity:msg-richmessage-buttons -->
-- [ ] Ephemeral messages: render message.ephemeral_content instead of regular content <!-- parity:msg-ephemeral-render -->
+- [x] Rich text editor: expand icon after 3+ lines, produces inputRichMessage <!-- parity:msg-richtext-editor -->
+- [x] Inline documents/files/music inside text blocks (pageBlockDocument / inputPageBlockDocument) <!-- parity:msg-richtext-inline-doc -->
+- [x] Send rich messages (inputMessageRichMessage) <!-- parity:msg-richmessage-send -->
+- [x] Render richMessage PageBlocks in message bubbles (messageRichMessage, getFullRichMessage) <!-- parity:msg-richmessage-render -->
+- [x] In-message buttons: render pageBlockButtonRow + richTextButton, taps fire bot callbacks <!-- parity:msg-richmessage-buttons -->
+- [x] Ephemeral messages: render message.ephemeral_content instead of regular content <!-- parity:msg-ephemeral-render -->
 
 ### Chat list
 

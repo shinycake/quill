@@ -8,7 +8,8 @@ use crate::calls::engine::{
 };
 use crate::composer::{
     AttachmentKind, ComposerEdit, ComposerEditKind, ComposerSnapshot, DeleteConfirm,
-    DraftSaveClock, DraftSaveStep, ForwardDraft, draft_text_to_store, schedule_draft_save,
+    DraftSaveClock, DraftSaveStep, ForwardDraft, SendOptions, draft_text_to_store,
+    schedule_draft_save,
 };
 use crate::credentials::TelegramCredentials;
 use crate::diagnostics::{Diagnostic, DiagnosticSink};
@@ -18,6 +19,7 @@ use crate::lifecycle::{RestoreBlocker, plan_restore};
 use crate::notify::NotificationSoundKind;
 use crate::platform::{DatabaseKey, KeyDecision, SecretStore, load_or_create_key};
 use crate::poll::{PollDraft, poll_answer_for_tap};
+use crate::rich::RichBlock;
 use crate::settings::{AccountPaths, default_app_root, load_call_prefs, save_call_prefs};
 use crate::state::{
     AdminListFetch, AdminRightsFetch, CHAT_EVENT_LOG_PAGE_SIZE, ChatEventLogFetch,
@@ -30,7 +32,7 @@ use crate::telegram::envelope::{
     AuthorizationState, CallState, ChatAdminRights, ChatDraft, ChatFolderSpec, ChatKind,
     ChatNotificationSettings, ChatPermissions, EnvelopePayload, GroupCallVideoInfo, MUTE_FOREVER,
     MessageContent, MessageSender, NotificationSettingsScope, ParsedGroupCallParticipant,
-    ReadyParams, ScopeNotificationSettings, StoryContentView,
+    ReadyParams, RichMessageContent, ScopeNotificationSettings, StoryContentView,
 };
 use crate::telegram::ffi::{LibraryOrigin, TdJsonError, resolve_tdjson_path};
 use crate::telegram::requests::{
@@ -56,40 +58,41 @@ use crate::telegram::requests::{
     get_chat_boost_status, get_chat_event_log, get_chat_folder, get_chat_history,
     get_chat_invite_links, get_chat_join_requests, get_chat_lists_to_add_chat, get_chat_member,
     get_chat_scheduled_messages, get_chat_sponsored_messages, get_chat_statistics, get_commands,
-    get_contacts, get_forum_topics, get_group_call, get_installed_sticker_sets, get_me,
-    get_message_link, get_message_properties, get_message_thread_history, get_saved_animations,
-    get_saved_notification_sounds, get_scope_notification_settings, get_secret_chat,
-    get_sticker_set, get_storage_statistics, get_story, get_story_available_reactions,
-    get_supergroup, get_supergroup_full_info, get_supergroup_members, get_user_full_info,
-    get_user_privacy_setting_rules, get_video_chat_invite_link, get_video_chat_rtmp_url,
-    input_message_photo, input_message_video, invite_group_call_participant, join_chat,
-    join_group_call, join_video_chat, leave_chat, leave_group_call, load_active_stories,
-    load_chat_welcome_messages, load_chats, load_chats_list, load_group_call_participants,
-    open_chat, open_message_content, open_story, pin_chat_message, process_chat_join_request,
-    remove_message_reaction, reorder_chat_folders, replace_primary_chat_invite_link,
-    replace_video_chat_rtmp_url, report_chat_sponsored_message, resend_messages,
-    revoke_chat_invite_link, revoke_group_call_invite_link, search_call_messages,
+    get_contacts, get_forum_topics, get_full_rich_message, get_group_call,
+    get_installed_sticker_sets, get_me, get_message_link, get_message_properties,
+    get_message_thread_history, get_saved_animations, get_saved_notification_sounds,
+    get_scope_notification_settings, get_secret_chat, get_sticker_set, get_storage_statistics,
+    get_story, get_story_available_reactions, get_supergroup, get_supergroup_full_info,
+    get_supergroup_members, get_user_full_info, get_user_privacy_setting_rules,
+    get_video_chat_invite_link, get_video_chat_rtmp_url, input_message_photo, input_message_video,
+    invite_group_call_participant, join_chat, join_group_call, join_video_chat, leave_chat,
+    leave_group_call, load_active_stories, load_chat_welcome_messages, load_chats, load_chats_list,
+    load_group_call_participants, open_chat, open_message_content, open_story, pin_chat_message,
+    process_chat_join_request, remove_message_reaction, reorder_chat_folders,
+    replace_primary_chat_invite_link, replace_video_chat_rtmp_url, report_chat_sponsored_message,
+    resend_messages, revoke_chat_invite_link, revoke_group_call_invite_link, search_call_messages,
     search_chat_messages, search_chats, search_messages, search_public_chats,
     search_recently_found_chats, send_animation, send_call_debug_information, send_call_log,
     send_call_rating_detail, send_call_signaling_data, send_chat_action, send_chat_action_kind,
     send_document, send_group_call_message, send_message_album, send_photo, send_poll,
-    send_sticker, send_text, send_text_story_reply, send_video, send_video_note, send_voice_note,
-    set_authentication_phone_number, set_chat_draft_message, set_chat_member_status,
-    set_chat_member_tag, set_chat_message_auto_delete_time, set_chat_notification_settings,
-    set_chat_permissions, set_chat_slow_mode_delay, set_group_call_participant_volume_level,
-    set_poll_answer, set_scope_notification_settings, set_story_reaction, set_supergroup_username,
-    set_user_privacy_setting_rules, set_video_chat_title, start_group_call_recording,
-    start_group_call_screen_sharing, start_scheduled_video_chat,
-    supergroup_members_filter_administrators_json, supergroup_members_filter_banned_json,
-    supergroup_members_filter_recent_json, supergroup_members_filter_restricted_json,
-    supergroup_members_filter_search_json, toggle_chat_folder_tags, toggle_forum_topic_closed,
-    toggle_forum_topic_pinned, toggle_general_forum_topic_hidden,
-    toggle_group_call_are_messages_allowed, toggle_group_call_is_my_video_enabled,
-    toggle_group_call_is_my_video_paused, toggle_group_call_participant_is_hand_raised,
-    toggle_group_call_participant_is_muted, toggle_supergroup_aggressive_anti_spam,
-    toggle_supergroup_is_broadcast_group, toggle_supergroup_join_by_request,
-    toggle_supergroup_sign_messages, toggle_video_chat_mute_new_participants,
-    unpin_all_chat_messages, unpin_chat_message, view_messages, view_sponsored_chat,
+    send_rich_message, send_sticker, send_text, send_text_story_reply, send_video, send_video_note,
+    send_voice_note, set_authentication_phone_number, set_chat_draft_message,
+    set_chat_member_status, set_chat_member_tag, set_chat_message_auto_delete_time,
+    set_chat_notification_settings, set_chat_permissions, set_chat_slow_mode_delay,
+    set_group_call_participant_volume_level, set_poll_answer, set_scope_notification_settings,
+    set_story_reaction, set_supergroup_username, set_user_privacy_setting_rules,
+    set_video_chat_title, start_group_call_recording, start_group_call_screen_sharing,
+    start_scheduled_video_chat, supergroup_members_filter_administrators_json,
+    supergroup_members_filter_banned_json, supergroup_members_filter_recent_json,
+    supergroup_members_filter_restricted_json, supergroup_members_filter_search_json,
+    toggle_chat_folder_tags, toggle_forum_topic_closed, toggle_forum_topic_pinned,
+    toggle_general_forum_topic_hidden, toggle_group_call_are_messages_allowed,
+    toggle_group_call_is_my_video_enabled, toggle_group_call_is_my_video_paused,
+    toggle_group_call_participant_is_hand_raised, toggle_group_call_participant_is_muted,
+    toggle_supergroup_aggressive_anti_spam, toggle_supergroup_is_broadcast_group,
+    toggle_supergroup_join_by_request, toggle_supergroup_sign_messages,
+    toggle_video_chat_mute_new_participants, unpin_all_chat_messages, unpin_chat_message,
+    view_messages, view_sponsored_chat,
 };
 use crate::voice::VoiceDraft;
 use std::collections::{HashMap, VecDeque};
@@ -860,6 +863,24 @@ impl<S: JsonSender> ConnectDriver<S> {
             owned.envelope.payload,
             EnvelopePayload::FoundChatMessages { .. }
         );
+        // M2: capture the `getFullRichMessage` answer before `apply`
+        // takes the pending request; the full blocks replace the
+        // partial message's blocks in history after apply.
+        let full_rich_answer: Option<(ChatId, MessageId, RichMessageContent)> =
+            match &owned.envelope.payload {
+                EnvelopePayload::RichMessage { rich } => owned
+                    .envelope
+                    .extra
+                    .and_then(|id| self.session.requests.purpose(id))
+                    .and_then(|purpose| match purpose {
+                        RequestPurpose::GetFullRichMessage {
+                            chat_id,
+                            message_id,
+                        } => Some((chat_id, message_id, rich.clone())),
+                        _ => None,
+                    }),
+                _ => None,
+            };
         // M1: capture the `getMessageLink` answer before `apply` takes the
         // pending request; the UI drains `Session::message_link_result`
         // into the clipboard.
@@ -973,6 +994,16 @@ impl<S: JsonSender> ConnectDriver<S> {
         let _ = self.refresh_notification_sounds_if_stale();
         if view_after {
             self.maybe_view_open_messages()?;
+        }
+        // M2: full rich blocks replace the partial message's blocks in
+        // history. Only `RichMessage` rows are touched — an unrelated
+        // response can never clobber a different content kind.
+        if let Some((chat_id, message_id, rich)) = full_rich_answer
+            && let Some(history) = self.session.histories.get_mut(&chat_id.0)
+            && let Some(message) = history.messages.get_mut(&message_id.0)
+            && let MessageContent::RichMessage(existing) = &mut message.content
+        {
+            *existing = rich;
         }
         // M1: stash the `getMessageLink` answer for the UI clipboard drain.
         if let Some(link) = message_link_answer {
@@ -7344,6 +7375,76 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
     }
 
+    /// M2: `sendMessage` with `inputMessageRichMessage` (TDLib 1.8.67, line
+    /// 6084) — sends the rich editor's blocks. The composer clears only
+    /// after a `message` response or a surfaced error; a failed send never
+    /// reports success (the error is shown, the draft stays). No optimistic
+    /// local row — M1's optimistic send is text-only, so a failed rich send
+    /// can't strand a fake row.
+    pub fn send_rich_snapshot(
+        &mut self,
+        chat_id: ChatId,
+        blocks: &[RichBlock],
+        reply_to: Option<SendReply>,
+        options: &SendOptions,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        // Phase 2.3: channel posting is admin-gated, same as `send_snapshot`.
+        let can_post = self
+            .session
+            .chats
+            .get(&chat_id.0)
+            .is_some_and(|chat| chat.can_post());
+        if !can_post {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        // Parity slice 4: never send into a closed forum topic.
+        if self.topic_send_is_closed(chat_id) {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let rich =
+            crate::rich::input_rich_message(blocks).ok_or(ConnectSendError::InvalidRequest)?;
+        let extra = self
+            .session
+            .request(RequestPurpose::SendMessage, Some(chat_id));
+        let topic_id = self.send_topic(chat_id);
+        let json = send_rich_message(extra, chat_id, topic_id, &rich, reply_to, options);
+        if let Err(err) = self.sender.send_json(&json) {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(extra)
+    }
+
+    /// M2: `getFullRichMessage` (TDLib 1.8.67, line 11554) for a
+    /// partially-received rich message (`is_full == false`). The reducer
+    /// replaces the history row's blocks with the full ones on success; a
+    /// failed fetch leaves the partial blocks in place (honest).
+    pub fn fetch_full_rich_message(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self.session.request(
+            RequestPurpose::GetFullRichMessage {
+                chat_id,
+                message_id,
+            },
+            Some(chat_id),
+        );
+        let json = get_full_rich_message(extra, chat_id, message_id);
+        if let Err(err) = self.sender.send_json(&json) {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(extra)
+    }
+
     /// `sendMessageAlbum` for 2–10 local photos and/or videos.
     fn send_album_snapshot(
         &mut self,
@@ -13598,6 +13699,7 @@ mod tests {
             is_outgoing: true,
             is_pinned: false,
             topic_id: None,
+            ephemeral: None,
             media_album_id: 0,
             author_signature: None,
             scheduling_state: Some(MessageSchedulingState::SendAtDate { send_date: 999 }),

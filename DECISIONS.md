@@ -3969,3 +3969,111 @@ P2P privacy in the privacy settings.
   - Text-only welcome support; forum custom icons out of scope; comment rows show only content/outgoing/signature (no invented sender/date).
 - **Not verifiable without live Telegram:** every TDLib round-trip (filters, signature toggles, anti-spam, all forum mutations, thread history, boost chain, welcome load/mutations) — request shapes, reducer transitions, rollback, and cache invalidation are unit- and driver-tested; the wire beyond that is live-only.
 - **Out of this slice:** `parity:groups-welcome-view` — joiner-side rendering of `updateChatWelcomeMessages` is not implemented (admin pack management is done); forum custom topic icons; forum editing beyond rename.
+
+## Slice M2 — ANNIVERSARY MESSAGING (2026-09-27)
+
+Telegram's 13th-anniversary post (2026-08-25, official blog) added: rich
+formatting in welcome messages, in-message buttons pairing with ephemeral
+content for automated flows, inline documents/files/music inside text, and a
+rich editor that opens via ⛶ after typing more than 3 lines. All six boxes
+are TDLib 1.8.67 schema-native — verified concept-level per the schema
+discipline (td_api.tl + raw telegram_api.tl + TDLib source), not single-name
+greps.
+
+- **Schema evidence (pinned TDLib 1.8.67, `schema/td_api.tl`):**
+  - `richMessage` (:123) — `is_full`, `is_rtl`, `blocks:vector<pageBlock>`;
+    partial messages carry `is_full == false`.
+  - `inputRichMessage` (:149); `richMessageSourceBlocks` / `richMessageSourceRawText` sources.
+  - `ephemeralMessageContent` (:3115) — `content:messageContent`,
+    `reply_markup:replyMarkup`; `message.ephemeral_content` (:3161/:3165).
+  - `richTextButton` (:4111) — inline button inside rich text; `inlineButton`
+    (:4030) with `buttonStyle*` and `inlineKeyboardButtonType*`.
+  - `pageBlockDocument` (:4272); `pageBlockButtonRow` (:4364).
+  - `messageRichMessage` (:5143); `inputPageBlockDocument` (:6023);
+    `inputPageBlockButtonRow` (:6071); `inputMessageRichMessage` (:6084).
+  - `getFullRichMessage chat_id:int53 message_id:int53 = RichMessage`
+    (:11554) — fetches the full blocks of a partial rich message.
+- **Official-blog behavior (2026-08-25 post):** rich formatting works in
+  welcome messages; buttons can appear inside messages and pair with
+  ephemeral content for automated flows; inline documents/files/music can
+  appear within text; the rich editor opens via ⛶ after typing more than
+  3 lines.
+- **Built (`src/rich.rs`, new):**
+  - Incoming: `RichText` flattening (nested styled runs → plain text +
+    M1 `TextEntity` spans, `richTextButton` → `InlineKeyboardButton`);
+    `pageBlock*` → `RichBlock` (headings, paragraphs, lists incl.
+    checklists, collapsible, documents, tables, button rows, dividers;
+    anchors/unknown blocks parse to `Empty`/`Unsupported` — rendered as
+    nothing, never fake content).
+  - Outgoing: M1 markup/entities → `RichText` per block (`block_rich_text`
+    reuses `parse_format_markup`, so the format toolbar stays meaningful);
+    `RichBlock` → `inputPageBlock*`; `input_rich_message` builds
+    `inputRichMessage` (`detect_automatic_blocks: true`).
+  - Editor markup: `#`/`##`/`###` headings, `-`/`*`/`•` and `1.` lists,
+    `[]`/`[x]` checklists, `>>` collapsible, `---` dividers
+    (`markup_to_blocks`).
+  - `inlineButton.text` is a `RichText`, unlike
+    `inlineKeyboardButton.text` (plain string): `parse_inline_button`
+    flattens the label first, then reuses the existing style/type parser.
+- **Driver (`connect.rs`, `requests.rs`, `state.rs`, `envelope.rs`):**
+  - `send_rich_message` / `get_full_rich_message` request builders with
+    exact-shape unit tests (`inputMessageRichMessage` +
+    `clear_draft:true`; `getFullRichMessage` ids).
+  - `send_rich_snapshot` (same channel-post + closed-topic gates as
+    `send_snapshot`); honest failure — the composer keeps the draft and
+    shows the error, never maps refusal to success; no optimistic local
+    row (M1's optimistic send is text-only).
+  - `fetch_full_rich_message` + `RequestPurpose::GetFullRichMessage`;
+    the driver captures the `richMessage` answer before `apply` and
+    replaces only the matching `RichMessage` row's blocks in history.
+  - `messageRichMessage` / `message.ephemeral_content` parse;
+    `effective_content` prefers ephemeral content; the row renders the
+    ephemeral `reply_markup` instead of the message's own.
+  - `MessageContent::preview` returns the first text-ish block
+    ("Rich message" fallback); rich messages are excluded from the legacy
+    text/caption edit path (edit resend goes through the normal text
+    flow — rich re-edit is out of slice).
+- **UI (`ui/mod.rs`):**
+  - Rich editor: ⛶ button appears in the composer after 3+ lines
+    (official behavior); rich mode reuses the textarea + format toolbar,
+    adds block buttons (H1/H2/list/checklist/collapsible/divider append
+    markup templates) and a live block preview; send routes
+    `inputMessageRichMessage` via `send_rich_snapshot`; editor state is
+    retained on send failure. Inline documents attach through the existing
+    explicit local-file picker — never a TDLib-provided `local.path`.
+  - Renderer: `message_rich_block` stacks headings/lists/collapsible/
+    documents/tables/dividers; styled text reuses `rich_text_line`;
+    paragraph buttons and `pageBlockButtonRow` reuse
+    `inline_keyboard_button`, so URL/callback/switchInline/copy taps keep
+    their existing honest behavior (unknown types render disabled).
+  - Screenshot demos: `ReadyRichMessage` (blocks + document + buttons +
+    ephemeral override), `ReadyRichEditor` (editor open with preview).
+- **Key decisions:**
+  - `inputPageBlockSectionHeading.size` is schema-documented (:5978): 1-6,
+    1 is the largest — the editor's H1/H2/H3 map to sizes 1/2/3, and incoming
+    `pageBlockSectionHeading` (:4213) sizes clamp to levels 1-3.
+  - `is_rtl` is a known simplification: `parse_rich_message` ignores the
+    `richMessage.is_rtl` flag and `input_rich_message` always sends `false`
+    — Hebrew/Arabic rich messages render LTR. RTL layout is out of slice.
+  - Collapsible blocks render expanded with an indented body; no
+    collapse toggle in this slice (queued).
+  - The editor is markup-source based (the composer textarea is the
+    source of truth); a WYSIWYG block editor is out of slice.
+  - The editor stores markup text in blocks and the send path re-parses
+    it (`block_rich_text`); the live preview resolves markup separately
+    (`preview_blocks` → clean text + `TextEntity`, UTF-16→UTF-8 converted).
+    Paragraphs/headings preview styled; list items and collapsible
+    header/body preview marker-stripped plain — matching how Quill
+    renders those blocks everywhere (incoming `pageBlockListItem.label`
+    is a plain string, schema :4143).
+  - Ephemeral content overrides for render, copy-source selection, and
+    reply markup — the regular content is still stored (history/search
+    keep working on it).
+- **Not verifiable without live Telegram:** every TDLib round-trip
+  (rich send, `getFullRichMessage` fetch, callback taps on rich buttons,
+  ephemeral delivery) — request shapes, reducer transitions, and the
+  no-optimistic-row / retain-on-failure behavior are unit- and
+  driver-tested; the wire beyond that is live-only.
+- **Out of this slice:** collapsible toggle; rich-message re-edit;
+  WYSIWYG block editing; ephemeral countdown/expiry UI; RTL layout for rich
+  messages (`is_rtl` renders LTR, see above).

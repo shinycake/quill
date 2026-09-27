@@ -36,14 +36,15 @@ use quill::playback::PlaybackClock;
 use quill::poll::{
     POLL_OPTIONS_MAX, POLL_OPTIONS_MIN, PollDraft, poll_bar_fraction, voter_count_label,
 };
+use quill::rich::RichBlock;
 use quill::settings::CallPrefs;
 use quill::state::{
     ActiveCall, ActiveGroupCall, AdminListFetch, AdminRightsFetch, CallSummary, ChatEventLogFetch,
     ChatSearchJump, ChatStatisticsFetch, ChatSummary, ContactRow, ForwardResult, HistoryMessage,
     InfoPanelTarget, InviteLinkFetch, JoinRequestFetch, MemberListFilter, OutboxReceipt,
     RequestPurpose, SearchStatus, Session, SponsoredReportFlight, SupergroupMembersFetch,
-    WelcomeMessagesFetch, event_log_relative_time, outgoing_status_label, unix_ms_now,
-    unread_badge_text,
+    WelcomeMessagesFetch, effective_preview, event_log_relative_time, outgoing_status_label,
+    unix_ms_now, unread_badge_text,
 };
 use quill::story_viewer::{StoryViewer, StoryViewerItem, StoryViewerKind, collect_story_items};
 use quill::telegram::client::copy_and_parse;
@@ -58,7 +59,8 @@ use quill::telegram::envelope::{
     ParsedGroupCallParticipant, ParsedMessage, ParsedSecretChat, ParsedStory, ParsedWelcomeMessage,
     PollContent, PollOption, PollType, ScopeNotificationSettings, SecretChatState,
     SponsoredMessage, StatisticalGraph, StatisticalValue, StorageFileTypeStats, StorageStats,
-    call_entry_label, chat_ttl_service_label, format_ttl_setting, toggle_chosen_emoji_reaction,
+    call_entry_label, chat_ttl_service_label, effective_content, format_ttl_setting,
+    toggle_chosen_emoji_reaction,
 };
 use quill::telegram::requests::SelfDestructSend;
 use quill::telegram::requests::{CallPrivacySetting, ChatEventLogFilterSet, PrivacyWho};
@@ -1145,6 +1147,11 @@ pub struct QuillApp {
     schedule_popup_open: bool,
     /// M1: the scheduled-messages dialog (view/delete).
     scheduled_dialog_open: bool,
+    /// M2: the rich editor is open — the composer textarea is interpreted
+    /// as block markup (`quill::rich::markup_to_blocks`) and sends via
+    /// `inputMessageRichMessage`. Opened via the ⛶ button (visible after
+    /// 3+ lines, per the anniversary post).
+    rich_editor_open: bool,
     /// M1: right-click context menu target + window position.
     message_menu: Option<MessageMenuState>,
     /// M1: swipe-to-reply press origin (chat, message, press x).
@@ -1694,6 +1701,16 @@ pub enum ScreenshotDemo {
     /// history (missed / declined / answered) + call settings
     /// (injected, no live Telegram).
     ReadyCallsSettings,
+    /// M2: rich message demo (injected, no live Telegram) — the demo bot
+    /// chat with an injected `messageRichMessage` (headings, styled
+    /// paragraphs, list, collapsible, inline document, table, divider,
+    /// `pageBlockButtonRow` with URL + callback buttons) plus a message
+    /// whose `ephemeral_content` overrides the regular content.
+    ReadyRichMessage,
+    /// M2: rich editor demo (injected, no live Telegram) — the demo bot
+    /// chat with the composer in rich mode (markup text, block buttons,
+    /// live block preview).
+    ReadyRichEditor,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -2429,6 +2446,24 @@ impl QuillApp {
                     AuthorizationState::Ready,
                 )
             }
+            Some(ScreenshotDemo::ReadyRichMessage) => {
+                demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
+                (
+                    ConnectUiStatus::DemoReadyChats,
+                    None,
+                    "screenshot demo — rich message blocks".into(),
+                    AuthorizationState::Ready,
+                )
+            }
+            Some(ScreenshotDemo::ReadyRichEditor) => {
+                demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
+                (
+                    ConnectUiStatus::DemoReadyChats,
+                    None,
+                    "screenshot demo — rich editor".into(),
+                    AuthorizationState::Ready,
+                )
+            }
             Some(ScreenshotDemo::ReadyBotCommandMenu) => {
                 demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
                 (
@@ -2848,6 +2883,7 @@ impl QuillApp {
             composer_scheduling: ComposerScheduling::None,
             schedule_popup_open: false,
             scheduled_dialog_open: false,
+            rich_editor_open: false,
             message_menu: None,
             swipe_reply_start: None,
             pending_reply: None,
@@ -3738,6 +3774,28 @@ impl QuillApp {
             }
             app.status_note = "screenshot demo — bot chat with inline keyboard".into();
         }
+        if matches!(demo, Some(ScreenshotDemo::ReadyRichMessage)) {
+            if let Some(session) = app.demo_session.as_mut() {
+                app.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_rich_message(session, &app.demo_sink, &app.demo_seq);
+            }
+            app.status_note = "screenshot demo — rich message blocks".into();
+        }
+        if matches!(demo, Some(ScreenshotDemo::ReadyRichEditor)) {
+            if let Some(session) = app.demo_session.as_mut() {
+                app.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_bot_chat(session, &app.demo_sink, &app.demo_seq);
+            }
+            app.composer.update(cx, |input, cx| {
+                input.set_value(
+                    "# Club night\n\nPick **one**:\n\n- Live set\n- DJ set\n- [] Bring a friend\n\n>> Details\nDoors at 9pm, show at 10pm.\n\n---\nSee you there!",
+                    window,
+                    cx,
+                );
+            });
+            app.rich_editor_open = true;
+            app.status_note = "screenshot demo — rich editor".into();
+        }
         if matches!(demo, Some(ScreenshotDemo::ReadyBotCommandMenu)) {
             if let Some(session) = app.demo_session.as_mut() {
                 app.demo_seq.store(session.last_seq, Ordering::SeqCst);
@@ -4132,6 +4190,11 @@ impl QuillApp {
                     self.submit_edit(text, window, cx);
                     return;
                 }
+                // M2: the rich editor sends blocks, not text.
+                if self.rich_editor_open {
+                    self.submit_rich_composer(text, window, cx);
+                    return;
+                }
                 if self.live.is_some() {
                     let plan = {
                         let session = &self.live.as_ref().expect("live").driver.session;
@@ -4284,6 +4347,85 @@ impl QuillApp {
                 cx.notify();
             }
         }
+    }
+
+    /// M2: send the rich editor's blocks via `inputMessageRichMessage`
+    /// (schema 1.8.67, line 6084). Same chat/supported/slow-mode gates as
+    /// the text path; on failure the editor keeps its text (nothing is
+    /// lost) and the error surfaces as a status note — never as success.
+    fn submit_rich_composer(&mut self, text: String, window: &mut Window, cx: &mut Context<Self>) {
+        let (open_chat, supported) = {
+            let session = &self.live.as_ref().expect("live").driver.session;
+            (
+                session.open_chat,
+                session
+                    .open_chat
+                    .and_then(|id| session.chats.get(&id.0).map(|chat| chat.supported())),
+            )
+        };
+        let Some(chat_id) = open_chat else {
+            self.status_note = "select a chat to send".into();
+            cx.notify();
+            return;
+        };
+        if supported != Some(true) {
+            self.status_note = "this chat type is not supported yet".into();
+            cx.notify();
+            return;
+        }
+        if self.slow_mode_blocked(chat_id, cx) {
+            return;
+        }
+        let mut blocks = quill::rich::markup_to_blocks(&text);
+        // M2: an explicitly attached document becomes an inline document
+        // block (`pageBlockDocument`) — the file picker's local path, never
+        // a TDLib-provided `local.path`.
+        if let Some(attachment) = self
+            .pending_attachments
+            .iter()
+            .find(|attachment| attachment.kind == AttachmentKind::Document)
+        {
+            blocks.push(quill::rich::RichBlock::Document {
+                file_name: attachment.file_name.clone(),
+                caption: String::new(),
+                local_path: Some(attachment.path.clone()),
+            });
+        }
+        if quill::rich::input_rich_message(&blocks).is_none() {
+            self.status_note = "type a message or attach a file".into();
+            cx.notify();
+            return;
+        }
+        let reply_to = self
+            .pending_reply
+            .as_ref()
+            .and_then(|reply| reply.send_reply(chat_id));
+        let options = self.composer_send_options();
+        match self
+            .live
+            .as_mut()
+            .expect("live")
+            .driver
+            .send_rich_snapshot(chat_id, &blocks, reply_to, &options)
+        {
+            Ok(_) => {
+                self.pending_attachments.clear();
+                // M1: a scheduling choice is one-shot.
+                self.composer_scheduling = ComposerScheduling::None;
+                self.schedule_popup_open = false;
+                self.pending_reply = None;
+                self.rich_editor_open = false;
+                self.clear_draft_on_success = Some(chat_id);
+                self.composer
+                    .update(cx, |input, cx| input.set_value("", window, cx));
+                self.forget_local_draft(chat_id);
+                self.status_note = "sending\u{2026}".into();
+            }
+            Err(_) => {
+                self.status_note = "could not send rich message".into();
+            }
+        }
+        cx.notify();
     }
 
     /// Phase S1: the open secret chat's peer name + `secretChat.layer`
@@ -4593,14 +4735,112 @@ impl QuillApp {
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.composer_preview_disabled = !this.composer_preview_disabled;
                         this.status_note = if this.composer_preview_disabled {
-                            "link previews off for the next send".into()
+                            "link previews off for the next send"
                         } else {
-                            "link previews on".into()
-                        };
+                            "link previews on"
+                        }
+                        .into();
                         cx.notify();
                     })),
             );
+        // M2: the rich editor opens via ⛶ after typing more than 3 lines
+        // (anniversary post). The button hides again while the editor is
+        // open (a ✕ close button takes its place in the editor bar).
+        if !self.rich_editor_open && self.composer.read(cx).value().lines().count() > 3 {
+            row = row.child(
+                Button::new("rich-editor-open")
+                    .label("⛶ Rich editor")
+                    .ghost()
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.rich_editor_open = true;
+                        this.status_note = "rich editor — markup becomes blocks".into();
+                        cx.notify();
+                    })),
+            );
+        }
         row
+    }
+
+    /// M2: rich editor bar — block buttons append markup templates to the
+    /// composer text; below them a live preview renders the parsed blocks
+    /// with the same block renderer as history. The ✕ button closes the
+    /// editor (the text stays, so nothing is lost).
+    fn rich_editor_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let mut buttons = div().id("rich-editor-blocks").flex().items_center().gap_1();
+        for (id, label, template) in [
+            ("rich-block-h1", "H1", "# "),
+            ("rich-block-h2", "H2", "## "),
+            ("rich-block-list", "\u{2022} List", "- "),
+            ("rich-block-check", "\u{2611} Check", "[] "),
+            ("rich-block-details", "\u{25be} Details", ">> "),
+            ("rich-block-divider", "\u{2014} Divider", "---\n"),
+        ] {
+            buttons = buttons.child(Button::new(id).label(label).ghost().on_click(cx.listener(
+                move |this, _, window, cx| {
+                    this.composer.update(cx, |input, cx| {
+                        let mut value = input.value().to_string();
+                        if !value.is_empty() && !value.ends_with('\n') {
+                            value.push('\n');
+                        }
+                        value.push_str(template);
+                        input.set_value(&value, window, cx);
+                    });
+                    cx.notify();
+                },
+            )));
+        }
+        buttons = buttons.child(
+            Button::new("rich-editor-close")
+                .label("\u{2715}")
+                .ghost()
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.rich_editor_open = false;
+                    cx.notify();
+                })),
+        );
+        let mut bar = div()
+            .id("rich-editor-bar")
+            .flex()
+            .flex_col()
+            .gap_1()
+            .px_1()
+            .py_1()
+            .child(buttons);
+        // Live preview of the parsed blocks (editor blocks never carry
+        // buttons, so the callback ids are unused).
+        let text = self.composer.read(cx).value().to_string();
+        let blocks = quill::rich::preview_blocks(&text);
+        if blocks.iter().any(|block| {
+            !matches!(
+                block,
+                quill::rich::RichBlock::Empty | quill::rich::RichBlock::Unsupported { .. }
+            )
+        }) {
+            let empty: std::collections::HashSet<(i64, u64, u64, bool)> =
+                std::collections::HashSet::new();
+            let mut preview = div()
+                .id("rich-editor-preview")
+                .flex()
+                .flex_col()
+                .gap_1()
+                .px_2()
+                .py_1()
+                .rounded_md()
+                .bg(rgb(0x161b22))
+                // Cap the preview so a long draft can't squeeze the history
+                // to zero height on short windows.
+                .max_h(px(320.))
+                .overflow_y_scroll();
+            for (index, block) in blocks.iter().enumerate() {
+                if let Some(child) =
+                    rich_block_element(index, block, (0, 0), ChatId(0), MessageId(0), &empty, cx)
+                {
+                    preview = preview.child(child);
+                }
+            }
+            bar = bar.child(preview);
+        }
+        bar
     }
 
     /// M1: schedule picker popup above the composer (duration presets +
@@ -4688,7 +4928,7 @@ impl QuillApp {
             .session()
             .and_then(|session| session.histories.get(&chat_id.0))
             .and_then(|history| history.messages.get(&message_id.0))
-            .map(|message| message.content.preview())
+            .map(|message| effective_preview(message))
             .unwrap_or_default();
         self.begin_reply_to(
             ComposerReplyTo::new(chat_id, message_id, preview),
@@ -4816,7 +5056,10 @@ impl QuillApp {
             return div().into_any_element();
         };
         let failed = message.failed;
-        let copyable = Self::message_copyable_text(&message.content);
+        let copyable = Self::message_copyable_text(effective_content(
+            &message.content,
+            message.ephemeral.as_ref(),
+        ));
         let delete_confirm =
             DeleteConfirm::for_message(chat_id, message_id, message.is_outgoing, message.pending);
         let pinned = message.is_pinned;
@@ -4973,6 +5216,11 @@ impl QuillApp {
             MessageContent::Audio(audio) if !audio.caption.is_empty() => {
                 Some(audio.caption.clone())
             }
+            // M2: rich messages copy their plain-text block form.
+            MessageContent::RichMessage(rich) => {
+                let text = rich.copy_text();
+                (!text.is_empty()).then_some(text)
+            }
             _ => None,
         }
     }
@@ -4992,7 +5240,7 @@ impl QuillApp {
         }
         for message in messages {
             let id = message.id;
-            let preview = message.content.preview();
+            let preview = effective_content(&message.content, message.ephemeral.as_ref()).preview();
             let label = scheduled_message_label(&message);
             // M1: scheduled sends are the user's own — editing routes
             // through the same composer edit flow with `scheduled: true`
@@ -5403,7 +5651,10 @@ impl QuillApp {
                         | MessageContent::Call { .. }
                         | MessageContent::ChatTtlChanged { .. }
                         | MessageContent::ScreenshotTaken
-                        | MessageContent::Unsupported { .. } => {}
+                        | MessageContent::Unsupported { .. }
+                        // M2: rich messages are not editable through the
+                        // legacy text/caption path.
+                        | MessageContent::RichMessage(_) => {}
                     }
                 }
             }
@@ -6930,7 +7181,7 @@ impl QuillApp {
                 .histories
                 .get(&draft.from_chat_id.0)
                 .and_then(|history| history.messages.get(&id.0))
-                .map(|message| message.content.preview())
+                .map(|message| effective_preview(message))
                 .unwrap_or_else(|| "Message".into());
             let body = serde_json::to_string(&preview).unwrap_or_else(|_| "\"\"".into());
             copies.push(format!(
@@ -9876,7 +10127,12 @@ impl QuillApp {
             .session()
             .and_then(|session| session.histories.get(&chat_id.0))
             .and_then(|history| history.messages.get(&message_id.0))
-            .and_then(|message| Self::message_copyable_text(&message.content))
+            .and_then(|message| {
+                Self::message_copyable_text(effective_content(
+                    &message.content,
+                    message.ephemeral.as_ref(),
+                ))
+            })
             .unwrap_or_default();
         if full_text.trim().is_empty() {
             self.status_note = "only text messages can be quoted".into();
@@ -18418,7 +18674,7 @@ impl QuillApp {
                         .histories
                         .get(&chat_id.0)
                         .and_then(|history| history.messages.get(&id.0))
-                        .map(|message| message.content.preview())
+                        .map(|message| effective_preview(message))
                         .filter(|text| !text.is_empty())
                         .unwrap_or_else(|| "message".into());
                     (id, text)
@@ -20102,7 +20358,7 @@ impl QuillApp {
     ) -> impl IntoElement {
         let chat_id = message.chat_id;
         let message_id = message.id;
-        let preview = message.content.preview();
+        let preview = effective_preview(message);
         // M1: tdesktop shows "Unpin all" when the chat pins more than one
         // message (`unpinAllChatMessages`, schema 1.8.67 line 13565).
         let pinned_count = self
@@ -22218,8 +22474,11 @@ impl QuillApp {
                                 .clone()
                                 .unwrap_or_else(|| "Comment".to_string())
                         };
-                        let text = Self::message_copyable_text(&message.content)
-                            .unwrap_or_else(|| "(no text)".to_string());
+                        let text = Self::message_copyable_text(effective_content(
+                            &message.content,
+                            message.ephemeral.as_ref(),
+                        ))
+                        .unwrap_or_else(|| "(no text)".to_string());
                         list = list.child(
                             div()
                                 .flex()
@@ -25278,7 +25537,12 @@ impl QuillApp {
                             this.child(self.schedule_popup(cx))
                         })
                         .child(self.format_toolbar(cx))
-                        .child(Textarea::new(&self.composer).h(px(88.))),
+                        .child(Textarea::new(&self.composer).h(px(88.)))
+                        // M2: rich editor block bar + live block preview
+                        // under the textarea while the editor is open.
+                        .when(self.rich_editor_open, |this| {
+                            this.child(self.rich_editor_bar(cx))
+                        }),
                 )
             })
             .when_some(composer_note, |this, note| {
@@ -28180,6 +28444,50 @@ fn apply_ready_bot_keyboard(session: &mut Session, sink: &Arc<MemorySink>, seq: 
     }
 }
 
+/// M2 `ReadyRichMessage` fixture: like `apply_ready_bot_chat`, plus two
+/// injected `updateNewMessage`s — a `messageRichMessage` exercising every
+/// rendered block kind (headings, styled paragraphs, list, collapsible,
+/// inline document, table, divider, `pageBlockButtonRow` with URL +
+/// callback buttons) and a text message whose `ephemeral_content`
+/// overrides the regular content for the current user.
+fn apply_ready_rich_message(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
+    apply_ready_bot_chat(session, sink, seq);
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let rich_message = r#"{"@type":"updateNewMessage","message":{"id":401,"chat_id":21,"is_outgoing":false,"content":{"@type":"messageRichMessage","message":{"@type":"richMessage","is_full":true,"is_rtl":false,"blocks":[
+        {"@type":"pageBlockTitle","title":{"@type":"richTextPlain","text":"Club night"}},
+        {"@type":"pageBlockParagraph","text":{"@type":"richTexts","texts":[
+            {"@type":"richTextPlain","text":"Pick "},
+            {"@type":"richTextBold","text":{"@type":"richTextPlain","text":"one"}},
+            {"@type":"richTextPlain","text":" and "},
+            {"@type":"richTextUrl","text":{"@type":"richTextPlain","text":"read more"},"url":"https://example.com","is_cached":false}]}},
+        {"@type":"pageBlockList","is_ordered":false,"items":[
+            {"@type":"pageBlockListItem","label":"Live set","blocks":[]},
+            {"@type":"pageBlockListItem","label":"DJ set","blocks":[]}]},
+        {"@type":"pageBlockDetails","header":{"@type":"richTextPlain","text":"Details"},"blocks":[
+            {"@type":"pageBlockParagraph","text":{"@type":"richTextPlain","text":"Doors at 9pm, show at 10pm."}}],"is_open":true},
+        {"@type":"pageBlockDocument","document":{"@type":"document","file_name":"setlist.pdf"},"caption":{"@type":"pageBlockCaption","text":{"@type":"richTextPlain","text":"Tonight's setlist"},"credit":{"@type":"richTextPlain","text":""}}},
+        {"@type":"pageBlockTable","cells":[
+            [{"@type":"pageBlockTableCell","text":{"@type":"richTextPlain","text":"A1"}},{"@type":"pageBlockTableCell","text":{"@type":"richTextPlain","text":"B1"}}],
+            [{"@type":"pageBlockTableCell","text":{"@type":"richTextPlain","text":"A2"}},{"@type":"pageBlockTableCell","text":{"@type":"richTextPlain","text":"B2"}}]],"is_bordered":true,"is_striped":false,"has_header":false},
+        {"@type":"pageBlockDivider"},
+        {"@type":"pageBlockButtonRow","buttons":[
+            {"@type":"inlineButton","text":{"@type":"richTextPlain","text":"Get tickets"},"style":{"@type":"buttonStylePrimary"},"type":{"@type":"inlineKeyboardButtonTypeUrl","url":"https://example.com/tickets"}},
+            {"@type":"inlineButton","text":{"@type":"richTextPlain","text":"RSVP"},"style":{"@type":"buttonStyleSuccess"},"type":{"@type":"inlineKeyboardButtonTypeCallback","data":"AQID"}}]}
+    ]}}}}"#.to_string();
+    let ephemeral_message = r#"{"@type":"updateNewMessage","message":{"id":402,"chat_id":21,"is_outgoing":false,
+        "content":{"@type":"messageText","text":{"@type":"formattedText","text":"public fallback","entities":[]}},
+        "ephemeral_content":{"@type":"ephemeralMessageContent","can_be_saved":false,"has_timestamped_media":false,
+        "content":{"@type":"messageRichMessage","message":{"@type":"richMessage","is_full":true,"is_rtl":false,"blocks":[
+            {"@type":"pageBlockParagraph","text":{"@type":"richTextPlain","text":"Only you can see this — the ephemeral override wins."}}
+        ]}}}}}"#.to_string();
+    for json in [rich_message, ephemeral_message] {
+        // Demo-only fixture: a parse failure is a programmer error and must
+        // fail loudly, never silently produce a wrong screenshot.
+        let owned = copy_and_parse(&json, seq, &dyn_sink).expect("M2 demo fixture must parse");
+        session.apply(owned);
+    }
+}
+
 /// `ReadyBotCommandMenu` fixture (Phase 3.3): like `apply_ready_bot_chat`,
 /// plus a global-scope `botCommands` response through the real
 /// `getCommands` reducer path, so the `/` menu shows the bot-specific
@@ -30319,7 +30627,13 @@ fn stats_graph_row(
 /// all inherit it). Buttons stretch to share each row's width, like Telegram
 /// desktop; empty rows are skipped.
 fn inline_keyboard(message: &HistoryMessage, cx: &mut Context<QuillApp>) -> Option<AnyElement> {
-    let keyboard = message.reply_markup.as_ref()?;
+    // M2: an ephemeral payload carries its own `reply_markup`, shown
+    // instead of the message's own (bot-built flows, anniversary post).
+    let keyboard = message
+        .ephemeral
+        .as_ref()
+        .and_then(|ephemeral| ephemeral.reply_markup.as_ref())
+        .or(message.reply_markup.as_ref())?;
     let message_id = message.id.0 as u64;
     let mut grid = div()
         .id(("inline-keyboard", message_id))
@@ -30725,7 +31039,8 @@ fn session_history_row(
         (None, None) => None,
     };
     let reply_id = format!("reply-{}", message.id.0);
-    let reply_target = ComposerReplyTo::new(message.chat_id, message.id, message.content.preview());
+    let reply_target =
+        ComposerReplyTo::new(message.chat_id, message.id, effective_preview(message));
     let reply_btn = Button::new(reply_id)
         .label("Reply")
         .ghost()
@@ -30893,7 +31208,9 @@ fn session_history_row(
         }
         row
     });
-    let text_body = match &message.content {
+    // M2: ephemeral content replaces the regular content for rendering
+    // (bot-built flows show the ephemeral variant to the current user).
+    let text_body = match effective_content(&message.content, message.ephemeral.as_ref()) {
         MessageContent::Text(text) => Some(message_text_block(
             (message.chat_id.0, message.id.0 as u64),
             text,
@@ -30905,7 +31222,7 @@ fn session_history_row(
         )),
         _ => None,
     };
-    let extra_media = match &message.content {
+    let extra_media = match effective_content(&message.content, message.ephemeral.as_ref()) {
         MessageContent::Photo(photo) => Some(photo_attachment(
             message.id.0 as u64,
             photo,
@@ -30997,6 +31314,7 @@ fn session_history_row(
         MessageContent::Contact(contact) => Some(contact_row(message.id.0 as u64, contact)),
         MessageContent::Dice(dice) => Some(dice_row(message.id.0 as u64, dice)),
         MessageContent::Text(_)
+        | MessageContent::RichMessage(_)
         | MessageContent::GroupCallInvitation { .. }
         | MessageContent::Call { .. }
         | MessageContent::ChatTtlChanged { .. }
@@ -31077,6 +31395,29 @@ fn session_history_row(
         MessageContent::Unsupported { type_name } => format!("({type_name})"),
         _ => String::new(),
     };
+    // M2: `messageRichMessage` (schema 1.8.67, line 5143) renders its
+    // `pageBlock*` list as a block stack; ephemeral content wins here too.
+    let rich_body = match effective_content(&message.content, message.ephemeral.as_ref()) {
+        MessageContent::RichMessage(rich) => Some(message_rich_block(
+            (message.chat_id.0, message.id.0 as u64),
+            message.chat_id,
+            message.id,
+            rich,
+            revealed,
+            cx,
+        )),
+        _ => None,
+    };
+    if let Some(rich_body) = rich_body {
+        return session_bubble_rich(
+            message.id.0 as u64,
+            label,
+            message.is_outgoing,
+            rich_body,
+            extra,
+            header,
+        );
+    }
     if let Some(text_body) = text_body {
         return session_bubble_rich(
             message.id.0 as u64,
@@ -31342,6 +31683,233 @@ fn link_preview_card(
         }))
         .child(body)
         .into_any_element()
+}
+
+/// M2: render a `messageRichMessage` (schema 1.8.67, line 5143) as a stack
+/// of `pageBlock*` elements. Styled text reuses `rich_text_line` (M1
+/// entities); inline buttons and button rows reuse
+/// `inline_keyboard_button` (URL / callback / switchInline / copy
+/// handlers — the same honest tap behavior as reply-markup keyboards).
+/// A partial message (`is_full == false`, schema line 123) offers a
+/// "Load full message" button that fetches the rest via
+/// `getFullRichMessage` instead of pretending to be complete.
+fn message_rich_block(
+    msg_key: (i64, u64),
+    chat_id: ChatId,
+    message_id: MessageId,
+    rich: &quill::telegram::envelope::RichMessageContent,
+    revealed: &std::collections::HashSet<(i64, u64, u64, bool)>,
+    cx: &mut Context<QuillApp>,
+) -> AnyElement {
+    let row_id = msg_key.1;
+    let mut stack = div()
+        .id(format!("msg-rich-block-{row_id}"))
+        .flex()
+        .flex_col()
+        .gap_2();
+    for (index, block) in rich.blocks.iter().enumerate() {
+        if let Some(child) =
+            rich_block_element(index, block, msg_key, chat_id, message_id, revealed, cx)
+        {
+            stack = stack.child(child);
+        }
+    }
+    if !rich.is_full {
+        stack = stack.child(
+            Button::new(format!("rich-load-full-{row_id}"))
+                .label("Load full message")
+                .ghost()
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    if let Some(live) = this.live.as_mut() {
+                        match live.driver.fetch_full_rich_message(chat_id, message_id) {
+                            Ok(_) => this.status_note = "loading full message…".into(),
+                            Err(_) => this.status_note = "could not load full message".into(),
+                        }
+                        cx.notify();
+                    }
+                })),
+        );
+    }
+    stack.into_any_element()
+}
+
+/// M2: one `RichBlock` as an element. `None` for invisible/unsupported
+/// blocks (`pageBlockAnchor`, unknown types) — parsed, never rendered as
+/// fake content.
+#[allow(clippy::too_many_arguments)]
+fn rich_block_element(
+    index: usize,
+    block: &RichBlock,
+    msg_key: (i64, u64),
+    chat_id: ChatId,
+    message_id: MessageId,
+    revealed: &std::collections::HashSet<(i64, u64, u64, bool)>,
+    cx: &mut Context<QuillApp>,
+) -> Option<AnyElement> {
+    let row_id = msg_key.1;
+    match block {
+        RichBlock::Paragraph {
+            text,
+            entities,
+            buttons,
+        } => {
+            let mut col = div()
+                .id(format!("rich-para-{row_id}-{index}"))
+                .flex()
+                .flex_col()
+                .gap_1();
+            if !text.is_empty() {
+                col = col.child(rich_text_line(text, entities, msg_key, false, revealed, cx));
+            }
+            for (button_index, button) in buttons.iter().enumerate() {
+                col = col.child(
+                    div()
+                        .id(format!("rich-para-btn-{row_id}-{index}-{button_index}"))
+                        .flex()
+                        .child(
+                            inline_keyboard_button(
+                                chat_id,
+                                message_id,
+                                index,
+                                button_index,
+                                button,
+                                cx,
+                            )
+                            .flex_1(),
+                        ),
+                );
+            }
+            Some(col.into_any_element())
+        }
+        RichBlock::Heading {
+            level,
+            text,
+            entities,
+        } => {
+            let heading = div()
+                .id(format!("rich-heading-{row_id}-{index}"))
+                .font_semibold();
+            let heading = match level {
+                1 => heading.text_xl(),
+                2 => heading.text_lg(),
+                _ => heading.text_base(),
+            };
+            Some(
+                heading
+                    .child(rich_text_line(text, entities, msg_key, false, revealed, cx))
+                    .into_any_element(),
+            )
+        }
+        RichBlock::List { ordered, items } => {
+            let mut col = div()
+                .id(format!("rich-list-{row_id}-{index}"))
+                .flex()
+                .flex_col()
+                .gap_1();
+            for (item_index, item) in items.iter().enumerate() {
+                let marker = match item.checked {
+                    Some(true) => "☑",
+                    Some(false) => "☐",
+                    None if *ordered => &format!("{}.", item_index + 1),
+                    None => "•",
+                };
+                col = col.child(
+                    div()
+                        .id(format!("rich-list-item-{row_id}-{index}-{item_index}"))
+                        .flex()
+                        .gap_2()
+                        .child(div().text_sm().child(marker.to_string()))
+                        .child(div().text_sm().child(item.text.clone())),
+                );
+            }
+            Some(col.into_any_element())
+        }
+        RichBlock::Collapsible { header, body, .. } => Some(
+            div()
+                .id(format!("rich-details-{row_id}-{index}"))
+                .flex()
+                .flex_col()
+                .gap_1()
+                .child(div().text_sm().font_semibold().child(format!("▾ {header}")))
+                .child(
+                    div()
+                        .ml_4()
+                        .text_sm()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(body.clone()),
+                )
+                .into_any_element(),
+        ),
+        RichBlock::Document {
+            file_name, caption, ..
+        } => {
+            let mut col = div()
+                .id(format!("rich-document-{row_id}-{index}"))
+                .flex()
+                .flex_col()
+                .gap_1()
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap_2()
+                        .child(div().text_sm().child("📄"))
+                        .child(div().text_sm().font_medium().child(file_name.clone())),
+                );
+            if !caption.is_empty() {
+                col = col.child(div().text_xs().child(caption.clone()));
+            }
+            Some(col.into_any_element())
+        }
+        RichBlock::Table { rows } => {
+            let mut table = div()
+                .id(format!("rich-table-{row_id}-{index}"))
+                .flex()
+                .flex_col()
+                .gap_1();
+            for (row_index, row) in rows.iter().enumerate() {
+                let mut line = div()
+                    .id(format!("rich-table-row-{row_id}-{index}-{row_index}"))
+                    .flex()
+                    .gap_2();
+                for (cell_index, cell) in row.iter().enumerate() {
+                    line = line.child(
+                        div()
+                            .id(format!(
+                                "rich-table-cell-{row_id}-{index}-{row_index}-{cell_index}"
+                            ))
+                            .flex_1()
+                            .text_sm()
+                            .child(cell.clone()),
+                    );
+                }
+                table = table.child(line);
+            }
+            Some(table.into_any_element())
+        }
+        RichBlock::ButtonRow { buttons } => {
+            let mut line = div()
+                .id(format!("rich-button-row-{row_id}-{index}"))
+                .flex()
+                .gap_1();
+            for (button_index, button) in buttons.iter().enumerate() {
+                line = line.child(
+                    inline_keyboard_button(chat_id, message_id, index, button_index, button, cx)
+                        .flex_1(),
+                );
+            }
+            Some(line.into_any_element())
+        }
+        RichBlock::Divider => Some(
+            div()
+                .id(format!("rich-divider-{row_id}-{index}"))
+                .h_px()
+                .w_full()
+                .bg(cx.theme().border)
+                .into_any_element(),
+        ),
+        RichBlock::Empty | RichBlock::Unsupported { .. } => None,
+    }
 }
 
 fn preview_thumb(
