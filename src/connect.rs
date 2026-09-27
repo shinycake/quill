@@ -2,7 +2,8 @@
 //! Never logs api_hash, phone numbers, or codes.
 
 use crate::calls::engine::{
-    CallEngine, ConnectParams, EngineError, MediaDevice, RtcServer, TransportState,
+    CallEngine, ConnectParams, EngineError, MediaDevice, RemoteVideoState, RtcServer,
+    TransportState, VideoFrame, video_wanted,
 };
 use crate::composer::{
     AttachmentKind, ComposerEdit, ComposerEditKind, ComposerSnapshot, DeleteConfirm,
@@ -69,7 +70,7 @@ use crate::telegram::requests::{
     unpin_chat_message, view_messages, view_sponsored_chat,
 };
 use crate::voice::VoiceDraft;
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -355,6 +356,11 @@ impl JsonSender for LiveSender {
 /// Phase C2b: worker-safe queue for engine-emitted signaling.
 type SignalingOutbox = Arc<Mutex<VecDeque<(i32, Vec<u8>)>>>;
 type TransportOutbox = Arc<Mutex<VecDeque<(i32, TransportState)>>>;
+/// Phase C2e: worker-safe queue for engine-emitted peer camera states.
+type VideoStateOutbox = Arc<Mutex<VecDeque<(i32, RemoteVideoState)>>>;
+/// Phase C2e: latest decoded video frame per (call id, is_local); only
+/// the newest frame is kept, so the UI never sees a backlog.
+type VideoFrameSlots = Arc<Mutex<HashMap<(i32, bool), VideoFrame>>>;
 
 /// Session + outbound sender that auto-replies to `WaitTdlibParameters`.
 pub struct ConnectDriver<S: JsonSender> {
@@ -363,6 +369,15 @@ pub struct ConnectDriver<S: JsonSender> {
     call_engine: Option<Box<dyn CallEngine>>,
     signaling_outbox: SignalingOutbox,
     transport_outbox: TransportOutbox,
+    /// Phase C2e: engine-emitted peer camera states (worker thread ->
+    /// driver pump).
+    video_state_outbox: VideoStateOutbox,
+    /// Phase C2e: latest decoded video frame per (call id, is_local).
+    video_frame_slots: VideoFrameSlots,
+    /// Phase C2e: selected camera device id; `None` means the engine
+    /// default. No devices are fabricated, so this can legitimately be
+    /// unset.
+    selected_camera: Option<String>,
     /// Phase C2c: last-enumerated audio devices and the selected
     /// (microphone, speaker) ids. `None` means the engine default; no
     /// devices are fabricated, so this can legitimately be empty.
@@ -421,6 +436,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             call_engine: None,
             signaling_outbox: Arc::new(Mutex::new(VecDeque::new())),
             transport_outbox: Arc::new(Mutex::new(VecDeque::new())),
+            video_state_outbox: Arc::new(Mutex::new(VecDeque::new())),
+            video_frame_slots: Arc::new(Mutex::new(HashMap::new())),
+            selected_camera: None,
             call_devices_cache: Vec::new(),
             selected_devices: (None, None),
             call_connect_params: None,
@@ -467,6 +485,22 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .lock()
                 .expect("call transport outbox")
                 .push_back((call_id, state));
+        }));
+        // Phase C2e: peer camera states and decoded frames ride the same
+        // worker-thread -> driver-pump path as transport and signaling.
+        let video_state_outbox = self.video_state_outbox.clone();
+        engine.set_remote_video_state_callback(Arc::new(move |call_id, state| {
+            video_state_outbox
+                .lock()
+                .expect("call video state outbox")
+                .push_back((call_id, state));
+        }));
+        let video_frame_slots = self.video_frame_slots.clone();
+        engine.set_video_frame_callback(Arc::new(move |call_id, frame| {
+            video_frame_slots
+                .lock()
+                .expect("call video frame slots")
+                .insert((call_id, frame.is_local), frame);
         }));
         self.call_engine = Some(engine);
     }
@@ -520,6 +554,18 @@ impl<S: JsonSender> ConnectDriver<S> {
             .filter(|engine| engine.is_available())
             .map(|engine| engine.protocol().library_versions)
             .unwrap_or_default();
+        let is_video = self.session.active_call.as_ref().is_some_and(|call| {
+            // A camera toggle before the transport existed is stored in
+            // `camera_on` and must survive into the connect params (a
+            // camera-off toggle means the call is negotiated without
+            // video). At initial connect `camera_on == is_video`, so
+            // nothing changes there.
+            call.is_video && call.camera_on
+        });
+        let (video_enabled, default_camera) = video_wanted(is_video, &self.call_devices_cache);
+        let camera_input = video_enabled
+            .then(|| self.selected_camera.clone().or(default_camera))
+            .flatten();
         ConnectParams {
             encryption_key: ready.encryption_key.clone(),
             is_outgoing,
@@ -543,11 +589,88 @@ impl<S: JsonSender> ConnectDriver<S> {
             p2p_allowed: ready.allow_p2p,
             mic_input: self.selected_devices.0.clone(),
             speaker_input: self.selected_devices.1.clone(),
-            // Phase C2e: video wiring lands in the next slice; the honest
-            // default is video off until the driver opts in.
-            video_enabled: false,
-            camera_input: None,
+            // Phase C2e: a video call negotiates video only when a camera
+            // exists; the user's camera pick wins over the first
+            // enumerated camera. The connect path refreshes the device
+            // cache before calling this (cheap no-op when the engine is
+            // missing).
+            video_enabled,
+            camera_input,
         }
+    }
+
+    /// Phase C2e: honest 1:1 video readiness — the active call is a video
+    /// call, the engine is available, and a camera exists. The UI uses
+    /// this for disabled states instead of guessing.
+    pub fn call_video_ready(&self) -> bool {
+        let is_video = self
+            .session
+            .active_call
+            .as_ref()
+            .is_some_and(|call| call.is_video);
+        self.call_engine
+            .as_ref()
+            .is_some_and(|engine| engine.is_available())
+            && video_wanted(is_video, &self.call_devices_cache).0
+    }
+
+    /// Phase C2e: newest decoded frame for a call; `is_local` selects the
+    /// local preview (`true`) or the peer camera (`false`). `None` when
+    /// no frame has arrived yet.
+    pub fn latest_video_frame(&self, call_id: i32, is_local: bool) -> Option<VideoFrame> {
+        self.video_frame_slots
+            .lock()
+            .expect("call video frame slots")
+            .get(&(call_id, is_local))
+            .cloned()
+    }
+
+    /// Phase C2e: selected camera device id; `None` is the engine default.
+    pub fn selected_call_camera(&self) -> Option<&str> {
+        self.selected_camera.as_deref()
+    }
+
+    /// Phase C2e: camera toggle through the native engine. The engine is
+    /// called first and its error propagates *without* flipping the
+    /// session flag (mirrors `set_call_muted`); without a connected
+    /// transport the intent is only stored (it applies on connect).
+    pub fn set_call_camera(&mut self, call_id: i32, enabled: bool) -> Result<(), EngineError> {
+        let Some(call) = self.session.active_call.as_mut() else {
+            return Err(EngineError::NoActiveCall);
+        };
+        if call.id != call_id {
+            return Err(EngineError::NoSuchCall(call_id));
+        }
+        if call.transport.is_some()
+            && let Some(engine) = self.call_engine.as_deref_mut()
+            && engine.is_available()
+        {
+            engine.set_camera_enabled(call.id, enabled, self.selected_camera.as_deref())?;
+        }
+        call.camera_on = enabled;
+        Ok(())
+    }
+
+    /// Phase C2e: pick the camera device id (`None` = engine default).
+    /// The selection is stored (so it applies on connect) and forwarded
+    /// to the native engine with the current camera intent only when a
+    /// transport is already connected; a failed forward propagates
+    /// before the stored selection changes.
+    pub fn select_call_camera(&mut self, camera: Option<String>) -> Result<(), EngineError> {
+        let camera_on = self
+            .session
+            .active_call
+            .as_ref()
+            .is_some_and(|call| call.camera_on);
+        if let Some(call) = self.session.active_call.as_ref()
+            && call.transport.is_some()
+            && let Some(engine) = self.call_engine.as_deref_mut()
+            && engine.is_available()
+        {
+            engine.set_camera_enabled(call.id, camera_on, camera.as_deref())?;
+        }
+        self.selected_camera = camera;
+        Ok(())
     }
 
     /// Kick the JSON client so authorization updates start flowing.
@@ -712,6 +835,12 @@ impl<S: JsonSender> ConnectDriver<S> {
             if let Some(engine) = self.call_engine.as_deref_mut() {
                 let _ = engine.hangup(call_id);
             }
+            // Phase C2e: drop any retained frames for the ended call so
+            // the UI cannot render a stale picture.
+            self.video_frame_slots
+                .lock()
+                .expect("call video frame slots")
+                .retain(|(slot_call_id, _), _| *slot_call_id != call_id);
             self.call_connect_params = None;
             self.reconnect_attempts = 0;
         }
@@ -851,6 +980,28 @@ impl<S: JsonSender> ConnectDriver<S> {
             }
         }
 
+        // Phase C2e: peer camera state follows the same gate as
+        // transport — only the reducer-tracked active call is updated;
+        // emissions for an unknown or ended call are dropped.
+        loop {
+            let update = self
+                .video_state_outbox
+                .lock()
+                .expect("call video state outbox")
+                .pop_front();
+            let Some((call_id, state)) = update else {
+                break;
+            };
+            if let Some(call) = self
+                .session
+                .active_call
+                .as_mut()
+                .filter(|call| call.id == call_id)
+            {
+                call.remote_video = state;
+            }
+        }
+
         loop {
             let emitted = self
                 .signaling_outbox
@@ -876,6 +1027,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 return Err(err);
             }
         }
+
         Ok(())
     }
 
@@ -6312,7 +6464,9 @@ pub fn start_live_connect(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::calls::engine::{CallEngine, MockEngine};
+    use crate::calls::engine::{
+        CallEngine, MediaDevice, MediaDeviceKind, MockEngine, RemoteVideoState, VideoFrame,
+    };
     use crate::diagnostics::MemorySink;
     use crate::platform::MemorySecretStore;
     use crate::telegram::client::copy_and_parse;
@@ -12253,6 +12407,212 @@ mod tests {
         assert_eq!(sent[0]["@type"], "sendCallSignalingData");
         assert_eq!(sent[0]["call_id"], 77);
         assert_eq!(sent[0]["data"], "ZW1pdC1ieXRlcw==");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Phase C2e: video-call variant of `READY_CALL_JSON`.
+    fn ready_video_call_json() -> String {
+        READY_CALL_JSON.replace("\"is_video\":false", "\"is_video\":true")
+    }
+
+    /// Phase C2e: the engine's peer camera state reaches the tracked
+    /// call through the pump; emissions for other call ids are dropped.
+    #[test]
+    fn remote_video_state_drain() {
+        let (dir, mut driver, handle, sink, seq) = ready_call_driver();
+        ingest_call_json(&mut driver, &seq, &sink, READY_CALL_JSON);
+        handle.emit_remote_video_state(999, RemoteVideoState::Active);
+        handle.emit_remote_video_state(77, RemoteVideoState::Paused);
+        ingest_call_json(&mut driver, &seq, &sink, READY_CALL_JSON);
+        assert_eq!(
+            driver.session.active_call.as_ref().unwrap().remote_video,
+            RemoteVideoState::Paused
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Phase C2e: only the newest frame per (call, side) is kept — the
+    /// UI always sees the latest, never a backlog.
+    #[test]
+    fn frame_slots_latest_wins() {
+        let (dir, driver, handle, _sink, _seq) = ready_call_driver();
+        let frame = |is_local: bool| VideoFrame {
+            seq: 0,
+            width: 2,
+            height: 2,
+            rgba: vec![0u8; 16],
+            is_local,
+        };
+        handle.emit_video_frame(77, frame(false));
+        handle.emit_video_frame(77, frame(false));
+        let latest = driver.latest_video_frame(77, false).unwrap();
+        assert_eq!(latest.seq, 1);
+        assert!(driver.latest_video_frame(77, true).is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Phase C2e: the UI camera toggle reaches the engine with the
+    /// call id, the new state, and the selected camera — but only
+    /// once a transport exists; before that the intent is stored
+    /// cleanly (the real engine errors on an untracked call) so it
+    /// can apply on connect.
+    #[test]
+    fn set_call_camera_gates_engine_on_transport() {
+        let (dir, mut driver, handle, sink, seq) = ready_call_driver();
+        // No transport yet: intent stored, engine untouched.
+        assert!(driver.set_call_camera(77, false).is_ok());
+        assert!(handle.camera_changes().is_empty());
+        assert!(!driver.session.active_call.as_ref().unwrap().camera_on);
+        // Transport connected: the toggle drives the engine.
+        ingest_call_json(&mut driver, &seq, &sink, READY_CALL_JSON);
+        assert!(driver.set_call_camera(77, true).is_ok());
+        assert_eq!(handle.camera_changes(), vec![(77, true, None)]);
+        assert!(driver.session.active_call.as_ref().unwrap().camera_on);
+        assert_eq!(
+            driver.set_call_camera(999, true),
+            Err(crate::calls::engine::EngineError::NoSuchCall(999))
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Phase C2e: picking a camera before the transport exists stores
+    /// the selection cleanly without error and without an engine
+    /// forward.
+    #[test]
+    fn select_call_camera_without_transport_stores_selection() {
+        let (dir, mut driver, handle, _sink, _seq) = ready_call_driver();
+        assert!(driver.select_call_camera(Some("cam-1".into())).is_ok());
+        assert!(handle.camera_changes().is_empty());
+        assert_eq!(driver.selected_call_camera(), Some("cam-1"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Phase C2e: no camera enumerated → a video call must not
+    /// negotiate video.
+    #[test]
+    fn connect_params_video_honors_no_camera() {
+        let (dir, mut driver, handle, sink, seq) = ready_call_driver();
+        driver.refresh_call_devices();
+        ingest_call_json(&mut driver, &seq, &sink, &ready_video_call_json());
+        let connects = handle.connects();
+        assert_eq!(connects.len(), 1);
+        assert!(!connects[0].1.video_enabled);
+        assert_eq!(connects[0].1.camera_input, None);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Phase C2e: a camera-off toggle set before the transport exists
+    /// survives into the connect params — the call is negotiated
+    /// without video even though a camera is available.
+    #[test]
+    fn connect_params_camera_off_intent_survives_pre_connect() {
+        let (dir, mut driver, _recorder, sink, seq) = call_driver();
+        let mock = MockEngine::new();
+        mock.set_devices(vec![MediaDevice {
+            id: "cam-1".into(),
+            name: "Test Cam".into(),
+            kind: MediaDeviceKind::Camera,
+        }]);
+        let handle = mock.clone();
+        driver.set_call_engine(Box::new(mock));
+        ingest_call_json(
+            &mut driver,
+            &seq,
+            &sink,
+            r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+        );
+        ingest_call_json(
+            &mut driver,
+            &seq,
+            &sink,
+            r#"{"@type":"updateCall","call":{"@type":"call","id":77,"unique_id":"99","user_id":41,"is_outgoing":true,"is_video":true,"state":{"@type":"callStatePending","is_created":true,"is_received":false}}}"#,
+        );
+        // Camera toggled off before the transport exists: stores the
+        // intent without an engine forward.
+        assert!(driver.set_call_camera(77, false).is_ok());
+        assert!(handle.camera_changes().is_empty());
+        ingest_call_json(&mut driver, &seq, &sink, &ready_video_call_json());
+        let connects = handle.connects();
+        assert_eq!(connects.len(), 1);
+        assert!(!connects[0].1.video_enabled);
+        assert_eq!(connects[0].1.camera_input, None);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Phase C2e: a camera enumerated → video negotiated with the
+    /// user's camera pick (or the engine default when unset).
+    #[test]
+    fn connect_params_video_selects_camera() {
+        let (dir, mut driver, _recorder, sink, seq) = call_driver();
+        let mock = MockEngine::new();
+        mock.set_devices(vec![MediaDevice {
+            id: "cam-1".into(),
+            name: "Test Cam".into(),
+            kind: MediaDeviceKind::Camera,
+        }]);
+        let handle = mock.clone();
+        driver.set_call_engine(Box::new(mock));
+        ingest_call_json(
+            &mut driver,
+            &seq,
+            &sink,
+            r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+        );
+        driver.select_call_camera(Some("cam-1".into())).unwrap();
+        ingest_call_json(&mut driver, &seq, &sink, &ready_video_call_json());
+        let connects = handle.connects();
+        assert_eq!(connects.len(), 1);
+        assert!(connects[0].1.video_enabled);
+        assert_eq!(connects[0].1.camera_input, Some("cam-1".to_string()));
+        assert_eq!(driver.selected_call_camera(), Some("cam-1"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Phase C2e: the reducer initializes the camera intent from
+    /// `is_video` — video calls start with the camera on.
+    #[test]
+    fn active_call_camera_on_from_is_video() {
+        for (is_video, expected) in [(false, false), (true, true)] {
+            let (dir, mut driver, _recorder, sink, seq) = call_driver();
+            ingest_call_json(
+                &mut driver,
+                &seq,
+                &sink,
+                &format!(
+                    r#"{{"@type":"updateCall","call":{{"@type":"call","id":77,"unique_id":"99","user_id":41,"is_outgoing":true,"is_video":{is_video},"state":{{"@type":"callStatePending","is_created":true,"is_received":false}}}}}}"#
+                ),
+            );
+            let call = driver.session.active_call.as_ref().unwrap();
+            assert_eq!(call.camera_on, expected);
+            assert_eq!(call.remote_video, RemoteVideoState::Inactive);
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+    }
+
+    /// Phase C2e: frame slots for an ended call are dropped — the UI
+    /// can never render a stale picture from a previous call.
+    #[test]
+    fn frame_slots_cleared_on_call_end() {
+        let (dir, mut driver, handle, sink, seq) = ready_call_driver();
+        ingest_call_json(&mut driver, &seq, &sink, READY_CALL_JSON);
+        handle.emit_video_frame(
+            77,
+            VideoFrame {
+                seq: 0,
+                width: 2,
+                height: 2,
+                rgba: vec![0u8; 16],
+                is_local: false,
+            },
+        );
+        assert!(driver.latest_video_frame(77, false).is_some());
+        ingest_call_json(
+            &mut driver,
+            &seq,
+            &sink,
+            r#"{"@type":"updateCall","call":{"@type":"call","id":77,"unique_id":"99","user_id":41,"is_outgoing":true,"is_video":false,"state":{"@type":"callStateDiscarded","reason":{"@type":"callDiscardReasonHungUp"},"need_rating":false,"need_debug_information":false,"need_log":false}}}"#,
+        );
+        assert!(driver.latest_video_frame(77, false).is_none());
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
