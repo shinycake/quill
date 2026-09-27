@@ -1610,8 +1610,9 @@ pub enum ScreenshotDemo {
     /// reaction, interaction counts, and deletable/repliable flags; the
     /// viewer opens with the **reaction picker** and **reply row** visible,
     /// plus a seeded `availableReactions` response (Phase 9.2). The photo
-    /// composer itself is absent: the pinned TDLib 1.8.67 schema has no
-    /// `sendStory` constructor, so posting cannot be built honestly yet.
+    /// composer itself is absent: the pinned TDLib 1.8.67 schema posts
+    /// stories via the `postStory` constructor, and the composer wiring
+    /// against it is queued as future work.
     ReadyStoryPost,
     /// MED3 downloads-manager demo (injected, no live Telegram): the
     /// `ReadyMedia` seed plus an actively downloading document (file 24,

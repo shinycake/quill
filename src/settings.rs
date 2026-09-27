@@ -78,6 +78,12 @@ pub const AUTO_DOWNLOAD_VIDEO_NOTE: u8 = 0x40;
 pub const AUTO_DOWNLOAD_DEFAULT: u8 =
     AUTO_DOWNLOAD_PHOTO | AUTO_DOWNLOAD_VOICE | AUTO_DOWNLOAD_GIF | AUTO_DOWNLOAD_VIDEO_NOTE;
 
+/// MED3: TGX `canAutomaticallyDownload` rejects files above the download
+/// limit (default 50 MiB on WiFi, steps 1/5/15/50/100/500 MiB/None). Quill
+/// honors the WiFi default as a fixed cap; per-type configurable limits are
+/// future work.
+pub const AUTO_DOWNLOAD_MAX_BYTES: i64 = 50 * 1024 * 1024;
+
 /// MED1: local-only media preferences, persisted as JSON next to the
 /// account root (`media_prefs.json`). Client-side only (no TDLib setting):
 /// - `remember_media_grouping`: when true, the composer's "group media"

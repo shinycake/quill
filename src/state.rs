@@ -7,8 +7,9 @@ use crate::ids::{
 };
 use crate::notify::{self, OsNotification, QueuedNotification};
 use crate::settings::{
-    AUTO_DOWNLOAD_FILE, AUTO_DOWNLOAD_GIF, AUTO_DOWNLOAD_MUSIC, AUTO_DOWNLOAD_PHOTO,
-    AUTO_DOWNLOAD_VIDEO, AUTO_DOWNLOAD_VIDEO_NOTE, AUTO_DOWNLOAD_VOICE, CallPrefs, MediaPrefs,
+    AUTO_DOWNLOAD_FILE, AUTO_DOWNLOAD_GIF, AUTO_DOWNLOAD_MAX_BYTES, AUTO_DOWNLOAD_MUSIC,
+    AUTO_DOWNLOAD_PHOTO, AUTO_DOWNLOAD_VIDEO, AUTO_DOWNLOAD_VIDEO_NOTE, AUTO_DOWNLOAD_VOICE,
+    CallPrefs, MediaPrefs,
 };
 use crate::telegram::client::OwnedEnvelope;
 use crate::telegram::envelope::{
@@ -6772,7 +6773,12 @@ impl Session {
                     .and_then(|p| p.file_id)
                     .or_else(|| extra.and_then(|id| self.download_extras.get(&id.0).copied()));
                 if let Some(file_id) = download_id {
-                    self.failed_downloads.insert(file_id);
+                    // MED3 review: only user-initiated downloads enter the
+                    // Failed section; automatic downloads never started by
+                    // the user must not show rows here.
+                    if self.user_downloads.contains(&file_id) {
+                        self.failed_downloads.insert(file_id);
+                    }
                     self.unstick_download(file_id);
                 }
                 if let Some(pending) = pending
@@ -7049,12 +7055,6 @@ impl Session {
         let Some(chat_id) = self.open_chat else {
             return Vec::new();
         };
-        // MED3: the thumb ingest used to download unconditionally; it is
-        // now gated on the auto-download prefs (data saver pauses all
-        // automatic downloads, TGX `settings_datasaver`).
-        if !self.auto_download_allowed(chat_id, AUTO_DOWNLOAD_PHOTO) {
-            return Vec::new();
-        }
         let Some(history) = self.histories.get(&chat_id.0) else {
             return Vec::new();
         };
@@ -7171,7 +7171,9 @@ impl Session {
     /// download under the user's per-chat-kind × media-type prefs (TGX
     /// `settings_autodownload`). Unlike the thumbnail pass, each media type
     /// is gated on its own flag; secret and spoiler content is never
-    /// auto-downloaded (same safeguard as the thumb hook).
+    /// auto-downloaded (same safeguard as the thumb hook), and files known
+    /// to exceed `AUTO_DOWNLOAD_MAX_BYTES` are skipped (TGX
+    /// `canAutomaticallyDownload` download limit).
     pub fn auto_download_media_file_ids(&self) -> Vec<FileId> {
         let Some(chat_id) = self.open_chat else {
             return Vec::new();
@@ -7184,7 +7186,18 @@ impl Session {
         };
         let mut ids = Vec::new();
         let push = |flag: u8, file_id: FileId, ids: &mut Vec<FileId>| {
-            if self.auto_download_allowed(chat_id, flag) && self.should_download(file_id) {
+            // MED3 review: skip files known to exceed the auto-download cap
+            // (TGX `canAutomaticallyDownload` download limit, WiFi default
+            // 50 MiB); an unknown size (`display_size() == 0`) is not a
+            // reason to block.
+            let oversized = self
+                .files
+                .get(&file_id.0)
+                .is_some_and(|file| file.display_size() > AUTO_DOWNLOAD_MAX_BYTES);
+            if !oversized
+                && self.auto_download_allowed(chat_id, flag)
+                && self.should_download(file_id)
+            {
                 ids.push(file_id);
             }
         };
@@ -14707,6 +14720,30 @@ mod tests {
     }
 
     #[test]
+    fn auto_download_skips_files_over_size_cap() {
+        // MED3 review: full-media auto-download skips files whose known
+        // size exceeds `AUTO_DOWNLOAD_MAX_BYTES` (TGX
+        // `canAutomaticallyDownload` download limit, WiFi default 50 MiB).
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        session.open_chat(ChatId(1));
+        // Voice note (file 4), auto-downloaded by default (TGX 0x63).
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"updateNewMessage","message":{{"id":20,"chat_id":1,"is_outgoing":false,"content":{{"@type":"messageVoiceNote","voice_note":{{"@type":"voiceNote","duration":12,"mime_type":"audio/ogg","voice":{}}},"caption":{{"@type":"formattedText","text":"","entities":[]}},"is_listened":false}}}}}}"#,
+                media_file_json(4, "", false),
+            ),
+        );
+        assert_eq!(session.auto_download_media_file_ids(), vec![FileId(4)]);
+        // File 4 balloons past the cap: skipped from here on.
+        session.files.get_mut(&4).unwrap().size = 100 * 1024 * 1024;
+        assert!(session.auto_download_media_file_ids().is_empty());
+    }
+
+    #[test]
     fn completed_user_downloads_land_in_recent_list() {
         let (mut session, _sink) = session();
         let completed = |id: i32| ParsedFile {
@@ -14778,11 +14815,14 @@ mod tests {
     #[test]
     fn download_file_error_marks_failed_download() {
         // A `downloadFile` error response unsticks the download and records
-        // the failure so the row can offer an honest retry.
+        // the failure so the row can offer an honest retry — but only for
+        // user-initiated downloads; an automatic (auto-download) error must
+        // not surface in the Failed section.
         let (mut session, sink) = session();
         let seq = AtomicU64::new(0);
         let extra = session.request_download(FileId(11));
         session.begin_download(FileId(11));
+        session.user_downloads.insert(11);
         apply_json(
             &mut session,
             &seq,
@@ -14794,5 +14834,19 @@ mod tests {
         );
         assert!(!session.downloading.contains(&11));
         assert!(session.failed_downloads.contains(&11));
+        // Automatic download: unstuck, but not recorded as failed.
+        let extra = session.request_download(FileId(12));
+        session.begin_download(FileId(12));
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"error","@extra":"{}","code":500,"message":"CANARY download failed"}}"#,
+                extra.0
+            ),
+        );
+        assert!(!session.downloading.contains(&12));
+        assert!(!session.failed_downloads.contains(&12));
     }
 }
