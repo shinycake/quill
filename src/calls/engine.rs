@@ -1,11 +1,15 @@
 //! Phase C2b: call-engine abstraction plus the runtime-loaded ntgcalls adapter.
 
 use ntgcalls_sys::{
-    Loader, NTG_OK, ntg_device_info, ntg_instance, ntg_media_devices, ntg_protocol,
+    Loader, NTG_CONNECTION_STATE_CLOSED, NTG_CONNECTION_STATE_CONNECTED,
+    NTG_CONNECTION_STATE_CONNECTING, NTG_CONNECTION_STATE_FAILED, NTG_CONNECTION_STATE_TIMEOUT,
+    NTG_ERR_INVALID_PARAMS, NTG_MEDIA_SOURCE_DEVICE, NTG_OK, NTG_STREAM_MODE_CAPTURE,
+    NTG_STREAM_MODE_PLAYBACK, ntg_audio_description, ntg_connection_info, ntg_device_info,
+    ntg_instance, ntg_media_description, ntg_media_devices, ntg_protocol, ntg_rtc_server,
 };
 use serde_json::{Value, json};
 use std::collections::HashMap;
-use std::ffi::{CStr, c_void};
+use std::ffi::{CStr, CString, c_void};
 use std::marker::PhantomData;
 use std::ptr::{NonNull, null_mut};
 use std::rc::Rc;
@@ -13,6 +17,41 @@ use std::sync::{Arc, Mutex};
 
 /// Phase C2b: engine-emitted signaling routed as `(tdlib_call_id, data)`.
 pub type SignalingEmittedCallback = Arc<dyn Fn(i32, Vec<u8>) + Send + Sync + 'static>;
+
+pub type TransportStateCallback = Arc<dyn Fn(i32, TransportState) + Send + Sync + 'static>;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TransportState {
+    Connecting,
+    Connected,
+    Failed,
+    Closed,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RtcServer {
+    pub id: u64,
+    pub ipv4: String,
+    pub ipv6: String,
+    pub port: u16,
+    pub username: String,
+    pub password: String,
+    pub turn: bool,
+    pub stun: bool,
+    pub tcp: bool,
+    pub peer_tag: Vec<u8>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConnectParams {
+    pub encryption_key: Vec<u8>,
+    pub is_outgoing: bool,
+    pub servers: Vec<RtcServer>,
+    pub library_versions: Vec<String>,
+    pub p2p_allowed: bool,
+    pub mic_input: Option<String>,
+    pub speaker_input: Option<String>,
+}
 
 /// Phase C2b: the exact `callProtocol` capability reported to TDLib.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -78,6 +117,8 @@ pub enum EngineError {
     Engine { op: &'static str, code: i32 },
     #[error("call engine returned a null instance")]
     NullInstance,
+    #[error("there is no active call")]
+    NoActiveCall,
 }
 
 /// Phase C2b: 1:1 engine lifecycle and bidirectional signaling.
@@ -113,6 +154,17 @@ pub trait CallEngine {
     /// through TDLib `sendCallSignalingData` (`schema/td_api.tl:14218`).
     fn set_signaling_emitted_callback(&mut self, callback: SignalingEmittedCallback);
 
+    fn set_transport_state_callback(&mut self, callback: TransportStateCallback);
+
+    fn connect(&mut self, call_id: i32, params: &ConnectParams) -> Result<(), EngineError>;
+
+    fn select_devices(
+        &mut self,
+        call_id: i32,
+        microphone: Option<&str>,
+        speaker: Option<&str>,
+    ) -> Result<(), EngineError>;
+
     /// Phase C2b: app -> engine; idempotent teardown, where an unknown call
     /// id succeeds.
     fn hangup(&mut self, call_id: i32) -> Result<(), EngineError>;
@@ -139,8 +191,13 @@ struct MockInner {
     signaling_received: Vec<(i32, Vec<u8>)>,
     hung_up_calls: Vec<i32>,
     mute_changes: Vec<(i32, bool)>,
+    /// Test-only failure injection for `set_muted`.
+    fail_mute: bool,
     devices: Vec<MediaDevice>,
     hook: Option<SignalingEmittedCallback>,
+    transport_hook: Option<TransportStateCallback>,
+    connects: Vec<(i32, ConnectParams)>,
+    device_selections: Vec<(i32, Option<String>, Option<String>)>,
 }
 
 /// Phase C2b: deterministic in-memory engine used by driver tests.
@@ -215,6 +272,39 @@ impl MockEngine {
         self.inner.lock().expect("mock call engine").devices = devices;
     }
 
+    /// Test-only: make the next `set_muted` calls fail.
+    pub fn fail_mute(&self) {
+        self.inner.lock().expect("mock call engine").fail_mute = true;
+    }
+
+    pub fn connects(&self) -> Vec<(i32, ConnectParams)> {
+        self.inner
+            .lock()
+            .expect("mock call engine")
+            .connects
+            .clone()
+    }
+
+    pub fn device_selections(&self) -> Vec<(i32, Option<String>, Option<String>)> {
+        self.inner
+            .lock()
+            .expect("mock call engine")
+            .device_selections
+            .clone()
+    }
+
+    pub fn emit_transport_state(&self, call_id: i32, state: TransportState) {
+        let hook = self
+            .inner
+            .lock()
+            .expect("mock call engine")
+            .transport_hook
+            .clone();
+        if let Some(hook) = hook {
+            hook(call_id, state);
+        }
+    }
+
     fn engine_protocol() -> EngineProtocol {
         EngineProtocol {
             udp_p2p: true,
@@ -285,6 +375,43 @@ impl CallEngine for MockEngine {
         self.inner.lock().expect("mock call engine").hook = Some(callback);
     }
 
+    fn set_transport_state_callback(&mut self, callback: TransportStateCallback) {
+        self.inner.lock().expect("mock call engine").transport_hook = Some(callback);
+    }
+
+    fn connect(&mut self, call_id: i32, params: &ConnectParams) -> Result<(), EngineError> {
+        let mut inner = self.inner.lock().expect("mock call engine");
+        if !inner.available {
+            return Err(EngineError::Unavailable);
+        }
+        if !inner.calls.contains_key(&call_id) {
+            return Err(EngineError::NoSuchCall(call_id));
+        }
+        inner.connects.push((call_id, params.clone()));
+        Ok(())
+    }
+
+    fn select_devices(
+        &mut self,
+        call_id: i32,
+        microphone: Option<&str>,
+        speaker: Option<&str>,
+    ) -> Result<(), EngineError> {
+        let mut inner = self.inner.lock().expect("mock call engine");
+        if !inner.available {
+            return Err(EngineError::Unavailable);
+        }
+        if !inner.calls.contains_key(&call_id) {
+            return Err(EngineError::NoSuchCall(call_id));
+        }
+        inner.device_selections.push((
+            call_id,
+            microphone.map(str::to_owned),
+            speaker.map(str::to_owned),
+        ));
+        Ok(())
+    }
+
     fn hangup(&mut self, call_id: i32) -> Result<(), EngineError> {
         let mut inner = self.inner.lock().expect("mock call engine");
         if !inner.available {
@@ -303,6 +430,12 @@ impl CallEngine for MockEngine {
         }
         if !inner.calls.contains_key(&call_id) {
             return Err(EngineError::NoSuchCall(call_id));
+        }
+        if inner.fail_mute {
+            return Err(EngineError::Engine {
+                op: "set_muted",
+                code: -1,
+            });
         }
         inner.mute_changes.push((call_id, muted));
         Ok(())
@@ -332,6 +465,7 @@ impl CallEngine for MockEngine {
 struct CallbackShared {
     user_to_call: Mutex<HashMap<i64, i32>>,
     hook: Mutex<Option<SignalingEmittedCallback>>,
+    transport_hook: Mutex<Option<TransportStateCallback>>,
 }
 
 /// Phase C2b: safe driver-thread adapter over the runtime-loaded C ABI.
@@ -382,6 +516,7 @@ impl NtgcallsEngine {
             callback: Arc::new(CallbackShared {
                 user_to_call: Mutex::new(HashMap::new()),
                 hook: Mutex::new(None),
+                transport_hook: Mutex::new(None),
             }),
             _driver_thread_only: PhantomData,
         })
@@ -414,6 +549,24 @@ impl NtgcallsEngine {
                 code: rc,
             });
         }
+        let rc = unsafe {
+            (self.api.ntg_on_connection_change_callback)(
+                instance.as_ptr(),
+                Some(connection_trampoline),
+                user_data,
+            )
+        };
+        if rc != NTG_OK {
+            unsafe {
+                let _ =
+                    (self.api.ntg_on_signaling_data_callback)(instance.as_ptr(), None, null_mut());
+                (self.api.ntg_instance_destroy)(instance.as_ptr());
+            }
+            return Err(EngineError::Engine {
+                op: "ntg_on_connection_change_callback",
+                code: rc,
+            });
+        }
         self.instance = Some(instance);
         Ok(instance)
     }
@@ -423,6 +576,63 @@ impl NtgcallsEngine {
             .get(&call_id)
             .copied()
             .ok_or(EngineError::NoSuchCall(call_id))
+    }
+
+    fn set_audio_sources(
+        &self,
+        call_id: i32,
+        microphone: Option<&str>,
+        speaker: Option<&str>,
+    ) -> Result<(), EngineError> {
+        let user_id = self.user_id(call_id)?;
+        let instance = self.instance.ok_or(EngineError::NullInstance)?;
+        for (mode, input, microphone_source) in [
+            (NTG_STREAM_MODE_CAPTURE, microphone, true),
+            (NTG_STREAM_MODE_PLAYBACK, speaker, false),
+        ] {
+            let input = input
+                .map(CString::new)
+                .transpose()
+                .map_err(|_| EngineError::Engine {
+                    op: "ntg_set_stream_sources",
+                    code: NTG_ERR_INVALID_PARAMS,
+                })?;
+            let mut audio = ntg_audio_description {
+                media_source: NTG_MEDIA_SOURCE_DEVICE,
+                sample_rate: 48_000,
+                channel_count: 1,
+                // ntgcalls' wrapper convention uses device metadata here;
+                // NULL selects the default (the C header is silent).
+                input: input
+                    .as_ref()
+                    .map_or(null_mut(), |value| value.as_ptr().cast_mut()),
+                keep_open: false,
+            };
+            let media = ntg_media_description {
+                microphone: if microphone_source {
+                    &mut audio
+                } else {
+                    null_mut()
+                },
+                speaker: if microphone_source {
+                    null_mut()
+                } else {
+                    &mut audio
+                },
+                camera: null_mut(),
+                screen: null_mut(),
+            };
+            let rc = unsafe {
+                (self.api.ntg_set_stream_sources)(instance.as_ptr(), user_id, mode, media)
+            };
+            if rc != NTG_OK {
+                return Err(EngineError::Engine {
+                    op: "ntg_set_stream_sources",
+                    code: rc,
+                });
+            }
+        }
+        Ok(())
     }
 }
 
@@ -498,6 +708,76 @@ impl CallEngine for NtgcallsEngine {
 
     fn set_signaling_emitted_callback(&mut self, callback: SignalingEmittedCallback) {
         *self.callback.hook.lock().expect("ntgcalls callback hook") = Some(callback);
+    }
+
+    fn set_transport_state_callback(&mut self, callback: TransportStateCallback) {
+        *self
+            .callback
+            .transport_hook
+            .lock()
+            .expect("ntgcalls transport callback hook") = Some(callback);
+    }
+
+    fn connect(&mut self, call_id: i32, params: &ConnectParams) -> Result<(), EngineError> {
+        let user_id = self.user_id(call_id)?;
+        let instance = self.ensure_instance()?;
+        if params.encryption_key.is_empty() {
+            return Err(EngineError::Engine {
+                op: "ntg_skip_exchange",
+                code: NTG_ERR_INVALID_PARAMS,
+            });
+        }
+        let servers = NativeRtcServers::new(&params.servers)?;
+        let versions = c_strings(&params.library_versions)?;
+        let version_ptrs: Vec<_> = versions.iter().map(|value| value.as_ptr()).collect();
+        let rc = unsafe {
+            (self.api.ntg_skip_exchange)(
+                instance.as_ptr(),
+                user_id,
+                params.encryption_key.as_ptr(),
+                params.encryption_key.len(),
+                params.is_outgoing,
+            )
+        };
+        if rc != NTG_OK {
+            return Err(EngineError::Engine {
+                op: "ntg_skip_exchange",
+                code: rc,
+            });
+        }
+        let rc = unsafe {
+            (self.api.ntg_connect_p2p)(
+                instance.as_ptr(),
+                user_id,
+                servers.raw.as_ptr(),
+                servers.raw.len(),
+                version_ptrs.as_ptr(),
+                version_ptrs.len(),
+                params.p2p_allowed,
+                std::ptr::null(),
+            )
+        };
+        if rc != NTG_OK {
+            return Err(EngineError::Engine {
+                op: "ntg_connect_p2p",
+                code: rc,
+            });
+        }
+        self.set_audio_sources(
+            call_id,
+            params.mic_input.as_deref(),
+            params.speaker_input.as_deref(),
+        )
+    }
+
+    fn select_devices(
+        &mut self,
+        call_id: i32,
+        microphone: Option<&str>,
+        speaker: Option<&str>,
+    ) -> Result<(), EngineError> {
+        self.user_id(call_id)?;
+        self.set_audio_sources(call_id, microphone, speaker)
     }
 
     fn hangup(&mut self, call_id: i32) -> Result<(), EngineError> {
@@ -601,6 +881,8 @@ impl Drop for NtgcallsEngine {
         // dropped.
         unsafe {
             let _ = (self.api.ntg_on_signaling_data_callback)(instance.as_ptr(), None, null_mut());
+            let _ =
+                (self.api.ntg_on_connection_change_callback)(instance.as_ptr(), None, null_mut());
         }
         self.call_to_user.clear();
         self.callback
@@ -645,6 +927,103 @@ unsafe extern "C" fn signaling_trampoline(
         unsafe { std::slice::from_raw_parts(data, len) }.to_vec()
     };
     hook(call_id, bytes);
+}
+
+unsafe extern "C" fn connection_trampoline(
+    _instance: *mut ntg_instance,
+    user_id: i64,
+    info: ntg_connection_info,
+    user_data: *mut c_void,
+) {
+    if user_data.is_null() {
+        return;
+    }
+    let state = match info.state {
+        NTG_CONNECTION_STATE_CONNECTING => TransportState::Connecting,
+        NTG_CONNECTION_STATE_CONNECTED => TransportState::Connected,
+        NTG_CONNECTION_STATE_FAILED => TransportState::Failed,
+        NTG_CONNECTION_STATE_TIMEOUT => TransportState::Failed,
+        NTG_CONNECTION_STATE_CLOSED => TransportState::Closed,
+        _ => return,
+    };
+    let shared = unsafe { &*user_data.cast::<CallbackShared>() };
+    let call_id = shared
+        .user_to_call
+        .lock()
+        .expect("ntgcalls callback map")
+        .get(&user_id)
+        .copied();
+    let hook = shared
+        .transport_hook
+        .lock()
+        .expect("ntgcalls transport callback hook")
+        .clone();
+    if let (Some(call_id), Some(hook)) = (call_id, hook) {
+        hook(call_id, state);
+    }
+}
+
+fn c_strings(values: &[String]) -> Result<Vec<CString>, EngineError> {
+    values
+        .iter()
+        .map(|value| {
+            CString::new(value.as_str()).map_err(|_| EngineError::Engine {
+                op: "ntg_connect_p2p",
+                code: NTG_ERR_INVALID_PARAMS,
+            })
+        })
+        .collect()
+}
+
+struct NativeRtcServers {
+    raw: Vec<ntg_rtc_server>,
+    _strings: Vec<[CString; 4]>,
+    _peer_tags: Vec<Vec<u8>>,
+}
+
+impl NativeRtcServers {
+    fn new(servers: &[RtcServer]) -> Result<Self, EngineError> {
+        let mut strings = Vec::with_capacity(servers.len());
+        let mut peer_tags = Vec::with_capacity(servers.len());
+        for server in servers {
+            strings.push([
+                native_string(&server.ipv4)?,
+                native_string(&server.ipv6)?,
+                native_string(&server.username)?,
+                native_string(&server.password)?,
+            ]);
+            peer_tags.push(server.peer_tag.clone());
+        }
+        let raw = servers
+            .iter()
+            .enumerate()
+            .map(|(index, server)| ntg_rtc_server {
+                id: server.id,
+                ipv4: strings[index][0].as_ptr().cast_mut(),
+                ipv6: strings[index][1].as_ptr().cast_mut(),
+                port: server.port,
+                username: strings[index][2].as_ptr().cast_mut(),
+                password: strings[index][3].as_ptr().cast_mut(),
+                turn: server.turn,
+                stun: server.stun,
+                tcp: server.tcp,
+                peer_tag: peer_tags[index].as_ptr().cast_mut(),
+                peer_tag_len: peer_tags[index].len(),
+            })
+            .collect();
+        Ok(Self {
+            raw,
+            _strings: strings,
+            _peer_tags: peer_tags,
+        })
+    }
+}
+
+fn native_string(value: &str) -> Result<CString, EngineError> {
+    CString::new(value).map_err(|_| EngineError::Engine {
+        op: "ntg_connect_p2p",
+        code: NTG_ERR_INVALID_PARAMS,
+    })
 }
 
 fn c_string_pointer_array(values: *mut *mut std::ffi::c_char, len: usize) -> Vec<String> {
@@ -715,6 +1094,30 @@ mod tests {
 
         engine.start_call(77, 41, false).unwrap();
         engine.accept_call(77).unwrap();
+        let params = ConnectParams {
+            encryption_key: vec![1; 256],
+            is_outgoing: false,
+            servers: vec![RtcServer {
+                id: 7,
+                ipv4: "149.154.167.40".into(),
+                ipv6: String::new(),
+                port: 443,
+                username: String::new(),
+                password: String::new(),
+                turn: true,
+                stun: false,
+                tcp: true,
+                peer_tag: vec![0, 1, 2],
+            }],
+            library_versions: vec!["13.0.0".into()],
+            p2p_allowed: true,
+            mic_input: Some("mic-1".into()),
+            speaker_input: Some("speaker-1".into()),
+        };
+        engine.connect(77, &params).unwrap();
+        engine
+            .select_devices(77, Some("mic-1"), Some("speaker-1"))
+            .unwrap();
         engine.send_signaling_data(77, b"inbound").unwrap();
         handle.receive_signaling_data(77, b"outbound");
         engine.set_muted(77, true).unwrap();
@@ -725,6 +1128,11 @@ mod tests {
 
         assert_eq!(handle.started_calls(), vec![(77, 41, false)]);
         assert_eq!(handle.accepted_calls(), vec![77]);
+        assert_eq!(handle.connects(), vec![(77, params)]);
+        assert_eq!(
+            handle.device_selections(),
+            vec![(77, Some("mic-1".to_string()), Some("speaker-1".to_string()))]
+        );
         assert_eq!(handle.signaling_received(), vec![(77, b"inbound".to_vec())]);
         assert_eq!(handle.mute_changes(), vec![(77, true)]);
         assert_eq!(handle.hung_up_calls(), vec![77]);
@@ -785,5 +1193,57 @@ mod tests {
             *second.lock().expect("second hook"),
             vec![b"replacement".to_vec()]
         );
+    }
+
+    #[test]
+    fn mock_engine_delivers_transport_state_and_replaces_hook() {
+        let mut engine = MockEngine::new();
+        let first = Arc::new(Mutex::new(Vec::new()));
+        let first_hook = first.clone();
+        engine.set_transport_state_callback(Arc::new(move |call_id, state| {
+            first_hook
+                .lock()
+                .expect("first transport hook")
+                .push((call_id, state));
+        }));
+        let second = Arc::new(Mutex::new(Vec::new()));
+        let second_hook = second.clone();
+        engine.set_transport_state_callback(Arc::new(move |call_id, state| {
+            second_hook
+                .lock()
+                .expect("second transport hook")
+                .push((call_id, state));
+        }));
+
+        engine.emit_transport_state(77, TransportState::Connected);
+        assert!(first.lock().expect("first transport hook").is_empty());
+        assert_eq!(
+            *second.lock().expect("second transport hook"),
+            vec![(77, TransportState::Connected)]
+        );
+    }
+
+    #[test]
+    fn mock_engine_connect_and_device_selection_need_known_call() {
+        let mut engine = MockEngine::new();
+        let params = ConnectParams {
+            encryption_key: vec![1; 256],
+            is_outgoing: true,
+            servers: Vec::new(),
+            library_versions: Vec::new(),
+            p2p_allowed: false,
+            mic_input: None,
+            speaker_input: None,
+        };
+        assert_eq!(
+            engine.connect(77, &params),
+            Err(EngineError::NoSuchCall(77))
+        );
+        assert_eq!(
+            engine.select_devices(77, Some("mic-1"), None),
+            Err(EngineError::NoSuchCall(77))
+        );
+        assert!(engine.connects().is_empty());
+        assert!(engine.device_selections().is_empty());
     }
 }

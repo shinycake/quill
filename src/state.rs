@@ -1,4 +1,5 @@
 use crate::auth::{AuthView, view_for};
+use crate::calls::engine::TransportState;
 use crate::composer::{CommandMenuItem, merge_command_menu_items};
 use crate::diagnostics::{Diagnostic, DiagnosticSink};
 use crate::ids::{
@@ -6,7 +7,6 @@ use crate::ids::{
 };
 use crate::notify::{self, OsNotification, QueuedNotification};
 use crate::telegram::client::OwnedEnvelope;
-use crate::telegram::envelope::CallState;
 use crate::telegram::envelope::{
     AnimationItem, AuthorizationState, BotCommand, BotInfo, CallbackQueryAnswer,
     ChannelMemberStatus, ChatAction, ChatActiveStoriesView, ChatAdminRights,
@@ -21,6 +21,7 @@ use crate::telegram::envelope::{
     ScopeNotificationSettings, SecretChatState, SponsoredMessage, StickerFormat, StickerItem,
     StickerSetInfo, StoryAvailableReactionView, StoryListView, TdError,
 };
+use crate::telegram::envelope::{CallState, ReadyParams};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Instant;
@@ -1982,6 +1983,9 @@ pub struct ActiveCall {
     /// When `callStateReady` arrived — the call-duration clock starts
     /// here.
     pub ready_at: Option<Instant>,
+    pub ready: Option<ReadyParams>,
+    pub transport: Option<TransportState>,
+    pub transport_error: Option<String>,
     /// Phase C2b: chunks from `updateNewCallSignalingData`; the engine now
     /// consumes them too, while this queue remains the honest diagnostic
     /// record. Capped at
@@ -2005,6 +2009,7 @@ pub struct CallSummary {
     /// Seconds between `callStateReady` and the end (0 when the call
     /// never connected).
     pub duration_secs: i64,
+    pub had_audio: bool,
     /// Human-readable end line (reason-aware).
     pub end_line: String,
     pub need_rating: bool,
@@ -2128,7 +2133,7 @@ impl ActiveGroupCall {
 impl CallSummary {
     /// Build the end screen from a terminal `updateCall`. `duration_secs`
     /// is the connected time (0 when the call never reached `Ready`).
-    fn from_terminal(call: &ParsedCall, duration_secs: i64) -> Self {
+    fn from_terminal(call: &ParsedCall, duration_secs: i64, had_audio: bool) -> Self {
         let (end_line, need_rating, need_debug_information, need_log) = match &call.state {
             CallState::Discarded {
                 reason,
@@ -2161,6 +2166,7 @@ impl CallSummary {
             is_outgoing: call.is_outgoing,
             is_video: call.is_video,
             duration_secs,
+            had_audio,
             end_line,
             need_rating,
             need_debug_information,
@@ -3605,6 +3611,9 @@ impl Session {
                         },
                         started_at: Instant::now(),
                         ready_at: None,
+                        ready: None,
+                        transport: None,
+                        transport_error: None,
                         signaling_queue: Vec::new(),
                         signaling_dropped: 0,
                     });
@@ -5328,6 +5337,9 @@ impl Session {
                 if matches!(call.state, CallState::Ready) && active.ready_at.is_none() {
                     active.ready_at = Some(Instant::now());
                 }
+                if matches!(call.state, CallState::Ready) {
+                    active.ready = call.ready.clone();
+                }
                 active.state = call.state.clone();
                 active.is_video = call.is_video;
             }
@@ -5353,7 +5365,7 @@ impl Session {
             return;
         }
         if call.state.is_terminal() {
-            self.call_summary = Some(CallSummary::from_terminal(call, 0));
+            self.call_summary = Some(CallSummary::from_terminal(call, 0, false));
             return;
         }
         self.active_call = Some(ActiveCall {
@@ -5364,6 +5376,9 @@ impl Session {
             state: call.state.clone(),
             started_at: Instant::now(),
             ready_at: None,
+            ready: call.ready.clone(),
+            transport: None,
+            transport_error: None,
             signaling_queue: Vec::new(),
             signaling_dropped: 0,
             muted: false,
@@ -5408,7 +5423,11 @@ impl Session {
             .ready_at
             .map(|t| t.elapsed().as_secs() as i64)
             .unwrap_or(0);
-        self.call_summary = Some(CallSummary::from_terminal(call, duration_secs));
+        self.call_summary = Some(CallSummary::from_terminal(
+            call,
+            duration_secs,
+            active.transport == Some(TransportState::Connected),
+        ));
         self.call_busy_decline_queue
             .retain(|(id, _)| *id != call.id);
     }

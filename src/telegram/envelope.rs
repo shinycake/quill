@@ -928,9 +928,28 @@ impl CallDiscardReason {
 /// `reason` / `need_rating` / `need_debug_information` / `need_log`),
 /// `callStateError` (:7081 — the `error` wrapper; only its numeric
 /// code is kept, never the message text, which can contain
-/// secrets). The `Ready` state's protocol / servers / encryption key
-/// are media-transport material — Quill has no transport yet (C2), so
-/// only the state tag is kept.
+/// secrets).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParsedRtcServer {
+    pub id: u64,
+    pub ipv4: String,
+    pub ipv6: String,
+    pub port: u16,
+    pub username: String,
+    pub password: String,
+    pub turn: bool,
+    pub stun: bool,
+    pub tcp: bool,
+    pub peer_tag: Vec<u8>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReadyParams {
+    pub encryption_key: Vec<u8>,
+    pub servers: Vec<ParsedRtcServer>,
+    pub allow_p2p: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CallState {
     Pending {
@@ -1011,6 +1030,65 @@ impl CallState {
     }
 }
 
+fn parse_rtc_server(value: &Value) -> Option<ParsedRtcServer> {
+    let kind = value.get("type")?;
+    let type_name = kind.get("@type").and_then(Value::as_str).unwrap_or("");
+    let (username, password, turn, stun, tcp, peer_tag) = match type_name {
+        "callServerTypeTelegramReflector" => (
+            String::new(),
+            String::new(),
+            true,
+            false,
+            kind.get("is_tcp").and_then(Value::as_bool).unwrap_or(false),
+            kind.get("peer_tag")
+                .and_then(Value::as_str)
+                .and_then(|tag| STANDARD.decode(tag).ok())
+                .unwrap_or_default(),
+        ),
+        "callServerTypeWebrtc" => (
+            kind.get("username")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string(),
+            kind.get("password")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string(),
+            kind.get("supports_turn")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            kind.get("supports_stun")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            false,
+            Vec::new(),
+        ),
+        _ => return None,
+    };
+    Some(ParsedRtcServer {
+        id: value
+            .get("id")
+            .and_then(|id| id.as_u64().or_else(|| id.as_str()?.parse().ok()))?,
+        ipv4: value
+            .get("ip_address")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string(),
+        ipv6: value
+            .get("ipv6_address")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string(),
+        port: value.get("port")?.as_u64()?.try_into().ok()?,
+        username,
+        password,
+        turn,
+        stun,
+        tcp,
+        peer_tag,
+    })
+}
+
 /// Phase C1: `call` subset (TDLib 1.8.67, `schema/td_api.tl:7287`):
 /// `call id:int32 unique_id:int64 user_id:int53 is_outgoing:Bool
 /// is_video:Bool state:CallState = Call;`
@@ -1022,10 +1100,30 @@ pub struct ParsedCall {
     pub is_outgoing: bool,
     pub is_video: bool,
     pub state: CallState,
+    pub ready: Option<ReadyParams>,
 }
 
 fn parse_call(value: Option<&Value>) -> Option<ParsedCall> {
     let value = value?;
+    let state_value = value.get("state");
+    let ready = state_value
+        .filter(|state| state.get("@type").and_then(Value::as_str) == Some("callStateReady"))
+        .map(|state| ReadyParams {
+            encryption_key: state
+                .get("encryption_key")
+                .and_then(Value::as_str)
+                .and_then(|key| STANDARD.decode(key).ok())
+                .unwrap_or_default(),
+            servers: state
+                .get("servers")
+                .and_then(Value::as_array)
+                .map(|servers| servers.iter().filter_map(parse_rtc_server).collect())
+                .unwrap_or_default(),
+            allow_p2p: state
+                .get("allow_p2p")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+        });
     Some(ParsedCall {
         id: value.get("id").and_then(Value::as_i64).unwrap_or(0) as i32,
         unique_id: int53_or_zero(value.get("unique_id")),
@@ -1038,7 +1136,8 @@ fn parse_call(value: Option<&Value>) -> Option<ParsedCall> {
             .get("is_video")
             .and_then(Value::as_bool)
             .unwrap_or(false),
-        state: CallState::from_value(value.get("state")),
+        state: CallState::from_value(state_value),
+        ready,
     })
 }
 
@@ -11177,7 +11276,7 @@ mod notification_sound_tests {
             EnvelopePayload::UpdateCall { call } => {
                 assert!(call.is_video);
                 assert!(!call.is_outgoing);
-                assert_eq!(call.state, CallState::Ready);
+                assert!(matches!(call.state, CallState::Ready));
             }
             other => panic!("unexpected {other:?}"),
         }
@@ -11246,6 +11345,24 @@ mod notification_sound_tests {
             EnvelopePayload::CallId { id } => assert_eq!(id, 77),
             other => panic!("unexpected {other:?}"),
         }
+    }
+
+    #[test]
+    fn call_ready_parses_transport_parameters_and_server_kinds() {
+        let json = r#"{"@type":"updateCall","call":{"@type":"call","id":77,"unique_id":"99","user_id":41,"is_outgoing":true,"is_video":false,"state":{"@type":"callStateReady","protocol":{"@type":"callProtocol","udp_p2p":true,"udp_reflector":true,"min_layer":92,"max_layer":92,"library_versions":["13.0.0"]},"servers":[{"@type":"callServer","id":"7","ip_address":"149.154.167.40","ipv6_address":"2001:b28:f23d:f001::a","port":443,"type":{"@type":"callServerTypeTelegramReflector","peer_tag":"AAEC","is_tcp":true}},{"@type":"callServer","id":"8","ip_address":"203.0.113.1","ipv6_address":"","port":3478,"type":{"@type":"callServerTypeWebrtc","username":"alice","password":"secret","supports_turn":true,"supports_stun":false}}],"config":"{}","encryption_key":"AQIDBA==","emojis":[],"allow_p2p":true,"is_group_call_supported":false,"custom_parameters":"{\"x\":1}"}}}"#;
+        let EnvelopePayload::UpdateCall { call } = parse_envelope(json).unwrap().payload else {
+            panic!("expected updateCall");
+        };
+        assert_eq!(call.state, CallState::Ready);
+        let ready = call.ready.expect("ready params");
+        assert_eq!(ready.encryption_key, vec![1, 2, 3, 4]);
+        assert!(ready.allow_p2p);
+        assert_eq!(ready.servers.len(), 2);
+        assert_eq!(ready.servers[0].peer_tag, vec![0, 1, 2]);
+        assert!(ready.servers[0].tcp);
+        assert!(ready.servers[1].turn);
+        assert!(!ready.servers[1].stun);
+        assert_eq!(ready.servers[1].username, "alice");
     }
 
     #[test]
