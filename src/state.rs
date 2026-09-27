@@ -13,16 +13,16 @@ use crate::telegram::envelope::{
     ChannelMemberStatus, ChatAction, ChatActiveStoriesView, ChatAdminRights,
     ChatAdministratorEntry, ChatDraft, ChatFolderInfo, ChatFolderSpec, ChatJoinResult, ChatKind,
     ChatList, ChatNotificationSettings, ChatPermissions, ChatPositionUpdate, ChatStatistics,
-    ConnectionState, EnvelopePayload, ErrorClass, ForumTopic, InlineKeyboard,
-    InviteGroupCallParticipantResult, MessageAutoDelete, MessageContent, MessageForwardInfo,
-    MessageInteractionInfo, MessageOrigin, MessageReaction, MessageReplyTo, MessageSelfDestruct,
-    MessageSender, NotificationSettingsScope, NotificationSound, ParsedCall, ParsedChatEvent,
-    ParsedChatInviteLink, ParsedChatJoinRequest, ParsedChatMember, ParsedFile, ParsedGroupCall,
-    ParsedGroupCallMessage, ParsedGroupCallParticipant, ParsedMessage, ParsedSecretChat,
-    ParsedStory, ParsedUser, ParsedVideoChat, ParsedWelcomeMessage, Poll, ReportOption,
-    ReportSponsoredResult, ScopeNotificationSettings, SecretChatState, SponsoredMessage,
-    StickerFormat, StickerItem, StickerSetInfo, StorageStats, StoryAvailableReactionView,
-    StoryListView, TdError,
+    ConnectionState, EnvelopePayload, EphemeralMessageContent, ErrorClass, ForumTopic,
+    InlineKeyboard, InviteGroupCallParticipantResult, MessageAutoDelete, MessageContent,
+    MessageForwardInfo, MessageInteractionInfo, MessageOrigin, MessageReaction, MessageReplyTo,
+    MessageSelfDestruct, MessageSender, NotificationSettingsScope, NotificationSound, ParsedCall,
+    ParsedChatEvent, ParsedChatInviteLink, ParsedChatJoinRequest, ParsedChatMember, ParsedFile,
+    ParsedGroupCall, ParsedGroupCallMessage, ParsedGroupCallParticipant, ParsedMessage,
+    ParsedSecretChat, ParsedStory, ParsedUser, ParsedVideoChat, ParsedWelcomeMessage, Poll,
+    ReportOption, ReportSponsoredResult, ScopeNotificationSettings, SecretChatState,
+    SponsoredMessage, StickerFormat, StickerItem, StickerSetInfo, StorageStats,
+    StoryAvailableReactionView, StoryListView, TdError,
 };
 use crate::telegram::envelope::{CallState, ReadyParams};
 use crate::telegram::requests::{CallPrivacySetting, ChatEventLogFilterSet, PrivacyWho};
@@ -97,6 +97,12 @@ pub enum RequestPurpose {
     GetHistory,
     /// Any `sendMessage` (text / photo / document). Response `message` is pending.
     SendMessage,
+    /// M2: `getFullRichMessage`. Response `richMessage` replaces the
+    /// partial blocks of the history message.
+    GetFullRichMessage {
+        chat_id: ChatId,
+        message_id: MessageId,
+    },
     /// `sendMessageAlbum`. Response `messages` are pending until send-succeeded.
     SendMessageAlbum,
     OpenChat,
@@ -1740,6 +1746,10 @@ pub struct HistoryMessage {
     /// `resendMessages`. Gates the retry affordance and the driver's
     /// `resend_failed_message`.
     pub can_retry: bool,
+    /// M2: parsed `message.ephemeral_content` (TDLib 1.8.67 lines
+    /// 3161/3165). When present the row renders it instead of `content`
+    /// (use `effective_content`); it carries its own `reply_markup`.
+    pub ephemeral: Option<EphemeralMessageContent>,
 }
 
 impl HistoryMessage {
@@ -1974,6 +1984,7 @@ impl SearchMessageHit {
             author_signature: self.author_signature,
             failed: false,
             can_retry: false,
+            ephemeral: None,
         }
     }
 }
@@ -5855,6 +5866,9 @@ impl Session {
             // stashes the link in `Session::message_link_result` before
             // `apply` takes the pending request; nothing to reduce here.
             EnvelopePayload::MessageLink { .. } => {}
+            // M2: handled by the driver before `apply` (blocks land in
+            // history there); nothing to reduce here.
+            EnvelopePayload::RichMessage { .. } => {}
             // M1 fix-up: `getMessageProperties` returns
             // `messageProperties`. The driver gates the chained
             // `getMessageLink` on `can_get_link` before `apply` takes
@@ -8415,6 +8429,7 @@ fn history_message(message: ParsedMessage, pending: bool) -> HistoryMessage {
         author_signature: message.author_signature,
         failed: false,
         can_retry: message.can_retry,
+        ephemeral: message.ephemeral,
     }
 }
 
@@ -8622,6 +8637,7 @@ mod tests {
             is_outgoing: true,
             is_pinned: false,
             topic_id: None,
+            ephemeral: None,
             media_album_id: 0,
             author_signature: None,
             scheduling_state: Some(MessageSchedulingState::SendAtDate { send_date: 999 }),
@@ -8696,6 +8712,7 @@ mod tests {
             is_outgoing: true,
             is_pinned: false,
             topic_id: None,
+            ephemeral: None,
             media_album_id: 0,
             author_signature: None,
             scheduling_state: Some(MessageSchedulingState::SendAtDate { send_date: 999 }),

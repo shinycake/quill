@@ -1,4 +1,5 @@
 use crate::ids::{ChatId, FileId, MessageId, RequestId, UserId};
+use crate::rich::{RichBlock, parse_rich_message};
 use crate::text::{TextEntity, TextEntityKind, utf16_to_utf8_offset};
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
@@ -332,6 +333,12 @@ pub enum EnvelopePayload {
     MessageLink {
         link: String,
         is_public: bool,
+    },
+    /// M2: `richMessage` (TDLib 1.8.67, `schema/td_api.tl:5143`) — the
+    /// `getFullRichMessage` answer. The driver replaces the blocks of the
+    /// partially-received message in history with the full blocks.
+    RichMessage {
+        rich: RichMessageContent,
     },
     /// M1 fix-up: `messageProperties` (TDLib 1.8.67,
     /// `schema/td_api.tl:11557`) — the `getMessageProperties` answer.
@@ -3572,6 +3579,10 @@ pub struct ParsedMessage {
     /// it on every `updateMessageSendFailed`.
     pub can_retry: bool,
     pub content: MessageContent,
+    /// M2: `message.ephemeral_content` (TDLib 1.8.67, `schema/td_api.tl`
+    /// lines 3161/3165) — visible only to the current user; renders
+    /// **instead of** the regular content. `None` when absent or null.
+    pub ephemeral: Option<EphemeralMessageContent>,
     pub files: Vec<ParsedFile>,
     pub reply_to: Option<MessageReplyTo>,
     pub forward_info: Option<MessageForwardInfo>,
@@ -4267,9 +4278,69 @@ pub enum MessageContent {
     /// has been taken. No fields; attribution comes from
     /// `message.is_outgoing` at render time.
     ScreenshotTaken,
+    /// M2: `messageRichMessage` (TDLib 1.8.67, `schema/td_api.tl:5143`) —
+    /// an anniversary rich message; `blocks` are the parsed `pageBlock*`
+    /// list (possibly partial when `is_full` is false — the renderer
+    /// fetches the rest via `getFullRichMessage`, schema line 11554).
+    RichMessage(RichMessageContent),
     Unsupported {
         type_name: String,
     },
+}
+
+/// M2: parsed `richMessage` (TDLib 1.8.67, `schema/td_api.tl:123`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RichMessageContent {
+    pub blocks: Vec<RichBlock>,
+    pub is_full: bool,
+}
+
+impl RichMessageContent {
+    /// Plain-text form of the blocks for "Copy" — every text-ish block
+    /// joined with newlines. Buttons/dividers contribute nothing.
+    pub fn copy_text(&self) -> String {
+        let mut parts: Vec<String> = Vec::new();
+        for block in &self.blocks {
+            match block {
+                RichBlock::Paragraph { text, .. } | RichBlock::Heading { text, .. } => {
+                    parts.push(text.clone())
+                }
+                RichBlock::List { items, .. } => {
+                    parts.extend(items.iter().map(|item| item.text.clone()))
+                }
+                RichBlock::Collapsible { header, body, .. } => {
+                    parts.push(header.clone());
+                    parts.push(body.clone());
+                }
+                RichBlock::Document {
+                    file_name, caption, ..
+                } => {
+                    parts.push(file_name.clone());
+                    parts.push(caption.clone());
+                }
+                RichBlock::Table { rows } => parts.extend(rows.iter().map(|row| row.join(" "))),
+                RichBlock::ButtonRow { .. }
+                | RichBlock::Divider
+                | RichBlock::Empty
+                | RichBlock::Unsupported { .. } => {}
+            }
+        }
+        parts
+            .into_iter()
+            .filter(|text| !text.is_empty())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+}
+
+/// M2: parsed `ephemeralMessageContent` (TDLib 1.8.67,
+/// `schema/td_api.tl:3115`) — content visible only to the current user,
+/// shown **instead of** the regular content (bot-built flows per the
+/// 2026-08-25 anniversary post).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EphemeralMessageContent {
+    pub content: Box<MessageContent>,
+    pub reply_markup: Option<InlineKeyboard>,
 }
 
 /// `formattedText` plus optional `messageText.link_preview` (TDLib 1.8.67).
@@ -4756,6 +4827,14 @@ impl MessageContent {
     pub fn preview(&self) -> String {
         match self {
             MessageContent::Text(text) => text.text.chars().take(80).collect(),
+            // M2: first text-ish block of the rich message.
+            MessageContent::RichMessage(rich) => rich
+                .blocks
+                .iter()
+                .filter_map(RichBlock::preview_text)
+                .next()
+                .map(|text| text.chars().take(80).collect())
+                .unwrap_or_else(|| "Rich message".to_string()),
             MessageContent::Photo(photo) if photo.caption.is_empty() => "Photo".into(),
             MessageContent::Photo(photo) => photo.caption.chars().take(80).collect(),
             MessageContent::Document(doc) if !doc.caption.is_empty() => {
@@ -5775,6 +5854,12 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
             })
         }
         "ok" => Ok(EnvelopePayload::Ok),
+        "richMessage" => {
+            let (blocks, is_full) = parse_rich_message(&value);
+            Ok(EnvelopePayload::RichMessage {
+                rich: RichMessageContent { blocks, is_full },
+            })
+        }
         "messageLink" => Ok(EnvelopePayload::MessageLink {
             link: value
                 .get("link")
@@ -7062,7 +7147,7 @@ fn parse_reply_markup(value: Option<&Value>) -> Option<InlineKeyboard> {
     })
 }
 
-fn parse_inline_keyboard_button(value: &Value) -> InlineKeyboardButton {
+pub(crate) fn parse_inline_keyboard_button(value: &Value) -> InlineKeyboardButton {
     let text = value
         .get("text")
         .and_then(Value::as_str)
@@ -7438,6 +7523,7 @@ fn parse_message(value: &Value) -> Result<ParsedMessage, ParseError> {
             .map(str::to_string),
         topic_id: parse_message_topic(value.get("topic_id")),
         content,
+        ephemeral: parse_ephemeral_message_content(value.get("ephemeral_content")),
         files,
         reply_to: parse_reply_to(value.get("reply_to")),
         forward_info: parse_forward_info(value.get("forward_info")),
@@ -7681,6 +7767,8 @@ fn parse_content(value: Option<&Value>) -> (MessageContent, Vec<ParsedFile>) {
         // "{name} took a screenshot", TGX YouTookAScreenshot /
         // XTookAScreenshot).
         Some("messageScreenshotTaken") => (MessageContent::ScreenshotTaken, Vec::new()),
+        // M2: `messageRichMessage` (schema 1.8.67, line 5143).
+        Some("messageRichMessage") => parse_message_rich_message(value),
         // Phase B4: `messageChatSetMessageAutoDeleteTime` (schema 1.8.67,
         // line 5387) — the chat's auto-delete / self-destruct timer was
         // changed. `from_user_id` is not kept (the row is a neutral
@@ -7753,6 +7841,40 @@ fn parse_message_text(value: &Value) -> (MessageContent, Vec<ParsedFile>) {
     let (preview, files) = parse_link_preview(value.get("link_preview"));
     content.link_preview = preview.filter(LinkPreview::has_card);
     (MessageContent::Text(content), files)
+}
+
+/// M2: `messageRichMessage` → `MessageContent::RichMessage` (schema 1.8.67,
+/// line 5143; `richMessage` line 123).
+fn parse_message_rich_message(value: &Value) -> (MessageContent, Vec<ParsedFile>) {
+    let (blocks, is_full) = parse_rich_message(value.get("message").unwrap_or(&Value::Null));
+    (
+        MessageContent::RichMessage(RichMessageContent { blocks, is_full }),
+        Vec::new(),
+    )
+}
+
+/// M2: `ephemeralMessageContent` (schema 1.8.67, line 3115). `None` when
+/// the field is absent or null — the regular content renders then.
+fn parse_ephemeral_message_content(value: Option<&Value>) -> Option<EphemeralMessageContent> {
+    let value = value.filter(|v| !v.is_null())?;
+    if value.get("@type").and_then(Value::as_str) != Some("ephemeralMessageContent") {
+        return None;
+    }
+    let (content, _) = parse_content(value.get("content"));
+    Some(EphemeralMessageContent {
+        content: Box::new(content),
+        reply_markup: parse_reply_markup(value.get("reply_markup")),
+    })
+}
+
+/// M2: the content a row actually renders — `ephemeral_content` wins over
+/// the regular content (schema 1.8.67, line 3161: "must be shown instead
+/// of the regular content").
+pub fn effective_content<'a>(
+    content: &'a MessageContent,
+    ephemeral: Option<&'a EphemeralMessageContent>,
+) -> &'a MessageContent {
+    ephemeral.map(|e| e.content.as_ref()).unwrap_or(content)
 }
 
 fn parse_text_content(value: Option<&Value>) -> TextContent {
@@ -11973,6 +12095,96 @@ mod channel_envelope_tests {
         let parsed = parse_message(&serde_json::from_str(json).unwrap()).unwrap();
         assert!(matches!(parsed.content, MessageContent::ScreenshotTaken));
         assert_eq!(parsed.content.preview(), "Took a screenshot");
+    }
+
+    #[test]
+    fn rich_message_parsed_with_blocks() {
+        // M2: `messageRichMessage` (schema 1.8.67, line 5143) parses its
+        // `pageBlock*` list; a partial `richMessage` keeps `is_full=false`.
+        let json = r#"{"id":601,"chat_id":14,"is_outgoing":false,"content":{"@type":"messageRichMessage","message":{"@type":"richMessage","is_full":false,"is_rtl":false,"blocks":[
+            {"@type":"pageBlockTitle","title":{"@type":"richTextPlain","text":"Welcome"}},
+            {"@type":"pageBlockParagraph","text":{"@type":"richTexts","texts":[
+                {"@type":"richTextPlain","text":"pick "},
+                {"@type":"richTextBold","text":{"@type":"richTextPlain","text":"one"}}
+            ]}},
+            {"@type":"pageBlockButtonRow","buttons":[{"@type":"inlineButton",
+                "text":{"@type":"richTextPlain","text":"Vote"},
+                "style":{"@type":"buttonStylePrimary"},
+                "type":{"@type":"inlineKeyboardButtonTypeCallback","data":"AQID"}}]}
+        ]}}}"#;
+        let parsed = parse_message(&serde_json::from_str(json).unwrap()).unwrap();
+        let MessageContent::RichMessage(rich) = &parsed.content else {
+            panic!("expected rich message");
+        };
+        assert!(!rich.is_full);
+        assert_eq!(rich.blocks.len(), 3);
+        assert!(matches!(
+            &rich.blocks[0],
+            crate::rich::RichBlock::Heading { level: 1, .. }
+        ));
+        let crate::rich::RichBlock::Paragraph { text, entities, .. } = &rich.blocks[1] else {
+            panic!("expected paragraph");
+        };
+        assert_eq!(text, "pick one");
+        assert_eq!(entities.len(), 1);
+        let crate::rich::RichBlock::ButtonRow { buttons } = &rich.blocks[2] else {
+            panic!("expected button row");
+        };
+        assert_eq!(buttons.len(), 1);
+        assert_eq!(buttons[0].text, "Vote");
+        assert_eq!(parsed.content.preview(), "Welcome");
+        // No `ephemeral_content` field → regular content renders.
+        assert!(parsed.ephemeral.is_none());
+        assert!(std::ptr::eq(
+            effective_content(&parsed.content, parsed.ephemeral.as_ref()),
+            &parsed.content
+        ));
+    }
+
+    #[test]
+    fn rich_message_copy_text_joins_text_blocks() {
+        // M2: "Copy" on a rich message copies the plain-text form of every
+        // text-ish block; buttons/dividers contribute nothing.
+        let json = r#"{"id":603,"chat_id":14,"is_outgoing":false,"content":{"@type":"messageRichMessage","message":{"@type":"richMessage","is_full":true,"is_rtl":false,"blocks":[
+            {"@type":"pageBlockTitle","title":{"@type":"richTextPlain","text":"Welcome"}},
+            {"@type":"pageBlockParagraph","text":{"@type":"richTextPlain","text":"pick one"}},
+            {"@type":"pageBlockList","is_ordered":false,"items":[
+                {"@type":"pageBlockListItem","label":"a","blocks":[]},
+                {"@type":"pageBlockListItem","label":"b","blocks":[]}]},
+            {"@type":"pageBlockDivider"},
+            {"@type":"pageBlockButtonRow","buttons":[]}
+        ]}}}"#;
+        let parsed = parse_message(&serde_json::from_str(json).unwrap()).unwrap();
+        let MessageContent::RichMessage(rich) = &parsed.content else {
+            panic!("expected rich message");
+        };
+        assert_eq!(rich.copy_text(), "Welcome\npick one\na\nb");
+    }
+
+    #[test]
+    fn ephemeral_content_parsed_and_wins() {
+        // M2: `message.ephemeral_content` (schema 1.8.67, lines 3161/3165)
+        // parses and `effective_content` prefers it over the regular
+        // content; `null` falls back to the regular content.
+        let json = r#"{"id":602,"chat_id":14,"is_outgoing":false,
+            "content":{"@type":"messageText","text":{"@type":"formattedText","text":"public","entities":[]}},
+            "ephemeral_content":{"@type":"ephemeralMessageContent","can_be_saved":false,"has_timestamped_media":false,
+            "content":{"@type":"messageText","text":{"@type":"formattedText","text":"secret flow","entities":[]}},
+            "reply_markup":null}}"#;
+        let parsed = parse_message(&serde_json::from_str(json).unwrap()).unwrap();
+        let ephemeral = parsed.ephemeral.as_ref().expect("ephemeral");
+        assert!(matches!(
+            ephemeral.content.as_ref(),
+            MessageContent::Text(_)
+        ));
+        let effective = effective_content(&parsed.content, parsed.ephemeral.as_ref());
+        assert!(std::ptr::eq(effective, ephemeral.content.as_ref()));
+
+        let json = r#"{"id":603,"chat_id":14,"is_outgoing":false,
+            "content":{"@type":"messageText","text":{"@type":"formattedText","text":"public","entities":[]}},
+            "ephemeral_content":null}"#;
+        let parsed = parse_message(&serde_json::from_str(json).unwrap()).unwrap();
+        assert!(parsed.ephemeral.is_none());
     }
 
     /// Phase C2i: `call_entry_label` follows Telegram X's

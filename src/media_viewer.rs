@@ -383,6 +383,7 @@ mod tests {
             author_signature: None,
             failed: false,
             can_retry: false,
+            ephemeral: None,
         }
     }
 
