@@ -244,9 +244,97 @@ impl ViewerZoom {
     }
 }
 
-/// Collect the openable photo/video messages from a chat's ordered history,
-/// oldest first. Documents, animations, stickers, voice, audio, and
-/// secret/spoiler media are excluded (see module docs).
+/// Rotate a packed RGBA image by `turns` quarter-turns clockwise, in 90°
+/// steps (the viewer Rotate button cycles 0 → 90 → 180 → 270). Pure pixel
+/// math — no `image` crate, so the no-default-features test build covers
+/// it; the UI layer converts to/from `RgbaImage` at the boundary.
+///
+/// Returns `(pixels, width, height)`: odd quarter-turns swap the
+/// dimensions.
+/// (Secret/spoiler media are excluded from the viewer; see module docs.)
+pub fn rotate_rgba_quarter_turns(
+    pixels: &[u8],
+    width: u32,
+    height: u32,
+    turns: u8,
+) -> (Vec<u8>, u32, u32) {
+    let turns = turns % 4;
+    if turns == 0 || pixels.len() != (width * height * 4) as usize {
+        return (pixels.to_vec(), width, height);
+    }
+    let (w, h) = (width as usize, height as usize);
+    let mut out = vec![0u8; pixels.len()];
+    // Clockwise: out(x, y) = in(w - 1 - y, x) for the 90° case, composed.
+    let src_index = |x: usize, y: usize| (y * w + x) * 4;
+    for y in 0..h {
+        for x in 0..w {
+            let (dx, dy, dw) = match turns {
+                // 90° cw: (x, y) -> (h - 1 - y, x)
+                1 => (h - 1 - y, x, h),
+                // 180°: (x, y) -> (w - 1 - x, h - 1 - y)
+                2 => (w - 1 - x, h - 1 - y, w),
+                // 270° cw: (x, y) -> (y, w - 1 - x)
+                _ => (y, w - 1 - x, h),
+            };
+            let src = src_index(x, y);
+            let dst = (dy * dw + dx) * 4;
+            out[dst..dst + 4].copy_from_slice(&pixels[src..src + 4]);
+        }
+    }
+    let (ow, oh) = if turns % 2 == 1 { (h, w) } else { (w, h) };
+    (out, ow as u32, oh as u32)
+}
+
+/// Copy `src` (a downloaded media file) into the user's downloads folder
+/// (`XDG_DOWNLOAD_DIR`, else `~/Downloads`), de-duplicating the file name
+/// with a ` (n)` suffix like the desktop clients. Returns the final path.
+/// Pure filesystem work — the UI resolves `src` through the existing
+/// `usable_path` machinery first.
+pub fn save_media_to_downloads(src: &std::path::Path) -> std::io::Result<std::path::PathBuf> {
+    let dir = std::env::var("XDG_DOWNLOAD_DIR")
+        .map(std::path::PathBuf::from)
+        .ok()
+        .filter(|p| p.is_absolute())
+        .or_else(|| {
+            directories::UserDirs::new().and_then(|u| u.download_dir().map(|p| p.to_path_buf()))
+        })
+        .or_else(|| {
+            std::env::var("HOME")
+                .ok()
+                .map(|h| std::path::PathBuf::from(format!("{h}/Downloads")))
+        })
+        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "no downloads folder"))?;
+    save_media_to_downloads_in_dir(src, &dir)
+}
+
+/// Copy `src` into `dir`, de-duplicating the file name with a ` (n)`
+/// suffix like the desktop clients. Split out so tests can pass a temp
+/// dir without mutating process-global env vars.
+pub fn save_media_to_downloads_in_dir(
+    src: &std::path::Path,
+    dir: &std::path::Path,
+) -> std::io::Result<std::path::PathBuf> {
+    std::fs::create_dir_all(dir)?;
+    let stem = src.file_stem().and_then(|s| s.to_str()).unwrap_or("media");
+    let ext = src.extension().and_then(|e| e.to_str()).unwrap_or("");
+    let mut candidate = dir.join(if ext.is_empty() {
+        stem.to_string()
+    } else {
+        format!("{stem}.{ext}")
+    });
+    let mut n = 1;
+    while candidate.exists() {
+        n += 1;
+        candidate = dir.join(if ext.is_empty() {
+            format!("{stem} ({n})")
+        } else {
+            format!("{stem} ({n}).{ext}")
+        });
+    }
+    std::fs::copy(src, &candidate)?;
+    Ok(candidate)
+}
+
 pub fn collect_media_items(messages: &[HistoryMessage]) -> Vec<MediaViewerItem> {
     messages.iter().filter_map(media_viewer_item).collect()
 }
@@ -674,5 +762,75 @@ mod tests {
             }),
         )];
         assert!(collect_media_items(&messages).is_empty());
+    }
+
+    /// 2×1 RGBA: red | green. 90° cw -> 1×2: green on top, red below.
+    fn tiny_rgba() -> (Vec<u8>, u32, u32) {
+        (
+            vec![
+                255, 0, 0, 255, // red
+                0, 255, 0, 255, // green
+            ],
+            2,
+            1,
+        )
+    }
+
+    #[test]
+    fn rotate_zero_turns_is_identity() {
+        let (px, w, h) = tiny_rgba();
+        assert_eq!(rotate_rgba_quarter_turns(&px, w, h, 0), (px.clone(), w, h));
+        assert_eq!(
+            rotate_rgba_quarter_turns(&px, w, h, 4),
+            (tiny_rgba().0, w, h)
+        );
+    }
+
+    #[test]
+    fn rotate_90_cw_swaps_dims_and_pixels() {
+        let (px, w, h) = tiny_rgba();
+        let (out, ow, oh) = rotate_rgba_quarter_turns(&px, w, h, 1);
+        assert_eq!((ow, oh), (1, 2));
+        // 90°cw: (x,y)->(h-1-y, x): red (0,0) at (0,0), green (1,0) at (0,1).
+        assert_eq!(&out[0..4], &[255, 0, 0, 255]); // red on top
+        assert_eq!(&out[4..8], &[0, 255, 0, 255]); // green below
+    }
+
+    #[test]
+    fn rotate_180_and_270() {
+        let (px, w, h) = tiny_rgba();
+        let (out, ow, oh) = rotate_rgba_quarter_turns(&px, w, h, 2);
+        assert_eq!((ow, oh), (2, 1));
+        assert_eq!(&out[0..4], &[0, 255, 0, 255]); // green first
+        assert_eq!(&out[4..8], &[255, 0, 0, 255]);
+        let (out, ow, oh) = rotate_rgba_quarter_turns(&px, w, h, 3);
+        assert_eq!((ow, oh), (1, 2));
+        // 270°cw: (x,y)->(y, w-1-x): green (1,0) at (0,0), red (0,0) at (0,1).
+        assert_eq!(&out[0..4], &[0, 255, 0, 255]); // green on top
+        assert_eq!(&out[4..8], &[255, 0, 0, 255]); // red below
+    }
+
+    #[test]
+    fn rotate_four_turns_returns_to_start() {
+        let (px, w, h) = tiny_rgba();
+        let once = rotate_rgba_quarter_turns(&px, w, h, 1);
+        let back = rotate_rgba_quarter_turns(&once.0, once.1, once.2, 3);
+        assert_eq!(back, (px, w, h));
+    }
+
+    #[test]
+    fn save_copies_into_downloads_with_dedup_suffix() {
+        let tmp = std::env::temp_dir().join(format!("quill-med1-{}", std::process::id()));
+        let src_dir = tmp.join("src");
+        std::fs::create_dir_all(&src_dir).unwrap();
+        let src = src_dir.join("photo.jpg");
+        std::fs::write(&src, b"fake-jpeg").unwrap();
+        let dir = tmp.join("dl");
+        let first = save_media_to_downloads_in_dir(&src, &dir).unwrap();
+        assert_eq!(first.file_name().unwrap(), "photo.jpg");
+        assert_eq!(std::fs::read(&first).unwrap(), b"fake-jpeg");
+        let second = save_media_to_downloads_in_dir(&src, &dir).unwrap();
+        assert_eq!(second.file_name().unwrap(), "photo (2).jpg");
+        std::fs::remove_dir_all(&tmp).unwrap();
     }
 }

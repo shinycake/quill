@@ -28,7 +28,8 @@ use quill::key_fingerprint;
 use quill::local_path::sandboxed_display_path;
 use quill::media_viewer::{
     MediaViewer, MediaViewerItem, MediaViewerKind, ViewerVideoStart, ViewerZoom,
-    collect_media_items, decide_viewer_video_start,
+    collect_media_items, decide_viewer_video_start, rotate_rgba_quarter_turns,
+    save_media_to_downloads,
 };
 use quill::notify::{NotificationSoundKind, QueuedNotification};
 use quill::platform::live_secret_store;
@@ -37,7 +38,7 @@ use quill::poll::{
     POLL_OPTIONS_MAX, POLL_OPTIONS_MIN, PollDraft, poll_bar_fraction, voter_count_label,
 };
 use quill::rich::RichBlock;
-use quill::settings::CallPrefs;
+use quill::settings::{CallPrefs, MediaPrefs};
 use quill::state::{
     ActiveCall, ActiveGroupCall, AdminListFetch, AdminRightsFetch, CallSummary, ChatEventLogFetch,
     ChatSearchJump, ChatStatisticsFetch, ChatSummary, ContactRow, ForwardResult, HistoryMessage,
@@ -1363,6 +1364,38 @@ pub struct QuillApp {
     /// Play was requested before the clip was local. Resumed from the poll
     /// loop when `downloadFile` finishes.
     viewer_pending_play: Option<(MessageId, FileId)>,
+    /// MED1: photo rotation in quarter-turns clockwise (photos only;
+    /// reset on open/step). Rendered from `viewer_rotated`.
+    viewer_rotation: u8,
+    /// MED1: rotated render of the viewer photo, keyed
+    /// `(path, quarter-turns)`; decoded eagerly by the Rotate button so
+    /// the overlay render stays allocation-free.
+    viewer_rotated: Option<(PathBuf, u8, Arc<RenderImage>)>,
+    /// MED1: seek slider for the viewer video transport (created in
+    /// `begin_viewer_video`, cleared in `stop_viewer_video`).
+    viewer_seek_slider: Option<Entity<SliderState>>,
+    /// MED1: true while the viewer seek thumb is being dragged (the tick
+    /// must not fight the drag).
+    viewer_seek_scrubbing: bool,
+    /// MED1: drag preview position for the viewer seek slider.
+    viewer_seek_preview_secs: Option<f64>,
+    /// MED1: volume slider for the viewer video transport (0–100%).
+    viewer_volume_slider: Option<Entity<SliderState>>,
+    /// MED1: true while the viewer volume thumb is being dragged.
+    viewer_volume_scrubbing: bool,
+    /// MED1: playback speed multiplier, 0.5–2.0 (TGX `PlaybackSpeed*`;
+    /// applied via ffplay `atempo` + the playback clock rate).
+    playback_speed: f64,
+    /// MED1: playback volume 0.0–1.0 (ffplay `-volume`); 0 is muted.
+    playback_volume: f32,
+    /// MED1: last non-zero volume, restored by the mute toggle.
+    playback_unmuted_volume: f32,
+    /// MED1: honest playback error for the active track — set instead of
+    /// the old silent failure (e.g. ffplay missing, unsupported format).
+    playback_error: Option<String>,
+    /// MED1: composer "group media" override for 2+ attachments; `None`
+    /// follows `media_prefs.default_grouping()`.
+    composer_group_media: Option<bool>,
     /// Phase 9.1: fullscreen story viewer (active-story tray → overlay).
     story_viewer: StoryViewer,
     /// Phase 9.1: `(chat_id, story_id)` the user tapped while the story's
@@ -1740,6 +1773,12 @@ struct SeekBarView {
     duration_secs: f64,
     /// True while the active row's player is actually running (vs paused).
     is_playing: bool,
+    /// MED1: current playback speed (for the speed button on active rows).
+    speed: f64,
+    /// MED1: true when the shared playback volume is muted.
+    muted: bool,
+    /// MED1: honest playback error for the active row, if any.
+    error: Option<String>,
 }
 
 /// Parity slice: data for the channel/supergroup conversation header —
@@ -2964,6 +3003,18 @@ impl QuillApp {
             viewer_clock: None,
             viewer_tick: false,
             viewer_pending_play: None,
+            viewer_rotation: 0,
+            viewer_rotated: None,
+            viewer_seek_slider: None,
+            viewer_seek_scrubbing: false,
+            viewer_seek_preview_secs: None,
+            viewer_volume_slider: None,
+            viewer_volume_scrubbing: false,
+            playback_speed: 1.0,
+            playback_volume: 1.0,
+            playback_unmuted_volume: 1.0,
+            playback_error: None,
+            composer_group_media: None,
             viewer_video_frames: Vec::new(),
             viewer_video_fps: 0.0,
             viewer_frame_cache_file: None,
@@ -4228,25 +4279,66 @@ impl QuillApp {
                         })
                         .then_some(self.composer_self_destruct)
                         .flatten();
-                    let snap = if attachments.len() >= 2
+                    // MED1: the grouping toggle decides album vs separate
+                    // sends (TGX `RememberAlbumSetting`).
+                    let albumable = attachments.len() >= 2
                         && attachments.iter().all(|att| {
                             matches!(att.kind, AttachmentKind::Photo | AttachmentKind::Video)
-                        }) {
-                        ComposerSnapshot::capture_album(chat_id, view_generation, text, attachments)
+                        });
+                    let grouped = self.composer_group_media_effective();
+                    let mut snaps = Vec::new();
+                    if albumable && grouped {
+                        snaps.push(
+                            ComposerSnapshot::capture_album(
+                                chat_id,
+                                view_generation,
+                                text,
+                                attachments,
+                            )
+                            .with_reply(self.pending_reply.clone())
+                            .with_self_destruct(self_destruct)
+                            // M1: silent / scheduled / when-online /
+                            // link-preview options ride the snapshot to
+                            // `sendMessage.options`.
+                            .with_send_options(self.composer_send_options()),
+                        );
+                    } else if albumable {
+                        // "Ungrouped": one message per photo/video, the
+                        // caption riding the first.
+                        for (i, att) in attachments.into_iter().enumerate() {
+                            snaps.push(
+                                ComposerSnapshot::capture_with_attachment(
+                                    chat_id,
+                                    view_generation,
+                                    if i == 0 { text.clone() } else { String::new() },
+                                    Some(att),
+                                )
+                                .with_reply(if i == 0 {
+                                    self.pending_reply.clone()
+                                } else {
+                                    None
+                                })
+                                .with_self_destruct(self_destruct)
+                                .with_send_options(self.composer_send_options()),
+                            );
+                        }
                     } else {
-                        ComposerSnapshot::capture_with_attachment(
-                            chat_id,
-                            view_generation,
-                            text,
-                            attachments.first().cloned(),
-                        )
+                        snaps.push(
+                            ComposerSnapshot::capture_with_attachment(
+                                chat_id,
+                                view_generation,
+                                text,
+                                attachments.first().cloned(),
+                            )
+                            .with_reply(self.pending_reply.clone())
+                            .with_self_destruct(self_destruct)
+                            // M1: silent / scheduled / when-online /
+                            // link-preview options ride the snapshot to
+                            // `sendMessage.options`.
+                            .with_send_options(self.composer_send_options()),
+                        );
                     }
-                    .with_reply(self.pending_reply.clone())
-                    .with_self_destruct(self_destruct)
-                    // M1: silent / scheduled / when-online / link-preview
-                    // options ride the snapshot to `sendMessage.options`.
-                    .with_send_options(self.composer_send_options());
-                    if snap.is_empty() {
+                    if snaps.first().is_none_or(ComposerSnapshot::is_empty) {
                         self.status_note = "type a message or attach a file".into();
                         cx.notify();
                         return;
@@ -4256,15 +4348,25 @@ impl QuillApp {
                     if self.slow_mode_blocked(chat_id, cx) {
                         return;
                     }
-                    let result = self
+                    // MED1: ungrouped sends go out one message at a time.
+                    let mut result = self
                         .live
                         .as_mut()
                         .expect("live")
                         .driver
-                        .send_snapshot(&snap);
+                        .send_snapshot(&snaps[0]);
+                    for snap in &snaps[1..] {
+                        if result.is_err() {
+                            break;
+                        }
+                        result = self.live.as_mut().expect("live").driver.send_snapshot(snap);
+                    }
                     match result {
                         Ok(_) => {
                             self.pending_attachments.clear();
+                            // MED1: the grouping override was consumed —
+                            // the next composer follows the pref again.
+                            self.composer_group_media = None;
                             // Phase B3: the timer choice was consumed by the
                             // snapshot — reset the picker for the next send.
                             self.composer_self_destruct = None;
@@ -4280,15 +4382,20 @@ impl QuillApp {
                             self.status_note = "sending…".into();
                         }
                         Err(_) => {
-                            let video_unreadable =
-                                snap.attachment.iter().chain(snap.album.iter()).any(|att| {
+                            let video_unreadable = snaps
+                                .iter()
+                                .flat_map(|snap| snap.attachment.iter().chain(snap.album.iter()))
+                                .any(|att| {
                                     att.kind == AttachmentKind::Video
                                         && quill::video::probe_local_video(&att.path).is_err()
                                 });
-                            let note_unreadable = snap.attachment.iter().any(|att| {
-                                att.kind == AttachmentKind::VideoNote
-                                    && quill::video::probe_local_video_note(&att.path).is_err()
-                            });
+                            let note_unreadable = snaps
+                                .iter()
+                                .filter_map(|snap| snap.attachment.as_ref())
+                                .any(|att| {
+                                    att.kind == AttachmentKind::VideoNote
+                                        && quill::video::probe_local_video_note(&att.path).is_err()
+                                });
                             self.status_note = if note_unreadable {
                                 "video note must be a square clip (max 60s, 640px)".into()
                             } else if video_unreadable {
@@ -4320,16 +4427,26 @@ impl QuillApp {
                         return;
                     }
                     let reply = self.pending_reply.clone();
-                    if attachments.len() >= 2
+                    // MED1: the grouping toggle applies to the demo too.
+                    let albumable = attachments.len() >= 2
                         && attachments.iter().all(|att| {
                             matches!(att.kind, AttachmentKind::Photo | AttachmentKind::Video)
-                        })
-                    {
+                        });
+                    if albumable && self.composer_group_media_effective() {
                         self.apply_demo_album(&text, &attachments, reply.as_ref());
+                    } else if albumable {
+                        for (i, att) in attachments.iter().enumerate() {
+                            self.apply_demo_outgoing(
+                                if i == 0 { &text } else { "" },
+                                Some(att),
+                                if i == 0 { reply.as_ref() } else { None },
+                            );
+                        }
                     } else {
                         self.apply_demo_outgoing(&text, attachments.first(), reply.as_ref());
                     }
                     self.pending_attachments.clear();
+                    self.composer_group_media = None;
                     self.pending_reply = None;
                     if let Some(chat_id) = self.demo_session.as_ref().and_then(|s| s.open_chat) {
                         self.forget_local_draft(chat_id);
@@ -4496,6 +4613,8 @@ impl QuillApp {
     fn clear_attachment(&mut self, cx: &mut Context<Self>) {
         self.pending_attachments.clear();
         self.composer_self_destruct = None;
+        // MED1: the grouping override belongs to this composer batch.
+        self.composer_group_media = None;
         self.status_note = "attachment cleared".into();
         cx.notify();
     }
@@ -7260,6 +7379,10 @@ impl QuillApp {
         self.media_viewer = MediaViewer::open(items, index);
         self.viewer_zoom.reset();
         self.viewer_drag = None;
+        // MED1: rotation and playback error are per-item state.
+        self.viewer_rotation = 0;
+        self.viewer_rotated = None;
+        self.playback_error = None;
         self.stop_viewer_video();
         self.ensure_viewer_download(cx);
         self.maybe_autoplay_viewer_video(cx);
@@ -7280,6 +7403,9 @@ impl QuillApp {
         }
         self.viewer_zoom.reset();
         self.viewer_drag = None;
+        // MED1: rotation is per-item.
+        self.viewer_rotation = 0;
+        self.viewer_rotated = None;
         self.stop_viewer_video();
         self.ensure_viewer_download(cx);
         self.maybe_autoplay_viewer_video(cx);
@@ -7628,9 +7754,18 @@ impl QuillApp {
                             this.play_viewer_video(&item, &path, cx);
                         }
                     }
-                    Err(_) => {
+                    Err(err) => {
                         this.viewer_video_frames.clear();
-                        this.status_note = "could not play video".into();
+                        // MED1: TGX distinguishes unsupported formats
+                        // (`VideoPlaybackUnsupported`) from generic
+                        // playback failures (`VideoPlaybackError`).
+                        let message = if err == "unsupported video" {
+                            "video format not supported"
+                        } else {
+                            "couldn't play this video"
+                        };
+                        this.playback_error = Some(message.into());
+                        this.status_note = message.into();
                     }
                 }
                 cx.notify();
@@ -7686,11 +7821,38 @@ impl QuillApp {
         self.stop_animation_playback();
         let duration = item.duration_secs.unwrap_or(0).max(0) as f64;
         let mut clock = PlaybackClock::new(duration);
+        clock.set_rate(self.playback_speed);
         clock.seek(0.0);
         clock.resume();
         self.viewer_clock = Some(clock);
         self.viewer_video = Some(item.message_id);
         self.viewer_video_path = Some(path.to_path_buf());
+        self.playback_error = None;
+        // MED1: viewer seek slider (the history-row seek bar pattern).
+        let slider = cx.new(|_| {
+            SliderState::new()
+                .min(0.0)
+                .max(duration.max(1.0) as f32)
+                .default_value(0.0)
+        });
+        cx.subscribe(&slider, |this, _, event, cx| {
+            this.on_viewer_seek_event(event, cx);
+        })
+        .detach();
+        self.viewer_seek_slider = Some(slider);
+        // MED1: volume slider (0–100%); applies on release so a drag
+        // doesn't restart ffplay per tick.
+        let volume = cx.new(|_| {
+            SliderState::new()
+                .min(0.0)
+                .max(100.0)
+                .default_value((self.playback_volume * 100.0).round())
+        });
+        cx.subscribe(&volume, |this, _, event, cx| {
+            this.on_viewer_volume_event(event, cx);
+        })
+        .detach();
+        self.viewer_volume_slider = Some(volume);
         self.spawn_viewer_tick(cx);
         cx.notify();
     }
@@ -7717,11 +7879,7 @@ impl QuillApp {
     /// with no audio) just means silent playback — the frames still show.
     fn spawn_viewer_ffplay(&mut self, path: &std::path::Path, offset_secs: f64) -> bool {
         self.kill_viewer_player();
-        let mut command = Command::new("ffplay");
-        command.args(["-nodisp", "-autoexit", "-loglevel", "quiet"]);
-        if offset_secs > 0.05 {
-            command.arg("-ss").arg(format!("{offset_secs:.1}"));
-        }
+        let mut command = self.ffplay_command(offset_secs);
         match command
             .arg(path)
             .stdin(Stdio::null())
@@ -7731,9 +7889,14 @@ impl QuillApp {
         {
             Ok(child) => {
                 self.viewer_player = Some(child);
+                self.playback_error = None;
                 true
             }
-            Err(_) => false,
+            // MED1: honest error instead of the old silent failure.
+            Err(_) => {
+                self.playback_error = Some("audio player (ffplay) couldn't start".into());
+                false
+            }
         }
     }
 
@@ -7803,9 +7966,462 @@ impl QuillApp {
         self.viewer_pending_play = None;
         self.viewer_video_frames.clear();
         self.viewer_extracting = false;
+        self.viewer_seek_slider = None;
+        self.viewer_seek_scrubbing = false;
+        self.viewer_seek_preview_secs = None;
+        self.viewer_volume_slider = None;
+        self.viewer_volume_scrubbing = false;
         if let Some(cached) = self.viewer_frame_cache_file.take() {
             quill::video::discard_viewer_frame_cache(cached);
         }
+    }
+
+    // ===================== MED1: viewer actions =====================
+
+    /// MED1: rotate the viewer photo 90° clockwise (photos only). The
+    /// rotated pixels are decoded eagerly and cached in `viewer_rotated`
+    /// so the overlay render stays allocation-free; reset on open/step.
+    fn rotate_viewer_photo(&mut self, cx: &mut Context<Self>) {
+        let item = self.media_viewer.current().cloned();
+        let Some(item) = item else { return };
+        if item.kind != MediaViewerKind::Photo {
+            return;
+        }
+        self.viewer_rotation = (self.viewer_rotation + 1) % 4;
+        self.viewer_rotated = None;
+        if self.viewer_rotation == 0 {
+            cx.notify();
+            return;
+        }
+        let files: HashMap<i32, ParsedFile> =
+            self.session().map(|s| s.files.clone()).unwrap_or_default();
+        let roots = self.media_display_roots();
+        let path = viewer_display_path(&item, &files, &roots);
+        match path {
+            Some(path) => match Self::rotated_render_image(&path, self.viewer_rotation) {
+                Some(image) => {
+                    self.viewer_rotated = Some((path, self.viewer_rotation, image));
+                }
+                None => {
+                    self.status_note = "couldn't rotate this photo".into();
+                    self.viewer_rotation = 0;
+                }
+            },
+            None => {
+                self.status_note = "download the photo first to rotate it".into();
+                self.viewer_rotation = 0;
+            }
+        }
+        cx.notify();
+    }
+
+    /// MED1: decode `path` and rotate it by `turns` quarter-turns into a
+    /// `RenderImage` (the `decode_viewer_frames` construction pattern).
+    fn rotated_render_image(path: &PathBuf, turns: u8) -> Option<Arc<RenderImage>> {
+        let rgba = image::open(path).ok()?.to_rgba8();
+        let (pixels, width, height) =
+            rotate_rgba_quarter_turns(rgba.as_raw(), rgba.width(), rgba.height(), turns);
+        let rotated = image::RgbaImage::from_raw(width, height, pixels)?;
+        Some(Arc::new(RenderImage::new(SmallVec::from_buf([
+            image::Frame::new(rotated),
+        ]))))
+    }
+
+    /// MED1: share the viewer media — opens the forward picker with the
+    /// current message selected (the message-menu forward flow, reused).
+    fn share_viewer_media(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(item) = self.media_viewer.current() else {
+            return;
+        };
+        let (chat_id, message_id) = (item.chat_id, item.message_id);
+        // Close the overlay first so the forward picker is visible.
+        self.close_media_viewer(cx);
+        self.begin_forward_one(chat_id, message_id, false, window, cx);
+    }
+
+    /// MED1: save the viewer media to the downloads folder. Photos save
+    /// the largest local size; videos save the full clip when local,
+    /// else the thumbnail.
+    fn save_viewer_media(&mut self, cx: &mut Context<Self>) {
+        let Some(item) = self.media_viewer.current().cloned() else {
+            return;
+        };
+        let files: HashMap<i32, ParsedFile> =
+            self.session().map(|s| s.files.clone()).unwrap_or_default();
+        let path = match item.kind {
+            MediaViewerKind::Photo => {
+                let roots = self.media_display_roots();
+                viewer_display_path(&item, &files, &roots)
+            }
+            // Video: save the full clip only — falling back to the
+            // thumbnail would write a JPEG as the "video". If the clip
+            // isn't local the user gets the honest download-first note.
+            MediaViewerKind::Video => item
+                .play_file_id
+                .and_then(|id| files.get(&id.0))
+                .and_then(|file| file.usable_path())
+                .map(PathBuf::from),
+        };
+        match path {
+            Some(path) => match save_media_to_downloads(&path) {
+                Ok(dest) => {
+                    self.status_note = format!(
+                        "saved to {}",
+                        dest.file_name()
+                            .and_then(|n| n.to_str())
+                            .unwrap_or("downloads")
+                    );
+                }
+                Err(err) => {
+                    self.status_note = format!("couldn't save: {err}");
+                }
+            },
+            None => {
+                self.status_note = "download the media first to save it".into();
+            }
+        }
+        cx.notify();
+    }
+
+    /// MED1: "Show in chat" — close the viewer and jump to the source
+    /// message (the reply-jump machinery, reused).
+    fn show_viewer_in_chat(&mut self, cx: &mut Context<Self>) {
+        let Some(item) = self.media_viewer.current() else {
+            return;
+        };
+        let message_id = item.message_id;
+        self.close_media_viewer(cx);
+        self.jump_to_replied_message(message_id, cx);
+    }
+
+    /// MED1: pin/unpin the album the viewer item belongs to. TGX
+    /// `MessagePinAlbum` pins each member (`pinChatMessage` per message —
+    /// TDLib 1.8.67 has no album-level pin, schema line 13559). When any
+    /// member is pinned the action unpins the pinned members instead.
+    /// Rights-gated on `ChatSummary::can_pin_messages`.
+    fn toggle_viewer_album_pin(&mut self, cx: &mut Context<Self>) {
+        let (chat_id, album_id) = match self.media_viewer.current() {
+            Some(item) => (item.chat_id, self.viewer_album_id(item.message_id)),
+            None => return,
+        };
+        let Some(album_id) = album_id else { return };
+        let can_pin = self
+            .session()
+            .and_then(|s| s.chats.get(&chat_id.0))
+            .is_some_and(|chat| chat.can_pin_messages());
+        if !can_pin {
+            self.status_note = "you can't pin messages in this chat".into();
+            cx.notify();
+            return;
+        }
+        let history: Vec<HistoryMessage> = self
+            .session()
+            .and_then(|s| s.histories.get(&chat_id.0))
+            .map(|h| h.ordered().into_iter().cloned().collect())
+            .unwrap_or_default();
+        let ids = quill::album::album_message_ids(&history, album_id);
+        if ids.is_empty() {
+            return;
+        }
+        let pinned: Vec<MessageId> = ids
+            .iter()
+            .filter(|id| history.iter().any(|m| m.id == **id && m.is_pinned))
+            .copied()
+            .collect();
+        if self.demo_session.is_some() {
+            // Demo: toggle only the messages whose pin state must change.
+            let pin_target = pinned.is_empty();
+            for id in &ids {
+                let currently = history.iter().any(|m| m.id == *id && m.is_pinned);
+                if currently != pin_target {
+                    self.apply_demo_pin_toggle(chat_id, *id);
+                }
+            }
+            self.status_note = "demo: album pin updated".into();
+            cx.notify();
+            return;
+        }
+        let Some(live) = self.live.as_mut() else {
+            self.status_note = "no live connection".into();
+            cx.notify();
+            return;
+        };
+        let mut failed = 0;
+        if pinned.is_empty() {
+            for id in &ids {
+                if live.driver.pin_chat_message(chat_id, *id, false).is_err() {
+                    failed += 1;
+                }
+            }
+            self.status_note = if failed == 0 {
+                "pinning album…".into()
+            } else {
+                format!("couldn't pin {failed} album item(s)")
+            };
+        } else {
+            for id in &pinned {
+                if live.driver.unpin_chat_message(chat_id, *id).is_err() {
+                    failed += 1;
+                }
+            }
+            self.status_note = if failed == 0 {
+                "unpinning album…".into()
+            } else {
+                format!("couldn't unpin {failed} album item(s)")
+            };
+        }
+        cx.notify();
+    }
+
+    /// MED1: the `media_album_id` of the history message behind the viewer
+    /// item (`None` when the message is not in an album).
+    fn viewer_album_id(&self, message_id: MessageId) -> Option<i64> {
+        let item = self.media_viewer.current()?;
+        self.session()?
+            .histories
+            .get(&item.chat_id.0)?
+            .messages
+            .get(&message_id.0)
+            .and_then(|m| (m.media_album_id != 0).then_some(m.media_album_id))
+    }
+
+    // ===================== MED1: viewer seek =====================
+
+    /// MED1: `SliderEvent` sink for the viewer video seek slider. Drag
+    /// previews the position; release seeks the clock and restarts ffplay
+    /// at the new offset (the history-row `on_seek_event` pattern).
+    fn on_viewer_seek_event(&mut self, event: &SliderEvent, cx: &mut Context<Self>) {
+        match event {
+            SliderEvent::Change(value) => {
+                self.viewer_seek_scrubbing = true;
+                self.viewer_seek_preview_secs = Some(f64::from(value.end()));
+                cx.notify();
+            }
+            SliderEvent::Release(value) => {
+                self.viewer_seek_scrubbing = false;
+                self.viewer_seek_preview_secs = None;
+                self.seek_viewer_to(f64::from(value.end()), cx);
+            }
+        }
+    }
+
+    /// MED1: apply a finished viewer seek. Seeking while paused just moves
+    /// the frozen clock; while playing, ffplay restarts at the offset.
+    fn seek_viewer_to(&mut self, secs: f64, cx: &mut Context<Self>) {
+        let Some(clock) = self.viewer_clock.as_mut() else {
+            return;
+        };
+        clock.seek(secs);
+        let offset = clock.elapsed_secs();
+        if clock.is_playing()
+            && let Some(path) = self.viewer_video_path.clone()
+        {
+            self.spawn_viewer_ffplay(&path, offset);
+        }
+        cx.notify();
+    }
+
+    /// MED1: push the viewer clock into the seek slider so the thumb
+    /// follows elapsed time. Called from the overlay render (the tick has
+    /// no `&mut Window`, which `SliderState::set_value` needs). Skipped
+    /// while scrubbing so the drag is never fought.
+    fn sync_viewer_seek_slider(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.viewer_seek_scrubbing {
+            return;
+        }
+        if let (Some(slider), Some(clock)) =
+            (self.viewer_seek_slider.as_ref(), self.viewer_clock.as_ref())
+        {
+            let value = clock.elapsed_secs().clamp(0.0, clock.duration_secs()) as f32;
+            let changed = slider.read(cx).value() != SliderValue::Single(value);
+            if changed {
+                slider.update(cx, |state, cx| {
+                    state.set_value(value, window, cx);
+                });
+            }
+        }
+    }
+
+    /// MED1: `SliderEvent` sink for the viewer volume slider. The volume
+    /// applies on release so a drag doesn't restart ffplay per tick.
+    fn on_viewer_volume_event(&mut self, event: &SliderEvent, cx: &mut Context<Self>) {
+        match event {
+            SliderEvent::Change(_) => {
+                self.viewer_volume_scrubbing = true;
+                cx.notify();
+            }
+            SliderEvent::Release(value) => {
+                self.viewer_volume_scrubbing = false;
+                self.set_playback_volume(f64::from(value.end()) as f32 / 100.0, cx);
+            }
+        }
+    }
+
+    /// MED1: push `playback_volume` into the volume slider (e.g. after
+    /// the mute toggle moved it). Skipped while dragging.
+    fn sync_viewer_volume_slider(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.viewer_volume_scrubbing {
+            return;
+        }
+        if let Some(slider) = self.viewer_volume_slider.as_ref() {
+            let value = (self.playback_volume * 100.0).round();
+            let changed = slider.read(cx).value() != SliderValue::Single(value);
+            if changed {
+                slider.update(cx, |state, cx| {
+                    state.set_value(value, window, cx);
+                });
+            }
+        }
+    }
+
+    // ===================== MED1: speed & volume =====================
+
+    /// MED1: cycle playback speed through the TGX `PlaybackSpeedLayout`
+    /// set (0.5x, 0.7x, 1x, 1.2x, 1.5x, 2x). Applies to the active
+    /// voice/audio track and the viewer video: the clock rate moves the
+    /// playhead and ffplay restarts with `-af atempo=` so audio stays in
+    /// sync.
+    fn cycle_playback_speed(&mut self, cx: &mut Context<Self>) {
+        const SPEEDS: [f64; 6] = [0.5, 0.7, 1.0, 1.2, 1.5, 2.0];
+        let next = SPEEDS
+            .iter()
+            .position(|s| (*s - self.playback_speed).abs() < 0.01)
+            .map(|i| SPEEDS[(i + 1) % SPEEDS.len()])
+            .unwrap_or(1.0);
+        self.playback_speed = next;
+        let mut restarted = false;
+        if let Some(clock) = self.playback_clock.as_mut() {
+            let offset = clock.elapsed_secs();
+            let was_playing = clock.is_playing();
+            clock.set_rate(next);
+            if was_playing {
+                self.restart_player_at(offset);
+                restarted = true;
+            }
+        }
+        if let Some(clock) = self.viewer_clock.as_mut() {
+            let offset = clock.elapsed_secs();
+            let was_playing = clock.is_playing();
+            clock.set_rate(next);
+            if was_playing && let Some(path) = self.viewer_video_path.clone() {
+                self.spawn_viewer_ffplay(&path, offset);
+                restarted = true;
+            }
+        }
+        if !restarted {
+            // Nothing playing: the speed applies to the next play.
+            self.status_note = format!("playback speed {}×", Self::speed_label(next));
+        }
+        cx.notify();
+    }
+
+    /// MED1: short "1.5×" style label for the speed button.
+    fn speed_label(speed: f64) -> String {
+        if (speed - speed.round()).abs() < 0.01 {
+            format!("{}×", speed as i32)
+        } else {
+            format!("{speed}×")
+        }
+    }
+
+    /// MED1: mute toggle — 0 volume remembers the previous level and
+    /// restores it on unmute; ffplay restarts with `-volume`.
+    fn toggle_playback_mute(&mut self, cx: &mut Context<Self>) {
+        if self.playback_volume > 0.01 {
+            self.playback_unmuted_volume = self.playback_volume;
+            self.set_playback_volume(0.0, cx);
+        } else {
+            let restore = self.playback_unmuted_volume.max(0.01);
+            self.set_playback_volume(restore, cx);
+        }
+    }
+
+    /// MED1: set playback volume 0.0–1.0 and restart any active player so
+    /// ffplay picks up the new `-volume`.
+    fn set_playback_volume(&mut self, volume: f32, cx: &mut Context<Self>) {
+        self.playback_volume = volume.clamp(0.0, 1.0);
+        if self.playback_clock.as_ref().is_some_and(|c| c.is_playing()) {
+            let offset = self
+                .playback_clock
+                .as_ref()
+                .map(|c| c.elapsed_secs())
+                .unwrap_or(0.0);
+            self.restart_player_at(offset);
+        }
+        if self.viewer_clock.as_ref().is_some_and(|c| c.is_playing())
+            && let Some(path) = self.viewer_video_path.clone()
+        {
+            let offset = self
+                .viewer_clock
+                .as_ref()
+                .map(|c| c.elapsed_secs())
+                .unwrap_or(0.0);
+            self.spawn_viewer_ffplay(&path, offset);
+        }
+        cx.notify();
+    }
+
+    /// MED1: update one media pref in the session and persist it
+    /// (the `set_call_pref` pattern).
+    fn set_media_pref(&mut self, update: impl FnOnce(&mut MediaPrefs), cx: &mut Context<Self>) {
+        let mut prefs = self
+            .session()
+            .map(|session| session.media_prefs.clone())
+            .unwrap_or_default();
+        update(&mut prefs);
+        if let Some(live) = self.live.as_mut() {
+            live.driver.session.media_prefs = prefs;
+            if let Err(err) = live.driver.save_media_prefs() {
+                self.status_note = format!("couldn't save media settings: {err}");
+            }
+        } else if let Some(demo) = self.demo_session.as_mut() {
+            demo.media_prefs = prefs;
+        }
+        cx.notify();
+    }
+
+    /// MED1: effective composer grouping — the user's toggle when set,
+    /// else the remembered pref (grouped when remembering is off).
+    fn composer_group_media_effective(&self) -> bool {
+        self.composer_group_media.unwrap_or_else(|| {
+            self.session()
+                .map(|s| s.media_prefs.default_grouping())
+                .unwrap_or(true)
+        })
+    }
+
+    /// MED1: flip the composer "group media" choice for 2+ attachments;
+    /// persisted when "remember grouping" is on (TGX `RememberAlbumSetting`).
+    fn toggle_composer_group_media(&mut self, cx: &mut Context<Self>) {
+        let next = !self.composer_group_media_effective();
+        self.composer_group_media = Some(next);
+        if self
+            .session()
+            .is_some_and(|s| s.media_prefs.remember_media_grouping)
+        {
+            self.set_media_pref(|prefs| prefs.group_media = next, cx);
+        } else {
+            cx.notify();
+        }
+    }
+
+    /// MED1: flip the "remember media grouping" setting itself.
+    fn toggle_remember_media_grouping(&mut self, cx: &mut Context<Self>) {
+        let next = !self
+            .session()
+            .map(|s| s.media_prefs.remember_media_grouping)
+            .unwrap_or(false);
+        // Turning it on snapshots the current grouping choice.
+        let current = self.composer_group_media_effective();
+        self.set_media_pref(
+            |prefs| {
+                prefs.remember_media_grouping = next;
+                if next {
+                    prefs.group_media = current;
+                }
+            },
+            cx,
+        );
     }
 
     /// 125 ms tick while a viewer clip is active: re-renders so the
@@ -10344,11 +10960,13 @@ impl QuillApp {
         self.stop_voice_playback();
         self.stop_audio_playback();
         self.stop_viewer_video();
+        self.playback_error = None;
         match kind {
             PlaybackKind::Voice => self.playing_voice = Some(message_id),
             PlaybackKind::Audio => self.playing_audio = Some(message_id),
         }
         let mut clock = PlaybackClock::new(duration_secs);
+        clock.set_rate(self.playback_speed);
         clock.seek(offset_secs);
         clock.resume();
         self.playback_clock = Some(clock);
@@ -10375,11 +10993,7 @@ impl QuillApp {
     /// Returns true when the child spawned.
     fn spawn_ffplay(&mut self, path: &std::path::Path, offset_secs: f64) -> bool {
         self.kill_shared_player();
-        let mut command = Command::new("ffplay");
-        command.args(["-nodisp", "-autoexit", "-loglevel", "quiet"]);
-        if offset_secs > 0.05 {
-            command.arg("-ss").arg(format!("{offset_secs:.1}"));
-        }
+        let mut command = self.ffplay_command(offset_secs);
         match command
             .arg(path)
             .stdin(Stdio::null())
@@ -10389,10 +11003,34 @@ impl QuillApp {
         {
             Ok(child) => {
                 self.voice_player = Some(child);
+                self.playback_error = None;
                 true
             }
-            Err(_) => false,
+            // MED1: honest error instead of the old silent failure.
+            Err(_) => {
+                self.playback_error = Some("audio player (ffplay) couldn't start".into());
+                false
+            }
         }
+    }
+
+    /// MED1: ffplay command with volume (`-volume`) and speed
+    /// (`-af atempo=` when != 1x) baked in. `atempo` only accepts
+    /// 0.5–2.0 — the TGX speed span, enforced by `PlaybackClock`.
+    fn ffplay_command(&self, offset_secs: f64) -> Command {
+        let mut command = Command::new("ffplay");
+        command.args(["-nodisp", "-autoexit", "-loglevel", "quiet"]);
+        if offset_secs > 0.05 {
+            command.arg("-ss").arg(format!("{offset_secs:.1}"));
+        }
+        let volume = (self.playback_volume.clamp(0.0, 1.0) * 100.0).round() as i32;
+        command.arg("-volume").arg(volume.to_string());
+        if (self.playback_speed - 1.0).abs() > 0.01 {
+            command
+                .arg("-af")
+                .arg(format!("atempo={:.2}", self.playback_speed));
+        }
+        command
     }
 
     /// Restart the active track's player at `offset_secs` (seek while playing).
@@ -10569,6 +11207,10 @@ impl QuillApp {
                     .playback_clock
                     .as_ref()
                     .is_some_and(PlaybackClock::is_playing),
+                // MED1: speed/mute/error shown on the active row.
+                speed: self.playback_speed,
+                muted: self.playback_volume < 0.01,
+                error: self.playback_error.clone(),
             }
         } else {
             SeekBarView {
@@ -10580,6 +11222,9 @@ impl QuillApp {
                     .unwrap_or(0.0),
                 duration_secs,
                 is_playing: false,
+                speed: self.playback_speed,
+                muted: false,
+                error: None,
             }
         }
     }
@@ -23357,7 +24002,19 @@ impl QuillApp {
     /// path. Videos show their thumbnail (no in-viewer playback — the
     /// history row's Play path is unchanged); secret/spoiler media never
     /// reach the viewer (filtered in `collect_media_items`).
-    fn media_viewer_overlay(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    /// MED1: fullscreen photo/video viewer overlay. Takes `&mut self` +
+    /// `window` so the viewer seek/volume sliders can sync to the clocks
+    /// during render.
+    fn media_viewer_overlay(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        // MED1: keep the viewer seek/volume thumbs on the clocks (the
+        // tick has no `&mut Window`, which `SliderState::set_value`
+        // needs).
+        self.sync_viewer_seek_slider(window, cx);
+        self.sync_viewer_volume_slider(window, cx);
         let item = self
             .media_viewer
             .current()
@@ -23419,6 +24076,36 @@ impl QuillApp {
         } else {
             kind_label.to_string()
         };
+        // MED1: album pin action for the header — only when the item is in
+        // an album and the user may pin in this chat (rights-gated, TGX
+        // `MessagePinAlbum` semantics: unpins when any member is pinned).
+        let album_pin_label: Option<String> =
+            self.viewer_album_id(item.message_id).and_then(|album_id| {
+                let can_pin = self
+                    .session()
+                    .and_then(|s| s.chats.get(&item.chat_id.0))
+                    .is_some_and(|chat| chat.can_pin_messages());
+                if !can_pin {
+                    return None;
+                }
+                let history: Vec<HistoryMessage> = self
+                    .session()
+                    .and_then(|s| s.histories.get(&item.chat_id.0))
+                    .map(|h| h.ordered().into_iter().cloned().collect())
+                    .unwrap_or_default();
+                let ids = quill::album::album_message_ids(&history, album_id);
+                if ids.is_empty() {
+                    return None;
+                }
+                let any_pinned = ids
+                    .iter()
+                    .any(|id| history.iter().any(|m| m.id == *id && m.is_pinned));
+                Some(if any_pinned {
+                    "Unpin album".to_string()
+                } else {
+                    "Pin album".to_string()
+                })
+            });
         // Parity slice 5: the visual lives in a fixed 720×480 frame; scroll
         // zooms (1×–8×, frame-center kept) and drag pans when zoomed.
         let zoom = self.viewer_zoom;
@@ -23428,10 +24115,20 @@ impl QuillApp {
         let content: AnyElement = {
             // Pre-decoded video frame and thumbnail both render through
             // `img`; the frame is an `ImageSource::Render` (synchronous),
-            // the thumbnail a path (async-loaded once, then cached).
+            // the thumbnail a path (async-loaded once, then cached). MED1:
+            // a rotated photo renders from the eagerly-decoded
+            // `viewer_rotated` cache (90°/180°/270° clockwise).
+            let rotated: Option<ImageSource> = (item.kind == MediaViewerKind::Photo)
+                .then(|| self.viewer_rotated.as_ref())
+                .flatten()
+                .filter(|(path, turns, _)| {
+                    *turns == self.viewer_rotation && Some(path.as_path()) == thumb_path.as_deref()
+                })
+                .map(|(_, _, image)| ImageSource::from(image.clone()));
             let source: Option<ImageSource> = frame
                 .map(ImageSource::from)
-                .or_else(|| thumb_path.map(ImageSource::from));
+                .or(rotated)
+                .or_else(|| thumb_path.clone().map(ImageSource::from));
             if let Some(source) = source {
                 img(source)
                     .id(("media-viewer-img", row_id))
@@ -23552,10 +24249,11 @@ impl QuillApp {
                         .as_ref()
                         .is_some_and(|clock| clock.is_playing())
                         && self.viewer_video == Some(item.message_id);
+                    // MED1: while scrubbing, the label previews the drag
+                    // position (the history-row seek pattern).
                     let elapsed = self
-                        .viewer_clock
-                        .as_ref()
-                        .map(|clock| clock.elapsed_secs())
+                        .viewer_seek_preview_secs
+                        .or_else(|| self.viewer_clock.as_ref().map(|clock| clock.elapsed_secs()))
                         .unwrap_or(0.0);
                     let total = item.duration_secs.unwrap_or(0) as f64;
                     let label = format!(
@@ -23566,6 +24264,9 @@ impl QuillApp {
                     // While ffmpeg extracts frames the thumbnail stays up;
                     // the Play button appears once frames are ready.
                     let extracting = self.viewer_extracting;
+                    let speed_label = Self::speed_label(self.playback_speed);
+                    let muted = self.playback_volume < 0.01;
+                    let volume_pct = (self.playback_volume * 100.0).round() as i32;
                     div()
                         .flex()
                         .items_center()
@@ -23587,6 +24288,57 @@ impl QuillApp {
                                 .into_any_element()
                         })
                         .child(div().text_sm().text_color(rgb(0xffffff)).child(label))
+                        // MED1: seek slider (created in `begin_viewer_video`).
+                        .when_some(self.viewer_seek_slider.clone(), |this, slider| {
+                            this.child(
+                                div().w(px(180.)).child(
+                                    Slider::new(&slider)
+                                        .bg(rgb(0x58a6ff))
+                                        .text_color(rgb(0xffffff)),
+                                ),
+                            )
+                        })
+                        // MED1: playback speed (TGX 0.5x–2x).
+                        .child(
+                            Button::new(("media-viewer-speed", row_id))
+                                .label(speed_label)
+                                .ghost()
+                                .text_color(rgb(0xffffff))
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.cycle_playback_speed(cx);
+                                })),
+                        )
+                        // MED1: volume slider + mute toggle.
+                        .when_some(self.viewer_volume_slider.clone(), |this, slider| {
+                            this.child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap_1()
+                                    .child(
+                                        div().w(px(80.)).child(
+                                            Slider::new(&slider)
+                                                .bg(rgb(0x58a6ff))
+                                                .text_color(rgb(0xffffff)),
+                                        ),
+                                    )
+                                    .child(
+                                        div()
+                                            .text_xs()
+                                            .text_color(rgb(0xffffff))
+                                            .child(format!("{volume_pct}%")),
+                                    ),
+                            )
+                        })
+                        .child(
+                            Button::new(("media-viewer-mute", row_id))
+                                .label(if muted { "Unmute" } else { "Mute" })
+                                .ghost()
+                                .text_color(rgb(0xffffff))
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.toggle_playback_mute(cx);
+                                })),
+                        )
                         .into_any_element()
                 } else {
                     let clip_downloading = item
@@ -23715,20 +24467,85 @@ impl QuillApp {
                             )
                             .child(
                                 div()
-                                    .id("media-viewer-close")
-                                    .cursor_pointer()
-                                    .px_2()
-                                    .py_1()
-                                    .rounded_md()
-                                    .text_color(rgb(0xffffff))
-                                    .child("Close")
-                                    .on_click(cx.listener(|this, _, _, cx| {
-                                        this.close_media_viewer(cx);
-                                    })),
+                                    .flex()
+                                    .items_center()
+                                    .gap_1()
+                                    // MED1: photo rotation (90° clockwise per tap).
+                                    .when(item.kind == MediaViewerKind::Photo, |this| {
+                                        this.child(
+                                            Button::new(("media-viewer-rotate", row_id))
+                                                .label("Rotate")
+                                                .ghost()
+                                                .text_color(rgb(0xffffff))
+                                                .on_click(cx.listener(|this, _, _, cx| {
+                                                    this.rotate_viewer_photo(cx);
+                                                })),
+                                        )
+                                    })
+                                    // MED1: share via the forward picker.
+                                    .child(
+                                        Button::new(("media-viewer-share", row_id))
+                                            .label("Share")
+                                            .ghost()
+                                            .text_color(rgb(0xffffff))
+                                            .on_click(cx.listener(|this, _, window, cx| {
+                                                this.share_viewer_media(window, cx);
+                                            })),
+                                    )
+                                    // MED1: save to the downloads folder.
+                                    .child(
+                                        Button::new(("media-viewer-save", row_id))
+                                            .label("Save")
+                                            .ghost()
+                                            .text_color(rgb(0xffffff))
+                                            .on_click(cx.listener(|this, _, _, cx| {
+                                                this.save_viewer_media(cx);
+                                            })),
+                                    )
+                                    // MED1: close and jump to the source message.
+                                    .child(
+                                        Button::new(("media-viewer-show-in-chat", row_id))
+                                            .label("Show in chat")
+                                            .ghost()
+                                            .text_color(rgb(0xffffff))
+                                            .on_click(cx.listener(|this, _, _, cx| {
+                                                this.show_viewer_in_chat(cx);
+                                            })),
+                                    )
+                                    // MED1: pin/unpin the album (rights-gated).
+                                    .when_some(album_pin_label, |this, label| {
+                                        this.child(
+                                            Button::new(("media-viewer-pin-album", row_id))
+                                                .label(label)
+                                                .ghost()
+                                                .text_color(rgb(0xffffff))
+                                                .on_click(cx.listener(|this, _, _, cx| {
+                                                    this.toggle_viewer_album_pin(cx);
+                                                })),
+                                        )
+                                    })
+                                    .child(
+                                        div()
+                                            .id("media-viewer-close")
+                                            .cursor_pointer()
+                                            .px_2()
+                                            .py_1()
+                                            .rounded_md()
+                                            .text_color(rgb(0xffffff))
+                                            .child("Close")
+                                            .on_click(cx.listener(|this, _, _, cx| {
+                                                this.close_media_viewer(cx);
+                                            })),
+                                    ),
                             ),
                     )
                     .child(visual)
                     .child(transport)
+                    // MED1: honest playback error (unsupported format /
+                    // player failure) instead of a silent stall.
+                    .when_some(self.playback_error.clone(), |this, err| {
+                        this.child(div().text_sm().text_color(rgb(0xff7b72)).child(err))
+                    })
                     .when_some(caption, |this, caption| {
                         this.child(div().text_color(rgb(0xffffff)).child(caption))
                     })
@@ -25142,7 +25959,7 @@ impl Render for QuillApp {
                 cx,
             ))
             .when(self.media_viewer.is_open(), |this| {
-                this.child(self.media_viewer_overlay(cx))
+                this.child(self.media_viewer_overlay(window, cx))
             })
             // Phase 9.1: story viewer overlay above the media viewer.
             .when(self.story_viewer.is_open(), |this| {
@@ -25416,6 +26233,37 @@ impl QuillApp {
                                                     this.clear_attachment(cx);
                                                 }),
                                             ),
+                                        )
+                                    })
+                                    // MED1: album grouping toggle + "remember
+                                    // grouping" (TGX `RememberAlbumSetting`).
+                                    .when(self.pending_attachments.len() >= 2, |row| {
+                                        let grouped = self.composer_group_media_effective();
+                                        let remember = self
+                                            .session()
+                                            .map(|s| s.media_prefs.remember_media_grouping)
+                                            .unwrap_or(false);
+                                        row.child(
+                                            Button::new("composer-group-media")
+                                                .label(if grouped {
+                                                    "Grouped ✓"
+                                                } else {
+                                                    "Ungrouped"
+                                                })
+                                                .on_click(cx.listener(|this, _, _, cx| {
+                                                    this.toggle_composer_group_media(cx);
+                                                })),
+                                        )
+                                        .child(
+                                            Button::new("composer-remember-grouping")
+                                                .label(if remember {
+                                                    "Remember: on"
+                                                } else {
+                                                    "Remember: off"
+                                                })
+                                                .on_click(cx.listener(|this, _, _, cx| {
+                                                    this.toggle_remember_media_grouping(cx);
+                                                })),
                                         )
                                     })
                                     // Phase B3: self-destruct timer picker —
@@ -32808,6 +33656,38 @@ fn seek_bar_element(row_key: u64, seek: &SeekBarView) -> AnyElement {
     }
 }
 
+/// MED1: speed + mute buttons and the honest playback error line for an
+/// active voice/audio row. `kind` disambiguates the button ids.
+fn row_playback_controls(
+    row_key: u64,
+    kind: &str,
+    seek: &SeekBarView,
+    cx: &mut Context<QuillApp>,
+) -> AnyElement {
+    div()
+        .flex()
+        .items_center()
+        .gap_2()
+        .child(
+            Button::new(format!("{kind}-speed-{row_key}"))
+                .label(QuillApp::speed_label(seek.speed))
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.cycle_playback_speed(cx);
+                })),
+        )
+        .child(
+            Button::new(format!("{kind}-mute-{row_key}"))
+                .label(if seek.muted { "Unmute" } else { "Mute" })
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.toggle_playback_mute(cx);
+                })),
+        )
+        .when_some(seek.error.clone(), |this, err| {
+            this.child(div().text_xs().text_color(rgb(0xff7b72)).child(err))
+        })
+        .into_any_element()
+}
+
 fn voice_note_row(
     chat_id: ChatId,
     message_id: MessageId,
@@ -32899,6 +33779,15 @@ fn voice_note_row(
         )
         .child(waveform_row(message_id.0 as u64, &bars))
         .child(seek_bar_element(message_id.0 as u64, seek))
+        // MED1: speed + mute on the active row.
+        .when(active, |this| {
+            this.child(row_playback_controls(
+                message_id.0 as u64,
+                "voice",
+                seek,
+                cx,
+            ))
+        })
         .into_any_element()
 }
 
@@ -33028,7 +33917,16 @@ fn audio_row(
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.toggle_audio_playback(message_id, file_id, audio_duration, cx);
                         })),
-                ),
+                )
+                // MED1: speed + mute on the active row.
+                .when(active, |this| {
+                    this.child(row_playback_controls(
+                        message_id.0 as u64,
+                        "audio",
+                        seek,
+                        cx,
+                    ))
+                }),
         )
         .into_any_element()
 }

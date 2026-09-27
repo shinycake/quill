@@ -12,29 +12,53 @@ use std::time::Instant;
 ///
 /// The clock has two pieces: a frozen `base_secs` offset (the pause point,
 /// seek target, or resume point) and an optional `started_at` instant while
-/// the player is running. Elapsed time is `base + now - started`, always
-/// clamped to `[0, duration]`.
+/// the player is running. Elapsed time is `base + (now - started) * rate`,
+/// always clamped to `[0, duration]`. `rate` is the playback speed
+/// multiplier (TGX `PlaybackSpeed*`: 0.5x–2x); ffplay applies the same
+/// factor through its `atempo` filter so audio stays in sync.
 #[derive(Debug, Clone)]
 pub struct PlaybackClock {
     duration_secs: f64,
     base_secs: f64,
     started_at: Option<Instant>,
+    rate: f64,
 }
+
+/// Bounds for [`PlaybackClock::set_rate`] (TGX offers 0.5x–2x).
+pub const PLAYBACK_RATE_MIN: f64 = 0.5;
+pub const PLAYBACK_RATE_MAX: f64 = 2.0;
 
 impl PlaybackClock {
     /// New clock for a track of `duration_secs` (negative clamped to 0),
-    /// paused at position 0.
+    /// paused at position 0, playing at 1x.
     pub fn new(duration_secs: f64) -> Self {
         Self {
             duration_secs: duration_secs.max(0.0),
             base_secs: 0.0,
             started_at: None,
+            rate: 1.0,
         }
     }
 
     /// Total track length in seconds.
     pub fn duration_secs(&self) -> f64 {
         self.duration_secs
+    }
+
+    /// Current playback speed multiplier (1.0 = normal).
+    pub fn rate(&self) -> f64 {
+        self.rate
+    }
+
+    /// Set the playback speed, clamped to `[0.5, 2.0]`. The current
+    /// elapsed position is frozen as the new base first, so changing
+    /// speed never jumps the playhead (works while playing or paused).
+    pub fn set_rate(&mut self, rate: f64) {
+        self.base_secs = self.elapsed_secs();
+        self.rate = rate.clamp(PLAYBACK_RATE_MIN, PLAYBACK_RATE_MAX);
+        if self.started_at.is_some() {
+            self.started_at = Some(Instant::now());
+        }
     }
 
     /// True while the player is running (elapsed advances).
@@ -46,7 +70,7 @@ impl PlaybackClock {
     pub fn elapsed_secs(&self) -> f64 {
         let mut elapsed = self.base_secs;
         if let Some(started) = self.started_at {
-            elapsed += started.elapsed().as_secs_f64();
+            elapsed += started.elapsed().as_secs_f64() * self.rate;
         }
         elapsed.clamp(0.0, self.duration_secs)
     }
@@ -178,5 +202,32 @@ mod tests {
         clock.resume();
         clock.resume();
         assert!(clock.is_playing());
+    }
+
+    #[test]
+    fn rate_defaults_to_one_and_clamps() {
+        let mut clock = PlaybackClock::new(60.0);
+        assert_eq!(clock.rate(), 1.0);
+        clock.set_rate(1.5);
+        assert_eq!(clock.rate(), 1.5);
+        clock.set_rate(99.0);
+        assert_eq!(clock.rate(), PLAYBACK_RATE_MAX);
+        clock.set_rate(0.0);
+        assert_eq!(clock.rate(), PLAYBACK_RATE_MIN);
+    }
+
+    #[test]
+    fn set_rate_keeps_playhead_position() {
+        let mut clock = PlaybackClock::new(60.0);
+        clock.seek(20.0);
+        clock.set_rate(2.0);
+        // Paused: frozen offset unchanged, speed recorded.
+        assert_eq!(clock.elapsed_secs(), 20.0);
+        assert_eq!(clock.rate(), 2.0);
+        clock.resume();
+        clock.set_rate(0.5);
+        // Playing: no jump at the moment of the change.
+        assert!((clock.elapsed_secs() - 20.0).abs() < 0.5);
+        assert_eq!(clock.rate(), 0.5);
     }
 }

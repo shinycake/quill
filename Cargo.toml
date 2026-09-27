@@ -19,7 +19,7 @@ ui = ["dep:gpui-kit", "dep:image", "dep:smallvec"]
 [dependencies]
 base64 = "0.22"
 directories = "6"
-image = { version = "0.25", default-features = false, features = ["png"], optional = true }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"], optional = true }
 libloading = "0.8"
 ntgcalls-sys = { path = "crates/ntgcalls-sys" }
 rand = "0.8"

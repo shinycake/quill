@@ -159,17 +159,17 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 
 - [x] Fullscreen photo/video viewer overlay with prev/next navigation (arrow keys) and "N of M" counter (src/media_viewer.rs:74-124) <!-- parity:media-viewer -->
 - [x] Zoom viewer image via `=`/`-` keys and scroll, drag-pan when zoomed, `0` resets to fit (src/media_viewer.rs:172-250, ui/mod.rs:146-150) <!-- parity:media-viewer-zoom -->
-- [ ] Rotate photo in the viewer <!-- parity:media-viewer-rotate -->
-- [ ] Picture-in-picture for video playback <!-- parity:media-video-pip -->
+- [x] Rotate photo in the viewer — Rotate button cycles 0/90/180/270, per-item, cached (media_viewer.rs `rotate_rgba_quarter_turns`) <!-- parity:media-viewer-rotate -->
+- [ ] Picture-in-picture for video playback — BLOCKED: GPUI 0.3.5 `WindowOptions` has no always-on-top field on Linux and the repo has no multi-window plumbing; a second window would not be an honest PiP <!-- parity:media-video-pip -->
 - [x] Viewer auto-downloads the current item when not local and resumes a parked play once `downloadFile` lands (ui/mod.rs:4926, 5179) <!-- parity:media-viewer-autodownload -->
-- [ ] Share photo/video from the viewer <!-- parity:media-viewer-share -->
-- [ ] Save viewer media to gallery / downloads folder <!-- parity:media-viewer-save -->
-- [ ] "Show in chat" jump from the viewer to the source message <!-- parity:media-viewer-show-in-chat -->
+- [x] Share photo/video from the viewer — closes the viewer and opens the existing forward picker with the message selected <!-- parity:media-viewer-share -->
+- [x] Save viewer media to downloads folder — largest local photo size / full video clip (honest "download the media first" when not local; video never saves its thumbnail), `(n)` de-dup <!-- parity:media-viewer-save -->
+- [x] "Show in chat" jump from the viewer to the source message — closes the viewer, jumps via the existing reply-jump flow <!-- parity:media-viewer-show-in-chat -->
 - [x] Play/pause video in the viewer with elapsed/total overlay (PlaybackClock, src/playback.rs:18; ui/mod.rs:4951) <!-- parity:media-video-play -->
-- [ ] Seek scrubber in the fullscreen video player (partial: scrub seek bars exist only on history rows, ui/mod.rs:1063) <!-- parity:media-video-seek -->
-- [ ] Playback speed control for voice/audio/video, incl. 0.5x–2x long-press dial (TGX PlaybackSpeed*) <!-- parity:media-playback-speed -->
-- [ ] Volume control / mute toggle in the video player <!-- parity:media-video-volume -->
-- [ ] Playback error states for unsupported video/audio/GIF/round-video formats (TGX *PlaybackError/*PlaybackUnsupported) <!-- parity:media-playback-errors -->
+- [x] Seek scrubber in the fullscreen video player — drag scrubs (position preview in the elapsed label), release seeks the clock and restarts ffplay at `-ss` when playing <!-- parity:media-video-seek -->
+- [x] Playback speed control for voice/audio/video — speed button cycles the TGX set 0.5x–2.0x (single-tap cycle, not TGX's long-press dial); clock rate + ffplay `-af atempo=` stay in sync <!-- parity:media-playback-speed -->
+- [x] Volume control / mute toggle in the video player — volume slider applies on release (ffplay `-volume`), mute remembers and restores the previous level; same mute on voice/audio rows <!-- parity:media-video-volume -->
+- [x] Playback error states for unsupported video/audio/GIF/round-video formats — unsupported-format vs generic playback errors surfaced as red error lines in the viewer transport (TGX *PlaybackError/*PlaybackUnsupported); voice/audio rows surface ffplay-spawn failures, not silent stalls <!-- parity:media-playback-errors -->
 - [x] Record voice note from the mic (ffmpeg OGG capture) with `chatActionRecordingVoiceNote` shown while recording (src/voice.rs:86-99, connect.rs:4796) <!-- parity:media-voice-record -->
 - [ ] Lock-to-record (swipe up) and slide-to-cancel while recording (partial: click-to-record, Esc/Cancel discards, ui/mod.rs:650) <!-- parity:media-voice-lock -->
 - [x] Waveform bars on voice messages decoded from TDLib 5-bit waveform (src/voice.rs:29-67) <!-- parity:media-voice-waveform -->
@@ -198,9 +198,9 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [ ] Album-type link previews with multiple photo/video thumbnails <!-- parity:media-link-preview-album -->
 - [x] Send photo/video albums of 2–10 items via `sendMessageAlbum` with composer text as caption (requests.rs:1943, connect.rs:4605) <!-- parity:media-album-send -->
 - [x] Received albums grouped by `media_album_id` into grid tiles (ui/mod.rs:17592, 21223) <!-- parity:media-album-grid -->
-- [ ] Open an album item in the fullscreen viewer (partial: album tiles do not open the viewer, ui/mod.rs:22718) <!-- parity:media-album-viewer -->
-- [ ] Pin / unpin an album (TGX MessagePinAlbum/MessageUnpinAlbum) <!-- parity:media-album-pin -->
-- [ ] "Remember media grouping" setting (TGX RememberAlbumSetting) <!-- parity:media-album-grouping-setting -->
+- [x] Open an album item in the fullscreen viewer — album tiles open the shared viewer (the old note claiming they didn't was stale); viewer header shows Pin/Unpin album when the item is in an album <!-- parity:media-album-viewer -->
+- [x] Pin / unpin an album — one `pinChatMessage` per member when none are pinned, unpins pinned members when any are (TGX MessagePinAlbum semantics; no album-level constructor in TDLib 1.8.67), rights-gated on `ChatSummary::can_pin_messages` <!-- parity:media-album-pin -->
+- [x] "Remember media grouping" setting — composer Grouped/Ungrouped toggle for 2+ photos/videos + remember on/off; persisted in `media_prefs.json` (settings::MediaPrefs), ungrouped sends go as separate messages <!-- parity:media-album-grouping-setting -->
 - [ ] Per-chat shared media gallery with Media / Files / Music / Links / Voice / GIFs tabs (partial: `searchMessagesFilter*` schema constructors exist, no UI) <!-- parity:media-shared-gallery -->
 - [ ] Empty states per shared-media tab (TGX NoPhotosToShowInChat etc.) <!-- parity:media-shared-gallery-empty -->
 - [x] Captions render on photos, videos, animations, audio, and documents <!-- parity:media-caption-render -->

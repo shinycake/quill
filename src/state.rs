@@ -6,7 +6,7 @@ use crate::ids::{
     AccountGeneration, AccountKey, ChatId, FileId, MessageId, RequestId, ViewGeneration,
 };
 use crate::notify::{self, OsNotification, QueuedNotification};
-use crate::settings::CallPrefs;
+use crate::settings::{CallPrefs, MediaPrefs};
 use crate::telegram::client::OwnedEnvelope;
 use crate::telegram::envelope::{
     AnimationItem, AuthorizationState, BotCommand, BotInfo, CallbackQueryAnswer,
@@ -1334,6 +1334,13 @@ pub struct ChatSummary {
     /// restriction / banning (`setChatMemberStatus` with a restricted or
     /// banned status requires this right, schema lines 13586-13587).
     pub my_admin_can_restrict_members: Option<bool>,
+    /// MED1: `rights.can_pin_messages` from
+    /// `chatMemberStatusAdministrator` (TDLib 1.8.67,
+    /// `chatAdministratorRights`, schema line 1092). `Some` only when the
+    /// status is Administrator and the rights block parsed; `None` for
+    /// every other status or an absent rights block. Gates album pin /
+    /// unpin (`pinChatMessage`, schema line 13559).
+    pub my_admin_can_pin_messages: Option<bool>,
     /// Phase 5.1: `supergroup.is_forum` (TDLib 1.8.67). `None` until
     /// `updateSupergroup` / the `getSupergroup` response resolves it; only
     /// meaningful for non-channel supergroups.
@@ -1558,6 +1565,37 @@ impl ChatSummary {
         self.my_admin_can_restrict_members = can_restrict_members;
     }
 
+    /// MED1: whether the current user may pin messages in this chat
+    /// (`pinChatMessage`, schema 1.8.67 line 13559). Private and secret
+    /// chats allow own-side pins; the creator always can; an
+    /// administrator needs the explicit `can_pin_messages` right
+    /// (`chatAdministratorRights`, schema line 1092); basic-group and
+    /// supergroup members need the `can_pin_messages` member right
+    /// (`chatPermissions`, schema line 1070). Unknown status keeps the
+    /// gate closed rather than fabricating a right.
+    pub fn can_pin_messages(&self) -> bool {
+        use crate::telegram::envelope::ChatKind;
+        match &self.kind {
+            ChatKind::Private { .. } | ChatKind::Secret { .. } => true,
+            _ => match self.my_member_status {
+                Some(ChannelMemberStatus::Creator) => true,
+                Some(ChannelMemberStatus::Administrator) => {
+                    self.my_admin_can_pin_messages.unwrap_or(false)
+                }
+                _ => self
+                    .permissions
+                    .as_ref()
+                    .is_some_and(|p| p.can_pin_messages),
+            },
+        }
+    }
+
+    /// MED1: record `rights.can_pin_messages` (`None` for non-admin
+    /// statuses or an absent rights block).
+    pub fn set_admin_can_pin_messages(&mut self, can_pin_messages: Option<bool>) {
+        self.my_admin_can_pin_messages = can_pin_messages;
+    }
+
     pub fn is_forum_chat(&self) -> bool {
         self.is_forum == Some(true)
     }
@@ -1679,6 +1717,7 @@ fn placeholder_chat(chat_id: ChatId) -> ChatSummary {
         my_admin_can_send_welcome_messages: None,
         my_admin_can_promote_members: None,
         my_admin_can_restrict_members: None,
+        my_admin_can_pin_messages: None,
         is_forum: None,
         photo_file_id: None,
         // Parity slice 4: lenient default true — the real `chat` object
@@ -2906,6 +2945,10 @@ pub struct Session {
     /// less-data), persisted via `settings::CallPrefs`. The driver
     /// loads them at startup; the UI saves on toggle.
     pub call_prefs: CallPrefs,
+    /// MED1: local media preferences (remember-media-grouping),
+    /// persisted via `settings::MediaPrefs`. Loaded at startup like
+    /// `call_prefs`; the UI saves on toggle.
+    pub media_prefs: MediaPrefs,
     /// Phase C3a: the tracked group call / voice chat, if any.
     /// **Signaling only** — TDLib transports no audio/video; the
     /// `joinVideoChat` response payload is stored (`join_payload`) and
@@ -3482,6 +3525,7 @@ impl Session {
             call_privacy_pending: 0,
             call_privacy_error: false,
             call_prefs: CallPrefs::default(),
+            media_prefs: MediaPrefs::default(),
             active_group_call: None,
             group_call_fetch_queue: Vec::new(),
             open_topic: None,
@@ -7125,6 +7169,7 @@ impl Session {
             chat.set_admin_can_restrict_members(
                 member.admin_rights.map(|r| r.can_restrict_members),
             );
+            chat.set_admin_can_pin_messages(member.admin_rights.map(|r| r.can_pin_messages));
             // Slice G2: sign-messages + welcome-message rights for the
             // channel path.
             chat.set_admin_can_change_info(member.admin_rights.map(|r| r.can_change_info));
@@ -13364,7 +13409,6 @@ mod tests {
             .unwrap()
             .set_member_status(ChannelMemberStatus::Member, None);
         assert!(!session.chat_can_view_event_log(ChatId(13)));
-
         // Non-channel supergroup path: administrator without promote right.
         let mut group = placeholder_chat(ChatId(14));
         group.kind = ChatKind::Supergroup {
@@ -13382,6 +13426,46 @@ mod tests {
         let private = placeholder_chat(ChatId(15));
         session.chats.insert(15, private);
         assert!(!session.chat_can_view_event_log(ChatId(15)));
+    }
+
+    #[test]
+    fn can_pin_messages_rights_gate() {
+        // MED1: pin rights — private chats always; creator always; admins
+        // need the explicit right; group members need the member right.
+        let mut private = placeholder_chat(ChatId(20));
+        private.kind = ChatKind::Private {
+            user_id: crate::ids::UserId(9),
+        };
+        assert!(private.can_pin_messages());
+
+        let mut creator = placeholder_chat(ChatId(21));
+        creator.kind = ChatKind::Supergroup {
+            supergroup_id: 21,
+            is_channel: false,
+        };
+        creator.set_member_status(ChannelMemberStatus::Creator, None);
+        assert!(creator.can_pin_messages());
+
+        let mut admin = placeholder_chat(ChatId(22));
+        admin.kind = ChatKind::BasicGroup { basic_group_id: 22 };
+        admin.set_member_status(ChannelMemberStatus::Administrator, None);
+        assert!(
+            !admin.can_pin_messages(),
+            "absent rights block keeps the gate closed"
+        );
+        admin.set_admin_can_pin_messages(Some(true));
+        assert!(admin.can_pin_messages());
+        admin.set_admin_can_pin_messages(Some(false));
+        assert!(!admin.can_pin_messages());
+
+        let mut member = placeholder_chat(ChatId(23));
+        member.kind = ChatKind::BasicGroup { basic_group_id: 23 };
+        member.set_member_status(ChannelMemberStatus::Member, None);
+        assert!(!member.can_pin_messages(), "no permissions block → closed");
+        member.permissions = Some(ChatPermissions::all());
+        assert!(member.can_pin_messages());
+        member.permissions.as_mut().unwrap().can_pin_messages = false;
+        assert!(!member.can_pin_messages());
     }
 
     #[test]

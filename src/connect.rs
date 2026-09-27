@@ -20,7 +20,9 @@ use crate::notify::NotificationSoundKind;
 use crate::platform::{DatabaseKey, KeyDecision, SecretStore, load_or_create_key};
 use crate::poll::{PollDraft, poll_answer_for_tap};
 use crate::rich::RichBlock;
-use crate::settings::{AccountPaths, default_app_root, load_call_prefs, save_call_prefs};
+use crate::settings::{
+    AccountPaths, default_app_root, load_call_prefs, load_media_prefs, save_call_prefs,
+};
 use crate::state::{
     AdminListFetch, AdminRightsFetch, CHAT_EVENT_LOG_PAGE_SIZE, ChatEventLogFetch,
     ChatSearchJumpNeed, ChatStatisticsFetch, ForwardFlight, InfoPanelTarget, InviteLinkFetch,
@@ -9415,6 +9417,8 @@ pub fn start_live_connect(
     // are loaded once here; the UI saves them back on toggle.
     let mut session = session;
     session.call_prefs = load_call_prefs(&prepared.paths);
+    // MED1: local media prefs (remember-media-grouping) load the same way.
+    session.media_prefs = load_media_prefs(&prepared.paths);
     let mut driver = ConnectDriver::new(session, sender, credentials, prepared);
     match crate::calls::engine::NtgcallsEngine::load() {
         Ok(engine) => {
@@ -9448,6 +9452,11 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// tab (same account-scoped dir as the other settings files).
     pub fn save_call_prefs(&mut self) -> std::io::Result<()> {
         save_call_prefs(&self.paths, &self.session.call_prefs)
+    }
+
+    /// MED1: persist media prefs (`media_prefs.json`) next to the account.
+    pub fn save_media_prefs(&mut self) -> std::io::Result<()> {
+        crate::settings::save_media_prefs(&self.paths, &self.session.media_prefs)
     }
 }
 

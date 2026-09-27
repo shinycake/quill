@@ -63,6 +63,55 @@ pub fn save_call_prefs(paths: &AccountPaths, prefs: &CallPrefs) -> std::io::Resu
     std::fs::write(path, bytes)
 }
 
+/// MED1: local-only media preferences, persisted as JSON next to the
+/// account root (`media_prefs.json`). Client-side only (no TDLib setting):
+/// - `remember_media_grouping`: when true, the composer's "group media"
+///   choice is remembered between sends (TGX `RememberAlbumSetting`);
+/// - `group_media`: the last-used grouping choice (only honored when
+///   `remember_media_grouping` is on).
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MediaPrefs {
+    pub remember_media_grouping: bool,
+    pub group_media: bool,
+}
+
+impl MediaPrefs {
+    /// Effective grouping for a fresh composer: the remembered choice when
+    /// remembering is on, grouped (the historical behavior) otherwise.
+    pub fn default_grouping(&self) -> bool {
+        if self.remember_media_grouping {
+            self.group_media
+        } else {
+            true
+        }
+    }
+}
+
+fn media_prefs_path(paths: &AccountPaths) -> PathBuf {
+    paths.root.join("media_prefs.json")
+}
+
+/// Load media prefs; missing or corrupt files fall back to defaults
+/// (never a hard error — prefs must not block startup).
+pub fn load_media_prefs(paths: &AccountPaths) -> MediaPrefs {
+    std::fs::read(media_prefs_path(paths))
+        .ok()
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+        .unwrap_or_default()
+}
+
+/// Persist media prefs; failures are returned to the caller to surface
+/// in the status note.
+pub fn save_media_prefs(paths: &AccountPaths, prefs: &MediaPrefs) -> std::io::Result<()> {
+    let path = media_prefs_path(paths);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let bytes = serde_json::to_vec_pretty(prefs)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+    std::fs::write(path, bytes)
+}
+
 #[derive(Debug, Clone)]
 pub struct AccountPaths {
     pub root: PathBuf,
@@ -134,6 +183,33 @@ mod tests {
         // Corrupt file → defaults, never a panic.
         std::fs::write(dir.join("accounts/primary/call_prefs.json"), b"not json").unwrap();
         assert_eq!(load_call_prefs(&paths), CallPrefs::default());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn media_prefs_roundtrip_and_default_grouping() {
+        // MED1: the stored grouping choice survives a load, and the
+        // effective default follows the remember flag.
+        let dir =
+            std::env::temp_dir().join(format!("quill-media-prefs-test-{}", std::process::id()));
+        let paths = AccountPaths::for_root(&dir, &AccountKey::primary());
+        assert_eq!(load_media_prefs(&paths), MediaPrefs::default());
+        assert!(MediaPrefs::default().default_grouping());
+        let prefs = MediaPrefs {
+            remember_media_grouping: true,
+            group_media: false,
+        };
+        save_media_prefs(&paths, &prefs).expect("save works");
+        assert_eq!(load_media_prefs(&paths), prefs);
+        assert!(!prefs.default_grouping());
+        // Remember off → grouped regardless of the stored choice.
+        let prefs = MediaPrefs {
+            remember_media_grouping: false,
+            group_media: false,
+        };
+        assert!(prefs.default_grouping());
+        std::fs::write(dir.join("accounts/primary/media_prefs.json"), b"not json").unwrap();
+        assert_eq!(load_media_prefs(&paths), MediaPrefs::default());
         let _ = std::fs::remove_dir_all(&dir);
     }
 
