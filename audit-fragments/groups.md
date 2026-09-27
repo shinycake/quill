@@ -1,0 +1,39 @@
+### Groups, supergroups & channels
+
+- [x] Group/channel info panel with description and member/subscriber count (src/ui/mod.rs:8280) <!-- parity:groups-info-panel -->
+- [ ] Create new group — no `createNewBasicGroupChat` request in Quill <!-- parity:groups-create-group -->
+- [ ] Create new channel — no `createNewSupergroupChat` request in Quill <!-- parity:groups-create-channel -->
+- [ ] Convert group to broadcast group (`toggleSupergroupIsBroadcastGroup`) <!-- parity:groups-convert-broadcast -->
+- [ ] Add members via contact picker — no `addChatMember`/`addChatMembers` request <!-- parity:groups-add-members -->
+- [ ] Browse/search member list (non-admin view) (partial: member list exists only inside the promote picker, src/ui/mod.rs:14430) <!-- parity:groups-member-list -->
+- [ ] Restricted-members and banned-members lists (member-status filters) <!-- parity:groups-restricted-banned-lists -->
+- [x] Administrator list with refresh, owner shown, custom titles displayed (src/ui/mod.rs:8748) <!-- parity:groups-admin-list -->
+- [x] Promote member via searchable picker with 18 granular rights checkboxes (src/ui/mod.rs:266-415) <!-- parity:groups-promote -->
+- [x] Edit existing admin rights, pre-filled from `getChatMember` (src/state.rs:209, src/ui/mod.rs:363) <!-- parity:groups-edit-rights -->
+- [x] Demote admin with confirmation dialog (src/ui/mod.rs:363) <!-- parity:groups-demote -->
+- [ ] Set/edit admin custom title (partial: titles are parsed and shown in the admin list) <!-- parity:groups-admin-title -->
+- [ ] Ban/restrict member with duration, mute-until, and unban (partial: only promote/edit/demote via `setChatMemberStatus` exist, src/state.rs:29) <!-- parity:groups-restrict-ban -->
+- [ ] Chat permissions editor — default "what members can do" toggles (send, stickers, polls, embed links, reactions) — no `setChatPermissions` request <!-- parity:groups-chat-permissions -->
+- [x] Slow-mode delay picker (Off/5s/10s/30s/1m/5m/15m/1h, admin-gated) (src/ui/mod.rs:8309) <!-- parity:groups-slow-mode -->
+- [x] Slow-mode send gate with countdown, applies to sends/forwards/voice (src/ui/mod.rs:3099) <!-- parity:groups-slow-mode-enforcement -->
+- [x] Slow-mode bypass when viewer boosts meet the unrestrict threshold (src/state.rs:3034) <!-- parity:groups-slow-mode-boost-bypass -->
+- [x] Invite-link list with expiry/humanised "Never expires"/"Expired" labels and pending-join-request counts (src/ui/mod.rs:8397) <!-- parity:groups-invite-link-list -->
+- [x] Create invite link dialog — name, expiration, member limit, join-request toggle (src/ui/mod.rs:222) <!-- parity:groups-invite-link-create -->
+- [x] Edit, copy and revoke invite links (src/ui/mod.rs:6341) <!-- parity:groups-invite-link-edit-revoke -->
+- [ ] Replace primary invite link — no `replacePrimaryChatInviteLink` request <!-- parity:groups-invite-link-primary -->
+- [x] Join-request list with approve/decline buttons and pending-count badge (src/ui/mod.rs:8596) <!-- parity:groups-join-requests -->
+- [ ] "Approve new members" join-by-request toggle (`toggleSupergroupJoinByRequest`) <!-- parity:groups-join-by-request-toggle -->
+- [x] Recent-actions event log with refresh and load-more (src/ui/mod.rs:8914) <!-- parity:groups-event-log -->
+- [ ] Event-log filter picker (per-event-type / per-admin) and in-log text search (partial: `getChatEventLog` accepts filters in the request builder, src/telegram/requests.rs:725, but no UI picker) <!-- parity:groups-event-log-filters -->
+- [x] Channel/group statistics panel with graphs and top senders/administrators/inviters, gated on `can_get_statistics` (src/ui/mod.rs:9195) <!-- parity:groups-statistics -->
+- [x] Author signatures rendered on channel posts (src/ui/mod.rs:22014) <!-- parity:groups-author-signatures-display -->
+- [ ] Author-signatures toggle for channel (`toggleSupergroupSignMessages`) <!-- parity:groups-author-signatures-toggle -->
+- [x] Forum topic list with per-topic history and posting to topics (src/connect.rs:1443) <!-- parity:groups-forum-browse -->
+- [ ] Create/edit/close/pin/hide forum topics — no `createForumTopic` family requests <!-- parity:groups-forum-manage -->
+- [x] "Discuss" jump to the linked discussion group (src/ui/mod.rs:12638) <!-- parity:groups-discussion-jump -->
+- [ ] Channel comments viewer ("view comments" in the discussion group) (partial: only the jump to the discussion group exists) <!-- parity:groups-channel-comments -->
+- [ ] Aggressive anti-spam toggle (`toggleSupergroupHasAggressiveAntiSpamEnabled`) <!-- parity:groups-anti-spam -->
+- [ ] Boost status/level display and boost action (partial: boost counts are parsed only for the slow-mode bypass) <!-- parity:groups-boost -->
+- [ ] Public username management for group/channel (`setSupergroupUsername`) <!-- parity:groups-public-username -->
+- [x] Leave channel (src/ui/mod.rs:17302) <!-- parity:groups-leave -->
+- [ ] Delete group/channel for everyone <!-- parity:groups-delete -->

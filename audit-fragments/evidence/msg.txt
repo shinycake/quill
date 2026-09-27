@@ -1,0 +1,58 @@
+# msg evidence — Messaging core parity (harvested 2026-09-27, ripgrep only)
+
+## SCHEMA  (~/workspace/quill/schema/td_api.tl, pinned 1.8.67)
+
+Constructor/function hits (concept-level grep, line:declaration):
+- 117: `formattedText text:string entities:vector<textEntity> = FormattedText`
+- 110: `textEntity offset:int32 length:int32 type:TextEntityType`; 24 textEntityType* constructors incl: Mention, Hashtag, Url, TextUrl(url), Bold, Italic, Underline, Strikethrough, Spoiler, Code, Pre, PreCode(language), BlockQuote, ExpandableBlockQuote, CustomEmoji(id)
+- 12200: `sendMessage chat_id topic_id reply_to options:messageSendOptions reply_markup input_message_content` ; 12209: `sendMessageAlbum`
+- 5934: `messageSendOptions suggested_post_info disable_notification from_background protect_content allow_paid_broadcast paid_message_star_count update_order_of_installed_sticker_sets scheduling_state effect_id sending_id only_preview`
+- 5902: `messageSchedulingStateSendAtDate send_date repeat_period`; 5905: `messageSchedulingStateSendWhenOnline`; 5909: `messageSchedulingStateSendWhenVideoProcessed`
+- 6081: `inputMessageText text:formattedText link_preview_options clear_draft`
+- 3086: `inputMessageReplyToMessage message_id quote:inputTextQuote checklist_task_id poll_option_id`
+- 3056: `inputTextQuote text:formattedText position:int32`
+- 12237: `forwardMessages chat_id topic_id from_chat_id message_ids options send_copy remove_caption`
+- 6218: `inputMessageForwarded ... copy_options:messageCopyOptions`; 5942: `messageCopyOptions send_copy replace_caption new_caption new_show_caption_above_media`
+- 12306: `editMessageText`; 12315: `editMessageLiveLocation`; 12330: `editMessageMedia`; 12338: `editMessageCaption caption:formattedText show_caption_above_media`; 12344: `editMessageReplyMarkup`
+- 12282: `deleteMessages chat_id message_ids revoke:Bool`
+- 13559: `pinChatMessage chat_id message_id disable_notification only_for_self`; 13562: `unpinChatMessage`; 13565: `unpinAllChatMessages`
+- 13493: `setChatDraftMessage chat_id topic_id draft_message:draftMessage`; 3433: `draftMessage reply_to date content effect_id`
+- 12064: `getMessageLink chat_id message_id media_timestamp checklist_task_id poll_option_id for_album in_message_thread`
+- 14792: `getLinkPreview text link_preview_options`; 5140: `messageText text link_preview link_preview_options`
+- 11524: `getMessage`; 11551: `getMessages`; 12251: `resendMessages chat_id message_ids quote paid_message_star_count`
+- `messageSendingStatePending` / `messageSendingStateFailed` exist (sending-state updates); `updateChatAction` + `chatActionTyping`/`chatActionCancel` exist
+
+## TGX  (~/workspace/telegram-x, official TDLib client — strings ARE the feature list)
+
+Formatting menu (menu/text.xml + values/strings.xml): TextFormatClear/Bold/Italic/Underline/Strikethrough/Monospace("code")/Spoiler/Quote/Link("Create Link"); "Text formatting" long-press/tools menu; 333 reply|forward|edit|delete|pin|copy|share|schedule|silent|draft strings total.
+Reply: MessageReply, Reply (per-message action), SwipeReply, InReplyToX, ReplyRequiredHint, ReplyMessageDeletedHint, AnotherChatReplyHint.
+Forward: ForwardLastXMessages (limit, cap error string), ForwardedFromX, MoreForwardOptions, ForwardAuthorHidden, SecretChatForwardError, PrivacyForwardLink* (link-to-account privacy settings — hide-sender is a PRIVACY setting here).
+Edit: DiscardChanges, EditMessageCaptionTooLong, DiscardEditCaption, RightEditMessages.
+Delete: DeleteMessage, DeleteForEveryone, DeleteForMe, DeleteForMeAndX.
+Pin: Pin, Unpin, UnpinMessage, PinnedMessages, YouPinnedMessage.
+Copy/Share: Copy, CopyText, CopyLine, CopyLink, Share, SwipeShare, CopyMediaLink absent from name grep; ShareLink.
+Send options: ChannelSilentBroadcast ("Silent Broadcast"), HoldToSilentBroadcast ("Hold for silent broadcast and more"), OnlyIfSilent; scheduled: DeleteScheduled, DeleteXScheduled, format_notificationScheduled* — send-when-online/schedule-date labels live in send-sheet, no dedicated name hits (behavior via long-press send).
+Draft: Draft ("Draft" badge).
+Status: Typing, IsTypingGroup, AreTypingGroup; status_Online/last-seen strings (presence, not per-msg receipts — TDX shows ✓/✓✓ glyphs).
+Link preview: LinkPreview toggle; SecretLinkPreviewEnable/Disable.
+Search: c_textSearchQueryHighlight (in-chat search exists); no dedicated SearchInChat string found.
+
+## QUILL  (~/workspace/quill/src — READ-ONLY)
+
+Send: telegram/requests.rs:1574 `send_text` (@type sendMessage; **entities: []**, options: Value::Null, link_preview_options: null, clear_draft: true); Enter-to-send gate composer.rs:20 `should_send_on_enter`; album send requests.rs:1945.
+Formatting: text.rs renders ALL incoming entities (TextEntityKind incl Spoiler:88, hidden-until-tapped:134; Bold:203 etc.); NO authoring path — composer produces plain text only (entities [] everywhere).
+Reply: ui/mod.rs:4269 `begin_reply_to` + Reply hover btn ui/mod.rs:21917; composer reply bar + cancel_reply_draft composer.rs:131; requests.rs:1547 `input_message_reply_to` sets **quote: null**; incoming quotes render (state.rs:6531 `reply_quote_preview`).
+Forward: requests.rs:2172 `forward_messages` — **send_copy:false, remove_caption:false, options:null** (comment:2146: official default, not hide-sender copy); multi-select: ui/mod.rs:21938 Select + 4682 `toggle_forward_select`; dest picker state.rs:6585 `forward_destinations`; 100-msg cap connect.rs (~5060).
+Edit: requests.rs:2097 `edit_message_text`, 2125 `edit_message_caption` (wired connect.rs:4989); begin_edit ui/mod.rs:21954; ComposerEdit::from_own_content gate; cancel_edit_draft composer.rs:213 preserves normal draft.
+Delete: requests.rs:2152 `delete_messages(revoke)`; UI: DeleteConfirm::own composer.rs:243 (own outgoing only); confirm_delete ui/mod.rs:4371; **revoke hardcoded true** connect.rs:5043 → delete-for-everyone always; no delete-for-me.
+Pin: requests.rs:2270 `pin_chat_message(disable_notification, only_for_self)`; UI toggle_pin_message ui/mod.rs:11464 → driver.toggle_pin_chat_message; pin/unpin row btn ui/mod.rs:21992; pins.rs exists; unpinAllChatMessages NOT wired in UI.
+Drafts: requests.rs:1537 `setChatDraftMessage`; composer.rs:333 DraftSaveClock (tdesktop 1s debounce); ui/mod.rs:12226 schedule_draft_commit; updateChatDraftMessage handled (test json ui/mod.rs:18633); edit-draft keeps reply context (composer.rs:221-237).
+Status: state.rs:893 `outgoing_status_label` → "You (sending)"/"You · sent"/"You · read"; state.rs:1177 `outbox_receipt` (last_read_outbox_message_id); pending: bool state.rs:1258; NO resend/retry (resendMessages unwired).
+Typing: send `sendChatAction` requests.rs:2392 (chatActionTyping/chatActionCancel); receive via updateChatAction → typing_senders state.rs:930; is_peer_typing:1138.
+Receipts: `viewMessages` requests.rs:1470 (source messageSourceChatHistory), openChat before it (requests.rs:306).
+Link preview: received previews render card ui/mod.rs:22404; send has NO preview options/toggle (link_preview_options null).
+Message links/share: NO getMessageLink usage; NO share action on messages.
+Copy text: NO copy-text on message row (only inline-button CopyText ui/mod.rs:3932 + invite-link copy:6357).
+Context menu: NO right-click/context menu handlers; per-message hover action buttons only (Reply/Forward/Select/Edit/Delete/React/Pin) ui/mod.rs:21900-22010.
+In-chat search: requests.rs:213 `search_chat_messages`; ui/mod.rs:575 chat_search_input + 1261 sync/jump handlers.
+Broadcast: views footer eye glyph ui/mod.rs:21998 (interaction_info.view_count).

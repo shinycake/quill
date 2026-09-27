@@ -1,0 +1,49 @@
+### Bots, polls & payments
+
+- [x] Inline keyboard rows rendered under messages with per-button styles (ui/mod.rs:21636) <!-- parity:bots-inline-keyboard-render -->
+- [x] URL buttons open the link (ui/mod.rs:21663) <!-- parity:bots-inline-url -->
+- [x] Callback buttons answered via getCallbackQueryAnswer; bot answer shown as toast / URL opened (connect.rs:4786, ui/mod.rs:3941) <!-- parity:bots-inline-callback -->
+- [x] Switch-inline buttons insert "@bot query" into the composer (ui/mod.rs:21678) <!-- parity:bots-inline-switch -->
+- [x] Copy-text buttons copy the text (ui/mod.rs:21681) <!-- parity:bots-inline-copy -->
+- [ ] Login URL buttons (partial: renders with "Login buttons are not supported yet" tooltip) <!-- parity:bots-inline-login -->
+- [ ] Web app buttons (partial: renders with "Web App buttons are not supported yet" tooltip; no getWebAppUrl code) <!-- parity:bots-inline-webapp -->
+- [ ] Password-protected callback buttons (partial: tooltip only) <!-- parity:bots-inline-callback-password -->
+- [ ] Game buttons (partial: "Game buttons are not supported yet" tooltip; no sendGame/score code) <!-- parity:bots-inline-game -->
+- [ ] Buy buttons (partial: "Payment buttons are not supported yet" tooltip; invoice messages fall back to Unsupported) <!-- parity:bots-inline-buy -->
+- [ ] User buttons (partial: "User buttons are not supported yet" tooltip) <!-- parity:bots-inline-user -->
+- [ ] Custom reply keyboards (keyboardButton types parsed in envelope.rs:8548 but never rendered) <!-- parity:bots-custom-keyboard -->
+- [ ] Force-reply markup (no UI) <!-- parity:bots-force-reply -->
+- [x] Bot info panel with description and tappable /command buttons inserting into the composer (ui/mod.rs:13726) <!-- parity:bots-info-panel -->
+- [ ] Bot START button / start_parameter deep links <!-- parity:bots-start -->
+- [ ] Restart bot <!-- parity:bots-restart -->
+- [ ] Share bot <!-- parity:bots-share -->
+- [ ] Block / unblock bot <!-- parity:bots-block -->
+- [ ] Bot menu button / main web app launch <!-- parity:bots-menu-button -->
+- [ ] Bot privacy settings <!-- parity:bots-privacy -->
+- [ ] Similar bots tab in profile <!-- parity:bots-similar -->
+- [x] `/` command menu merging chat-specific bot commands and global getCommands (state.rs:3100) <!-- parity:bots-command-menu -->
+- [ ] Inline mode: type @bot in composer, inline query results list, send an inline result (no getInlineQueryResults code in src) <!-- parity:bots-inline-mode -->
+- [ ] Games: send / play, high scores (no game code at all) <!-- parity:bots-games -->
+- [x] Poll creation dialog: question, add/remove options (2–10), validation errors, anonymous + multiple-answer toggles (ui/mod.rs:14860, poll.rs:112) <!-- parity:bots-poll-create -->
+- [ ] Create quiz polls: mark correct option, write quiz explanation (dialog explicitly excludes quiz; quiz answers only render in results) <!-- parity:bots-poll-create-quiz -->
+- [ ] Poll description field (shown above the poll title) <!-- parity:bots-poll-description -->
+- [ ] Poll duration setting <!-- parity:bots-poll-duration -->
+- [ ] Revoting toggle in creation dialog (partial: revoting honored when the server allows it) <!-- parity:bots-poll-revoting -->
+- [ ] Shuffle options toggle <!-- parity:bots-poll-shuffle -->
+- [ ] Show voters toggle <!-- parity:bots-poll-show-voters -->
+- [ ] Country restriction setting <!-- parity:bots-poll-countries -->
+- [ ] Poll discard-confirmation prompt <!-- parity:bots-poll-discard -->
+- [x] Voting: single, multiple, retract-when-revoting, quiz answering, closed-poll blocked, optimistic UI with rollback on failure (poll.rs:51, connect.rs:5287) <!-- parity:bots-poll-vote -->
+- [x] Live poll updates applied in place via updatePoll (state.rs:3962) <!-- parity:bots-poll-live-update -->
+- [x] Results: percentage bars, voter counts, chosen marks, correct-answer mark on closed quizzes (ui/mod.rs:21764) <!-- parity:bots-poll-results -->
+- [ ] View voter list (getPollVoters) <!-- parity:bots-poll-voters -->
+- [ ] Stop poll / stop quiz with confirmation warning (zero stopPoll usage in src) <!-- parity:bots-poll-stop -->
+- [ ] Quiz explanation shown after answering <!-- parity:bots-poll-quiz-explanation -->
+- [ ] Vote restriction reasons display (closed / country / membership) <!-- parity:bots-poll-restrictions -->
+- [ ] Poll entry gated on can_send_polls; restricted-poll notices <!-- parity:bots-poll-permissions -->
+- [ ] Poll stopped service message <!-- parity:bots-poll-service-message -->
+- [ ] Invoice message rendering (falls back to Unsupported) <!-- parity:bots-payment-invoice -->
+- [ ] Payment checkout flow (order info, shipping, card credentials) <!-- parity:bots-payment-checkout -->
+- [ ] Payment receipts <!-- parity:bots-payment-receipt -->
+- [ ] Recurring payments <!-- parity:bots-payment-recurring -->
+- [ ] Clear payment/shipping info (privacy) <!-- parity:bots-payment-clear -->

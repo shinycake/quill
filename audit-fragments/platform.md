@@ -1,0 +1,29 @@
+### Platform & edge cases
+
+- [x] Global keyboard shortcuts: 22 bindings wired in `bind_keys` (Quit, focus sidebar/composer, chat search, media viewer nav/zoom) (src/ui/mod.rs:125) <!-- parity:platform-keyboard-shortcuts -->
+- [ ] Keyboard shortcuts reference/help overlay listing all bindings <!-- parity:platform-shortcuts-reference -->
+- [ ] Customizable key bindings <!-- parity:platform-custom-keybindings -->
+- [ ] Screen-reader accessible labels/roles on UI elements (no accessibility API usage in src) <!-- parity:platform-screen-reader-labels -->
+- [ ] VoiceOver support (blocked: Linux desktop has no VoiceOver; no accessibility tree backend in the UI layer) <!-- parity:platform-voiceover -->
+- [ ] High-contrast theme/mode <!-- parity:platform-high-contrast -->
+- [ ] System tray icon with unread count <!-- parity:platform-tray-icon -->
+- [ ] Minimize/close-to-tray behavior <!-- parity:platform-minimize-to-tray -->
+- [ ] Tray context menu (open window, quit) <!-- parity:platform-tray-menu -->
+- [ ] Start minimized to tray <!-- parity:platform-start-minimized -->
+- [ ] Autostart on login (OS-level; schema `autostart` is bot-start-only, no TDLib involvement) <!-- parity:platform-autostart -->
+- [ ] Spellcheck in composer <!-- parity:platform-spellcheck -->
+- [ ] Chat history export to file (partial: getChatHistory fetching exists; no export-to-file; implementable client-side — no exportHistory constructor in schema, not schema-blocked) <!-- parity:platform-history-export -->
+- [ ] Full account data export (Telegram Desktop "Export Telegram data") <!-- parity:platform-data-export -->
+- [ ] In-app update check/download/install <!-- parity:platform-app-updates -->
+- [ ] Update changelog display after updates <!-- parity:platform-update-changelog -->
+- [ ] Offline connection indicator in UI (partial: updateConnectionState parsed at telegram/envelope.rs:5506 and stored in state.rs:2199, but never rendered) <!-- parity:platform-offline-indicator -->
+- [ ] Reconnect state labels ("Connecting…", "Waiting for network…", "Updating…", "Connecting to proxy…") <!-- parity:platform-reconnect-states -->
+- [ ] "You're offline" error messaging when sending/calling while offline <!-- parity:platform-offline-errors -->
+- [x] TDLib request errors surfaced on the originating surface (e.g. failed createCall → error line on call overlay) (src/state.rs:4547) <!-- parity:platform-error-surfacing -->
+- [ ] Flood/rate-limit errors with retry countdown (e.g. "Try again in N seconds") <!-- parity:platform-flood-errors -->
+- [ ] Unread badge on the app/taskbar icon <!-- parity:platform-app-icon-badge -->
+- [ ] OS desktop notifications (partial: in-app toast queue with burst coalescing exists in src/notify.rs; no OS dispatch) <!-- parity:platform-os-notifications -->
+- [ ] Drag-and-drop files into the composer <!-- parity:platform-drag-drop-files -->
+- [x] Copy text to clipboard (inline keyboard copy-text button src/ui/mod.rs:3932; invite link src/ui/mod.rs:6357) <!-- parity:platform-copy-clipboard -->
+- [ ] Paste image from clipboard into composer (partial: clipboard write exists, no read_from_clipboard usage) <!-- parity:platform-paste-image -->
+- [ ] t.me/tg: deep-link handling via getDeepLinkInfo (schema support exists; no usage in Quill) <!-- parity:platform-deep-links -->

@@ -1,0 +1,37 @@
+### Auth & accounts
+
+- [x] Phone-number login: country code, invalid/banned-number errors, SMS hint <!-- parity:auth-phone-login --> (README:24; telegram/requests.rs:51)
+- [x] Verification-code entry: expected digit count, invalid-code handling <!-- parity:auth-code-entry --> (auth.rs:44; telegram/requests.rs:71)
+- [ ] Resend the login code (partial: code entry works; no resend UI — schema has resendPhoneNumberCode) <!-- parity:auth-code-resend -->
+- [x] Two-step password entry on login <!-- parity:auth-2fa-password --> (auth.rs:52; telegram/requests.rs:81)
+- [ ] Log in via QR code: request QR, display link, scan with phone (partial: WaitOtherDeviceConfirmation state text exists at auth.rs:62 but requestQrCodeAuthentication is never called) <!-- parity:auth-qr-login -->
+- [ ] "Link desktop device": show QR so another device can log in as this account <!-- parity:auth-qr-authorize-other -->
+- [ ] New-user registration: first/last name + terms (partial: explicit UnsupportedHalt — "finish registration in an official client", auth.rs:83) <!-- parity:auth-registration -->
+- [ ] Email-based login flow (partial: explicit UnsupportedHalt, auth.rs:72) <!-- parity:auth-email-login -->
+- [ ] Premium-purchase-gated login state (partial: explicit UnsupportedHalt, auth.rs:66) <!-- parity:auth-premium-login -->
+- [ ] Enable / change / disable the two-step password (schema: setPassword) <!-- parity:auth-2fa-manage -->
+- [ ] Set / change recovery email, pending-confirmation state, abort setup (schema: setRecoveryEmailAddress; TGX SetRecoveryEmail, PendingEmailText, AbortPasswordSetup) <!-- parity:auth-recovery-email -->
+- [ ] Password recovery via 6-digit email code (partial: login password screen only hints "recovery email is available in the official client", auth.rs:54) <!-- parity:auth-password-recovery -->
+- [ ] Active Sessions list: device/app/IP/location with current-device marker (schema: getActiveSessions) <!-- parity:auth-sessions-list -->
+- [ ] Incomplete login attempts list with per-attempt terminate (TGX SessionsIncompleteTitle/Info) <!-- parity:auth-sessions-incomplete -->
+- [ ] Terminate one session, with confirmation (schema: terminateSession; TGX TerminateSessionQuestion) <!-- parity:auth-session-terminate-one -->
+- [ ] Terminate all other sessions, with confirmation (schema: terminateAllOtherSessions; TGX AreYouSureSessions) <!-- parity:auth-sessions-terminate-all -->
+- [ ] Per-session toggles: accept secret chats / accept calls (schema: toggleSessionCanAcceptSecretChats, toggleSessionCanAcceptCalls; TGX SessionAccepts) <!-- parity:auth-session-toggles -->
+- [ ] "Logged in with Telegram" websites list + disconnect all (TGX WebSessionsTitle, TerminateAllWebSessions) <!-- parity:auth-web-sessions -->
+- [x] Log out (telegram/requests.rs:98; state.rs:6502 invalidates account) <!-- parity:auth-logout -->
+- [ ] Logout warning text: secret chats die, downloaded media erased (TGX SignOutHint2) (partial: logout works, no warning copy) <!-- parity:auth-logout-warning -->
+- [ ] Add another account / switch between accounts: single "accounts/primary" DB layout only, no account UI (settings.rs:39) <!-- parity:auth-multi-account -->
+- [ ] Change phone number: move contacts/groups/messages/media to a new number (partial: nothing in Quill; schema has no changePhoneNumber constructor — it re-runs the auth flow on the new number) <!-- parity:auth-change-number -->
+- [ ] Delete account with "Deleted Account" explainer (schema: deleteAccount) <!-- parity:auth-delete-account -->
+- [ ] Self-destruct-if-away timer (schema: getAccountTtl/setAccountTtl; TGX DeleteAccountIfAwayFor*) <!-- parity:auth-account-ttl -->
+- [x] Contacts list with empty state (ui/mod.rs:7729 contacts_list; telegram/requests.rs:364 getContacts) <!-- parity:auth-contacts-list -->
+- [x] Add contact via dialog: phone (required), first/last name -> addContact (ui/mod.rs:9469; telegram/requests.rs:379) <!-- parity:auth-contact-add -->
+- [ ] Delete contact (schema: removeContacts; TGX DeleteContactConfirm) <!-- parity:auth-contact-delete -->
+- [ ] Import contacts from a file/vCard (schema: importContacts) <!-- parity:auth-contact-import -->
+- [ ] Sync contacts toggle + delete synced contacts from servers (TGX SyncContacts*, SyncContactsDeleteInfo) <!-- parity:auth-contact-sync -->
+- [ ] Block user with confirmation (TGX QBlockUser/BlockUserConfirm; no block request builders in Quill) <!-- parity:auth-block-user -->
+- [ ] Edit name (schema: setName) <!-- parity:auth-edit-name -->
+- [ ] Edit bio (schema: setBio; profile panel is read-only, ui/mod.rs:8150) <!-- parity:auth-edit-bio -->
+- [ ] Username management: set, active-usernames list, reorder, activate/deactivate (schema: setUsername, reorderActiveUsernames, toggleUsernameIsActive) <!-- parity:auth-username -->
+- [ ] Set / remove profile photo (schema: setProfilePhoto, deleteProfilePhoto) <!-- parity:auth-profile-photo -->
+- [ ] Profile accent color (schema: setProfileAccentColor) <!-- parity:auth-profile-accent -->

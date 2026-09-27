@@ -1,0 +1,109 @@
+EVIDENCE: SETTINGS area parity fragment (schema 1.8.67, TGX, Quill) — harvested 2026-09-27.
+
+## SCHEMA (~/workspace/quill/schema/td_api.tl, pinned 1.8.67)
+
+Notifications:
+- chatNotificationSettings (14 fields: mute_for, sound_id, show_preview, mute_stories,
+  story_sound_id, show_story_poster, disable_pinned_message_notifications,
+  disable_mention_notifications, each with use_default_* variants)
+- scopeNotificationSettings / reactionNotificationSettings; NotificationSettingsScope
+  (PrivateChats, GroupChats, ChannelChats)
+- Fns: setChatNotificationSettings, getScopeNotificationSettings, setScopeNotificationSettings,
+  setForumTopicNotificationSettings, setReactionNotificationSettings, resetAllNotificationSettings,
+  getChatNotificationSettingsExceptions, getStoryNotificationSettingsExceptions
+
+Privacy (concept search "privacy" hit ~60 lines; concept-level, not one-name grep):
+- 14 UserPrivacySetting constructors: userPrivacySettingShowStatus, ShowProfilePhoto,
+  ShowLinkInForwardedMessages, ShowPhoneNumber, ShowBio, ShowBirthdate, ShowProfileAudio,
+  AllowChatInvites, AllowCalls, AllowPeerToPeerCalls, AllowFindingByPhoneNumber,
+  AllowPrivateVoiceAndVideoNoteMessages, AutosaveGifts, AllowUnpaidMessages
+- Rules: userPrivacySettingRuleAllowAll/Contacts/Bots/PremiumUsers/Users/ChatMembers,
+  Restrict* mirrors; fns setUserPrivacySettingRules / getUserPrivacySettingRules
+
+Appearance/theme:
+- themeSettings (base_theme:BuiltInTheme, accent_color, background, outgoing_message_fill, ...);
+  builtInThemeClassic/Day/Night/Tinted/Arctic; chatTheme; setDefaultBackground; setChatTheme
+- setOption (generic); language applied via setOption("language_pack_id")
+
+Auto-download/storage:
+- autoDownloadSettings (is_auto_download_enabled, max_photo/video/other sizes, video_upload_bitrate,
+  preload_large_videos/next_audio/stories, use_less_data_for_calls)
+- fns: getAutoDownloadSettingsPresets, setAutoDownloadSettings(settings, type:NetworkType)
+- getStorageStatistics(chat_limit), getStorageStatisticsFast, optimizeStorage(size,ttl,count,...)
+- settingsSectionDataAndStorage subsections: "storage", "storage/edit", "storage/auto-remove",
+  "storage/clear-cache", "storage/max-cache", "usage"
+
+## TGX (~/workspace/telegram-x; strings ARE the feature list)
+
+Main Settings screen rows (SettingsController.java:630-649):
+  Devices · Notifications · Data and Storage · Privacy and Security · Stickers and Emoji ·
+  Themes and Chats · TweakSettings (TGX-only) · ChatFolders · Language · Log Out
+  (Sessions/Device list excluded per task: auth area owns them)
+
+Appearance (SettingsThemeController.java):
+  Themes · ThemeClassic/Day/Night + custom (ThemeCreate/ThemeEdit/ThemeRemove) · AutoNightMode
+  (Disabled/System/Scheduled, AutoNightModeDescriptionSystemQ) · TextSize ("Message Font Size",
+  TextSizeReset) · ChatStyleBubbles · Wallpaper · SendByEnter · ChatListStyle · UseSystemFonts
+
+Notifications (SettingsNotificationController.java):
+  PrivateChats / Groups / Channels / Calls scopes · Sound · MessagePreview · Vibrate ·
+  Mentions (MentionsOn/Off) · PinnedMessages (PinnedMessagesOn/Off) · InChatSound ·
+  RepeatNotifications · ResetNotifications ("Reset all notification settings, including custom
+  notification settings for your contacts, groups and channels?") · CustomNotifications
+  ("These settings will override the global values in Settings > Notifications.") ·
+  ReactionNotificationSettings concept present in strings? (no dedicated strings; TGX handles
+  reactions via MessageReactions settings not exposed in notification screen)
+
+Privacy & Security (SettingsPrivacyController.java + strings.xml EditPrivacy*):
+  BlockedSenders ("Blocked users") · Last Seen & Online · Phone Number · Profile Photos ·
+  Forward My Messages · Call Me · Add Me to Groups and Channels · See My Read Date ·
+  Bio · Birthday · Saved Music · Send Me Voice Messages · Remove Fee · Display Gifts ·
+  PrivacyBots · Clear Payment and Shipping Info · Delete All Cloud Drafts · New Chats
+  (Security section: Passcode Lock, Two-Step — auth/security area, not duplicated here)
+
+Data & Storage (SettingsDataController.java):
+  AutomaticMediaDownload (per network: WhenUsingMobileData, WiFi, Roaming; per type:
+  Photos, Videos, Files, Music, VoiceMessages, VideoMessages, GIFs; SizeLimitDesc) ·
+  DataSaver ("media will never download automatically") · StorageUsage (with per-chat/file-type
+  breakdown, DeleteFromCache) · NetworkUsage (Mobile/Roaming stats, ResetStatistics) ·
+  UseLessDataForCalls · Proxy (SettingsProxyController; desktop parity item)
+
+Language: SettingsLanguageController; "You can revert changes anytime later in
+Settings > Language." (ApplicationLanguage string)
+
+## QUILL (~/workspace/quill/src — read-only)
+
+Settings area in code:
+- src/settings.rs (91 lines): ONLY AccountPaths + Preferences{version, account,
+  hide_notification_previews:bool default true}; NO settings screen, NO theme/font/lang prefs.
+- NO global settings view/route in src/ui/mod.rs (rg "settings_view|settings_open|\"Settings\"" → none).
+- Theme: app explicitly "has no dark-mode concept" (ui/mod.rs:7883-7885); cx.theme() is GPUI
+  framework default, not user-settable; NO wallpaper (rg wallpaper → 0), NO accent color picker,
+  NO font-size setting (only hardcoded px values).
+
+Notifications — per-chat panel IS LIVE:
+- src/ui/mod.rs:12657-13087 per-chat notification settings panel: mute presets (1h/8h/2d/forever
+  tdesktop-style), message-preview toggle, saved-sound picker (getSavedNotificationSounds).
+- Live apply paths: apply_chat_mute → connect.rs:5424 set_chat_mute_for → setChatNotificationSettings
+  (requests.rs:2303); apply_chat_preview → connect.rs set_chat_show_preview (13028-13041);
+  sound picker → apply via setChatNotificationSettings (12990-13027).
+- Scope defaults dialog IS LIVE: "Notification defaults" dialog (13390-13425), per scope
+  (PrivateChats/Groups/Channels) mute (apply_scope_mute:13274), preview (apply_scope_preview:13318),
+  sound picker (apply_scope_sound:13229), backed by getScopeNotificationSettings (state.rs:96-102,
+  connect.rs:5556) + setScopeNotificationSettings; opened from per-chat panel
+  ("Defaults for all chats…", ui/mod.rs:12862-12868).
+- MISSING: resetAllNotificationSettings (0 hits), getChatNotificationSettingsExceptions (0 hits),
+  custom-exceptions list UI, mentions override, pinned-message notification toggle,
+  reactionNotificationSettings, in-app sounds toggle, repeat notifications.
+
+Privacy: ZERO implementation — "privacy" appears only in test JSON fixtures
+(ui/mod.rs:19230, state.rs:9507); NO setUserPrivacySettingRules/getUserPrivacySettingRules,
+NO blocked-users UI, NO privacy screen.
+
+Data & storage: ZERO implementation — "storage|cache" hits are internal file caches; NO
+setAutoDownloadSettings, NO getStorageStatistics, NO optimizeStorage (clear cache), NO UI.
+
+Language: only connect.rs:284 system_language_code:"en" for auth params; NO language picker.
+
+Chat settings: Enter ALWAYS sends (composer.rs:19-20 should_send_on_enter; NO toggle);
+  Shift/secondary Enter does NOT send; NO send-by-Cmd/Ctrl+Enter option; NO message font size.

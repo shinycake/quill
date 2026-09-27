@@ -1,0 +1,47 @@
+### Stickers, emoji & GIFs
+
+- [x] Sticker picker with installed sets + grid, tap to send <!-- parity:stickers-picker -->
+- [x] Send sticker via inputMessageSticker <!-- parity:stickers-send -->
+- [x] Load installed regular sticker sets (getInstalledStickerSets + getStickerSet per set) <!-- parity:stickers-installed -->
+- [x] Sticker picker loading / error states (state.rs:4844-4849) <!-- parity:stickers-picker-states -->
+- [x] GIF picker with saved GIFs (getSavedAnimations), tap to send via inputMessageAnimation <!-- parity:gifs-saved-picker -->
+- [x] GIF picker refreshes when updateSavedAnimations arrives (state.rs:4397-4398) <!-- parity:gifs-saved-refresh -->
+- [x] Emoji reactions picker (emoji-only) + reaction chips on messages (ui/mod.rs:631, state.rs:1298-1308) <!-- parity:emoji-reactions -->
+- [x] Sticker thumbnails shown in picker and history (state.rs:5215, ui/mod.rs:14067) <!-- parity:stickers-thumbnails -->
+- [ ] Trending sticker sets tab (partial: picker opens only; no getTrendingStickerSets/viewTrendingStickerSets) <!-- parity:stickers-trending -->
+- [ ] Search sticker sets / stickers (searchStickerSets/searchStickers) <!-- parity:stickers-search -->
+- [ ] Favorites sticker tab (getFavoriteStickers/addFavoriteSticker/removeFavoriteSticker) <!-- parity:stickers-favorites -->
+- [ ] Recent stickers tab + clear recent stickers (getRecentStickers/clearRecentStickers) <!-- parity:stickers-recent -->
+- [ ] Install sticker set (changeStickerSet install) <!-- parity:stickers-install -->
+- [ ] Remove sticker set with confirm dialog <!-- parity:stickers-remove -->
+- [ ] Archive sticker set + Archived view in settings (restore path) <!-- parity:stickers-archive -->
+- [ ] Reorder installed sticker sets <!-- parity:stickers-reorder -->
+- [ ] Dynamic set order (auto-place recently used sets above others) <!-- parity:stickers-dynamic-order -->
+- [ ] Open sticker set preview screen (title, stickers grid, install/remove from preview) <!-- parity:stickers-set-preview -->
+- [ ] "No sticker sets installed" empty state <!-- parity:stickers-empty-state -->
+- [ ] "X sets installed" counts and batch install/remove feedback <!-- parity:stickers-install-counts -->
+- [ ] Sticker suggestions by emoji in composer (Installed + recommended / Only installed / None) <!-- parity:stickers-suggest-by-emoji -->
+- [ ] Animated sticker (TGS) playback in picker and history (partial: format parsed, only thumbnails rendered) <!-- parity:stickers-animated-playback -->
+- [ ] Video sticker (WebM) playback (partial: format parsed, static thumb only) <!-- parity:stickers-video-playback -->
+- [ ] "Loop Animated Stickers" setting <!-- parity:stickers-loop-setting -->
+- [ ] Premium sticker gating ("Sending this sticker requires Telegram Premium") <!-- parity:stickers-premium-gate -->
+- [ ] Show "choosing a sticker" chat action of others <!-- parity:stickers-typing-action -->
+- [ ] GIF search + trending GIFs (inline bot path searchInlineBots/getInlineQueryResults) <!-- parity:gifs-search-trending -->
+- [ ] Save GIF to media keyboard (addSavedAnimation) <!-- parity:gifs-save -->
+- [ ] Delete saved GIF (removeSavedAnimation + confirm) <!-- parity:gifs-delete -->
+- [ ] "No GIFs" empty state <!-- parity:gifs-empty-state -->
+- [ ] "Autoplay GIFs" setting <!-- parity:gifs-autoplay-setting -->
+- [ ] GIF loop playback in history (partial: static frame cache only, ui/mod.rs:3015) <!-- parity:gifs-history-playback -->
+- [ ] Emoji picker in composer with categories (Smileys & People, etc.) and search <!-- parity:emoji-picker -->
+- [ ] Insert emoji at cursor in composer text <!-- parity:emoji-insert -->
+- [ ] Big emoji rendering for emoji-only messages (Big Emoji setting) <!-- parity:emoji-big -->
+- [ ] Custom emoji packs (browse/install/remove, "Emoji Sets" settings screen) <!-- parity:emoji-custom-packs -->
+- [ ] Render custom emoji inside message text <!-- parity:emoji-custom-render -->
+- [ ] Suggest animated emoji in composer <!-- parity:emoji-suggest-animated -->
+- [ ] Emoji status: select/set status, timed status (1h/2h/8h/2d/custom), trending statuses <!-- parity:emoji-status -->
+- [ ] Clear recent emoji statuses <!-- parity:emoji-status-clear-recent -->
+- [ ] Clear recent emoji <!-- parity:emoji-clear-recent -->
+- [ ] Dynamic emoji pack order setting <!-- parity:emoji-dynamic-pack-order -->
+- [ ] Emoji pack download states (Downloading…/Downloaded/Update Needed/Installing…) <!-- parity:emoji-pack-states -->
+- [ ] "Send Stickers & GIFs" permission denied messaging in groups <!-- parity:stickers-permission-messaging -->
+- [ ] Group sticker set management (setSupergroupStickerSet / setSupergroupCustomEmojiStickerSet) <!-- parity:stickers-group-set -->

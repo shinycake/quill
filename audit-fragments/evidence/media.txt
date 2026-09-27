@@ -1,0 +1,63 @@
+## SCHEMA (td_api.tl, pinned 1.8.67) — concept-level case-insensitive greps
+
+- download/upload/file mgmt: cancelDownloadFile, getFileDownloadedPrefixSize, setFileGenerationProgress present (163 lines match 'download|upload' total)
+- voiceNote (41 matches): voiceNote, inputVoiceNote, inputMessageVoiceNote, chatActionRecordingVoiceNote, chatActionUploadingVoiceNote, searchMessagesFilterVoiceNote/VoiceAndVideoNote, draftMessageContentVoiceNote, linkPreviewTypeVoiceNote, pageBlockVoiceNote
+- videoNote: videoNote, inputVideoNote, inputMessageVideoNote, chatActionRecordingVideoNote, chatActionUploadingVideoNote, searchMessagesFilterVideoNote
+- albums: message.media_album_id (groups audios/documents/photos/videos); linkPreviewTypeAlbum(media, caption), LinkPreviewAlbumMedia(Photo|Video); NO 'messageMediaGroup' constructor — grouping is via media_album_id field
+- linkPreview: linkPreviewOptions(is_disabled,url,force_small_media,force_large_media,show_above_text) (51 matches); LinkPreviewType variants: Album, Animation, App, Article, Audio, Background, ChannelBoost, Chat, DirectMessagesChat, Document, EmbeddedAnimationPlayer, EmbeddedAudioPlayer, EmbeddedVideoPlayer, ExternalAudio, VideoNote, VoiceNote, StoryAlbum, Sticker, Theme, User
+- message media constructors: messagePhoto(3), messageVideo(8), messageAnimation(3), messageAudio(2), messageVoiceNote(2), messageVideoNote(2), messageDocument(3), messageSticker(2)
+- player/seek/speed: NO seek/speed constructor on td_api layer (speed is client-side; found only 'preload_large_videos' for instant playback)
+- caption: 146 matches; messagePhoto/Video/Animation/Audio/Document carry caption:formattedText + show_caption_above_media
+- waveform: 5-bit bytes on voiceNote + videoNote + inputVoiceNote
+- searchMessagesFilter: Photo, Video, Animation, Document, VoiceNote, VideoNote, VoiceAndVideoNote, PhotoAndVideo, Url (shared-media gallery API exists)
+
+## TGX (strings.xml = feature list)
+- PlaybackSpeed (+50/70/100/120/150/200 labels), 'Hold to access more options', 'Hold and swipe horizontally for precise adjustment' — long-press speed dial on audio/video/voice
+- ZoomOut; CameraVolumeZoom='Zoom' (camera), no explicit photo-viewer 'Rotate' string; PiP string not in strings.xml (Android PiP is system gesture)
+- Download/pause/resume: CloudPause='Pause Download', CloudResume='Resume Download', CloudDownload='Download %1s'; Downloads screen; DownloadingOf/Downloading; NoDownloadFilesFound; DataSaverDesc pauses all; AutomaticMediaDownload settings; KeepMediaInfo (auto-delete cached media timer)
+- SaveXToDownloads/SaveToDownloads; SaveToGallery; ShowInChat; CopyLink; Share; DownloadedToPath; DeleteFileHint ('you can download this file any time later')
+- Caption: AddCaption='Add a caption…', EditMessageCaptionTooLong, DiscardEditCaption/DiscardMediaMsg2, RemoveCaptions ('Remove captions in copies'); MessagePinAlbum/MessageUnpinAlbum; RememberAlbumSetting ('Remember media grouping setting')
+- Shared media tabs: MessageSearchFilterMusic='Music', MessageSearchFilterGif='GIFs'; empty states NoPhotosToShowInChat/NoVideosToShowInChat/NoDocumentsToShowInChat/NoMusicToShowInChat/NoLinksToShowInChat/NoVoiceToShowInChat/NoVideoToShowInChat/NoGifsToShowInChat/NoMediaToShowInChat
+- Recording: HoldToAudio='Hold to record audio. Tap to switch to video.' HoldToVideo; slideToCancel='Slide to Cancel'; RecordingAudio/Video/Round; UseHqRoundVideos='Record HQ Round Videos'; DiscardVideoMessageTitle/Description; XRestrictedVoiceMessages/XRestrictedVideoMessages
+- Playback errors: VideoPlaybackError/VideoPlaybackUnsupported, RoundVideoPlaybackError, AudioPlaybackError/Unsupported, GifPlaybackError/Unsupported
+- InstantView + AutoInstantView (None/Telegram/All links) + InstantViewUnsupported/Unavailable/Error
+- res/menu/: only text.xml — media actions live in contextual bottom sheets, not XML menus
+- Mute/Unmute video player strings are notification-mute related, not player volume (volume controlled by system)
+
+## QUILL (src, read-only) — presence evidence
+PHOTO VIEWER (src/media_viewer.rs + ui/mod.rs:4865/15059/15067)
+- MediaViewer{open,close,prev,next,current,position('N of M'),len} — works (media_viewer.rs:74-124)
+- ViewerZoom{new,reset,step,pan_by,is_zoomed} + keys =/- zoom, 0 reset (ui/mod.rs:92-97,146-150), scroll-zoom (5387), drag-pan (5397)
+- ensure_viewer_download: auto downloadFile for current item (ui/mod.rs:4926); viewer play resumes when downloadFile lands (5179)
+- video in viewer: ffplay child + PlaybackClock (pause/resume/seek/fraction) (playback.rs:18-86; ui/mod.rs:727-735); Play/Pause + elapsed/total overlay (4951)
+- NO rotate (no keybinds, no rotate in media_viewer.rs); NO PiP; NO viewer share/save/show-in-chat buttons (only ViewerPrev/ViewerNext/Zoom actions exist); NO viewer seek scrubber (seek_slider is history-row only, ui/mod.rs:677)
+
+AUDIO/VOICE PLAYER (playback.rs, ui/mod.rs:671-684, 1063-1090)
+- PlaybackClock play/pause/resume/seek; SeekBarView per history row with scrub + remembered position (6966)
+- music rows: title/performer/cover art + Play/Pause (844); parked-play resumes after downloadFile (668)
+- NO speed control anywhere (no '1x'/'1.5x'/rate UI in src); NO volume/mute on media player (mute_menu is chat notifications only)
+
+VOICE RECORDING (src/voice.rs, connect.rs:4677, ui/mod.rs:650)
+- VoiceRecordBar: click mic to record, Esc/Cancel discards; VoiceCapture via ffmpeg OGG (voice.rs:86-99)
+- chatActionRecordingVoiceNote while recording (connect.rs:4796); sendMessage inputMessageVoiceNote on finish (4708); waveform 5-bit encode/decode (voice.rs:29-67)
+- NO lock-to-record / slide-to-cancel UI; NO video-note camera recording (VideoNote only attached from file, ui/mod.rs:16983)
+
+VIDEO NOTES (state.rs:5182)
+- round player with Play/Pause in history (ui/mod.rs:842); send via send_video_note/inputMessageVideoNote (requests.rs:1885, connect.rs:4584); probe + thumbnail gen (video.rs:107-156)
+
+ALBUMS (quill::album, requests.rs:1943)
+- send: sendMessageAlbum 2-10 photos/videos (connect.rs:4605); receive: group_media_albums + layout_media_group grid tiles (ui/mod.rs:17592, 21223); album caption in composer (2501)
+- PARTIAL: album tiles do NOT open the fullscreen viewer (ui/mod.rs:22718 comment)
+
+LINK PREVIEW (ui/mod.rs:22426)
+- link_preview_card renders article-style card; link_preview_options always null on send (requests.rs:1507-1529)
+- NO Instant View reader (no getWebPageInstantView; only instant_view_version field passthrough); NO send-time preview toggle; NO embedded-player special rendering
+
+DOWNLOADS (telegram/requests.rs:1491 download_file)
+- downloadFile with priority; auto-download thumbs in open chat (connect.rs:2820)
+- NO cancelDownloadFile anywhere in src -> no pause/cancel/retry of downloads; NO downloads-manager list UI; NO save-to-disk action; NO auto-download settings UI
+
+SHARED MEDIA GALLERY: MISSING — no SearchMessagesFilter UI, no per-chat media tabs (zero 'shared_media/TabMedia/media_tab' hits in src); searchChatMessages/searchMessages exist in requests (149/206) but no media-filter UI
+CAPTIONS: caption render on media (state.rs:7800ff); editMessageCaption request exists (requests.rs:2123, connect.rs:4941); NO 'show above media' toggle UI; NO 'remove captions in copies' UI
+DOCUMENTS: rows render file name + mime (envelope.rs:4025, ui/mod.rs:16933), click-to-download; GIF/animation frame playback (ui/mod.rs:688-690, 5838)
+TRANSCRIPTION: speech_recognition_result parsed but only null in fixtures — no UI

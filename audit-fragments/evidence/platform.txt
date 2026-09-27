@@ -1,0 +1,66 @@
+## SCHEMA (~/workspace/quill/schema/td_api.tl, pinned 1.8.67; telegram_api.tl not shipped in repo; local tdlib dir empty)
+- updateConnectionState: 1 hit. ConnectionState variants: connectionStateWaitingForNetwork,
+  connectionStateConnecting, connectionStateConnectingToProxy, connectionStateReady,
+  connectionStateUpdating (7 ConnectionState mentions). -> offline/reconnect UI schema EXISTS.
+- "shortcut": 58 hits — ALL quickReplyShortcut/quickReplyShortcutName/... (Quick Replies chat
+  feature), NOT keyboard shortcuts. Keyboard shortcuts are pure client-side; no schema needed.
+- clipboard: 2 hits — only mini-app clipboard-read permission text (getDeepLinkInfo description).
+  No general clipboard API -> clipboard behaviors are client-side.
+- autostart: 2 hits — only internalLinkTypeBotStart.autostart (bot start button). NOT OS autostart.
+  OS autostart is desktop-OS level (.desktop/XDG), no TDLib involvement.
+- tray: 0 hits. Desktop-only concern.
+- spell/spellcheck: 0 hits. Client-side (hunspell/IME), no schema.
+- deep links: internalLinkType* variants + getDeepLinkInfo (2 hits) + deepLinkInfo (3 hits,
+  incl. need_update_application). -> t.me resolution schema EXISTS.
+- history export (concept-level): export constructors = only `exported*`/`export` (invite-link
+  export); NO exportHistory constructor. getChatHistory/getMessageThreadHistory etc. exist for
+  fetching. Conclusion: export-to-file is client-side iteration (as Telegram Desktop does);
+  implementable, NOT schema-blocked.
+- flood: 5 hits — only AICOMPOSE_FLOOD_PREMIUM doc comments. Flood surfacing = generic
+  `error` envelope {code, message} (envelope.rs:4988); retry countdown text is client-side.
+- notification settings schema: notificationSounds(3), getScopeNotificationSettings,
+  setChatNotificationSettings, setReactionNotificationSettings, updateScopeNotificationSettings,
+  resetAllNotificationSettings -> settings schema EXISTS.
+
+## TGX (~/workspace/telegram-x/app/src/main/res/values/strings.xml; res/menu has only text.xml)
+- Network states: network_Connecting "Connecting…", network_WaitingForNetwork "Waiting for
+  network…", network_Updating "Updating…", ConnectingToProxy, ConnectingWithProxy,
+  network_LookupFailed "No routes found, connecting directly…".
+- Offline: VoipOfflineTitle "Offline", VoipOffline, LoginErrorOffline "You're currently offline…",
+  VoipOfflineAirplane*.
+- Retry/flood: TryAgainSeconds_one/other, TryAgainMinutes_one, NobodyLikesSpam2 (PEER_FLOOD),
+  24 name="error_*" mapped error codes.
+- Export: only theme export strings (ThemeExport*, ToolsExportText) — no chat-history export on TGX.
+- Drag: drag = list reordering only (DragChatsHint "Drag chat to reorder", ChatFoldersReorderTip,
+  HoldAndDragToReorder, username reorder hints) — NOT file drag-drop into composer.
+- No spellcheck strings; clipboard strings only PasteUrl* hints; shortcut string only markdown-formatting hint.
+- Update: AppUpdateRequiredTitle/AppUpdateOk, error_APP_UPGRADE_NEEDED, ChangeLogText.
+
+## QUILL (~/workspace/quill/src — greps bounded with head)
+- keyboard shortcuts: PRESENT. ui/mod.rs:125 bind_keys — 22 KeyBindings: cmd/ctrl-q QuitApp,
+  cmd/ctrl-1 FocusSidebar, cmd/ctrl-l FocusComposer, cmd/ctrl-up LoadOlder, cmd/ctrl-k OpenSearch,
+  cmd/ctrl-f OpenChatSearch, cmd/ctrl-g ChatSearchNewer, cmd/ctrl-shift-g ChatSearchOlder, escape
+  CancelSearch, left/right ViewerPrev/Next, 0 ViewerZoomReset, =/- ViewerZoomIn/Out. main.rs:40
+  calls ui::bind_keys. NO shortcuts reference/help overlay anywhere in src.
+- system tray: ABSENT. All "tray" hits = stories "story tray" (envelope.rs:596-633) — false positives.
+- autostart on login: ABSENT (no hits).
+- spellcheck: ABSENT (no hits).
+- self-update: ABSENT (no hits: self_update/updater/new_version).
+- chat history export: ABSENT (no export_history/ExportHistory hits; getChatHistory used for loading only).
+- app-icon badge: ABSENT. "badge" hits = in-message self-destruct timer badge (envelope.rs:3008
+  badge_label) and DemoSeed::UnreadBadge — no dock/taskbar badge set.
+- drag-and-drop files into composer: ABSENT (no file_dropped/on_file_drop/DropTarget/dropped_path hits).
+- clipboard: write-only. ui/mod.rs:3932 write_to_clipboard (copy-text button), 6357 (invite link).
+  No read_from_clipboard -> no paste-image-from-clipboard.
+- deep links: ABSENT. No getDeepLinkInfo usage; only targetChatInternalLink enum (envelope.rs:5961)
+  for inline keyboards.
+- connection state: PARSED (envelope.rs:5506-5513 all 5 states) + stored (state.rs:2199/3170) but
+  NOT rendered in UI (no `.connection` reads, no "Waiting for network" text in ui/mod.rs).
+  -> offline/reconnect UI missing.
+- error surfacing: PRESENT per-purpose. state.rs:4547 EnvelopePayload::Error -> e.g. CreateCall
+  failure -> call_error line on call overlay. No generic FLOOD_WAIT/retry-after countdown surfacing.
+- accessibility labels/roles: ABSENT (no accessibility/a11y/aria/content_desc hits in src).
+- high contrast: ABSENT.
+- notifications: in-app toast queue with burst coalescing + sound decision at enqueue (notify.rs);
+  no OS dispatch (no notify_rust/dbus/zbus hits).
+- lifecycle.rs: "Close is not logout" — explicit quit vs logout; shutdown kinds planned.

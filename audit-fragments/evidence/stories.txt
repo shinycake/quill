@@ -1,0 +1,72 @@
+STORIES — evidence harvest (2026-09-27)
+Sources: ~/workspace/quill/schema/td_api.tl (pinned 1.8.67), ~/workspace/telegram-x (official TGX),
+         ~/workspace/quill/src (read-only)
+
+## SCHEMA (td_api.tl; 751 lines contain 'stor')
+Classes/constructors (representative):
+- story (line 6742): content:StoryContent caption:formattedText interaction_info chosen_reaction_type
+  can_be_deleted can_be_replied can_get_interactions can_be_shared_in_story privacy_settings repost_info areas ...
+- StoryContent: storyContentPhoto (6654), storyContentVideo (6657), storyContentLive (6662), storyContentUnsupported (6665)
+- InputStoryContent: inputStoryContentPhoto (6673), inputStoryContentVideo (6681)
+- StoryList: storyListMain / storyListArchive (6687/6690)
+- StoryInfo (6773), ChatActiveStories (6783: order, can_be_archived, max_read_story_id)
+- StoryInteractionInfo (6712: view_count/forward_count/reaction_count), StoryInteractions (6811)
+- StoryAreaPosition + StoryAreaType: Location(6536), Venue(6539), SuggestedReaction(6541),
+  Message(6549), Link(6552), Weather(6558), UpgradedGift(6562); InputStoryAreaType* (6569+)
+- StoryPrivacySettings: Everyone/Contacts (with except_user_ids)/CloseFriends/SelectedUsers (8928-8937)
+- StoryAlbums: StoryAlbum, StoryAlbums, getChatStoryAlbums, getStoryAlbumStories, createStoryAlbum,
+  reorderStoryAlbums, deleteStoryAlbum, setStoryAlbumName (13799-13840)
+Functions (representative lines):
+- getStory (13695), getChatActiveStories (13768), loadActiveStories (13762), getChatPostedToChatPageStories,
+  getChatArchivedStories, setChatPinnedStories
+- canPostStory (13702) -> CanPostStoryResult; getChatsToPostStories (13697)
+- postStory (13715): content areas caption privacy_settings album_ids active_period from_story_full_id
+  is_posted_to_chat_page protect_content = Story   <-- the real posting function (was mis-verified as sendStory)
+- startLiveStory (13724); editStory (13732); editStoryCover (13738);
+  setStoryPrivacySettings (13743); toggleStoryIsPostedToChatPage (13749); deleteStory (13754)
+- openStory (13794) / closeStory (13799); getStoryAvailableReactions (13802); setStoryReaction (13809);
+  getStoryInteractions (13819); getChatStoryInteractions; reportStory (13848);
+  activateStoryStealthMode; getStoryPublicForwards
+Updates: updateStory (10895), updateStoryDeleted (10898), updateStoryPostSucceeded (10901),
+  updateStoryPostFailed (10907), updateChatActiveStories (10911), updateStoryListChatCount (10914),
+  updateStoryStealthMode (10919)
+- reply_to: inputMessageReplyToStory (3099); stories notify settings: mute_stories, story_sound_id,
+  show_story_poster, story_reaction_source (3354-3372)
+Note: there is NO viewStories function; read state = openStory/closeStory + max_read_story_id.
+
+## TGX (official Telegram X checkout at ~/workspace/telegram-x)
+- strings.xml story UI strings are thin: admin rights RightStories/RightStoriesPost/RightStoriesEdit/
+  RightStoriesDelete (2154-2158), event log EventLogPromotedPostStories/EditStories/DeleteStories (2352-2354),
+  ChatDisabledStory ("Only admins can send stories in this group"), ChatRestrictedStory /
+  ChatRestrictedStoryUntil (3972-3973). No story-viewer strings in this checkout (viewer UI is
+  TDLib-server-language or newer than the checkout).
+- telegram/StoryListener.java: onStoryUpdated, onStoryDeleted, onStorySendSucceeded, onStorySendFailed,
+  onStoryStealthModeUpdated — TGX consumes post-status and stealth-mode updates.
+
+## QUILL (src, read-only; Phase 9.1 = viewing, Phase 9.2 = reactions/replies/deletion; see DECISIONS.md 1441-1580)
+Requests (src/telegram/requests.rs): getStory (2506), getChatActiveStories (2494), openStory (2519),
+  closeStory (2531), get_story_available_reactions (Phase 9.2), set_story_reaction (2556, null removes),
+  delete_story (2584, gated on can_be_deleted), send_text_story_reply (sendMessage + inputMessageReplyToStory,
+  gated on can_be_replied). NO postStory, canPostStory, editStory, getStoryInteractions, reportStory,
+  activateStoryStealthMode, setStoryPrivacySettings, toggleStoryIsPostedToChatPage requests.
+Parser (envelope.rs): ParsedStory (chosen_reaction_emoji emoji-only; custom-emoji -> None),
+  interaction_info (view_count/forward_count/reaction_count, any_nonzero()), can_be_deleted/can_be_replied/
+  can_get_interactions gates; updateStory/Deleted/PostSucceeded/PostFailed parsed (4660/4774/4786);
+  privacy, repost info, areas, albums dropped ("Dropped (see DECISIONS.md Phase 9.1)" line 3328).
+State/driver (state.rs, connect.rs): story_tray from updateChatActiveStories (Session::story_tray,
+  ordered_story_tray); loadActiveStories(storyListMain) per Ready; getStory prefetch deduped;
+  SetStoryReaction/RemoveStoryReaction/DeleteStory/SendStoryReply purposes; delete removes from cache
+  + tray; post-succeeded upserts + queues tray refresh. Archive-list entries remove the tray row —
+  no archive tray UI.
+Viewer (src/story_viewer.rs:11): "photo and video story content. Live and unsupported stories keep their
+  item in the list but render a placeholder"; video shows thumbnail only (full clip not renderable by img
+  element). UI overlay (ui/mod.rs): fullscreen dark backdrop, poster name + "Story N of M", caption,
+  Prev/Next/Close, Escape closes (DECISIONS 9.1). Phase 9.2 UI (ui/mod.rs 5482+): interaction counters
+  (views/hearts/reposts, only when can_get_interactions and non-zero), quick-react toggle, React... picker
+  (getStoryAvailableReactions, story_reaction_picker_open), Reply (text input + Send), Delete (own story;
+  viewer closes when story leaves cache). Screenshot: docs/screenshots/ready-story-post.png.
+NOT implemented: composer/photo-video upload, canPostStory check, postStory call, privacy selector,
+  edit story/cover, story areas, albums UI, archive list UI, stealth mode, report, per-chat story
+  notification settings, live-story playback, pinned-to-chat-page toggle. DECISIONS.md 1508-1527: the
+  original "blocked" claim for posting (searched sendStory) was RETRACTED 2026-09-27 — postStory exists
+  at line 13715; posting queued as a future slice after call work.

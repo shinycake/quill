@@ -1,0 +1,35 @@
+### Settings
+
+- [ ] Light/dark theme switcher <!-- parity:settings-theme-switch -->
+- [ ] Auto-night mode (system/scheduled) <!-- parity:settings-auto-night -->
+- [ ] Accent color picker <!-- parity:settings-accent-color -->
+- [ ] Chat background / wallpaper <!-- parity:settings-chat-wallpaper -->
+- [ ] Message font size <!-- parity:settings-font-size -->
+- [ ] Bubble vs plain chat style <!-- parity:settings-bubble-style -->
+- [x] Per-chat mute presets (1h / 8h / 2d / forever), live via chat panel (src/ui/mod.rs:11564; connect.rs:5424 `set_chat_mute_for` → `setChatNotificationSettings`) <!-- parity:settings-chat-mute -->
+- [x] Per-chat message preview toggle, live (src/ui/mod.rs:13028 `apply_chat_preview`) <!-- parity:settings-chat-preview -->
+- [x] Per-chat custom notification sound picker, live (src/ui/mod.rs:12844; `getSavedNotificationSounds`) <!-- parity:settings-chat-sound -->
+- [x] Default mute per scope (private / groups / channels), live "Notification defaults" dialog (src/ui/mod.rs:13274 `apply_scope_mute`, `setScopeNotificationSettings`) <!-- parity:settings-scope-mute -->
+- [x] Default message preview per scope, live (src/ui/mod.rs:13318 `apply_scope_preview`) <!-- parity:settings-scope-preview -->
+- [x] Default notification sound per scope, live (src/ui/mod.rs:13229 `apply_scope_sound`) <!-- parity:settings-scope-sound -->
+- [ ] Mentions/replies and pinned-message notification overrides <!-- parity:settings-mentions-pinned -->
+- [ ] Reaction and story notification settings <!-- parity:settings-reaction-notif -->
+- [ ] List of chats with custom notification exceptions (partial: per-chat settings can be set, but no exceptions list view) <!-- parity:settings-notif-exceptions -->
+- [ ] Reset all notification settings <!-- parity:settings-reset-notif -->
+- [ ] In-app notification sounds toggle <!-- parity:settings-inapp-sound -->
+- [ ] Privacy: Last Seen & Online <!-- parity:settings-privacy-lastseen -->
+- [ ] Privacy: Phone Number visibility <!-- parity:settings-privacy-phone -->
+- [ ] Privacy: Profile Photos visibility <!-- parity:settings-privacy-photo -->
+- [ ] Privacy: Forward My Messages (link in forwarded messages) <!-- parity:settings-privacy-forwards -->
+- [ ] Privacy: Call Me, incl. peer-to-peer calls <!-- parity:settings-privacy-calls -->
+- [ ] Privacy: Add Me to Groups and Channels <!-- parity:settings-privacy-invites -->
+- [ ] Privacy: See My Read Date <!-- parity:settings-privacy-readreceipts -->
+- [ ] Blocked users list <!-- parity:settings-blocked-users -->
+- [ ] Privacy exceptions per rule (always allow / never allow user lists) <!-- parity:settings-privacy-exceptions -->
+- [ ] Auto-download per network (mobile / Wi-Fi / roaming) and media type <!-- parity:settings-auto-download -->
+- [ ] Use less data for calls <!-- parity:settings-less-data-calls -->
+- [ ] Storage usage view with per-chat / file-type breakdown <!-- parity:settings-storage-usage -->
+- [ ] Clear cache <!-- parity:settings-clear-cache -->
+- [ ] App language selector (partial: `system_language_code:"en"` hardcoded in src/connect.rs:284) <!-- parity:settings-language -->
+- [ ] Enter-to-send toggle (partial: Enter always sends, hardcoded in src/composer.rs:19-20; no toggle) <!-- parity:settings-enter-send -->
+- [ ] Send by Cmd/Ctrl+Enter option <!-- parity:settings-ctrlenter-send -->
