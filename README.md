@@ -214,11 +214,11 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 
 - [x] Group/channel info panel with description and member/subscriber count (src/ui/mod.rs:8280) <!-- parity:groups-info-panel -->
 - [x] Create new group via `createNewBasicGroupChat` (title + member picker, sidebar "New group") (src/ui/mod.rs) <!-- parity:groups-create-group -->
-- [x] Create new supergroup/channel via `createNewSupergroupChat` (title + description + forum toggle; members added after creation since the schema takes none; sidebar "New supergroup" / "New channel") (src/ui/mod.rs) <!-- parity:groups-create-channel -->
+- [x] Create new supergroup/channel via `createNewSupergroupChat` (title + description only — no forum toggle, no member picker; `is_forum` is sent false and the schema takes no member IDs, so members are added after creation from the member dialog; sidebar "New supergroup" / "New channel") (src/ui/mod.rs) <!-- parity:groups-create-channel -->
 - [x] Convert supergroup to broadcast group — one-way (`toggleSupergroupIsBroadcastGroup`, no reverse in schema :15221 or Telegram X; owner-only, destructive confirm) (src/ui/mod.rs) <!-- parity:groups-convert-broadcast -->
 - [x] Add members via contact picker — `addChatMember` (basic groups) / `addChatMembers` (supergroups/channels), privacy failures surfaced from `failedToAddMembers` (src/connect.rs, src/ui/mod.rs) <!-- parity:groups-add-members -->
-- [x] Browse/search real member lists — `getBasicGroupFullInfo` (basic groups) and `getSupergroupMembers` with All/Admins/Restricted/Banned tabs + server-side search (src/ui/mod.rs) <!-- parity:groups-member-list -->
-- [x] Restricted-members and banned-members lists via `getSupergroupMembers` status filters (:2570/:2574), with edit/unrestrict/unban actions (src/ui/mod.rs) <!-- parity:groups-restricted-banned-lists -->
+- [x] Browse/search real member lists — `getBasicGroupFullInfo` (basic groups) and `getSupergroupMembers` with All/Admins/Restricted/Banned tabs + server-side search; first 200 members only (offset 0 / limit 200, no load-more) (src/ui/mod.rs) <!-- parity:groups-member-list -->
+- [x] Restricted-members and banned-members lists via `getSupergroupMembers` status filters (:2571/:2574), first 200 only, with edit/unrestrict/unban actions (src/ui/mod.rs) <!-- parity:groups-restricted-banned-lists -->
 - [x] Administrator list with refresh, owner shown, custom titles displayed (src/ui/mod.rs:8748) <!-- parity:groups-admin-list -->
 - [x] Promote member via searchable picker with 18 granular rights checkboxes (src/ui/mod.rs:266-415) <!-- parity:groups-promote -->
 - [x] Edit existing admin rights, pre-filled from `getChatMember` (src/state.rs:209, src/ui/mod.rs:363) <!-- parity:groups-edit-rights -->
@@ -540,7 +540,6 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [ ] Spellcheck in composer <!-- parity:platform-spellcheck -->
 - [ ] Chat history export to file (partial: getChatHistory fetching exists; no export-to-file; implementable client-side — no exportHistory constructor in schema, not schema-blocked) <!-- parity:platform-history-export -->
 - [ ] Full account data export (Telegram Desktop "Export Telegram data") <!-- parity:platform-data-export -->
-- [ ] In-app update check/download/install <!-- parity:platform-app-updates -->
 - [ ] Check for updates automatically on launch against GitHub Releases (latest tag vs compiled-in `CARGO_PKG_VERSION`), with an opt-out toggle in Settings <!-- parity:platform-update-check-auto -->
 - [ ] Manual "Check for updates" action in Settings/menu <!-- parity:platform-update-check-manual -->
 - [ ] Update-available UI: non-intrusive banner/dialog showing the new version and release notes <!-- parity:platform-update-available-ui -->

@@ -3739,6 +3739,33 @@ impl QuillApp {
             self.status_note = err;
             progressed = true;
         }
+        // Slice G1 fix-up: an invite-link mutation (create/edit/revoke/
+        // replace-primary) failed — the loaded list is kept, so the
+        // error surfaces here instead of wiping the panel.
+        if let Some(err) = self
+            .live
+            .as_mut()
+            .and_then(|live| live.driver.session.invite_link_error.take())
+        {
+            self.status_note = err;
+            progressed = true;
+        }
+        // Slice G1 fix-up: `updateChatMember` dropped the member-list
+        // caches — refetch the open dialog's page so it shows the new
+        // membership instead of sticking on "Loading members…".
+        let stale_chats: Vec<i64> = self
+            .live
+            .as_mut()
+            .map(|live| live.driver.session.member_list_stale.drain(..).collect())
+            .unwrap_or_default();
+        if self
+            .member_dialog
+            .as_ref()
+            .is_some_and(|dialog| stale_chats.contains(&dialog.chat_id.0))
+        {
+            self.refresh_member_dialog(cx);
+            progressed = true;
+        }
         // Phase 3.2: bot answers to inline keyboard callback presses.
         if let Some(answer) = self
             .live
@@ -8924,7 +8951,8 @@ impl QuillApp {
             None => "adding members needs a live connection (demo)".into(),
         };
         self.status_note = note;
-        // The member list refreshes from `updateChatMember` events.
+        // `updateChatMember` drops the cached member list and marks the
+        // chat stale; `poll_live` refetches the open dialog's page.
         self.refresh_member_dialog(cx);
     }
 
@@ -8993,14 +9021,18 @@ impl QuillApp {
                     )
                 };
                 match result {
-                    Ok(_) => {
+                    // Slice G1 fix-up: `Ok(None)` means the driver
+                    // refused to send (no rights, or restrict in a
+                    // channel) — not success. Keep the dialog open and
+                    // say so instead of claiming it happened.
+                    Ok(Some(_)) => {
                         if dialog.ban {
                             "member banned".into()
                         } else {
                             "member restricted".into()
                         }
                     }
-                    Err(_) => {
+                    Ok(None) | Err(_) => {
                         self.restrict_dialog = Some(dialog);
                         "could not update member status".into()
                     }
@@ -9019,8 +9051,11 @@ impl QuillApp {
     /// `chatMemberStatusMember`).
     fn unban_member(&mut self, chat_id: ChatId, user_id: i64, cx: &mut Context<Self>) {
         let note = match self.live.as_mut() {
+            // Slice G1 fix-up: `Ok(None)` is a driver refusal, not
+            // success — report it honestly.
             Some(live) => match live.driver.unban_chat_member(chat_id, user_id) {
-                Ok(_) => "member unbanned".into(),
+                Ok(Some(_)) => "member unbanned".into(),
+                Ok(None) => "could not unban member".into(),
                 Err(_) => "could not unban member".into(),
             },
             None => "member actions need a live connection (demo)".into(),
@@ -20062,6 +20097,18 @@ impl QuillApp {
                 None if query.trim().is_empty() => MemberListFilter::Recent,
                 None => MemberListFilter::Search,
             };
+            // Slice G1 fix-up: a Restricted/Banned tab left open after
+            // the viewer lost restrict rights has no fetchable page —
+            // fall back to Recent instead of spinning forever.
+            let filter = if !session.chat_can_restrict_members(dialog.chat_id)
+                && matches!(
+                    filter,
+                    MemberListFilter::Restricted | MemberListFilter::Banned
+                ) {
+                MemberListFilter::Recent
+            } else {
+                filter
+            };
             session
                 .supergroup_members
                 .get(&(dialog.chat_id.0, filter))
@@ -20113,8 +20160,13 @@ impl QuillApp {
         ] {
             // Restricted/banned tabs only exist for supergroups
             // (`getSupergroupMembers` filters, schema 1.8.67 lines
-            // 2570/2574).
+            // 2571/2574) — and only for viewers who can restrict
+            // members; the driver refuses the fetch otherwise and the
+            // tab would spin on "Loading members…" forever.
             if is_basic_group && member_tab != MemberTab::All {
+                continue;
+            }
+            if !can_restrict && matches!(member_tab, MemberTab::Restricted | MemberTab::Banned) {
                 continue;
             }
             let label = if member_tab == tab {
@@ -20425,6 +20477,16 @@ impl QuillApp {
             }
         }
         if can_restrict {
+            // Slice G1 fix-up: restricted status is not supported in
+            // channels (schema 1.8.67, line 2506) — channel rows offer
+            // Ban only, never Restrict.
+            let is_channel = self.session().is_some_and(|s| {
+                matches!(
+                    s.chats.get(&chat_id.0),
+                    Some(chat)
+                        if matches!(chat.kind, ChatKind::Supergroup { is_channel: true, .. })
+                )
+            });
             if let Some(user_id) = user_id {
                 // Slice G1: never offer restrict/ban against the viewer,
                 // the owner, or a non-editable administrator — TDLib
@@ -20442,42 +20504,44 @@ impl QuillApp {
                 if actionable {
                     match tab {
                         MemberTab::All => {
-                            row = row
-                                .child(
+                            if !is_channel {
+                                row = row.child(
                                     Button::new(format!("g1-member-restrict-{user_id}"))
                                         .label("Restrict")
                                         .ghost()
                                         .on_click(cx.listener(move |this, _, _, cx| {
                                             this.open_restrict_dialog(chat_id, user_id, false, cx);
                                         })),
-                                )
-                                .child(
-                                    Button::new(format!("g1-member-ban-{user_id}"))
-                                        .label("Ban")
-                                        .ghost()
-                                        .on_click(cx.listener(move |this, _, _, cx| {
-                                            this.open_restrict_dialog(chat_id, user_id, true, cx);
-                                        })),
                                 );
+                            }
+                            row = row.child(
+                                Button::new(format!("g1-member-ban-{user_id}"))
+                                    .label("Ban")
+                                    .ghost()
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        this.open_restrict_dialog(chat_id, user_id, true, cx);
+                                    })),
+                            );
                         }
                         MemberTab::Restricted => {
-                            row = row
-                                .child(
+                            if !is_channel {
+                                row = row.child(
                                     Button::new(format!("g1-member-edit-{user_id}"))
                                         .label("Edit")
                                         .ghost()
                                         .on_click(cx.listener(move |this, _, _, cx| {
                                             this.open_restrict_dialog(chat_id, user_id, false, cx);
                                         })),
-                                )
-                                .child(
-                                    Button::new(format!("g1-member-unrestrict-{user_id}"))
-                                        .label("Unrestrict")
-                                        .ghost()
-                                        .on_click(cx.listener(move |this, _, _, cx| {
-                                            this.unban_member(chat_id, user_id, cx);
-                                        })),
                                 );
+                            }
+                            row = row.child(
+                                Button::new(format!("g1-member-unrestrict-{user_id}"))
+                                    .label("Unrestrict")
+                                    .ghost()
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        this.unban_member(chat_id, user_id, cx);
+                                    })),
+                            );
                         }
                         MemberTab::Banned => {
                             row = row.child(

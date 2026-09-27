@@ -59,11 +59,11 @@ pub enum MemberStatusChange {
 pub enum MemberListFilter {
     /// `supergroupMembersFilterRecent` (schema 1.8.67, line 2559).
     Recent,
-    /// `supergroupMembersFilterSearch` (line 2562).
+    /// `supergroupMembersFilterSearch` (line 2568).
     Search,
-    /// `supergroupMembersFilterAdministrators` (line 2567).
+    /// `supergroupMembersFilterAdministrators` (line 2565).
     Administrators,
-    /// `supergroupMembersFilterRestricted` (line 2570); admins only.
+    /// `supergroupMembersFilterRestricted` (line 2571); admins only.
     Restricted,
     /// `supergroupMembersFilterBanned` (line 2574); admins only.
     Banned,
@@ -308,7 +308,13 @@ pub enum RequestPurpose {
     ToggleBroadcastGroup,
     /// Slice G1: `addChatMembers` (schema 1.8.67, line 13584). Response is
     /// `failedToAddMembers`; added members arrive as `updateChatMember`.
+    /// The single bulk response replaces the failure count.
     AddChatMembers,
+    /// Slice G1 fix-up: one `addChatMember` per user for basic groups
+    /// (schema 1.8.67, line 13578 — also answers `failedToAddMembers`,
+    /// 0 or 1 failures each). Per-user responses accumulate into the
+    /// failure count instead of replacing it.
+    AddChatMember,
     /// Slice G1: `setChatPermissions` (schema 1.8.67, line 13464).
     /// Response is `ok`; `updateChatPermissions` carries the new block.
     /// Applied optimistically by the driver at send time; a TDLib error
@@ -2633,6 +2639,10 @@ pub struct Session {
     /// into the `_ => {}` swallower and the user saw "retrying send…"
     /// followed by silence.
     pub resend_error: Option<String>,
+    /// Slice G1 fix-up: one-shot; set when an invite-link mutation
+    /// (create/edit/revoke/replace-primary) errors. The UI drains it into
+    /// the status note — the previously loaded list is kept, not wiped.
+    pub invite_link_error: Option<String>,
     /// M1: `getChatScheduledMessages` results — the chat's scheduled sends,
     /// with `scheduling_state` showing the planned send time.
     pub scheduled_messages: Vec<ParsedMessage>,
@@ -2880,10 +2890,15 @@ pub struct Session {
     pub supergroup_is_broadcast: HashMap<i64, bool>,
     /// Slice G1: `addChatMembers` failure count from the last add
     /// attempt — `failedToAddMembers.failed_to_add_members.len()` for the
-    /// bulk path (schema 1.8.67, line 3640), or the count of per-user
-    /// `addChatMember` errors for basic groups — keyed by chat id.
+    /// bulk path (schema 1.8.67, line 3640), or the accumulated per-user
+    /// `addChatMember` `failedToAddMembers` counts plus error responses
+    /// for basic groups — keyed by chat id.
     /// Reset when a new add starts; cleared when the dialog closes.
     pub add_members_failed: HashMap<i64, i32>,
+    /// Slice G1 fix-up: chat ids whose member-list caches were dropped by
+    /// an `updateChatMember` while a member dialog may be open. One-shot;
+    /// the UI drains it and refetches the open dialog's page.
+    pub member_list_stale: Vec<i64>,
     /// Slice G1: last member-action failure for the member-management
     /// dialog (`setChatMemberTag` / `setChatMemberStatus`), keyed by
     /// chat id. The dialog reads the member-list fetch states, not
@@ -3191,6 +3206,7 @@ impl Session {
             message_link_result: None,
             message_link_error: None,
             resend_error: None,
+            invite_link_error: None,
             scheduled_messages: Vec::new(),
             open_chat: None,
             app_active: true,
@@ -3272,6 +3288,7 @@ impl Session {
             supergroup_join_by_request: HashMap::new(),
             supergroup_is_broadcast: HashMap::new(),
             add_members_failed: HashMap::new(),
+            member_list_stale: Vec::new(),
             member_action_error: HashMap::new(),
             admin_lists: HashMap::new(),
             supergroup_members: HashMap::new(),
@@ -4140,10 +4157,22 @@ impl Session {
                 }
             }
             EnvelopePayload::FailedToAddMembers { failed_count } => {
-                if pending.map(|p| p.purpose) == Some(RequestPurpose::AddChatMembers)
-                    && let Some(chat_id) = pending.and_then(|p| p.chat_id)
-                {
-                    self.add_members_failed.insert(chat_id.0, failed_count);
+                if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
+                    match pending.map(|p| p.purpose) {
+                        // Slice G1: the bulk `addChatMembers` answer is a
+                        // single response — it replaces the count.
+                        Some(RequestPurpose::AddChatMembers) => {
+                            self.add_members_failed.insert(chat_id.0, failed_count);
+                        }
+                        // Slice G1 fix-up: basic groups send one
+                        // `addChatMember` per user and each answers
+                        // `failedToAddMembers` — accumulate, or the last
+                        // response would overwrite the earlier ones.
+                        Some(RequestPurpose::AddChatMember) => {
+                            *self.add_members_failed.entry(chat_id.0).or_insert(0) += failed_count;
+                        }
+                        _ => {}
+                    }
                 }
             }
             // Phase D3c: `getChatEventLog` answer — a first page (cursor
@@ -5212,6 +5241,17 @@ impl Session {
                 if let MessageSender::User { user_id } = member.member_id {
                     self.admin_rights.remove(&(chat_id.0, user_id));
                 }
+                // Slice G1 fix-up: membership changes also stale the
+                // member-list caches (e.g. our own add, or someone else
+                // joining). Drop both so the dialog refetches instead of
+                // showing the pre-change list; `member_list_stale` tells
+                // the UI an open dialog needs a refetch.
+                self.basic_group_members.remove(&chat_id.0);
+                self.supergroup_members
+                    .retain(|(id, _), _| *id != chat_id.0);
+                if !self.member_list_stale.contains(&chat_id.0) {
+                    self.member_list_stale.push(chat_id.0);
+                }
                 self.accept_own_chat_member(chat_id, member);
             }
             EnvelopePayload::JoinChatResult(result) => {
@@ -5731,49 +5771,31 @@ impl Session {
                         }
                     }
                     Some(RequestPurpose::CreateChatInviteLink) => {
-                        if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
-                            self.invite_links.insert(
-                                chat_id.0,
-                                InviteLinkFetch::Failed(call_request_error_line(
-                                    &err,
-                                    "Could not create invite link",
-                                )),
-                            );
-                        }
+                        // Slice G1 fix-up: a failed mutation must not wipe
+                        // the previously loaded list — surface the error in
+                        // the status note and keep the last good data.
+                        self.invite_link_error = Some(call_request_error_line(
+                            &err,
+                            "Could not create invite link",
+                        ));
                     }
                     Some(RequestPurpose::EditChatInviteLink) => {
-                        if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
-                            self.invite_links.insert(
-                                chat_id.0,
-                                InviteLinkFetch::Failed(call_request_error_line(
-                                    &err,
-                                    "Could not edit invite link",
-                                )),
-                            );
-                        }
+                        self.invite_link_error =
+                            Some(call_request_error_line(&err, "Could not edit invite link"));
                     }
                     Some(RequestPurpose::RevokeChatInviteLink) => {
-                        if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
-                            self.invite_links.insert(
-                                chat_id.0,
-                                InviteLinkFetch::Failed(call_request_error_line(
-                                    &err,
-                                    "Could not revoke invite link",
-                                )),
-                            );
-                        }
+                        self.invite_link_error = Some(call_request_error_line(
+                            &err,
+                            "Could not revoke invite link",
+                        ));
                     }
-                    // Slice G1: failed primary-link replacement.
+                    // Slice G1: failed primary-link replacement — keep the
+                    // last good list, surface the error in the note.
                     Some(RequestPurpose::ReplacePrimaryChatInviteLink) => {
-                        if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
-                            self.invite_links.insert(
-                                chat_id.0,
-                                InviteLinkFetch::Failed(call_request_error_line(
-                                    &err,
-                                    "Could not replace primary invite link",
-                                )),
-                            );
-                        }
+                        self.invite_link_error = Some(call_request_error_line(
+                            &err,
+                            "Could not replace primary invite link",
+                        ));
                     }
                     // Slice G1: roll back the optimistic broadcast-group
                     // upgrade so the panel doesn't lie.
@@ -5859,10 +5881,12 @@ impl Session {
                         }
                     }
                     // Slice G1: a basic-group `addChatMember` answers per
-                    // user (`ok`/`error`) — there is no `failedToAddMembers`
-                    // for it. Count per-user errors in the same slot the
-                    // dialog already renders so partial adds are honest.
-                    Some(RequestPurpose::AddChatMembers) => {
+                    // user with `failedToAddMembers` (schema 1.8.67, line
+                    // 13578) — but a request-level TDLib error has no
+                    // such body. Count per-user errors in the same slot
+                    // the dialog already renders so partial adds stay
+                    // honest.
+                    Some(RequestPurpose::AddChatMembers | RequestPurpose::AddChatMember) => {
                         if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
                             *self.add_members_failed.entry(chat_id.0).or_insert(0) += 1;
                         }
@@ -8267,26 +8291,72 @@ mod tests {
     }
 
     #[test]
-    fn basic_group_add_member_errors_count_as_failures() {
-        // Slice G1 replay: basic groups add one `addChatMember` per user
-        // (`ok`/`error` each — no `failedToAddMembers`). Per-user errors
-        // count into `add_members_failed` so the dialog's partial-add
-        // line is honest.
+    fn basic_group_add_member_failures_accumulate() {
+        // Slice G1 fix-up replay: every per-user `addChatMember` answers
+        // `failedToAddMembers` (schema 1.8.67, line 13578) — the real
+        // shape, not `ok`/`error`. Two per-user responses must
+        // accumulate (1 + 0), and a request-level error counts one more,
+        // so the dialog's partial-add line is honest.
         let (mut session, sink) = session();
         let seq = AtomicU64::new(0);
-        for _ in 0..2 {
-            let extra = session.request(RequestPurpose::AddChatMembers, Some(ChatId(13)));
+        let failed_member = |user_id: i64| {
+            format!(
+                r#"{{"@type":"failedToAddMember","user_id":{user_id},"premium_would_allow_invite":false,"premium_required_to_send_messages":false}}"#
+            )
+        };
+        for (user_id, extra_count) in [(7, 1), (8, 0)] {
+            let extra = session.request(RequestPurpose::AddChatMember, Some(ChatId(13)));
+            let members = (0..extra_count)
+                .map(|_| failed_member(user_id))
+                .collect::<Vec<_>>()
+                .join(",");
             apply_json(
                 &mut session,
                 &seq,
                 &sink,
                 &format!(
-                    r#"{{"@type":"error","@extra":"{}","code":400,"message":"USER_PRIVACY_RESTRICTED"}}"#,
+                    r#"{{"@type":"failedToAddMembers","@extra":"{}","failed_to_add_members":[{members}]}}"#,
                     extra.0
                 ),
             );
         }
+        assert_eq!(session.add_members_failed.get(&13), Some(&1));
+        let extra = session.request(RequestPurpose::AddChatMember, Some(ChatId(13)));
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"error","@extra":"{}","code":400,"message":"USER_PRIVACY_RESTRICTED"}}"#,
+                extra.0
+            ),
+        );
         assert_eq!(session.add_members_failed.get(&13), Some(&2));
+    }
+
+    #[test]
+    fn bulk_add_members_response_replaces_count() {
+        // Slice G1: the single bulk `addChatMembers` response replaces
+        // the failure count (no accumulation across attempts).
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        for count in [3, 1] {
+            let extra = session.request(RequestPurpose::AddChatMembers, Some(ChatId(13)));
+            let members = (0..count)
+                .map(|_| r#"{"@type":"failedToAddMember","user_id":9,"premium_would_allow_invite":false,"premium_required_to_send_messages":false}"#)
+                .collect::<Vec<_>>()
+                .join(",");
+            apply_json(
+                &mut session,
+                &seq,
+                &sink,
+                &format!(
+                    r#"{{"@type":"failedToAddMembers","@extra":"{}","failed_to_add_members":[{members}]}}"#,
+                    extra.0
+                ),
+            );
+        }
+        assert_eq!(session.add_members_failed.get(&13), Some(&1));
     }
 
     #[test]
@@ -8382,13 +8452,20 @@ mod tests {
 
     #[test]
     fn invite_link_replace_failure_surfaces_and_broadcast_rolls_back() {
-        // Slice G1 replay: a failed `replacePrimaryChatInviteLink`
-        // marks the invite-link fetch failed (the info panel renders
-        // the error with a retry); a failed
-        // `toggleSupergroupIsBroadcastGroup` removes the optimistic
-        // broadcast flag so the panel doesn't lie.
+        // Slice G1 fix-up replay: a failed `replacePrimaryChatInviteLink`
+        // keeps the previously loaded list (no cache poisoning) and
+        // surfaces the error via `invite_link_error` for the status
+        // note; a failed `toggleSupergroupIsBroadcastGroup` removes the
+        // optimistic broadcast flag so the panel doesn't lie.
         let (mut session, sink) = session();
         let seq = AtomicU64::new(0);
+        session.invite_links.insert(
+            13,
+            InviteLinkFetch::Loaded(InviteLinkList {
+                total_count: 1,
+                links: Vec::new(),
+            }),
+        );
 
         let extra = session.request(
             RequestPurpose::ReplacePrimaryChatInviteLink,
@@ -8405,8 +8482,14 @@ mod tests {
         );
         assert!(matches!(
             session.invite_links.get(&13),
-            Some(InviteLinkFetch::Failed(_))
+            Some(InviteLinkFetch::Loaded(_))
         ));
+        assert!(
+            session
+                .invite_link_error
+                .as_ref()
+                .is_some_and(|m| m.contains("Could not replace primary invite link"))
+        );
 
         let mut chat = placeholder_chat(ChatId(14));
         chat.kind = ChatKind::Supergroup {

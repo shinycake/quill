@@ -5157,8 +5157,24 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.chats.get(&chat_id.0),
             Some(chat) if matches!(chat.kind, ChatKind::BasicGroup { .. })
         );
-        let purpose = RequestPurpose::AddChatMembers;
-        if self.session.requests.has_purpose_for_chat(purpose, chat_id) {
+        // Slice G1 fix-up: basic groups send one `addChatMember` per
+        // user, each answering `failedToAddMembers` — a distinct purpose
+        // so per-user responses accumulate instead of replacing the
+        // single bulk count.
+        let purpose = if is_basic_group {
+            RequestPurpose::AddChatMember
+        } else {
+            RequestPurpose::AddChatMembers
+        };
+        if self
+            .session
+            .requests
+            .has_purpose_for_chat(RequestPurpose::AddChatMembers, chat_id)
+            || self
+                .session
+                .requests
+                .has_purpose_for_chat(RequestPurpose::AddChatMember, chat_id)
+        {
             return Ok(None);
         }
         // Slice G1: a new add attempt resets the failure count — errors
