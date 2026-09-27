@@ -3812,6 +3812,21 @@ pub fn open_message_content(extra: RequestId, chat_id: ChatId, message_id: Messa
     .to_string()
 }
 
+/// MED2: `recognizeSpeech` (TDLib 1.8.67, `schema/td_api.tl:12181`).
+/// Recognizes speech in a voice note or video note message. Returns `Ok`;
+/// the result arrives later as `updateMessageContent` carrying the new
+/// `speech_recognition_result` (`speechRecognitionResultPending` →
+/// `speechRecognitionResultText` / `speechRecognitionResultError`).
+pub fn recognize_speech(extra: RequestId, chat_id: ChatId, message_id: MessageId) -> String {
+    json!({
+        "@type": "recognizeSpeech",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0,
+        "message_id": message_id.0
+    })
+    .to_string()
+}
+
 /// Phase 9.1: `loadActiveStories` (TDLib 1.8.67, `schema/td_api.tl:13762`).
 /// The loaded stories arrive as `updateChatActiveStories` updates — they
 /// feed the story tray above the chat list.
@@ -5764,6 +5779,18 @@ mod tests {
             send_chat_action_kind(RequestId(44), ChatId(11), "chatActionRecordingVoiceNote");
         let v: serde_json::Value = serde_json::from_str(&recording).unwrap();
         assert_eq!(v["action"]["@type"], "chatActionRecordingVoiceNote");
+    }
+
+    #[test]
+    fn recognize_speech_shape_matches_1_8_67() {
+        // MED2: what the request is ultimately validating — the
+        // `recognizeSpeech` constructor with chat and message ids.
+        let json = recognize_speech(RequestId(21), ChatId(7), MessageId(9));
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "recognizeSpeech");
+        assert_eq!(v["@extra"], "21");
+        assert_eq!(v["chat_id"], 7);
+        assert_eq!(v["message_id"], 9);
     }
 
     #[test]

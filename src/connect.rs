@@ -70,7 +70,7 @@ use crate::telegram::requests::{
     invite_group_call_participant, join_chat, join_group_call, join_video_chat, leave_chat,
     leave_group_call, load_active_stories, load_chat_welcome_messages, load_chats, load_chats_list,
     load_group_call_participants, open_chat, open_message_content, open_story, pin_chat_message,
-    process_chat_join_request, remove_message_reaction, reorder_chat_folders,
+    process_chat_join_request, recognize_speech, remove_message_reaction, reorder_chat_folders,
     replace_primary_chat_invite_link, replace_video_chat_rtmp_url, report_chat_sponsored_message,
     resend_messages, revoke_chat_invite_link, revoke_group_call_invite_link, search_call_messages,
     search_chat_messages, search_chats, search_messages, search_public_chats,
@@ -7582,6 +7582,103 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
     }
 
+    /// `sendMessage` + `inputMessageVideoNote` for a finished camera
+    /// capture. Mirrors `send_voice_note`; the draft is already squared
+    /// and probed by `VideoNoteCapture::finish`.
+    pub fn send_recorded_video_note(
+        &mut self,
+        draft: &crate::video::VideoNoteDraft,
+        reply_to: Option<SendReply>,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let Some(chat_id) = self.session.open_chat else {
+            return Err(ConnectSendError::InvalidRequest);
+        };
+        let supported = self
+            .session
+            .chats
+            .get(&chat_id.0)
+            .is_some_and(|chat| chat.supported());
+        if !supported || self.topic_send_is_closed(chat_id) {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let path = crate::local_path::pick_send_path(&draft.path)
+            .ok_or(ConnectSendError::InvalidRequest)?;
+        let path = path.to_string_lossy().into_owned();
+        let thumbnail = crate::video::write_video_note_thumbnail(&draft.path).map(|thumb| {
+            VideoNoteThumbnailSend {
+                path: thumb.path.to_string_lossy().into_owned(),
+                width: thumb.width,
+                height: thumb.height,
+            }
+        });
+        let extra = self
+            .session
+            .request(RequestPurpose::SendMessage, Some(chat_id));
+        let topic_id = self.send_topic(chat_id);
+        let json = send_video_note(
+            extra,
+            chat_id,
+            topic_id,
+            &path,
+            &VideoNoteSend {
+                duration: draft.duration_secs,
+                length: draft.length,
+                thumbnail,
+            },
+            reply_to,
+        );
+        match self.sender.send_json(&json) {
+            Ok(()) => {
+                let _ = self.cancel_outgoing_typing();
+                let _ = self.sync_video_note_recording(false, 0);
+                Ok(extra)
+            }
+            Err(err) => {
+                self.session.requests.take(extra);
+                Err(err)
+            }
+        }
+    }
+
+    /// MED2: `recognizeSpeech` for a voice/video note message. Only real
+    /// (non-pending) messages qualify; the transcript arrives later via
+    /// `updateMessageContent`. A refused request is an error, never a
+    /// faked transcript.
+    pub fn recognize_speech(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let Some(message) = self
+            .session
+            .histories
+            .get(&chat_id.0)
+            .and_then(|history| history.messages.get(&message_id.0))
+        else {
+            return Err(ConnectSendError::InvalidRequest);
+        };
+        if message.pending || message.id.0 <= 0 {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::RecognizeSpeech, Some(chat_id));
+        let json = recognize_speech(extra, chat_id, message_id);
+        match self.sender.send_json(&json) {
+            Ok(()) => Ok(extra),
+            Err(err) => {
+                self.session.requests.take(extra);
+                Err(err)
+            }
+        }
+    }
+
     /// `openMessageContent` when playback of a voice note starts.
     pub fn open_voice_content(
         &mut self,
@@ -7656,6 +7753,25 @@ impl<S: JsonSender> ConnectDriver<S> {
         active: bool,
         now_ms: u64,
     ) -> Result<(), ConnectSendError> {
+        self.sync_record_action(active, now_ms, "chatActionRecordingVoiceNote")
+    }
+
+    /// MED2: same as [`Self::sync_voice_recording`] for round video-note
+    /// capture (`chatActionRecordingVideoNote`, schema 1.8.67 line 6392).
+    pub fn sync_video_note_recording(
+        &mut self,
+        active: bool,
+        now_ms: u64,
+    ) -> Result<(), ConnectSendError> {
+        self.sync_record_action(active, now_ms, "chatActionRecordingVideoNote")
+    }
+
+    fn sync_record_action(
+        &mut self,
+        active: bool,
+        now_ms: u64,
+        action: &str,
+    ) -> Result<(), ConnectSendError> {
         let chat_id = self
             .session
             .open_chat
@@ -7671,7 +7787,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 return Ok(());
             }
         }
-        self.send_voice_action(chat_id, true, now_ms)
+        self.send_voice_action(chat_id, true, now_ms, action)
     }
 
     fn cancel_outgoing_voice(&mut self) -> Result<(), ConnectSendError> {
@@ -7681,7 +7797,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.typing_chat_allowed(prev.chat_id) {
             return Ok(());
         }
-        self.send_voice_action(prev.chat_id, false, 0)
+        self.send_voice_action(prev.chat_id, false, 0, "chatActionRecordingVoiceNote")
     }
 
     fn send_voice_action(
@@ -7689,6 +7805,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         chat_id: ChatId,
         recording: bool,
         now_ms: u64,
+        action: &str,
     ) -> Result<(), ConnectSendError> {
         let extra = self
             .session
@@ -7697,7 +7814,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             extra,
             chat_id,
             if recording {
-                "chatActionRecordingVoiceNote"
+                action
             } else {
                 "chatActionCancel"
             },
@@ -17546,6 +17663,138 @@ mod tests {
             .unwrap();
         let value: Value = serde_json::from_str(&add).unwrap();
         assert_eq!(value["chat_id"], 13);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// MED2: `recognize_speech` sends one `recognizeSpeech` for a real,
+    /// non-pending voice-note message; the chats path gate, unknown
+    /// messages, and pending messages are rejected (a refused request is
+    /// an error, never a faked transcript).
+    #[test]
+    fn driver_recognize_speech_sends_and_gates() {
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = Arc::new(RecordingSender::new());
+        let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+        let mut driver =
+            ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+        let seq = AtomicU64::new(0);
+        // Chats path inactive before authorization is Ready: rejected.
+        assert_eq!(
+            driver.recognize_speech(ChatId(11), MessageId(90)),
+            Err(ConnectSendError::InvalidRequest)
+        );
+        for json in [
+            r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+            r#"{"@type":"updateNewChat","chat":{"id":11,"title":"Cloud","type":{"@type":"chatTypePrivate","user_id":7},"unread_count":0}}"#,
+        ] {
+            driver
+                .ingest(copy_and_parse(json, &seq, &dyn_sink).unwrap())
+                .unwrap();
+        }
+        // Unknown message: rejected.
+        assert_eq!(
+            driver.recognize_speech(ChatId(11), MessageId(90)),
+            Err(ConnectSendError::InvalidRequest)
+        );
+        // A real voice-note message.
+        let voice_json = r#"{"@type":"updateNewMessage","message":{"id":90,"chat_id":11,"is_outgoing":false,"content":{"@type":"messageVoiceNote","voice_note":{"@type":"voiceNote","duration":3,"waveform":"","mime_type":"audio/ogg","voice":{"@type":"file","id":81,"size":10,"expected_size":10,"local":{"@type":"localFile","path":"","is_downloading_completed":false,"is_downloading_active":false,"downloaded_size":0},"remote":{"@type":"remoteFile","id":"","unique_id":"","is_uploading_completed":false,"is_uploading_active":false,"uploaded_size":0}}}},"is_listened":false}}"#;
+        driver
+            .ingest(copy_and_parse(voice_json, &seq, &dyn_sink).unwrap())
+            .unwrap();
+        let extra = driver
+            .recognize_speech(ChatId(11), MessageId(90))
+            .expect("real message sends");
+        let last = recorder.snapshot().into_iter().last().unwrap();
+        let value: Value = serde_json::from_str(&last).unwrap();
+        assert_eq!(value["@type"], "recognizeSpeech");
+        assert_eq!(value["chat_id"], 11);
+        assert_eq!(value["message_id"], 90);
+        assert_eq!(value["@extra"], extra.0.to_string());
+        // Pending (unsent) message: rejected.
+        let history = driver.session.histories.get_mut(&11).unwrap();
+        let mut pending_msg = history.messages.get(&90).unwrap().clone();
+        pending_msg.id = MessageId(0);
+        history.messages.insert(91, pending_msg);
+        assert_eq!(
+            driver.recognize_speech(ChatId(11), MessageId(91)),
+            Err(ConnectSendError::InvalidRequest)
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// MED2: `send_recorded_video_note` sends one `sendMessage` carrying
+    /// `inputMessageVideoNote` (duration + square length from the draft);
+    /// a closed chats path or an unsupported chat is rejected.
+    #[test]
+    fn driver_send_recorded_video_note_sends_input_message_video_note() {
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = Arc::new(RecordingSender::new());
+        let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+        let mut driver =
+            ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+        let seq = AtomicU64::new(0);
+        // Chats path inactive before authorization is Ready: rejected.
+        assert_eq!(
+            driver.send_recorded_video_note(
+                &crate::video::VideoNoteDraft {
+                    path: std::path::PathBuf::from("/nonexistent.mp4"),
+                    duration_secs: 5,
+                    length: 280,
+                },
+                None
+            ),
+            Err(ConnectSendError::InvalidRequest)
+        );
+        for json in [
+            r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+            r#"{"@type":"updateNewChat","chat":{"id":11,"title":"Cloud","type":{"@type":"chatTypePrivate","user_id":7},"unread_count":0}}"#,
+        ] {
+            driver
+                .ingest(copy_and_parse(json, &seq, &dyn_sink).unwrap())
+                .unwrap();
+        }
+        // No open chat: rejected.
+        assert_eq!(
+            driver.send_recorded_video_note(
+                &crate::video::VideoNoteDraft {
+                    path: std::path::PathBuf::from("/nonexistent.mp4"),
+                    duration_secs: 5,
+                    length: 280,
+                },
+                None
+            ),
+            Err(ConnectSendError::InvalidRequest)
+        );
+        driver.session.open_chat = Some(ChatId(11));
+        // A real file so `pick_send_path` accepts it; the thumbnail probe
+        // may fail on garbage bytes (thumbnail is optional).
+        let clip = dir.join("clip.mp4");
+        std::fs::write(&clip, b"not a real video").unwrap();
+        let draft = crate::video::VideoNoteDraft {
+            path: clip,
+            duration_secs: 5,
+            length: 280,
+        };
+        let extra = driver
+            .send_recorded_video_note(&draft, None)
+            .expect("sends");
+        let last = recorder.snapshot().into_iter().last().unwrap();
+        let value: Value = serde_json::from_str(&last).unwrap();
+        assert_eq!(value["@type"], "sendMessage");
+        assert_eq!(value["chat_id"], 11);
+        assert_eq!(
+            value["input_message_content"]["@type"],
+            "inputMessageVideoNote"
+        );
+        assert_eq!(value["input_message_content"]["video_note"]["duration"], 5);
+        assert_eq!(value["input_message_content"]["video_note"]["length"], 280);
+        assert_eq!(value["@extra"], extra.0.to_string());
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

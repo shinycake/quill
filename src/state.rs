@@ -177,6 +177,10 @@ pub enum RequestPurpose {
     /// Response is `ok`. `is_listened` / `is_viewed` arrive as
     /// `updateMessageContentOpened`.
     OpenMessageContent,
+    /// MED2: `recognizeSpeech`. Response is `ok`; the transcript arrives
+    /// later via `updateMessageContent` on the message's
+    /// `speech_recognition_result`.
+    RecognizeSpeech,
     /// `getInstalledStickerSets` (`stickerTypeRegular`). Response is `stickerSets`.
     GetInstalledStickerSets,
     /// `getStickerSet`. Response is `stickerSet`.

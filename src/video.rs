@@ -626,6 +626,201 @@ fn extract_frames(
     Ok(frames)
 }
 
+/// Linux V4L2 camera device used for round video-note capture.
+pub const V4L2_DEVICE: &str = "/dev/video0";
+
+/// TGX `RecordAudioVideoController`: round video-note capture resolution —
+/// 480px with "Record HQ Round Videos" on, 280px otherwise.
+pub fn round_video_size(hq: bool) -> i32 {
+    if hq { 480 } else { 280 }
+}
+
+/// Finished camera capture ready for `inputMessageVideoNote`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VideoNoteDraft {
+    /// Square, transcoded MP4 ready to send.
+    pub path: PathBuf,
+    pub duration_secs: i32,
+    /// Square side in pixels (`inputVideoNote.length`).
+    pub length: i32,
+}
+
+/// In-progress round video-note camera capture (MED2).
+///
+/// Mirrors `VoiceCapture`: shells out to `ffmpeg` (`v4l2` on Linux) while
+/// recording; a missing camera or ffmpeg is an error, never a fake file.
+/// The call stack's camera (ntgcalls) feeds the live-call WebRTC pipeline
+/// only — file recording goes through ffmpeg, the same pattern voice
+/// recording uses (`ffmpeg` + pulse).
+pub struct VideoNoteCapture {
+    raw_path: PathBuf,
+    started: std::time::Instant,
+    child: Option<std::process::Child>,
+    hq: bool,
+    /// Screenshot fixtures must not be deleted on Cancel.
+    keep_file: bool,
+    preview_secs: Option<i32>,
+}
+
+impl VideoNoteCapture {
+    /// Start `ffmpeg` v4l2 capture (native camera resolution; squared at
+    /// finish). Fails when there is no camera or ffmpeg is missing.
+    pub fn start(hq: bool) -> Result<Self, String> {
+        if !Path::new(V4L2_DEVICE).exists() {
+            return Err(format!("no camera found ({V4L2_DEVICE})"));
+        }
+        let raw_path = std::env::temp_dir().join(format!(
+            "quill-video-note-{}-{}.mp4",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        let child = Command::new("ffmpeg")
+            .args([
+                "-y",
+                "-f",
+                "v4l2",
+                "-framerate",
+                "15",
+                "-i",
+                V4L2_DEVICE,
+                "-t",
+                "60",
+                "-c:v",
+                "libx264",
+                "-pix_fmt",
+                "yuv420p",
+                "-an",
+            ])
+            .arg(&raw_path)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .map_err(|err| format!("video recording needs ffmpeg ({err})"))?;
+        Ok(Self {
+            raw_path,
+            started: std::time::Instant::now(),
+            child: Some(child),
+            hq,
+            keep_file: false,
+            preview_secs: None,
+        })
+    }
+
+    /// Screenshot / fixture capture. Does not open a camera; `finish`
+    /// still runs the square transcode on `path`.
+    pub fn preview(path: PathBuf, seconds: i32, hq: bool) -> Self {
+        Self {
+            raw_path: path,
+            started: std::time::Instant::now(),
+            child: None,
+            hq,
+            keep_file: true,
+            preview_secs: Some(seconds.max(0)),
+        }
+    }
+
+    pub fn elapsed_secs(&self) -> i32 {
+        if let Some(seconds) = self.preview_secs {
+            return seconds;
+        }
+        self.started
+            .elapsed()
+            .as_secs()
+            .min(u64::from(i32::MAX as u32)) as i32
+    }
+
+    pub fn discard(mut self) {
+        self.stop_child(false);
+        if !self.keep_file {
+            let _ = std::fs::remove_file(&self.raw_path);
+        }
+    }
+
+    /// Stop the encoder, square-crop + scale to the HQ setting, and keep
+    /// the file when it is a valid round clip.
+    pub fn finish(mut self) -> Result<VideoNoteDraft, String> {
+        self.stop_child(true);
+        let len = std::fs::metadata(&self.raw_path)
+            .map(|m| m.len())
+            .unwrap_or(0);
+        if len == 0 || !self.raw_path.is_file() {
+            if !self.keep_file {
+                let _ = std::fs::remove_file(&self.raw_path);
+            }
+            return Err("video recording was empty".into());
+        }
+        let size = round_video_size(self.hq);
+        let dest = self.raw_path.with_extension("round.mp4");
+        transcode_square(&self.raw_path, &dest, size)?;
+        if !self.keep_file {
+            let _ = std::fs::remove_file(&self.raw_path);
+        }
+        let probe =
+            probe_local_video(&dest).map_err(|err| format!("recorded clip unreadable ({err})"))?;
+        if probe.width != probe.height || probe.width != size {
+            let _ = std::fs::remove_file(&dest);
+            return Err("recorded clip is not a square round video".into());
+        }
+        if !(1..=60).contains(&probe.duration) {
+            let _ = std::fs::remove_file(&dest);
+            return Err("recorded clip duration out of range".into());
+        }
+        Ok(VideoNoteDraft {
+            path: dest,
+            duration_secs: probe.duration.max(1),
+            length: probe.width,
+        })
+    }
+
+    fn stop_child(&mut self, graceful: bool) {
+        let Some(mut child) = self.child.take() else {
+            return;
+        };
+        if graceful {
+            let _ = Command::new("kill")
+                .args(["-INT", &child.id().to_string()])
+                .status();
+            let _ = child.wait();
+        } else {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    }
+}
+
+impl Drop for VideoNoteCapture {
+    fn drop(&mut self) {
+        if self.child.is_some() {
+            self.stop_child(false);
+        }
+    }
+}
+
+/// Center-crop to a square and scale to `size`×`size` (MPEG4, no audio).
+/// Cameras rarely output square frames, so the crop happens here rather
+/// than at capture time.
+fn transcode_square(src: &Path, dest: &Path, size: i32) -> Result<(), String> {
+    let filter = format!("crop=min(iw\\,ih):min(iw\\,ih),scale={size}:{size}");
+    let status = Command::new("ffmpeg")
+        .args(["-y", "-hide_banner", "-loglevel", "error", "-i"])
+        .arg(src)
+        .args([
+            "-vf", &filter, "-c:v", "libx264", "-pix_fmt", "yuv420p", "-an",
+        ])
+        .arg(dest)
+        .status()
+        .map_err(|err| format!("video recording needs ffmpeg ({err})"))?;
+    if !status.success() || !dest.is_file() {
+        let _ = std::fs::remove_file(dest);
+        return Err("could not square the recorded clip".into());
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -856,5 +1051,68 @@ mod tests {
             !viewer_frame_cache_root().exists(),
             "stale viewer frame caches are swept at startup"
         );
+    }
+
+    #[test]
+    fn round_video_size_matches_tgx_constants() {
+        // MED2: what the HQ setting is ultimately validating — TGX
+        // `MAX_HQ_ROUND_RESOLUTION` (480) vs `MAX_ROUND_RESOLUTION` (280).
+        assert_eq!(round_video_size(true), 480);
+        assert_eq!(round_video_size(false), 280);
+    }
+
+    #[test]
+    fn video_note_capture_start_fails_honestly_without_camera() {
+        // Environment-gated: only meaningful where no camera exists.
+        if Path::new(V4L2_DEVICE).exists() {
+            return;
+        }
+        let err = match VideoNoteCapture::start(false) {
+            Ok(_) => panic!("expected no-camera error"),
+            Err(err) => err,
+        };
+        assert!(err.contains("no camera found"), "got: {err}");
+    }
+
+    #[test]
+    fn transcode_square_produces_square_mp4() {
+        // MED2: what `finish` is ultimately validating — a non-square
+        // camera frame becomes a square round clip at the HQ size.
+        // Skipped where ffmpeg is missing (same as the runtime path).
+        if Command::new("ffmpeg")
+            .arg("-version")
+            .output()
+            .map(|out| !out.status.success())
+            .unwrap_or(true)
+        {
+            return;
+        }
+        let dir = std::env::temp_dir().join(format!("quill-transcode-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let src = dir.join("src.mp4");
+        let status = Command::new("ffmpeg")
+            .args([
+                "-y",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-f",
+                "lavfi",
+                "-i",
+                "testsrc=size=640x480:duration=2:rate=15",
+                "-c:v",
+                "libx264",
+                "-pix_fmt",
+                "yuv420p",
+            ])
+            .arg(&src)
+            .status()
+            .unwrap();
+        assert!(status.success(), "synthetic source must encode");
+        let dest = dir.join("round.mp4");
+        transcode_square(&src, &dest, 280).expect("transcode works");
+        let probe = probe_local_video(&dest).expect("probe works");
+        assert_eq!((probe.width, probe.height), (280, 280));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

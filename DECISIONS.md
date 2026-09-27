@@ -4078,6 +4078,27 @@ greps.
   WYSIWYG block editing; ephemeral countdown/expiry UI; RTL layout for rich
   messages (`is_rtl` renders LTR, see above).
 
+## Slice MED2 — MEDIA RECORDING & VOICE (2026-09-27)
+
+- **Schema (pinned TDLib 1.8.67, `schema/td_api.tl`, verified verbatim):**
+  - `videoNote.speech_recognition_result` (:614-616) and `voiceNote.speech_recognition_result` (:622-624) carry `speechRecognitionResult` (:7390-7399): `speechRecognitionResultPending partial_text`, `speechRecognitionResultText text`, `speechRecognitionResultError error`. Parsed into `envelope::SpeechRecognition`; null/unknown stay `None`.
+  - `recognizeSpeech chat_id:int53 message_id:int53 = Ok` (:12181); `messageProperties.can_recognize_speech` (:6254) gates eligibility (parsed but the UI shows the Transcribe button regardless — a refusal surfaces as an error, never a faked transcript).
+  - `chatActionRecordingVoiceNote` (:6368) / `chatActionRecordingVideoNote` (:6392) — the driver sends the matching action while the record bar is active (Unigram/TGX pattern).
+  - Transcript delivery is `updateMessageContent` on the existing message — no new update plumbing; the reducer's existing content replacement picks it up.
+- **Telegram X evidence (local TGX-Android source, `~/workspace/telegram-x`):**
+  - Exact strings `HoldToAudio`/`HoldToVideo` ("Hold to record audio. Tap to switch to video." / vice versa, `strings.xml`:2538-2539); `VoiceVideoButtonView.onTouchEvent` (:255-318) — press/hold starts recording in the preferred mode, movement distinguishes up-lock from left-cancel, short tap switches mode.
+  - `RecordLockView` exists and its click finishes a released/locked recording (`RecordAudioVideoController.java`:379-390) — Quill's Lock button is the desktop mapping.
+  - HQ round video: `MAX_ROUND_RESOLUTION` 280, `MAX_HQ_ROUND_RESOLUTION` 480 (`RecordAudioVideoController.java`:99-100,1593); persisted setting `needHqRoundVideos` ("Record HQ Round Videos").
+- **Built:**
+  - Record mode toggle: right-click the record button flips audio/video (TGX tap-to-switch, desktop-mapped — a touch hold has no honest mouse equivalent); button label + tooltip show the current mode and hint; `MediaPrefs.prefer_video_mode` persisted in `media_prefs.json`.
+  - Round video-note capture: `video::VideoNoteCapture` — ffmpeg V4L2 from `/dev/video0` (same pattern as voice's ffmpeg capture), graceful SIGINT stop, center-crop square + scale to 280/480 per the HQ pref, validated duration (1–60s) and square dimensions; `connect::send_recorded_video_note` sends `inputMessageVideoNote` with the probed duration/length. Missing camera or ffmpeg is an honest status-note error, never a fake file.
+  - Lock-to-record + discard confirmation: record bar gains Lock/Unlock (locked ignores Esc), Cancel and Esc on an unlocked recording open a "Discard this recording?" confirm row (Esc with the row open dismisses it and keeps recording). Chat switches/panel toggles still force-cancel (internal teardown, not user cancellation).
+  - Transcription: `connect::recognize_speech` driver method (real, non-pending messages only; refused requests are errors); rows under voice and video notes show Transcribe / "Transcribing… {partial}" / the transcript / "Transcription failed: …" + Retry.
+  - "Record HQ round videos" toggle in the settings Media section, persisted via the existing `set_media_pref` path.
+- **Key decisions:** ponytail — the record action sync was parametrized (`sync_record_action(active, now_ms, action)`) instead of a second timer; the video-note send mirrors `send_voice_note` (slow-mode gate, reply threading via a shared `recording_send_reply` helper, demo routing); `VideoNoteCapture` reuses the `VoiceCapture` lifecycle shape (start/discard/finish + `Drop` kills the child); no slide-to-cancel / hold-to-record gesture plumbing — touch gestures have no mouse equivalent, and the Lock button + confirm row cover the same intent on desktop.
+- **Not verifiable without live Telegram:** the `recognizeSpeech` round-trip and transcript delivery via `updateMessageContent`; the live camera path (`/dev/video0` absent on this VM — synthetic ffmpeg transcode and the no-camera error are test-covered); actual V4L2 encoder behavior.
+- **Out of this slice:** touch-hold to record / swipe-up to lock / slide-to-cancel (TGX gestures; desktop-mapped as click / Lock button / confirm row — the README boxes note this); in-call "video messages" (a different TGX feature, not round video notes).
+
 ## Slice MED1 — MEDIA VIEWER & PLAYBACK (2026-09-27)
 
 - **Schema (pinned TDLib 1.8.67, `schema/td_api.tl`, verified verbatim):**

@@ -171,16 +171,16 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Volume control / mute toggle in the video player — volume slider applies on release (ffplay `-volume`), mute remembers and restores the previous level; same mute on voice/audio rows <!-- parity:media-video-volume -->
 - [x] Playback error states for unsupported video/audio/GIF/round-video formats — unsupported-format vs generic playback errors surfaced as red error lines in the viewer transport (TGX *PlaybackError/*PlaybackUnsupported); voice/audio rows surface ffplay-spawn failures, not silent stalls <!-- parity:media-playback-errors -->
 - [x] Record voice note from the mic (ffmpeg OGG capture) with `chatActionRecordingVoiceNote` shown while recording (src/voice.rs:86-99, connect.rs:4796) <!-- parity:media-voice-record -->
-- [ ] Lock-to-record (swipe up) and slide-to-cancel while recording (partial: click-to-record, Esc/Cancel discards, ui/mod.rs:650) <!-- parity:media-voice-lock -->
+- [x] Lock-to-record and discard confirmation while recording — Lock button (TGX `RecordLockView`, desktop-mapped); locked recordings ignore Esc; Cancel/Esc on an unlocked recording opens a "Discard this recording?" confirm row instead of discarding silently (ui/mod.rs) <!-- parity:media-voice-lock -->
 - [x] Waveform bars on voice messages decoded from TDLib 5-bit waveform (src/voice.rs:29-67) <!-- parity:media-voice-waveform -->
 - [x] Voice/audio history rows with play/pause, draggable seek bar, and remembered position (ui/mod.rs:1063, 6966) <!-- parity:media-audio-player -->
-- [ ] Voice note transcription display (partial: `speech_recognition_result` parsed, no UI) <!-- parity:media-voice-transcription -->
-- [ ] Hold-to-record audio vs tap-to-switch video recording mode toggle (TGX HoldToAudio/HoldToVideo) <!-- parity:media-record-mode-toggle -->
-- [ ] "Record HQ round videos" quality setting (TGX UseHqRoundVideos) <!-- parity:media-video-note-hq -->
-- [ ] Discard-recording confirmation dialog <!-- parity:media-record-discard-confirm -->
+- [x] Voice note transcription display — `speech_recognition_result` parsed (pending/text/error) for voice and video notes; Transcribe button sends a real `recognizeSpeech` request, transcript arrives via `updateMessageContent` (src/telegram/envelope.rs, requests.rs, ui/mod.rs) <!-- parity:media-voice-transcription -->
+- [x] Audio/video recording mode toggle — right-click the record button flips mode (TGX tap-to-switch `HoldToAudio`/`HoldToVideo`, desktop-mapped), persisted in `MediaPrefs` (src/settings.rs, ui/mod.rs) <!-- parity:media-record-mode-toggle -->
+- [x] "Record HQ round videos" quality setting (TGX `UseHqRoundVideos`) in Media settings — 480px captures when on, 280px otherwise (src/settings.rs, src/video.rs) <!-- parity:media-video-note-hq -->
+- [x] Discard-recording confirmation dialog — Cancel/Esc opens a confirm row ("Discard this recording?" / Keep recording); Esc with the row open dismisses it and keeps recording (ui/mod.rs) <!-- parity:media-record-discard-confirm -->
 - [x] Round video-note player with play/pause in history (ui/mod.rs:842) <!-- parity:media-video-note-player -->
 - [x] Send video notes from video files with probed duration and generated square thumbnail (requests.rs:1885, src/video.rs:107-156) <!-- parity:media-video-note-send -->
-- [ ] Record video note from the camera (partial: video notes attach from file only) <!-- parity:media-video-note-record -->
+- [x] Record video note from the camera — ffmpeg V4L2 capture, center-crop square + scale to the HQ size, validated duration/square MP4 sent via `inputMessageVideoNote`; `chatActionRecordingVideoNote` while recording (src/video.rs, connect.rs). Live camera path untested — no `/dev/video*` on this VM; synthetic transcode and the no-camera error path are covered by tests <!-- parity:media-video-note-record -->
 - [x] Music rows with title/performer/album-cover art and play/pause (ui/mod.rs:844) <!-- parity:media-music-row -->
 - [x] GIF/animation frame playback in history (ui/mod.rs:688-690, 5838) <!-- parity:media-gif-playback -->
 - [x] Document rows with file name and mime type, click-to-download (envelope.rs:4025, ui/mod.rs:16933) <!-- parity:media-document-row -->

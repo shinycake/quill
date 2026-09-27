@@ -69,10 +69,16 @@ pub fn save_call_prefs(paths: &AccountPaths, prefs: &CallPrefs) -> std::io::Resu
 ///   choice is remembered between sends (TGX `RememberAlbumSetting`);
 /// - `group_media`: the last-used grouping choice (only honored when
 ///   `remember_media_grouping` is on).
+/// - `hq_round_videos`: MED2 — "Record HQ Round Videos" (TGX
+///   `UseHqRoundVideos`): capture round video notes at 480px instead of 280px;
+/// - `prefer_video_mode`: MED2 — the record button's mode (TGX
+///   `preferVideoMode`); right-click on the record button flips it.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct MediaPrefs {
     pub remember_media_grouping: bool,
     pub group_media: bool,
+    pub hq_round_videos: bool,
+    pub prefer_video_mode: bool,
 }
 
 impl MediaPrefs {
@@ -198,6 +204,8 @@ mod tests {
         let prefs = MediaPrefs {
             remember_media_grouping: true,
             group_media: false,
+            hq_round_videos: true,
+            prefer_video_mode: true,
         };
         save_media_prefs(&paths, &prefs).expect("save works");
         assert_eq!(load_media_prefs(&paths), prefs);
@@ -206,6 +214,7 @@ mod tests {
         let prefs = MediaPrefs {
             remember_media_grouping: false,
             group_media: false,
+            ..Default::default()
         };
         assert!(prefs.default_grouping());
         std::fs::write(dir.join("accounts/primary/media_prefs.json"), b"not json").unwrap();
