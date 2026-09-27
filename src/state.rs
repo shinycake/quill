@@ -24,9 +24,10 @@ use crate::telegram::envelope::{
     ParsedCall, ParsedChatEvent, ParsedChatInviteLink, ParsedChatJoinRequest, ParsedChatMember,
     ParsedFile, ParsedGroupCall, ParsedGroupCallMessage, ParsedGroupCallParticipant, ParsedMessage,
     ParsedSecretChat, ParsedStory, ParsedUser, ParsedVideoChat, ParsedWelcomeMessage, Poll,
-    ReportOption, ReportSponsoredResult, RichMessageContent, ScopeNotificationSettings,
-    SecretChatState, SponsoredMessage, StickerFormat, StickerItem, StickerSetInfo, StorageStats,
-    StoryAvailableReactionView, StoryListView, TdError, effective_content,
+    ReportChatOutcome, ReportOption, ReportSponsoredResult, RichMessageContent,
+    ScopeNotificationSettings, SecretChatState, SponsoredMessage, StickerFormat, StickerItem,
+    StickerSetInfo, StorageStats, StoryAvailableReactionView, StoryListView, TdError,
+    effective_content,
 };
 use crate::telegram::envelope::{CallState, ReadyParams};
 use crate::telegram::requests::{
@@ -464,6 +465,14 @@ pub enum RequestPurpose {
     /// Response is `ok`; the local recents were already cleared
     /// optimistically (TGX `SearchManager.clearRecentlyFoundChats`).
     ClearRecentlyFoundChats,
+    /// Slice CL3: `reportChat` (schema 1.8.67, line 15693). Response is
+    /// `ReportChatResult`; `Ok` reports the chat, any other variant
+    /// surfaces as "more info required" (never success).
+    ReportChat,
+    /// Slice CL3: `setMessageSenderBlockList` (schema 1.8.67, line
+    /// 14492). Response is `ok`; the new state arrives via
+    /// `updateChatBlockList`.
+    SetMessageSenderBlockList,
     /// Slice CL2: `getArchiveChatListSettings` (schema 1.8.67, line
     /// 13421). Response is `archiveChatListSettings`; stored in
     /// `Session::archive_chat_list_settings`.
@@ -1454,6 +1463,23 @@ pub struct ChatSummary {
     /// 3600 / 3627), refreshed by `updateNewChat` and
     /// `updateChatIsMarkedAsUnread` (schema line 10588).
     pub is_marked_as_unread: bool,
+    /// Slice CL3: `chat.unread_mention_count` (schema 1.8.67, lines
+    /// 3611 / 3627), refreshed by `updateChatUnreadMentionCount`
+    /// (schema line 10567). Drives the @ mention badge on the row.
+    pub unread_mention_count: i32,
+    /// Slice CL3: `chat.unread_reaction_count` (schema 1.8.67, lines
+    /// 3612 / 3627), refreshed by `updateChatUnreadReactionCount`
+    /// (schema line 10570). Drives the ♥ reaction badge on the row.
+    pub unread_reaction_count: i32,
+    /// Slice CL3: `chat.can_be_reported` (schema 1.8.67, lines 3606 /
+    /// 3627). Gates the row-menu Report item (`reportChat`, schema
+    /// line 15693).
+    pub can_be_reported: bool,
+    /// Slice CL3: the peer is on `blockListMain` (`chat.block_list`,
+    /// schema 1.8.67 lines 3627 / 9692), refreshed by
+    /// `updateChatBlockList` (schema line 10594). Drives the
+    /// row-menu Block/Unblock label.
+    pub blocked: bool,
     /// Phase B1: latest known `SecretChatState` for `ChatKind::Secret`
     /// chats (from `updateSecretChat` / `getSecretChat`, schema 1.8.67
     /// lines 10741 / 2816). `None` for other chat kinds and until the
@@ -1826,6 +1852,10 @@ fn placeholder_chat(chat_id: ChatId) -> ChatSummary {
         can_be_deleted_for_all_users: false,
         can_be_deleted_only_for_self: false,
         is_marked_as_unread: false,
+        unread_mention_count: 0,
+        unread_reaction_count: 0,
+        can_be_reported: false,
+        blocked: false,
         // Phase B1: unknown until `updateSecretChat` / `getSecretChat`
         // resolves it.
         secret_state: None,
@@ -2950,6 +2980,10 @@ pub struct Session {
     /// `deleteChatHistory`). The UI drains it into the status note so a
     /// refused action never looks like it worked.
     pub chat_action_error: Option<String>,
+    /// Slice CL3: one-shot `reportChat` outcome (`reportChatResultOk`
+    /// vs option/text/messages required). The UI drains it into the
+    /// status note next to `chat_action_error`.
+    pub report_chat_outcome: Option<String>,
     /// MED4: one-shot `getWebPageInstantView` answer for the IV reader.
     /// The UI drains it (opens the reader) and clears it.
     pub instant_view: Option<InstantViewPage>,
@@ -3663,6 +3697,7 @@ impl Session {
             pinned_chat_count_max: 5,
             pinned_archived_chat_count_max: 100,
             chat_action_error: None,
+            report_chat_outcome: None,
             instant_view: None,
             instant_view_fallback_url: None,
             instant_view_urls: HashMap::new(),
@@ -4459,6 +4494,10 @@ impl Session {
                 message_auto_delete_time,
                 video_chat,
                 has_welcome_messages,
+                unread_mention_count,
+                unread_reaction_count,
+                can_be_reported,
+                blocked,
             } => {
                 // Parity slice: keep the chat photo (`chatPhotoInfo.small`)
                 // file id so the chat list can render avatars. The file
@@ -4486,6 +4525,12 @@ impl Session {
                 // Slice CL1: clear-history gate + marked-as-unread flag.
                 chat.can_be_deleted_only_for_self = can_be_deleted_only_for_self;
                 chat.is_marked_as_unread = is_marked_as_unread;
+                // Slice CL3: mention / reaction badge counts, report gate,
+                // block-list state.
+                chat.unread_mention_count = unread_mention_count;
+                chat.unread_reaction_count = unread_reaction_count;
+                chat.can_be_reported = can_be_reported;
+                chat.blocked = blocked;
                 // Phase B4: chat-level auto-delete / self-destruct timer
                 // (`chat.message_auto_delete_time`, schema 1.8.67, lines
                 // 3616 / 3627).
@@ -5189,6 +5234,45 @@ impl Session {
                     .or_insert_with(|| placeholder_chat(chat_id));
                 chat.last_read_inbox_message_id = last_read_inbox_message_id;
                 chat.unread_count = unread_count;
+            }
+            // Slice CL3: mention / reaction badge counts (schema 1.8.67,
+            // lines 10567/10570).
+            EnvelopePayload::UpdateChatUnreadMentionCount {
+                chat_id,
+                unread_mention_count,
+            } => {
+                self.chats
+                    .entry(chat_id.0)
+                    .or_insert_with(|| placeholder_chat(chat_id))
+                    .unread_mention_count = unread_mention_count;
+            }
+            EnvelopePayload::UpdateChatUnreadReactionCount {
+                chat_id,
+                unread_reaction_count,
+            } => {
+                self.chats
+                    .entry(chat_id.0)
+                    .or_insert_with(|| placeholder_chat(chat_id))
+                    .unread_reaction_count = unread_reaction_count;
+            }
+            // Slice CL3: `updateChatBlockList` (schema 1.8.67, line
+            // 10594).
+            EnvelopePayload::UpdateChatBlockList { chat_id, blocked } => {
+                self.chats
+                    .entry(chat_id.0)
+                    .or_insert_with(|| placeholder_chat(chat_id))
+                    .blocked = blocked;
+            }
+            // Slice CL3: `reportChat` result — surfaced as a status note
+            // via the same drain as `chat_action_error`; a refusal or a
+            // "more info required" is never shown as success.
+            EnvelopePayload::ReportChatResult(outcome) => {
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::ReportChat) {
+                    self.report_chat_outcome = Some(match outcome {
+                        ReportChatOutcome::Ok => "chat reported".to_string(),
+                        ReportChatOutcome::MoreInfoRequired => "report needs a reason or messages — the chat list only sends simple spam reports".to_string(),
+                    });
+                }
             }
             EnvelopePayload::UpdateChatReadOutbox {
                 chat_id,
@@ -6589,6 +6673,18 @@ impl Session {
                     Some(RequestPurpose::ClearRecentlyFoundChats) => {
                         self.chat_action_error = Some(format!(
                             "could not clear recent searches (error {})",
+                            err.code
+                        ));
+                    }
+                    // Slice CL3: refused report / block surfaces in the
+                    // status note — never shown as success.
+                    Some(RequestPurpose::ReportChat) => {
+                        self.chat_action_error =
+                            Some(format!("could not report the chat (error {})", err.code));
+                    }
+                    Some(RequestPurpose::SetMessageSenderBlockList) => {
+                        self.chat_action_error = Some(format!(
+                            "could not change the block state (error {})",
                             err.code
                         ));
                     }
@@ -15026,6 +15122,130 @@ mod tests {
         );
         assert_eq!(session.pinned_chat_count_max, 10);
         assert_eq!(session.pinned_archived_chat_count_max, 200);
+    }
+
+    #[test]
+    fn cl3_mention_reaction_counts_parse_and_update() {
+        // Slice CL3: `chat.unread_mention_count` /
+        // `chat.unread_reaction_count` (schema 1.8.67, lines 3611-3612)
+        // and the updates (lines 10567/10570) feed the @ / ♥ badges.
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateNewChat","chat":{"id":14,"title":"Mentions","type":{"@type":"chatTypePrivate","user_id":14},"unread_count":3,"unread_mention_count":2,"unread_reaction_count":1,"can_be_reported":true}}"#,
+        );
+        let chat = session.chats.get(&14).expect("chat");
+        assert_eq!(chat.unread_mention_count, 2);
+        assert_eq!(chat.unread_reaction_count, 1);
+        assert!(chat.can_be_reported);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateChatUnreadMentionCount","chat_id":14,"unread_mention_count":0}"#,
+        );
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateChatUnreadReactionCount","chat_id":14,"unread_reaction_count":0}"#,
+        );
+        let chat = session.chats.get(&14).expect("chat");
+        assert_eq!(chat.unread_mention_count, 0);
+        assert_eq!(chat.unread_reaction_count, 0);
+    }
+
+    #[test]
+    fn cl3_report_chat_result_ok_and_more_info() {
+        // Slice CL3: `reportChatResultOk` → "chat reported";
+        // `reportChatResultOptionRequired` (and its siblings) → the
+        // honest "more info required" note, never success.
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        let extra = session.request(RequestPurpose::ReportChat, Some(ChatId(14)));
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(r#"{{"@type":"reportChatResultOk","@extra":"{}"}}"#, extra.0),
+        );
+        assert_eq!(
+            session.report_chat_outcome.as_deref(),
+            Some("chat reported")
+        );
+
+        let extra = session.request(RequestPurpose::ReportChat, Some(ChatId(14)));
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"reportChatResultOptionRequired","@extra":"{}"}}"#,
+                extra.0
+            ),
+        );
+        assert_eq!(
+            session.report_chat_outcome.as_deref(),
+            Some(
+                "report needs a reason or messages — the chat list only sends simple spam reports"
+            )
+        );
+    }
+
+    #[test]
+    fn cl3_block_list_update_sets_blocked() {
+        // Slice CL3: `updateChatBlockList` (schema 1.8.67, line 10594)
+        // tracks the peer's block state.
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        session.chats.insert(14, placeholder_chat(ChatId(14)));
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateChatBlockList","chat_id":14,"block_list":{"@type":"blockListMain"}}"#,
+        );
+        assert!(session.chats.get(&14).expect("chat").blocked);
+    }
+
+    #[test]
+    fn cl3_report_and_block_errors_surface() {
+        // Slice CL3: a refused `reportChat` /
+        // `setMessageSenderBlockList` surfaces in `chat_action_error` —
+        // never shown as success.
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        let extra = session.request(RequestPurpose::ReportChat, Some(ChatId(14)));
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"error","@extra":"{}","code":400,"message":"CHAT_REPORT_FAILED"}}"#,
+                extra.0
+            ),
+        );
+        assert_eq!(
+            session.chat_action_error.as_deref(),
+            Some("could not report the chat (error 400)")
+        );
+        let extra = session.request(RequestPurpose::SetMessageSenderBlockList, Some(ChatId(14)));
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"error","@extra":"{}","code":403,"message":"FORBIDDEN"}}"#,
+                extra.0
+            ),
+        );
+        assert_eq!(
+            session.chat_action_error.as_deref(),
+            Some("could not change the block state (error 403)")
+        );
     }
 
     #[test]

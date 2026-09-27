@@ -756,6 +756,19 @@ pub enum GroupConfirmAction {
     /// `remove_from_chat_list: true` (Telegram X `Tdlib.deleteChat`),
     /// not the destructive `deleteChat` constructor.
     RemoveFromList,
+    /// Slice CL3: row-menu Report — `reportChat` spam report (schema
+    /// 1.8.67, line 15693).
+    ReportChat,
+    /// Slice CL3: row-menu Block/Unblock user —
+    /// `setMessageSenderBlockList` (schema 1.8.67, line 14492).
+    BlockUser {
+        block: bool,
+    },
+    /// Slice CL3: multi-select bulk delete — `deleteChatHistory` with
+    /// `remove_from_chat_list: true` for every selected chat. The ids
+    /// are read from the live selection at submit time (the dialog
+    /// blocks selection changes while open).
+    RemoveSelectedChats,
 }
 
 pub struct GroupConfirmDialog {
@@ -1185,6 +1198,10 @@ pub struct QuillApp {
     /// Slice CL1: right-click chat-row context menu target + window
     /// position.
     chat_menu: Option<ChatMenuState>,
+    /// Slice CL3: multi-select mode — checked chat ids. Non-empty while
+    /// selecting; rows toggle the check instead of opening the chat and
+    /// the select bar offers the bulk actions.
+    selected_chats: HashSet<i64>,
     /// M1: swipe-to-reply press origin (chat, message, press x).
     swipe_reply_start: Option<(ChatId, MessageId, Pixels)>,
     /// Same-chat reply draft (tdesktop `FieldHeader::replyToMessage`).
@@ -1520,6 +1537,11 @@ pub enum ScreenshotDemo {
     /// section, and the Saved Messages entry (injected, no live
     /// Telegram).
     ReadyChatList,
+    /// Slice CL3: chat list with the @ mention badge, the ♥ reaction
+    /// badge, multi-select mode (two chats checked + the select bar),
+    /// and the row menu open showing Report / Block user (injected,
+    /// no live Telegram).
+    ReadyChatList3,
     /// Slice CL2: the archive auto-settings dialog over the
     /// `ReadyChatList` fixture (injected settings, no live Telegram).
     ReadyChatListArchive,
@@ -2427,6 +2449,15 @@ impl QuillApp {
                     AuthorizationState::Ready,
                 )
             }
+            Some(ScreenshotDemo::ReadyChatList3) => {
+                demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
+                (
+                    ConnectUiStatus::DemoReadyChats,
+                    None,
+                    "screenshot demo — chat list: mentions · reactions · multi-select".into(),
+                    AuthorizationState::Ready,
+                )
+            }
             Some(ScreenshotDemo::ReadyNotificationSound) => {
                 demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
                 (
@@ -3113,6 +3144,7 @@ impl QuillApp {
             rich_editor_open: false,
             message_menu: None,
             chat_menu: None,
+            selected_chats: HashSet::new(),
             swipe_reply_start: None,
             pending_reply: None,
             clear_draft_on_success: None,
@@ -3381,6 +3413,26 @@ impl QuillApp {
                 session.search.status = SearchStatus::Empty;
             }
             app.status_note = "screenshot demo — search empty state".into();
+        }
+        // Slice CL3: select mode (chats 11 + 12 checked, select bar),
+        // the @ mention badge on chat 11, the ♥ reaction badge on chat
+        // 12, and the row menu open on chat 11 showing Report / Block
+        // user / Select. The menu sits below the rows so both badges
+        // and the select bar stay visible (capture at
+        // QUILL_DEMO_WINDOW_SIZE=1200x1250 on a 1400x1400 display).
+        if matches!(demo, Some(ScreenshotDemo::ReadyChatList3)) {
+            if let Some(session) = app.demo_session.as_mut() {
+                app.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_chat_list_3(session, &app.demo_sink, &app.demo_seq);
+            }
+            app.selected_chats.insert(11);
+            app.selected_chats.insert(12);
+            app.chat_menu = Some(ChatMenuState {
+                chat_id: ChatId(11),
+                position: Point::new(px(120.), px(770.)),
+            });
+            app.status_note =
+                "screenshot demo — mentions · reactions · multi-select · report · block".into();
         }
         if matches!(demo, Some(ScreenshotDemo::ReadyNotificationSound)) {
             if let Some(session) = app.demo_session.as_mut() {
@@ -4288,6 +4340,16 @@ impl QuillApp {
             .and_then(|live| live.driver.session.invite_link_error.take())
         {
             self.status_note = err;
+            progressed = true;
+        }
+        // Slice CL3: a `reportChat` outcome arrived — surface it in the
+        // status bar alongside the other async error drains.
+        if let Some(note) = self
+            .live
+            .as_mut()
+            .and_then(|live| live.driver.session.report_chat_outcome.take())
+        {
+            self.status_note = note;
             progressed = true;
         }
         // Slice G1 fix-up: `updateChatMember` dropped the member-list
@@ -5506,6 +5568,11 @@ impl QuillApp {
                     Button::new($id)
                         .label($label)
                         .ghost()
+                        // Slice CL3 drive-by: same dark-panel text fix CL1
+                        // applied to the chat-row menu (commit 5cd5c25) —
+                        // ghost buttons inherit unreadable dark text on
+                        // the rgb(0x161b22) panel without it.
+                        .text_color(rgb(0xe6edf3))
                         .on_click($cx.listener(move |$this, _, $window, $cx| $body)),
                 );
             };
@@ -5750,6 +5817,58 @@ impl QuillApp {
                 cx.notify();
             });
         }
+        // Slice CL3: Report — gated on `chat.can_be_reported` (schema
+        // 1.8.67, line 3606); sends the simple spam report
+        // (`reportChat` with empty option_id/message_ids, schema:3667).
+        if chat.can_be_reported {
+            item!("chat-menu-report", "Report", this, cx, {
+                this.open_group_confirm(chat_id, GroupConfirmAction::ReportChat, cx);
+                this.chat_menu = None;
+                cx.notify();
+            });
+        }
+        // Slice CL3: Block/Unblock the peer of a private or secret chat
+        // (`setMessageSenderBlockList`, schema 1.8.67, line 14492;
+        // schema:3674 covers secret chats). Never offered for the user's
+        // own chat.
+        let blockable = match &chat.kind {
+            ChatKind::Private { user_id } | ChatKind::Secret { user_id, .. } => {
+                let is_self = self
+                    .session()
+                    .and_then(|s| s.my_user_id)
+                    .is_some_and(|me| me == user_id.0);
+                (!is_self).then_some(user_id.0)
+            }
+            _ => None,
+        };
+        if blockable.is_some() {
+            let blocked = chat.blocked;
+            item!(
+                "chat-menu-block",
+                if blocked {
+                    "Unblock user"
+                } else {
+                    "Block user"
+                },
+                this,
+                cx,
+                {
+                    this.open_group_confirm(
+                        chat_id,
+                        GroupConfirmAction::BlockUser { block: !blocked },
+                        cx,
+                    );
+                    this.chat_menu = None;
+                    cx.notify();
+                }
+            );
+        }
+        // Slice CL3: enter multi-select mode with this chat checked.
+        item!("chat-menu-select", "Select", this, cx, {
+            this.enter_select_mode(chat_id, cx);
+            this.chat_menu = None;
+            cx.notify();
+        });
         div()
             .id("chat-menu-overlay")
             .absolute()
@@ -11566,6 +11685,106 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// Slice CL3: multi-select mode — enter with one chat checked (from
+    /// the row-menu "Select" item).
+    fn enter_select_mode(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
+        self.selected_chats.insert(chat_id.0);
+        cx.notify();
+    }
+
+    /// Slice CL3: leave multi-select mode, clearing the checks.
+    fn exit_select_mode(&mut self, cx: &mut Context<Self>) {
+        self.selected_chats.clear();
+        cx.notify();
+    }
+
+    /// Slice CL3: toggle one row's check in multi-select mode; the last
+    /// uncheck exits the mode.
+    fn toggle_chat_selected(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
+        if !self.selected_chats.remove(&chat_id.0) {
+            self.selected_chats.insert(chat_id.0);
+        }
+        cx.notify();
+    }
+
+    /// Slice CL3: "Select unread" — check every listed chat with unread
+    /// messages or a marked-as-unread flag (TGX `ChatsController`
+    /// select-unread).
+    fn select_unread_chats(&mut self, cx: &mut Context<Self>) {
+        // Collect first: `session()` borrows `self`, so the ids must be
+        // owned before touching `selected_chats`.
+        let unread: Vec<i64> = self
+            .session()
+            .map(|session| {
+                session
+                    .ordered_chats()
+                    .into_iter()
+                    .filter(|chat| chat.unread_count > 0 || chat.is_marked_as_unread)
+                    .map(|chat| chat.id.0)
+                    .collect()
+            })
+            .unwrap_or_default();
+        for id in unread {
+            self.selected_chats.insert(id);
+        }
+        cx.notify();
+    }
+
+    /// Slice CL3: bulk pin toggle for the selection, reusing
+    /// `toggle_chat_pin` (with its rollback note).
+    fn toggle_selected_pins(&mut self, cx: &mut Context<Self>) {
+        let ids: Vec<ChatId> = self.selected_chats.iter().map(|id| ChatId(*id)).collect();
+        for id in ids {
+            self.toggle_chat_pin(id, cx);
+        }
+    }
+
+    /// Slice CL3: bulk mark-as-read for the selection, reusing the
+    /// single-chat mark-read path (`toggle_chat_marked_as_unread`
+    /// does the TGX `viewMessages` flow when there is unread state).
+    fn mark_selected_read(&mut self, cx: &mut Context<Self>) {
+        let ids: Vec<ChatId> = self.selected_chats.iter().map(|id| ChatId(*id)).collect();
+        for id in ids {
+            self.toggle_chat_marked_as_unread(id, cx);
+        }
+        self.selected_chats.clear();
+        cx.notify();
+    }
+
+    /// Slice CL3: bulk mute toggle for the selection, reusing
+    /// `apply_chat_mute` (mute-forever / unmute, like the row menu).
+    fn toggle_selected_mute(&mut self, cx: &mut Context<Self>) {
+        let ids: Vec<ChatId> = self.selected_chats.iter().map(|id| ChatId(*id)).collect();
+        for id in ids {
+            let muted = self
+                .session()
+                .and_then(|s| s.chats.get(&id.0))
+                .is_some_and(|chat| chat.is_muted());
+            self.apply_chat_mute(id, if muted { 0 } else { MUTE_FOREVER }, cx);
+        }
+    }
+
+    /// Slice CL3: bulk archive toggle for the selection, reusing
+    /// `toggle_archive`.
+    fn toggle_selected_archive(&mut self, cx: &mut Context<Self>) {
+        let ids: Vec<ChatId> = self.selected_chats.iter().map(|id| ChatId(*id)).collect();
+        for id in ids {
+            self.toggle_archive(id, cx);
+        }
+        self.selected_chats.clear();
+        cx.notify();
+    }
+
+    /// Slice CL3: bulk delete — confirms first, like the single-chat
+    /// row-menu path.
+    fn delete_selected_chats(&mut self, cx: &mut Context<Self>) {
+        // The dialog needs a chat id; the ids to delete are read from
+        // the live selection at submit time.
+        if let Some(first) = self.selected_chats.iter().next().map(|id| ChatId(*id)) {
+            self.open_group_confirm(first, GroupConfirmAction::RemoveSelectedChats, cx);
+        }
+    }
+
     /// Slice G1: run the confirmed action — `deleteChat` (schema
     /// 1.8.67, line 11850; driver checks
     /// `chat.can_be_deleted_for_all_users`), `leaveChat`, or the
@@ -11617,6 +11836,54 @@ impl QuillApp {
                         .driver
                         .remove_chat_from_list(dialog.chat_id)
                         .map(|sent| sent_note(sent, "deleting chat…")),
+                    // Slice CL3: row-menu Report (`reportChat`, schema
+                    // 1.8.67, line 15693). TDLib answers
+                    // `ReportChatResult` asynchronously; the outcome
+                    // surfaces via `Session::report_chat_outcome`.
+                    GroupConfirmAction::ReportChat => live
+                        .driver
+                        .report_chat(dialog.chat_id)
+                        .map(|sent| sent_note(sent, "reporting chat…")),
+                    // Slice CL3: row-menu Block/Unblock
+                    // (`setMessageSenderBlockList`, schema 1.8.67, line
+                    // 14492). TDLib answers `ok`; the new state arrives
+                    // via `updateChatBlockList`.
+                    GroupConfirmAction::BlockUser { block } => live
+                        .driver
+                        .set_chat_user_blocked(dialog.chat_id, block)
+                        .map(|sent| {
+                            sent_note(
+                                sent,
+                                if block {
+                                    "blocking user…"
+                                } else {
+                                    "unblocking user…"
+                                },
+                            )
+                        }),
+                    // Slice CL3: multi-select bulk delete — one
+                    // `deleteChatHistory(remove_from_chat_list:true)`
+                    // per selected chat; the selection clears on
+                    // confirm. The ids come from the live selection
+                    // (the dialog blocks selection changes while
+                    // open), so the enum stays `Copy`.
+                    GroupConfirmAction::RemoveSelectedChats => {
+                        let chat_ids: Vec<ChatId> =
+                            self.selected_chats.iter().map(|id| ChatId(*id)).collect();
+                        let mut sent = 0;
+                        for id in &chat_ids {
+                            if live
+                                .driver
+                                .remove_chat_from_list(*id)
+                                .is_ok_and(|sent| sent.is_some())
+                            {
+                                sent += 1;
+                            }
+                        }
+                        let total = chat_ids.len();
+                        self.selected_chats.clear();
+                        Ok(format!("deleting {sent} of {total} chats…"))
+                    }
                 };
                 match result {
                     Ok(note) => note,
@@ -24794,6 +25061,27 @@ impl QuillApp {
                 "Delete this chat and its history from your chat list?",
                 "Delete",
             ),
+            GroupConfirmAction::ReportChat => (
+                "Report chat",
+                "Report this chat to Telegram moderators as spam?",
+                "Report",
+            ),
+            GroupConfirmAction::BlockUser { block } => {
+                if block {
+                    (
+                        "Block user",
+                        "Block this user? They won't be able to send you messages.",
+                        "Block",
+                    )
+                } else {
+                    ("Unblock user", "Unblock this user?", "Unblock")
+                }
+            }
+            GroupConfirmAction::RemoveSelectedChats => (
+                "Delete chats",
+                "Delete the selected chats and their history from your chat list?",
+                "Delete",
+            ),
             GroupConfirmAction::LeaveChat => (
                 "Leave chat",
                 "Leave this chat? You can rejoin with an invite link.",
@@ -29867,6 +30155,96 @@ impl QuillApp {
                         // Slice CL2: the Archived category shows only the
                         // archive section.
                         let show_main_list = filter != ChatListFilter::Archived;
+                        // Slice CL3: multi-select mode — rows toggle the
+                        // check instead of opening the chat. Defined
+                        // once here so the select bar, the main loop,
+                        // and the archive loop all see it.
+                        let selecting = !self.selected_chats.is_empty();
+                        // Slice CL3: multi-select action bar (TGX
+                        // `ChatsController` selection header): the
+                        // selected count, the bulk actions, and cancel.
+                        if selecting {
+                            let count = self.selected_chats.len();
+                            list = list.child(
+                                div()
+                                    .id("select-bar")
+                                    .flex()
+                                    .items_center()
+                                    .justify_between()
+                                    .px_2()
+                                    .py_1()
+                                    .rounded_md()
+                                    .bg(cx.theme().accent.opacity(0.12))
+                                    .child(
+                                        div()
+                                            .text_xs()
+                                            .font_semibold()
+                                            .child(format!("{count} selected")),
+                                    )
+                                    .child(
+                                        div()
+                                            .flex()
+                                            .items_center()
+                                            .gap_1()
+                                            .child(
+                                                Button::new("select-pin")
+                                                    .label("Pin")
+                                                    .ghost()
+                                                    .on_click(cx.listener(|this, _, _, cx| {
+                                                        this.toggle_selected_pins(cx);
+                                                    })),
+                                            )
+                                            .child(
+                                                Button::new("select-read")
+                                                    .label("Read")
+                                                    .ghost()
+                                                    .on_click(cx.listener(|this, _, _, cx| {
+                                                        this.mark_selected_read(cx);
+                                                    })),
+                                            )
+                                            .child(
+                                                Button::new("select-mute")
+                                                    .label("Mute")
+                                                    .ghost()
+                                                    .on_click(cx.listener(|this, _, _, cx| {
+                                                        this.toggle_selected_mute(cx);
+                                                    })),
+                                            )
+                                            .child(
+                                                Button::new("select-archive")
+                                                    .label("Archive")
+                                                    .ghost()
+                                                    .on_click(cx.listener(|this, _, _, cx| {
+                                                        this.toggle_selected_archive(cx);
+                                                    })),
+                                            )
+                                            .child(
+                                                Button::new("select-unread")
+                                                    .label("Select unread")
+                                                    .ghost()
+                                                    .on_click(cx.listener(|this, _, _, cx| {
+                                                        this.select_unread_chats(cx);
+                                                    })),
+                                            )
+                                            .child(
+                                                Button::new("select-delete")
+                                                    .label("Delete")
+                                                    .ghost()
+                                                    .on_click(cx.listener(|this, _, _, cx| {
+                                                        this.delete_selected_chats(cx);
+                                                    })),
+                                            )
+                                            .child(
+                                                Button::new("select-cancel")
+                                                    .label("✕")
+                                                    .ghost()
+                                                    .on_click(cx.listener(|this, _, _, cx| {
+                                                        this.exit_select_mode(cx);
+                                                    })),
+                                            ),
+                                    ),
+                            );
+                        }
                         if show_main_list && chats.is_empty() {
                             let loading = self.session().is_some_and(|s| !s.chats_exhausted);
                             list = list.child(
@@ -29900,6 +30278,10 @@ impl QuillApp {
                                 .and_then(|s| s.chat_photo_path(chat.id))
                                 .and_then(|path| sandboxed_display_path(path, &media_roots))
                         };
+                        // Slice CL3: multi-select mode — rows toggle the
+                        // check instead of opening the chat.
+                        // (`selecting` is defined above, next to the
+                        // select bar.)
                         if show_main_list {
                             for chat in chats {
                                 let selected = open == Some(chat.id);
@@ -29912,6 +30294,8 @@ impl QuillApp {
                                     photo.as_deref(),
                                     pin_draggable && chat.is_pinned,
                                     false,
+                                    selecting,
+                                    selecting && self.selected_chats.contains(&chat.id.0),
                                     cx,
                                 ));
                             }
@@ -30018,6 +30402,9 @@ impl QuillApp {
                                                 photo.as_deref(),
                                                 archive_draggable && chat.archive_is_pinned,
                                                 true,
+                                                selecting,
+                                                selecting
+                                                    && self.selected_chats.contains(&chat.id.0),
                                                 cx,
                                             ));
                                         }
@@ -32685,6 +33072,38 @@ fn apply_ready_chat_list_menu(session: &mut Session, sink: &Arc<MemorySink>, seq
     }
 }
 
+/// Slice CL3: chat-list screenshot fixture — chat 11 (private) carries
+/// 2 unread mentions (the @ badge; the single-digit main counter hides
+/// per TGX `setCounter`), chat 12 (private) carries an unread reaction
+/// (the ♥ badge) and is muted so the badge dims, chat 11 is reportable
+/// and chat 12 is blocked so the row menu shows Report / Unblock user.
+/// All injected through the normal reducer, no live Telegram.
+fn apply_ready_chat_list_3(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let jsons = [
+        r#"{"@type":"updateChatUnreadMentionCount","chat_id":11,"unread_mention_count":2}"#
+            .to_string(),
+        r#"{"@type":"updateChatUnreadReactionCount","chat_id":12,"unread_reaction_count":1}"#
+            .to_string(),
+    ];
+    for json in jsons {
+        if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
+            session.apply(owned);
+        }
+    }
+    // Capability flags TDLib sends on real chats but the demo seed
+    // doesn't carry — set directly like the CL1 fixture does.
+    if let Some(chat) = session.chats.get_mut(&11) {
+        chat.can_be_deleted_only_for_self = true;
+        chat.can_be_reported = true;
+    }
+    if let Some(chat) = session.chats.get_mut(&12) {
+        chat.blocked = true;
+        chat.notification_settings =
+            ChatNotificationSettings::default().with_mute_for(MUTE_FOREVER);
+    }
+}
+
 /// Slice CL2: chat-list screenshot fixture — folder tabs (Work/News;
 /// the chats stay on Main so the Main tab renders with the category
 /// chips), chat 12 moved to the archive (expanded section), chat 11
@@ -33328,6 +33747,10 @@ fn session_chat_row(
     // Slice CL2: which pinned list the row is in (`setPinnedChats`
     // takes main or archive).
     archived: bool,
+    // Slice CL3: multi-select mode — the row toggles selection instead
+    // of opening the chat, and shows the check circle.
+    selecting: bool,
+    checked: bool,
     cx: &mut Context<QuillApp>,
 ) -> impl IntoElement {
     let id = chat.id;
@@ -33339,11 +33762,18 @@ fn session_chat_row(
     // Slice CL1: a marked-as-unread chat shows the unread badge even
     // with zero unread messages (official clients show a dot); the count
     // wins when there are unread messages (TGX TGChat.java:396).
+    // Slice CL3: with mentions and a single unread message the main
+    // counter hides — the @ badge carries it (TGX `setCounter`:
+    // `hasMentions && unreadCount == 1 ? 0 : unreadCount`).
+    let has_mentions = chat.unread_mention_count > 0;
     let badge = if chat.unread_count == 0 && chat.is_marked_as_unread {
         Some("●".to_string())
+    } else if has_mentions && chat.unread_count == 1 {
+        None
     } else {
         unread_badge_text(chat.unread_count)
     };
+    let has_reactions = chat.unread_reaction_count > 0;
     let tags: Vec<String> = if show_tags {
         folders
             .iter()
@@ -33365,7 +33795,13 @@ fn session_chat_row(
             cx.theme().sidebar
         })
         .on_click(cx.listener(move |this, _, window, cx| {
-            this.select_listed_chat(id, window, cx);
+            // Slice CL3: in multi-select mode a row click toggles the
+            // check instead of opening the chat.
+            if selecting {
+                this.toggle_chat_selected(id, cx);
+            } else {
+                this.select_listed_chat(id, window, cx);
+            }
         }))
         // Slice CL1: right-click opens the chat-row context menu at the
         // click position (window coordinates).
@@ -33386,6 +33822,9 @@ fn session_chat_row(
                 .gap_2()
                 // Parity slice: circular chat photo or colored initials for
                 // every chat-list row / chat type.
+                // Slice CL3: the select-mode check circle precedes the
+                // avatar while multi-select is active.
+                .when(selecting, |this| this.child(select_check(id, checked)))
                 .child(chat_avatar(&title, id.0, photo_path, 40.))
                 .child(
                     div()
@@ -33417,9 +33856,23 @@ fn session_chat_row(
                                             |this| this.child(secret_badge(id)),
                                         ),
                                 )
-                                .when_some(badge, |this, label| {
-                                    this.child(unread_badge(label, id))
-                                }),
+                                // Slice CL3: TGX draws counter, @ mention
+                                // badge, and ♥ reaction badge
+                                // right-to-left; the flex row renders
+                                // them left-to-right in the same order.
+                                .child(
+                                    div()
+                                        .flex()
+                                        .items_center()
+                                        .gap_1()
+                                        .when(has_reactions, |this| {
+                                            this.child(reaction_badge(id, chat.is_muted()))
+                                        })
+                                        .when(has_mentions, |this| this.child(mention_badge(id)))
+                                        .when_some(badge, |this, label| {
+                                            this.child(unread_badge(label, id))
+                                        }),
+                                ),
                         )
                         .child(
                             div()
@@ -33739,6 +34192,70 @@ fn unread_badge(label: String, chat_id: ChatId) -> impl IntoElement {
         .text_xs()
         .font_semibold()
         .child(label)
+}
+
+/// Slice CL3: the @ mention badge (TGX `TGChat.mentionCounter` — a badge-
+/// colored circle with an @ glyph, shown when `unread_mention_count > 0`).
+fn mention_badge(chat_id: ChatId) -> impl IntoElement {
+    div()
+        .id(("mention-badge", chat_id.0 as u64))
+        .h(px(20.))
+        .min_w(px(20.))
+        .px_1()
+        .rounded_full()
+        .flex()
+        .items_center()
+        .justify_center()
+        .bg(rgb(0x1f6feb))
+        .text_color(rgb(0xffffff))
+        .text_xs()
+        .font_semibold()
+        .child("@")
+}
+
+/// Slice CL3: the ♥ reaction badge (TGX `TGChat.reactionsCounter` —
+/// heart badge, dimmed when the chat is muted, shown when
+/// `unread_reaction_count > 0`).
+fn reaction_badge(chat_id: ChatId, muted: bool) -> impl IntoElement {
+    div()
+        .id(("reaction-badge", chat_id.0 as u64))
+        .h(px(20.))
+        .min_w(px(20.))
+        .px_1()
+        .rounded_full()
+        .flex()
+        .items_center()
+        .justify_center()
+        .bg(if muted { rgb(0x6e7681) } else { rgb(0x1f6feb) })
+        .text_color(rgb(0xffffff))
+        .text_xs()
+        .font_semibold()
+        .child("♥")
+}
+
+/// Slice CL3: the select-mode check circle shown on every row while
+/// multi-select is active (TGX select mode shows checkboxes over the
+/// rows).
+fn select_check(chat_id: ChatId, checked: bool) -> impl IntoElement {
+    div()
+        .id(("select-check", chat_id.0 as u64))
+        .flex()
+        .items_center()
+        .justify_center()
+        .rounded_full()
+        .border_1()
+        .border_color(rgb(0x1f6feb))
+        .bg(if checked {
+            rgb(0x1f6feb)
+        } else {
+            rgb(0x000000).opacity(0.0)
+        })
+        .text_color(rgb(0xffffff))
+        .text_xs()
+        .font_semibold()
+        .w(px(20.))
+        .h(px(20.))
+        .child(if checked { "✓" } else { "" })
 }
 
 fn album_history_row(

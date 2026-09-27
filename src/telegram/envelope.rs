@@ -123,6 +123,30 @@ pub enum EnvelopePayload {
         chat_id: ChatId,
         last_read_outbox_message_id: MessageId,
     },
+    /// Slice CL3: `updateChatUnreadMentionCount` (schema 1.8.67, line
+    /// 10567) — the row's @ mention badge.
+    UpdateChatUnreadMentionCount {
+        chat_id: ChatId,
+        unread_mention_count: i32,
+    },
+    /// Slice CL3: `updateChatUnreadReactionCount` (schema 1.8.67, line
+    /// 10570) — the row's ♥ reaction badge.
+    UpdateChatUnreadReactionCount {
+        chat_id: ChatId,
+        unread_reaction_count: i32,
+    },
+    /// Slice CL3: `updateChatBlockList` (schema 1.8.67, line 10594) —
+    /// `blocked` is true when the new `block_list` is `blockListMain`.
+    UpdateChatBlockList {
+        chat_id: ChatId,
+        blocked: bool,
+    },
+    /// Slice CL3: `reportChat` result (schema 1.8.67, lines 9210–9219).
+    /// The chat list only sends the simple spam report (empty
+    /// option_id/message_ids/text, schema:3667), so every non-Ok
+    /// variant collapses to "more info required" — surfaced honestly,
+    /// never as success.
+    ReportChatResult(ReportChatOutcome),
     UpdateConnectionState(ConnectionState),
     UpdateNewChat {
         chat_id: ChatId,
@@ -173,6 +197,22 @@ pub enum EnvelopePayload {
         /// 3600 / 3627). Refreshed by `updateChatIsMarkedAsUnread`
         /// (schema line 10588).
         is_marked_as_unread: bool,
+        /// Slice CL3: `chat.unread_mention_count` (schema 1.8.67, lines
+        /// 3611 / 3627). Refreshed by `updateChatUnreadMentionCount`
+        /// (schema line 10567).
+        unread_mention_count: i32,
+        /// Slice CL3: `chat.unread_reaction_count` (schema 1.8.67, lines
+        /// 3612 / 3627). Refreshed by `updateChatUnreadReactionCount`
+        /// (schema line 10570).
+        unread_reaction_count: i32,
+        /// Slice CL3: `chat.can_be_reported` (schema 1.8.67, lines 3606 /
+        /// 3627). Gates the row-menu Report item (`reportChat`, schema
+        /// line 15693).
+        can_be_reported: bool,
+        /// Slice CL3: `chat.block_list` is `blockListMain` (schema 1.8.67,
+        /// lines 3627 / 9692). Refreshed by `updateChatBlockList`
+        /// (schema line 10594); drives the row-menu Block/Unblock label.
+        blocked: bool,
     },
     /// `updateChatDraftMessage`. Positions are the new chat-list orders.
     UpdateChatDraftMessage {
@@ -4878,6 +4918,16 @@ pub enum ReportSponsoredResult {
     PremiumRequired,
 }
 
+/// Slice CL3: `reportChat` result collapsed to what the chat list can
+/// honestly report — the simple spam flow returns `reportChatResultOk`;
+/// anything else means TDLib wants options/text/messages, which the
+/// chat list does not collect.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReportChatOutcome {
+    Ok,
+    MoreInfoRequired,
+}
+
 impl ReportSponsoredResult {
     /// Short user-facing note (no TDLib text is echoed).
     pub fn user_message(&self) -> &'static str {
@@ -5583,7 +5633,36 @@ fn parse_new_chat(chat: &Value) -> Result<EnvelopePayload, ParseError> {
             .get("has_welcome_messages")
             .and_then(Value::as_bool)
             .unwrap_or(false),
+        // Slice CL3: mention / reaction badge counts (schema 1.8.67,
+        // lines 3611-3612/3627). Default 0 — older TDLib builds may
+        // omit them.
+        unread_mention_count: chat
+            .get("unread_mention_count")
+            .and_then(Value::as_i64)
+            .unwrap_or(0) as i32,
+        unread_reaction_count: chat
+            .get("unread_reaction_count")
+            .and_then(Value::as_i64)
+            .unwrap_or(0) as i32,
+        // Slice CL3: `chat.can_be_reported` (schema 1.8.67, lines
+        // 3606/3627) gates the row-menu Report item.
+        can_be_reported: chat
+            .get("can_be_reported")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        // Slice CL3: `chat.block_list` (schema 1.8.67, lines 3627/9692);
+        // `blockListMain` means the peer is blocked.
+        blocked: is_block_list_main(chat.get("block_list")),
     })
+}
+
+/// Slice CL3: true when a `BlockList` JSON value is `blockListMain`
+/// (schema 1.8.67, lines 9692–9695).
+fn is_block_list_main(block_list: Option<&Value>) -> bool {
+    block_list
+        .and_then(|b| b.get("@type"))
+        .and_then(Value::as_str)
+        == Some("blockListMain")
 }
 
 fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseError> {
@@ -5941,6 +6020,35 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
                 .and_then(Value::as_i64)
                 .unwrap_or(0) as i32,
         }),
+        // Slice CL3: mention / reaction badge counts (schema 1.8.67,
+        // lines 10567/10570).
+        "updateChatUnreadMentionCount" => Ok(EnvelopePayload::UpdateChatUnreadMentionCount {
+            chat_id: ChatId(int53(value.get("chat_id"))?),
+            unread_mention_count: value
+                .get("unread_mention_count")
+                .and_then(Value::as_i64)
+                .unwrap_or(0) as i32,
+        }),
+        "updateChatUnreadReactionCount" => Ok(EnvelopePayload::UpdateChatUnreadReactionCount {
+            chat_id: ChatId(int53(value.get("chat_id"))?),
+            unread_reaction_count: value
+                .get("unread_reaction_count")
+                .and_then(Value::as_i64)
+                .unwrap_or(0) as i32,
+        }),
+        // Slice CL3: `updateChatBlockList` (schema 1.8.67, line 10594).
+        "updateChatBlockList" => Ok(EnvelopePayload::UpdateChatBlockList {
+            chat_id: ChatId(int53(value.get("chat_id"))?),
+            blocked: is_block_list_main(value.get("block_list")),
+        }),
+        // Slice CL3: `reportChat` result (schema 1.8.67, lines
+        // 9210–9219) — collapsed to Ok vs "more info required".
+        "reportChatResultOk" => Ok(EnvelopePayload::ReportChatResult(ReportChatOutcome::Ok)),
+        "reportChatResultOptionRequired"
+        | "reportChatResultTextRequired"
+        | "reportChatResultMessagesRequired" => Ok(EnvelopePayload::ReportChatResult(
+            ReportChatOutcome::MoreInfoRequired,
+        )),
         "updateChatReadOutbox" => Ok(EnvelopePayload::UpdateChatReadOutbox {
             chat_id: ChatId(int53(value.get("chat_id"))?),
             last_read_outbox_message_id: MessageId(int53_or_zero(
