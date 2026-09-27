@@ -38,7 +38,10 @@ use quill::poll::{
     POLL_OPTIONS_MAX, POLL_OPTIONS_MIN, PollDraft, poll_bar_fraction, voter_count_label,
 };
 use quill::rich::RichBlock;
-use quill::settings::{CallPrefs, MediaPrefs};
+use quill::settings::{
+    AUTO_DOWNLOAD_FILE, AUTO_DOWNLOAD_GIF, AUTO_DOWNLOAD_MUSIC, AUTO_DOWNLOAD_PHOTO,
+    AUTO_DOWNLOAD_VIDEO, AUTO_DOWNLOAD_VIDEO_NOTE, AUTO_DOWNLOAD_VOICE, CallPrefs, MediaPrefs,
+};
 use quill::state::{
     ActiveCall, ActiveGroupCall, AdminListFetch, AdminRightsFetch, CallSummary, ChatEventLogFetch,
     ChatSearchJump, ChatStatisticsFetch, ChatSummary, ContactRow, ForwardResult, HistoryMessage,
@@ -1607,9 +1610,18 @@ pub enum ScreenshotDemo {
     /// reaction, interaction counts, and deletable/repliable flags; the
     /// viewer opens with the **reaction picker** and **reply row** visible,
     /// plus a seeded `availableReactions` response (Phase 9.2). The photo
-    /// composer itself is absent: the pinned TDLib 1.8.67 schema has no
-    /// `sendStory` constructor, so posting cannot be built honestly yet.
+    /// composer itself is absent: the pinned TDLib 1.8.67 schema posts
+    /// stories via the `postStory` constructor, and the composer wiring
+    /// against it is queued as future work.
     ReadyStoryPost,
+    /// MED3 downloads-manager demo (injected, no live Telegram): the
+    /// `ReadyMedia` seed plus an actively downloading document (file 24,
+    /// 42% through `notes.txt`), a failed document (file 26, "Retry"
+    /// chip), and a completed one (file 25, `report.pdf`) sitting in the
+    /// recent list — with the downloads panel open beside the
+    /// conversation, showing per-file progress, cancel, open and
+    /// reveal-in-folder rows.
+    ReadyDownloads,
     /// Seek-bar demo (injected, no live Telegram): a voice note playing
     /// with its seek bar mid-track (elapsed advancing via the playback
     /// tick) plus a music track paused with a remembered position, both
@@ -2215,6 +2227,16 @@ impl QuillApp {
                     ConnectUiStatus::DemoReadyChats,
                     None,
                     "screenshot demo — photo/document (injected updates, no live Telegram)".into(),
+                    AuthorizationState::Ready,
+                )
+            }
+            Some(ScreenshotDemo::ReadyDownloads) => {
+                demo_session = Some(seed_ready_downloads_session(demo_sink.clone()));
+                (
+                    ConnectUiStatus::DemoReadyChats,
+                    None,
+                    "screenshot demo — downloads manager (injected updates, no live Telegram)"
+                        .into(),
                     AuthorizationState::Ready,
                 )
             }
@@ -6334,7 +6356,9 @@ impl QuillApp {
             self.click_sponsored_message(chat_id, message_id, true, cx);
         }
         if let Some(live) = self.live.as_mut() {
-            let result = live.driver.download_file(file_id, USER_DOWNLOAD_PRIORITY);
+            let result = live
+                .driver
+                .download_file(file_id, USER_DOWNLOAD_PRIORITY, true);
             self.status_note = match result {
                 Ok(Some(_)) => "downloading…".into(),
                 Ok(None) => "already local or in progress".into(),
@@ -6342,6 +6366,53 @@ impl QuillApp {
             };
         } else if self.demo_session.is_some() {
             self.status_note = "demo — downloadFile runs with live TDLib".into();
+        }
+        cx.notify();
+    }
+
+    /// MED3: open a fully-downloaded file with the system viewer
+    /// (`platform::open_local_file` — `xdg-open` / `open`).
+    fn open_downloaded_file(&mut self, file_id: FileId, cx: &mut Context<Self>) {
+        let path: Option<PathBuf> = self
+            .session()
+            .and_then(|s| s.files.get(&file_id.0))
+            .and_then(|f| f.usable_path())
+            .map(PathBuf::from);
+        self.status_note = match path {
+            Some(path) if quill::platform::open_local_file(&path) => "opened file".into(),
+            _ => "could not open the file".into(),
+        };
+        cx.notify();
+    }
+
+    /// MED3: reveal a downloaded file in the file manager
+    /// (`platform::reveal_in_file_manager`).
+    fn reveal_downloaded_file(&mut self, file_id: FileId, cx: &mut Context<Self>) {
+        let path: Option<PathBuf> = self
+            .session()
+            .and_then(|s| s.files.get(&file_id.0))
+            .and_then(|f| f.usable_path())
+            .map(PathBuf::from);
+        self.status_note = match path {
+            Some(path) if quill::platform::reveal_in_file_manager(&path) => {
+                "revealed in file manager".into()
+            }
+            _ => "could not reveal the file".into(),
+        };
+        cx.notify();
+    }
+
+    /// MED3: cancel an in-flight download (`cancelDownloadFile`, TGX's
+    /// cancel button on downloading media).
+    fn cancel_media_download(&mut self, file_id: FileId, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            self.status_note = match live.driver.cancel_download(file_id) {
+                Ok(true) => "download canceled".into(),
+                Ok(false) => "nothing to cancel".into(),
+                Err(_) => "could not cancel the download".into(),
+            };
+        } else if self.demo_session.is_some() {
+            self.status_note = "demo — cancelDownloadFile runs with live TDLib".into();
         }
         cx.notify();
     }
@@ -12903,6 +12974,120 @@ impl QuillApp {
                         this.toggle_hq_round_videos(cx);
                     })),
             )
+            // MED3: auto-download settings below the media prefs.
+            .child(self.auto_download_settings_section(cx))
+    }
+
+    /// MED3: auto-download settings — data-saver master toggle plus the
+    /// per-chat-kind × media-type grid. The bit model mirrors TGX
+    /// `settings_autodownload` (private/group/channel shifts); desktop has
+    /// no mobile/wifi/roaming distinction, so TGX's per-connection grids
+    /// collapse into this one (Telegram Desktop's own dialog is the same
+    /// grid). Persisted client-side in `media_prefs.json`.
+    fn auto_download_settings_section(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let prefs = self
+            .session()
+            .map(|s| s.media_prefs.clone())
+            .unwrap_or_default();
+        let section = div()
+            .flex()
+            .flex_col()
+            .gap_1()
+            .mt_2()
+            .child(
+                div()
+                    .text_sm()
+                    .font_semibold()
+                    .px_1()
+                    .child("Auto-download"),
+            )
+            .child(
+                div()
+                    .id("media-pref-data-saver")
+                    .cursor_pointer()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .px_2()
+                    .py_1()
+                    .rounded_md()
+                    .child(
+                        div()
+                            .text_xs()
+                            .child(if prefs.data_saver { "●" } else { "○" }),
+                    )
+                    .child(
+                        div().text_sm().child("Data saver").child(
+                            div()
+                                .text_xs()
+                                .text_color(cx.theme().muted_foreground)
+                                .child("Pause all automatic media downloads"),
+                        ),
+                    )
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.set_media_pref(|prefs| prefs.data_saver = !prefs.data_saver, cx);
+                    })),
+            );
+        const ROWS: [(&str, u8); 7] = [
+            ("Photos", AUTO_DOWNLOAD_PHOTO),
+            ("Voice messages", AUTO_DOWNLOAD_VOICE),
+            ("Video messages", AUTO_DOWNLOAD_VIDEO_NOTE),
+            ("Videos", AUTO_DOWNLOAD_VIDEO),
+            ("Files", AUTO_DOWNLOAD_FILE),
+            ("Music", AUTO_DOWNLOAD_MUSIC),
+            ("GIFs", AUTO_DOWNLOAD_GIF),
+        ];
+        let kinds = [
+            ("Private", prefs.auto_download_private),
+            ("Groups", prefs.auto_download_groups),
+            ("Channels", prefs.auto_download_channels),
+        ];
+        let mut grid = div().flex().flex_col().gap_1().px_2().mt_1();
+        let mut header = div().flex().items_center().gap_2();
+        header = header.child(div().w(px(110.)).child(""));
+        for (kind, _) in &kinds {
+            header = header.child(
+                div()
+                    .flex_1()
+                    .text_xs()
+                    .text_center()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(*kind),
+            );
+        }
+        grid = grid.child(header);
+        for (row_idx, (label, flag)) in ROWS.iter().enumerate() {
+            let mut row = div().flex().items_center().gap_2();
+            row = row.child(div().w(px(110.)).text_sm().child(*label));
+            for (kind_idx, (_, bits)) in kinds.iter().enumerate() {
+                let on = bits & flag != 0;
+                let flag = *flag;
+                row = row.child(
+                    div()
+                        .id(format!("auto-dl-{row_idx}-{kind_idx}"))
+                        .flex_1()
+                        .text_center()
+                        .cursor_pointer()
+                        .text_sm()
+                        .child(if on { "●" } else { "○" })
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.set_media_pref(
+                                move |prefs| {
+                                    let bits = match kind_idx {
+                                        0 => &mut prefs.auto_download_private,
+                                        1 => &mut prefs.auto_download_groups,
+                                        _ => &mut prefs.auto_download_channels,
+                                    };
+                                    *bits ^= flag;
+                                },
+                                cx,
+                            );
+                        })),
+                );
+            }
+            grid = grid.child(row);
+        }
+        section.child(grid)
     }
 
     fn open_user_panel(&mut self, user_id: i64, window: &mut Window, cx: &mut Context<Self>) {
@@ -13217,6 +13402,231 @@ impl QuillApp {
                 )
                 .into_any_element(),
         )
+    }
+
+    /// MED3: downloads manager panel (TGX side-menu Downloads, empty state
+    /// `NoDownloadFilesFound`). Lists user-initiated active downloads with
+    /// live progress + cancel, and recently completed downloads with
+    /// open / reveal actions. Sits beside the conversation like the info
+    /// panel; toggled from the sidebar "Downloads" entry.
+    fn downloads_panel(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let session = self.session()?;
+        if !session.downloads_panel_open {
+            return None;
+        }
+        let mut active: Vec<i32> = session.user_downloads.iter().copied().collect();
+        active.sort_unstable();
+        let recent: Vec<i32> = session.completed_downloads.iter().copied().collect();
+        let mut failed: Vec<i32> = session.failed_downloads.iter().copied().collect();
+        failed.sort_unstable();
+        let mut panel = div()
+            .id("downloads-panel")
+            .w(px(300.))
+            .h_full()
+            .flex_shrink_0()
+            .border_l_1()
+            .border_color(cx.theme().border)
+            .bg(cx.theme().sidebar)
+            .flex()
+            .flex_col()
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .px_3()
+                    .py_2()
+                    .border_b_1()
+                    .border_color(cx.theme().border)
+                    .child(div().font_semibold().child("Downloads"))
+                    .child(
+                        div()
+                            .id("downloads-panel-close")
+                            .cursor_pointer()
+                            .px_2()
+                            .py_1()
+                            .rounded_md()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("✕")
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                if let Some(live) = this.live.as_mut() {
+                                    live.driver.session.downloads_panel_open = false;
+                                } else if let Some(session) = this.demo_session.as_mut() {
+                                    session.downloads_panel_open = false;
+                                }
+                                cx.notify();
+                            })),
+                    ),
+            );
+        if active.is_empty() && recent.is_empty() {
+            panel = panel.child(
+                div()
+                    .px_3()
+                    .py_4()
+                    .text_sm()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("No downloads yet."),
+            );
+        } else {
+            if !active.is_empty() {
+                panel = panel.child(
+                    div()
+                        .px_3()
+                        .pt_2()
+                        .text_xs()
+                        .font_semibold()
+                        .text_color(cx.theme().muted_foreground)
+                        .child("Active"),
+                );
+                for file_id in active {
+                    panel = panel.child(self.download_row(file_id, true, false, cx));
+                }
+            }
+            if !failed.is_empty() {
+                panel = panel.child(
+                    div()
+                        .px_3()
+                        .pt_2()
+                        .text_xs()
+                        .font_semibold()
+                        .text_color(cx.theme().muted_foreground)
+                        .child("Failed"),
+                );
+                for file_id in failed {
+                    panel = panel.child(self.download_row(file_id, false, true, cx));
+                }
+            }
+            if !recent.is_empty() {
+                panel = panel.child(
+                    div()
+                        .px_3()
+                        .pt_2()
+                        .text_xs()
+                        .font_semibold()
+                        .text_color(cx.theme().muted_foreground)
+                        .child("Recent"),
+                );
+                for file_id in recent.into_iter().rev() {
+                    panel = panel.child(self.download_row(file_id, false, false, cx));
+                }
+            }
+        }
+        Some(panel.into_any_element())
+    }
+
+    /// MED3: one downloads-manager row. Active rows show the live progress
+    /// bar + percent + a cancel button; failed rows show a retry button;
+    /// recent rows show size + open / reveal actions.
+    fn download_row(
+        &self,
+        file_id: i32,
+        active: bool,
+        failed: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let session = self.session();
+        let file = session.as_ref().and_then(|s| s.files.get(&file_id));
+        let name = session
+            .as_ref()
+            .map(|s| download_display_name(s, file_id))
+            .unwrap_or_else(|| format!("File {file_id}"));
+        let size_label = file
+            .map(|f| f.display_size())
+            .map(format_bytes)
+            .unwrap_or_default();
+        let progress = file.and_then(|f| f.download_progress());
+        let status = if active {
+            match progress {
+                Some(p) => format!("{}%", (p * 100.0).round() as i32),
+                None => "downloading…".to_string(),
+            }
+        } else if failed {
+            "download failed".to_string()
+        } else {
+            size_label.clone()
+        };
+        let mut row = div()
+            .id(("download-row", file_id as u64))
+            .px_3()
+            .py_2()
+            .flex()
+            .flex_col()
+            .gap_1()
+            .child(div().text_sm().font_medium().child(name))
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(status),
+            );
+        if active {
+            row = row.child(
+                div()
+                    .w_full()
+                    .h(px(4.))
+                    .rounded_full()
+                    .bg(rgb(0x30363d))
+                    .child(
+                        div()
+                            .h_full()
+                            .w(relative(progress.unwrap_or(0.0)))
+                            .rounded_full()
+                            .bg(rgb(0x58a6ff)),
+                    ),
+            );
+        }
+        let actions = if active {
+            div().flex().gap_2().child(
+                div()
+                    .id(("download-cancel", file_id as u64))
+                    .cursor_pointer()
+                    .text_xs()
+                    .text_color(rgb(0x58a6ff))
+                    .child("Cancel")
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.cancel_media_download(FileId(file_id), cx);
+                    })),
+            )
+        } else if failed {
+            div().flex().gap_2().child(
+                div()
+                    .id(("download-retry", file_id as u64))
+                    .cursor_pointer()
+                    .text_xs()
+                    .text_color(rgb(0x58a6ff))
+                    .child("Retry")
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.request_media_download(FileId(file_id), None, cx);
+                    })),
+            )
+        } else {
+            div()
+                .flex()
+                .gap_2()
+                .child(
+                    div()
+                        .id(("download-open", file_id as u64))
+                        .cursor_pointer()
+                        .text_xs()
+                        .text_color(rgb(0x58a6ff))
+                        .child("Open")
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.open_downloaded_file(FileId(file_id), cx);
+                        })),
+                )
+                .child(
+                    div()
+                        .id(("download-reveal", file_id as u64))
+                        .cursor_pointer()
+                        .text_xs()
+                        .text_color(rgb(0x58a6ff))
+                        .child("Show in folder")
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.reveal_downloaded_file(FileId(file_id), cx);
+                        })),
+                )
+        };
+        row.child(actions).into_any_element()
     }
 
     /// Phase B2: the "Encryption key" section of a secret chat partner's
@@ -24511,10 +24921,24 @@ impl QuillApp {
                     })
                     .into_any_element()
             } else {
+                // MED3: show the real download percent when known
+                // (`updateFile` → `downloaded_size`).
+                let progress_pct: Option<i32> = item
+                    .display_file_ids
+                    .iter()
+                    .chain(std::iter::once(&item.download_file_id))
+                    .filter_map(|id| files.get(&id.0))
+                    .filter_map(|f| f.download_progress())
+                    .map(|p| (p * 100.0).round() as i32)
+                    .next();
+                let downloading_label = match progress_pct {
+                    Some(pct) => format!("downloading… {pct}%"),
+                    None => "downloading…".to_string(),
+                };
                 let status = match (&item.duration_label, downloading_now) {
-                    (Some(duration), true) => format!("Video · {duration} — downloading…"),
+                    (Some(duration), true) => format!("Video · {duration} — {downloading_label}"),
                     (Some(duration), false) => format!("Video · {duration} — not downloaded"),
-                    (None, true) => format!("{kind_label} — downloading…"),
+                    (None, true) => format!("{kind_label} — {downloading_label}"),
                     (None, false) => format!("{kind_label} — not downloaded"),
                 };
                 div()
@@ -26311,7 +26735,9 @@ impl Render for QuillApp {
                     .child(self.sidebar(&auth, show_phone, show_code, show_password, cx))
                     .child(self.conversation(cx))
                     // Phase 6: user / group info panel beside the conversation.
-                    .when_some(self.info_panel(cx), |this, panel| this.child(panel)),
+                    .when_some(self.info_panel(cx), |this, panel| this.child(panel))
+                    // MED3: downloads manager panel beside the conversation.
+                    .when_some(self.downloads_panel(cx), |this, panel| this.child(panel)),
             )
             .child(status_bar(
                 &auth,
@@ -27161,6 +27587,9 @@ impl QuillApp {
         let files: HashMap<i32, ParsedFile> = session.map(|s| s.files.clone()).unwrap_or_default();
         let downloading: std::collections::HashSet<i32> =
             session.map(|s| s.downloading.clone()).unwrap_or_default();
+        let failed: std::collections::HashSet<i32> = session
+            .map(|s| s.failed_downloads.clone())
+            .unwrap_or_default();
         let media_roots = self.media_display_roots();
         let sender_name = title.clone();
         let chat_search_open = session.is_some_and(|s| s.chat_search.open);
@@ -27281,6 +27710,7 @@ impl QuillApp {
                         highlight_id,
                         &files,
                         &downloading,
+                        &failed,
                         &media_roots,
                         cx,
                     )
@@ -27310,6 +27740,7 @@ impl QuillApp {
                     highlight_id,
                     &files,
                     &downloading,
+                    &failed,
                     &media_roots,
                     cx,
                 )
@@ -27328,6 +27759,7 @@ impl QuillApp {
         highlight_id: Option<MessageId>,
         files: &HashMap<i32, ParsedFile>,
         downloading: &std::collections::HashSet<i32>,
+        failed: &std::collections::HashSet<i32>,
         media_roots: &[PathBuf],
         cx: &mut Context<Self>,
     ) -> AnyElement {
@@ -27416,6 +27848,7 @@ impl QuillApp {
                 &message,
                 &files,
                 &downloading,
+                failed,
                 &media_roots,
                 label,
                 quote_preview,
@@ -27731,6 +28164,9 @@ impl QuillApp {
         let files: HashMap<i32, ParsedFile> = session.map(|s| s.files.clone()).unwrap_or_default();
         let downloading: std::collections::HashSet<i32> =
             session.map(|s| s.downloading.clone()).unwrap_or_default();
+        let failed: std::collections::HashSet<i32> = session
+            .map(|s| s.failed_downloads.clone())
+            .unwrap_or_default();
         let media_roots = self.media_display_roots();
         let report = session.and_then(|s| s.sponsored_report.clone());
         let outcome = session.and_then(|s| s.last_sponsored_report.clone());
@@ -27786,6 +28222,7 @@ impl QuillApp {
                 message,
                 &files,
                 &downloading,
+                &failed,
                 &media_roots,
                 &self.spoiler_revealed,
                 cx,
@@ -28010,6 +28447,21 @@ impl QuillApp {
                     if self.new_secret_picker_open {
                         list = list.child(self.new_secret_picker_panel(cx));
                     }
+                    // MED3: downloads manager (TGX side-menu "Downloads") —
+                    // toggles the right-side panel with active/recent downloads.
+                    list = list.child(
+                        Button::new("downloads-panel-toggle")
+                            .label("⬇ Downloads")
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                if let Some(live) = this.live.as_mut() {
+                                    let open = &mut live.driver.session.downloads_panel_open;
+                                    *open = !*open;
+                                } else if let Some(session) = this.demo_session.as_mut() {
+                                    session.downloads_panel_open = !session.downloads_panel_open;
+                                }
+                                cx.notify();
+                            })),
+                    );
                     // Slice G1: group/supergroup/channel creation
                     // entries (TGX main-menu "New Group" / "New
                     // Channel"). Each opens the creation dialog.
@@ -29532,6 +29984,120 @@ fn apply_ready_chat_avatars(session: &mut Session, sink: &Arc<MemorySink>, seq: 
 
 fn seed_ready_media_session(sink: Arc<MemorySink>) -> Session {
     seed_demo_session(sink, DemoSeed::Media)
+}
+
+/// MED3 screenshot fixture: `DemoSeed::Media` (document 24 = notes.txt)
+/// plus a mid-download state for it, a completed document (25 =
+/// report.pdf, in the recent list) and a failed one (26 = Retry chip),
+/// with the downloads panel open.
+fn seed_ready_downloads_session(sink: Arc<MemorySink>) -> Session {
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let mut session = seed_demo_session(sink, DemoSeed::Media);
+    // Continue the envelope sequence from the Media seed: `Session::apply`
+    // ignores out-of-order envelopes (`seq <= last_seq`), so restarting at 0
+    // would silently drop every injected update.
+    let seq = AtomicU64::new(session.last_seq);
+    let apply = |session: &mut Session, json: &str| {
+        if let Some(owned) = copy_and_parse(json, &seq, &dyn_sink) {
+            session.apply(owned);
+        }
+    };
+    let document = |msg_id: i64, file_id: i32, name: &str, size: i64| {
+        // serde_json::json! instead of a format! string: the nested
+        // braces are no longer hand-counted (and the compiler can't
+        // catch a JSON brace typo, only a format-string one).
+        serde_json::json!({
+            "@type": "updateNewMessage",
+            "message": {
+                "id": msg_id,
+                "chat_id": 11,
+                "is_outgoing": false,
+                "content": {
+                    "@type": "messageDocument",
+                    "document": {
+                        "@type": "document",
+                        "file_name": name,
+                        "mime_type": "application/pdf",
+                        "document": {
+                            "@type": "file",
+                            "id": file_id,
+                            "size": size,
+                            "expected_size": size,
+                            "local": {
+                                "@type": "localFile",
+                                "path": "",
+                                "can_be_downloaded": true,
+                                "can_be_deleted": false,
+                                "is_downloading_active": false,
+                                "is_downloading_completed": false,
+                                "download_offset": 0,
+                                "downloaded_prefix_size": 0,
+                                "downloaded_size": 0
+                            },
+                            "remote": {
+                                "@type": "remoteFile",
+                                "id": "x",
+                                "unique_id": "u",
+                                "is_uploading_active": false,
+                                "is_uploading_completed": true,
+                                "uploaded_size": size
+                            }
+                        }
+                    },
+                    "caption": {"@type": "formattedText", "text": "", "entities": []}
+                }
+            }
+        })
+        .to_string()
+    };
+    let file_update = |file_id: i32, size: i64, downloaded: i64, active: bool, path: &str| {
+        serde_json::json!({
+            "@type": "updateFile",
+            "file": {
+                "@type": "file",
+                "id": file_id,
+                "size": size,
+                "expected_size": size,
+                "local": {
+                    "@type": "localFile",
+                    "path": path,
+                    "can_be_downloaded": true,
+                    "can_be_deleted": false,
+                    "is_downloading_active": active,
+                    "is_downloading_completed": !active && downloaded >= size,
+                    "download_offset": 0,
+                    "downloaded_prefix_size": downloaded,
+                    "downloaded_size": downloaded
+                },
+                "remote": {
+                    "@type": "remoteFile",
+                    "id": "x",
+                    "unique_id": "u",
+                    "is_uploading_active": false,
+                    "is_uploading_completed": true,
+                    "uploaded_size": size
+                }
+            }
+        })
+        .to_string()
+    };
+    // Completed document 25 → lands in the recent list.
+    apply(&mut session, &document(204, 25, "report.pdf", 460_800));
+    session.begin_download(FileId(25));
+    session.user_downloads.insert(25);
+    apply(
+        &mut session,
+        &file_update(25, 460_800, 460_800, false, "/tmp/report.pdf"),
+    );
+    // Active document 24 (the Media seed's notes.txt): 42% progress.
+    session.begin_download(FileId(24));
+    session.user_downloads.insert(24);
+    apply(&mut session, &file_update(24, 24, 10, true, ""));
+    // Failed document 26 → Retry chip on the row.
+    apply(&mut session, &document(205, 26, "archive.zip", 1_048_576));
+    session.failed_downloads.insert(26);
+    session.downloads_panel_open = true;
+    session
 }
 
 fn seed_ready_send_media_session(sink: Arc<MemorySink>) -> Session {
@@ -31328,6 +31894,7 @@ fn sponsored_message_row(
     message: &SponsoredMessage,
     files: &HashMap<i32, ParsedFile>,
     downloading: &std::collections::HashSet<i32>,
+    failed: &std::collections::HashSet<i32>,
     media_roots: &[PathBuf],
     revealed: &std::collections::HashSet<(i64, u64, u64, bool)>,
     cx: &mut Context<QuillApp>,
@@ -31398,6 +31965,7 @@ fn sponsored_message_row(
             doc,
             files,
             downloading,
+            failed,
             Some((chat_id, message.message_id)),
             cx,
         )),
@@ -32205,6 +32773,7 @@ fn session_history_row(
     message: &HistoryMessage,
     files: &HashMap<i32, ParsedFile>,
     downloading: &std::collections::HashSet<i32>,
+    failed: &std::collections::HashSet<i32>,
     media_roots: &[PathBuf],
     label: String,
     quote_preview: Option<String>,
@@ -32521,6 +33090,7 @@ fn session_history_row(
             doc,
             files,
             downloading,
+            failed,
             None,
             cx,
         )),
@@ -34438,11 +35008,19 @@ fn audio_row(
         .into_any_element()
 }
 
+/// MED3: document row. Primary click per state (TGX: tapping downloading
+/// media cancels it): ready → open with the system viewer; downloading →
+/// cancel (`cancelDownloadFile`); failed / not downloaded → download
+/// (retry). A second action row offers "Show in folder" (ready), "Cancel"
+/// (downloading), "Retry" (failed). Progress comes from
+/// `file.download_progress()` — `updateFile`'s `downloaded_size` over the
+/// known total (TGX `TD.getFileProgress` semantics).
 fn document_chip(
     row_id: u64,
     doc: &quill::telegram::envelope::DocumentContent,
     files: &HashMap<i32, ParsedFile>,
     downloading: &std::collections::HashSet<i32>,
+    failed: &std::collections::HashSet<i32>,
     sponsored: Option<(ChatId, i64)>,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
@@ -34450,14 +35028,21 @@ fn document_chip(
     let file = files.get(&file_id.0);
     let ready = file.and_then(|f| f.usable_path()).is_some();
     let downloading_now = file_is_downloading(file_id, files, downloading);
+    let failed_now = !ready && !downloading_now && failed.contains(&file_id.0);
+    let progress = file.and_then(|f| f.download_progress());
     let size = file.map(|f| f.display_size()).unwrap_or(0);
     let size_label = format_bytes(size);
     let state = if ready {
-        "ready"
+        "ready".to_string()
     } else if downloading_now {
-        "downloading…"
+        match progress {
+            Some(p) => format!("downloading… {}%", (p * 100.0).round() as i32),
+            None => "downloading…".to_string(),
+        }
+    } else if failed_now {
+        "download failed".to_string()
     } else {
-        "not downloaded"
+        "not downloaded".to_string()
     };
     let mut detail = doc.mime_type.clone();
     if !size_label.is_empty() {
@@ -34469,11 +35054,20 @@ fn document_chip(
     if !detail.is_empty() {
         detail.push_str(" · ");
     }
-    detail.push_str(state);
+    detail.push_str(&state);
     let name = if doc.file_name.is_empty() {
         "Document".to_string()
     } else {
         doc.file_name.clone()
+    };
+    let action_label = if ready {
+        Some("Show in folder")
+    } else if downloading_now {
+        Some("Cancel")
+    } else if failed_now {
+        Some("Retry")
+    } else {
+        None
     };
     div()
         .id(("doc-chip", row_id))
@@ -34484,13 +35078,87 @@ fn document_chip(
         .border_1()
         .border_color(rgb(0x8b949e))
         .bg(rgb(0x21262d))
-        .cursor_pointer()
-        .on_click(cx.listener(move |this, _, _, cx| {
-            this.request_media_download(file_id, sponsored, cx);
-        }))
-        .child(div().text_sm().font_medium().child(name))
+        .child(
+            div()
+                .id(("doc-chip-name", row_id))
+                .cursor_pointer()
+                .child(div().text_sm().font_medium().child(name))
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    if ready {
+                        this.open_downloaded_file(file_id, cx);
+                    } else if downloading_now {
+                        this.cancel_media_download(file_id, cx);
+                    } else {
+                        this.request_media_download(file_id, sponsored, cx);
+                    }
+                })),
+        )
         .child(div().text_xs().text_color(rgb(0xc9d1d9)).child(detail))
+        .when(downloading_now, |this| {
+            this.child(
+                div()
+                    .id(("doc-progress", row_id))
+                    .w_full()
+                    .h(px(4.))
+                    .mt_1()
+                    .rounded_full()
+                    .bg(rgb(0x30363d))
+                    .child(
+                        div()
+                            .h_full()
+                            .w(relative(progress.unwrap_or(0.0)))
+                            .rounded_full()
+                            .bg(rgb(0x58a6ff)),
+                    ),
+            )
+        })
+        .when_some(action_label, |this, label| {
+            this.child(
+                div()
+                    .id(("doc-action", row_id))
+                    .cursor_pointer()
+                    .mt_1()
+                    .text_xs()
+                    .text_color(rgb(0x58a6ff))
+                    .child(label)
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        if ready {
+                            this.reveal_downloaded_file(file_id, cx);
+                        } else if downloading_now {
+                            this.cancel_media_download(file_id, cx);
+                        } else {
+                            this.request_media_download(file_id, sponsored, cx);
+                        }
+                    })),
+            )
+        })
         .into_any_element()
+}
+
+/// MED3: display name for a downloads-manager row — the document's
+/// `file_name` when the file belongs to a known message, else the local
+/// path's file name, else a plain "File {id}" fallback.
+fn download_display_name(session: &Session, file_id: i32) -> String {
+    for history in session.histories.values() {
+        for message in history.messages.values() {
+            if let quill::telegram::envelope::MessageContent::Document(doc) = &message.content
+                && doc.file_id.0 == file_id
+            {
+                return if doc.file_name.is_empty() {
+                    "Document".to_string()
+                } else {
+                    doc.file_name.clone()
+                };
+            }
+        }
+    }
+    session
+        .files
+        .get(&file_id)
+        .and_then(|f| f.usable_path())
+        .and_then(|p| std::path::Path::new(p).file_name())
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| format!("File {file_id}"))
 }
 
 fn format_bytes(n: i64) -> String {

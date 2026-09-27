@@ -6,7 +6,11 @@ use crate::ids::{
     AccountGeneration, AccountKey, ChatId, FileId, MessageId, RequestId, ViewGeneration,
 };
 use crate::notify::{self, OsNotification, QueuedNotification};
-use crate::settings::{CallPrefs, MediaPrefs};
+use crate::settings::{
+    AUTO_DOWNLOAD_FILE, AUTO_DOWNLOAD_GIF, AUTO_DOWNLOAD_MAX_BYTES, AUTO_DOWNLOAD_MUSIC,
+    AUTO_DOWNLOAD_PHOTO, AUTO_DOWNLOAD_VIDEO, AUTO_DOWNLOAD_VIDEO_NOTE, AUTO_DOWNLOAD_VOICE,
+    CallPrefs, MediaPrefs,
+};
 use crate::telegram::client::OwnedEnvelope;
 use crate::telegram::envelope::{
     AnimationItem, AuthorizationState, BotCommand, BotInfo, CallbackQueryAnswer,
@@ -26,7 +30,7 @@ use crate::telegram::envelope::{
 };
 use crate::telegram::envelope::{CallState, ReadyParams};
 use crate::telegram::requests::{CallPrivacySetting, ChatEventLogFilterSet, PrivacyWho};
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -109,6 +113,8 @@ pub enum RequestPurpose {
     CloseChat,
     ViewMessages,
     DownloadFile,
+    /// MED3: `cancelDownloadFile`. Response is `Ok`.
+    CancelDownloadFile,
     SearchChats,
     SearchMessages,
     SearchRecentlyFoundChats,
@@ -2993,6 +2999,21 @@ pub struct Session {
     pub files: HashMap<i32, ParsedFile>,
     /// `downloadFile` in flight (until completed, undownloadable, idle, or error).
     pub downloading: HashSet<i32>,
+    /// Subset of `downloading` the user explicitly started (history rows,
+    /// viewer) — these surface in the downloads manager. Automatic
+    /// thumbs/avatars/sounds are not tracked here.
+    pub user_downloads: HashSet<i32>,
+    /// `downloadFile` requests TDLib answered with an error (file id → still
+    /// in `downloading` until unstuck; the UI shows "failed — retry").
+    /// Cleared when a new download starts or the file completes.
+    pub failed_downloads: HashSet<i32>,
+    /// Recently completed downloads (file ids, most recent last, capped) for
+    /// the downloads manager's "recent" list. Recorded only when a file was
+    /// in `downloading` and its `updateFile` shows completion — pre-existing
+    /// local files don't count.
+    pub completed_downloads: VecDeque<i32>,
+    /// Downloads manager panel open (right side, next to the info panel).
+    pub downloads_panel_open: bool,
     /// `@extra` → `file.id` until the download unsticks (survives `file@extra` consuming pending).
     download_extras: HashMap<u64, i32>,
     pub search: SearchState,
@@ -3552,6 +3573,10 @@ impl Session {
             last_callback_answer: None,
             files: HashMap::new(),
             downloading: HashSet::new(),
+            user_downloads: HashSet::new(),
+            failed_downloads: HashSet::new(),
+            completed_downloads: VecDeque::new(),
+            downloads_panel_open: false,
             download_extras: HashMap::new(),
             search: SearchState::default(),
             chat_search: ChatSearchState::default(),
@@ -6748,6 +6773,12 @@ impl Session {
                     .and_then(|p| p.file_id)
                     .or_else(|| extra.and_then(|id| self.download_extras.get(&id.0).copied()));
                 if let Some(file_id) = download_id {
+                    // MED3 review: only user-initiated downloads enter the
+                    // Failed section; automatic downloads never started by
+                    // the user must not show rows here.
+                    if self.user_downloads.contains(&file_id) {
+                        self.failed_downloads.insert(file_id);
+                    }
                     self.unstick_download(file_id);
                 }
                 if let Some(pending) = pending
@@ -6939,6 +6970,26 @@ impl Session {
 
     fn upsert_file(&mut self, file: ParsedFile, from_file_update: bool) {
         let idle_incomplete = file.local.is_idle_incomplete();
+        if file.local.is_downloading_completed {
+            self.failed_downloads.remove(&file.id.0);
+            if self.user_downloads.contains(&file.id.0) {
+                // A user-initiated download that finished: remember for the
+                // downloads manager's recent list (deduped, capped).
+                self.completed_downloads.retain(|id| *id != file.id.0);
+                self.completed_downloads.push_back(file.id.0);
+                while self.completed_downloads.len() > 50 {
+                    self.completed_downloads.pop_front();
+                }
+            }
+        }
+        if from_file_update && idle_incomplete && self.user_downloads.contains(&file.id.0) {
+            // MED3: a user-initiated download that went active → idle without
+            // completing stalled (or errored without failing the request) —
+            // surface it as failed so the row offers Retry. Explicit cancels
+            // are excluded: `abort_download` already dropped them from
+            // `user_downloads`.
+            self.failed_downloads.insert(file.id.0);
+        }
         if file.local.is_downloading_completed
             || !file.local.can_be_downloaded
             || (from_file_update && idle_incomplete)
@@ -6967,6 +7018,7 @@ impl Session {
 
     fn unstick_download(&mut self, file_id: i32) {
         self.downloading.remove(&file_id);
+        self.user_downloads.remove(&file_id);
         self.download_extras.retain(|_, id| *id != file_id);
     }
 
@@ -6989,6 +7041,7 @@ impl Session {
 
     pub fn begin_download(&mut self, file_id: FileId) {
         if file_id.0 != 0 {
+            self.failed_downloads.remove(&file_id.0);
             self.downloading.insert(file_id.0);
         }
     }
@@ -7112,6 +7165,107 @@ impl Session {
         ids.sort_by_key(|id| id.0);
         ids.dedup();
         ids
+    }
+
+    /// MED3: full media files in the open chat eligible for automatic
+    /// download under the user's per-chat-kind × media-type prefs (TGX
+    /// `settings_autodownload`). Unlike the thumbnail pass, each media type
+    /// is gated on its own flag; secret and spoiler content is never
+    /// auto-downloaded (same safeguard as the thumb hook), and files known
+    /// to exceed `AUTO_DOWNLOAD_MAX_BYTES` are skipped (TGX
+    /// `canAutomaticallyDownload` download limit).
+    pub fn auto_download_media_file_ids(&self) -> Vec<FileId> {
+        let Some(chat_id) = self.open_chat else {
+            return Vec::new();
+        };
+        if self.media_prefs.data_saver {
+            return Vec::new();
+        }
+        let Some(history) = self.histories.get(&chat_id.0) else {
+            return Vec::new();
+        };
+        let mut ids = Vec::new();
+        let push = |flag: u8, file_id: FileId, ids: &mut Vec<FileId>| {
+            // MED3 review: skip files known to exceed the auto-download cap
+            // (TGX `canAutomaticallyDownload` download limit, WiFi default
+            // 50 MiB); an unknown size (`display_size() == 0`) is not a
+            // reason to block.
+            let oversized = self
+                .files
+                .get(&file_id.0)
+                .is_some_and(|file| file.display_size() > AUTO_DOWNLOAD_MAX_BYTES);
+            if !oversized
+                && self.auto_download_allowed(chat_id, flag)
+                && self.should_download(file_id)
+            {
+                ids.push(file_id);
+            }
+        };
+        for message in history.messages.values() {
+            match &message.content {
+                MessageContent::Photo(photo) => {
+                    if photo.is_secret || photo.has_spoiler {
+                        continue;
+                    }
+                    if let Some(size) = photo.largest_size() {
+                        push(AUTO_DOWNLOAD_PHOTO, size.file_id, &mut ids);
+                    }
+                }
+                MessageContent::Document(doc) => {
+                    push(AUTO_DOWNLOAD_FILE, doc.file_id, &mut ids);
+                }
+                MessageContent::Animation(animation) => {
+                    if animation.is_secret || animation.has_spoiler {
+                        continue;
+                    }
+                    push(AUTO_DOWNLOAD_GIF, animation.file_id, &mut ids);
+                }
+                MessageContent::Video(video) => {
+                    if video.is_secret || video.has_spoiler {
+                        continue;
+                    }
+                    push(AUTO_DOWNLOAD_VIDEO, video.file_id, &mut ids);
+                }
+                MessageContent::VideoNote(note) => {
+                    if note.is_secret {
+                        continue;
+                    }
+                    push(AUTO_DOWNLOAD_VIDEO_NOTE, note.file_id, &mut ids);
+                }
+                MessageContent::VoiceNote(voice) => {
+                    push(AUTO_DOWNLOAD_VOICE, voice.file_id, &mut ids);
+                }
+                MessageContent::Audio(audio) => {
+                    push(AUTO_DOWNLOAD_MUSIC, audio.file_id, &mut ids);
+                }
+                _ => {}
+            }
+        }
+        ids.sort_by_key(|id| id.0);
+        ids.dedup();
+        ids
+    }
+
+    /// MED3: auto-download gate for automatic (non-user-initiated) downloads
+    /// in a chat. `flag` is one of the `settings::AUTO_DOWNLOAD_*` media-type
+    /// bits. Data saver pauses every automatic download (TGX
+    /// `settings_datasaver`); otherwise the chat kind selects the per-kind
+    /// bitfield (TGX `settings_autodownload` private/group/channel shifts).
+    /// Secret chats use the private bucket.
+    pub fn auto_download_allowed(&self, chat_id: ChatId, flag: u8) -> bool {
+        if self.media_prefs.data_saver {
+            return false;
+        }
+        let bits = match self.chats.get(&chat_id.0).map(|chat| &chat.kind) {
+            Some(ChatKind::Supergroup {
+                is_channel: true, ..
+            }) => self.media_prefs.auto_download_channels,
+            Some(ChatKind::BasicGroup { .. }) | Some(ChatKind::Supergroup { .. }) => {
+                self.media_prefs.auto_download_groups
+            }
+            _ => self.media_prefs.auto_download_private,
+        };
+        bits & flag != 0
     }
 
     pub fn accept_installed_sticker_sets(&mut self, sets: Vec<StickerSetInfo>) {
@@ -9839,6 +9993,7 @@ mod tests {
                     can_be_downloaded: true,
                     is_downloading_active: false,
                     is_downloading_completed: false,
+                    downloaded_size: 0,
                 },
             },
             true,
@@ -14466,5 +14621,232 @@ mod tests {
             has_more: false,
         };
         assert_eq!(page.admin_user_ids(), vec![7, 9]);
+    }
+
+    #[test]
+    fn auto_download_gate_respects_data_saver_and_chat_kind() {
+        use crate::settings::{AUTO_DOWNLOAD_FILE, AUTO_DOWNLOAD_PHOTO, AUTO_DOWNLOAD_VIDEO};
+        let (mut session, _sink) = session();
+        // Unknown kind → private bucket; defaults allow photos.
+        let mut chat = placeholder_chat(ChatId(13));
+        session.chats.insert(13, chat.clone());
+        assert!(session.auto_download_allowed(ChatId(13), AUTO_DOWNLOAD_PHOTO));
+        assert!(!session.auto_download_allowed(ChatId(13), AUTO_DOWNLOAD_VIDEO));
+        // Channel bucket is independent.
+        chat.kind = ChatKind::Supergroup {
+            supergroup_id: 1,
+            is_channel: true,
+        };
+        session.chats.insert(13, chat);
+        session.media_prefs.auto_download_channels = AUTO_DOWNLOAD_VIDEO;
+        assert!(!session.auto_download_allowed(ChatId(13), AUTO_DOWNLOAD_PHOTO));
+        assert!(session.auto_download_allowed(ChatId(13), AUTO_DOWNLOAD_VIDEO));
+        // Data saver pauses everything, regardless of bucket.
+        session.media_prefs.data_saver = true;
+        assert!(!session.auto_download_allowed(ChatId(13), AUTO_DOWNLOAD_VIDEO));
+        session.media_prefs.data_saver = false;
+        // Groups bucket: basic groups.
+        let mut group = placeholder_chat(ChatId(14));
+        group.kind = ChatKind::BasicGroup { basic_group_id: 2 };
+        session.chats.insert(14, group);
+        session.media_prefs.auto_download_groups = AUTO_DOWNLOAD_FILE;
+        assert!(session.auto_download_allowed(ChatId(14), AUTO_DOWNLOAD_FILE));
+        assert!(!session.auto_download_allowed(ChatId(14), AUTO_DOWNLOAD_PHOTO));
+    }
+
+    #[test]
+    fn auto_download_media_ids_follow_per_type_flags() {
+        // MED3: full-media auto-download honors the per-media-type flags —
+        // voice on by default (TGX 0x63), video/file off; data saver and
+        // spoiler/secret suppress everything.
+        use crate::settings::{AUTO_DOWNLOAD_FILE, AUTO_DOWNLOAD_VIDEO};
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        session.open_chat(ChatId(1));
+        // Voice note (file 4), video (file 5), document (file 9).
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"updateNewMessage","message":{{"id":20,"chat_id":1,"is_outgoing":false,"content":{{"@type":"messageVoiceNote","voice_note":{{"@type":"voiceNote","duration":12,"mime_type":"audio/ogg","voice":{}}},"caption":{{"@type":"formattedText","text":"","entities":[]}},"is_listened":false}}}}}}"#,
+                media_file_json(4, "", false),
+            ),
+        );
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"updateNewMessage","message":{{"id":21,"chat_id":1,"is_outgoing":false,"content":{{"@type":"messageVideo","video":{{"@type":"video","duration":10,"width":320,"height":240,"file_name":"v.mp4","mime_type":"video/mp4","has_stickers":false,"video":{}}},"caption":{{"@type":"formattedText","text":"","entities":[]}},"has_spoiler":false,"is_secret":false}}}}}}"#,
+                media_file_json(5, "", false),
+            ),
+        );
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"updateNewMessage","message":{{"id":22,"chat_id":1,"is_outgoing":false,"content":{{"@type":"messageDocument","document":{{"@type":"document","file_name":"d.bin","mime_type":"application/octet-stream","document":{}}},"caption":{{"@type":"formattedText","text":"","entities":[]}}}}}}}}"#,
+                media_file_json(9, "", false),
+            ),
+        );
+        // Defaults: voice auto-downloads; video and file do not.
+        assert_eq!(session.auto_download_media_file_ids(), vec![FileId(4)]);
+        // Enabling video+file for private chats picks them up.
+        session.media_prefs.auto_download_private |= AUTO_DOWNLOAD_VIDEO | AUTO_DOWNLOAD_FILE;
+        assert_eq!(
+            session.auto_download_media_file_ids(),
+            vec![FileId(4), FileId(5), FileId(9)]
+        );
+        // Data saver suppresses all automatic media.
+        session.media_prefs.data_saver = true;
+        assert!(session.auto_download_media_file_ids().is_empty());
+        session.media_prefs.data_saver = false;
+        // A spoiler video is never auto-downloaded.
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"updateNewMessage","message":{{"id":23,"chat_id":1,"is_outgoing":false,"content":{{"@type":"messageVideo","video":{{"@type":"video","duration":10,"width":320,"height":240,"file_name":"s.mp4","mime_type":"video/mp4","has_stickers":false,"video":{}}},"caption":{{"@type":"formattedText","text":"","entities":[]}},"has_spoiler":true,"is_secret":false}}}}}}"#,
+                media_file_json(6, "", false),
+            ),
+        );
+        assert_eq!(
+            session.auto_download_media_file_ids(),
+            vec![FileId(4), FileId(5), FileId(9)]
+        );
+    }
+
+    #[test]
+    fn auto_download_skips_files_over_size_cap() {
+        // MED3 review: full-media auto-download skips files whose known
+        // size exceeds `AUTO_DOWNLOAD_MAX_BYTES` (TGX
+        // `canAutomaticallyDownload` download limit, WiFi default 50 MiB).
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        session.open_chat(ChatId(1));
+        // Voice note (file 4), auto-downloaded by default (TGX 0x63).
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"updateNewMessage","message":{{"id":20,"chat_id":1,"is_outgoing":false,"content":{{"@type":"messageVoiceNote","voice_note":{{"@type":"voiceNote","duration":12,"mime_type":"audio/ogg","voice":{}}},"caption":{{"@type":"formattedText","text":"","entities":[]}},"is_listened":false}}}}}}"#,
+                media_file_json(4, "", false),
+            ),
+        );
+        assert_eq!(session.auto_download_media_file_ids(), vec![FileId(4)]);
+        // File 4 balloons past the cap: skipped from here on.
+        session.files.get_mut(&4).unwrap().size = 100 * 1024 * 1024;
+        assert!(session.auto_download_media_file_ids().is_empty());
+    }
+
+    #[test]
+    fn completed_user_downloads_land_in_recent_list() {
+        let (mut session, _sink) = session();
+        let completed = |id: i32| ParsedFile {
+            id: FileId(id),
+            size: 100,
+            expected_size: 100,
+            local: LocalFileState {
+                path: format!("/tmp/{id}.bin"),
+                can_be_downloaded: true,
+                is_downloading_active: false,
+                is_downloading_completed: true,
+                downloaded_size: 100,
+            },
+        };
+        // User-initiated download completing → recorded.
+        session.begin_download(FileId(7));
+        session.user_downloads.insert(7);
+        session.upsert_file(completed(7), true);
+        // Automatic thumb completing → not recorded.
+        session.begin_download(FileId(8));
+        session.upsert_file(completed(8), true);
+        assert_eq!(
+            session
+                .completed_downloads
+                .iter()
+                .copied()
+                .collect::<Vec<_>>(),
+            vec![7]
+        );
+        assert!(!session.downloading.contains(&7));
+        assert!(!session.user_downloads.contains(&7));
+        // begin_download clears a recorded failure (retry path).
+        session.failed_downloads.insert(9);
+        session.begin_download(FileId(9));
+        assert!(!session.failed_downloads.contains(&9));
+    }
+
+    #[test]
+    fn stalled_user_download_marks_failed_but_cancel_does_not() {
+        // MED3: an `updateFile` that takes a user download active → idle
+        // without completing is a stall — record the failure so the row
+        // offers Retry. An explicit cancel (`abort_download` drops the id
+        // from `user_downloads`) must not be mislabeled as a failure.
+        fn update_file(id: i32, active: bool) -> String {
+            format!(
+                r#"{{"@type":"updateFile","file":{{"@type":"file","id":{id},"size":24,"expected_size":24,"local":{{"@type":"localFile","path":"","can_be_downloaded":true,"can_be_deleted":false,"is_downloading_active":{active},"is_downloading_completed":false,"download_offset":0,"downloaded_prefix_size":0,"downloaded_size":0}},"remote":{{"@type":"remoteFile","id":"r","unique_id":"u","is_uploading_active":false,"is_uploading_completed":true,"uploaded_size":24}}}}}}"#,
+            )
+        }
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        // Stalled: in-flight, then idle without completing.
+        session.begin_download(FileId(12));
+        session.user_downloads.insert(12);
+        apply_json(&mut session, &seq, &sink, &update_file(12, true));
+        assert!(!session.failed_downloads.contains(&12));
+        apply_json(&mut session, &seq, &sink, &update_file(12, false));
+        assert!(session.failed_downloads.contains(&12));
+        assert!(!session.downloading.contains(&12));
+        assert!(!session.user_downloads.contains(&12));
+        // Cancelled: abort first, then the idle echo arrives.
+        session.begin_download(FileId(13));
+        session.user_downloads.insert(13);
+        session.abort_download(FileId(13));
+        apply_json(&mut session, &seq, &sink, &update_file(13, true));
+        apply_json(&mut session, &seq, &sink, &update_file(13, false));
+        assert!(!session.failed_downloads.contains(&13));
+    }
+
+    #[test]
+    fn download_file_error_marks_failed_download() {
+        // A `downloadFile` error response unsticks the download and records
+        // the failure so the row can offer an honest retry — but only for
+        // user-initiated downloads; an automatic (auto-download) error must
+        // not surface in the Failed section.
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        let extra = session.request_download(FileId(11));
+        session.begin_download(FileId(11));
+        session.user_downloads.insert(11);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"error","@extra":"{}","code":500,"message":"CANARY download failed"}}"#,
+                extra.0
+            ),
+        );
+        assert!(!session.downloading.contains(&11));
+        assert!(session.failed_downloads.contains(&11));
+        // Automatic download: unstuck, but not recorded as failed.
+        let extra = session.request_download(FileId(12));
+        session.begin_download(FileId(12));
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"error","@extra":"{}","code":500,"message":"CANARY download failed"}}"#,
+                extra.0
+            ),
+        );
+        assert!(!session.downloading.contains(&12));
+        assert!(!session.failed_downloads.contains(&12));
     }
 }

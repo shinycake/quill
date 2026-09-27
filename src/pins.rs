@@ -122,6 +122,7 @@ pub const REQUIRED_SCHEMA_CONSTRUCTORS: &[&str] = &[
     "thumbnail",
     "updateFile",
     "downloadFile",
+    "cancelDownloadFile",
     "inputMessageText",
     "inputMessagePhoto",
     "inputMessageDocument",
