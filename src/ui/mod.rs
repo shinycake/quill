@@ -3552,11 +3552,7 @@ impl QuillApp {
         let chat = session.chats.get(&open.0)?;
         let secret_chat_id = chat.secret_chat_id()?;
         let record = session.secret_chat_states.get(&secret_chat_id)?;
-        let name = session
-            .user(record.user_id)
-            .map(|u| u.display_name())
-            .filter(|name| !name.is_empty())
-            .unwrap_or_else(|| "Your contact".to_string());
+        let name = Self::secret_peer_name(Some(session), record.user_id, "Your contact");
         Some((name, record.layer))
     }
 
@@ -9337,12 +9333,8 @@ impl QuillApp {
                     .child({
                         // Phase S1: TGX `EncryptionKeyDescription`, verbatim,
                         // with the peer's display name.
-                        let name = self
-                            .session()
-                            .and_then(|s| s.user(record.user_id))
-                            .map(|u| u.display_name())
-                            .filter(|name| !name.is_empty())
-                            .unwrap_or_else(|| "your contact".to_string());
+                        let name =
+                            Self::secret_peer_name(self.session(), record.user_id, "your contact");
                         div()
                             .text_xs()
                             .text_color(cx.theme().muted_foreground)
@@ -9535,16 +9527,11 @@ impl QuillApp {
     }
 
     /// Phase S1: per-secret-chat passcode hint (TGX `SecretPasscodeInfo`,
-    /// verbatim, with the peer's name). The hint only — setting an
+    /// paraphrased, with the peer's name). The hint only — setting an
     /// additional per-chat passcode needs a full app passcode feature,
     /// which is out of this slice.
     fn secret_passcode_hint(&self, user_id: i64, cx: &mut Context<Self>) -> AnyElement {
-        let name = self
-            .session()
-            .and_then(|s| s.user(user_id))
-            .map(|u| u.display_name())
-            .filter(|name| !name.is_empty())
-            .unwrap_or_else(|| "this chat".to_string());
+        let name = Self::secret_peer_name(self.session(), user_id, "this chat");
         div()
             .flex()
             .flex_col()
@@ -15490,13 +15477,9 @@ impl QuillApp {
         let ChatKind::Secret { user_id, .. } = &chat.kind else {
             return None;
         };
-        let name = session
-            .user(user_id.0)
-            .map(|u| u.display_name())
-            .filter(|name| !name.is_empty())
-            .unwrap_or_else(|| "your contact".to_string());
+        let name = Self::secret_peer_name(Some(session), user_id.0, "your contact");
         Some(format!(
-            "Custom notification settings for the secret chat with {name}."
+            "Custom notification settings for the Secret Chat with {name}."
         ))
     }
 
@@ -17148,17 +17131,17 @@ impl QuillApp {
     /// `Confirm` strings, verbatim).
     fn secret_close_copy(&self) -> (String, String, &'static str) {
         let session = self.session();
-        let name = self
+        let user_id = self
             .pending_close_secret_chat
             .and_then(|id| session.as_ref()?.chats.get(&id.0))
             .and_then(|chat| match &chat.kind {
-                ChatKind::Secret { user_id, .. } => Some(*user_id),
+                ChatKind::Secret { user_id, .. } => Some(user_id.0),
                 _ => None,
-            })
-            .and_then(|user_id| session.as_ref()?.user(user_id.0))
-            .map(|u| u.display_name())
-            .filter(|name| !name.is_empty())
-            .unwrap_or_else(|| "your contact".to_string());
+            });
+        let name = user_id.map_or_else(
+            || "your contact".to_string(),
+            |id| Self::secret_peer_name(session, id, "your contact"),
+        );
         let state = self
             .pending_close_secret_chat
             .and_then(|id| session.as_ref()?.chats.get(&id.0))
@@ -20242,6 +20225,17 @@ impl QuillApp {
             .child(waveform_row(0, &bars))
     }
 
+    /// Phase S1: peer display name for a secret chat — the user's
+    /// `display_name()`, empty-filtered, with a caller-chosen fallback
+    /// (the fallback wording varies by context, so it stays a parameter).
+    fn secret_peer_name(session: Option<&Session>, user_id: i64, fallback: &str) -> String {
+        session
+            .and_then(|s| s.user(user_id))
+            .map(|u| u.display_name())
+            .filter(|name| !name.is_empty())
+            .unwrap_or_else(|| fallback.to_string())
+    }
+
     /// Phase S1: "Waiting for {name} to get online…" header subtitle for a
     /// Pending secret chat (TGX `AwaitingEncryption`). `None` for anything
     /// else — the composer note covers the bottom of the pane, this covers
@@ -20255,11 +20249,7 @@ impl QuillApp {
         if chat.secret_state != Some(SecretChatState::Pending) {
             return None;
         }
-        let name = session
-            .user(user_id.0)
-            .map(|u| u.display_name())
-            .filter(|name| !name.is_empty())
-            .unwrap_or_else(|| "your contact".to_string());
+        let name = Self::secret_peer_name(Some(session), user_id.0, "your contact");
         Some(format!("Waiting for {name} to get online…"))
     }
 
@@ -20279,11 +20269,7 @@ impl QuillApp {
         match &chat.secret_state {
             Some(SecretChatState::Ready) => None,
             Some(SecretChatState::Pending) => {
-                let name = session
-                    .user(user_id.0)
-                    .map(|u| u.display_name())
-                    .filter(|name| !name.is_empty())
-                    .unwrap_or_else(|| "your contact".to_string());
+                let name = Self::secret_peer_name(Some(session), user_id.0, "your contact");
                 Some(format!("🔒 Waiting for {name} to come online…"))
             }
             Some(SecretChatState::Closed) => Some("🔒 Secret chat closed".to_string()),
