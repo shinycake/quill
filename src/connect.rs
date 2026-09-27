@@ -543,6 +543,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             p2p_allowed: ready.allow_p2p,
             mic_input: self.selected_devices.0.clone(),
             speaker_input: self.selected_devices.1.clone(),
+            // Phase C2e: video wiring lands in the next slice; the honest
+            // default is video off until the driver opts in.
+            video_enabled: false,
+            camera_input: None,
         }
     }
 

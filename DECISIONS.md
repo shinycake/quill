@@ -3434,3 +3434,64 @@ device list renders honestly.
 - **Out of this slice:** E2E testing against a real peer (CI has no live
   Telegram), video transport, group calls, screen sharing, call recording, and
   custom-parameters passthrough.
+
+## Phase C2e — 1:1 video transport, session 1: engine layer (2026-09-27)
+
+- **Built:** the 1:1 video transport ENGINE layer (`src/calls/engine.rs`,
+  `src/connect.rs`), no UI yet. New types: `RemoteVideoState`
+  {Inactive, Paused, Active} mirroring Telegram X's `VideoState`
+  annotation (verified INACTIVE=0, PAUSED=1, ACTIVE=2 in
+  `~/workspace/telegram-x/.../voip/annotation/VideoState.java`);
+  `VideoFrame` {seq, width, height, rgba, is_local} — RGBA8 row-major with
+  rotation already applied; `VideoFrameCallback` /
+  `RemoteVideoStateCallback` hooks. `CallEngine` gains
+  `set_video_frame_callback`, `set_remote_video_state_callback`, and
+  `set_camera_enabled(call_id, enabled, camera)` (camera doubles as
+  selection, `None` = default), implemented for both `NtgcallsEngine` and
+  `MockEngine`. `ConnectParams` gains `video_enabled` and
+  `camera_input`; the driver keeps the honest default (off, None) until
+  session 2 opts in.
+- **Built:** `NtgcallsEngine` retains per-call `CallMediaConfig`
+  {mic, speaker, camera_enabled, camera} (populated in `connect()`,
+  updated in `select_devices()` / `set_camera_enabled()`, removed in
+  `hangup()`); `set_audio_sources` became `set_media_sources`, re-issuing
+  `ntg_set_stream_sources` for CAPTURE (mic + camera description when
+  enabled, NULL camera removes the reader and ntgcalls signals the peer
+  `video_stopped`) and PLAYBACK (speaker). Camera description is
+  `NTG_MEDIA_SOURCE_DEVICE`, 640x480@30 — the conventional tgvoip P2P
+  default. `ntg_on_frames_callback` and
+  `ntg_on_remote_source_change_callback` register in `ensure_instance()`
+  with the same failure-cleanup pattern as the existing registrations and
+  unregister in `Drop`.
+- **Built:** pure, unit-tested `i420_to_rgba` (I420 planar -> RGBA8,
+  full-range BT.601, alpha 255, returns `None` on bad size/zero dims),
+  `rotate_rgba` for 90/180/270 (dimension swap for 90/270), and
+  `remote_video_state_from` (ACTIVE->Active, PAUSED->Paused,
+  IDLING/other->Inactive). The frames trampoline takes the LAST frame of
+  each batch, classifies CAPTURE+CAMERA as local preview and
+  PLAYBACK+CAMERA as peer, ignores everything else (screen = later
+  slice), copies the bytes off the C thread, and sequences frames from a
+  shared `AtomicU64`. The remote-source trampoline ignores non-camera
+  devices; the state is passed by value per the C typedef. `video_wanted`
+  is a pure driver helper: a video call is wanted only when a camera
+  exists, returning the first camera id, else (false, None).
+- **Key decisions:** `ntg_add_incoming_video` is GROUP-ONLY (throws on a
+  P2P call via the GroupCall cast) and is NOT used — peer frames arrive
+  unsolicited through the frames callback for 1:1. Full-range BT.601 with
+  no limited-range scaling: neutral chroma passes Y straight through
+  (Y=235 -> ~white, Y=16 -> ~black, +-2 rounding). Hook delivery happens
+  outside the mutex locks to avoid deadlock with UI callbacks.
+- **Not verifiable without a live peer:** the native trampoline paths
+  (frame delivery from real ntgcalls, rotation handedness against a real
+  camera, peer MediaState -> stream status). Tested instead: pure
+  conversion/rotation/mapping (7 unit tests) plus the mock engine's
+  toggle contract, frame hook plumbing with replacement semantics, and
+  state-emission ordering (8 new tests total, all green).
+- **Out of this slice (session 2):** driver wiring
+  (`ConnectDriver::call_connect_params` opts into video via
+  `video_wanted`; camera toggle control), UI (local preview tile +
+  peer video tile rendering `VideoFrame`s, camera device selection),
+  docs, and a milestone screenshot. Session 2 can then check
+  `parity:calls-start-video`, `parity:calls-camera-preview`,
+  `parity:calls-remote-video`, `parity:calls-camera-switch`, and
+  `parity:calls-camera-select` — no README boxes touched in this slice.
