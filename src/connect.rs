@@ -21,13 +21,15 @@ use crate::platform::{DatabaseKey, KeyDecision, SecretStore, load_or_create_key}
 use crate::poll::{PollDraft, poll_answer_for_tap};
 use crate::rich::RichBlock;
 use crate::settings::{
-    AccountPaths, default_app_root, load_call_prefs, load_media_prefs, save_call_prefs,
+    AccountPaths, InstantViewMode, default_app_root, load_call_prefs, load_media_prefs,
+    save_call_prefs,
 };
 use crate::state::{
     AdminListFetch, AdminRightsFetch, CHAT_EVENT_LOG_PAGE_SIZE, ChatEventLogFetch,
-    ChatSearchJumpNeed, ChatStatisticsFetch, ForwardFlight, InfoPanelTarget, InviteLinkFetch,
-    JoinRequestFetch, MemberListFilter, MemberStatusChange, RequestPurpose, RequestRollback,
-    SearchStatus, Session, ShutdownPhase, SupergroupMembersFetch, WelcomeMessagesFetch,
+    ChatSearchJumpNeed, ChatStatisticsFetch, ForwardFlight, InfoPanelTarget, InstantViewPage,
+    InviteLinkFetch, JoinRequestFetch, MemberListFilter, MemberStatusChange, RequestPurpose,
+    RequestRollback, SearchStatus, Session, ShutdownPhase, SupergroupMembersFetch,
+    WelcomeMessagesFetch,
 };
 use crate::telegram::client::{LiveTdJson, OwnedEnvelope, ReceiveBridge};
 use crate::telegram::envelope::{
@@ -67,11 +69,12 @@ use crate::telegram::requests::{
     get_scope_notification_settings, get_secret_chat, get_sticker_set, get_storage_statistics,
     get_story, get_story_available_reactions, get_supergroup, get_supergroup_full_info,
     get_supergroup_members, get_user_full_info, get_user_privacy_setting_rules,
-    get_video_chat_invite_link, get_video_chat_rtmp_url, input_message_photo, input_message_video,
-    invite_group_call_participant, join_chat, join_group_call, join_video_chat, leave_chat,
-    leave_group_call, load_active_stories, load_chat_welcome_messages, load_chats, load_chats_list,
-    load_group_call_participants, open_chat, open_message_content, open_story, pin_chat_message,
-    process_chat_join_request, recognize_speech, remove_message_reaction, reorder_chat_folders,
+    get_video_chat_invite_link, get_video_chat_rtmp_url, get_web_page_instant_view,
+    input_message_photo, input_message_video, invite_group_call_participant, join_chat,
+    join_group_call, join_video_chat, leave_chat, leave_group_call, load_active_stories,
+    load_chat_welcome_messages, load_chats, load_chats_list, load_group_call_participants,
+    open_chat, open_message_content, open_story, pin_chat_message, process_chat_join_request,
+    recognize_speech, remove_message_reaction, reorder_chat_folders,
     replace_primary_chat_invite_link, replace_video_chat_rtmp_url, report_chat_sponsored_message,
     resend_messages, revoke_chat_invite_link, revoke_group_call_invite_link, search_call_messages,
     search_chat_messages, search_chats, search_messages, search_public_chats,
@@ -327,6 +330,25 @@ pub trait JsonSender: Send {
 pub enum ConnectSendError {
     InvalidRequest,
     Native,
+    /// MED4: caption exceeded `getOption("message_caption_length_max")`
+    /// (schema:6088). The UI shows the limit; the send never goes out.
+    CaptionTooLong {
+        limit: i32,
+    },
+}
+
+/// MED4: outcome of an Instant View open attempt (TGX
+/// `TdlibUi.fetchInstantView` + browser fallback).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InstantViewOutcome {
+    /// Instant View is off (or the request send failed) — the caller
+    /// opens the URL in the browser.
+    Browser,
+    /// `getWebPageInstantView` was sent. Success lands in
+    /// `Session::instant_view`; TDLib's 404 (no Instant View for this
+    /// page) lands in `Session::instant_view_fallback_url` so the UI
+    /// opens the browser — a refusal is never shown as success.
+    Requested,
 }
 
 /// Records outbound JSON for unit/replay tests (no network).
@@ -916,6 +938,39 @@ impl<S: JsonSender> ConnectDriver<S> {
                 }),
             _ => None,
         };
+        // MED4: capture the `getWebPageInstantView` answer before `apply`
+        // takes the pending request; the UI drains
+        // `Session::instant_view` into the IV reader. The URL rides
+        // `Session::instant_view_urls` (the purpose stays `Copy`).
+        let instant_view_answer: Option<(String, RichMessageContent)> =
+            match &owned.envelope.payload {
+                EnvelopePayload::WebPageInstantView { rich } => owned
+                    .envelope
+                    .extra
+                    .and_then(|id| {
+                        (self.session.requests.purpose(id)
+                            == Some(RequestPurpose::GetWebPageInstantView))
+                        .then_some(id)
+                    })
+                    .and_then(|id| {
+                        self.session
+                            .instant_view_urls
+                            .remove(&id)
+                            .map(|url| (url, rich.clone()))
+                    }),
+                _ => None,
+            };
+        // MED4: a failed `getWebPageInstantView` (TDLib 404 = the page has
+        // no Instant View) falls back to the browser like TGX — the URL
+        // is stashed for the UI drain, never rendered as a reader.
+        let instant_view_fallback: Option<String> = match &owned.envelope.payload {
+            EnvelopePayload::Error(_) => owned.envelope.extra.and_then(|id| {
+                (self.session.requests.purpose(id) == Some(RequestPurpose::GetWebPageInstantView))
+                    .then_some(id)
+                    .and_then(|id| self.session.instant_view_urls.remove(&id))
+            }),
+            _ => None,
+        };
         // Slice G2: capture forum/welcome/boost mutations before `apply`
         // takes the pending request. The state drops the stale cache on
         // confirmed success; the post-apply refetch reloads it now that
@@ -1015,6 +1070,14 @@ impl<S: JsonSender> ConnectDriver<S> {
         // M1: stash the `getMessageLink` answer for the UI clipboard drain.
         if let Some(link) = message_link_answer {
             self.session.message_link_result = Some(link);
+        }
+        // MED4: stash the `getWebPageInstantView` answer (success →
+        // IV reader; error → browser fallback) for the UI drains.
+        if let Some((url, rich)) = instant_view_answer {
+            self.session.instant_view = Some(InstantViewPage { url, rich });
+        }
+        if let Some(url) = instant_view_fallback {
+            self.session.instant_view_fallback_url = Some(url);
         }
         // M1 fix-up: "Share link" gate — chain to `getMessageLink` only
         // when `messageProperties.can_get_link` passed; otherwise tell
@@ -2640,6 +2703,11 @@ impl<S: JsonSender> ConnectDriver<S> {
                     }
                     ConnectSendError::Native => {
                         "Could not upload diagnostics: TDLib send failed".into()
+                    }
+                    // MED4: caption-length errors can't arise from a
+                    // diagnostics upload; categorized as invalid request.
+                    ConnectSendError::CaptionTooLong { .. } => {
+                        "Could not upload diagnostics: invalid request".into()
                     }
                 });
             }
@@ -7272,6 +7340,20 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     /// Send text, photo, document, or local video via `sendMessage` (TDLib 1.8.67).
+    /// MED4: caption-length gate against the runtime
+    /// `message_caption_length_max` option (TDLib 1.8.67, `schema/td_api.tl:6088`).
+    /// Counts Unicode scalar values, matching TDLib's limit semantics for
+    /// captions. Plain-text sends use the separate `message_text_length_max`
+    /// option (untracked here — out of this slice).
+    fn check_caption_length(&self, caption: &str) -> Result<(), ConnectSendError> {
+        let limit = self.session.message_caption_length_max;
+        if caption.chars().count() as i64 > i64::from(limit.max(0)) {
+            Err(ConnectSendError::CaptionTooLong { limit })
+        } else {
+            Ok(())
+        }
+    }
+
     pub fn send_snapshot(
         &mut self,
         snapshot: &ComposerSnapshot,
@@ -7305,6 +7387,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         let caption = snapshot.caption();
         if snapshot.attachment.is_none() && caption.is_empty() {
             return Err(ConnectSendError::InvalidRequest);
+        }
+        // MED4: caption-length gate (runtime option; the counter in the
+        // composer shows the same limit). Only the caption-carrying
+        // paths are gated — plain text has its own (untracked) limit.
+        if snapshot.attachment.is_some() || snapshot.is_media_album() {
+            self.check_caption_length(caption)?;
         }
         // Slice G1: quote-carrying reply (`inputTextQuote`).
         let reply_to = snapshot.send_reply();
@@ -7377,6 +7465,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                     topic_id,
                     path,
                     caption,
+                    snapshot.caption_above_media,
                     reply_to,
                     self_destruct,
                     is_secret,
@@ -7402,6 +7491,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                             self_destruct,
                         },
                         caption,
+                        snapshot.caption_above_media,
                         reply_to,
                         is_secret,
                     )
@@ -7537,6 +7627,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         let caption = snapshot.caption();
         let last = snapshot.album.len() - 1;
+        // MED4: caption-length gate (same runtime option as single
+        // sends — `send_snapshot` returns here before its own check).
+        self.check_caption_length(caption)?;
         // Phase B3: same private-chat gate as `send_snapshot` — the timer
         // applies per album item (the schema allows it per
         // `inputMessagePhoto`/`inputMessageVideo`).
@@ -7559,9 +7652,13 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .ok_or(ConnectSendError::InvalidRequest)?;
             let item_caption = if index == last { caption } else { "" };
             let content = match att.kind {
-                AttachmentKind::Photo => {
-                    input_message_photo(&path, item_caption, self_destruct, is_secret)
-                }
+                AttachmentKind::Photo => input_message_photo(
+                    &path,
+                    item_caption,
+                    snapshot.caption_above_media,
+                    self_destruct,
+                    is_secret,
+                ),
                 AttachmentKind::Video => {
                     let probe = crate::video::probe_local_video(&att.path)
                         .map_err(|_| ConnectSendError::InvalidRequest)?;
@@ -7575,6 +7672,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                             self_destruct,
                         },
                         item_caption,
+                        snapshot.caption_above_media,
                         is_secret,
                     )
                 }
@@ -8030,6 +8128,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         if matches!(edit.kind, ComposerEditKind::Text) && caption.is_empty() {
             return Err(ConnectSendError::InvalidRequest);
         }
+        // MED4: caption-length gate for caption edits (same runtime
+        // option as media sends).
+        if matches!(edit.kind, ComposerEditKind::Caption) {
+            self.check_caption_length(caption)?;
+        }
         let extra = self
             .session
             .request(RequestPurpose::EditMessage, Some(edit.chat_id));
@@ -8053,7 +8156,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 edit.chat_id,
                 edit.message_id,
                 caption,
-                false,
+                edit.caption_above,
                 strip_blockquote,
             ),
         };
@@ -8456,10 +8559,34 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
     }
 
-    /// M1: delete a scheduled send. Scheduled messages live in
-    /// `session.scheduled_messages`, not in history, so the
-    /// history-validated `delete_confirmed` can't take them. `revoke` is
-    /// always false (no for-everyone distinction before sending).
+    /// MED4: outcome of an Instant View open attempt (TGX
+    /// `TdlibUi.fetchInstantView` + browser fallback).
+    pub fn open_instant_view(&mut self, url: &str) -> InstantViewOutcome {
+        // Mode Off (or a send failure) means the caller opens the URL in
+        // the browser directly — never a fake reader.
+        if !matches!(
+            self.session.media_prefs.instant_view_mode,
+            InstantViewMode::Telegram | InstantViewMode::All
+        ) {
+            return InstantViewOutcome::Browser;
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::GetWebPageInstantView, None);
+        let json = get_web_page_instant_view(extra, url);
+        match self.sender.send_json(&json) {
+            Ok(()) => {
+                self.session
+                    .instant_view_urls
+                    .insert(extra, url.to_string());
+                InstantViewOutcome::Requested
+            }
+            Err(_) => {
+                self.session.requests.take(extra);
+                InstantViewOutcome::Browser
+            }
+        }
+    }
     pub fn delete_scheduled_message(
         &mut self,
         chat_id: ChatId,
@@ -8468,6 +8595,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
+        // M1: delete a scheduled send. Scheduled messages live in
+        // `session.scheduled_messages`, not in history, so the
+        // history-validated `delete_confirmed` can't take them. `revoke`
+        // is always false (no for-everyone distinction before sending).
         let known = self
             .session
             .scheduled_messages
@@ -10366,7 +10497,10 @@ mod tests {
         let v: Value = serde_json::from_str(&last_load).unwrap();
         let extra = v["@extra"].as_str().unwrap();
         let err404 = copy_and_parse(
-            &format!(r#"{{"@type":"error","code":404,"message":"Not Found","@extra":"{extra}"}}"#),
+            &format!(
+                r#"{{"@type":"error","code":404,"message":"Not Found","@extra":"{id}"}}"#,
+                id = extra
+            ),
             &seq,
             &dyn_sink,
         )
@@ -13627,6 +13761,224 @@ mod tests {
     }
 
     #[test]
+    fn driver_send_snapshot_rejects_overlong_caption() {
+        // MED4: `message_caption_length_max` (runtime `updateOption`)
+        // gates media captions before any file work; the limit rides
+        // the error so the UI can show it.
+        use crate::composer::{AttachmentKind, ComposerAttachment};
+
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = Arc::new(RecordingSender::new());
+        let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+        let mut driver =
+            ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+        let seq = AtomicU64::new(0);
+        seed_ready_alice(&mut driver, &seq, &dyn_sink);
+        driver.session.message_caption_length_max = 4;
+
+        let snap = crate::composer::ComposerSnapshot::capture_with_attachment(
+            ChatId(7),
+            driver.session.view_generation,
+            "toolong",
+            Some(ComposerAttachment {
+                path: std::path::PathBuf::from("/tmp/does-not-exist.png"),
+                kind: AttachmentKind::Photo,
+                file_name: "does-not-exist.png".to_string(),
+            }),
+        );
+        let sent_before = recorder.snapshot().len();
+        let err = driver.send_snapshot(&snap).unwrap_err();
+        assert!(matches!(err, ConnectSendError::CaptionTooLong { limit: 4 }));
+        // The gate runs before any file work or request — nothing new
+        // went out.
+        assert_eq!(recorder.snapshot().len(), sent_before);
+
+        // At the limit the gate passes (the missing file then fails the
+        // send — the gate is what this test pins).
+        driver.session.message_caption_length_max = 7;
+        let snap = crate::composer::ComposerSnapshot::capture_with_attachment(
+            ChatId(7),
+            driver.session.view_generation,
+            "1234567",
+            Some(ComposerAttachment {
+                path: std::path::PathBuf::from("/tmp/does-not-exist.png"),
+                kind: AttachmentKind::Photo,
+                file_name: "does-not-exist.png".to_string(),
+            }),
+        );
+        let err = driver.send_snapshot(&snap).unwrap_err();
+        assert!(!matches!(err, ConnectSendError::CaptionTooLong { .. }));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn driver_send_album_rejects_overlong_caption() {
+        // MED4: the album path gates on `message_caption_length_max`
+        // before any request — an overlong caption refuses with the
+        // limit and emits nothing.
+        use crate::composer::{AttachmentKind, ComposerAttachment};
+
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = Arc::new(RecordingSender::new());
+        let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+        let mut driver =
+            ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+        let seq = AtomicU64::new(0);
+        seed_ready_alice(&mut driver, &seq, &dyn_sink);
+        driver.session.message_caption_length_max = 4;
+
+        let snap = crate::composer::ComposerSnapshot::capture_album(
+            ChatId(7),
+            driver.session.view_generation,
+            "toolong",
+            vec![
+                ComposerAttachment {
+                    path: std::path::PathBuf::from("/tmp/a.png"),
+                    kind: AttachmentKind::Photo,
+                    file_name: "a.png".to_string(),
+                },
+                ComposerAttachment {
+                    path: std::path::PathBuf::from("/tmp/b.png"),
+                    kind: AttachmentKind::Photo,
+                    file_name: "b.png".to_string(),
+                },
+            ],
+        );
+        let sent_before = recorder.snapshot().len();
+        let err = driver.send_album_snapshot(&snap).unwrap_err();
+        assert!(matches!(err, ConnectSendError::CaptionTooLong { limit: 4 }));
+        assert_eq!(recorder.snapshot().len(), sent_before);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn driver_edit_snapshot_rejects_overlong_caption() {
+        // MED4: caption edits gate on `message_caption_length_max` too —
+        // an overlong edit refuses with the limit and emits nothing.
+        // The message must exist in history with a caption for the edit
+        // path to reach the length gate.
+        use crate::telegram::client::copy_and_parse;
+
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = Arc::new(RecordingSender::new());
+        let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+        let mut driver =
+            ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+        let seq = AtomicU64::new(0);
+        seed_ready_alice(&mut driver, &seq, &dyn_sink);
+        driver.session.message_caption_length_max = 4;
+
+        // Inject an outgoing photo message with a caption into history.
+        let msg_json = r#"{"@type":"updateNewMessage","message":{"id":9,"chat_id":7,"is_outgoing":true,"date":1700000000,"content":{"@type":"messagePhoto","photo":{"@type":"photo","has_stickers":false,"sizes":[]},"caption":{"@type":"formattedText","text":"hi","entities":[]},"show_caption_above_media":false,"has_spoiler":false,"is_secret":false}}}"#;
+        let owned = copy_and_parse(msg_json, &seq, &dyn_sink).expect("parse msg");
+        driver.ingest(owned).expect("ingest msg");
+
+        let edit = crate::composer::ComposerEdit {
+            chat_id: ChatId(7),
+            message_id: crate::ids::MessageId(9),
+            original_text: "hi".to_string(),
+            kind: crate::composer::ComposerEditKind::Caption,
+            scheduled: false,
+            caption_above: false,
+        };
+        let sent_before = recorder.snapshot().len();
+        let err = driver.edit_snapshot(&edit, "toolong").unwrap_err();
+        assert!(matches!(err, ConnectSendError::CaptionTooLong { limit: 4 }));
+        assert_eq!(recorder.snapshot().len(), sent_before);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn driver_instant_view_success_ingest() {
+        // MED4: a `webPageInstantView` answer for a tracked
+        // `GetWebPageInstantView` request populates `session.instant_view`
+        // (the UI drains it into the reader). The URL rides
+        // `instant_view_urls`, keyed by the request id.
+        use crate::telegram::client::copy_and_parse;
+
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = Arc::new(RecordingSender::new());
+        let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+        let mut driver =
+            ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+        let seq = AtomicU64::new(0);
+        seed_ready_alice(&mut driver, &seq, &dyn_sink);
+
+        // Register a request like `open_instant_view` does.
+        let extra = driver
+            .session
+            .request(RequestPurpose::GetWebPageInstantView, None);
+        driver
+            .session
+            .instant_view_urls
+            .insert(extra, "https://example.com/article".to_string());
+
+        let json = format!(
+            r#"{{"@type":"webPageInstantView","page_blocks":[],"@extra":"{id}"}}"#,
+            id = extra.0,
+        );
+        let owned = copy_and_parse(&json, &seq, &dyn_sink).expect("parse IV");
+        driver.ingest(owned).expect("ingest IV");
+        let iv = driver.session.instant_view.as_ref().expect("IV stored");
+        assert_eq!(iv.url, "https://example.com/article");
+        // A success is never stashed as a browser fallback.
+        assert!(driver.session.instant_view_fallback_url.is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn driver_instant_view_error_falls_back() {
+        // MED4: a TDLib error for `getWebPageInstantView` (e.g. 404 — no
+        // Instant View for the page) stashes the URL for browser
+        // fallback, never a fake reader.
+        use crate::telegram::client::copy_and_parse;
+
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = Arc::new(RecordingSender::new());
+        let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+        let mut driver =
+            ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+        let seq = AtomicU64::new(0);
+        seed_ready_alice(&mut driver, &seq, &dyn_sink);
+
+        let extra = driver
+            .session
+            .request(RequestPurpose::GetWebPageInstantView, None);
+        driver
+            .session
+            .instant_view_urls
+            .insert(extra, "https://example.com/noiv".to_string());
+
+        let json = format!(
+            r#"{{"@type":"error","code":404,"message":"Not Found","@extra":"{id}"}}"#,
+            id = extra.0,
+        );
+        let owned = copy_and_parse(&json, &seq, &dyn_sink).expect("parse error");
+        driver.ingest(owned).expect("ingest error");
+        assert!(driver.session.instant_view.is_none());
+        assert_eq!(
+            driver.session.instant_view_fallback_url.as_deref(),
+            Some("https://example.com/noiv")
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn driver_send_snapshot_carries_quote() {
         // Slice G1: a composer reply with a validated partial quote
         // reaches `sendMessage` as `inputTextQuote` (schema 1.8.67,
@@ -13812,6 +14164,7 @@ mod tests {
             original_text: "hello already here".into(),
             kind: ComposerEditKind::Text,
             scheduled: false,
+            caption_above: false,
         };
         assert_eq!(
             driver.edit_snapshot(&incoming, "nope"),
@@ -13824,6 +14177,7 @@ mod tests {
             original_text: "own outgoing".into(),
             kind: ComposerEditKind::Text,
             scheduled: false,
+            caption_above: false,
         };
         assert_eq!(
             driver.edit_snapshot(&edit, "   "),
@@ -13919,6 +14273,7 @@ mod tests {
             original_text: "scheduled draft".into(),
             kind: ComposerEditKind::Text,
             scheduled: false,
+            caption_above: false,
         };
         assert_eq!(
             driver.edit_snapshot(&plain, "nope"),

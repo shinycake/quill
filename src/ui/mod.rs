@@ -1139,6 +1139,10 @@ pub struct QuillApp {
     /// chats only). Cycles Off → 5s → 30s → 1m → View once via the
     /// picker button; captured into `ComposerSnapshot` at submit time.
     composer_self_destruct: Option<SelfDestructSend>,
+    /// MED4: caption-above-media toggle for photo/video sends
+    /// (`show_caption_above_media`, schema 1.8.67 lines 6117/6128).
+    /// Captured into `ComposerSnapshot` at submit time; reset after send.
+    composer_caption_above: bool,
     /// M1: silent-send toggle (`messageSendOptions.disable_notification`,
     /// schema 1.8.67 line 5934). Persists across sends until toggled.
     composer_silent: bool,
@@ -1488,6 +1492,15 @@ pub enum ScreenshotDemo {
     ReadyVoice,
     /// Link entities + web page (`linkPreview`) card (injected, no live Telegram).
     ReadyLinkPreview,
+    /// MED4: composer with a typed URL → detected-URL chip + preview
+    /// toggle (injected, no live Telegram).
+    ReadyComposerPreview,
+    /// MED4: embedded-player + album `linkPreview` cards in bubbles
+    /// (injected, no live Telegram).
+    ReadyPreviewCards,
+    /// MED4: photo messages with caption above vs below the media
+    /// (`show_caption_above_media`, injected, no live Telegram).
+    ReadyCaptionPosition,
     /// Saved-GIF panel + a playing animation in history (injected, no live Telegram).
     ReadyGifs,
     /// Video bubble with Play/Pause in history (injected, no live Telegram).
@@ -2370,6 +2383,33 @@ impl QuillApp {
                     AuthorizationState::Ready,
                 )
             }
+            Some(ScreenshotDemo::ReadyComposerPreview) => {
+                demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
+                (
+                    ConnectUiStatus::DemoReadyChats,
+                    None,
+                    "screenshot demo — composer link preview chip".into(),
+                    AuthorizationState::Ready,
+                )
+            }
+            Some(ScreenshotDemo::ReadyPreviewCards) => {
+                demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
+                (
+                    ConnectUiStatus::DemoReadyChats,
+                    None,
+                    "screenshot demo — embedded + album preview cards".into(),
+                    AuthorizationState::Ready,
+                )
+            }
+            Some(ScreenshotDemo::ReadyCaptionPosition) => {
+                demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
+                (
+                    ConnectUiStatus::DemoReadyChats,
+                    None,
+                    "screenshot demo — caption above vs below".into(),
+                    AuthorizationState::Ready,
+                )
+            }
             Some(ScreenshotDemo::ReadyGifs) => {
                 demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
                 (
@@ -2974,6 +3014,7 @@ impl QuillApp {
             notify_inflight: Arc::new(AtomicUsize::new(0)),
             pending_attachments,
             composer_self_destruct: None,
+            composer_caption_above: false,
             composer_silent: false,
             composer_preview_disabled: false,
             composer_scheduling: ComposerScheduling::None,
@@ -3671,6 +3712,30 @@ impl QuillApp {
                 apply_ready_link_preview(session, &app.demo_sink, &app.demo_seq);
             }
             app.status_note = "screenshot demo — link preview".into();
+        }
+        // MED4: composer link-preview chip — type a URL so the
+        // detected-URL chip + preview toggle render.
+        if matches!(demo, Some(ScreenshotDemo::ReadyComposerPreview)) {
+            app.composer.update(cx, |input, cx| {
+                input.set_value("see https://example.com/story", window, cx);
+            });
+            app.status_note = "screenshot demo — composer preview chip".into();
+        }
+        // MED4: embedded-player + album preview cards.
+        if matches!(demo, Some(ScreenshotDemo::ReadyPreviewCards)) {
+            if let Some(session) = app.demo_session.as_mut() {
+                app.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_preview_cards(session, &app.demo_sink, &app.demo_seq);
+            }
+            app.status_note = "screenshot demo — preview cards".into();
+        }
+        // MED4: caption above vs below the media.
+        if matches!(demo, Some(ScreenshotDemo::ReadyCaptionPosition)) {
+            if let Some(session) = app.demo_session.as_mut() {
+                app.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_caption_position(session, &app.demo_sink, &app.demo_seq);
+            }
+            app.status_note = "screenshot demo — caption position".into();
         }
         if matches!(demo, Some(ScreenshotDemo::ReadyTextEntities)) {
             if let Some(session) = app.demo_session.as_mut() {
@@ -4374,7 +4439,11 @@ impl QuillApp {
                             // M1: silent / scheduled / when-online /
                             // link-preview options ride the snapshot to
                             // `sendMessage.options`.
-                            .with_send_options(self.composer_send_options()),
+                            .with_send_options(self.composer_send_options())
+                            // MED4: caption-above-media toggle.
+                            .with_caption_above_media(
+                                self.composer_caption_above && !self.open_chat_is_secret(),
+                            ),
                         );
                     } else if albumable {
                         // "Ungrouped": one message per photo/video, the
@@ -4393,7 +4462,11 @@ impl QuillApp {
                                     None
                                 })
                                 .with_self_destruct(self_destruct)
-                                .with_send_options(self.composer_send_options()),
+                                .with_send_options(self.composer_send_options())
+                                // MED4: caption-above-media toggle.
+                                .with_caption_above_media(
+                                    self.composer_caption_above && !self.open_chat_is_secret(),
+                                ),
                             );
                         }
                     } else {
@@ -4409,7 +4482,11 @@ impl QuillApp {
                             // M1: silent / scheduled / when-online /
                             // link-preview options ride the snapshot to
                             // `sendMessage.options`.
-                            .with_send_options(self.composer_send_options()),
+                            .with_send_options(self.composer_send_options())
+                            // MED4: caption-above-media toggle.
+                            .with_caption_above_media(
+                                self.composer_caption_above && !self.open_chat_is_secret(),
+                            ),
                         );
                     }
                     if snaps.first().is_none_or(ComposerSnapshot::is_empty) {
@@ -4444,6 +4521,9 @@ impl QuillApp {
                             // Phase B3: the timer choice was consumed by the
                             // snapshot — reset the picker for the next send.
                             self.composer_self_destruct = None;
+                            // MED4: the caption-above choice was consumed
+                            // too — reset for the next send.
+                            self.composer_caption_above = false;
                             // M1: a scheduling choice is one-shot (the next
                             // send goes immediately unless re-scheduled).
                             self.composer_scheduling = ComposerScheduling::None;
@@ -4454,6 +4534,13 @@ impl QuillApp {
                                 .update(cx, |input, cx| input.set_value("", window, cx));
                             self.forget_local_draft(chat_id);
                             self.status_note = "sending…".into();
+                        }
+                        Err(quill::connect::ConnectSendError::CaptionTooLong { limit }) => {
+                            // MED4: runtime `message_caption_length_max`
+                            // refusal — the counter already warned; this
+                            // names the limit.
+                            self.status_note =
+                                format!("caption too long (max {limit} characters)").into();
                         }
                         Err(_) => {
                             let video_unreadable = snaps
@@ -5389,6 +5476,67 @@ impl QuillApp {
             .into_any_element()
     }
 
+    /// MED4: Instant View reader overlay (TGX behavior — attempt IV
+    /// when the card offers it, fall back to the browser on 404 /
+    /// unsupported). Drains `Session::instant_view_fallback_url` into
+    /// the browser and renders `Session::instant_view` page blocks via
+    /// `message_rich_block`. A refusal is never rendered as a reader.
+    fn instant_view_overlay(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        if let Some(live) = self.live.as_mut()
+            && let Some(url) = live.driver.session.instant_view_fallback_url.take()
+        {
+            self.open_message_url(&url, cx);
+        }
+        let page = self.live.as_ref()?.driver.session.instant_view.clone()?;
+        let url = page.url.clone();
+        Some(
+            div()
+                .id("instant-view-overlay")
+                .absolute()
+                .inset_0()
+                .bg(rgb(0x0d1117))
+                .flex()
+                .flex_col()
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .px_4()
+                        .py_2()
+                        .border_b_1()
+                        .border_color(rgb(0x30363d))
+                        .child(div().text_sm().font_medium().child("Instant View"))
+                        .child(Button::new("instant-view-close").label("Close").on_click(
+                            cx.listener(|this, _, _, cx| {
+                                if let Some(live) = this.live.as_mut() {
+                                    live.driver.session.instant_view = None;
+                                }
+                                cx.notify();
+                            }),
+                        )),
+                )
+                .child(
+                    div()
+                        .flex_1()
+                        .p_4()
+                        .flex()
+                        .flex_col()
+                        .gap_2()
+                        .child(div().text_xs().text_color(rgb(0x8b949e)).child(url))
+                        .child(message_rich_block(
+                            (0, 0),
+                            ChatId(0),
+                            MessageId(0),
+                            &page.rich,
+                            &std::collections::HashSet::new(),
+                            cx,
+                        )),
+                )
+                .into_any_element(),
+        )
+    }
+
     /// M1: text that "Copy" can copy — the message text, or a non-empty
     /// media caption.
     fn message_copyable_text(content: &MessageContent) -> Option<String> {
@@ -5957,6 +6105,48 @@ impl QuillApp {
             "could not open link".into()
         };
         cx.notify();
+    }
+
+    /// MED4: open a link-preview card tap (TGX `TdlibUi` behavior).
+    /// Embedded players open their embed URL (IV never applies); cards
+    /// with `instant_view_version > 0` (schema:4570) open the IV reader
+    /// in Telegram mode, and `All` mode attempts IV for any card link.
+    /// Otherwise — and on TDLib's 404 — the browser opens. A refusal is
+    /// never rendered as a reader.
+    fn open_preview_url(
+        &mut self,
+        preview: &quill::telegram::envelope::LinkPreview,
+        cx: &mut Context<Self>,
+    ) {
+        // Embedded players open their embed URL, not the page URL.
+        if let quill::telegram::envelope::LinkPreviewKind::EmbeddedPlayer { url, .. } =
+            &preview.kind
+            && !url.is_empty()
+        {
+            self.open_message_url(url, cx);
+            return;
+        }
+        let url = preview.url.clone();
+        let mode = self
+            .live
+            .as_ref()
+            .map(|live| live.driver.session.media_prefs.instant_view_mode);
+        let try_iv = matches!(mode, Some(quill::settings::InstantViewMode::All))
+            || (preview.instant_view_version > 0
+                && matches!(mode, Some(quill::settings::InstantViewMode::Telegram)));
+        let mut requested = false;
+        if try_iv && let Some(live) = self.live.as_mut() {
+            match live.driver.open_instant_view(&url) {
+                quill::connect::InstantViewOutcome::Requested => requested = true,
+                quill::connect::InstantViewOutcome::Browser => {}
+            }
+        }
+        if requested {
+            self.status_note = "loading Instant View…".into();
+            cx.notify();
+        } else {
+            self.open_message_url(&url, cx);
+        }
     }
 
     /// Phase 3.2: press an inline keyboard callback button. Live sessions
@@ -12939,6 +13129,16 @@ impl QuillApp {
         let hq = self
             .session()
             .is_some_and(|session| session.media_prefs.hq_round_videos);
+        // MED4: Instant View mode (TGX: None / Telegram-internal / All).
+        let iv_mode = self
+            .session()
+            .map(|session| session.media_prefs.instant_view_mode)
+            .unwrap_or(quill::settings::InstantViewMode::Telegram);
+        let iv_label = match iv_mode {
+            quill::settings::InstantViewMode::Off => "Off",
+            quill::settings::InstantViewMode::Telegram => "Telegram links",
+            quill::settings::InstantViewMode::All => "All links",
+        };
         div()
             .flex()
             .flex_col()
@@ -12972,6 +13172,43 @@ impl QuillApp {
                     )
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.toggle_hq_round_videos(cx);
+                    })),
+            )
+            .child(
+                div()
+                    .id("media-pref-instant-view")
+                    .cursor_pointer()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .px_2()
+                    .py_1()
+                    .rounded_md()
+                    .child(div().text_sm().font_medium().child("Instant View"))
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(format!("{iv_label} — tap to cycle")),
+                    )
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        // MED4: cycle Off → Telegram links → All links.
+                        this.set_media_pref(
+                            |prefs| {
+                                prefs.instant_view_mode = match prefs.instant_view_mode {
+                                    quill::settings::InstantViewMode::Off => {
+                                        quill::settings::InstantViewMode::Telegram
+                                    }
+                                    quill::settings::InstantViewMode::Telegram => {
+                                        quill::settings::InstantViewMode::All
+                                    }
+                                    quill::settings::InstantViewMode::All => {
+                                        quill::settings::InstantViewMode::Off
+                                    }
+                                };
+                            },
+                            cx,
+                        );
                     })),
             )
             // MED3: auto-download settings below the media prefs.
@@ -22218,6 +22455,131 @@ impl QuillApp {
             )
     }
 
+    /// MED4: detected-URL chip for send-time link-preview controls. The
+    /// format toolbar already toggles `linkPreviewOptions.is_disabled`;
+    /// this row surfaces WHICH url the toggle applies to. The actual
+    /// preview is rendered by the server on the sent message — no
+    /// `getLinkPreview` prefetch is done (out of slice, DECISIONS.md).
+    fn preview_chip(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        if !self.pending_attachments.is_empty() || self.pending_edit.is_some() {
+            return None;
+        }
+        let text = self.composer.read(cx).value().to_string();
+        let first = quill::composer::find_urls(&text).into_iter().next()?;
+        Some(
+            div()
+                .id("composer-preview-chip")
+                .flex()
+                .items_center()
+                .gap_2()
+                .px_3()
+                .py_1()
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(rgb(0x58a6ff))
+                        .child(format!("🔗 {first}")),
+                )
+                .child(
+                    Button::new("composer-preview-chip-toggle")
+                        .label(if self.composer_preview_disabled {
+                            "Preview off"
+                        } else {
+                            "Preview on"
+                        })
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.composer_preview_disabled = !this.composer_preview_disabled;
+                            cx.notify();
+                        })),
+                )
+                .into_any_element(),
+        )
+    }
+
+    /// caption…" affordance, the caption-above-media toggle
+    /// (`show_caption_above_media`, schema 1.8.67 lines 6117/6128, only
+    /// for photo/video), and the `n / max` counter from the runtime
+    /// `message_caption_length_max` option. Shown while attachments are
+    /// pending or a caption is being edited.
+    fn caption_bar(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let editing_caption = self
+            .pending_edit
+            .as_ref()
+            .is_some_and(|edit| matches!(edit.kind, quill::composer::ComposerEditKind::Caption));
+        if self.pending_attachments.is_empty() && !editing_caption {
+            return None;
+        }
+        let captionable = editing_caption
+            || self.pending_attachments.iter().any(|att| {
+                matches!(
+                    att.kind,
+                    quill::composer::AttachmentKind::Photo | quill::composer::AttachmentKind::Video
+                )
+            });
+        let above = if editing_caption {
+            self.pending_edit
+                .as_ref()
+                .is_some_and(|edit| edit.caption_above)
+        } else {
+            self.composer_caption_above
+        };
+        let text_len = self.composer.read(cx).value().chars().count();
+        let limit = self
+            .live
+            .as_ref()
+            .map(|live| live.driver.session.message_caption_length_max)
+            .unwrap_or(1024);
+        let over = text_len as i64 > i64::from(limit.max(0));
+        Some(
+            div()
+                .id("composer-caption-bar")
+                .flex()
+                .items_center()
+                .justify_between()
+                .gap_2()
+                .px_3()
+                .py_1()
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap_2()
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(rgb(0x8b949e))
+                                .child("Add a caption…"),
+                        )
+                        .when(captionable && !self.open_chat_is_secret(), |this| {
+                            this.child(
+                                Button::new("composer-caption-above")
+                                    .label(if above {
+                                        "Caption: above"
+                                    } else {
+                                        "Caption: below"
+                                    })
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        if let Some(edit) = this.pending_edit.as_mut() {
+                                            edit.caption_above = !edit.caption_above;
+                                        } else {
+                                            this.composer_caption_above =
+                                                !this.composer_caption_above;
+                                        }
+                                        cx.notify();
+                                    })),
+                            )
+                        }),
+                )
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(if over { rgb(0xff7b72) } else { rgb(0x8b949e) })
+                        .child(format!("{text_len} / {limit}")),
+                )
+                .into_any_element(),
+        )
+    }
+
     fn delete_confirm_banner(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let confirm = self.pending_delete.clone();
         let scope_label = match confirm.as_ref() {
@@ -26799,6 +27161,10 @@ impl Render for QuillApp {
             .when_some(self.message_menu, |this, menu| {
                 this.child(self.message_menu_overlay(menu, cx))
             })
+            // MED4: Instant View reader overlay (above the menu).
+            .when_some(self.instant_view_overlay(cx), |this, overlay| {
+                this.child(overlay)
+            })
     }
 }
 
@@ -27187,6 +27553,11 @@ impl QuillApp {
                             this.child(self.schedule_popup(cx))
                         })
                         .child(self.format_toolbar(cx))
+                        // MED4: detected-URL chip (send-time preview
+                        // control) and caption bar ("Add a caption…",
+                        // above/below toggle, n / max counter).
+                        .when_some(self.preview_chip(cx), |this, chip| this.child(chip))
+                        .when_some(self.caption_bar(cx), |this, bar| this.child(bar))
                         .child(Textarea::new(&self.composer).h(px(88.)))
                         // M2: rich editor block bar + live block preview
                         // under the textarea while the editor is open.
@@ -29244,6 +29615,61 @@ fn apply_ready_link_preview(session: &mut Session, sink: &Arc<MemorySink>, seq: 
     );
     if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
         session.apply(owned);
+    }
+}
+
+/// MED4: `ReadyPreviewCards` fixture — one message with an embedded
+/// video player preview (play badge + duration), one with an album
+/// preview (thumbnail strip). Both carry `instant_view_version > 0` so
+/// the tap path is honest.
+fn apply_ready_preview_cards(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let thumb = demo_file_json(61, &demo_thumb_png_path(), true);
+    let mk_text = |body: &str, url: &str| {
+        let url_at = body.find("https").unwrap();
+        let url_len = url.len();
+        let text_json = serde_json::to_string(body).unwrap();
+        format!(
+            r#"{{"@type":"formattedText","text":{text_json},"entities":[{{"@type":"textEntity","offset":{url_at},"length":{url_len},"type":{{"@type":"textEntityTypeUrl"}}}}]}}"#,
+        )
+    };
+    let embedded = format!(
+        r#"{{"@type":"updateNewMessage","message":{{"id":102,"chat_id":11,"is_outgoing":false,"date":1700000000,"content":{{"@type":"messageText","text":{text},"link_preview":{{"@type":"linkPreview","url":"https://video.example/watch","display_url":"video.example","site_name":"Vids","title":"Clip","description":{{"@type":"formattedText","text":"","entities":[]}},"author":"","type":{{"@type":"linkPreviewTypeEmbeddedVideoPlayer","url":"https://video.example/embed/1","thumbnail":{{"@type":"photo","has_stickers":false,"minithumbnail":null,"sizes":[{{"@type":"photoSize","type":"m","photo":{thumb},"width":90,"height":90,"progressive_sizes":[]}}]}},"duration":95,"width":640,"height":360}},"has_large_media":false,"show_large_media":false,"show_media_above_description":false,"skip_confirmation":true,"show_above_text":false,"instant_view_version":2}},"link_preview_options":null}}}}}}"#,
+        text = mk_text(
+            "watch https://video.example/watch",
+            "https://video.example/watch"
+        ),
+    );
+    let album = format!(
+        r#"{{"@type":"updateNewMessage","message":{{"id":103,"chat_id":11,"is_outgoing":false,"date":1700000001,"content":{{"@type":"messageText","text":{text},"link_preview":{{"@type":"linkPreview","url":"https://example.com/album","display_url":"example.com","site_name":"","title":"Album","description":{{"@type":"formattedText","text":"","entities":[]}},"author":"","type":{{"@type":"linkPreviewTypeAlbum","media":[{{"@type":"linkPreviewAlbumMediaPhoto","photo":{{"@type":"photo","has_stickers":false,"minithumbnail":null,"sizes":[{{"@type":"photoSize","type":"m","photo":{thumb},"width":90,"height":90,"progressive_sizes":[]}}]}}}}],"caption":""}},"has_large_media":false,"show_large_media":false,"show_media_above_description":false,"skip_confirmation":false,"show_above_text":false,"instant_view_version":0}},"link_preview_options":null}}}}}}"#,
+        text = mk_text(
+            "pics https://example.com/album",
+            "https://example.com/album"
+        ),
+    );
+    for json in [embedded, album] {
+        if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
+            session.apply(owned);
+        }
+    }
+}
+
+/// MED4: `ReadyCaptionPosition` fixture — two photo messages, one with
+/// `show_caption_above_media: true`, one false.
+fn apply_ready_caption_position(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let file = demo_file_json(71, &demo_thumb_png_path(), true);
+    for (id, above, caption) in [
+        (104, true, "caption above the photo"),
+        (105, false, "caption below the photo"),
+    ] {
+        let caption_json = serde_json::to_string(caption).unwrap();
+        let json = format!(
+            r#"{{"@type":"updateNewMessage","message":{{"id":{id},"chat_id":11,"is_outgoing":false,"date":1700000000,"content":{{"@type":"messagePhoto","photo":{{"@type":"photo","has_stickers":false,"sizes":[{{"@type":"photoSize","type":"m","photo":{file},"width":240,"height":160,"progressive_sizes":[]}}]}},"caption":{{"@type":"formattedText","text":{caption_json},"entities":[]}},"show_caption_above_media":{above},"has_spoiler":false,"is_secret":false}}}}}}"#,
+        );
+        if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
+            session.apply(owned);
+        }
     }
 }
 
@@ -32769,6 +33195,18 @@ fn call_message_peer(session: Option<&Session>, chat_id: ChatId) -> Option<(i64,
     Some((user_id, name))
 }
 
+/// MED4: `show_caption_above_media` (TDLib 1.8.67, `schema/td_api.tl:6117`
+/// photo / `:6128` video / animation). Documents / audio / voice notes
+/// have no such field — their captions always render below.
+fn caption_above_media(content: &MessageContent) -> bool {
+    match content {
+        MessageContent::Photo(photo) => photo.show_caption_above_media,
+        MessageContent::Video(video) => video.show_caption_above_media,
+        MessageContent::Animation(animation) => animation.show_caption_above_media,
+        _ => false,
+    }
+}
+
 fn session_history_row(
     message: &HistoryMessage,
     files: &HashMap<i32, ParsedFile>,
@@ -33200,10 +33638,54 @@ fn session_history_row(
             .text_color(rgb(0xffd479))
             .child(label)
     });
+    // MED4: caption element + position (`show_caption_above_media`,
+    // schema 1.8.67 lines 6117/6128). Above → bubble body; below →
+    // inside `extra` right after the media (the previous code always
+    // rendered the caption above the media).
+    let caption_above_el: Option<AnyElement>;
+    let caption_below_el: Option<AnyElement>;
+    {
+        let caption: Option<(&str, &[TextEntity])> = match &message.content {
+            MessageContent::Photo(photo) => (!photo.caption.is_empty())
+                .then_some((photo.caption.as_str(), photo.caption_entities.as_slice())),
+            MessageContent::Document(doc) => (!doc.caption.is_empty())
+                .then_some((doc.caption.as_str(), doc.caption_entities.as_slice())),
+            MessageContent::Animation(animation) => (!animation.caption.is_empty()).then_some((
+                animation.caption.as_str(),
+                animation.caption_entities.as_slice(),
+            )),
+            MessageContent::Video(video) => (!video.caption.is_empty())
+                .then_some((video.caption.as_str(), video.caption_entities.as_slice())),
+            MessageContent::VoiceNote(note) => (!note.caption.is_empty())
+                .then_some((note.caption.as_str(), note.caption_entities.as_slice())),
+            MessageContent::Audio(audio) => (!audio.caption.is_empty())
+                .then_some((audio.caption.as_str(), audio.caption_entities.as_slice())),
+            _ => None,
+        };
+        let el = caption.map(|(caption_text, caption_entities)| {
+            rich_text_line(
+                caption_text,
+                caption_entities,
+                (message.chat_id.0, message.id.0 as u64),
+                true,
+                revealed,
+                cx,
+            )
+        });
+        if caption_above_media(&message.content) {
+            caption_above_el = el;
+            caption_below_el = None;
+        } else {
+            caption_above_el = None;
+            caption_below_el = el;
+        }
+    }
     let extra = Some(
         div()
             .id(("bubble-extra", message.id.0 as u64))
             .when_some(extra_media, |this, media| this.child(media))
+            // MED4: caption below the media.
+            .when_some(caption_below_el, |this, el| this.child(el))
             .when_some(self_destruct_badge, |this, badge| this.child(badge))
             .when_some(auto_delete_chip, |this, chip| this.child(chip))
             .when_some(keyboard, |this, keyboard| this.child(keyboard))
@@ -33224,26 +33706,6 @@ fn session_history_row(
             )
             .into_any_element(),
     );
-    // Captions carry entities too (Phase 4.1); they render through the same
-    // rich-text path as message text. Everything else about captions is
-    // unchanged (order in the bubble, preview text, media attachments).
-    let caption: Option<(&str, &[TextEntity])> = match &message.content {
-        MessageContent::Photo(photo) => (!photo.caption.is_empty())
-            .then_some((photo.caption.as_str(), photo.caption_entities.as_slice())),
-        MessageContent::Document(doc) => (!doc.caption.is_empty())
-            .then_some((doc.caption.as_str(), doc.caption_entities.as_slice())),
-        MessageContent::Animation(animation) => (!animation.caption.is_empty()).then_some((
-            animation.caption.as_str(),
-            animation.caption_entities.as_slice(),
-        )),
-        MessageContent::Video(video) => (!video.caption.is_empty())
-            .then_some((video.caption.as_str(), video.caption_entities.as_slice())),
-        MessageContent::VoiceNote(note) => (!note.caption.is_empty())
-            .then_some((note.caption.as_str(), note.caption_entities.as_slice())),
-        MessageContent::Audio(audio) => (!audio.caption.is_empty())
-            .then_some((audio.caption.as_str(), audio.caption_entities.as_slice())),
-        _ => None,
-    };
     let unsupported_body = match &message.content {
         MessageContent::Unsupported { type_name } => format!("({type_name})"),
         _ => String::new(),
@@ -33281,19 +33743,15 @@ fn session_history_row(
             header,
         );
     }
-    if let Some((caption_text, caption_entities)) = caption {
+    // MED4: caption above the media → bubble body. Caption below the
+    // media already rides inside `extra` (after the media), so it falls
+    // through to the quoted fallback with an empty body.
+    if let Some(caption_el) = caption_above_el {
         return session_bubble_rich(
             message.id.0 as u64,
             label,
             message.is_outgoing,
-            rich_text_line(
-                caption_text,
-                caption_entities,
-                (message.chat_id.0, message.id.0 as u64),
-                true,
-                revealed,
-                cx,
-            ),
+            caption_el,
             extra,
             header,
         );
@@ -33451,7 +33909,6 @@ fn link_preview_card(
     media_roots: &[PathBuf],
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
-    let url = preview.url.clone();
     let site_empty = preview.site_name.is_empty();
     let title_empty = preview.title.is_empty();
     let description_empty = preview.description.is_empty();
@@ -33473,6 +33930,71 @@ fn link_preview_card(
             media_roots,
         )
     });
+    // MED4: embedded players get a play/duration badge over the
+    // thumbnail (schema:4434/:4443/:4452). Tap opens the embed URL in
+    // the browser — inline playback is out of slice (DECISIONS.md MED4).
+    let thumb = match &preview.kind {
+        quill::telegram::envelope::LinkPreviewKind::EmbeddedPlayer {
+            duration_secs,
+            audio,
+            ..
+        } => thumb.map(|thumb| {
+            let badge = if *duration_secs > 0 {
+                format!(
+                    "{} {}:{:02}",
+                    if *audio { "♪" } else { "▶" },
+                    duration_secs / 60,
+                    duration_secs % 60
+                )
+            } else if *audio {
+                "♪".to_string()
+            } else {
+                "▶".to_string()
+            };
+            div()
+                .relative()
+                .child(thumb)
+                .child(
+                    div()
+                        .absolute()
+                        .bottom_1()
+                        .right_1()
+                        .px_1()
+                        .rounded_sm()
+                        .bg(rgb(0x000000))
+                        .text_xs()
+                        .text_color(rgb(0xffffff))
+                        .child(badge),
+                )
+                .into_any_element()
+        }),
+        _ => thumb,
+    };
+    // MED4: album previews (`linkPreviewTypeAlbum`, schema:4392) show a
+    // strip of up to 4 thumbnails under the card copy.
+    let album_strip: Option<AnyElement> = match &preview.kind {
+        quill::telegram::envelope::LinkPreviewKind::Album { thumbnails }
+            if !thumbnails.is_empty() =>
+        {
+            let mut strip = div()
+                .id(("link-preview-album", row_id))
+                .flex()
+                .gap_1()
+                .mt_1();
+            for (index, thumb_photo) in thumbnails.iter().enumerate() {
+                strip = strip.child(preview_thumb(
+                    row_id * 100 + index as u64,
+                    thumb_photo,
+                    false,
+                    files,
+                    downloading,
+                    media_roots,
+                ));
+            }
+            Some(strip.into_any_element())
+        }
+        _ => None,
+    };
     let mut copy = div()
         .id(("link-preview-copy", row_id))
         .flex()
@@ -33510,17 +34032,27 @@ fn link_preview_card(
             column = column.child(copy);
             column = column.when_some(thumb, |this, thumb| this.child(thumb));
         }
-        column.into_any_element()
+        column
+            .when_some(album_strip, |this, strip| this.child(strip))
+            .into_any_element()
     } else {
         div()
             .id(("link-preview-small", row_id))
             .flex()
-            .items_start()
-            .gap_2()
-            .child(copy.flex_1())
-            .when_some(thumb, |this, thumb| this.child(thumb))
+            .flex_col()
+            .gap_1()
+            .child(
+                div()
+                    .flex()
+                    .items_start()
+                    .gap_2()
+                    .child(copy.flex_1())
+                    .when_some(thumb, |this, thumb| this.child(thumb)),
+            )
+            .when_some(album_strip, |this, strip| this.child(strip))
             .into_any_element()
     };
+    let preview_for_tap = preview.clone();
     div()
         .id(("link-preview", row_id))
         .mt_2()
@@ -33532,7 +34064,10 @@ fn link_preview_card(
         .bg(rgb(0x161b22))
         .cursor_pointer()
         .on_click(cx.listener(move |this, _, _, cx| {
-            this.open_message_url(&url, cx);
+            // MED4: `instant_view_version > 0` (schema:4570) opens the IV
+            // reader (mode-gated); otherwise the browser. Embedded
+            // players open their embed URL instead of the page URL.
+            this.open_preview_url(&preview_for_tap, cx);
         }))
         .child(body)
         .into_any_element()

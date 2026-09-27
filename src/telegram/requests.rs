@@ -2823,6 +2823,20 @@ pub fn send_rich_message(
     .to_string()
 }
 
+/// MED4: `getWebPageInstantView` (TDLib 1.8.67, `schema/td_api.tl:14794`).
+/// `only_local: false` — a network fetch is exactly what opening IV is
+/// for. TDLib answers `webPageInstantView` or a 404 error when the page
+/// has no Instant View (the caller falls back to the browser).
+pub fn get_web_page_instant_view(extra: RequestId, url: &str) -> String {
+    json!({
+        "@type": "getWebPageInstantView",
+        "@extra": extra.as_extra(),
+        "url": url,
+        "only_local": false,
+    })
+    .to_string()
+}
+
 /// M2: `getFullRichMessage` (TDLib 1.8.67, line 11554) — fetch the full
 /// blocks of a partially received `richMessage` (`is_full == false`).
 pub fn get_full_rich_message(extra: RequestId, chat_id: ChatId, message_id: MessageId) -> String {
@@ -2904,6 +2918,7 @@ fn self_destruct_type_value(choice: Option<SelfDestructSend>) -> Value {
 pub fn input_message_photo(
     path: &str,
     caption: &str,
+    caption_above: bool,
     self_destruct: Option<SelfDestructSend>,
     strip_blockquote: bool,
 ) -> Value {
@@ -2922,7 +2937,7 @@ pub fn input_message_photo(
             "height": 0
         },
         "caption": formatted_caption(caption, strip_blockquote),
-        "show_caption_above_media": false,
+        "show_caption_above_media": caption_above,
         "self_destruct_type": self_destruct_type_value(self_destruct),
         "has_spoiler": false
     })
@@ -2937,6 +2952,7 @@ pub fn send_photo(
     topic_id: Option<i32>,
     path: &str,
     caption: &str,
+    caption_above: bool,
     reply_to: Option<SendReply>,
     self_destruct: Option<SelfDestructSend>,
     strip_blockquote: bool,
@@ -2949,7 +2965,7 @@ pub fn send_photo(
         "reply_to": send_reply_value(reply_to.as_ref()),
         "options": Value::Null,
         "reply_markup": Value::Null,
-        "input_message_content": input_message_photo(path, caption, self_destruct, strip_blockquote)
+        "input_message_content": input_message_photo(path, caption, caption_above, self_destruct, strip_blockquote)
     })
     .to_string()
 }
@@ -3089,6 +3105,7 @@ pub fn input_message_video(
     path: &str,
     video: &VideoSend,
     caption: &str,
+    caption_above: bool,
     strip_blockquote: bool,
 ) -> Value {
     json!({
@@ -3109,7 +3126,7 @@ pub fn input_message_video(
             "supports_streaming": video.supports_streaming
         },
         "caption": formatted_caption(caption, strip_blockquote),
-        "show_caption_above_media": false,
+        "show_caption_above_media": caption_above,
         "self_destruct_type": self_destruct_type_value(video.self_destruct),
         "has_spoiler": false
     })
@@ -3193,6 +3210,7 @@ pub fn send_video(
     path: &str,
     video: &VideoSend,
     caption: &str,
+    caption_above: bool,
     reply_to: Option<SendReply>,
     strip_blockquote: bool,
 ) -> String {
@@ -3204,7 +3222,7 @@ pub fn send_video(
         "reply_to": send_reply_value(reply_to.as_ref()),
         "options": Value::Null,
         "reply_markup": Value::Null,
-        "input_message_content": input_message_video(path, video, caption, strip_blockquote)
+        "input_message_content": input_message_video(path, video, caption, caption_above, strip_blockquote)
     })
     .to_string()
 }
@@ -4527,6 +4545,7 @@ mod tests {
             None,
             "/tmp/picked.png",
             "CANARY_CAP",
+            false,
             None,
             None,
             false,
@@ -4576,6 +4595,7 @@ mod tests {
             None,
             "/tmp/picked.png",
             "**bold** and plain",
+            false,
             None,
             None,
             false,
@@ -4619,6 +4639,7 @@ mod tests {
             None,
             "/tmp/picked.png",
             "> quoted\n**bold**",
+            false,
             None,
             None,
             true,
@@ -4671,6 +4692,57 @@ mod tests {
             "non-blockquote entities survive: {entities:?}"
         );
     }
+    /// MED4: `getWebPageInstantView` (schema 1.8.67, line 14797) —
+    /// `only_local: false`; a 404 from TDLib means "no Instant View"
+    /// and the caller falls back to the browser.
+    #[test]
+    fn get_web_page_instant_view_shape() {
+        let json = get_web_page_instant_view(RequestId(5), "https://example.com/article");
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "getWebPageInstantView");
+        assert_eq!(v["@extra"], "5");
+        assert_eq!(v["url"], "https://example.com/article");
+        assert_eq!(v["only_local"], false);
+    }
+
+    /// MED4: `show_caption_above_media` rides `inputMessagePhoto` /
+    /// `inputMessageVideo` (schema 1.8.67, lines 6117/6128).
+    #[test]
+    fn caption_above_media_wire() {
+        let json = send_photo(
+            RequestId(11),
+            ChatId(7),
+            None,
+            "/tmp/picked.png",
+            "cap",
+            true,
+            None,
+            None,
+            false,
+        );
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["input_message_content"]["show_caption_above_media"], true);
+        let json = send_video(
+            RequestId(17),
+            ChatId(7),
+            None,
+            "/tmp/picked.mp4",
+            &VideoSend {
+                duration: 1,
+                width: 320,
+                height: 180,
+                supports_streaming: true,
+                self_destruct: None,
+            },
+            "cap",
+            true,
+            None,
+            false,
+        );
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["input_message_content"]["show_caption_above_media"], true);
+    }
+
     /// `inputMessageVideo` (schema 1.8.67, lines 5915/5918/6117/6128).
     #[test]
     fn send_photo_self_destruct_shapes() {
@@ -4691,6 +4763,7 @@ mod tests {
                 None,
                 "/tmp/picked.png",
                 "cap",
+                false,
                 None,
                 choice,
                 false,
@@ -4709,6 +4782,7 @@ mod tests {
             None,
             "/tmp/picked.png",
             "cap",
+            false,
             None,
             Some(SelfDestructSend::Timer(30)),
             false,
@@ -4731,6 +4805,7 @@ mod tests {
                 self_destruct: Some(SelfDestructSend::Immediately),
             },
             "cap",
+            false,
             None,
             false,
         );
@@ -4854,6 +4929,7 @@ mod tests {
                 self_destruct: None,
             },
             "CANARY_VIDEO",
+            false,
             Some(SendReply::plain(MessageId(9))),
             false,
         );

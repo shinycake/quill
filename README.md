@@ -193,10 +193,10 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Downloads manager screen listing active/completed downloads (MED3: right-side panel — active with progress/cancel, recent completed with open/reveal, failed with retry) <!-- parity:media-downloads-manager -->
 - [x] Automatic media download settings incl. data-saver pause-all mode (MED3: TGX-compatible per-chat-kind × media-type bitmask + data saver; `media_prefs.json`; desktop collapses TGX's mobile/wifi/roaming grids into one; enabled types auto-download full media in the open chat, secret/spoiler excluded) <!-- parity:media-auto-download-settings -->
 - [x] Link preview cards render on messages with site, title, description, and thumbnail (ui/mod.rs:22426) <!-- parity:media-link-preview -->
-- [ ] Send-time link preview controls: disable, force small/large media, show above text (partial: `link_preview_options` always null on send, requests.rs:1529) <!-- parity:media-link-preview-send-options -->
-- [ ] Instant View reader with auto-open setting (None / Telegram / All links) (partial: `instant_view_version` only passed through) <!-- parity:media-instant-view -->
-- [ ] Embedded media players inside link previews (video/audio embeds) <!-- parity:media-link-preview-embedded -->
-- [ ] Album-type link previews with multiple photo/video thumbnails <!-- parity:media-link-preview-album -->
+- [ ] Send-time link preview controls: disable, force small/large media, show above text (partial: disable toggle + detected-URL chip work; `force_small_media`/`force_large_media`/`show_above_text` not exposed, no `getLinkPreview` prefetch) <!-- parity:media-link-preview-send-options -->
+- [x] Instant View reader with tap-gating setting (Off / Telegram / All links): card tap attempts `getWebPageInstantView` when `instant_view_version > 0` and the mode allows the URL, page blocks render in a reader overlay, TDLib error falls back to the browser (TGX behavior) <!-- parity:media-instant-view -->
+- [x] Embedded media player previews inside link previews (video/audio/animation): play/duration badge on the card, tap opens the embed URL (inline playback out of slice) <!-- parity:media-link-preview-embedded -->
+- [x] Album-type link previews with multiple photo/video thumbnails (up to 4 in a strip) <!-- parity:media-link-preview-album -->
 - [x] Send photo/video albums of 2–10 items via `sendMessageAlbum` with composer text as caption (requests.rs:1943, connect.rs:4605) <!-- parity:media-album-send -->
 - [x] Received albums grouped by `media_album_id` into grid tiles (ui/mod.rs:17592, 21223) <!-- parity:media-album-grid -->
 - [x] Open an album item in the fullscreen viewer — album tiles open the shared viewer (the old note claiming they didn't was stale); viewer header shows Pin/Unpin album when the item is in an album <!-- parity:media-album-viewer -->
@@ -206,10 +206,10 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [ ] Empty states per shared-media tab (TGX NoPhotosToShowInChat etc.) <!-- parity:media-shared-gallery-empty -->
 - [x] Captions render on photos, videos, animations, audio, and documents <!-- parity:media-caption-render -->
 - [x] Edit a sent media caption via `editMessageCaption` (requests.rs:2123, connect.rs:4941) <!-- parity:media-caption-edit -->
-- [ ] Caption position toggle: show above vs below media (partial: `show_caption_above_media` parsed, no UI) <!-- parity:media-caption-position -->
-- [ ] "Add a caption…" affordance when attaching media (partial: composer text field doubles as caption) <!-- parity:media-caption-prompt -->
-- [ ] Remove captions when forwarding copies (TGX RemoveCaptions) <!-- parity:media-caption-remove-on-forward -->
-- [ ] Caption-too-long validation on caption edits (TGX EditMessageCaptionTooLong) <!-- parity:media-caption-length-limit -->
+- [x] Caption position toggle: show above vs below media (composer toggle for photo/video, preserved on caption edits, rendered per `show_caption_above_media`) <!-- parity:media-caption-position -->
+- [x] "Add a caption…" affordance when attaching media (caption bar above the composer with hint, above/below toggle, live n / max counter) <!-- parity:media-caption-prompt -->
+- [x] Remove captions when forwarding copies (TGX RemoveCaptions; checkbox gated on send-copy) <!-- parity:media-caption-remove-on-forward -->
+- [x] Caption-too-long validation on sends and caption edits (runtime `message_caption_length_max`, live counter, refusal names the limit) <!-- parity:media-caption-length-limit -->
 
 ### Groups, supergroups & channels
 

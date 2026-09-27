@@ -29,9 +29,25 @@ pub enum InviteGroupCallParticipantResult {
     UserWasBanned,
 }
 
+/// MED4: `optionValue*` (TDLib 1.8.67, `schema/td_api.tl:8889`).
+#[derive(Debug, Clone, PartialEq)]
+pub enum OptionValue {
+    Boolean(bool),
+    Integer(i64),
+    String(String),
+    Empty,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum EnvelopePayload {
     UpdateAuthorizationState(AuthorizationState),
+    /// MED4: `updateOption` (TDLib 1.8.67, `schema/td_api.tl:10926`).
+    /// Only the options Quill reads are kept; everything else is still a
+    /// parsed-but-ignored update (never an error).
+    UpdateOption {
+        name: String,
+        value: OptionValue,
+    },
     UpdateNewMessage(ParsedMessage),
     UpdateMessageSendSucceeded {
         message: ParsedMessage,
@@ -338,6 +354,13 @@ pub enum EnvelopePayload {
     /// `getFullRichMessage` answer. The driver replaces the blocks of the
     /// partially-received message in history with the full blocks.
     RichMessage {
+        rich: RichMessageContent,
+    },
+    /// MED4: `webPageInstantView` (TDLib 1.8.67, `schema/td_api.tl:4377`)
+    /// — the `getWebPageInstantView` answer. `blocks` are the same
+    /// `pageBlock*` list as `richMessage`, so the IV reader reuses the M2
+    /// block parser/renderer verbatim.
+    WebPageInstantView {
         rich: RichMessageContent,
     },
     /// M1 fix-up: `messageProperties` (TDLib 1.8.67,
@@ -4709,7 +4732,31 @@ pub struct LinkPreview {
     pub show_large_media: bool,
     pub show_media_above_description: bool,
     pub show_above_text: bool,
+    pub instant_view_version: i32,
     pub photo: Option<PhotoContent>,
+    /// MED4: the `linkPreviewType*` behind the card (embedded players /
+    /// album strips need more than the plain card).
+    pub kind: LinkPreviewKind,
+}
+
+/// MED4: `linkPreviewType*` (TDLib 1.8.67, `schema/td_api.tl:4392` album,
+/// `:4434/:4443/:4452` embedded players). Plain article/photo/video types
+/// render as the standard card; only the kinds needing distinct UI are
+/// carried here.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum LinkPreviewKind {
+    #[default]
+    Plain,
+    /// Embedded player (`linkPreviewTypeEmbedded{Video,Audio,Animation}Player`).
+    /// The card shows a play badge; tap opens `url` in the browser (inline
+    /// playback is out of slice — see DECISIONS.md MED4).
+    EmbeddedPlayer {
+        url: String,
+        duration_secs: i32,
+        audio: bool,
+    },
+    /// `linkPreviewTypeAlbum` — up to 4 thumbnails for the strip.
+    Album { thumbnails: Vec<PhotoContent> },
 }
 
 impl LinkPreview {
@@ -4958,6 +5005,8 @@ pub struct PhotoContent {
     pub caption: String,
     /// Phase 4.1: entities for `caption` (same list as message text).
     pub caption_entities: Vec<TextEntity>,
+    /// MED4: `messagePhoto.show_caption_above_media` (schema:6117).
+    pub show_caption_above_media: bool,
     pub sizes: Vec<PhotoSizeView>,
     pub is_secret: bool,
     pub has_spoiler: bool,
@@ -5446,6 +5495,19 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
                 .ok_or(ParseError::MissingField)?;
             Ok(EnvelopePayload::UpdateAuthorizationState(parse_auth(state)))
         }
+        // MED4: `updateOption` (schema:10926). TDLib pushes all options
+        // after authorization; Quill keeps `message_caption_length_max`.
+        "updateOption" => {
+            let name = json_field_str(&value, "name");
+            let raw = value.get("value").unwrap_or(&Value::Null);
+            let value = match raw.get("@type").and_then(Value::as_str).unwrap_or("") {
+                "optionValueBoolean" => OptionValue::Boolean(json_bool(raw.get("value"), false)),
+                "optionValueInteger" => OptionValue::Integer(int53_or_zero(raw.get("value"))),
+                "optionValueString" => OptionValue::String(json_field_str(raw, "value")),
+                _ => OptionValue::Empty,
+            };
+            Ok(EnvelopePayload::UpdateOption { name, value })
+        }
         "authorizationStateWaitTdlibParameters"
         | "authorizationStateWaitPhoneNumber"
         | "authorizationStateWaitPremiumPurchase"
@@ -5926,6 +5988,14 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
         "richMessage" => {
             let (blocks, is_full) = parse_rich_message(&value);
             Ok(EnvelopePayload::RichMessage {
+                rich: RichMessageContent { blocks, is_full },
+            })
+        }
+        // MED4: `webPageInstantView` (schema:4377) — same `blocks` /
+        // `is_full` shape as `richMessage`, so the M2 parser applies.
+        "webPageInstantView" => {
+            let (blocks, is_full) = parse_rich_message(&value);
+            Ok(EnvelopePayload::WebPageInstantView {
                 rich: RichMessageContent { blocks, is_full },
             })
         }
@@ -8330,6 +8400,10 @@ fn parse_link_preview(value: Option<&Value>) -> (Option<LinkPreview>, Vec<Parsed
         .filter(|preview_type| !preview_type.is_null())
         .map(parse_link_preview_photo)
         .unwrap_or((None, Vec::new()));
+    // MED4: embedded players / album strips ride the `type` object too.
+    let (kind, kind_files) = parse_link_preview_kind(value.get("type"));
+    let mut files = files;
+    files.extend(kind_files);
     (
         Some(LinkPreview {
             url: json_field_str(value, "url"),
@@ -8343,10 +8417,100 @@ fn parse_link_preview(value: Option<&Value>) -> (Option<LinkPreview>, Vec<Parsed
                 false,
             ),
             show_above_text: json_bool(value.get("show_above_text"), false),
+            // MED4: `linkPreview.instant_view_version` (schema:4570) — the
+            // IV reader opens when this is > 0.
+            instant_view_version: int53_or_zero(value.get("instant_view_version")) as i32,
             photo,
+            kind,
         }),
         files,
     )
+}
+
+/// MED4: classify the `linkPreview.type` object (schema:4392 album,
+/// :4434/:4443/:4452 embedded players). Anything else is `Plain` — the
+/// standard card already covers it.
+fn parse_link_preview_kind(preview_type: Option<&Value>) -> (LinkPreviewKind, Vec<ParsedFile>) {
+    let Some(preview_type) = preview_type.filter(|value| !value.is_null()) else {
+        return (LinkPreviewKind::Plain, Vec::new());
+    };
+    match preview_type
+        .get("@type")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+    {
+        "linkPreviewTypeEmbeddedVideoPlayer" | "linkPreviewTypeEmbeddedAnimationPlayer" => (
+            LinkPreviewKind::EmbeddedPlayer {
+                url: json_field_str(preview_type, "url"),
+                duration_secs: int53_or_zero(preview_type.get("duration")) as i32,
+                audio: false,
+            },
+            Vec::new(),
+        ),
+        "linkPreviewTypeEmbeddedAudioPlayer" => (
+            LinkPreviewKind::EmbeddedPlayer {
+                url: json_field_str(preview_type, "url"),
+                duration_secs: int53_or_zero(preview_type.get("duration")) as i32,
+                audio: true,
+            },
+            Vec::new(),
+        ),
+        "linkPreviewTypeAlbum" => {
+            let mut thumbnails = Vec::new();
+            let mut files = Vec::new();
+            let media = preview_type
+                .get("media")
+                .and_then(Value::as_array)
+                .map(Vec::as_slice)
+                .unwrap_or(&[]);
+            // ponytail: 4 thumbs is the strip's ceiling; the card never
+            // needs the whole album.
+            for item in media.iter().take(4) {
+                match item.get("@type").and_then(Value::as_str).unwrap_or("") {
+                    "linkPreviewAlbumMediaPhoto" => {
+                        let (sizes, item_files) =
+                            parse_photo_sizes(item.get("photo").unwrap_or(&Value::Null));
+                        files.extend(item_files);
+                        if !sizes.is_empty() {
+                            thumbnails.push(PhotoContent {
+                                caption: String::new(),
+                                caption_entities: Vec::new(),
+                                show_caption_above_media: false,
+                                sizes,
+                                is_secret: false,
+                                has_spoiler: false,
+                            });
+                        }
+                    }
+                    "linkPreviewAlbumMediaVideo" => {
+                        let thumb = item.get("video").and_then(|video| video.get("thumbnail"));
+                        if let Some(thumb) = thumb.filter(|thumb| !thumb.is_null())
+                            && let Ok(file) = parse_file(thumb.get("file"))
+                        {
+                            let id = file.id;
+                            files.push(file);
+                            thumbnails.push(PhotoContent {
+                                caption: String::new(),
+                                caption_entities: Vec::new(),
+                                show_caption_above_media: false,
+                                sizes: vec![PhotoSizeView {
+                                    type_name: "t".to_string(),
+                                    width: int53_or_zero(thumb.get("width")) as i32,
+                                    height: int53_or_zero(thumb.get("height")) as i32,
+                                    file_id: id,
+                                }],
+                                is_secret: false,
+                                has_spoiler: false,
+                            });
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            (LinkPreviewKind::Album { thumbnails }, files)
+        }
+        _ => (LinkPreviewKind::Plain, Vec::new()),
+    }
 }
 
 /// Photo on `linkPreviewTypeArticle` / `Photo` (`photo`) and embedded players (`thumbnail` / `cover`).
@@ -8367,6 +8531,7 @@ fn parse_link_preview_photo(preview_type: &Value) -> (Option<PhotoContent>, Vec<
             Some(PhotoContent {
                 caption: String::new(),
                 caption_entities: Vec::new(),
+                show_caption_above_media: false,
                 sizes,
                 is_secret: false,
                 has_spoiler: false,
@@ -8393,6 +8558,10 @@ fn parse_message_photo(value: &Value) -> (MessageContent, Vec<ParsedFile>) {
         MessageContent::Photo(PhotoContent {
             caption,
             caption_entities,
+            show_caption_above_media: value
+                .get("show_caption_above_media")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
             sizes,
             is_secret: value
                 .get("is_secret")
@@ -8846,6 +9015,7 @@ fn parse_sponsored_photo(photo: &Value) -> (Option<PhotoContent>, Vec<ParsedFile
         Some(PhotoContent {
             caption: String::new(),
             caption_entities: Vec::new(),
+            show_caption_above_media: false,
             sizes,
             is_secret: false,
             has_spoiler: false,
@@ -10320,6 +10490,99 @@ mod tests {
         assert_eq!(photo.thumb_size().map(|size| size.file_id), Some(FileId(7)));
         assert_eq!(message.files.len(), 1);
         assert_eq!(message.files[0].id, FileId(7));
+    }
+
+    /// MED4: `updateOption` for `message_caption_length_max` (schema:10926)
+    /// parses to a typed option value; other options parse but are ignored.
+    #[test]
+    fn update_option_parses_caption_length_max() {
+        let json = r#"{"@type":"updateOption","name":"message_caption_length_max","value":{"@type":"optionValueInteger","value":1024}}"#;
+        let payload = parse_payload("updateOption", json).unwrap();
+        assert_eq!(
+            payload,
+            EnvelopePayload::UpdateOption {
+                name: "message_caption_length_max".to_string(),
+                value: OptionValue::Integer(1024),
+            }
+        );
+        let json = r#"{"@type":"updateOption","name":"some_unknown_option","value":{"@type":"optionValueBoolean","value":true}}"#;
+        let payload = parse_payload("updateOption", json).unwrap();
+        assert!(matches!(
+            payload,
+            EnvelopePayload::UpdateOption {
+                value: OptionValue::Boolean(true),
+                ..
+            }
+        ));
+    }
+
+    /// MED4: `webPageInstantView` (schema:4377) reuses the M2 `pageBlock*`
+    /// parser — same blocks, new payload.
+    #[test]
+    fn web_page_instant_view_parses_blocks() {
+        let json = r#"{"@type":"webPageInstantView","blocks":[{"@type":"pageBlockTitle","title":{"@type":"richTextPlain","text":"Headline"}},{"@type":"pageBlockParagraph","text":{"@type":"richTextPlain","text":"Body"}}],"view_count":3,"version":2,"is_rtl":false,"is_full":true,"feedback_link":null}"#;
+        let payload = parse_payload("webPageInstantView", json).unwrap();
+        let EnvelopePayload::WebPageInstantView { rich } = payload else {
+            panic!("expected WebPageInstantView, got {payload:?}");
+        };
+        assert!(rich.is_full);
+        assert_eq!(rich.blocks.len(), 2);
+    }
+
+    /// MED4: embedded-player and album `linkPreviewType*` (schema:4392,
+    /// :4434/:4443/:4452) classify the card; `instant_view_version`
+    /// (schema:4570) gates the IV reader.
+    #[test]
+    fn link_preview_parses_embedded_player_kind() {
+        let json = r#"{"@type":"linkPreview","url":"https://video.example/watch","display_url":"video.example","site_name":"Vids","title":"Clip","description":{"@type":"formattedText","text":"","entities":[]},"author":"","type":{"@type":"linkPreviewTypeEmbeddedVideoPlayer","url":"https://video.example/embed/1","thumbnail":null,"duration":95,"width":640,"height":360},"has_large_media":false,"show_large_media":false,"show_media_above_description":false,"skip_confirmation":false,"show_above_text":false,"instant_view_version":2}"#;
+        let value: serde_json::Value = serde_json::from_str(json).unwrap();
+        let (preview, _) = parse_link_preview(Some(&value));
+        let preview = preview.expect("preview");
+        assert_eq!(preview.instant_view_version, 2);
+        assert_eq!(
+            preview.kind,
+            LinkPreviewKind::EmbeddedPlayer {
+                url: "https://video.example/embed/1".to_string(),
+                duration_secs: 95,
+                audio: false,
+            }
+        );
+        assert!(preview.has_card());
+    }
+
+    /// MED4: album `linkPreviewTypeAlbum` (schema:4392) yields up to 4
+    /// thumbnails for the strip (photo sizes + video thumbnails).
+    #[test]
+    fn link_preview_parses_album_kind() {
+        let thumb = r#"{"@type":"file","id":21,"size":100,"expected_size":100,"local":{"@type":"localFile","path":"","can_be_downloaded":true,"can_be_deleted":true,"download_offset":0,"downloaded_prefix_size":0,"downloaded_size":0},"remote":{"@type":"remoteFile","id":"","unique_id":"","is_uploading_active":false,"is_uploading_completed":false,"uploaded_size":0}}"#;
+        let empty_file = r#"{"@type":"file","id":0,"size":0,"expected_size":0,"local":{"@type":"localFile","path":"","can_be_downloaded":false,"can_be_deleted":true,"download_offset":0,"downloaded_prefix_size":0,"downloaded_size":0},"remote":{"@type":"remoteFile","id":"","unique_id":"","is_uploading_active":false,"is_uploading_completed":false,"uploaded_size":0}}"#;
+        let json = [
+            r#"{"@type":"linkPreview","url":"https://example.com/album","display_url":"example.com","#,
+            r#""site_name":"","title":"Album","description":{"@type":"formattedText","text":"","entities":[]},"#,
+            r#""author":"","type":{"@type":"linkPreviewTypeAlbum","media":["#,
+            r#"{"@type":"linkPreviewAlbumMediaPhoto","photo":{"@type":"photo","has_stickers":false,"minithumbnail":null,"#,
+            r#""sizes":[{"@type":"photoSize","type":"m","photo":"#,
+            thumb,
+            r#","width":90,"height":90,"progressive_sizes":[]}]}},"#,
+            r#"{"@type":"linkPreviewAlbumMediaVideo","video":{"@type":"video","duration":5,"width":320,"height":180,"#,
+            r#""file_name":"","mime_type":"","has_stickers":false,"supports_streaming":false,"minithumbnail":null,"#,
+            r#""thumbnail":{"@type":"thumbnail","format":{"@type":"thumbnailFormatJpeg"},"width":64,"height":36,"file":"#,
+            thumb,
+            r#"},"thumbnail_ts":0,"start_ts":0,"video":"#,
+            empty_file,
+            r#"}}],"caption":""},"#,
+            r#""has_large_media":false,"show_large_media":false,"show_media_above_description":false,"#,
+            r#""skip_confirmation":false,"show_above_text":false,"instant_view_version":0}"#,
+        ]
+        .concat();
+        let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let (preview, files) = parse_link_preview(Some(&value));
+        let preview = preview.expect("preview");
+        let LinkPreviewKind::Album { thumbnails } = &preview.kind else {
+            panic!("expected Album kind, got {:?}", preview.kind);
+        };
+        assert_eq!(thumbnails.len(), 2);
+        assert_eq!(files.len(), 2);
     }
 
     fn local_file_json(id: i32, path: &str, completed: bool, can_download: bool) -> String {
