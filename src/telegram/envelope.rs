@@ -124,6 +124,15 @@ pub enum EnvelopePayload {
         /// when the block is absent (the real `chat` object always carries
         /// it); refreshed by `updateChatPermissions`.
         can_send_basic_messages: bool,
+        /// Slice G1: the full `chat.permissions` block (`chatPermissions`,
+        /// schema 1.8.67, line 1070) for the default chat permissions
+        /// editor; `None` when the block is absent or malformed.
+        permissions: Option<ChatPermissions>,
+        /// Slice G1: `chat.can_be_deleted_for_all_users` (schema 1.8.67,
+        /// line 3616). Gates `deleteChat` (schema line 11848: "Use the
+        /// field chat.can_be_deleted_for_all_users to find whether the
+        /// method can be applied to the chat").
+        can_be_deleted_for_all_users: bool,
         /// Phase B4: `chat.message_auto_delete_time` (schema 1.8.67,
         /// lines 3616 / 3627) — the chat-level auto-delete or
         /// self-destruct (secret chats) timer, in seconds; 0 when
@@ -140,11 +149,14 @@ pub enum EnvelopePayload {
         draft: Option<ChatDraft>,
         positions: Vec<ChatPositionUpdate>,
     },
-    /// Parity slice 4: `updateChatPermissions` (schema 1.8.67, line 10500).
-    /// Only `can_send_basic_messages` is kept — the topic-composer gate.
+    /// Parity slice 4 / slice G1: `updateChatPermissions` (schema 1.8.67,
+    /// line 10500). `can_send_basic_messages` is kept for the
+    /// topic-composer gate; the full block drives the default chat
+    /// permissions editor.
     UpdateChatPermissions {
         chat_id: ChatId,
         can_send_basic_messages: bool,
+        permissions: Option<ChatPermissions>,
     },
     /// Phase B4: `updateChatMessageAutoDeleteTime` (schema 1.8.67,
     /// line 10549) — the chat-level auto-delete or self-destruct
@@ -375,6 +387,18 @@ pub enum EnvelopePayload {
         /// `None` for any other status or a missing rights block.
         /// Admin management requires this right (or creator status).
         can_promote_members: Option<bool>,
+        /// Slice G1: `rights.can_manage_tags` from own
+        /// `chatMemberStatusAdministrator` (schema 1.8.67, line 1092);
+        /// `None` for any other status or a missing rights block.
+        /// Changing another member's custom title requires this right
+        /// (or creator status); changing your own tag is always allowed.
+        can_manage_tags: Option<bool>,
+        /// Slice G1: `supergroup.join_by_request` (schema 1.8.67, lines
+        /// 2733/2746) — drives the "Approve new members" toggle.
+        join_by_request: bool,
+        /// Slice G1: `supergroup.is_broadcast_group` (schema 1.8.67,
+        /// lines 2736/2746) — drives the broadcast-group toggle.
+        is_broadcast_group: bool,
     },
     /// `supergroup` — `getSupergroup` response. Phase A1: also keeps own
     /// `status` (`supergroup.status`, schema 1.8.67 line 2746) for the
@@ -398,6 +422,18 @@ pub enum EnvelopePayload {
         /// `None` for any other status or a missing rights block.
         /// Admin management requires this right (or creator status).
         can_promote_members: Option<bool>,
+        /// Slice G1: `rights.can_manage_tags` from own
+        /// `chatMemberStatusAdministrator` (schema 1.8.67, line 1092);
+        /// `None` for any other status or a missing rights block.
+        /// Changing another member's custom title requires this right
+        /// (or creator status); changing your own tag is always allowed.
+        can_manage_tags: Option<bool>,
+        /// Slice G1: `supergroup.join_by_request` (schema 1.8.67, lines
+        /// 2733/2746) — drives the "Approve new members" toggle.
+        join_by_request: bool,
+        /// Slice G1: `supergroup.is_broadcast_group` (schema 1.8.67,
+        /// lines 2736/2746) — drives the broadcast-group toggle.
+        is_broadcast_group: bool,
     },
     /// `forumTopics` — `getForumTopics` response. Only the first page is
     /// fetched; `next_offset_*` are dropped (see Phase 5.1 DECISIONS).
@@ -576,6 +612,33 @@ pub enum EnvelopePayload {
     /// `PendingRequest::chat_id`.
     ChatAdministrators {
         administrators: Vec<ChatAdministratorEntry>,
+    },
+    /// Slice G1: `createdBasicGroupChat` (TDLib 1.8.67, line 3644) — the
+    /// response of `createNewBasicGroupChat` (line 13327):
+    /// `createdBasicGroupChat chat_id:int53
+    /// failed_to_add_members:failedToAddMembers = CreatedBasicGroupChat;`
+    /// The new chat itself arrives as `updateNewChat`.
+    CreatedBasicGroupChat {
+        chat_id: i64,
+    },
+    /// Slice G1: `failedToAddMembers` (TDLib 1.8.67, line 3640) — the
+    /// response of `addChatMembers` (line 13584):
+    /// `failedToAddMembers
+    /// failed_to_add_members:vector<failedToAddMember> =
+    /// FailedToAddMembers;`
+    /// Only the failure count is kept; per-user errors are dropped.
+    FailedToAddMembers {
+        failed_count: i32,
+    },
+    /// Slice G1: `basicGroupFullInfo` (TDLib 1.8.67, line 2714) — the
+    /// response of `getBasicGroupFullInfo` (line 11507):
+    /// `basicGroupFullInfo photo:chatPhoto description:string
+    /// creator_user_id:int53 members:vector<chatMember> ... =
+    /// BasicGroupFullInfo;`
+    /// Only the member list is kept (the basic-group member dialog);
+    /// correlated to the chat by the request's `PendingRequest::chat_id`.
+    BasicGroupFullInfo {
+        members: Vec<ParsedChatMember>,
     },
     /// Phase D3c: `chatEvents` (TDLib 1.8.67, line 7938) — the response
     /// of `getChatEventLog` (line 15252). Carries no chat id; correlated
@@ -1678,7 +1741,7 @@ impl ChannelMemberStatus {
 /// `rights.can_invite_users` (schema 1.8.67, line 1092), driving the
 /// Phase D3a invite-link / join-request management gate; `None` for every
 /// other status or when the rights block is absent.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParsedChatMember {
     pub member_id: MessageSender,
     pub status: ChannelMemberStatus,
@@ -1691,6 +1754,15 @@ pub struct ParsedChatMember {
     /// status or an absent rights block. Drives the promote/edit-rights
     /// flows and the `can_promote_members` gate.
     pub admin_rights: Option<ChatAdminRights>,
+    /// Slice G1: `chatMember.tag` (schema 1.8.67, line 2526) — the
+    /// admin custom title (set via `setChatMemberTag`, line 13598).
+    pub tag: String,
+    /// Slice G1: `can_be_edited` from `chatMemberStatusAdministrator`
+    /// (schema 1.8.67, line 2500). False for every other status.
+    /// Telegram X refuses ban/restrict/promote against the creator and
+    /// non-editable admins (`ProfileController` `YouCantBanX`); the
+    /// member dialog mirrors that gate.
+    pub can_be_edited: bool,
 }
 
 /// Phase D3b: `chatAdministratorRights` (TDLib 1.8.67,
@@ -1808,6 +1880,113 @@ pub fn parse_chat_admin_rights(value: Option<&Value>) -> Option<ChatAdminRights>
         can_manage_tags: right("can_manage_tags"),
         can_send_welcome_messages: right("can_send_welcome_messages"),
         is_anonymous: right("is_anonymous"),
+    })
+}
+
+/// Slice G1: `chatPermissions` (TDLib 1.8.67, `schema/td_api.tl:1070`):
+/// `chatPermissions can_send_basic_messages:Bool can_send_audios:Bool
+/// can_send_documents:Bool can_send_photos:Bool can_send_videos:Bool
+/// can_send_video_notes:Bool can_send_voice_notes:Bool can_send_polls:Bool
+/// can_send_other_messages:Bool can_add_link_previews:Bool
+/// can_react_to_messages:Bool can_edit_tag:Bool can_change_info:Bool
+/// can_invite_users:Bool can_pin_messages:Bool can_create_topics:Bool =
+/// ChatPermissions;`
+/// Fields are declared in schema order. Missing JSON fields parse to
+/// `false` (deny-by-default); TDLib always sends the full block.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ChatPermissions {
+    pub can_send_basic_messages: bool,
+    pub can_send_audios: bool,
+    pub can_send_documents: bool,
+    pub can_send_photos: bool,
+    pub can_send_videos: bool,
+    pub can_send_video_notes: bool,
+    pub can_send_voice_notes: bool,
+    pub can_send_polls: bool,
+    pub can_send_other_messages: bool,
+    pub can_add_link_previews: bool,
+    pub can_react_to_messages: bool,
+    pub can_edit_tag: bool,
+    pub can_change_info: bool,
+    pub can_invite_users: bool,
+    pub can_pin_messages: bool,
+    pub can_create_topics: bool,
+}
+
+impl ChatPermissions {
+    /// All permissions granted. The permissions editor starts from the
+    /// chat's current block, not from this.
+    pub fn all() -> Self {
+        Self {
+            can_send_basic_messages: true,
+            can_send_audios: true,
+            can_send_documents: true,
+            can_send_photos: true,
+            can_send_videos: true,
+            can_send_video_notes: true,
+            can_send_voice_notes: true,
+            can_send_polls: true,
+            can_send_other_messages: true,
+            can_add_link_previews: true,
+            can_react_to_messages: true,
+            can_edit_tag: true,
+            can_change_info: true,
+            can_invite_users: true,
+            can_pin_messages: true,
+            can_create_topics: true,
+        }
+    }
+
+    /// Serialize as `chatPermissions` JSON for `setChatPermissions`
+    /// (schema 1.8.67, line 13464).
+    pub fn to_json(&self) -> Value {
+        serde_json::json!({
+            "@type": "chatPermissions",
+            "can_send_basic_messages": self.can_send_basic_messages,
+            "can_send_audios": self.can_send_audios,
+            "can_send_documents": self.can_send_documents,
+            "can_send_photos": self.can_send_photos,
+            "can_send_videos": self.can_send_videos,
+            "can_send_video_notes": self.can_send_video_notes,
+            "can_send_voice_notes": self.can_send_voice_notes,
+            "can_send_polls": self.can_send_polls,
+            "can_send_other_messages": self.can_send_other_messages,
+            "can_add_link_previews": self.can_add_link_previews,
+            "can_react_to_messages": self.can_react_to_messages,
+            "can_edit_tag": self.can_edit_tag,
+            "can_change_info": self.can_change_info,
+            "can_invite_users": self.can_invite_users,
+            "can_pin_messages": self.can_pin_messages,
+            "can_create_topics": self.can_create_topics,
+        })
+    }
+}
+
+/// Slice G1: parse a `chatPermissions` block (TDLib 1.8.67, schema line
+/// 1070); `None` unless `@type` matches or the value is absent/null.
+pub fn parse_chat_permissions(value: Option<&Value>) -> Option<ChatPermissions> {
+    let value = value.filter(|v| !v.is_null())?;
+    if value.get("@type").and_then(Value::as_str) != Some("chatPermissions") {
+        return None;
+    }
+    let perm = |name: &str| value.get(name).and_then(Value::as_bool).unwrap_or(false);
+    Some(ChatPermissions {
+        can_send_basic_messages: perm("can_send_basic_messages"),
+        can_send_audios: perm("can_send_audios"),
+        can_send_documents: perm("can_send_documents"),
+        can_send_photos: perm("can_send_photos"),
+        can_send_videos: perm("can_send_videos"),
+        can_send_video_notes: perm("can_send_video_notes"),
+        can_send_voice_notes: perm("can_send_voice_notes"),
+        can_send_polls: perm("can_send_polls"),
+        can_send_other_messages: perm("can_send_other_messages"),
+        can_add_link_previews: perm("can_add_link_previews"),
+        can_react_to_messages: perm("can_react_to_messages"),
+        can_edit_tag: perm("can_edit_tag"),
+        can_change_info: perm("can_change_info"),
+        can_invite_users: perm("can_invite_users"),
+        can_pin_messages: perm("can_pin_messages"),
+        can_create_topics: perm("can_create_topics"),
     })
 }
 
@@ -2067,6 +2246,10 @@ pub enum ChatJoinResult {
 pub struct ChatDraft {
     pub text: String,
     pub reply_to_message_id: Option<MessageId>,
+    /// Slice G1: partial-message quote carried by the draft's `reply_to`
+    /// (`inputTextQuote`, schema 1.8.67 line 3056) — `(text, position)`
+    /// with `position` in UTF-16 code units.
+    pub quote: Option<(String, i32)>,
 }
 
 /// `ChatAction` values this slice acts on. Other constructors stay `Other`
@@ -5422,6 +5605,14 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
                     .and_then(|p| p.get("can_send_basic_messages"))
                     .and_then(Value::as_bool)
                     .unwrap_or(true),
+                // Slice G1: full `chatPermissions` block for the editor.
+                permissions: parse_chat_permissions(chat.get("permissions")),
+                // Slice G1: delete gate for `deleteChat` (schema 1.8.67,
+                // lines 3616/11848).
+                can_be_deleted_for_all_users: chat
+                    .get("can_be_deleted_for_all_users")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
                 // Phase B4: `chat.message_auto_delete_time` (schema 1.8.67,
                 // lines 3616 / 3627). Defaults to 0 (disabled) when
                 // absent — the field is new enough that older TDLib
@@ -5447,6 +5638,9 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
                     .and_then(|p| p.get("can_send_basic_messages"))
                     .and_then(Value::as_bool)
                     .unwrap_or(true),
+                // Slice G1: full `chatPermissions` block (schema 1.8.67,
+                // line 1070) for the permissions editor.
+                permissions: parse_chat_permissions(permissions),
             })
         }
         "updateChatMessageAutoDeleteTime" => {
@@ -5678,6 +5872,18 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
                 can_restrict_members: parse_restrict_members_right(supergroup.get("status")),
                 can_invite_users: parse_invite_users_right(supergroup.get("status")),
                 can_promote_members: parse_promote_members_right(supergroup.get("status")),
+                can_manage_tags: parse_manage_tags_right(supergroup.get("status")),
+                // Slice G1: `supergroup.join_by_request` /
+                // `supergroup.is_broadcast_group` (schema 1.8.67, lines
+                // 2733/2736/2746).
+                join_by_request: supergroup
+                    .get("join_by_request")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
+                is_broadcast_group: supergroup
+                    .get("is_broadcast_group")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
             })
         }
         "supergroup" => Ok(EnvelopePayload::Supergroup {
@@ -5694,6 +5900,18 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
             can_restrict_members: parse_restrict_members_right(value.get("status")),
             can_invite_users: parse_invite_users_right(value.get("status")),
             can_promote_members: parse_promote_members_right(value.get("status")),
+            can_manage_tags: parse_manage_tags_right(value.get("status")),
+            // Slice G1: `supergroup.join_by_request` /
+            // `supergroup.is_broadcast_group` (schema 1.8.67, lines
+            // 2733/2736/2746).
+            join_by_request: value
+                .get("join_by_request")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            is_broadcast_group: value
+                .get("is_broadcast_group")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
         }),
         // Phase 5.1: `forumTopics` (schema line 3976). Topics keep their
         // response order; the UI sorts by `order` descending per the schema
@@ -6050,6 +6268,31 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
                 })
                 .unwrap_or_default(),
         }),
+        // Slice G1: `createdBasicGroupChat` (schema 1.8.67, line 3644).
+        "createdBasicGroupChat" => Ok(EnvelopePayload::CreatedBasicGroupChat {
+            chat_id: int53(value.get("chat_id"))?,
+        }),
+        // Slice G1: `failedToAddMembers` (schema 1.8.67, line 3640).
+        "failedToAddMembers" => Ok(EnvelopePayload::FailedToAddMembers {
+            failed_count: value
+                .get("failed_to_add_members")
+                .and_then(Value::as_array)
+                .map(|members| members.len() as i32)
+                .unwrap_or(0),
+        }),
+        // Slice G1: `basicGroupFullInfo` (schema 1.8.67, line 2714).
+        "basicGroupFullInfo" => Ok(EnvelopePayload::BasicGroupFullInfo {
+            members: value
+                .get("members")
+                .and_then(Value::as_array)
+                .map(|members| {
+                    members
+                        .iter()
+                        .filter_map(|member| parse_chat_member(Some(member)))
+                        .collect()
+                })
+                .unwrap_or_default(),
+        }),
         "updateNewChatJoinRequest" => Ok(EnvelopePayload::UpdateNewChatJoinRequest {
             chat_id: int53(value.get("chat_id"))?,
             request: parse_chat_join_request(value.get("request"))
@@ -6330,6 +6573,23 @@ fn parse_promote_members_right(value: Option<&Value>) -> Option<bool> {
         .and_then(Value::as_bool)
 }
 
+/// Slice G1: `rights.can_manage_tags` from a
+/// `chatMemberStatusAdministrator` block (TDLib 1.8.67,
+/// `chatAdministratorRights`, schema line 1092); `None` for any other
+/// status or a missing/absent rights block. Changing another member's
+/// custom title (`setChatMemberTag`, line 13598) requires this right
+/// (or creator status).
+fn parse_manage_tags_right(value: Option<&Value>) -> Option<bool> {
+    let value = value?;
+    if value.get("@type").and_then(Value::as_str) != Some("chatMemberStatusAdministrator") {
+        return None;
+    }
+    value
+        .get("rights")
+        .and_then(|rights| rights.get("can_manage_tags"))
+        .and_then(Value::as_bool)
+}
+
 /// `chatMember` (TDLib 1.8.67). Returns `None` when `member_id` or `status`
 /// is missing or unparseable.
 fn parse_chat_member(value: Option<&Value>) -> Option<ParsedChatMember> {
@@ -6347,6 +6607,16 @@ fn parse_chat_member(value: Option<&Value>) -> Option<ParsedChatMember> {
         admin_can_post_messages,
         admin_can_invite_users: parse_invite_users_right(value.get("status")),
         admin_rights,
+        tag: value
+            .get("tag")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string(),
+        can_be_edited: value
+            .get("status")
+            .and_then(|status| status.get("can_be_edited"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
     })
 }
 
@@ -6642,18 +6912,33 @@ fn parse_chat_draft(value: Option<&Value>) -> Option<ChatDraft> {
         .and_then(Value::as_str)
         .unwrap_or("")
         .to_string();
-    let reply_to_message_id = value.get("reply_to").and_then(|reply| {
-        if reply.get("@type").and_then(Value::as_str) != Some("inputMessageReplyToMessage") {
-            return None;
+    let (reply_to_message_id, quote) = match value.get("reply_to") {
+        Some(reply)
+            if reply.get("@type").and_then(Value::as_str) == Some("inputMessageReplyToMessage") =>
+        {
+            let id = int53(reply.get("message_id")).ok().map(MessageId);
+            let quote = reply.get("quote").and_then(|quote| {
+                if quote.get("@type").and_then(Value::as_str) != Some("inputTextQuote") {
+                    return None;
+                }
+                let text = quote
+                    .get("text")
+                    .and_then(|formatted| formatted.get("text"))
+                    .and_then(Value::as_str)?;
+                let position = quote.get("position").and_then(Value::as_i64)? as i32;
+                Some((text.to_string(), position))
+            });
+            (id, quote)
         }
-        int53(reply.get("message_id")).ok().map(MessageId)
-    });
+        _ => (None, None),
+    };
     if text.trim().is_empty() && reply_to_message_id.is_none() {
         return None;
     }
     Some(ChatDraft {
         text,
         reply_to_message_id,
+        quote,
     })
 }
 
@@ -8847,9 +9132,12 @@ mod tests {
             EnvelopePayload::UpdateChatPermissions {
                 chat_id,
                 can_send_basic_messages,
+                permissions,
             } => {
                 assert_eq!(chat_id, ChatId(16));
                 assert!(can_send_basic_messages);
+                // Slice G1: the full block is kept for the editor.
+                assert!(permissions.unwrap().can_send_basic_messages);
             }
             other => panic!("{other:?}"),
         }
@@ -8907,12 +9195,15 @@ mod tests {
                 status,
                 can_restrict_members,
                 can_promote_members,
+                can_manage_tags,
                 ..
             } => {
                 assert_eq!(status, ChannelMemberStatus::Administrator);
                 assert_eq!(can_restrict_members, Some(true));
                 // Phase D3b: `can_promote_members` rides the same rights block.
                 assert_eq!(can_promote_members, Some(false));
+                // Slice G1: `can_manage_tags` gates custom-title changes.
+                assert_eq!(can_manage_tags, Some(false));
             }
             other => panic!("unexpected {other:?}"),
         }
@@ -8951,6 +9242,9 @@ mod tests {
                 can_restrict_members,
                 can_invite_users,
                 can_promote_members,
+                can_manage_tags: _,
+                join_by_request,
+                is_broadcast_group,
             } => {
                 assert_eq!(supergroup_id, 16);
                 assert!(is_forum);
@@ -8964,6 +9258,9 @@ mod tests {
                 assert_eq!(can_invite_users, None);
                 // Phase D3b: no promote right either.
                 assert_eq!(can_promote_members, None);
+                // Slice G1: flags parsed (both false in this fixture).
+                assert!(!join_by_request);
+                assert!(!is_broadcast_group);
             }
             other => panic!("unexpected {other:?}"),
         }
@@ -8984,6 +9281,9 @@ mod tests {
                 can_restrict_members,
                 can_invite_users,
                 can_promote_members,
+                can_manage_tags: _,
+                join_by_request,
+                is_broadcast_group,
             } => {
                 assert_eq!(supergroup_id, 18);
                 assert!(!is_forum);
@@ -8994,6 +9294,9 @@ mod tests {
                 assert_eq!(can_invite_users, None);
                 // Phase D3b: no `status` block → no promote right either.
                 assert_eq!(can_promote_members, None);
+                // Slice G1: missing flags default to false.
+                assert!(!join_by_request);
+                assert!(!is_broadcast_group);
             }
             other => panic!("unexpected {other:?}"),
         }
@@ -9012,6 +9315,9 @@ mod tests {
                 can_restrict_members,
                 can_invite_users,
                 can_promote_members,
+                can_manage_tags: _,
+                join_by_request,
+                is_broadcast_group,
             } => {
                 assert_eq!(supergroup_id, 17);
                 assert!(!is_forum);
@@ -9021,6 +9327,9 @@ mod tests {
                 // No `status` block → no admin rights for either gate.
                 assert_eq!(can_invite_users, None);
                 assert_eq!(can_promote_members, None);
+                // Slice G1: missing flags default to false.
+                assert!(!join_by_request);
+                assert!(!is_broadcast_group);
             }
             other => panic!("unexpected {other:?}"),
         }
@@ -9289,6 +9598,7 @@ mod tests {
                 let draft = draft.expect("draft");
                 assert_eq!(draft.text, "meet at 6");
                 assert_eq!(draft.reply_to_message_id, Some(MessageId(101)));
+                assert_eq!(draft.quote, None);
             }
             other => panic!("{other:?}"),
         }
@@ -9315,6 +9625,7 @@ mod tests {
                 let draft = draft.expect("text kept");
                 assert_eq!(draft.text, "hi");
                 assert_eq!(draft.reply_to_message_id, None);
+                assert_eq!(draft.quote, None);
             }
             other => panic!("{other:?}"),
         }
@@ -9346,6 +9657,25 @@ mod tests {
                 assert_eq!(unread_count, 2);
                 assert_eq!(last_read_inbox_message_id.0, 10);
                 assert_eq!(last_read_outbox_message_id.0, 11);
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn draft_message_parses_partial_quote() {
+        // Slice G1: a draft saved with `inputTextQuote` (schema 1.8.67
+        // line 3056) restores the quote text and UTF-16 position.
+        let env = parse_envelope(
+            r#"{"@type":"updateChatDraftMessage","chat_id":11,"draft_message":{"@type":"draftMessage","reply_to":{"@type":"inputMessageReplyToMessage","message_id":101,"quote":{"@type":"inputTextQuote","text":{"@type":"formattedText","text":"meet at","entities":[]},"position":7},"checklist_task_id":0,"poll_option_id":""},"date":1,"content":{"@type":"draftMessageContentText","text":{"@type":"formattedText","text":"sounds good","entities":[]},"link_preview_options":null},"effect_id":"0","suggested_post_info":null},"positions":[]}"#,
+        )
+        .unwrap();
+        match env.payload {
+            EnvelopePayload::UpdateChatDraftMessage { draft, .. } => {
+                let draft = draft.expect("draft");
+                assert_eq!(draft.text, "sounds good");
+                assert_eq!(draft.reply_to_message_id, Some(MessageId(101)));
+                assert_eq!(draft.quote, Some(("meet at".to_string(), 7)));
             }
             other => panic!("{other:?}"),
         }
@@ -13084,6 +13414,23 @@ mod notification_sound_tests {
     }
 
     #[test]
+    fn g1_basic_group_full_info_parses() {
+        // Slice G1: `basicGroupFullInfo` (schema 1.8.67, line 2714) — the
+        // `getBasicGroupFullInfo` answer (line 11507). Only `members` is
+        // kept.
+        let env = parse_envelope(
+            r#"{"@type":"basicGroupFullInfo","creator_user_id":7,"members":[{"@type":"chatMember","member_id":{"@type":"messageSenderUser","user_id":7},"tag":"","inviter_user_id":0,"joined_chat_date":0,"status":{"@type":"chatMemberStatusCreator"}},{"@type":"chatMember","member_id":{"@type":"messageSenderUser","user_id":8},"tag":"","inviter_user_id":7,"joined_chat_date":0,"status":{"@type":"chatMemberStatusMember"}}]}"#,
+        )
+        .unwrap();
+        match env.payload {
+            EnvelopePayload::BasicGroupFullInfo { members } => {
+                assert_eq!(members.len(), 2);
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+
+    #[test]
     fn group_call_info_parses() {
         // Phase C2f: the `joinGroupCall` answer (schema 1.8.67, line
         // 7190) — invitation acceptance.
@@ -13098,5 +13445,60 @@ mod notification_sound_tests {
                 join_payload: "tgcalls-payload".to_string(),
             }
         );
+    }
+
+    #[test]
+    fn g1_created_basic_group_chat_parses() {
+        // Slice G1: `createdBasicGroupChat chat_id:int53
+        // failed_to_add_members:failedToAddMembers = CreatedBasicGroupChat`
+        // (schema 1.8.67, line 3644) — the `createNewBasicGroupChat`
+        // answer (line 13327).
+        let env = parse_envelope(
+            r#"{"@type":"createdBasicGroupChat","chat_id":99,"failed_to_add_members":{"@type":"failedToAddMembers","failed_to_add_members":[]}}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            env.payload,
+            EnvelopePayload::CreatedBasicGroupChat { chat_id: 99 }
+        );
+    }
+
+    #[test]
+    fn g1_failed_to_add_members_parses() {
+        // Slice G1: `failedToAddMembers
+        // failed_to_add_members:vector<failedToAddMember> =
+        // FailedToAddMembers` (schema 1.8.67, line 3640) — the
+        // `addChatMembers` answer (line 13584). Only the failure count is
+        // kept.
+        let env = parse_envelope(
+            r#"{"@type":"failedToAddMembers","failed_to_add_members":[{"@type":"failedToAddMember","user_id":7,"premium_would_allow_invite":false,"premium_required_to_send_messages":false},{"@type":"failedToAddMember","user_id":8,"premium_would_allow_invite":false,"premium_required_to_send_messages":false}]}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            env.payload,
+            EnvelopePayload::FailedToAddMembers { failed_count: 2 }
+        );
+    }
+
+    #[test]
+    fn g1_chat_permissions_round_trip() {
+        // Slice G1: `chatPermissions` (schema 1.8.67, line 1070) parses
+        // field-by-field and serializes back with the same `@type`.
+        let json = r#"{"@type":"chatPermissions","can_send_basic_messages":true,"can_send_audios":false,"can_send_documents":true,"can_send_photos":true,"can_send_videos":true,"can_send_video_notes":true,"can_send_voice_notes":true,"can_send_polls":false,"can_send_other_messages":true,"can_add_link_previews":true,"can_react_to_messages":true,"can_edit_tag":false,"can_change_info":false,"can_invite_users":true,"can_pin_messages":false,"can_create_topics":false}"#;
+        let value: Value = serde_json::from_str(json).unwrap();
+        let perms = parse_chat_permissions(Some(&value)).unwrap();
+        assert!(perms.can_send_basic_messages);
+        assert!(!perms.can_send_audios);
+        assert!(perms.can_invite_users);
+        assert!(!perms.can_create_topics);
+        let back = perms.to_json();
+        assert_eq!(back["@type"], "chatPermissions");
+        assert_eq!(back["can_send_polls"], Value::Bool(false));
+        assert_eq!(back["can_send_documents"], Value::Bool(true));
+        // Wrong `@type` / null → None (deny-by-default, no fabricated block).
+        assert!(parse_chat_permissions(None).is_none());
+        assert!(parse_chat_permissions(Some(&Value::Null)).is_none());
+        let wrong = serde_json::json!({"@type": "chatAdministratorRights"});
+        assert!(parse_chat_permissions(Some(&wrong)).is_none());
     }
 }

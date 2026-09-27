@@ -1,6 +1,6 @@
 use quill::diagnostics::{Diagnostic, DiagnosticSink, MemorySink};
 use quill::ids::AccountKey;
-use quill::state::{RequestPurpose, Session};
+use quill::state::{MemberListFilter, RequestPurpose, Session};
 use quill::telegram::client::{ReceiveBridge, copy_and_parse};
 use quill::telegram::envelope::EnvelopePayload;
 use std::sync::Arc;
@@ -3432,7 +3432,12 @@ fn replay_supergroup_members_picker_cache() {
         ],
     );
 
-    let members_extra = session.request(RequestPurpose::GetSupergroupMembers, Some(chat_id));
+    let members_extra = session.request(
+        RequestPurpose::GetSupergroupMembers {
+            filter: MemberListFilter::Recent,
+        },
+        Some(chat_id),
+    );
     apply_all_seq(
         &mut session,
         &sink,
@@ -3442,7 +3447,10 @@ fn replay_supergroup_members_picker_cache() {
             members_extra.0
         )],
     );
-    let page = match session.supergroup_members.get(&13) {
+    let page = match session
+        .supergroup_members
+        .get(&(13, MemberListFilter::Recent))
+    {
         Some(SupergroupMembersFetch::Loaded { members, .. }) => members,
         other => panic!("expected loaded members, got {other:?}"),
     };
@@ -3459,7 +3467,12 @@ fn replay_supergroup_members_picker_cache() {
     assert!(page[1].admin_rights.is_some());
 
     // A TDLib error records a failed fetch with the action label.
-    let retry_extra = session.request(RequestPurpose::GetSupergroupMembers, Some(chat_id));
+    let retry_extra = session.request(
+        RequestPurpose::GetSupergroupMembers {
+            filter: MemberListFilter::Recent,
+        },
+        Some(chat_id),
+    );
     apply_all_seq(
         &mut session,
         &sink,
@@ -3470,7 +3483,9 @@ fn replay_supergroup_members_picker_cache() {
         )],
     );
     assert!(matches!(
-        session.supergroup_members.get(&13),
+        session
+            .supergroup_members
+            .get(&(13, MemberListFilter::Recent)),
         Some(SupergroupMembersFetch::Failed(_))
     ));
 }

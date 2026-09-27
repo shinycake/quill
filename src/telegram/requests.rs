@@ -654,6 +654,20 @@ pub fn get_supergroup_members(
     .to_string()
 }
 
+/// Slice G1: `getBasicGroupFullInfo` (TDLib 1.8.67,
+/// `schema/td_api.tl:11507`):
+/// `getBasicGroupFullInfo basic_group_id:int53 = BasicGroupFullInfo;`
+/// The response's `members:vector<chatMember>` (line 2714) is the member
+/// list for basic groups. Correlated via `PendingRequest::chat_id`.
+pub fn get_basic_group_full_info(extra: RequestId, basic_group_id: i64) -> String {
+    json!({
+        "@type": "getBasicGroupFullInfo",
+        "@extra": extra.as_extra(),
+        "basic_group_id": basic_group_id,
+    })
+    .to_string()
+}
+
 /// Phase D3b: `supergroupMembersFilterRecent` (TDLib 1.8.67,
 /// `schema/td_api.tl:2559`) — the member picker's default filter.
 pub fn supergroup_members_filter_recent_json() -> Value {
@@ -668,6 +682,327 @@ pub fn supergroup_members_filter_search_json(query: &str) -> Value {
         "@type": "supergroupMembersFilterSearch",
         "query": query,
     })
+}
+
+/// Slice G1: `supergroupMembersFilterAdministrators` (TDLib 1.8.67,
+/// `schema/td_api.tl:2563`):
+/// `supergroupMembersFilterAdministrators = SupergroupMembersFilter;`
+/// Returns the owner and administrators.
+pub fn supergroup_members_filter_administrators_json() -> Value {
+    json!({ "@type": "supergroupMembersFilterAdministrators" })
+}
+
+/// Slice G1: `supergroupMembersFilterRestricted` (TDLib 1.8.67,
+/// `schema/td_api.tl:2571`):
+/// `supergroupMembersFilterRestricted query:string =
+/// SupergroupMembersFilter;` — restricted members, administrators only.
+pub fn supergroup_members_filter_restricted_json(query: &str) -> Value {
+    json!({
+        "@type": "supergroupMembersFilterRestricted",
+        "query": query,
+    })
+}
+
+/// Slice G1: `supergroupMembersFilterBanned` (TDLib 1.8.67,
+/// `schema/td_api.tl:2574`):
+/// `supergroupMembersFilterBanned query:string = SupergroupMembersFilter;`
+/// — banned users, administrators only.
+pub fn supergroup_members_filter_banned_json(query: &str) -> Value {
+    json!({
+        "@type": "supergroupMembersFilterBanned",
+        "query": query,
+    })
+}
+
+/// Slice G1: `chatMemberStatusRestricted` JSON (TDLib 1.8.67,
+/// `schema/td_api.tl:2510`):
+/// `chatMemberStatusRestricted is_member:Bool restricted_until_date:int32
+/// permissions:chatPermissions = ChatMemberStatus;`
+/// Used by the restrict flow's `setChatMemberStatus` call.
+pub fn chat_member_status_restricted_json(
+    is_member: bool,
+    restricted_until_date: i32,
+    permissions: &Value,
+) -> Value {
+    json!({
+        "@type": "chatMemberStatusRestricted",
+        "is_member": is_member,
+        "restricted_until_date": restricted_until_date,
+        "permissions": permissions,
+    })
+}
+
+/// Slice G1: `chatMemberStatusBanned` JSON (TDLib 1.8.67,
+/// `schema/td_api.tl:2517`):
+/// `chatMemberStatusBanned banned_until_date:int32 = ChatMemberStatus;`
+/// Used by the ban flow's `setChatMemberStatus` call.
+pub fn chat_member_status_banned_json(banned_until_date: i32) -> Value {
+    json!({
+        "@type": "chatMemberStatusBanned",
+        "banned_until_date": banned_until_date,
+    })
+}
+
+/// Slice G1: `createNewBasicGroupChat` (TDLib 1.8.67,
+/// `schema/td_api.tl:13327`):
+/// `createNewBasicGroupChat user_ids:vector<int53> title:string
+/// message_auto_delete_time:int32 = CreatedBasicGroupChat;`
+/// Title is 1-128 characters. The new chat arrives as `updateNewChat`;
+/// the `CreatedBasicGroupChat` answer carries its id.
+pub fn create_new_basic_group_chat(extra: RequestId, user_ids: &[i64], title: &str) -> String {
+    json!({
+        "@type": "createNewBasicGroupChat",
+        "@extra": extra.as_extra(),
+        "user_ids": user_ids,
+        "title": title,
+        "message_auto_delete_time": 0,
+    })
+    .to_string()
+}
+
+/// Slice G1: `createNewSupergroupChat` (TDLib 1.8.67,
+/// `schema/td_api.tl:13337`):
+/// `createNewSupergroupChat title:string is_forum:Bool is_channel:Bool
+/// description:string location:chatLocation message_auto_delete_time:int32
+/// for_import:Bool = Chat;`
+/// `location` is null for an ordinary supergroup/channel (schema line
+/// 13335: "pass null to create an ordinary supergroup chat").
+pub fn create_new_supergroup_chat(
+    extra: RequestId,
+    title: &str,
+    is_channel: bool,
+    description: &str,
+) -> String {
+    json!({
+        "@type": "createNewSupergroupChat",
+        "@extra": extra.as_extra(),
+        "title": title,
+        "is_forum": false,
+        "is_channel": is_channel,
+        "description": description,
+        "location": Value::Null,
+        "message_auto_delete_time": 0,
+        "for_import": false,
+    })
+    .to_string()
+}
+
+/// Slice G1: `toggleSupergroupIsBroadcastGroup` (TDLib 1.8.67,
+/// `schema/td_api.tl:15221`):
+/// `toggleSupergroupIsBroadcastGroup supergroup_id:int53 = Ok;`
+/// "Upgrades supergroup to a broadcast group; requires owner privileges".
+/// One-way per the schema description (no parameter to convert back — a
+/// broadcast group stays a broadcast group; Telegram has no reverse API).
+pub fn toggle_supergroup_is_broadcast_group(extra: RequestId, supergroup_id: i64) -> String {
+    json!({
+        "@type": "toggleSupergroupIsBroadcastGroup",
+        "@extra": extra.as_extra(),
+        "supergroup_id": supergroup_id,
+    })
+    .to_string()
+}
+
+/// Slice G1: `addChatMembers` (TDLib 1.8.67, `schema/td_api.tl:13584`):
+/// `addChatMembers chat_id:int53 user_ids:vector<int53> =
+/// FailedToAddMembers;`
+/// "Adds multiple new members to a chat; requires can_invite_users member
+/// right. Currently, this method is available only in supergroups and
+/// channels." Max 20 users per call for supergroups, 100 for channels.
+pub fn add_chat_members(extra: RequestId, chat_id: i64, user_ids: &[i64]) -> String {
+    json!({
+        "@type": "addChatMembers",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id,
+        "user_ids": user_ids,
+    })
+    .to_string()
+}
+
+/// Slice G1: `addChatMember` (TDLib 1.8.67, `schema/td_api.tl:13578`):
+/// `addChatMember chat_id:int53 user_id:int53 forward_limit:int32 =
+/// FailedToAddMembers;`
+/// "Adds a new member to a chat; requires can_invite_users member right."
+/// The singular variant used for basic groups (`addChatMembers` is
+/// supergroups and channels only, line 13580).
+pub fn add_chat_member(extra: RequestId, chat_id: i64, user_id: i64) -> String {
+    json!({
+        "@type": "addChatMember",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id,
+        "user_id": user_id,
+        "forward_limit": 0,
+    })
+    .to_string()
+}
+
+/// Slice G1: `setChatPermissions` (TDLib 1.8.67, `schema/td_api.tl:13464`):
+/// `setChatPermissions chat_id:int53 permissions:chatPermissions = Ok;`
+/// "Supported only for basic groups and supergroups. Requires
+/// can_restrict_members administrator right".
+pub fn set_chat_permissions(extra: RequestId, chat_id: i64, permissions: &Value) -> String {
+    json!({
+        "@type": "setChatPermissions",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id,
+        "permissions": permissions,
+    })
+    .to_string()
+}
+
+/// Slice G1: `replacePrimaryChatInviteLink` (TDLib 1.8.67,
+/// `schema/td_api.tl:14089`):
+/// `replacePrimaryChatInviteLink chat_id:int53 = ChatInviteLink;`
+/// "Replaces current primary invite link for a chat with a new primary
+/// invite link. Available for basic groups, supergroups, and channels.
+/// Requires administrator privileges and can_invite_users right".
+pub fn replace_primary_chat_invite_link(extra: RequestId, chat_id: i64) -> String {
+    json!({
+        "@type": "replacePrimaryChatInviteLink",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id,
+    })
+    .to_string()
+}
+
+/// Slice G1: `toggleSupergroupJoinByRequest` (TDLib 1.8.67,
+/// `schema/td_api.tl:15188`):
+/// `toggleSupergroupJoinByRequest supergroup_id:int53 join_by_request:Bool
+/// guard_bot_user_id:int53 apply_to_invite_links:Bool = Ok;`
+/// No guard bot in Quill (`guard_bot_user_id: 0`, ignored when
+/// `join_by_request == false` per the schema); the change is not applied
+/// to existing invite links (`apply_to_invite_links: false`).
+pub fn toggle_supergroup_join_by_request(
+    extra: RequestId,
+    supergroup_id: i64,
+    join_by_request: bool,
+) -> String {
+    json!({
+        "@type": "toggleSupergroupJoinByRequest",
+        "@extra": extra.as_extra(),
+        "supergroup_id": supergroup_id,
+        "join_by_request": join_by_request,
+        "guard_bot_user_id": 0,
+        "apply_to_invite_links": false,
+    })
+    .to_string()
+}
+
+/// Slice G1: `setSupergroupUsername` (TDLib 1.8.67, `schema/td_api.tl:15136`):
+/// `setSupergroupUsername supergroup_id:int53 username:string = Ok;`
+/// "Changes the editable username of a supergroup or channel, requires
+/// owner privileges". Empty string removes the username.
+pub fn set_supergroup_username(extra: RequestId, supergroup_id: i64, username: &str) -> String {
+    json!({
+        "@type": "setSupergroupUsername",
+        "@extra": extra.as_extra(),
+        "supergroup_id": supergroup_id,
+        "username": username,
+    })
+    .to_string()
+}
+
+/// Slice G1: `setChatMemberTag` (TDLib 1.8.67, `schema/td_api.tl:13598`):
+/// `setChatMemberTag chat_id:int53 user_id:int53 tag:string = Ok;`
+/// "Changes the tag or custom title of a chat member" — this is the
+/// admin custom-title setter (Telegram X `EditRightsController` sets
+/// the "Custom title" field through it; 0-16 characters, no emoji).
+/// Basic groups and supergroups only, not channels; requires
+/// `can_manage_tags` to change another member's tag.
+pub fn set_chat_member_tag(extra: RequestId, chat_id: ChatId, user_id: i64, tag: &str) -> String {
+    json!({
+        "@type": "setChatMemberTag",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0,
+        "user_id": user_id,
+        "tag": tag,
+    })
+    .to_string()
+}
+
+/// Slice G1: `deleteChat` (TDLib 1.8.67, `schema/td_api.tl:11850`):
+/// `deleteChat chat_id:int53 = Ok;`
+/// "Deletes a chat along with all messages in the corresponding chat for
+/// all chat members. For group chats this will release the usernames and
+/// remove all members. Use the field chat.can_be_deleted_for_all_users to
+/// find whether the method can be applied to the chat".
+pub fn delete_chat(extra: RequestId, chat_id: i64) -> String {
+    json!({
+        "@type": "deleteChat",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id,
+    })
+    .to_string()
+}
+
+/// Slice G1: `inputTextQuote` JSON (TDLib 1.8.67, `schema/td_api.tl:3056`):
+/// `inputTextQuote text:formattedText position:int32 = InputTextQuote;`
+/// `position` is the offset of the quoted text in the original message in
+/// UTF-16 code units.
+pub fn input_text_quote_json(text: &str, position: i32) -> Value {
+    json!({
+        "@type": "inputTextQuote",
+        "text": {
+            "@type": "formattedText",
+            "text": text,
+            "entities": []
+        },
+        "position": position,
+    })
+}
+
+/// Slice G1: reply target for the send builders — a message id plus an
+/// optional validated partial quote (`inputTextQuote`, schema 1.8.67
+/// line 3056). Replaces bare `Option<MessageId>` wherever a send can
+/// carry a quote.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SendReply {
+    pub message_id: MessageId,
+    pub quote: Option<(String, i32)>,
+}
+
+impl SendReply {
+    pub fn plain(message_id: MessageId) -> Self {
+        Self {
+            message_id,
+            quote: None,
+        }
+    }
+}
+
+/// Slice G1: `reply_to` JSON for a send builder — delegates to
+/// `input_message_reply_to_with_quote` so whole-message replies keep
+/// the exact shape the old `input_message_reply_to` produced.
+fn send_reply_value(reply_to: Option<&SendReply>) -> Value {
+    input_message_reply_to_with_quote(
+        reply_to.map(|reply| reply.message_id),
+        reply_to.and_then(|reply| {
+            reply
+                .quote
+                .as_ref()
+                .map(|(text, position)| (text.as_str(), *position))
+        }),
+    )
+}
+
+/// Slice G1: same-chat reply with an optional quote (TDLib 1.8.67,
+/// `schema/td_api.tl:3086`):
+/// `inputMessageReplyToMessage message_id:int53 quote:inputTextQuote
+/// checklist_task_id:int32 poll_option_id:string = InputMessageReplyTo;`
+/// `quote` is null for a whole-message reply.
+pub fn input_message_reply_to_with_quote(
+    message_id: Option<MessageId>,
+    quote: Option<(&str, i32)>,
+) -> Value {
+    match message_id {
+        None => Value::Null,
+        Some(id) => json!({
+            "@type": "inputMessageReplyToMessage",
+            "message_id": id.0,
+            "quote": quote.map(|(text, position)| input_text_quote_json(text, position)).unwrap_or(Value::Null),
+            "checklist_task_id": 0,
+            "poll_option_id": ""
+        }),
+    }
 }
 
 /// Phase D3c: `chatEventLogFilters` (TDLib 1.8.67,
@@ -1950,7 +2285,7 @@ pub fn set_chat_draft_message(
     extra: RequestId,
     chat_id: ChatId,
     text: Option<&str>,
-    reply_to: Option<MessageId>,
+    reply_to: Option<&SendReply>,
 ) -> String {
     let draft_message = match text {
         None if reply_to.is_none() => Value::Null,
@@ -1958,7 +2293,7 @@ pub fn set_chat_draft_message(
             let body = text.unwrap_or("");
             json!({
                 "@type": "draftMessage",
-                "reply_to": input_message_reply_to(reply_to),
+                "reply_to": send_reply_value(reply_to),
                 "date": 0,
                 "content": {
                     "@type": "draftMessageContentText",
@@ -1982,20 +2317,6 @@ pub fn set_chat_draft_message(
         "draft_message": draft_message,
     })
     .to_string()
-}
-
-/// Same-chat reply: schema `inputMessageReplyToMessage` (quote null = whole message).
-pub fn input_message_reply_to(message_id: Option<MessageId>) -> Value {
-    match message_id {
-        None => Value::Null,
-        Some(id) => json!({
-            "@type": "inputMessageReplyToMessage",
-            "message_id": id.0,
-            "quote": Value::Null,
-            "checklist_task_id": 0,
-            "poll_option_id": ""
-        }),
-    }
 }
 
 /// M1: `textEntity` JSON for a parsed composer entity (TDLib 1.8.67,
@@ -2084,7 +2405,7 @@ pub fn send_text(
     chat_id: ChatId,
     topic_id: Option<i32>,
     text: &str,
-    reply_to: Option<MessageId>,
+    reply_to: Option<SendReply>,
     options: &SendOptions,
 ) -> String {
     // M1: composer markup (`**bold**` etc.) becomes `textEntities` here,
@@ -2115,7 +2436,7 @@ pub fn send_text(
         "@extra": extra.as_extra(),
         "chat_id": chat_id.0,
         "topic_id": message_topic_value(topic_id),
-        "reply_to": input_message_reply_to(reply_to),
+        "reply_to": send_reply_value(reply_to.as_ref()),
         "options": message_send_options(options),
         "reply_markup": Value::Null,
         "input_message_content": {
@@ -2234,7 +2555,7 @@ pub fn send_photo(
     topic_id: Option<i32>,
     path: &str,
     caption: &str,
-    reply_to: Option<MessageId>,
+    reply_to: Option<SendReply>,
     self_destruct: Option<SelfDestructSend>,
     strip_blockquote: bool,
 ) -> String {
@@ -2243,7 +2564,7 @@ pub fn send_photo(
         "@extra": extra.as_extra(),
         "chat_id": chat_id.0,
         "topic_id": message_topic_value(topic_id),
-        "reply_to": input_message_reply_to(reply_to),
+        "reply_to": send_reply_value(reply_to.as_ref()),
         "options": Value::Null,
         "reply_markup": Value::Null,
         "input_message_content": input_message_photo(path, caption, self_destruct, strip_blockquote)
@@ -2278,7 +2599,7 @@ pub struct StickerSend<'a> {
     pub width: i32,
     pub height: i32,
     pub thumb: Option<(FileId, i32, i32)>,
-    pub reply_to: Option<MessageId>,
+    pub reply_to: Option<SendReply>,
     /// Parity slice 4: forum topic the send is addressed to (`None` = no topic).
     pub topic_id: Option<i32>,
 }
@@ -2300,7 +2621,7 @@ pub fn send_sticker(extra: RequestId, chat_id: ChatId, sticker: StickerSend<'_>)
         "@extra": extra.as_extra(),
         "chat_id": chat_id.0,
         "topic_id": message_topic_value(sticker.topic_id),
-        "reply_to": input_message_reply_to(sticker.reply_to),
+        "reply_to": send_reply_value(sticker.reply_to.as_ref()),
         "options": Value::Null,
         "reply_markup": Value::Null,
         "input_message_content": {
@@ -2326,7 +2647,7 @@ pub struct AnimationSend {
     pub duration: i32,
     pub width: i32,
     pub height: i32,
-    pub reply_to: Option<MessageId>,
+    pub reply_to: Option<SendReply>,
     /// Parity slice 4: forum topic the send is addressed to (`None` = no topic).
     pub topic_id: Option<i32>,
 }
@@ -2347,7 +2668,7 @@ pub fn send_animation(extra: RequestId, chat_id: ChatId, animation: AnimationSen
         "@extra": extra.as_extra(),
         "chat_id": chat_id.0,
         "topic_id": message_topic_value(animation.topic_id),
-        "reply_to": input_message_reply_to(animation.reply_to),
+        "reply_to": send_reply_value(animation.reply_to.as_ref()),
         "options": Value::Null,
         "reply_markup": Value::Null,
         "input_message_content": {
@@ -2452,14 +2773,14 @@ pub fn send_video_note(
     topic_id: Option<i32>,
     path: &str,
     note: &VideoNoteSend,
-    reply_to: Option<MessageId>,
+    reply_to: Option<SendReply>,
 ) -> String {
     json!({
         "@type": "sendMessage",
         "@extra": extra.as_extra(),
         "chat_id": chat_id.0,
         "topic_id": message_topic_value(topic_id),
-        "reply_to": input_message_reply_to(reply_to),
+        "reply_to": send_reply_value(reply_to.as_ref()),
         "options": Value::Null,
         "reply_markup": Value::Null,
         "input_message_content": {
@@ -2490,7 +2811,7 @@ pub fn send_video(
     path: &str,
     video: &VideoSend,
     caption: &str,
-    reply_to: Option<MessageId>,
+    reply_to: Option<SendReply>,
     strip_blockquote: bool,
 ) -> String {
     json!({
@@ -2498,7 +2819,7 @@ pub fn send_video(
         "@extra": extra.as_extra(),
         "chat_id": chat_id.0,
         "topic_id": message_topic_value(topic_id),
-        "reply_to": input_message_reply_to(reply_to),
+        "reply_to": send_reply_value(reply_to.as_ref()),
         "options": Value::Null,
         "reply_markup": Value::Null,
         "input_message_content": input_message_video(path, video, caption, strip_blockquote)
@@ -2512,7 +2833,7 @@ pub fn send_message_album(
     extra: RequestId,
     chat_id: ChatId,
     topic_id: Option<i32>,
-    reply_to: Option<MessageId>,
+    reply_to: Option<SendReply>,
     input_message_contents: Vec<Value>,
 ) -> String {
     json!({
@@ -2520,7 +2841,7 @@ pub fn send_message_album(
         "@extra": extra.as_extra(),
         "chat_id": chat_id.0,
         "topic_id": message_topic_value(topic_id),
-        "reply_to": input_message_reply_to(reply_to),
+        "reply_to": send_reply_value(reply_to.as_ref()),
         "options": Value::Null,
         "input_message_contents": input_message_contents
     })
@@ -2535,7 +2856,7 @@ pub fn send_document(
     topic_id: Option<i32>,
     path: &str,
     caption: &str,
-    reply_to: Option<MessageId>,
+    reply_to: Option<SendReply>,
     strip_blockquote: bool,
 ) -> String {
     json!({
@@ -2543,7 +2864,7 @@ pub fn send_document(
         "@extra": extra.as_extra(),
         "chat_id": chat_id.0,
         "topic_id": message_topic_value(topic_id),
-        "reply_to": input_message_reply_to(reply_to),
+        "reply_to": send_reply_value(reply_to.as_ref()),
         "options": Value::Null,
         "reply_markup": Value::Null,
         "input_message_content": {
@@ -2590,7 +2911,7 @@ pub struct PollSend<'a> {
     pub options: &'a [&'a str],
     pub is_anonymous: bool,
     pub allows_multiple_answers: bool,
-    pub reply_to: Option<MessageId>,
+    pub reply_to: Option<SendReply>,
     /// Parity slice 4: forum topic the send is addressed to (`None` = no topic).
     pub topic_id: Option<i32>,
 }
@@ -2623,7 +2944,7 @@ pub fn send_poll(extra: RequestId, chat_id: ChatId, poll: PollSend<'_>) -> Strin
         "@extra": extra.as_extra(),
         "chat_id": chat_id.0,
         "topic_id": message_topic_value(poll.topic_id),
-        "reply_to": input_message_reply_to(poll.reply_to),
+        "reply_to": send_reply_value(poll.reply_to.as_ref()),
         "options": Value::Null,
         "reply_markup": Value::Null,
         "input_message_content": {
@@ -3068,7 +3389,7 @@ pub struct VoiceNoteSend<'a> {
     pub duration: i32,
     pub waveform_b64: &'a str,
     pub caption: &'a str,
-    pub reply_to: Option<MessageId>,
+    pub reply_to: Option<SendReply>,
     /// Parity slice 4: forum topic the send is addressed to (`None` = no topic).
     pub topic_id: Option<i32>,
 }
@@ -3091,7 +3412,7 @@ pub fn send_voice_note(extra: RequestId, chat_id: ChatId, voice: VoiceNoteSend<'
         "@extra": extra.as_extra(),
         "chat_id": chat_id.0,
         "topic_id": message_topic_value(voice.topic_id),
-        "reply_to": input_message_reply_to(voice.reply_to),
+        "reply_to": send_reply_value(voice.reply_to.as_ref()),
         "options": Value::Null,
         "reply_markup": Value::Null,
         "input_message_content": {
@@ -3554,7 +3875,7 @@ mod tests {
             ChatId(11),
             None,
             "sounds good",
-            Some(MessageId(101)),
+            Some(SendReply::plain(MessageId(101))),
             &SendOptions::default(),
         );
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
@@ -3991,7 +4312,7 @@ mod tests {
                 width: 512,
                 height: 512,
                 thumb: Some((FileId(42), 128, 128)),
-                reply_to: Some(MessageId(101)),
+                reply_to: Some(SendReply::plain(MessageId(101))),
                 topic_id: None,
             },
         );
@@ -4045,7 +4366,7 @@ mod tests {
                 duration: 2,
                 width: 240,
                 height: 140,
-                reply_to: Some(MessageId(101)),
+                reply_to: Some(SendReply::plain(MessageId(101))),
                 topic_id: None,
             },
         );
@@ -4088,7 +4409,7 @@ mod tests {
                 self_destruct: None,
             },
             "CANARY_VIDEO",
-            Some(MessageId(9)),
+            Some(SendReply::plain(MessageId(9))),
             false,
         );
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
@@ -4144,7 +4465,7 @@ mod tests {
                     height: 240,
                 }),
             },
-            Some(MessageId(9)),
+            Some(SendReply::plain(MessageId(9))),
         );
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(v["@type"], "sendMessage");
@@ -4689,7 +5010,7 @@ mod tests {
             RequestId(41),
             ChatId(11),
             Some("meet at 6"),
-            Some(MessageId(101)),
+            Some(&SendReply::plain(MessageId(101))),
         );
         let v: serde_json::Value = serde_json::from_str(&save).unwrap();
         assert_eq!(v["@type"], "setChatDraftMessage");
@@ -4714,6 +5035,30 @@ mod tests {
             "inputMessageReplyToMessage"
         );
         assert_eq!(v["draft_message"]["reply_to"]["message_id"], 101);
+        assert_eq!(
+            v["draft_message"]["reply_to"]["quote"],
+            Value::Null,
+            "whole-message draft reply carries no quote"
+        );
+        let quoted = set_chat_draft_message(
+            RequestId(43),
+            ChatId(11),
+            Some("agree"),
+            Some(&SendReply {
+                message_id: MessageId(101),
+                quote: Some(("meet at".to_string(), 0)),
+            }),
+        );
+        let v: serde_json::Value = serde_json::from_str(&quoted).unwrap();
+        assert_eq!(
+            v["draft_message"]["reply_to"]["quote"]["@type"],
+            "inputTextQuote"
+        );
+        assert_eq!(
+            v["draft_message"]["reply_to"]["quote"]["text"]["text"],
+            "meet at"
+        );
+        assert_eq!(v["draft_message"]["reply_to"]["quote"]["position"], 0);
         let clear = set_chat_draft_message(RequestId(42), ChatId(11), None, None);
         let v: serde_json::Value = serde_json::from_str(&clear).unwrap();
         assert_eq!(v["draft_message"], Value::Null);
@@ -5015,7 +5360,7 @@ mod tests {
                 duration: 3,
                 waveform_b64: "BASE64WAVE",
                 caption: "",
-                reply_to: Some(MessageId(9)),
+                reply_to: Some(SendReply::plain(MessageId(9))),
                 topic_id: None,
             },
         );
@@ -5176,7 +5521,7 @@ mod channel_requests_tests {
                 options: &options,
                 is_anonymous: true,
                 allows_multiple_answers: false,
-                reply_to: Some(MessageId(101)),
+                reply_to: Some(SendReply::plain(MessageId(101))),
                 topic_id: None,
             },
         );
@@ -5884,5 +6229,219 @@ mod channel_requests_tests {
             serde_json::from_str(&get_chat_scheduled_messages(RequestId(67), ChatId(11))).unwrap();
         assert_eq!(v["@type"], "getChatScheduledMessages");
         assert_eq!(v["chat_id"], 11);
+    }
+
+    #[test]
+    fn g1_create_shapes_match_1_8_67() {
+        // Slice G1: `createNewBasicGroupChat user_ids:vector<int53>
+        // title:string message_auto_delete_time:int32 =
+        // CreatedBasicGroupChat` (schema 1.8.67, line 13327).
+        let v: serde_json::Value = serde_json::from_str(&create_new_basic_group_chat(
+            RequestId(70),
+            &[7, 8],
+            "Study",
+        ))
+        .unwrap();
+        assert_eq!(v["@type"], "createNewBasicGroupChat");
+        assert_eq!(v["user_ids"], serde_json::json!([7, 8]));
+        assert_eq!(v["title"], "Study");
+        assert_eq!(v["message_auto_delete_time"], 0);
+
+        // Slice G1: `createNewSupergroupChat title:string is_forum:Bool
+        // is_channel:Bool description:string location:chatLocation
+        // message_auto_delete_time:int32 for_import:Bool = Chat`
+        // (schema 1.8.67, line 13337).
+        let v: serde_json::Value = serde_json::from_str(&create_new_supergroup_chat(
+            RequestId(71),
+            "News",
+            true,
+            "desc",
+        ))
+        .unwrap();
+        assert_eq!(v["@type"], "createNewSupergroupChat");
+        assert_eq!(v["title"], "News");
+        assert!(v["is_forum"].as_bool() == Some(false));
+        assert!(v["is_channel"].as_bool() == Some(true));
+        assert_eq!(v["description"], "desc");
+        assert!(v["location"].is_null());
+        assert!(v["for_import"].as_bool() == Some(false));
+    }
+
+    #[test]
+    fn g1_group_admin_shapes_match_1_8_67() {
+        // Slice G1: `toggleSupergroupIsBroadcastGroup supergroup_id:int53
+        // = Ok` (schema 1.8.67, line 15221).
+        let v: serde_json::Value =
+            serde_json::from_str(&toggle_supergroup_is_broadcast_group(RequestId(72), 13)).unwrap();
+        assert_eq!(v["@type"], "toggleSupergroupIsBroadcastGroup");
+        assert_eq!(v["supergroup_id"], 13);
+
+        // Slice G1: `addChatMembers chat_id:int53 user_ids:vector<int53>
+        // = FailedToAddMembers` (schema 1.8.67, line 13584).
+        let v: serde_json::Value =
+            serde_json::from_str(&add_chat_members(RequestId(73), 11, &[7])).unwrap();
+        assert_eq!(v["@type"], "addChatMembers");
+        assert_eq!(v["chat_id"], 11);
+        assert_eq!(v["user_ids"], serde_json::json!([7]));
+
+        // Slice G1: `setChatPermissions chat_id:int53
+        // permissions:chatPermissions = Ok` (schema 1.8.67, line 13464).
+        let perms =
+            serde_json::json!({"@type": "chatPermissions", "can_send_basic_messages": true});
+        let v: serde_json::Value =
+            serde_json::from_str(&set_chat_permissions(RequestId(74), 11, &perms)).unwrap();
+        assert_eq!(v["@type"], "setChatPermissions");
+        assert_eq!(v["permissions"]["can_send_basic_messages"], true);
+
+        // Slice G1: `replacePrimaryChatInviteLink chat_id:int53 =
+        // ChatInviteLink` (schema 1.8.67, line 14089).
+        let v: serde_json::Value =
+            serde_json::from_str(&replace_primary_chat_invite_link(RequestId(75), 11)).unwrap();
+        assert_eq!(v["@type"], "replacePrimaryChatInviteLink");
+        assert_eq!(v["chat_id"], 11);
+
+        // Slice G1: `toggleSupergroupJoinByRequest supergroup_id:int53
+        // join_by_request:Bool guard_bot_user_id:int53
+        // apply_to_invite_links:Bool = Ok` (schema 1.8.67, line 15188).
+        let v: serde_json::Value =
+            serde_json::from_str(&toggle_supergroup_join_by_request(RequestId(76), 13, true))
+                .unwrap();
+        assert_eq!(v["@type"], "toggleSupergroupJoinByRequest");
+        assert_eq!(v["supergroup_id"], 13);
+        assert!(v["join_by_request"].as_bool() == Some(true));
+        assert_eq!(v["guard_bot_user_id"], 0);
+        assert!(v["apply_to_invite_links"].as_bool() == Some(false));
+
+        // Slice G1: `setSupergroupUsername supergroup_id:int53
+        // username:string = Ok` (schema 1.8.67, line 15136).
+        let v: serde_json::Value =
+            serde_json::from_str(&set_supergroup_username(RequestId(77), 13, "news")).unwrap();
+        assert_eq!(v["@type"], "setSupergroupUsername");
+        assert_eq!(v["username"], "news");
+
+        // Slice G1: `deleteChat chat_id:int53 = Ok` (schema 1.8.67, line
+        // 11850).
+        let v: serde_json::Value = serde_json::from_str(&delete_chat(RequestId(78), 11)).unwrap();
+        assert_eq!(v["@type"], "deleteChat");
+        assert_eq!(v["chat_id"], 11);
+    }
+
+    #[test]
+    fn g1_member_status_shapes_match_1_8_67() {
+        // Slice G1: `chatMemberStatusRestricted is_member:Bool
+        // restricted_until_date:int32 permissions:chatPermissions =
+        // ChatMemberStatus` (schema 1.8.67, line 2510).
+        let perms = serde_json::json!({"@type": "chatPermissions"});
+        let v = chat_member_status_restricted_json(true, 1700000000, &perms);
+        assert_eq!(v["@type"], "chatMemberStatusRestricted");
+        assert!(v["is_member"].as_bool() == Some(true));
+        assert_eq!(v["restricted_until_date"], 1700000000);
+        assert_eq!(v["permissions"]["@type"], "chatPermissions");
+
+        // Slice G1: `chatMemberStatusBanned banned_until_date:int32 =
+        // ChatMemberStatus` (schema 1.8.67, line 2517).
+        let v = chat_member_status_banned_json(0);
+        assert_eq!(v["@type"], "chatMemberStatusBanned");
+        assert_eq!(v["banned_until_date"], 0);
+
+        // Slice G1: member-list filters (schema 1.8.67, lines 2563/2571/2574).
+        assert_eq!(
+            supergroup_members_filter_administrators_json()["@type"],
+            "supergroupMembersFilterAdministrators"
+        );
+        let v = supergroup_members_filter_restricted_json("");
+        assert_eq!(v["@type"], "supergroupMembersFilterRestricted");
+        assert_eq!(v["query"], "");
+        let v = supergroup_members_filter_banned_json("x");
+        assert_eq!(v["@type"], "supergroupMembersFilterBanned");
+        assert_eq!(v["query"], "x");
+    }
+
+    #[test]
+    fn g1_basic_group_full_info_shape_matches_1_8_67() {
+        // Slice G1: `getBasicGroupFullInfo basic_group_id:int53 =
+        // BasicGroupFullInfo` (schema 1.8.67, line 11507).
+        let v: Value = serde_json::from_str(&get_basic_group_full_info(RequestId(9), 42)).unwrap();
+        assert_eq!(v["@type"], "getBasicGroupFullInfo");
+        assert_eq!(v["basic_group_id"], 42);
+        // `addChatMember` (schema 1.8.67, line 13578).
+        let v: Value = serde_json::from_str(&add_chat_member(RequestId(9), 7, 11)).unwrap();
+        assert_eq!(v["@type"], "addChatMember");
+        assert_eq!(v["chat_id"], 7);
+        assert_eq!(v["user_id"], 11);
+    }
+
+    #[test]
+    fn g1_reply_quote_shape_matches_1_8_67() {
+        // Slice G1: `inputMessageReplyToMessage message_id:int53
+        // quote:inputTextQuote checklist_task_id:int32 poll_option_id:string
+        // = InputMessageReplyTo` (schema 1.8.67, line 3086) with
+        // `inputTextQuote text:formattedText position:int32 =
+        // InputTextQuote` (line 3056).
+        let v = input_message_reply_to_with_quote(Some(MessageId(101)), Some(("sel", 7)));
+        assert_eq!(v["@type"], "inputMessageReplyToMessage");
+        assert_eq!(v["message_id"], 101);
+        assert_eq!(v["quote"]["@type"], "inputTextQuote");
+        assert_eq!(v["quote"]["text"]["text"], "sel");
+        assert_eq!(v["quote"]["position"], 7);
+
+        // Whole-message reply keeps `quote: null` (existing behavior).
+        let v = input_message_reply_to_with_quote(Some(MessageId(101)), None);
+        assert!(v["quote"].is_null());
+        assert!(input_message_reply_to_with_quote(None, Some(("sel", 7))).is_null());
+    }
+
+    #[test]
+    fn g1_send_reply_quote_rides_send_text() {
+        // Slice G1: `SendReply` with a quote produces
+        // `inputMessageReplyToMessage` with a populated `inputTextQuote`
+        // through the `sendMessage` builder.
+        let reply = SendReply {
+            message_id: MessageId(101),
+            quote: Some(("sel".to_string(), 7)),
+        };
+        let json = send_text(
+            RequestId(1),
+            ChatId(7),
+            None,
+            "hi",
+            Some(reply),
+            &SendOptions::default(),
+        );
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["reply_to"]["@type"], "inputMessageReplyToMessage");
+        assert_eq!(v["reply_to"]["message_id"], 101);
+        assert_eq!(v["reply_to"]["quote"]["@type"], "inputTextQuote");
+        assert_eq!(v["reply_to"]["quote"]["text"]["text"], "sel");
+        assert_eq!(v["reply_to"]["quote"]["position"], 7);
+        // Plain replies keep `quote: null`.
+        let json = send_text(
+            RequestId(1),
+            ChatId(7),
+            None,
+            "hi",
+            Some(SendReply::plain(MessageId(101))),
+            &SendOptions::default(),
+        );
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert!(v["reply_to"]["quote"].is_null());
+    }
+
+    #[test]
+    fn g1_set_chat_member_tag_shape_matches_1_8_67() {
+        // Slice G1: `setChatMemberTag chat_id:int53 user_id:int53
+        // tag:string = Ok` (schema 1.8.67, line 13598) — the admin
+        // custom-title setter.
+        let json = set_chat_member_tag(RequestId(3), ChatId(7), 42, "boss");
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "setChatMemberTag");
+        assert_eq!(v["@extra"], "3");
+        assert_eq!(v["chat_id"], 7);
+        assert_eq!(v["user_id"], 42);
+        assert_eq!(v["tag"], "boss");
+        // Empty tag clears the title.
+        let json = set_chat_member_tag(RequestId(3), ChatId(7), 42, "");
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["tag"], "");
     }
 }
