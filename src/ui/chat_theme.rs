@@ -91,4 +91,3 @@ pub const BORDER_VIDEO: Rgba = hex(0x333333);
 
 // --- scrims (modal dims) ---
 pub const SCRIM: Rgba = hex_a(0x000000e6);
-pub const SCRIM_LIGHT: Rgba = hex_a(0x00000099);

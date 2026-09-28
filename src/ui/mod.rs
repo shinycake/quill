@@ -5,7 +5,9 @@ pub(crate) use chat_theme::*;
 
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
+use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::input::{InputEvent, Textarea, TextareaState};
+use gpui_kit::component::notification::Notification;
 use gpui_kit::component::slider::{Slider, SliderEvent, SliderState, SliderValue};
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
@@ -89,9 +91,11 @@ use quill::text::{TextEntity, styled_runs, utf8_to_utf16_offset};
 use quill::video::VideoNoteCapture;
 use quill::voice::{self, VoiceCapture, format_voice_duration};
 use smallvec::SmallVec;
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
+use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
@@ -885,75 +889,6 @@ pub struct LoginUrlConfirm {
     request: LoginUrlRequest,
 }
 
-/// B1: which dialog a modal backdrop click closes.
-#[derive(Clone, Copy)]
-enum B1DialogClose {
-    CallbackPassword,
-    LoginUrlConfirm,
-    /// Slice P1: the payment checkout dialog.
-    PaymentForm,
-    /// Slice P1: the payment receipt dialog.
-    PaymentReceipt,
-}
-
-/// B1: centered modal shell for the bot-keyboard dialogs (mirrors the
-/// `g1_modal` visuals): a backdrop sibling closes on click, the panel
-/// never bubbles into it.
-fn b1_modal(
-    id_prefix: &str,
-    close: B1DialogClose,
-    title: &str,
-    body: AnyElement,
-    cx: &mut Context<QuillApp>,
-) -> AnyElement {
-    let title = title.to_string();
-    div()
-        .id(format!("{id_prefix}-overlay"))
-        .absolute()
-        .top_0()
-        .left_0()
-        .right_0()
-        .bottom_0()
-        .flex()
-        .items_center()
-        .justify_center()
-        .child(
-            div()
-                .id(format!("{id_prefix}-backdrop"))
-                .absolute()
-                .top_0()
-                .left_0()
-                .right_0()
-                .bottom_0()
-                .bg(SCRIM)
-                .on_click(cx.listener(move |this, _, _, cx| match close {
-                    B1DialogClose::CallbackPassword => this.close_callback_password_dialog(cx),
-                    B1DialogClose::LoginUrlConfirm => {
-                        this.login_url_confirm = None;
-                        cx.notify();
-                    }
-                    B1DialogClose::PaymentForm => this.close_payment_dialog(cx),
-                    B1DialogClose::PaymentReceipt => this.close_payment_receipt(cx),
-                })),
-        )
-        .child(
-            div()
-                .id(format!("{id_prefix}-panel"))
-                .flex()
-                .flex_col()
-                .gap_3()
-                .p_5()
-                .rounded_lg()
-                .bg(BG_CANVAS)
-                .border_1()
-                .border_color(BORDER)
-                .w(px(420.))
-                .child(div().text_lg().font_semibold().child(title))
-                .child(body),
-        )
-        .into_any_element()
-}
-
 impl MemberDialog {
     fn new(
         window: &mut Window,
@@ -1141,26 +1076,7 @@ pub struct GroupConfirmDialog {
 
 /// Slice G1: which close action a modal dialog's backdrop / close
 /// button runs.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum G1DialogClose {
-    CreateChat,
-    Member,
-    Permissions,
-    Username,
-    Restrict,
-    GroupConfirm,
-    QuoteReply,
-    /// Slice G2: forum-topic management dialog.
-    ForumManage,
-    /// Slice G2: channel-post comment-thread viewer.
-    CommentThread,
-    /// B4: poll voter-list viewer.
-    PollVoters,
-    /// Slice G2: chat welcome-message editor.
-    WelcomeMessage,
-    /// Slice A6: vCard import dialog.
-    ImportContacts,
-}
+#[derive(Debug, Clone, PartialEq, Eq)]
 
 /// Slice G1: partial-quote dialog (message menu → "Quote reply").
 /// The input is prefilled with the message's full text; the user
@@ -1657,10 +1573,7 @@ pub struct QuillApp {
     status_note: String,
     /// Phase 1 (kit adoption): the note text a dismiss timer is already armed
     /// for. The permanent debug status bar is gone; `status_note` now shows
-    /// as an auto-dismissing toast pill instead.
-    toast_armed_for: String,
-    toast_seq: u64,
-    /// Screenshot / synthetic demo: show the matching auth field without a live client.
+    /// as a kit notification (auto-dismissing) instead.    /// Screenshot / synthetic demo: show the matching auth field without a live client.
     demo_auth_inputs: bool,
     /// Screenshot Ready list: same reducers as live, injected JSON only.
     demo_session: Option<Session>,
@@ -4134,8 +4047,6 @@ impl QuillApp {
             connect_status,
             live,
             status_note,
-            toast_armed_for: String::new(),
-            toast_seq: 0,
             demo_auth_inputs: matches!(
                 demo,
                 Some(
@@ -7619,140 +7530,6 @@ impl QuillApp {
             _ => None,
         }
     }
-    fn scheduled_dialog(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let messages: Vec<ParsedMessage> = self
-            .session()
-            .map(|session| session.scheduled_messages.clone())
-            .unwrap_or_default();
-        let mut list = div().id("scheduled-list").flex().flex_col().gap_1();
-        if messages.is_empty() {
-            list = list.child(
-                div()
-                    .text_sm()
-                    .text_color(cx.theme().muted_foreground)
-                    .child("No scheduled messages."),
-            );
-        }
-        for message in messages {
-            let id = message.id;
-            let preview = effective_content(&message.content, message.ephemeral.as_ref()).preview();
-            let label = scheduled_message_label(&message);
-            // M1: scheduled sends are the user's own — editing routes
-            // through the same composer edit flow with `scheduled: true`
-            // so `edit_snapshot` validates against the scheduled list.
-            let edit = ComposerEdit::from_own_content(
-                message.chat_id,
-                message.id,
-                true,
-                false,
-                &message.content,
-            )
-            .map(|mut edit| {
-                edit.scheduled = true;
-                edit
-            });
-            let mut row = div()
-                .id(("scheduled-row", id.0 as u64))
-                .flex()
-                .items_center()
-                .justify_between()
-                .gap_2()
-                .px_2()
-                .py_1()
-                .rounded_md()
-                .bg(cx.theme().sidebar)
-                .child(
-                    div()
-                        .flex()
-                        .flex_col()
-                        .min_w_0()
-                        .child(div().text_sm().child(preview))
-                        .child(
-                            div()
-                                .text_xs()
-                                .text_color(cx.theme().muted_foreground)
-                                .child(label),
-                        ),
-                );
-            if let Some(edit) = edit {
-                row = row.child(
-                    Button::new(format!("scheduled-edit-{}", id.0))
-                        .label("Edit")
-                        .ghost()
-                        .on_click(cx.listener(move |this, _, window, cx| {
-                            this.scheduled_dialog_open = false;
-                            this.begin_edit(edit.clone(), window, cx);
-                        })),
-                );
-            }
-            list = list.child(
-                row.child(
-                    Button::new(format!("scheduled-delete-{}", id.0))
-                        .label("Delete")
-                        .ghost()
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.delete_scheduled_message(id, cx);
-                        })),
-                ),
-            );
-        }
-        div()
-            .id("scheduled-overlay")
-            .absolute()
-            .top_0()
-            .left_0()
-            .right_0()
-            .bottom_0()
-            .flex()
-            .items_center()
-            .justify_center()
-            .child(
-                div()
-                    .id("scheduled-backdrop")
-                    .absolute()
-                    .top_0()
-                    .left_0()
-                    .right_0()
-                    .bottom_0()
-                    .bg(SCRIM_LIGHT)
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.scheduled_dialog_open = false;
-                        cx.notify();
-                    })),
-            )
-            .child(
-                div()
-                    .id("scheduled-panel")
-                    .flex()
-                    .flex_col()
-                    .gap_2()
-                    .px_4()
-                    .py_3()
-                    .rounded_lg()
-                    .border_1()
-                    .border_color(cx.theme().border)
-                    .bg(cx.theme().background)
-                    .min_w(px(420.))
-                    .max_h(px(480.))
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .justify_between()
-                            .child(div().font_semibold().child("Scheduled messages"))
-                            .child(
-                                Button::new("scheduled-close")
-                                    .label("Close")
-                                    .ghost()
-                                    .on_click(cx.listener(|this, _, _, cx| {
-                                        this.scheduled_dialog_open = false;
-                                        cx.notify();
-                                    })),
-                            ),
-                    )
-                    .child(list),
-            )
-    }
 
     fn apply_demo_album(
         &mut self,
@@ -8673,80 +8450,6 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// Slice P1: the checkout dialog. Renders from the session's
-    /// `payment_form` — the single source of truth; the text inputs live in
-    /// `self.payment_dialog`.
-    fn payment_dialog_overlay(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let session = self.session()?;
-        if session.payment_form.is_none() && !session.payment_form_loading {
-            return None;
-        }
-        let dialog = self.payment_dialog.as_ref()?;
-        let mut body = div().flex().flex_col().gap_3();
-        if session.payment_form_loading {
-            body = body.child(div().text_sm().child("Loading payment form…"));
-        }
-        if let Some(note) = &session.payment_note {
-            body = body.child(
-                div()
-                    .text_sm()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(note.clone()),
-            );
-        }
-        let Some(form) = session.payment_form.as_ref() else {
-            return Some(b1_modal(
-                "p1-payment",
-                B1DialogClose::PaymentForm,
-                "Checkout",
-                body.into_any_element(),
-                cx,
-            ));
-        };
-        match &form.form_type {
-            PaymentFormTypeData::Stars { star_count } => {
-                body = body.child(div().text_sm().child(format!(
-                    "This invoice asks for {star_count} Telegram Stars — Stars checkout is not supported in this slice."
-                )));
-            }
-            PaymentFormTypeData::StarSubscription => {
-                body = body.child(
-                    div()
-                        .text_sm()
-                        .child("Star subscriptions are not supported in this slice."),
-                );
-            }
-            PaymentFormTypeData::Unknown => {
-                body =
-                    body.child(div().text_sm().child(
-                        "This invoice uses a payment form type this client doesn't support.",
-                    ));
-            }
-            PaymentFormTypeData::Regular(regular) => {
-                body = self.payment_form_body(
-                    body,
-                    form,
-                    dialog,
-                    &regular.invoice,
-                    &regular.provider,
-                    &regular.additional_options,
-                    &regular.saved_credentials,
-                    regular.can_save_credentials,
-                    regular.need_password,
-                    session,
-                    cx,
-                );
-            }
-        }
-        Some(b1_modal(
-            "p1-payment",
-            B1DialogClose::PaymentForm,
-            "Checkout",
-            body.into_any_element(),
-            cx,
-        ))
-    }
-
     /// Slice P1: the regular-form checkout body (split out so
     /// `payment_dialog_overlay` stays readable).
     #[allow(clippy::too_many_arguments)]
@@ -9063,80 +8766,14 @@ impl QuillApp {
         body = body.child(if session.payment_sending {
             pay.label("Processing…").disabled(true)
         } else if can_pay {
-            pay.on_click(cx.listener(|this, _, _, cx| {
+            pay.on_click(cx.listener(|this, _, window, cx| {
                 this.submit_payment(cx);
+                this.close_kit_dialog_if_done(DialogKind::PaymentForm, window, cx);
             }))
         } else {
             pay.disabled(true)
         });
         body
-    }
-
-    /// Slice P1: the `paymentReceipt` dialog (schema:4765).
-    fn payment_receipt_overlay(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let session = self.session()?;
-        if !session.payment_receipt_open {
-            return None;
-        }
-        let receipt = session.payment_receipt.as_ref()?;
-        let total = if receipt.is_stars {
-            format!("{} Stars", receipt.star_count)
-        } else {
-            format_payment_price(&receipt.currency, receipt.total_amount)
-        };
-        let mut body = div()
-            .flex()
-            .flex_col()
-            .gap_2()
-            .child(
-                div()
-                    .text_sm()
-                    .font_semibold()
-                    .child(format!("🧾 {}", receipt.product_title)),
-            )
-            .child(
-                div()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(format_unix_date_time(receipt.date as i64)),
-            )
-            .child(
-                div()
-                    .flex()
-                    .justify_between()
-                    .text_sm()
-                    .child(div().child("Total"))
-                    .child(div().font_semibold().child(total)),
-            );
-        if !receipt.credentials_title.is_empty() {
-            body = body.child(
-                div()
-                    .flex()
-                    .justify_between()
-                    .text_sm()
-                    .child(div().child("Paid with"))
-                    .child(div().child(receipt.credentials_title.clone())),
-            );
-        }
-        if receipt.tip_amount > 0 {
-            body = body.child(
-                div()
-                    .flex()
-                    .justify_between()
-                    .text_sm()
-                    .child(div().child("Tip"))
-                    .child(
-                        div().child(format_payment_price(&receipt.currency, receipt.tip_amount)),
-                    ),
-            );
-        }
-        Some(b1_modal(
-            "p1-receipt",
-            B1DialogClose::PaymentReceipt,
-            "Payment receipt",
-            body.into_any_element(),
-            cx,
-        ))
     }
 
     /// Slice P1: "View receipt" on a paid invoice — `getPaymentReceipt`
@@ -9551,133 +9188,6 @@ impl QuillApp {
     fn set_status_note(&mut self, note: &str, cx: &mut Context<Self>) {
         self.status_note = note.into();
         cx.notify();
-    }
-
-    /// B1: dispatch to whichever bot-keyboard dialog is open.
-    fn b1_dialogs_overlay(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        if self.callback_password_dialog.is_some() {
-            return Some(self.callback_password_dialog_overlay(cx));
-        }
-        if self.login_url_confirm.is_some() {
-            return Some(self.login_url_confirm_overlay(cx));
-        }
-        // Slice P1: the payment checkout + receipt dialogs.
-        if let Some(overlay) = self.payment_dialog_overlay(cx) {
-            return Some(overlay);
-        }
-        if let Some(overlay) = self.payment_receipt_overlay(cx) {
-            return Some(overlay);
-        }
-        None
-    }
-
-    /// B1: password-prompt modal for `CallbackWithPassword` presses.
-    fn callback_password_dialog_overlay(&self, cx: &mut Context<Self>) -> AnyElement {
-        let dialog = self
-            .callback_password_dialog
-            .as_ref()
-            .expect("b1_dialogs_overlay checked is_some");
-        let body = div()
-            .flex()
-            .flex_col()
-            .gap_3()
-            .child(
-                div()
-                    .text_sm()
-                    .text_color(TEXT_MUTED)
-                    .child("This button is protected by your two-step verification password."),
-            )
-            .child(Textarea::new(&dialog.password_input).h(px(40.)))
-            .child(
-                div()
-                    .flex()
-                    .justify_end()
-                    .gap_2()
-                    .child(
-                        Button::new("b1-password-cancel")
-                            .label("Cancel")
-                            .ghost()
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.close_callback_password_dialog(cx);
-                            })),
-                    )
-                    .child(
-                        Button::new("b1-password-submit")
-                            .label("Send")
-                            .primary()
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.submit_callback_password_dialog(cx);
-                            })),
-                    ),
-            )
-            .into_any_element();
-        b1_modal(
-            "b1-callback-password",
-            B1DialogClose::CallbackPassword,
-            "Enter 2-step password",
-            body,
-            cx,
-        )
-    }
-
-    /// B1: `loginUrlInfoRequestConfirmation` consent dialog — shows the
-    /// TDLib-reported domain before fetching the authorized URL.
-    fn login_url_confirm_overlay(&self, cx: &mut Context<Self>) -> AnyElement {
-        let confirm = self.login_url_confirm.as_ref();
-        let domain = confirm
-            .map(|confirm| confirm.domain.clone())
-            .unwrap_or_default();
-        let request_write_access = confirm
-            .map(|confirm| confirm.request_write_access)
-            .unwrap_or(false);
-        let mut body =
-            div()
-                .flex()
-                .flex_col()
-                .gap_3()
-                .child(div().text_sm().text_color(TEXT_MUTED).child(format!(
-                    "The bot wants to open a login URL for {domain}. Open it in your browser?"
-                )));
-        if request_write_access {
-            body = body.child(
-                div()
-                    .text_sm()
-                    .text_color(TEXT_MUTED)
-                    .child("The bot also asks for permission to send you messages."),
-            );
-        }
-        let body = body
-            .child(
-                div()
-                    .flex()
-                    .justify_end()
-                    .gap_2()
-                    .child(
-                        Button::new("b1-login-cancel")
-                            .label("Cancel")
-                            .ghost()
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.login_url_confirm = None;
-                                cx.notify();
-                            })),
-                    )
-                    .child(
-                        Button::new("b1-login-open")
-                            .label("Open")
-                            .primary()
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.confirm_login_url(cx);
-                            })),
-                    ),
-            )
-            .into_any_element();
-        b1_modal(
-            "b1-login-url",
-            B1DialogClose::LoginUrlConfirm,
-            "Open login URL?",
-            body,
-            cx,
-        )
     }
 
     /// B1: one custom keyboard button. `Text` sends the text; `WebApp` opens
@@ -11448,7 +10958,7 @@ impl QuillApp {
         let extract_path = path.clone();
         let task_slot = slot.clone();
         let task_cancel = cancel.clone();
-        cx.spawn(async move |this, cx| {
+        let _ = cx.spawn(async move |this, cx| {
             let extracted = cx
                 .background_executor()
                 .spawn(async move {
@@ -14577,17 +14087,6 @@ impl QuillApp {
         body.into_any_element()
     }
 
-    /// B4: the poll voters dialog overlay (`g1_modal` shell).
-    fn poll_voters_dialog_overlay(&self, cx: &mut Context<Self>) -> AnyElement {
-        self.g1_modal(
-            "poll-voters",
-            G1DialogClose::PollVoters,
-            "Poll voters",
-            self.poll_voters_dialog_body(cx),
-            cx,
-        )
-    }
-
     /// Slice G2: open the welcome-message editor and load the pack.
     fn open_welcome_dialog(
         &mut self,
@@ -17356,121 +16855,3099 @@ impl QuillApp {
     /// labels (`SettingsArchiveChatListController`). TGX's fourth
     /// "archive as folder" appearance toggle is a client-side display
     /// preference and stays out of scope.
-    fn archive_settings_overlay(&self, cx: &mut Context<Self>) -> AnyElement {
-        let settings = self.session().and_then(|s| s.archive_chat_list_settings);
-        let loading = self.session().is_some_and(|s| s.archive_settings_loading);
-        let mut body = div().flex().flex_col().gap_3();
-        if loading {
-            body = body.child(
+    /// kit Phase 2 (redo): explicit in-dialog actions (Cancel, Close,
+    /// successful submits) must close the kit dialog immediately rather
+    /// than waiting for the shell sync. The kit's `close_dialog` does not
+    /// run `on_close`, so the action itself clears the app-side open flag
+    /// first; this closes the kit dialog only when the flag is actually
+    /// cleared — validation failures and non-closing actions keep the
+    /// dialog open.
+    fn close_kit_dialog_if_done(&self, kind: DialogKind, window: &mut Window, cx: &mut App) {
+        if !QuillShell::dialog_is_open(self, kind) {
+            window.close_dialog(cx);
+        }
+    }
+
+    /// kit Phase 2 (redo): scheduled messages hosted in a kit `Dialog`
+    /// via `window.open_dialog`. Esc / backdrop / ✕ clear state via
+    /// `on_close`.
+    fn build_scheduled_dialog(
+        app: &Entity<QuillApp>,
+        shell: &Entity<QuillShell>,
+        dialog: Dialog,
+        cx: &mut App,
+    ) -> Dialog {
+        let on_close =
+            QuillShell::on_close_kind(app, shell, DialogKind::Scheduled, |this, _, cx| {
+                this.scheduled_dialog_open = false;
+                cx.notify();
+            });
+        app.update(cx, |this, cx| {
+            let dialog = dialog.overlay(true).title("Scheduled messages");
+            let body = this.scheduled_dialog_body(cx);
+            dialog
+                .content({
+                    // `content` needs an `Fn` closure, but the body is built once
+                    // per dialog render — hand it over through a one-shot cell.
+                    let body = Rc::new(RefCell::new(Some(body.into_any_element())));
+                    move |content, _, _| {
+                        let body = body
+                            .borrow_mut()
+                            .take()
+                            .unwrap_or_else(|| div().into_any_element());
+                        content.child(body)
+                    }
+                })
+                .on_close(on_close)
+        })
+    }
+
+    /// kit Phase 2 (redo): list body extracted from the old
+    /// `scheduled_dialog` — kept pure (no custom scrim/panel).
+    fn scheduled_dialog_body(&self, cx: &mut Context<Self>) -> AnyElement {
+        let messages: Vec<ParsedMessage> = self
+            .session()
+            .map(|session| session.scheduled_messages.clone())
+            .unwrap_or_default();
+        let mut list = div()
+            .id("scheduled-list")
+            .flex()
+            .flex_col()
+            .gap_1()
+            .max_h(px(360.))
+            .overflow_y_scroll();
+        if messages.is_empty() {
+            list = list.child(
                 div()
-                    .text_xs()
+                    .text_sm()
                     .text_color(cx.theme().muted_foreground)
-                    .child("Loading archive settings…"),
+                    .child("No scheduled messages."),
             );
-        } else if settings.is_none() {
-            body = body
+        }
+        for message in messages {
+            let id = message.id;
+            let preview = effective_content(&message.content, message.ephemeral.as_ref()).preview();
+            let label = scheduled_message_label(&message);
+            // M1: scheduled sends are the user's own — editing routes
+            // through the same composer edit flow with `scheduled: true`
+            // so `edit_snapshot` validates against the scheduled list.
+            let edit = ComposerEdit::from_own_content(
+                message.chat_id,
+                message.id,
+                true,
+                false,
+                &message.content,
+            )
+            .map(|mut edit| {
+                edit.scheduled = true;
+                edit
+            });
+            let mut row = div()
+                .id(("scheduled-row", id.0 as u64))
+                .flex()
+                .items_center()
+                .justify_between()
+                .gap_2()
+                .px_2()
+                .py_1()
+                .rounded_md()
+                .bg(cx.theme().sidebar)
                 .child(
-                    div()
-                        .text_xs()
-                        .text_color(cx.theme().muted_foreground)
-                        .child("Could not load archive settings."),
-                )
-                .child(
-                    Button::new("archive-settings-retry")
-                        .label("Retry")
-                        .ghost()
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.open_archive_settings(cx);
-                        })),
-                );
-        } else {
-            let settings = settings.expect("checked");
-            for (index, (title, label, desc)) in ARCHIVE_SETTING_ROWS.iter().enumerate() {
-                let enabled = archive_setting_get(&settings, index);
-                body = body.child(
                     div()
                         .flex()
                         .flex_col()
-                        .gap_1()
-                        .child(div().text_xs().font_semibold().child(*title))
-                        .child(
-                            Button::new(format!("archive-setting-{index}"))
-                                .label(if enabled {
-                                    format!("☑ {label}")
-                                } else {
-                                    format!("☐ {label}")
-                                })
-                                .ghost()
-                                .on_click(cx.listener(move |this, _, _, cx| {
-                                    this.toggle_archive_setting(index, cx);
-                                })),
-                        )
+                        .min_w_0()
+                        .child(div().text_sm().child(preview))
                         .child(
                             div()
                                 .text_xs()
                                 .text_color(cx.theme().muted_foreground)
-                                .child(*desc),
+                                .child(label),
+                        ),
+                );
+            if let Some(edit) = edit {
+                row = row.child(
+                    Button::new(format!("scheduled-edit-{}", id.0))
+                        .label("Edit")
+                        .ghost()
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            this.scheduled_dialog_open = false;
+                            this.begin_edit(edit.clone(), window, cx);
+                            this.close_kit_dialog_if_done(DialogKind::Scheduled, window, cx);
+                        })),
+                );
+            }
+            list = list.child(
+                row.child(
+                    Button::new(format!("scheduled-delete-{}", id.0))
+                        .label("Delete")
+                        .ghost()
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.delete_scheduled_message(id, cx);
+                        })),
+                ),
+            );
+        }
+        list.into_any_element()
+    }
+
+    /// kit Phase 2 (redo): payment checkout hosted in a kit `Dialog` via
+    /// `window.open_dialog`. Esc / backdrop / ✕ clear state via `on_close`.
+    fn build_payment_dialog(
+        app: &Entity<QuillApp>,
+        shell: &Entity<QuillShell>,
+        dialog: Dialog,
+        cx: &mut App,
+    ) -> Dialog {
+        let on_close =
+            QuillShell::on_close_kind(app, shell, DialogKind::PaymentForm, |this, _, cx| {
+                this.close_payment_dialog(cx);
+            });
+        app.update(cx, |this, cx| {
+            let dialog = dialog.overlay(true).title("Checkout");
+            let Some(session) = this.session() else {
+                return dialog.on_close(on_close.clone());
+            };
+            if session.payment_form.is_none() && !session.payment_form_loading {
+                return dialog.on_close(on_close.clone());
+            }
+            let Some(dialog_state) = this.payment_dialog.as_ref() else {
+                return dialog.on_close(on_close.clone());
+            };
+            let mut body = div().flex().flex_col().gap_3();
+            if session.payment_form_loading {
+                body = body.child(div().text_sm().child("Loading payment form…"));
+            }
+            if let Some(note) = &session.payment_note {
+                body = body.child(
+                    div()
+                        .text_sm()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(note.clone()),
+                );
+            }
+            let Some(form) = session.payment_form.as_ref() else {
+                let body = body.into_any_element();
+                return dialog
+                    .content({
+                        // `content` needs an `Fn` closure, but the body is built once
+                        // per dialog render — hand it over through a one-shot cell.
+                        let body = Rc::new(RefCell::new(Some(body.into_any_element())));
+                        move |content, _, _| {
+                            let body = body.borrow_mut().take().unwrap_or_else(|| div().into_any_element());
+                            content.child(body)
+                        }
+                    })
+                    .on_close(on_close);
+            };
+            match &form.form_type {
+                PaymentFormTypeData::Stars { star_count } => {
+                    body = body.child(div().text_sm().child(format!(
+                        "This invoice asks for {star_count} Telegram Stars — Stars checkout is not supported in this slice."
+                    )));
+                }
+                PaymentFormTypeData::StarSubscription => {
+                    body = body.child(
+                        div()
+                            .text_sm()
+                            .child("Star subscriptions are not supported in this slice."),
+                    );
+                }
+                PaymentFormTypeData::Unknown => {
+                    body =
+                        body.child(div().text_sm().child(
+                            "This invoice uses a payment form type this client doesn't support.",
+                        ));
+                }
+                PaymentFormTypeData::Regular(regular) => {
+                    body = this.payment_form_body(
+                        body,
+                        form,
+                        dialog_state,
+                        &regular.invoice,
+                        &regular.provider,
+                        &regular.additional_options,
+                        &regular.saved_credentials,
+                        regular.can_save_credentials,
+                        regular.need_password,
+                        &session,
+                        cx,
+                    );
+                }
+            }
+            let body = body.into_any_element();
+            dialog
+                .content({
+                    // `content` needs an `Fn` closure, but the body is built once
+                    // per dialog render — hand it over through a one-shot cell.
+                    let body = Rc::new(RefCell::new(Some(body.into_any_element())));
+                    move |content, _, _| {
+                        let body = body.borrow_mut().take().unwrap_or_else(|| div().into_any_element());
+                        content.child(body)
+                    }
+                })
+                .on_close(on_close)
+        })
+    }
+
+    /// kit Phase 2 (redo): payment receipt hosted in a kit `Dialog` via
+    /// `window.open_dialog`. Esc / backdrop / ✕ clear state via `on_close`.
+    fn build_payment_receipt_dialog(
+        app: &Entity<QuillApp>,
+        shell: &Entity<QuillShell>,
+        dialog: Dialog,
+        cx: &mut App,
+    ) -> Dialog {
+        let on_close =
+            QuillShell::on_close_kind(app, shell, DialogKind::PaymentReceipt, |this, _, cx| {
+                this.close_payment_receipt(cx);
+            });
+        app.update(cx, |this, cx| {
+            let dialog = dialog.overlay(true).title("Payment receipt");
+            let session = this.session();
+            let receipt = session.as_ref().and_then(|s| s.payment_receipt.as_ref());
+            let Some(receipt) = receipt else {
+                return dialog.on_close(on_close);
+            };
+            let total = if receipt.is_stars {
+                format!("{} Stars", receipt.star_count)
+            } else {
+                format_payment_price(&receipt.currency, receipt.total_amount)
+            };
+            let mut body = div()
+                .flex()
+                .flex_col()
+                .gap_2()
+                .child(
+                    div()
+                        .text_sm()
+                        .font_semibold()
+                        .child(format!("🧾 {}", receipt.product_title)),
+                )
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(format_unix_date_time(receipt.date as i64)),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .justify_between()
+                        .text_sm()
+                        .child(div().child("Total"))
+                        .child(div().font_semibold().child(total)),
+                );
+            if !receipt.credentials_title.is_empty() {
+                body = body.child(
+                    div()
+                        .flex()
+                        .justify_between()
+                        .text_sm()
+                        .child(div().child("Paid with"))
+                        .child(div().child(receipt.credentials_title.clone())),
+                );
+            }
+            if receipt.tip_amount > 0 {
+                body = body.child(
+                    div()
+                        .flex()
+                        .justify_between()
+                        .text_sm()
+                        .child(div().child("Tip"))
+                        .child(
+                            div()
+                                .child(format_payment_price(&receipt.currency, receipt.tip_amount)),
                         ),
                 );
             }
-        }
-        div()
-            .id("archive-settings-overlay")
-            .absolute()
-            .top_0()
-            .left_0()
-            .right_0()
-            .bottom_0()
-            .flex()
-            .items_center()
-            .justify_center()
-            .child(
-                div()
-                    .id("archive-settings-backdrop")
-                    .absolute()
-                    .top_0()
-                    .left_0()
-                    .right_0()
-                    .bottom_0()
-                    .bg(SCRIM)
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.set_archive_settings_open(false);
-                        cx.notify();
+            let body = body.into_any_element();
+            dialog
+                .content({
+                    // `content` needs an `Fn` closure, but the body is built once
+                    // per dialog render — hand it over through a one-shot cell.
+                    let body = Rc::new(RefCell::new(Some(body.into_any_element())));
+                    move |content, _, _| {
+                        let body = body
+                            .borrow_mut()
+                            .take()
+                            .unwrap_or_else(|| div().into_any_element());
+                        content.child(body)
+                    }
+                })
+                .on_close(on_close)
+        })
+    }
+
+    /// kit Phase 2 (redo): callback password hosted in a kit `Dialog`
+    /// via `window.open_dialog`. Esc / backdrop / ✕ clear state via `on_close`.
+    fn build_callback_password_dialog(
+        app: &Entity<QuillApp>,
+        shell: &Entity<QuillShell>,
+        dialog: Dialog,
+        cx: &mut App,
+    ) -> Dialog {
+        let on_close =
+            QuillShell::on_close_kind(app, shell, DialogKind::CallbackPassword, |this, _, cx| {
+                this.close_callback_password_dialog(cx);
+            });
+        app.update(cx, |this, cx| {
+            let Some(dialog_state) = this.callback_password_dialog.as_ref() else {
+                return dialog
+                    .overlay(true)
+                    .title("Enter 2-step password")
+                    .on_close(on_close.clone());
+            };
+            let body = div()
+                .flex()
+                .flex_col()
+                .gap_3()
+                .child(
+                    div()
+                        .text_sm()
+                        .text_color(TEXT_MUTED)
+                        .child("This button is protected by your two-step verification password."),
+                )
+                .child(Textarea::new(&dialog_state.password_input).h(px(40.)))
+                .into_any_element();
+            let footer = div()
+                .flex()
+                .justify_end()
+                .gap_2()
+                .child(
+                    Button::new("b1-password-cancel")
+                        .label("Cancel")
+                        .ghost()
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.close_callback_password_dialog(cx);
+                            this.close_kit_dialog_if_done(DialogKind::CallbackPassword, window, cx);
+                        })),
+                )
+                .child(
+                    Button::new("b1-password-submit")
+                        .label("Send")
+                        .primary()
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.submit_callback_password_dialog(cx);
+                            this.close_kit_dialog_if_done(DialogKind::CallbackPassword, window, cx);
+                        })),
+                );
+            dialog
+                .overlay(true)
+                .title("Enter 2-step password")
+                .content({
+                    // `content` needs an `Fn` closure, but the body is built once
+                    // per dialog render — hand it over through a one-shot cell.
+                    let body = Rc::new(RefCell::new(Some(body.into_any_element())));
+                    move |content, _, _| {
+                        let body = body
+                            .borrow_mut()
+                            .take()
+                            .unwrap_or_else(|| div().into_any_element());
+                        content.child(body)
+                    }
+                })
+                .footer(footer)
+                .on_close(on_close)
+        })
+    }
+
+    /// kit Phase 2 (redo): login URL confirm hosted in a kit `Dialog`
+    /// via `window.open_dialog`. Esc / backdrop / ✕ clear state via `on_close`.
+    fn build_login_url_confirm_dialog(
+        app: &Entity<QuillApp>,
+        shell: &Entity<QuillShell>,
+        dialog: Dialog,
+        cx: &mut App,
+    ) -> Dialog {
+        let on_close =
+            QuillShell::on_close_kind(app, shell, DialogKind::LoginUrlConfirm, |this, _, cx| {
+                this.login_url_confirm = None;
+                cx.notify();
+            });
+        app.update(cx, |this, cx| {
+            let confirm = this.login_url_confirm.as_ref();
+            let domain = confirm
+                .map(|confirm| confirm.domain.clone())
+                .unwrap_or_default();
+            let request_write_access = confirm
+                .map(|confirm| confirm.request_write_access)
+                .unwrap_or(false);
+            let mut body = div().flex().flex_col().gap_3().child(
+                div().text_sm().text_color(TEXT_MUTED).child(format!(
+                    "The bot wants to open a login URL for {domain}. Open it in your browser?"
+                )),
+            );
+            if request_write_access {
+                body = body.child(
+                    div()
+                        .text_sm()
+                        .text_color(TEXT_MUTED)
+                        .child("The bot also asks for permission to send you messages."),
+                );
+            }
+            let body = body.into_any_element();
+            let footer = div()
+                .flex()
+                .justify_end()
+                .gap_2()
+                .child(
+                    Button::new("b1-login-cancel")
+                        .label("Cancel")
+                        .ghost()
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.login_url_confirm = None;
+                            cx.notify();
+                            this.close_kit_dialog_if_done(DialogKind::LoginUrlConfirm, window, cx);
+                        })),
+                )
+                .child(
+                    Button::new("b1-login-open")
+                        .label("Open")
+                        .primary()
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.confirm_login_url(cx);
+                            this.close_kit_dialog_if_done(DialogKind::LoginUrlConfirm, window, cx);
+                        })),
+                );
+            dialog
+                .overlay(true)
+                .title("Open login URL?")
+                .content({
+                    // `content` needs an `Fn` closure, but the body is built once
+                    // per dialog render — hand it over through a one-shot cell.
+                    let body = Rc::new(RefCell::new(Some(body.into_any_element())));
+                    move |content, _, _| {
+                        let body = body
+                            .borrow_mut()
+                            .take()
+                            .unwrap_or_else(|| div().into_any_element());
+                        content.child(body)
+                    }
+                })
+                .footer(footer)
+                .on_close(on_close)
+        })
+    }
+
+    /// kit Phase 2 (redo): poll voters hosted in a kit `Dialog` via
+    /// `window.open_dialog`. Esc / backdrop / ✕ clear state via `on_close`.
+    fn build_poll_voters_dialog(
+        app: &Entity<QuillApp>,
+        shell: &Entity<QuillShell>,
+        dialog: Dialog,
+        cx: &mut App,
+    ) -> Dialog {
+        let on_close =
+            QuillShell::on_close_kind(app, shell, DialogKind::PollVoters, |this, _, cx| {
+                this.close_poll_voters_dialog(cx);
+            });
+        app.update(cx, |this, cx| {
+            let body = this.poll_voters_dialog_body(cx);
+            dialog
+                .overlay(true)
+                .title("Poll voters")
+                .content({
+                    // `content` needs an `Fn` closure, but the body is built once
+                    // per dialog render — hand it over through a one-shot cell.
+                    let body = Rc::new(RefCell::new(Some(body.into_any_element())));
+                    move |content, _, _| {
+                        let body = body
+                            .borrow_mut()
+                            .take()
+                            .unwrap_or_else(|| div().into_any_element());
+                        content.child(body)
+                    }
+                })
+                .on_close(on_close)
+        })
+    }
+
+    /// kit Phase 2 (redo): import contacts hosted in a kit `Dialog` via
+    /// `window.open_dialog`. Esc / backdrop / ✕ clear state via `on_close`.
+    fn build_import_contacts_dialog(
+        app: &Entity<QuillApp>,
+        shell: &Entity<QuillShell>,
+        dialog: Dialog,
+        cx: &mut App,
+    ) -> Dialog {
+        let on_close =
+            QuillShell::on_close_kind(app, shell, DialogKind::ImportContacts, |this, _, cx| {
+                this.close_import_contacts_dialog(cx);
+            });
+        app.update(cx, |this, cx| {
+            let dialog = dialog.overlay(true).title("Import contacts");
+            let Some(dialog_state) = this.import_contacts_dialog.as_ref() else {
+                return dialog.on_close(on_close);
+            };
+            let body = div()
+                .flex()
+                .flex_col()
+                .gap_2()
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child("Paste the contents of a .vcf file. Only cards with a phone number are imported."),
+                )
+                .child(
+                    div()
+                        .flex_1()
+                        .child(Textarea::new(&dialog_state.input).h(px(220.))),
+                )
+                .into_any_element();
+            let footer = div().flex().justify_end().gap_2().child(
+                Button::new("import-contacts-cancel")
+                    .label("Cancel")
+                    .ghost()
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.close_import_contacts_dialog(cx);
+                        this.close_kit_dialog_if_done(DialogKind::ImportContacts, window, cx);
                     })),
-            )
-            .child(
+            ).child(
+                Button::new("import-contacts-submit")
+                    .label("Import")
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.submit_import_contacts_dialog(window, cx);
+                        this.close_kit_dialog_if_done(DialogKind::ImportContacts, window, cx);
+                    })),
+            );
+            dialog
+                .content({
+                    // `content` needs an `Fn` closure, but the body is built once
+                    // per dialog render — hand it over through a one-shot cell.
+                    let body = Rc::new(RefCell::new(Some(body.into_any_element())));
+                    move |content, _, _| {
+                        let body = body.borrow_mut().take().unwrap_or_else(|| div().into_any_element());
+                        content.child(body)
+                    }
+                })
+                .footer(footer)
+                .on_close(on_close)
+        })
+    }
+
+    /// kit Phase 2 (redo): add contact hosted in a kit `Dialog` via
+    /// `window.open_dialog`. Esc / backdrop / ✕ clear state via `on_close`.
+    fn build_add_contact_dialog(
+        app: &Entity<QuillApp>,
+        shell: &Entity<QuillShell>,
+        dialog: Dialog,
+        cx: &mut App,
+    ) -> Dialog {
+        let on_close =
+            QuillShell::on_close_kind(app, shell, DialogKind::AddContact, |this, _, cx| {
+                this.close_add_contact_dialog(cx);
+            });
+        app.update(cx, |this, cx| {
+            let Some(dialog_state) = this.add_contact_dialog.as_ref() else {
+                return dialog.overlay(true).title("Add contact").on_close(on_close);
+            };
+            let name = this
+                .session()
+                .and_then(|s| s.user(dialog_state.user_id))
+                .map(|u| u.display_name())
+                .unwrap_or_else(|| format!("User {}", dialog_state.user_id));
+            let body = div()
+                .flex()
+                .flex_col()
+                .gap_2()
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap_1()
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(cx.theme().muted_foreground)
+                                .child("Phone number"),
+                        )
+                        .child(Textarea::new(&dialog_state.phone_input).h(px(40.))),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap_1()
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(cx.theme().muted_foreground)
+                                .child("First name"),
+                        )
+                        .child(Textarea::new(&dialog_state.first_name_input).h(px(40.))),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap_1()
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(cx.theme().muted_foreground)
+                                .child("Last name"),
+                        )
+                        .child(Textarea::new(&dialog_state.last_name_input).h(px(40.))),
+                )
+                .into_any_element();
+            let footer = div()
+                .flex()
+                .gap_2()
+                .child(
+                    Button::new("add-contact-submit")
+                        .label("Add contact")
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.submit_add_contact_dialog(window, cx);
+                            this.close_kit_dialog_if_done(DialogKind::AddContact, window, cx);
+                        })),
+                )
+                .child(
+                    Button::new("add-contact-cancel")
+                        .label("Cancel")
+                        .ghost()
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.close_add_contact_dialog(cx);
+                            this.close_kit_dialog_if_done(DialogKind::AddContact, window, cx);
+                        })),
+                );
+            dialog
+                .overlay(true)
+                .title(format!("Add {name} to contacts"))
+                .content({
+                    // `content` needs an `Fn` closure, but the body is built once
+                    // per dialog render — hand it over through a one-shot cell.
+                    let body = Rc::new(RefCell::new(Some(body.into_any_element())));
+                    move |content, _, _| {
+                        let body = body
+                            .borrow_mut()
+                            .take()
+                            .unwrap_or_else(|| div().into_any_element());
+                        content.child(body)
+                    }
+                })
+                .footer(footer)
+                .on_close(on_close)
+        })
+    }
+
+    /// kit Phase 2 (redo): edit profile hosted in a kit `Dialog` via
+    /// `window.open_dialog`. Esc / backdrop / ✕ clear state via `on_close`.
+    fn build_edit_profile_dialog(
+        app: &Entity<QuillApp>,
+        shell: &Entity<QuillShell>,
+        dialog: Dialog,
+        cx: &mut App,
+    ) -> Dialog {
+        let on_close =
+            QuillShell::on_close_kind(app, shell, DialogKind::EditProfile, |this, _, cx| {
+                this.close_edit_profile_dialog(cx);
+            });
+        app.update(cx, |this, cx| {
+            let dialog = dialog.overlay(true).title("Edit profile");
+            let Some(body) = this.edit_profile_dialog_body(cx) else {
+                return dialog.on_close(on_close);
+            };
+            let footer = div().flex().justify_end().child(
+                Button::new("edit-profile-close")
+                    .label("Done")
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.close_edit_profile_dialog(cx);
+                        this.close_kit_dialog_if_done(DialogKind::EditProfile, window, cx);
+                    })),
+            );
+            dialog
+                .content({
+                    // `content` needs an `Fn` closure, but the body is built once
+                    // per dialog render — hand it over through a one-shot cell.
+                    let body = Rc::new(RefCell::new(Some(body.into_any_element())));
+                    move |content, _, _| {
+                        let body = body
+                            .borrow_mut()
+                            .take()
+                            .unwrap_or_else(|| div().into_any_element());
+                        content.child(body)
+                    }
+                })
+                .footer(footer)
+                .on_close(on_close)
+        })
+    }
+
+    /// kit Phase 2 (redo): group-call start hosted in a kit `Dialog` via
+    /// `window.open_dialog`. Esc / backdrop / ✕ clear state via `on_close`.
+    fn build_group_call_start_dialog(
+        app: &Entity<QuillApp>,
+        shell: &Entity<QuillShell>,
+        dialog: Dialog,
+        cx: &mut App,
+    ) -> Dialog {
+        let on_close =
+            QuillShell::on_close_kind(app, shell, DialogKind::GroupCallStart, |this, _, cx| {
+                this.close_group_call_start_dialog(cx);
+            });
+        app.update(cx, |this, cx| {
+            let Some(dialog_state) = this.group_call_start_dialog.as_ref() else {
+                return dialog
+                    .overlay(true)
+                    .title("Start voice chat")
+                    .on_close(on_close.clone());
+            };
+            let selected = dialog_state.schedule_offset;
+            let mut presets = div().flex().flex_wrap().gap_2();
+            for (offset, label) in GROUP_CALL_SCHEDULE_PRESETS {
+                let active = offset == selected;
+                presets = presets.child(
+                    Button::new(format!("group-call-start-preset-{offset}"))
+                        .label(label)
+                        .when(!active, |b| b.ghost())
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            this.set_group_call_start_schedule(offset, cx);
+                            this.close_kit_dialog_if_done(DialogKind::GroupCallStart, window, cx);
+                        })),
+                );
+            }
+            let body = div()
+                .flex()
+                .flex_col()
+                .gap_3()
+                .child(Textarea::new(&dialog_state.title_input).h(px(40.)))
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child("When should it start?"),
+                )
+                .child(presets)
+                .into_any_element();
+            let footer = div()
+                .flex()
+                .gap_2()
+                .child(
+                    Button::new("group-call-start-confirm")
+                        .label(if selected == 0 {
+                            "Start now"
+                        } else {
+                            "Schedule"
+                        })
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.confirm_group_call_start(cx);
+                            this.close_kit_dialog_if_done(DialogKind::GroupCallStart, window, cx);
+                        })),
+                )
+                .child(
+                    Button::new("group-call-start-cancel")
+                        .label("Cancel")
+                        .ghost()
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.close_group_call_start_dialog(cx);
+                            this.close_kit_dialog_if_done(DialogKind::GroupCallStart, window, cx);
+                        })),
+                );
+            dialog
+                .overlay(true)
+                .title("Start voice chat")
+                .content({
+                    let body = Rc::new(RefCell::new(Some(body.into_any_element())));
+                    move |content, _, _| {
+                        let body = body
+                            .borrow_mut()
+                            .take()
+                            .unwrap_or_else(|| div().into_any_element());
+                        content.child(body)
+                    }
+                })
+                .footer(footer)
+                .on_close(on_close)
+        })
+    }
+
+    /// kit Phase 2 (redo): folder editor hosted in a kit `Dialog` via
+    /// `window.open_dialog`. Esc / backdrop / ✕ clear state via `on_close`.
+    /// The existing `folder_editor_panel` builds the form (stripped of its
+    /// old modal chrome/title, which the kit `Dialog` now provides);
+    /// Cancel/Save live in the dialog footer.
+    fn build_folder_editor_dialog(
+        app: &Entity<QuillApp>,
+        shell: &Entity<QuillShell>,
+        dialog: Dialog,
+        cx: &mut App,
+    ) -> Dialog {
+        let on_close =
+            QuillShell::on_close_kind(app, shell, DialogKind::FolderEditor, |this, _, cx| {
+                this.folder_editor = None;
+                cx.notify();
+            });
+        app.update(cx, |this, cx| {
+            let title = match this.folder_editor.as_ref().and_then(|d| d.folder_id) {
+                Some(_) => "Edit folder",
+                None => "New folder",
+            };
+            let body = this.folder_editor_panel(cx);
+            let footer = div()
+                .flex()
+                .justify_end()
+                .gap_2()
+                .child(
+                    Button::new("folder-editor-cancel")
+                        .label("Cancel")
+                        .ghost()
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.folder_editor = None;
+                            cx.notify();
+                            this.close_kit_dialog_if_done(DialogKind::FolderEditor, window, cx);
+                        })),
+                )
+                .child(
+                    Button::new("folder-editor-save")
+                        .label("Save")
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.save_folder_editor(cx);
+                            this.close_kit_dialog_if_done(DialogKind::FolderEditor, window, cx);
+                        })),
+                );
+            dialog
+                .overlay(true)
+                .title(title)
+                .content({
+                    let body = Rc::new(RefCell::new(Some(body.into_any_element())));
+                    move |content, _, _| {
+                        let body = body
+                            .borrow_mut()
+                            .take()
+                            .unwrap_or_else(|| div().into_any_element());
+                        content.child(body)
+                    }
+                })
+                .footer(footer)
+                .on_close(on_close)
+        })
+    }
+
+    /// kit Phase 2 (redo): folder delete confirm hosted in a kit `Dialog`
+    /// via `window.open_dialog`. Esc / backdrop / ✕ clear state via
+    /// `on_close`.
+    fn build_folder_delete_dialog(
+        app: &Entity<QuillApp>,
+        shell: &Entity<QuillShell>,
+        dialog: Dialog,
+        cx: &mut App,
+    ) -> Dialog {
+        let on_close =
+            QuillShell::on_close_kind(app, shell, DialogKind::FolderDelete, |this, _, cx| {
+                this.folder_delete_confirm = None;
+                cx.notify();
+            });
+        app.update(cx, |this, cx| {
+            let Some(confirm) = this.folder_delete_confirm.as_ref() else {
+                return dialog
+                    .overlay(true)
+                    .title("Delete folder")
+                    .on_close(on_close.clone());
+            };
+            let leave_count = this
+                .session()
+                .and_then(|s| s.folder_chats_to_leave.get(&confirm.folder_id))
+                .map(|ids| ids.len())
+                .unwrap_or(0);
+            let leave_label = if leave_count > 0 {
+                format!(
+                    "{} Also leave {leave_count} suggested chat{}",
+                    if confirm.leave_with_folder {
+                        "☑"
+                    } else {
+                        "☐"
+                    },
+                    if leave_count == 1 { "" } else { "s" },
+                )
+            } else {
+                "Also leave suggested chats".to_string()
+            };
+            let body = div()
+                .flex()
+                .flex_col()
+                .gap_2()
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child("Chats stay in your main list unless you leave them."),
+                )
+                .child(
+                    Button::new("folder-delete-leave-toggle")
+                        .label(leave_label)
+                        .ghost()
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            if let Some(confirm) = this.folder_delete_confirm.as_mut() {
+                                confirm.leave_with_folder = !confirm.leave_with_folder;
+                            }
+                            cx.notify();
+                            this.close_kit_dialog_if_done(DialogKind::FolderDelete, window, cx);
+                        })),
+                )
+                .into_any_element();
+            let footer = div()
+                .flex()
+                .justify_end()
+                .gap_2()
+                .child(
+                    Button::new("folder-delete-cancel")
+                        .label("Cancel")
+                        .ghost()
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.folder_delete_confirm = None;
+                            cx.notify();
+                            this.close_kit_dialog_if_done(DialogKind::FolderDelete, window, cx);
+                        })),
+                )
+                .child(
+                    Button::new("folder-delete-confirm")
+                        .label("Delete")
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.confirm_folder_delete(cx);
+                            this.close_kit_dialog_if_done(DialogKind::FolderDelete, window, cx);
+                        })),
+                );
+            let title = format!("Delete “{}”?", confirm.name);
+            dialog
+                .overlay(true)
+                .title(title)
+                .content({
+                    let body = Rc::new(RefCell::new(Some(body.into_any_element())));
+                    move |content, _, _| {
+                        let body = body
+                            .borrow_mut()
+                            .take()
+                            .unwrap_or_else(|| div().into_any_element());
+                        content.child(body)
+                    }
+                })
+                .footer(footer)
+                .on_close(on_close)
+        })
+    }
+
+    /// kit Phase 2 (redo): folder manager hosted in a kit `Dialog` via
+    /// `window.open_dialog`. Esc / backdrop / ✕ clear state via `on_close`.
+    fn build_folder_manage_dialog(
+        app: &Entity<QuillApp>,
+        shell: &Entity<QuillShell>,
+        dialog: Dialog,
+        cx: &mut App,
+    ) -> Dialog {
+        let on_close =
+            QuillShell::on_close_kind(app, shell, DialogKind::FolderManage, |this, _, cx| {
+                this.close_folder_manage(cx);
+            });
+        app.update(cx, |this, cx| {
+            let session = this.session();
+            let tags_enabled = session.as_ref().is_some_and(|s| s.are_folder_tags_enabled);
+            let folders: Vec<(i32, String, usize)> = session
+                .as_ref()
+                .map(|s| {
+                    s.chat_folders
+                        .iter()
+                        .map(|f| {
+                            let count = s
+                                .chats
+                                .values()
+                                .filter(|c| c.folder_positions.contains_key(&f.id))
+                                .count();
+                            (f.id, f.name.clone(), count)
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            let mut list = div()
+                .id("folder-manage-list")
+                .flex()
+                .flex_col()
+                .gap_1()
+                .max_h(px(300.))
+                .overflow_y_scroll();
+            if folders.is_empty() {
+                list = list.child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child("No folders yet. Create one to organize your chats."),
+                );
+            }
+            for (index, (folder_id, name, count)) in folders.iter().enumerate() {
+                let folder_id = *folder_id;
+                let is_first = index == 0;
+                let is_last = index + 1 == folders.len();
+                let name_label = format!("{name} ({count})");
+                list = list.child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .gap_2()
+                        .px_2()
+                        .py_1()
+                        .rounded_md()
+                        .child(div().text_sm().font_medium().child(name_label))
+                        .child(
+                            div()
+                                .flex()
+                                .gap_1()
+                                .child(
+                                    Button::new(format!("folder-up-{folder_id}"))
+                                        .label("↑")
+                                        .ghost()
+                                        .when(is_first, |this| this.disabled(true))
+                                        .on_click(cx.listener(move |this, _, window, cx| {
+                                            this.move_folder(folder_id, true, cx);
+                                            this.close_kit_dialog_if_done(
+                                                DialogKind::FolderManage,
+                                                window,
+                                                cx,
+                                            );
+                                        })),
+                                )
+                                .child(
+                                    Button::new(format!("folder-down-{folder_id}"))
+                                        .label("↓")
+                                        .ghost()
+                                        .when(is_last, |this| this.disabled(true))
+                                        .on_click(cx.listener(move |this, _, window, cx| {
+                                            this.move_folder(folder_id, false, cx);
+                                            this.close_kit_dialog_if_done(
+                                                DialogKind::FolderManage,
+                                                window,
+                                                cx,
+                                            );
+                                        })),
+                                )
+                                .child(
+                                    Button::new(format!("folder-edit-{folder_id}"))
+                                        .label("Edit")
+                                        .ghost()
+                                        .on_click(cx.listener(move |this, _, window, cx| {
+                                            this.open_folder_edit(folder_id, window, cx);
+                                            this.close_kit_dialog_if_done(
+                                                DialogKind::FolderManage,
+                                                window,
+                                                cx,
+                                            );
+                                        })),
+                                )
+                                .child(
+                                    Button::new(format!("folder-delete-{folder_id}"))
+                                        .label("Delete")
+                                        .ghost()
+                                        .on_click(cx.listener(move |this, _, window, cx| {
+                                            this.open_folder_delete(folder_id, cx);
+                                            this.close_kit_dialog_if_done(
+                                                DialogKind::FolderManage,
+                                                window,
+                                                cx,
+                                            );
+                                        })),
+                                ),
+                        ),
+                );
+            }
+            let body = div()
+                .flex()
+                .flex_col()
+                .gap_2()
+                .child(list)
+                .child(
+                    div().flex().items_center().gap_2().child(
+                        Button::new("folder-tags-toggle")
+                            .label(if tags_enabled {
+                                "☑ Show folder tags"
+                            } else {
+                                "☐ Show folder tags"
+                            })
+                            .ghost()
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.toggle_folder_tags_ui(cx);
+                                this.close_kit_dialog_if_done(DialogKind::FolderManage, window, cx);
+                            })),
+                    ),
+                )
+                .child(
+                    Button::new("folder-create")
+                        .label("New folder")
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.open_folder_create(window, cx);
+                            this.close_kit_dialog_if_done(DialogKind::FolderManage, window, cx);
+                        })),
+                )
+                .into_any_element();
+            dialog
+                .overlay(true)
+                .title("Folders")
+                .content({
+                    let body = Rc::new(RefCell::new(Some(body.into_any_element())));
+                    move |content, _, _| {
+                        let body = body
+                            .borrow_mut()
+                            .take()
+                            .unwrap_or_else(|| div().into_any_element());
+                        content.child(body)
+                    }
+                })
+                .on_close(on_close)
+        })
+    }
+
+    /// kit Phase 2 (redo): call confirm hosted in a kit `Dialog` via
+    /// `window.open_dialog`. Esc / backdrop / ✕ clear state via `on_close`.
+    fn build_call_confirm_dialog(
+        app: &Entity<QuillApp>,
+        shell: &Entity<QuillShell>,
+        dialog: Dialog,
+        cx: &mut App,
+    ) -> Dialog {
+        let on_close =
+            QuillShell::on_close_kind(app, shell, DialogKind::CallConfirm, |this, _, cx| {
+                this.cancel_pending_call(cx);
+            });
+        app.update(cx, |this, cx| {
+            let Some((user_id, is_video)) = this.call_confirm else {
+                return dialog
+                    .overlay(true)
+                    .title("Confirm call")
+                    .on_close(on_close.clone());
+            };
+            let name = this
+                .session()
+                .and_then(|session| session.user(user_id))
+                .map(|user| user.display_name())
+                .unwrap_or_else(|| format!("User {user_id}"));
+            let kind = if is_video { "video call" } else { "call" };
+            let body = div()
+                .flex()
+                .flex_col()
+                .gap_2()
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child("You asked to confirm before calling."),
+                )
+                .into_any_element();
+            let footer = div()
+                .flex()
+                .justify_end()
+                .gap_2()
+                .child(
+                    Button::new("call-confirm-cancel")
+                        .label("Cancel")
+                        .ghost()
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.cancel_pending_call(cx);
+                            this.close_kit_dialog_if_done(DialogKind::CallConfirm, window, cx);
+                        })),
+                )
+                .child(
+                    Button::new("call-confirm-ok")
+                        .label(if is_video { "Video call" } else { "Call" })
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.confirm_pending_call(cx);
+                            this.close_kit_dialog_if_done(DialogKind::CallConfirm, window, cx);
+                        })),
+                );
+            dialog
+                .overlay(true)
+                .title(format!("Start {kind} with {name}?"))
+                .content({
+                    let body = Rc::new(RefCell::new(Some(body.into_any_element())));
+                    move |content, _, _| {
+                        let body = body
+                            .borrow_mut()
+                            .take()
+                            .unwrap_or_else(|| div().into_any_element());
+                        content.child(body)
+                    }
+                })
+                .footer(footer)
+                .on_close(on_close)
+        })
+    }
+
+    /// kit Phase 2 (redo): notification defaults hosted in a kit `Dialog`
+    /// via `window.open_dialog`. Esc / backdrop / ✕ clear state via `on_close`.
+    fn build_notification_defaults_dialog(
+        app: &Entity<QuillApp>,
+        shell: &Entity<QuillShell>,
+        dialog: Dialog,
+        cx: &mut App,
+    ) -> Dialog {
+        let on_close = QuillShell::on_close_kind(
+            app,
+            shell,
+            DialogKind::NotificationDefaults,
+            |this, _, cx| {
+                this.notification_defaults_open = false;
+                this.defaults_sound_picker = None;
+                cx.notify();
+            },
+        );
+        app.update(cx, |this, cx| {
+            let session = this.session();
+            let saved_sounds: Vec<NotificationSound> = session
+                .as_ref()
+                .map(|s| s.saved_notification_sounds.clone())
+                .unwrap_or_default();
+            let mut body = div().flex().flex_col().gap_3();
+            body = body.child(
                 div()
-                    .id("archive-settings-dialog")
-                    .flex()
-                    .flex_col()
-                    .gap_2()
-                    .px_4()
-                    .py_3()
-                    .rounded_lg()
-                    .bg(cx.theme().sidebar)
-                    .border_1()
-                    .border_color(cx.theme().border)
-                    .min_w(px(360.))
-                    .max_w(px(480.))
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
                     .child(
+                        "Used when a chat keeps the default setting. \
+                         Changes apply via setScopeNotificationSettings.",
+                    ),
+            );
+            for scope in NotificationSettingsScope::ALL {
+                body = body.child(this.scope_settings_section(cx, scope, &saved_sounds));
+            }
+            let footer = div().flex().justify_end().child(
+                Button::new("close-notif-defaults")
+                    .label("Close")
+                    .ghost()
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.notification_defaults_open = false;
+                        this.defaults_sound_picker = None;
+                        cx.notify();
+                        this.close_kit_dialog_if_done(DialogKind::NotificationDefaults, window, cx);
+                    })),
+            );
+            dialog
+                .overlay(true)
+                .title("Notification defaults")
+                .content({
+                    // `content` needs an `Fn` closure, but the body is built once
+                    // per dialog render — hand it over through a one-shot cell.
+                    let body = Rc::new(RefCell::new(Some(body.into_any_element())));
+                    move |content, _, _| {
+                        let body = body
+                            .borrow_mut()
+                            .take()
+                            .unwrap_or_else(|| div().into_any_element());
+                        content.child(body)
+                    }
+                })
+                .footer(footer)
+                .on_close(on_close)
+        })
+    }
+
+    /// kit Phase 2 (redo): storage usage hosted in a kit `Dialog` via
+    /// `window.open_dialog`. Esc / backdrop / ✕ clear state via `on_close`.
+    fn build_storage_usage_dialog(
+        app: &Entity<QuillApp>,
+        shell: &Entity<QuillShell>,
+        dialog: Dialog,
+        cx: &mut App,
+    ) -> Dialog {
+        let on_close =
+            QuillShell::on_close_kind(app, shell, DialogKind::StorageUsage, |this, _, cx| {
+                this.storage_usage_open = false;
+                cx.notify();
+            });
+        app.update(cx, |this, cx| {
+            let session = this.session();
+            let stats = session.as_ref().and_then(|s| s.storage_stats.clone());
+            let loading = session.is_some_and(|s| s.storage_stats_loading);
+            let mut body = div().flex().flex_col().gap_2();
+            match stats {
+                None => {
+                    body = body.child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(if loading {
+                                "Loading…"
+                            } else {
+                                "No storage data yet."
+                            }),
+                    );
+                }
+                Some(stats) => {
+                    body = body.child(
                         div()
                             .flex()
                             .items_center()
                             .justify_between()
-                            .child(div().font_semibold().child("Archive settings"))
+                            .child(div().font_semibold().text_sm().child("Total"))
+                            .child(div().text_sm().child(format_bytes(stats.total_size))),
+                    );
+                    for (label, size, count) in
+                        quill::telegram::envelope::storage_category_rows(&stats)
+                    {
+                        body = body.child(
+                            div()
+                                .id(format!("storage-row-{label}"))
+                                .flex()
+                                .items_center()
+                                .justify_between()
+                                .gap_2()
+                                .child(div().text_sm().child(label))
+                                .child(
+                                    div()
+                                        .text_xs()
+                                        .text_color(cx.theme().muted_foreground)
+                                        .child(format!("{count} files · {}", format_bytes(size))),
+                                ),
+                        );
+                    }
+                }
+            }
+            let footer = div()
+                .flex()
+                .justify_end()
+                .gap_2()
+                .child(
+                    Button::new("storage-refresh")
+                        .label("Refresh")
+                        .ghost()
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.refresh_storage_usage(cx);
+                            this.close_kit_dialog_if_done(DialogKind::StorageUsage, window, cx);
+                        })),
+                )
+                .child(
+                    Button::new("close-storage-usage")
+                        .label("Close")
+                        .ghost()
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.storage_usage_open = false;
+                            cx.notify();
+                            this.close_kit_dialog_if_done(DialogKind::StorageUsage, window, cx);
+                        })),
+                );
+            dialog
+                .overlay(true)
+                .title("Storage usage")
+                .content({
+                    // `content` needs an `Fn` closure, but the body is built once
+                    // per dialog render — hand it over through a one-shot cell.
+                    let body = Rc::new(RefCell::new(Some(body.into_any_element())));
+                    move |content, _, _| {
+                        let body = body
+                            .borrow_mut()
+                            .take()
+                            .unwrap_or_else(|| div().into_any_element());
+                        content.child(body)
+                    }
+                })
+                .footer(footer)
+                .on_close(on_close)
+        })
+    }
+
+    /// kit Phase 2 (redo): two-step verification hosted in a kit `Dialog`
+    /// via `window.open_dialog`. Esc / backdrop / ✕ clear state via `on_close`.
+    fn build_twofa_dialog(
+        app: &Entity<QuillApp>,
+        shell: &Entity<QuillShell>,
+        dialog: Dialog,
+        cx: &mut App,
+    ) -> Dialog {
+        let on_close =
+            QuillShell::on_close_kind(app, shell, DialogKind::TwoFa, |this, window, cx| {
+                this.close_twofa(window, cx);
+            });
+        app.update(cx, |this, cx| {
+            let session = this.session();
+            let state = session.as_ref().and_then(|s| s.password_state.clone());
+            let loading = session.is_some_and(|s| s.password_state_loading);
+            let error = session.as_ref().and_then(|s| s.password_op_error.clone());
+            let mut body = div().flex().flex_col().gap_2();
+            if let Some(line) = error {
+                body = body.child(
+                    div()
+                        .text_xs()
+                        .text_color(DANGER)
+                        .child(format!("Error: {line}")),
+                );
+            }
+            body = match (this.twofa_view, state) {
+                (TwofaView::Status, None) => body.child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(if loading {
+                            "Loading…"
+                        } else {
+                            "No two-step verification data yet."
+                        }),
+                ),
+                (TwofaView::Status, Some(state)) => {
+                    this.twofa_status_body(cx, body, &state, loading)
+                }
+                (TwofaView::Enable, _) => this.twofa_enable_body(cx, body),
+                (TwofaView::Change, _) => this.twofa_change_body(cx, body),
+                (TwofaView::Disable, _) => this.twofa_disable_body(cx, body),
+                (TwofaView::Email, _) => this.twofa_email_body(cx, body),
+            };
+            let footer = div().flex().justify_end().child(
+                Button::new("close-twofa")
+                    .label("Close")
+                    .ghost()
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.close_twofa(window, cx);
+                        this.close_kit_dialog_if_done(DialogKind::TwoFa, window, cx);
+                    })),
+            );
+            dialog
+                .overlay(true)
+                .title("Two-Step Verification")
+                .content({
+                    // `content` needs an `Fn` closure, but the body is built once
+                    // per dialog render — hand it over through a one-shot cell.
+                    let body = Rc::new(RefCell::new(Some(body.into_any_element())));
+                    move |content, _, _| {
+                        let body = body
+                            .borrow_mut()
+                            .take()
+                            .unwrap_or_else(|| div().into_any_element());
+                        content.child(body)
+                    }
+                })
+                .footer(footer)
+                .on_close(on_close)
+        })
+    }
+
+    /// kit Phase 2 (redo): sessions hosted in a kit `Dialog` via
+    /// `window.open_dialog`. Esc / backdrop / ✕ clear state via `on_close`.
+    fn build_sessions_dialog(
+        app: &Entity<QuillApp>,
+        shell: &Entity<QuillShell>,
+        dialog: Dialog,
+        cx: &mut App,
+    ) -> Dialog {
+        let on_close =
+            QuillShell::on_close_kind(app, shell, DialogKind::Sessions, |this, _, cx| {
+                this.close_sessions(cx);
+            });
+        app.update(cx, |this, cx| {
+            let session = this.session();
+            let sessions = session
+                .as_ref()
+                .and_then(|s| s.sessions.clone())
+                .unwrap_or_default();
+            let loading = session.is_some_and(|s| s.sessions_loading);
+            let mutating = session.is_some_and(|s| s.sessions_mutating);
+            let stale = session.is_some_and(|s| s.sessions_stale);
+            let error = session.as_ref().and_then(|s| s.sessions_error.clone());
+            let current = sessions.iter().find(|s| s.is_current);
+            let mut incomplete: Vec<&ParsedSession> = sessions
+                .iter()
+                .filter(|s| !s.is_current && s.is_password_pending)
+                .collect();
+            incomplete.sort_by(|a, b| b.last_active_date.cmp(&a.last_active_date));
+            let mut others: Vec<&ParsedSession> = sessions
+                .iter()
+                .filter(|s| !s.is_current && !s.is_password_pending)
+                .collect();
+            others.sort_by(|a, b| b.last_active_date.cmp(&a.last_active_date));
+
+            let mut body = div().flex().flex_col().gap_2();
+            if let Some(line) = error {
+                body = body.child(
+                    div()
+                        .text_xs()
+                        .text_color(DANGER)
+                        .child(format!("Error: {line}")),
+                );
+            }
+            if let Some(confirm) = this.sessions_confirm {
+                body = body.child(this.sessions_confirm_banner(confirm, mutating, cx));
+            }
+            if sessions.is_empty() {
+                body = body.child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(if loading {
+                            "Loading…"
+                        } else {
+                            "No session data yet."
+                        }),
+                );
+            } else {
+                // A terminate just landed: the old list stays visible while
+                // the authoritative refetch is in flight (never an optimistic
+                // delete).
+                if stale && loading {
+                    body = body.child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("Refreshing…"),
+                    );
+                }
+                if let Some(current) = current {
+                    body = body
+                        .child(
+                            div()
+                                .text_xs()
+                                .font_medium()
+                                .text_color(cx.theme().muted_foreground)
+                                .child("Current session"),
+                        )
+                        .child(this.session_row(current, mutating, true, cx));
+                }
+                if !incomplete.is_empty() {
+                    body = body
+                        .child(
+                            div()
+                                .text_xs()
+                                .font_medium()
+                                .text_color(cx.theme().muted_foreground)
+                                .child("Incomplete Login Attempts"),
+                        )
+                        .child(
+                            div().text_xs().text_color(cx.theme().muted_foreground).child(
+                                "The devices above have no access to your messages. The code was entered correctly, but no correct password was given.",
+                            ),
+                        );
+                    for s in incomplete {
+                        body = body.child(this.session_row(s, mutating, false, cx));
+                    }
+                }
+                if !others.is_empty() {
+                    body = body.child(
+                        div()
+                            .text_xs()
+                            .font_medium()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("Other sessions"),
+                    );
+                    for s in others {
+                        body = body.child(this.session_row(s, mutating, true, cx));
+                    }
+                }
+                let any_other = sessions.iter().any(|s| !s.is_current);
+                body = body.child(
+                    div().flex().justify_end().child(
+                        Button::new("terminate-all-sessions")
+                            .label("Terminate All Other Sessions")
+                            .danger()
+                            .disabled(!any_other || mutating)
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.begin_terminate_all_sessions(cx);
+                                this.close_kit_dialog_if_done(DialogKind::Sessions, window, cx);
+                            })),
+                    ),
+                );
+            }
+            let footer = div().flex().justify_end().gap_2().child(
+                Button::new("sessions-refresh")
+                    .label("Refresh")
+                    .ghost()
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.refresh_sessions(cx);
+                        this.close_kit_dialog_if_done(DialogKind::Sessions, window, cx);
+                    })),
+            ).child(
+                Button::new("close-sessions")
+                    .label("Close")
+                    .ghost()
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.close_sessions(cx);
+                        this.close_kit_dialog_if_done(DialogKind::Sessions, window, cx);
+                    })),
+            );
+            dialog
+                .overlay(true)
+                .title("Active Sessions")
+                .content({
+                    // `content` needs an `Fn` closure, but the body is built once
+                    // per dialog render — hand it over through a one-shot cell.
+                    let body = Rc::new(RefCell::new(Some(body.into_any_element())));
+                    move |content, _, _| {
+                        let body = body.borrow_mut().take().unwrap_or_else(|| div().into_any_element());
+                        content.child(body)
+                    }
+                })
+                .footer(footer)
+                .on_close(on_close)
+        })
+    }
+
+    /// kit Phase 2 (redo): connected websites hosted in a kit `Dialog`
+    /// via `window.open_dialog`. Esc / backdrop / ✕ clear state via `on_close`.
+    fn build_websites_dialog(
+        app: &Entity<QuillApp>,
+        shell: &Entity<QuillShell>,
+        dialog: Dialog,
+        cx: &mut App,
+    ) -> Dialog {
+        let on_close =
+            QuillShell::on_close_kind(app, shell, DialogKind::Websites, |this, _, cx| {
+                this.close_websites(cx);
+            });
+        app.update(cx, |this, cx| {
+            let session = this.session();
+            let has_websites = session
+                .as_ref()
+                .is_some_and(|s| s.connected_websites.is_some());
+            let mut websites = session
+                .as_ref()
+                .and_then(|s| s.connected_websites.clone())
+                .unwrap_or_default();
+            websites.sort_by(|a, b| b.last_active_date.cmp(&a.last_active_date));
+            let loading = session.is_some_and(|s| s.connected_websites_loading);
+            let mutating = session.is_some_and(|s| s.websites_mutating);
+            let stale = session.is_some_and(|s| s.websites_stale);
+            let error = session.as_ref().and_then(|s| s.websites_error.clone());
+
+            let mut body = div().flex().flex_col().gap_2();
+            if let Some(line) = error {
+                body = body.child(
+                    div()
+                        .text_xs()
+                        .text_color(DANGER)
+                        .child(format!("Error: {line}")),
+                );
+            }
+            if let Some(confirm) = this.websites_confirm {
+                body = body.child(this.websites_confirm_banner(confirm, &websites, mutating, cx));
+            }
+            if websites.is_empty() {
+                body = body.child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(if loading {
+                            "Loading…"
+                        } else if has_websites {
+                            "No active logins — you can log in on websites that support signing in with Telegram."
+                        } else {
+                            "No website data yet."
+                        }),
+                );
+            } else {
+                if stale && loading {
+                    body = body.child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("Refreshing…"),
+                    );
+                }
+                body = body
+                    .child(
+                        div().flex().justify_end().child(
+                            Button::new("disconnect-all-websites")
+                                .label("Disconnect All Websites")
+                                .danger()
+                                .disabled(mutating)
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.begin_disconnect_all_websites(cx);
+                                    this.close_kit_dialog_if_done(DialogKind::Websites, window, cx);
+                                })),
+                        ),
+                    )
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("You can log in on websites that support signing in with Telegram."),
+                    )
+                    .child(
+                        div()
+                            .text_xs()
+                            .font_medium()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("Connected Websites"),
+                    );
+                for w in &websites {
+                    body = body.child(this.website_row(w, mutating, cx));
+                }
+                body = body.child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child("Tap to disconnect from your Telegram account."),
+                );
+            }
+            let footer = div().flex().justify_end().gap_2().child(
+                Button::new("websites-refresh")
+                    .label("Refresh")
+                    .ghost()
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.refresh_websites(cx);
+                        this.close_kit_dialog_if_done(DialogKind::Websites, window, cx);
+                    })),
+            ).child(
+                Button::new("close-websites")
+                    .label("Close")
+                    .ghost()
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.close_websites(cx);
+                        this.close_kit_dialog_if_done(DialogKind::Websites, window, cx);
+                    })),
+            );
+            dialog
+                .overlay(true)
+                // TGX `WebSessionsTitle`, verbatim.
+                .title("Logged In with Telegram")
+                .content({
+                    // `content` needs an `Fn` closure, but the body is built once
+                    // per dialog render — hand it over through a one-shot cell.
+                    let body = Rc::new(RefCell::new(Some(body.into_any_element())));
+                    move |content, _, _| {
+                        let body = body.borrow_mut().take().unwrap_or_else(|| div().into_any_element());
+                        content.child(body)
+                    }
+                })
+                .footer(footer)
+                .on_close(on_close)
+        })
+    }
+
+    /// kit Phase 2 (redo): create-chat hosted in a kit `Dialog` via
+    /// `window.open_dialog`. Esc / backdrop / ✕ clear state via `on_close`.
+    fn build_create_chat_dialog(
+        app: &Entity<QuillApp>,
+        shell: &Entity<QuillShell>,
+        dialog: Dialog,
+        cx: &mut App,
+    ) -> Dialog {
+        let on_close =
+            QuillShell::on_close_kind(app, shell, DialogKind::CreateChat, |this, _, cx| {
+                this.close_create_chat_dialog(cx);
+            });
+        app.update(cx, |this, cx| {
+            let dialog = dialog.overlay(true);
+            let Some(dialog_state) = this.create_chat_dialog.as_ref() else {
+                return dialog.title("New chat").on_close(on_close);
+            };
+            let kind = dialog_state.kind;
+            let picks_members = kind.picks_members();
+            let query = dialog_state.search_input.read(cx).value();
+            let rows = if picks_members {
+                this.g1_contact_rows(&query, cx)
+            } else {
+                Vec::new()
+            };
+            let selected = dialog_state.selected_users.clone();
+            let mut body = div().flex().flex_col().gap_2();
+            body = body
+                .child(
+                    div()
+                        .flex_1()
+                        .child(Textarea::new(&dialog_state.title_input).h(px(40.))),
+                )
+                .when(kind != CreateChatKind::BasicGroup, |this| {
+                    this.child(
+                        div()
+                            .flex_1()
+                            .child(Textarea::new(&dialog_state.description_input).h(px(64.))),
+                    )
+                });
+            if picks_members {
+                body = body.child(
+                    div().flex().items_center().gap_2().child(
+                        div()
+                            .flex_1()
+                            .child(Textarea::new(&dialog_state.search_input).h(px(40.))),
+                    ),
+                );
+                let mut list = div()
+                    .id("g1-create-contacts")
+                    .flex()
+                    .flex_col()
+                    .gap_1()
+                    .max_h(px(220.))
+                    .overflow_y_scroll();
+                if rows.is_empty() {
+                    list = list.child(
+                        div()
+                            .text_sm()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("No contacts found"),
+                    );
+                }
+                for row in rows.iter().take(50) {
+                    let is_selected = selected.contains(&row.user_id);
+                    list = list.child(this.g1_contact_checkbox(
+                        "g1-create".to_string(),
+                        row,
+                        is_selected,
+                        row.user_id,
+                        cx,
+                    ));
+                }
+                body = body.child(list);
+                if !selected.is_empty() {
+                    body = body.child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(format!("{} members selected", selected.len())),
+                    );
+                }
+            }
+            let footer = div()
+                .flex()
+                .justify_end()
+                .gap_2()
+                .child(
+                    Button::new("g1-create-cancel")
+                        .label("Cancel")
+                        .ghost()
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.close_create_chat_dialog(cx);
+                            this.close_kit_dialog_if_done(DialogKind::CreateChat, window, cx);
+                        })),
+                )
+                .child(
+                    Button::new("g1-create-submit")
+                        .label(format!("Create {}", kind.title().to_lowercase()))
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.submit_create_chat_dialog(cx);
+                            this.close_kit_dialog_if_done(DialogKind::CreateChat, window, cx);
+                        })),
+                );
+            let body = body.into_any_element();
+            dialog
+                .title(kind.title())
+                .content({
+                    // `content` needs an `Fn` closure, but the body is built once
+                    // per dialog render — hand it over through a one-shot cell.
+                    let body = Rc::new(RefCell::new(Some(body.into_any_element())));
+                    move |content, _, _| {
+                        let body = body
+                            .borrow_mut()
+                            .take()
+                            .unwrap_or_else(|| div().into_any_element());
+                        content.child(body)
+                    }
+                })
+                .footer(footer)
+                .on_close(on_close)
+        })
+    }
+
+    /// kit Phase 2 (redo): member dialog hosted in a kit `Dialog` via
+    /// `window.open_dialog`. Esc / backdrop / ✕ clear state via `on_close`.
+    fn build_member_dialog(
+        app: &Entity<QuillApp>,
+        shell: &Entity<QuillShell>,
+        dialog: Dialog,
+        cx: &mut App,
+    ) -> Dialog {
+        let on_close = QuillShell::on_close_kind(app, shell, DialogKind::Member, |this, _, cx| {
+            this.close_member_dialog(cx);
+        });
+        app.update(cx, |this, cx| {
+            let dialog = dialog.overlay(true);
+            let Some(dialog_state) = this.member_dialog.as_ref() else {
+                return dialog.title("Manage members").on_close(on_close);
+            };
+            let chat_id = dialog_state.chat_id;
+            let is_basic_group = dialog_state.is_basic_group;
+            let tab = dialog_state.tab;
+            let add_open = dialog_state.add_open;
+            let add_query = dialog_state.add_search.read(cx).value();
+            let add_selected = dialog_state.add_selected.clone();
+            let can_restrict = this
+                .session()
+                .is_some_and(|session| session.chat_can_restrict_members(chat_id));
+            let can_add = this
+                .session()
+                .is_some_and(|session| session.chat_can_add_members(chat_id));
+            let fetch = this.member_dialog_fetch(cx);
+
+            let mut body = div().flex().flex_col().gap_2();
+            // Tab bar.
+            let mut tabs = div().id("g1-member-tabs").flex().gap_1();
+            for member_tab in [
+                MemberTab::All,
+                MemberTab::Administrators,
+                MemberTab::Restricted,
+                MemberTab::Banned,
+            ] {
+                if is_basic_group && member_tab != MemberTab::All {
+                    continue;
+                }
+                if !can_restrict && matches!(member_tab, MemberTab::Restricted | MemberTab::Banned)
+                {
+                    continue;
+                }
+                let label = if member_tab == tab {
+                    format!("✓ {}", member_tab.label())
+                } else {
+                    member_tab.label().to_string()
+                };
+                tabs = tabs.child(
+                    Button::new(format!("g1-member-tab-{}", member_tab.label()))
+                        .label(label)
+                        .ghost()
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            this.member_dialog_tab(member_tab, cx);
+                            this.close_kit_dialog_if_done(DialogKind::Member, window, cx);
+                        })),
+                );
+            }
+            body = body.child(tabs);
+            if let Some(error) = this
+                .session()
+                .and_then(|session| session.member_action_error.get(&chat_id.0))
+                .cloned()
+            {
+                body = body.child(
+                    div()
+                        .w_full()
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .gap_2()
+                        .p_2()
+                        .rounded_md()
+                        .bg(DANGER_BG_DEEP)
+                        .child(div().text_sm().text_color(DANGER_PALE).child(error))
+                        .child(
+                            Button::new("g1-member-action-error-dismiss")
+                                .label("Dismiss")
+                                .ghost()
+                                .on_click(cx.listener(move |this, _, window, cx| {
+                                    this.dismiss_member_action_error(chat_id, cx);
+                                    this.close_kit_dialog_if_done(DialogKind::Member, window, cx);
+                                })),
+                        ),
+                );
+            }
+            // Search (supergroups only — basic groups list everyone).
+            if !is_basic_group {
+                body = body.child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap_2()
+                        .child(
+                            div()
+                                .flex_1()
+                                .child(Textarea::new(&dialog_state.search_input).h(px(40.))),
+                        )
+                        .child(
+                            Button::new("g1-member-search")
+                                .label("Search")
+                                .ghost()
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.refresh_member_dialog(cx);
+                                    this.close_kit_dialog_if_done(DialogKind::Member, window, cx);
+                                })),
+                        ),
+                );
+            }
+            // Member rows.
+            let mut list = div()
+                .id("g1-member-list")
+                .flex()
+                .flex_col()
+                .gap_1()
+                .max_h(px(240.))
+                .overflow_y_scroll();
+            match fetch {
+                None | Some(SupergroupMembersFetch::Loading) => {
+                    list = list.child(
+                        div()
+                            .text_sm()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("Loading members…"),
+                    );
+                }
+                Some(SupergroupMembersFetch::Failed(message)) => {
+                    list = list.child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_2()
                             .child(
-                                Button::new("close-archive-settings")
-                                    .label("Close")
+                                div()
+                                    .flex_1()
+                                    .text_sm()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(message),
+                            )
+                            .child(
+                                Button::new("g1-member-retry")
+                                    .label("Retry")
                                     .ghost()
-                                    .on_click(cx.listener(|this, _, _, cx| {
-                                        this.set_archive_settings_open(false);
-                                        cx.notify();
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.refresh_member_dialog(cx);
+                                        this.close_kit_dialog_if_done(
+                                            DialogKind::Member,
+                                            window,
+                                            cx,
+                                        );
                                     })),
                             ),
+                    );
+                }
+                Some(SupergroupMembersFetch::Loaded { members, .. }) => {
+                    if members.is_empty() {
+                        list = list.child(
+                            div()
+                                .text_sm()
+                                .text_color(cx.theme().muted_foreground)
+                                .child("No members"),
+                        );
+                    }
+                    for member in members.iter().take(200) {
+                        list = list.child(this.member_row(chat_id, member, tab, can_restrict, cx));
+                    }
+                }
+            }
+            body = body.child(list);
+            // Add-members section.
+            if can_add && tab == MemberTab::All {
+                let toggle_label = if add_open {
+                    "▾ Add members"
+                } else {
+                    "▸ Add members"
+                };
+                body = body.child(
+                    Button::new("g1-add-toggle")
+                        .label(toggle_label)
+                        .ghost()
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            if let Some(dialog) = this.member_dialog.as_mut() {
+                                dialog.add_open = !dialog.add_open;
+                                cx.notify();
+                            }
+                            this.close_kit_dialog_if_done(DialogKind::Member, window, cx);
+                        })),
+                );
+                if add_open {
+                    if let Some(failed) = this
+                        .session()
+                        .and_then(|session| session.add_members_failed.get(&chat_id.0))
+                        .copied()
+                        .filter(|count| *count > 0)
+                    {
+                        body =
+                            body.child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap_2()
+                                    .child(
+                                        div().flex_1().text_xs().text_color(DANGER).child(format!(
+                                            "{failed} member(s) could not be added"
+                                        )),
+                                    )
+                                    .child(
+                                        Button::new("g1-add-failed-dismiss")
+                                            .label("Dismiss")
+                                            .ghost()
+                                            .on_click(cx.listener(move |this, _, window, cx| {
+                                                if let Some(live) = this.live.as_mut() {
+                                                    live.driver
+                                                        .session
+                                                        .add_members_failed
+                                                        .remove(&chat_id.0);
+                                                }
+                                                cx.notify();
+                                                this.close_kit_dialog_if_done(
+                                                    DialogKind::Member,
+                                                    window,
+                                                    cx,
+                                                );
+                                            })),
+                                    ),
+                            );
+                    }
+                    body = body.child(
+                        div()
+                            .flex_1()
+                            .child(Textarea::new(&dialog_state.add_search).h(px(40.))),
+                    );
+                    let mut add_list = div()
+                        .id("g1-add-contacts")
+                        .flex()
+                        .flex_col()
+                        .gap_1()
+                        .max_h(px(160.))
+                        .overflow_y_scroll();
+                    let rows = this.g1_contact_rows(&add_query, cx);
+                    for row in rows.iter().take(50) {
+                        let is_selected = add_selected.contains(&row.user_id);
+                        add_list = add_list.child(this.g1_contact_checkbox(
+                            "g1-add".to_string(),
+                            row,
+                            is_selected,
+                            row.user_id,
+                            cx,
+                        ));
+                    }
+                    body = body.child(add_list);
+                    body = body.child(
+                        Button::new("g1-add-submit")
+                            .label(if add_selected.is_empty() {
+                                "Add members".to_string()
+                            } else {
+                                format!("Add {} member(s)", add_selected.len())
+                            })
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.submit_member_add(cx);
+                                this.close_kit_dialog_if_done(DialogKind::Member, window, cx);
+                            })),
+                    );
+                }
+            }
+            let body = body.into_any_element();
+            dialog
+                .title(if is_basic_group {
+                    "Group members"
+                } else {
+                    "Manage members"
+                })
+                .content({
+                    // `content` needs an `Fn` closure, but the body is built once
+                    // per dialog render — hand it over through a one-shot cell.
+                    let body = Rc::new(RefCell::new(Some(body.into_any_element())));
+                    move |content, _, _| {
+                        let body = body
+                            .borrow_mut()
+                            .take()
+                            .unwrap_or_else(|| div().into_any_element());
+                        content.child(body)
+                    }
+                })
+                .on_close(on_close)
+        })
+    }
+
+    /// kit Phase 2 (redo): permissions hosted in a kit `Dialog` via
+    /// `window.open_dialog`. Esc / backdrop / ✕ clear state via `on_close`.
+    fn build_permissions_dialog(
+        app: &Entity<QuillApp>,
+        shell: &Entity<QuillShell>,
+        dialog: Dialog,
+        cx: &mut App,
+    ) -> Dialog {
+        let on_close =
+            QuillShell::on_close_kind(app, shell, DialogKind::Permissions, |this, _, cx| {
+                this.close_permissions_dialog(cx);
+            });
+        app.update(cx, |this, cx| {
+            let dialog = dialog.overlay(true).title("Default permissions");
+            let Some(dialog_state) = this.permissions_dialog.as_ref() else {
+                return dialog.on_close(on_close);
+            };
+            let body = div()
+                .flex()
+                .flex_col()
+                .gap_2()
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child("What new members may do by default"),
+                )
+                .child(this.permission_checkboxes(&dialog_state.permissions, cx))
+                .into_any_element();
+            let footer =
+                div()
+                    .flex()
+                    .justify_end()
+                    .gap_2()
+                    .child(
+                        Button::new("g1-permissions-cancel")
+                            .label("Cancel")
+                            .ghost()
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.close_permissions_dialog(cx);
+                                this.close_kit_dialog_if_done(DialogKind::Permissions, window, cx);
+                            })),
                     )
-                    .child(body),
-            )
-            .into_any_element()
+                    .child(Button::new("g1-permissions-submit").label("Save").on_click(
+                        cx.listener(|this, _, window, cx| {
+                            this.submit_permissions_dialog(cx);
+                            this.close_kit_dialog_if_done(DialogKind::Permissions, window, cx);
+                        }),
+                    ));
+            dialog
+                .content({
+                    // `content` needs an `Fn` closure, but the body is built once
+                    // per dialog render — hand it over through a one-shot cell.
+                    let body = Rc::new(RefCell::new(Some(body.into_any_element())));
+                    move |content, _, _| {
+                        let body = body
+                            .borrow_mut()
+                            .take()
+                            .unwrap_or_else(|| div().into_any_element());
+                        content.child(body)
+                    }
+                })
+                .footer(footer)
+                .on_close(on_close)
+        })
+    }
+
+    /// kit Phase 2 (redo): username editor hosted in a kit `Dialog` via
+    /// `window.open_dialog`. Esc / backdrop / ✕ clear state via `on_close`.
+    fn build_username_dialog(
+        app: &Entity<QuillApp>,
+        shell: &Entity<QuillShell>,
+        dialog: Dialog,
+        cx: &mut App,
+    ) -> Dialog {
+        let on_close =
+            QuillShell::on_close_kind(app, shell, DialogKind::Username, |this, _, cx| {
+                this.close_username_dialog(cx);
+            });
+        app.update(cx, |this, cx| {
+            let dialog = dialog.overlay(true);
+            let Some(dialog_state) = this.username_dialog.as_ref() else {
+                return dialog.title("Public username").on_close(on_close);
+            };
+            let (title, hint) = match dialog_state.kind {
+                TextPromptKind::Username => (
+                    "Public username",
+                    "Public link t.me/username — empty removes it",
+                ),
+                TextPromptKind::CustomTitle { .. } => (
+                    "Custom title",
+                    "Admin title shown instead of \"admin\" — empty removes it",
+                ),
+            };
+            let body = div()
+                .flex()
+                .flex_col()
+                .gap_2()
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(hint),
+                )
+                .child(
+                    div()
+                        .flex_1()
+                        .child(Textarea::new(&dialog_state.input).h(px(40.))),
+                )
+                .into_any_element();
+            let footer = div()
+                .flex()
+                .justify_end()
+                .gap_2()
+                .child(
+                    Button::new("g1-username-cancel")
+                        .label("Cancel")
+                        .ghost()
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.close_username_dialog(cx);
+                            this.close_kit_dialog_if_done(DialogKind::Username, window, cx);
+                        })),
+                )
+                .child(
+                    Button::new("g1-username-submit")
+                        .label("Save")
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.submit_username_dialog(cx);
+                            this.close_kit_dialog_if_done(DialogKind::Username, window, cx);
+                        })),
+                );
+            dialog
+                .title(title)
+                .content({
+                    // `content` needs an `Fn` closure, but the body is built once
+                    // per dialog render — hand it over through a one-shot cell.
+                    let body = Rc::new(RefCell::new(Some(body.into_any_element())));
+                    move |content, _, _| {
+                        let body = body
+                            .borrow_mut()
+                            .take()
+                            .unwrap_or_else(|| div().into_any_element());
+                        content.child(body)
+                    }
+                })
+                .footer(footer)
+                .on_close(on_close)
+        })
+    }
+
+    /// kit Phase 2 (redo): restrict/ban hosted in a kit `Dialog` via
+    /// `window.open_dialog`. Esc / backdrop / ✕ clear state via `on_close`.
+    fn build_restrict_dialog(
+        app: &Entity<QuillApp>,
+        shell: &Entity<QuillShell>,
+        dialog: Dialog,
+        cx: &mut App,
+    ) -> Dialog {
+        let on_close =
+            QuillShell::on_close_kind(app, shell, DialogKind::Restrict, |this, _, cx| {
+                this.close_restrict_dialog(cx);
+            });
+        app.update(cx, |this, cx| {
+            let dialog = dialog.overlay(true);
+            let Some(dialog_state) = this.restrict_dialog.as_ref() else {
+                return dialog.title("Restrict").on_close(on_close);
+            };
+            let name = this
+                .session()
+                .and_then(|session| session.user(dialog_state.user_id))
+                .map(|user| user.display_name())
+                .unwrap_or_else(|| format!("User {}", dialog_state.user_id));
+            let duration_label = match dialog_state.banned_until_days {
+                0 => "Forever".to_string(),
+                1 => "1 day".to_string(),
+                days => format!("{days} days"),
+            };
+            let title = format!(
+                "{} {name}",
+                if dialog_state.ban { "Ban" } else { "Restrict" }
+            );
+            let mut body = div().flex().flex_col().gap_2();
+            if !dialog_state.ban {
+                body = body
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("Allowed while restricted"),
+                    )
+                    .child(this.restrict_permission_checkboxes(&dialog_state.permissions, cx));
+            }
+            body = body.child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("Duration:"),
+                    )
+                    .child(
+                        Button::new("g1-restrict-duration")
+                            .label(duration_label)
+                            .ghost()
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.cycle_restrict_duration(cx);
+                                this.close_kit_dialog_if_done(DialogKind::Restrict, window, cx);
+                            })),
+                    ),
+            );
+            let footer = div()
+                .flex()
+                .justify_end()
+                .gap_2()
+                .child(
+                    Button::new("g1-restrict-cancel")
+                        .label("Cancel")
+                        .ghost()
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.close_restrict_dialog(cx);
+                            this.close_kit_dialog_if_done(DialogKind::Restrict, window, cx);
+                        })),
+                )
+                .child(
+                    Button::new("g1-restrict-submit")
+                        .label(if dialog_state.ban { "Ban" } else { "Restrict" })
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.submit_restrict_dialog(cx);
+                            this.close_kit_dialog_if_done(DialogKind::Restrict, window, cx);
+                        })),
+                );
+            let body = body.into_any_element();
+            dialog
+                .title(title)
+                .content({
+                    // `content` needs an `Fn` closure, but the body is built once
+                    // per dialog render — hand it over through a one-shot cell.
+                    let body = Rc::new(RefCell::new(Some(body.into_any_element())));
+                    move |content, _, _| {
+                        let body = body
+                            .borrow_mut()
+                            .take()
+                            .unwrap_or_else(|| div().into_any_element());
+                        content.child(body)
+                    }
+                })
+                .footer(footer)
+                .on_close(on_close)
+        })
+    }
+
+    /// kit Phase 2 (redo): group confirm hosted in a kit `Dialog` via
+    /// `window.open_dialog`. Esc / backdrop / ✕ clear state via `on_close`.
+    fn build_group_confirm_dialog(
+        app: &Entity<QuillApp>,
+        shell: &Entity<QuillShell>,
+        dialog: Dialog,
+        cx: &mut App,
+    ) -> Dialog {
+        let on_close =
+            QuillShell::on_close_kind(app, shell, DialogKind::GroupConfirm, |this, _, cx| {
+                this.close_group_confirm(cx);
+            });
+        app.update(cx, |this, cx| {
+            let dialog = dialog.overlay(true);
+            let Some(dialog_state) = this.group_confirm_dialog.as_ref() else {
+                return dialog.title("Confirm").on_close(on_close);
+            };
+            let (title, message, confirm_label): (String, String, String) =
+                match dialog_state.action {
+                    GroupConfirmAction::DeleteChat => (
+                        "Delete group".to_string(),
+                        "Delete this group for everyone? This cannot be undone.".to_string(),
+                        "Delete".to_string(),
+                    ),
+                    GroupConfirmAction::RemoveFromList => (
+                        "Delete chat".to_string(),
+                        "Delete this chat and its history from your chat list?".to_string(),
+                        "Delete".to_string(),
+                    ),
+                    GroupConfirmAction::ReportChat => (
+                        "Report chat".to_string(),
+                        "Report this chat to Telegram moderators as spam?".to_string(),
+                        "Report".to_string(),
+                    ),
+                    GroupConfirmAction::BlockUser { block } => {
+                        if block {
+                            (
+                                "Block user".to_string(),
+                                "Block this user? They won't be able to send you messages."
+                                    .to_string(),
+                                "Block".to_string(),
+                            )
+                        } else {
+                            (
+                                "Unblock user".to_string(),
+                                "Unblock this user?".to_string(),
+                                "Unblock".to_string(),
+                            )
+                        }
+                    }
+                    GroupConfirmAction::RemoveSelectedChats => (
+                        "Delete chats".to_string(),
+                        "Delete the selected chats and their history from your chat list?"
+                            .to_string(),
+                        "Delete".to_string(),
+                    ),
+                    GroupConfirmAction::LeaveChat => (
+                        "Leave chat".to_string(),
+                        "Leave this chat? You can rejoin with an invite link.".to_string(),
+                        "Leave".to_string(),
+                    ),
+                    GroupConfirmAction::BroadcastUpgrade => (
+                        "Convert to broadcast group".to_string(),
+                        "Only admins will be able to post. Non-admin members become \
+                         subscribers. This cannot be undone."
+                            .to_string(),
+                        "Convert".to_string(),
+                    ),
+                    GroupConfirmAction::ClearHistory { revoke } => (
+                        "Clear history".to_string(),
+                        if revoke {
+                            "Delete all messages in this chat for everyone? This cannot be undone."
+                        } else {
+                            "Delete all messages in this chat for you? This cannot be undone."
+                        }
+                        .to_string(),
+                        "Clear".to_string(),
+                    ),
+                    GroupConfirmAction::RestartBot => (
+                        "Restart bot".to_string(),
+                        "Clear this bot's chat history and send /start again? This cannot be undone."
+                            .to_string(),
+                        "Restart".to_string(),
+                    ),
+                    GroupConfirmAction::AbortRecoveryEmailSetup => (
+                        "Abort recovery email setup".to_string(),
+                        "Are you sure you want to abort recovery email setup? The new address will not be activated."
+                            .to_string(),
+                        "Abort".to_string(),
+                    ),
+                    GroupConfirmAction::BlockContact { user_id, block } => {
+                        let name = this.contact_display_name(user_id);
+                        if block {
+                            (
+                                "Block user".to_string(),
+                                format!("Are you sure you want to block {name}?"),
+                                "Block".to_string(),
+                            )
+                        } else {
+                            (
+                                "Unblock user".to_string(),
+                                format!("Unblock {name}?"),
+                                "Unblock".to_string(),
+                            )
+                        }
+                    }
+                    GroupConfirmAction::DeleteContact { user_id } => {
+                        let name = this.contact_display_name(user_id);
+                        (
+                            "Delete contact".to_string(),
+                            format!("Delete {name} from contacts?"),
+                            "Delete".to_string(),
+                        )
+                    }
+                    GroupConfirmAction::DeleteSyncedContacts => (
+                        "Delete synced contacts".to_string(),
+                        "This will remove your contacts from the Telegram servers. If 'Sync contacts' is enabled, contacts will be re-synced.".to_string(),
+                        "Delete".to_string(),
+                    ),
+                };
+            let destructive = matches!(
+                dialog_state.action,
+                GroupConfirmAction::DeleteContact { .. }
+                    | GroupConfirmAction::BlockUser { block: true, .. }
+                    | GroupConfirmAction::BlockContact { block: true, .. }
+                    | GroupConfirmAction::DeleteSyncedContacts
+            );
+            let body = div()
+                .flex()
+                .flex_col()
+                .gap_3()
+                .child(div().text_sm().child(message))
+                .into_any_element();
+            let footer = div().flex().justify_end().gap_2().child(
+                Button::new("g1-confirm-cancel")
+                    .label("Cancel")
+                    .ghost()
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.close_group_confirm(cx);
+                        this.close_kit_dialog_if_done(DialogKind::GroupConfirm, window, cx);
+                    })),
+            ).child(
+                Button::new("g1-confirm-submit")
+                    .label(confirm_label)
+                    .when(destructive, |button| button.danger())
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.submit_group_confirm(cx);
+                        this.close_kit_dialog_if_done(DialogKind::GroupConfirm, window, cx);
+                    })),
+            );
+            dialog
+                .title(title)
+                .content({
+                    // `content` needs an `Fn` closure, but the body is built once
+                    // per dialog render — hand it over through a one-shot cell.
+                    let body = Rc::new(RefCell::new(Some(body.into_any_element())));
+                    move |content, _, _| {
+                        let body = body.borrow_mut().take().unwrap_or_else(|| div().into_any_element());
+                        content.child(body)
+                    }
+                })
+                .footer(footer)
+                .on_close(on_close)
+        })
+    }
+
+    /// kit Phase 2 (redo): quote reply hosted in a kit `Dialog` via
+    /// `window.open_dialog`. Esc / backdrop / ✕ clear state via `on_close`.
+    fn build_quote_reply_dialog(
+        app: &Entity<QuillApp>,
+        shell: &Entity<QuillShell>,
+        dialog: Dialog,
+        cx: &mut App,
+    ) -> Dialog {
+        let on_close =
+            QuillShell::on_close_kind(app, shell, DialogKind::QuoteReply, |this, _, cx| {
+                this.close_quote_reply_dialog(cx);
+            });
+        app.update(cx, |this, cx| {
+            let dialog = dialog.overlay(true).title("Quote part of message");
+            let Some(dialog_state) = this.quote_reply_dialog.as_ref() else {
+                return dialog.on_close(on_close);
+            };
+            let body = div()
+                .flex()
+                .flex_col()
+                .gap_2()
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child("Trim the text below to the part you want to quote"),
+                )
+                .child(
+                    div()
+                        .flex_1()
+                        .child(Textarea::new(&dialog_state.input).h(px(120.))),
+                )
+                .into_any_element();
+            let footer = div()
+                .flex()
+                .justify_end()
+                .gap_2()
+                .child(
+                    Button::new("g1-quote-cancel")
+                        .label("Cancel")
+                        .ghost()
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.close_quote_reply_dialog(cx);
+                            this.close_kit_dialog_if_done(DialogKind::QuoteReply, window, cx);
+                        })),
+                )
+                .child(
+                    Button::new("g1-quote-submit")
+                        .label("Quote reply")
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.submit_quote_reply_dialog(window, cx);
+                            this.close_kit_dialog_if_done(DialogKind::QuoteReply, window, cx);
+                        })),
+                );
+            dialog
+                .content({
+                    // `content` needs an `Fn` closure, but the body is built once
+                    // per dialog render — hand it over through a one-shot cell.
+                    let body = Rc::new(RefCell::new(Some(body.into_any_element())));
+                    move |content, _, _| {
+                        let body = body
+                            .borrow_mut()
+                            .take()
+                            .unwrap_or_else(|| div().into_any_element());
+                        content.child(body)
+                    }
+                })
+                .footer(footer)
+                .on_close(on_close)
+        })
+    }
+
+    /// kit Phase 2 (redo): forum manage hosted in a kit `Dialog` via
+    /// `window.open_dialog`. Esc / backdrop / ✕ clear state via `on_close`.
+    fn build_forum_manage_dialog(
+        app: &Entity<QuillApp>,
+        shell: &Entity<QuillShell>,
+        dialog: Dialog,
+        cx: &mut App,
+    ) -> Dialog {
+        let on_close =
+            QuillShell::on_close_kind(app, shell, DialogKind::ForumManage, |this, _, cx| {
+                this.close_forum_manage_dialog(cx);
+            });
+        app.update(cx, |this, cx| {
+            let dialog = dialog.overlay(true).title("Manage topics");
+            let Some(dialog_state) = this.forum_manage_dialog.as_ref() else {
+                return dialog.on_close(on_close);
+            };
+            let chat_id = dialog_state.chat_id;
+            let topics: Vec<ForumTopic> = this
+                .session()
+                .map(|session| session.ordered_forum_topics(chat_id))
+                .unwrap_or_default();
+            let editing = dialog_state.editing_topic;
+            let mut body =
+                div().flex().flex_col().gap_2().child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap_1()
+                        .child(
+                            div()
+                                .flex_1()
+                                .child(Textarea::new(&dialog_state.new_topic_input).h(px(36.))),
+                        )
+                        .child(Button::new("g2-topic-create").label("Create").on_click(
+                            cx.listener(|this, _, window, cx| {
+                                this.submit_forum_topic_create(window, cx);
+                                this.close_kit_dialog_if_done(DialogKind::ForumManage, window, cx);
+                            }),
+                        )),
+                );
+            let mut list = div()
+                .id("g2-topic-list")
+                .flex()
+                .flex_col()
+                .gap_1()
+                .max_h(px(320.))
+                .overflow_y_scroll();
+            for topic in &topics {
+                list = list.child(this.forum_topic_manage_row(chat_id, topic, editing, cx));
+            }
+            body = body.child(list);
+            let body = body.into_any_element();
+            dialog
+                .content({
+                    // `content` needs an `Fn` closure, but the body is built once
+                    // per dialog render — hand it over through a one-shot cell.
+                    let body = Rc::new(RefCell::new(Some(body.into_any_element())));
+                    move |content, _, _| {
+                        let body = body
+                            .borrow_mut()
+                            .take()
+                            .unwrap_or_else(|| div().into_any_element());
+                        content.child(body)
+                    }
+                })
+                .on_close(on_close)
+        })
+    }
+
+    /// kit Phase 2 (redo): comment thread hosted in a kit `Dialog` via
+    /// `window.open_dialog`. Esc / backdrop / ✕ clear state via `on_close`.
+    fn build_comment_thread_dialog(
+        app: &Entity<QuillApp>,
+        shell: &Entity<QuillShell>,
+        dialog: Dialog,
+        cx: &mut App,
+    ) -> Dialog {
+        let on_close =
+            QuillShell::on_close_kind(app, shell, DialogKind::CommentThread, |this, _, cx| {
+                this.close_comment_thread_dialog(cx);
+            });
+        app.update(cx, |this, cx| {
+            let dialog = dialog.overlay(true).title("Comments");
+            let Some((chat_id, message_id)) = this
+                .comment_thread_dialog
+                .as_ref()
+                .map(|dialog| (dialog.chat_id, dialog.message_id))
+            else {
+                return dialog.on_close(on_close);
+            };
+            let fetch = this
+                .session()
+                .and_then(|session| session.comment_thread.clone());
+            let mut body = div().flex().flex_col().gap_2();
+            match fetch {
+                Some(thread) if thread.chat_id == chat_id && thread.message_id == message_id => {
+                    if let Some(error) = thread.failed {
+                        body = body.child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .w_full()
+                                .gap_1()
+                                .child(
+                                    div()
+                                        .flex_1()
+                                        .text_sm()
+                                        .text_color(cx.theme().muted_foreground)
+                                        .child(error),
+                                )
+                                .child(
+                                    Button::new("g2-comments-retry")
+                                        .label("Retry")
+                                        .ghost()
+                                        .on_click(cx.listener(move |this, _, window, cx| {
+                                            this.open_comment_thread_dialog(
+                                                chat_id, message_id, window, cx,
+                                            );
+                                            this.close_kit_dialog_if_done(
+                                                DialogKind::CommentThread,
+                                                window,
+                                                cx,
+                                            );
+                                        })),
+                                ),
+                        );
+                    } else if thread.messages.is_empty() {
+                        body = body.child(
+                            div()
+                                .text_sm()
+                                .text_color(cx.theme().muted_foreground)
+                                .child("No comments yet."),
+                        );
+                    } else {
+                        let mut list = div()
+                            .id("g2-comment-list")
+                            .flex()
+                            .flex_col()
+                            .gap_2()
+                            .max_h(px(360.))
+                            .overflow_y_scroll();
+                        for message in &thread.messages {
+                            let name = if message.is_outgoing {
+                                "You".to_string()
+                            } else {
+                                message
+                                    .author_signature
+                                    .clone()
+                                    .unwrap_or_else(|| "Comment".to_string())
+                            };
+                            let text = Self::message_copyable_text(effective_content(
+                                &message.content,
+                                message.ephemeral.as_ref(),
+                            ))
+                            .unwrap_or_else(|| "(no text)".to_string());
+                            list = list.child(
+                                div()
+                                    .flex()
+                                    .flex_col()
+                                    .gap_1()
+                                    .child(
+                                        div()
+                                            .text_xs()
+                                            .font_semibold()
+                                            .text_color(cx.theme().muted_foreground)
+                                            .child(name),
+                                    )
+                                    .child(div().text_sm().child(text)),
+                            );
+                        }
+                        body = body.child(list);
+                    }
+                }
+                _ => {
+                    body = body.child(
+                        div()
+                            .text_sm()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("Loading comments…"),
+                    );
+                }
+            }
+            let body = body.into_any_element();
+            dialog
+                .content({
+                    // `content` needs an `Fn` closure, but the body is built once
+                    // per dialog render — hand it over through a one-shot cell.
+                    let body = Rc::new(RefCell::new(Some(body.into_any_element())));
+                    move |content, _, _| {
+                        let body = body
+                            .borrow_mut()
+                            .take()
+                            .unwrap_or_else(|| div().into_any_element());
+                        content.child(body)
+                    }
+                })
+                .on_close(on_close)
+        })
+    }
+
+    /// kit Phase 2 (redo): welcome message editor hosted in a kit
+    /// `Dialog` via `window.open_dialog`. Esc / backdrop / ✕ clear state
+    /// via `on_close`.
+    fn build_welcome_dialog(
+        app: &Entity<QuillApp>,
+        shell: &Entity<QuillShell>,
+        dialog: Dialog,
+        cx: &mut App,
+    ) -> Dialog {
+        let on_close = QuillShell::on_close_kind(app, shell, DialogKind::Welcome, |this, _, cx| {
+            this.close_welcome_dialog(cx);
+        });
+        app.update(cx, |this, cx| {
+            let dialog = dialog.overlay(true).title("Welcome message");
+            let Some(dialog_state) = this.welcome_dialog.as_ref() else {
+                return dialog.on_close(on_close);
+            };
+            let chat_id = dialog_state.chat_id;
+            let editing = dialog_state.editing;
+            let fetch = this
+                .session()
+                .and_then(|session| session.welcome_message_fetches.get(&chat_id.0).cloned());
+            let messages: Vec<ParsedWelcomeMessage> = this
+                .session()
+                .and_then(|session| session.welcome_messages.get(&chat_id.0).cloned())
+                .unwrap_or_default();
+            let mut body = div().flex().flex_col().gap_2().child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_1()
+                    .child(
+                        div()
+                            .flex_1()
+                            .child(Textarea::new(&dialog_state.new_input).h(px(64.))),
+                    )
+                    .child(
+                        Button::new("g2-welcome-add")
+                            .label("Add")
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.submit_welcome_add(window, cx);
+                                this.close_kit_dialog_if_done(DialogKind::Welcome, window, cx);
+                            })),
+                    ),
+            );
+            match fetch {
+                Some(WelcomeMessagesFetch::Failed(error)) => {
+                    body = body.child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .w_full()
+                            .gap_1()
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .text_sm()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(error),
+                            )
+                            .child(
+                                Button::new("g2-welcome-retry")
+                                    .label("Retry")
+                                    .ghost()
+                                    .on_click(cx.listener(move |this, _, window, cx| {
+                                        this.open_welcome_dialog(chat_id, window, cx);
+                                        this.close_kit_dialog_if_done(
+                                            DialogKind::Welcome,
+                                            window,
+                                            cx,
+                                        );
+                                    })),
+                            ),
+                    );
+                }
+                Some(WelcomeMessagesFetch::Loaded) | None => {
+                    if messages.is_empty() {
+                        body = body.child(
+                            div()
+                                .text_sm()
+                                .text_color(cx.theme().muted_foreground)
+                                .child("No welcome messages yet."),
+                        );
+                    } else {
+                        let mut list = div()
+                            .id("g2-welcome-list")
+                            .flex()
+                            .flex_col()
+                            .gap_2()
+                            .max_h(px(300.))
+                            .overflow_y_scroll();
+                        for message in &messages {
+                            list =
+                                list.child(this.welcome_message_row(chat_id, message, editing, cx));
+                        }
+                        body = body.child(list);
+                    }
+                }
+                Some(WelcomeMessagesFetch::Loading) => {
+                    body = body.child(
+                        div()
+                            .text_sm()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("Loading welcome messages…"),
+                    );
+                }
+            }
+            let body = body.into_any_element();
+            dialog
+                .content({
+                    // `content` needs an `Fn` closure, but the body is built once
+                    // per dialog render — hand it over through a one-shot cell.
+                    let body = Rc::new(RefCell::new(Some(body.into_any_element())));
+                    move |content, _, _| {
+                        let body = body
+                            .borrow_mut()
+                            .take()
+                            .unwrap_or_else(|| div().into_any_element());
+                        content.child(body)
+                    }
+                })
+                .on_close(on_close)
+        })
+    }
+    /// kit Phase 2 (redo): archive settings hosted in a kit `Dialog`
+    /// via `window.open_dialog`. Title/footer go to the kit slots;
+    /// Esc / backdrop / ✕ clear the session flag through `on_close`.
+    fn build_archive_settings_dialog(
+        app: &Entity<QuillApp>,
+        shell: &Entity<QuillShell>,
+        dialog: Dialog,
+        cx: &mut App,
+    ) -> Dialog {
+        let on_close =
+            QuillShell::on_close_kind(app, shell, DialogKind::ArchiveSettings, |this, _, _| {
+                this.set_archive_settings_open(false)
+            });
+        app.update(cx, |this, cx| {
+            let settings = this.session().and_then(|s| s.archive_chat_list_settings);
+            let loading = this.session().is_some_and(|s| s.archive_settings_loading);
+            let mut body = div().flex().flex_col().gap_3();
+            if loading {
+                body = body.child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child("Loading archive settings…"),
+                );
+            } else if settings.is_none() {
+                body = body
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("Could not load archive settings."),
+                    )
+                    .child(
+                        Button::new("archive-settings-retry")
+                            .label("Retry")
+                            .ghost()
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.open_archive_settings(cx);
+                                this.close_kit_dialog_if_done(
+                                    DialogKind::ArchiveSettings,
+                                    window,
+                                    cx,
+                                );
+                            })),
+                    );
+            } else {
+                let settings = settings.expect("checked");
+                for (index, (title, label, desc)) in ARCHIVE_SETTING_ROWS.iter().enumerate() {
+                    let enabled = archive_setting_get(&settings, index);
+                    body = body.child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap_1()
+                            .child(div().text_xs().font_semibold().child(*title))
+                            .child(
+                                Button::new(format!("archive-setting-{index}"))
+                                    .label(if enabled {
+                                        format!("☑ {label}")
+                                    } else {
+                                        format!("☐ {label}")
+                                    })
+                                    .ghost()
+                                    .on_click(cx.listener(move |this, _, window, cx| {
+                                        this.toggle_archive_setting(index, cx);
+                                        this.close_kit_dialog_if_done(
+                                            DialogKind::ArchiveSettings,
+                                            window,
+                                            cx,
+                                        );
+                                    })),
+                            )
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(*desc),
+                            ),
+                    );
+                }
+            }
+            let footer = div().flex().justify_end().child(
+                Button::new("close-archive-settings")
+                    .label("Close")
+                    .ghost()
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.set_archive_settings_open(false);
+                        cx.notify();
+                        this.close_kit_dialog_if_done(DialogKind::ArchiveSettings, window, cx);
+                    })),
+            );
+            dialog
+                .overlay(true)
+                .title("Archive settings")
+                .content({
+                    // `content` needs an `Fn` closure, but the body is built once
+                    // per dialog render — hand it over through a one-shot cell.
+                    let body = Rc::new(RefCell::new(Some(body.into_any_element())));
+                    move |content, _, _| {
+                        let body = body
+                            .borrow_mut()
+                            .take()
+                            .unwrap_or_else(|| div().into_any_element());
+                        content.child(body)
+                    }
+                })
+                .footer(footer)
+                .on_close(on_close)
+        })
     }
 
     /// Slice CL2: show/hide the archive settings dialog on the active
@@ -17728,57 +20205,6 @@ impl QuillApp {
     fn close_import_contacts_dialog(&mut self, cx: &mut Context<Self>) {
         self.import_contacts_dialog = None;
         cx.notify();
-    }
-
-    /// Slice A6: the vCard import dialog overlay — a paste box plus
-    /// Import/Cancel; parse errors stay in `status_note` and keep the
-    /// dialog open so the user can fix the text.
-    fn import_contacts_dialog_overlay(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let dialog = self.import_contacts_dialog.as_ref()?;
-        let body = div()
-            .flex()
-            .flex_col()
-            .gap_2()
-            .child(
-                div()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .child("Paste the contents of a .vcf file. Only cards with a phone number are imported."),
-            )
-            .child(
-                div()
-                    .flex_1()
-                    .child(Textarea::new(&dialog.input).h(px(220.))),
-            )
-            .child(
-                div()
-                    .flex()
-                    .justify_end()
-                    .gap_2()
-                    .child(
-                        Button::new("import-contacts-cancel")
-                            .label("Cancel")
-                            .ghost()
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.close_import_contacts_dialog(cx);
-                            })),
-                    )
-                    .child(
-                        Button::new("import-contacts-submit")
-                            .label("Import")
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.submit_import_contacts_dialog(window, cx);
-                            })),
-                    ),
-            )
-            .into_any_element();
-        Some(self.g1_modal(
-            "import-contacts",
-            G1DialogClose::ImportContacts,
-            "Import contacts",
-            body,
-            cx,
-        ))
     }
 
     fn contact_row(&self, row: &ContactRow, cx: &mut Context<Self>) -> impl IntoElement {
@@ -21865,128 +24291,13 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// Add-contact dialog overlay (phone + first/last name), centered over
-    /// the shell like the media viewer.
-    fn add_contact_dialog_overlay(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let dialog = self.add_contact_dialog.as_ref()?;
-        let name = self
-            .session()
-            .and_then(|s| s.user(dialog.user_id))
-            .map(|u| u.display_name())
-            .unwrap_or_else(|| format!("User {}", dialog.user_id));
-        Some(
-            div()
-                .id("add-contact-overlay")
-                .absolute()
-                .top_0()
-                .left_0()
-                .right_0()
-                .bottom_0()
-                .flex()
-                .items_center()
-                .justify_center()
-                .child(
-                    div()
-                        .id("add-contact-backdrop")
-                        .absolute()
-                        .top_0()
-                        .left_0()
-                        .right_0()
-                        .bottom_0()
-                        .bg(SCRIM)
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.close_add_contact_dialog(cx);
-                        })),
-                )
-                .child(
-                    div()
-                        .id("add-contact-panel")
-                        .flex()
-                        .flex_col()
-                        .gap_2()
-                        .p_4()
-                        .w(px(360.))
-                        .rounded_md()
-                        .border_1()
-                        .border_color(cx.theme().border)
-                        .bg(cx.theme().sidebar)
-                        .child(
-                            div()
-                                .text_sm()
-                                .font_semibold()
-                                .child(format!("Add {name} to contacts")),
-                        )
-                        .child(
-                            div()
-                                .flex()
-                                .flex_col()
-                                .gap_1()
-                                .child(
-                                    div()
-                                        .text_xs()
-                                        .text_color(cx.theme().muted_foreground)
-                                        .child("Phone number"),
-                                )
-                                .child(Textarea::new(&dialog.phone_input).h(px(40.))),
-                        )
-                        .child(
-                            div()
-                                .flex()
-                                .flex_col()
-                                .gap_1()
-                                .child(
-                                    div()
-                                        .text_xs()
-                                        .text_color(cx.theme().muted_foreground)
-                                        .child("First name"),
-                                )
-                                .child(Textarea::new(&dialog.first_name_input).h(px(40.))),
-                        )
-                        .child(
-                            div()
-                                .flex()
-                                .flex_col()
-                                .gap_1()
-                                .child(
-                                    div()
-                                        .text_xs()
-                                        .text_color(cx.theme().muted_foreground)
-                                        .child("Last name"),
-                                )
-                                .child(Textarea::new(&dialog.last_name_input).h(px(40.))),
-                        )
-                        .child(
-                            div()
-                                .flex()
-                                .gap_2()
-                                .child(
-                                    Button::new("add-contact-submit")
-                                        .label("Add contact")
-                                        .on_click(cx.listener(|this, _, window, cx| {
-                                            this.submit_add_contact_dialog(window, cx);
-                                        })),
-                                )
-                                .child(
-                                    Button::new("add-contact-cancel")
-                                        .label("Cancel")
-                                        .ghost()
-                                        .on_click(cx.listener(|this, _, _, cx| {
-                                            this.close_add_contact_dialog(cx);
-                                        })),
-                                ),
-                        ),
-                )
-                .into_any_element(),
-        )
-    }
-
     /// A5: edit-profile dialog overlay — name (`setName`), bio
     /// (`setBio`), username (`setUsername` + `checkChatUsername` +
     /// `reorderActiveUsernames` / `toggleUsernameIsActive`), and photo
     /// (`setProfilePhoto` / `deleteProfilePhoto`) sections with
     /// per-section saves. Centered over the shell like the add-contact
     /// dialog.
-    fn edit_profile_dialog_overlay(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+    fn edit_profile_dialog_body(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let dialog = self.edit_profile_dialog.as_ref()?;
         let me = self.session().and_then(|s| s.my_user_id);
         let (active, disabled, editable) = me
@@ -22119,20 +24430,15 @@ impl QuillApp {
                     ),
             );
         }
+        // kit Phase 2 (redo): plain form content — the kit `Dialog`
+        // provides the title, padding, and chrome via `.title()`.
         let mut panel = div()
             .id("edit-profile-panel")
             .flex()
             .flex_col()
             .gap_3()
-            .p_4()
-            .w(px(420.))
             .max_h(px(600.))
-            .overflow_y_scroll()
-            .rounded_md()
-            .border_1()
-            .border_color(cx.theme().border)
-            .bg(cx.theme().sidebar)
-            .child(div().text_sm().font_semibold().child("Edit profile"));
+            .overflow_y_scroll();
         if let Some(error) = error {
             panel = panel.child(div().text_sm().text_color(DANGER).child(error));
         }
@@ -22235,43 +24541,8 @@ impl QuillApp {
                                 })),
                         ),
                     ),
-            )
-            .child(
-                div().flex().justify_end().child(
-                    Button::new("edit-profile-close")
-                        .label("Done")
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.close_edit_profile_dialog(cx);
-                        })),
-                ),
             );
-        Some(
-            div()
-                .id("edit-profile-overlay")
-                .absolute()
-                .top_0()
-                .left_0()
-                .right_0()
-                .bottom_0()
-                .flex()
-                .items_center()
-                .justify_center()
-                .child(
-                    div()
-                        .id("edit-profile-backdrop")
-                        .absolute()
-                        .top_0()
-                        .left_0()
-                        .right_0()
-                        .bottom_0()
-                        .bg(SCRIM)
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.close_edit_profile_dialog(cx);
-                        })),
-                )
-                .child(panel)
-                .into_any_element(),
-        )
+        Some(panel.into_any_element())
     }
 
     /// Phase C1: call overlay — incoming / outgoing / active / ended
@@ -23107,80 +25378,6 @@ impl QuillApp {
     fn group_call_overlay(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let call = self.session()?.active_group_call.clone()?;
         Some(self.group_call_card(&call, cx).into_any_element())
-    }
-
-    /// Phase C2h: the `createVideoChat` start/schedule dialog —
-    /// title plus relative schedule presets.
-    fn group_call_start_overlay(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let dialog = self.group_call_start_dialog.as_ref()?;
-        let selected = dialog.schedule_offset;
-        let mut presets = div().flex().flex_wrap().gap_2();
-        for (offset, label) in GROUP_CALL_SCHEDULE_PRESETS {
-            let active = offset == selected;
-            presets = presets.child(
-                Button::new(format!("group-call-start-preset-{offset}"))
-                    .label(label)
-                    .when(!active, |b| b.ghost())
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.set_group_call_start_schedule(offset, cx);
-                    })),
-            );
-        }
-        Some(
-            div()
-                .id("group-call-start-dialog")
-                .absolute()
-                .inset_0()
-                .flex()
-                .items_center()
-                .justify_center()
-                .child(
-                    div()
-                        .w(px(420.))
-                        .flex()
-                        .flex_col()
-                        .gap_3()
-                        .p_4()
-                        .rounded_lg()
-                        .border_1()
-                        .border_color(cx.theme().border)
-                        .bg(cx.theme().sidebar)
-                        .child(div().text_sm().font_semibold().child("Start voice chat"))
-                        .child(Textarea::new(&dialog.title_input).h(px(40.)))
-                        .child(
-                            div()
-                                .text_xs()
-                                .text_color(cx.theme().muted_foreground)
-                                .child("When should it start?"),
-                        )
-                        .child(presets)
-                        .child(
-                            div()
-                                .flex()
-                                .gap_2()
-                                .child(
-                                    Button::new("group-call-start-confirm")
-                                        .label(if selected == 0 {
-                                            "Start now"
-                                        } else {
-                                            "Schedule"
-                                        })
-                                        .on_click(cx.listener(|this, _, _, cx| {
-                                            this.confirm_group_call_start(cx);
-                                        })),
-                                )
-                                .child(
-                                    Button::new("group-call-start-cancel")
-                                        .label("Cancel")
-                                        .ghost()
-                                        .on_click(cx.listener(|this, _, _, cx| {
-                                            this.close_group_call_start_dialog(cx);
-                                        })),
-                                ),
-                        ),
-                )
-                .into_any_element(),
-        )
     }
 
     fn group_call_participant_name(&self, sender: &MessageSender) -> String {
@@ -25041,223 +27238,15 @@ impl QuillApp {
             .into_any_element()
     }
 
-    /// Parity slice: folder manage / editor / delete-confirm overlays.
-    /// The editor replaces the manage list while open (modal flow).
-    fn folder_overlays(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        if self.folder_editor.is_some() {
-            return Some(self.folder_editor_overlay(cx));
-        }
-        if self.folder_delete_confirm.is_some() {
-            return Some(self.folder_delete_overlay(cx));
-        }
-        if self.folder_manage_open {
-            return Some(self.folder_manage_overlay(cx));
-        }
-        None
-    }
-
-    fn folder_backdrop(&self, cx: &mut Context<Self>, id: &str) -> AnyElement {
-        div()
-            .id(format!("{id}-backdrop"))
-            .absolute()
-            .top_0()
-            .left_0()
-            .right_0()
-            .bottom_0()
-            .bg(SCRIM)
-            .on_click(cx.listener(|this, _, _, cx| {
-                this.close_folder_manage(cx);
-            }))
-            .into_any_element()
-    }
-
-    fn folder_manage_overlay(&self, cx: &mut Context<Self>) -> AnyElement {
-        let session = self.session();
-        let tags_enabled = session.as_ref().is_some_and(|s| s.are_folder_tags_enabled);
-        let folders: Vec<(i32, String, usize)> = session
-            .as_ref()
-            .map(|s| {
-                s.chat_folders
-                    .iter()
-                    .map(|f| {
-                        let count = s
-                            .chats
-                            .values()
-                            .filter(|c| c.folder_positions.contains_key(&f.id))
-                            .count();
-                        (f.id, f.name.clone(), count)
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
-        let mut list = div().id("folder-manage-list").flex().flex_col().gap_1();
-        if folders.is_empty() {
-            list = list.child(
-                div()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .child("No folders yet. Create one to organize your chats."),
-            );
-        }
-        for (index, (folder_id, name, count)) in folders.iter().enumerate() {
-            let folder_id = *folder_id;
-            let is_first = index == 0;
-            let is_last = index + 1 == folders.len();
-            let name_label = format!("{name} ({count})");
-            list = list.child(
-                div()
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .gap_2()
-                    .px_2()
-                    .py_1()
-                    .rounded_md()
-                    .child(div().text_sm().font_medium().child(name_label))
-                    .child(
-                        div()
-                            .flex()
-                            .gap_1()
-                            .child(
-                                Button::new(format!("folder-up-{folder_id}"))
-                                    .label("↑")
-                                    .ghost()
-                                    .when(is_first, |this| this.disabled(true))
-                                    .on_click(cx.listener(move |this, _, _, cx| {
-                                        this.move_folder(folder_id, true, cx);
-                                    })),
-                            )
-                            .child(
-                                Button::new(format!("folder-down-{folder_id}"))
-                                    .label("↓")
-                                    .ghost()
-                                    .when(is_last, |this| this.disabled(true))
-                                    .on_click(cx.listener(move |this, _, _, cx| {
-                                        this.move_folder(folder_id, false, cx);
-                                    })),
-                            )
-                            .child(
-                                Button::new(format!("folder-edit-{folder_id}"))
-                                    .label("Edit")
-                                    .ghost()
-                                    .on_click(cx.listener(move |this, _, window, cx| {
-                                        this.open_folder_edit(folder_id, window, cx);
-                                    })),
-                            )
-                            .child(
-                                Button::new(format!("folder-delete-{folder_id}"))
-                                    .label("Delete")
-                                    .ghost()
-                                    .on_click(cx.listener(move |this, _, _, cx| {
-                                        this.open_folder_delete(folder_id, cx);
-                                    })),
-                            ),
-                    ),
-            );
-        }
-        div()
-            .id("folder-manage-overlay")
-            .absolute()
-            .top_0()
-            .left_0()
-            .right_0()
-            .bottom_0()
-            .flex()
-            .items_center()
-            .justify_center()
-            .child(self.folder_backdrop(cx, "folder-manage"))
-            .child(
-                div()
-                    .id("folder-manage-panel")
-                    .flex()
-                    .flex_col()
-                    .gap_2()
-                    .p_4()
-                    .w(px(440.))
-                    .rounded_md()
-                    .border_1()
-                    .border_color(cx.theme().border)
-                    .bg(cx.theme().sidebar)
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .justify_between()
-                            .child(div().text_sm().font_semibold().child("Folders"))
-                            .child(
-                                Button::new("folder-manage-close")
-                                    .label("Close")
-                                    .ghost()
-                                    .on_click(cx.listener(|this, _, _, cx| {
-                                        this.close_folder_manage(cx);
-                                    })),
-                            ),
-                    )
-                    .child(list)
-                    .child(
-                        div().flex().items_center().gap_2().child(
-                            Button::new("folder-tags-toggle")
-                                .label(if tags_enabled {
-                                    "☑ Show folder tags"
-                                } else {
-                                    "☐ Show folder tags"
-                                })
-                                .ghost()
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.toggle_folder_tags_ui(cx);
-                                })),
-                        ),
-                    )
-                    .child(
-                        Button::new("folder-create")
-                            .label("New folder")
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.open_folder_create(window, cx);
-                            })),
-                    ),
-            )
-            .into_any_element()
-    }
-
-    fn folder_editor_overlay(&self, cx: &mut Context<Self>) -> AnyElement {
-        div()
-            .id("folder-editor-overlay")
-            .absolute()
-            .top_0()
-            .left_0()
-            .right_0()
-            .bottom_0()
-            .flex()
-            .items_center()
-            .justify_center()
-            .child(self.folder_backdrop(cx, "folder-editor"))
-            .child(self.folder_editor_panel(cx))
-            .into_any_element()
-    }
-
     /// Parity slice: create/edit folder form — name, include-type filters,
     /// per-chat include/exclude multi-select, exclude flags.
     fn folder_editor_panel(&self, cx: &mut Context<Self>) -> AnyElement {
-        let dialog = self.folder_editor.as_ref();
-        let title = match dialog.and_then(|d| d.folder_id) {
-            Some(_) => "Edit folder",
-            None => "New folder",
+        let Some(dialog) = self.folder_editor.as_ref() else {
+            return div().into_any_element();
         };
-        let mut panel = div()
-            .id("folder-editor-panel")
-            .flex()
-            .flex_col()
-            .gap_2()
-            .p_4()
-            .w(px(480.))
-            .rounded_md()
-            .border_1()
-            .border_color(cx.theme().border)
-            .bg(cx.theme().sidebar)
-            .child(div().text_sm().font_semibold().child(title));
-        let Some(dialog) = dialog else {
-            return panel.into_any_element();
-        };
+        // kit Phase 2 (redo): plain form content — the kit `Dialog`
+        // provides the title, padding, and chrome via `.title()`.
+        let mut panel = div().flex().flex_col().gap_2();
         panel = panel.child(Textarea::new(&dialog.name_input));
         if let Some(error) = dialog.error.clone() {
             panel = panel.child(
@@ -25449,195 +27438,8 @@ impl QuillApp {
                     })),
             );
         }
-        panel = panel.child(exclude_row).child(
-            div()
-                .flex()
-                .justify_end()
-                .gap_2()
-                .child(
-                    Button::new("folder-editor-cancel")
-                        .label("Cancel")
-                        .ghost()
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.folder_editor = None;
-                            cx.notify();
-                        })),
-                )
-                .child(
-                    Button::new("folder-editor-save")
-                        .label("Save")
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.save_folder_editor(cx);
-                        })),
-                ),
-        );
+        panel = panel.child(exclude_row);
         panel.into_any_element()
-    }
-
-    fn folder_delete_overlay(&self, cx: &mut Context<Self>) -> AnyElement {
-        let confirm = self.folder_delete_confirm.as_ref();
-        let mut panel = div()
-            .id("folder-delete-panel")
-            .flex()
-            .flex_col()
-            .gap_2()
-            .p_4()
-            .w(px(400.))
-            .rounded_md()
-            .border_1()
-            .border_color(cx.theme().border)
-            .bg(cx.theme().sidebar);
-        if let Some(confirm) = confirm {
-            let leave_count = self
-                .session()
-                .and_then(|s| s.folder_chats_to_leave.get(&confirm.folder_id))
-                .map(|ids| ids.len())
-                .unwrap_or(0);
-            let leave_label = if leave_count > 0 {
-                format!(
-                    "{} Also leave {leave_count} suggested chat{}",
-                    if confirm.leave_with_folder {
-                        "☑"
-                    } else {
-                        "☐"
-                    },
-                    if leave_count == 1 { "" } else { "s" },
-                )
-            } else {
-                "Also leave suggested chats".to_string()
-            };
-            panel = panel
-                .child(
-                    div()
-                        .text_sm()
-                        .font_semibold()
-                        .child(format!("Delete “{}”?", confirm.name)),
-                )
-                .child(
-                    div()
-                        .text_xs()
-                        .text_color(cx.theme().muted_foreground)
-                        .child("Chats stay in your main list unless you leave them."),
-                )
-                .child(
-                    Button::new("folder-delete-leave-toggle")
-                        .label(leave_label)
-                        .ghost()
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            if let Some(confirm) = this.folder_delete_confirm.as_mut() {
-                                confirm.leave_with_folder = !confirm.leave_with_folder;
-                            }
-                            cx.notify();
-                        })),
-                )
-                .child(
-                    div()
-                        .flex()
-                        .justify_end()
-                        .gap_2()
-                        .child(
-                            Button::new("folder-delete-cancel")
-                                .label("Cancel")
-                                .ghost()
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.folder_delete_confirm = None;
-                                    cx.notify();
-                                })),
-                        )
-                        .child(
-                            Button::new("folder-delete-confirm")
-                                .label("Delete")
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.confirm_folder_delete(cx);
-                                })),
-                        ),
-                );
-        }
-        div()
-            .id("folder-delete-overlay")
-            .absolute()
-            .top_0()
-            .left_0()
-            .right_0()
-            .bottom_0()
-            .flex()
-            .items_center()
-            .justify_center()
-            .child(self.folder_backdrop(cx, "folder-delete"))
-            .child(panel)
-            .into_any_element()
-    }
-
-    /// Phase C2i: confirm-before-calling dialog. Shown when the pref
-    /// is on and the user starts a call; the actual `startCall` only
-    /// goes out via `confirm_pending_call`.
-    fn call_confirm_overlay(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let (user_id, is_video) = self.call_confirm?;
-        let name = self
-            .session()
-            .and_then(|session| session.user(user_id))
-            .map(|user| user.display_name())
-            .unwrap_or_else(|| format!("User {user_id}"));
-        let kind = if is_video { "video call" } else { "call" };
-        let panel = div()
-            .id("call-confirm-panel")
-            .flex()
-            .flex_col()
-            .gap_2()
-            .p_4()
-            .w(px(360.))
-            .rounded_md()
-            .border_1()
-            .border_color(cx.theme().border)
-            .bg(cx.theme().sidebar)
-            .child(
-                div()
-                    .text_sm()
-                    .font_semibold()
-                    .child(format!("Start {kind} with {name}?")),
-            )
-            .child(
-                div()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .child("You asked to confirm before calling."),
-            )
-            .child(
-                div()
-                    .flex()
-                    .justify_end()
-                    .gap_2()
-                    .child(
-                        Button::new("call-confirm-cancel")
-                            .label("Cancel")
-                            .ghost()
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.cancel_pending_call(cx);
-                            })),
-                    )
-                    .child(
-                        Button::new("call-confirm-ok")
-                            .label(if is_video { "Video call" } else { "Call" })
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.confirm_pending_call(cx);
-                            })),
-                    ),
-            );
-        Some(
-            div()
-                .id("call-confirm-overlay")
-                .absolute()
-                .top_0()
-                .left_0()
-                .right_0()
-                .bottom_0()
-                .flex()
-                .items_center()
-                .justify_center()
-                .child(self.folder_backdrop(cx, "call-confirm"))
-                .child(panel)
-                .into_any_element(),
-        )
     }
 
     fn add_poll_option_row(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -27911,214 +29713,6 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// Parity slice: the scope-defaults dialog overlay (private chats /
-    /// groups / channels), each with mute presets, a preview toggle, and a
-    /// sound picker. Entry point: "Defaults for all chats…" in the per-chat
-    /// notifications panel.
-    fn notification_defaults_overlay(&self, cx: &mut Context<Self>) -> AnyElement {
-        let session = self.session();
-        let saved_sounds: Vec<NotificationSound> = session
-            .as_ref()
-            .map(|s| s.saved_notification_sounds.clone())
-            .unwrap_or_default();
-        let mut body = div().flex().flex_col().gap_3();
-        for scope in NotificationSettingsScope::ALL {
-            body = body.child(self.scope_settings_section(cx, scope, &saved_sounds));
-        }
-        div()
-            .id("notif-defaults-overlay")
-            .absolute()
-            .top_0()
-            .left_0()
-            .right_0()
-            .bottom_0()
-            .flex()
-            .items_center()
-            .justify_center()
-            .child(
-                div()
-                    .id("notif-defaults-backdrop")
-                    .absolute()
-                    .top_0()
-                    .left_0()
-                    .right_0()
-                    .bottom_0()
-                    .bg(SCRIM)
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.notification_defaults_open = false;
-                        this.defaults_sound_picker = None;
-                        cx.notify();
-                    })),
-            )
-            .child(
-                div()
-                    .id("notif-defaults-dialog")
-                    .flex()
-                    .flex_col()
-                    .gap_2()
-                    .px_4()
-                    .py_3()
-                    .rounded_lg()
-                    .bg(cx.theme().sidebar)
-                    .border_1()
-                    .border_color(cx.theme().border)
-                    .min_w(px(420.))
-                    .max_w(px(560.))
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .justify_between()
-                            .child(div().font_semibold().child("Notification defaults"))
-                            .child(
-                                Button::new("close-notif-defaults")
-                                    .label("Close")
-                                    .ghost()
-                                    .on_click(cx.listener(|this, _, _, cx| {
-                                        this.notification_defaults_open = false;
-                                        this.defaults_sound_picker = None;
-                                        cx.notify();
-                                    })),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(
-                                "Used when a chat keeps the default setting. \
-                                 Changes apply via setScopeNotificationSettings.",
-                            ),
-                    )
-                    .child(body),
-            )
-            .into_any_element()
-    }
-
-    /// Phase S2: storage-usage overlay (TGX `SettingsCacheController`):
-    /// total plus per-file-type categories in TGX's category order,
-    /// including "Secret media and files" (TGX `SecretFiles`, verbatim)
-    /// for `fileTypeSecret`. Live: `getStorageStatistics` via the
-    /// driver; demo: injected fixture stats.
-    fn storage_usage_overlay(&self, cx: &mut Context<Self>) -> AnyElement {
-        let session = self.session();
-        let stats = session.as_ref().and_then(|s| s.storage_stats.clone());
-        let loading = session.is_some_and(|s| s.storage_stats_loading);
-        let mut body = div().flex().flex_col().gap_2();
-        match stats {
-            None => {
-                body = body.child(
-                    div()
-                        .text_xs()
-                        .text_color(cx.theme().muted_foreground)
-                        .child(if loading {
-                            "Loading…"
-                        } else {
-                            "No storage data yet."
-                        }),
-                );
-            }
-            Some(stats) => {
-                body = body.child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .justify_between()
-                        .child(div().font_semibold().text_sm().child("Total"))
-                        .child(div().text_sm().child(format_bytes(stats.total_size))),
-                );
-                for (label, size, count) in quill::telegram::envelope::storage_category_rows(&stats)
-                {
-                    body = body.child(
-                        div()
-                            .id(format!("storage-row-{label}"))
-                            .flex()
-                            .items_center()
-                            .justify_between()
-                            .gap_2()
-                            .child(div().text_sm().child(label))
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .text_color(cx.theme().muted_foreground)
-                                    .child(format!("{count} files · {}", format_bytes(size))),
-                            ),
-                    );
-                }
-            }
-        }
-        div()
-            .id("storage-usage-overlay")
-            .absolute()
-            .top_0()
-            .left_0()
-            .right_0()
-            .bottom_0()
-            .flex()
-            .items_center()
-            .justify_center()
-            .child(
-                div()
-                    .id("storage-usage-backdrop")
-                    .absolute()
-                    .top_0()
-                    .left_0()
-                    .right_0()
-                    .bottom_0()
-                    .bg(SCRIM)
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.storage_usage_open = false;
-                        cx.notify();
-                    })),
-            )
-            .child(
-                div()
-                    .id("storage-usage-dialog")
-                    .flex()
-                    .flex_col()
-                    .gap_2()
-                    .px_4()
-                    .py_3()
-                    .rounded_lg()
-                    .bg(cx.theme().sidebar)
-                    .border_1()
-                    .border_color(cx.theme().border)
-                    .min_w(px(360.))
-                    .max_w(px(480.))
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .justify_between()
-                            .child(div().font_semibold().child("Storage usage"))
-                            .child(
-                                div()
-                                    .flex()
-                                    .gap_2()
-                                    .child(
-                                        Button::new("storage-refresh")
-                                            .label("Refresh")
-                                            .ghost()
-                                            .on_click(cx.listener(|this, _, _, cx| {
-                                                this.refresh_storage_usage(cx);
-                                            })),
-                                    )
-                                    .child(
-                                        Button::new("close-storage-usage")
-                                            .label("Close")
-                                            .ghost()
-                                            .on_click(cx.listener(|this, _, _, cx| {
-                                                this.storage_usage_open = false;
-                                                cx.notify();
-                                            })),
-                                    ),
-                            ),
-                    )
-                    .child(body),
-            )
-            .into_any_element()
-    }
-
     /// Phase S2: refetch the storage stats. Live: drop the cache so the
     /// guarded fetch fires again. Demo: re-inject the fixture stats.
     fn refresh_storage_usage(&mut self, cx: &mut Context<Self>) {
@@ -28353,97 +29947,6 @@ impl QuillApp {
             };
         }
         cx.notify();
-    }
-
-    /// Slice A2: "Two-Step Verification" overlay (TGX
-    /// `TwoStepVerification`, `PasswordController.java`): status of the
-    /// cached `passwordState`, the enable/change/disable forms, the
-    /// recovery-email form, and the pending-confirmation card with
-    /// resend + abort. Renders the authoritative state only — loading
-    /// and error lines are honest, never optimistic.
-    fn twofa_overlay(&self, cx: &mut Context<Self>) -> AnyElement {
-        let session = self.session();
-        let state = session.as_ref().and_then(|s| s.password_state.clone());
-        let loading = session.is_some_and(|s| s.password_state_loading);
-        let error = session.as_ref().and_then(|s| s.password_op_error.clone());
-        let mut body = div().flex().flex_col().gap_2();
-        if let Some(line) = error {
-            body = body.child(
-                div()
-                    .text_xs()
-                    .text_color(DANGER)
-                    .child(format!("Error: {line}")),
-            );
-        }
-        body = match (self.twofa_view, state) {
-            (TwofaView::Status, None) => body.child(
-                div()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(if loading {
-                        "Loading…"
-                    } else {
-                        "No two-step verification data yet."
-                    }),
-            ),
-            (TwofaView::Status, Some(state)) => self.twofa_status_body(cx, body, &state, loading),
-            (TwofaView::Enable, _) => self.twofa_enable_body(cx, body),
-            (TwofaView::Change, _) => self.twofa_change_body(cx, body),
-            (TwofaView::Disable, _) => self.twofa_disable_body(cx, body),
-            (TwofaView::Email, _) => self.twofa_email_body(cx, body),
-        };
-        div()
-            .id("twofa-overlay")
-            .absolute()
-            .top_0()
-            .left_0()
-            .right_0()
-            .bottom_0()
-            .flex()
-            .items_center()
-            .justify_center()
-            .child(
-                div()
-                    .id("twofa-backdrop")
-                    .absolute()
-                    .top_0()
-                    .left_0()
-                    .right_0()
-                    .bottom_0()
-                    .bg(SCRIM)
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.close_twofa(window, cx);
-                    })),
-            )
-            .child(
-                div()
-                    .id("twofa-dialog")
-                    .flex()
-                    .flex_col()
-                    .gap_2()
-                    .px_4()
-                    .py_3()
-                    .rounded_lg()
-                    .bg(cx.theme().sidebar)
-                    .border_1()
-                    .border_color(cx.theme().border)
-                    .min_w(px(360.))
-                    .max_w(px(480.))
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .justify_between()
-                            .child(div().font_semibold().child("Two-Step Verification"))
-                            .child(Button::new("close-twofa").label("Close").ghost().on_click(
-                                cx.listener(|this, _, window, cx| {
-                                    this.close_twofa(window, cx);
-                                }),
-                            )),
-                    )
-                    .child(body),
-            )
-            .into_any_element()
     }
 
     /// Slice A2: the status screen — current state plus the pending
@@ -28745,6 +30248,7 @@ impl QuillApp {
                             } else {
                                 this.submit_twofa_password(window, cx, form == TwofaView::Enable);
                             }
+                            this.close_kit_dialog_if_done(DialogKind::TwoFa, window, cx);
                         }),
                     ))
                     .child(
@@ -28787,195 +30291,6 @@ impl QuillApp {
             }
         }
         cx.notify();
-    }
-
-    /// Slice A3: "Active Sessions" overlay (TGX `SettingsSessionsController`
-    /// / `SessionsTitle`): the current-device card, the Incomplete Login
-    /// Attempts section (TGX `SessionsIncompleteTitle` /
-    /// `SessionsIncompleteInfo`, verbatim), other sessions with
-    /// per-session Terminate (TGX `TerminateSessionQuestion`), and
-    /// "Terminate all other sessions" (TGX `TerminateAllSessions` /
-    /// `AreYouSureSessions`). Renders the authoritative state only —
-    /// loading and error lines are honest, never optimistic.
-    fn sessions_overlay(&self, cx: &mut Context<Self>) -> AnyElement {
-        let session = self.session();
-        let sessions = session
-            .as_ref()
-            .and_then(|s| s.sessions.clone())
-            .unwrap_or_default();
-        let loading = session.is_some_and(|s| s.sessions_loading);
-        let mutating = session.is_some_and(|s| s.sessions_mutating);
-        let stale = session.is_some_and(|s| s.sessions_stale);
-        let error = session.as_ref().and_then(|s| s.sessions_error.clone());
-        let current = sessions.iter().find(|s| s.is_current);
-        let mut incomplete: Vec<&ParsedSession> = sessions
-            .iter()
-            .filter(|s| !s.is_current && s.is_password_pending)
-            .collect();
-        incomplete.sort_by(|a, b| b.last_active_date.cmp(&a.last_active_date));
-        let mut others: Vec<&ParsedSession> = sessions
-            .iter()
-            .filter(|s| !s.is_current && !s.is_password_pending)
-            .collect();
-        others.sort_by(|a, b| b.last_active_date.cmp(&a.last_active_date));
-
-        let mut body = div().flex().flex_col().gap_2();
-        if let Some(line) = error {
-            body = body.child(
-                div()
-                    .text_xs()
-                    .text_color(DANGER)
-                    .child(format!("Error: {line}")),
-            );
-        }
-        if let Some(confirm) = self.sessions_confirm {
-            body = body.child(self.sessions_confirm_banner(confirm, mutating, cx));
-        }
-        if sessions.is_empty() {
-            body = body.child(
-                div()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(if loading {
-                        "Loading…"
-                    } else {
-                        "No session data yet."
-                    }),
-            );
-        } else {
-            // A terminate just landed: the old list stays visible while
-            // the authoritative refetch is in flight (never an optimistic
-            // delete).
-            if stale && loading {
-                body = body.child(
-                    div()
-                        .text_xs()
-                        .text_color(cx.theme().muted_foreground)
-                        .child("Refreshing…"),
-                );
-            }
-            if let Some(current) = current {
-                body = body
-                    .child(
-                        div()
-                            .text_xs()
-                            .font_medium()
-                            .text_color(cx.theme().muted_foreground)
-                            .child("Current session"),
-                    )
-                    .child(self.session_row(current, mutating, true, cx));
-            }
-            if !incomplete.is_empty() {
-                body = body
-                    .child(
-                        div()
-                            .text_xs()
-                            .font_medium()
-                            .text_color(cx.theme().muted_foreground)
-                            .child("Incomplete Login Attempts"),
-                    )
-                    .child(
-                        div().text_xs().text_color(cx.theme().muted_foreground).child(
-                            "The devices above have no access to your messages. The code was entered correctly, but no correct password was given.",
-                        ),
-                    );
-                for s in incomplete {
-                    body = body.child(self.session_row(s, mutating, false, cx));
-                }
-            }
-            if !others.is_empty() {
-                body = body.child(
-                    div()
-                        .text_xs()
-                        .font_medium()
-                        .text_color(cx.theme().muted_foreground)
-                        .child("Other sessions"),
-                );
-                for s in others {
-                    body = body.child(self.session_row(s, mutating, true, cx));
-                }
-            }
-            let any_other = sessions.iter().any(|s| !s.is_current);
-            body = body.child(
-                div().flex().justify_end().child(
-                    Button::new("terminate-all-sessions")
-                        .label("Terminate All Other Sessions")
-                        .danger()
-                        .disabled(!any_other || mutating)
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.begin_terminate_all_sessions(cx);
-                        })),
-                ),
-            );
-        }
-        div()
-            .id("sessions-overlay")
-            .absolute()
-            .top_0()
-            .left_0()
-            .right_0()
-            .bottom_0()
-            .flex()
-            .items_center()
-            .justify_center()
-            .child(
-                div()
-                    .id("sessions-backdrop")
-                    .absolute()
-                    .top_0()
-                    .left_0()
-                    .right_0()
-                    .bottom_0()
-                    .bg(SCRIM)
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.close_sessions(cx);
-                    })),
-            )
-            .child(
-                div()
-                    .id("sessions-dialog")
-                    .flex()
-                    .flex_col()
-                    .gap_2()
-                    .px_4()
-                    .py_3()
-                    .rounded_lg()
-                    .bg(cx.theme().sidebar)
-                    .border_1()
-                    .border_color(cx.theme().border)
-                    .min_w(px(380.))
-                    .max_w(px(520.))
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .justify_between()
-                            .child(div().font_semibold().child("Active Sessions"))
-                            .child(
-                                div()
-                                    .flex()
-                                    .gap_2()
-                                    .child(
-                                        Button::new("sessions-refresh")
-                                            .label("Refresh")
-                                            .ghost()
-                                            .on_click(cx.listener(|this, _, _, cx| {
-                                                this.refresh_sessions(cx);
-                                            })),
-                                    )
-                                    .child(
-                                        Button::new("close-sessions")
-                                            .label("Close")
-                                            .ghost()
-                                            .on_click(cx.listener(|this, _, _, cx| {
-                                                this.close_sessions(cx);
-                                            })),
-                                    ),
-                            ),
-                    )
-                    .child(body),
-            )
-            .into_any_element()
     }
 
     /// Slice A3: the terminate confirmation banner (the
@@ -29274,180 +30589,6 @@ impl QuillApp {
             };
         }
         cx.notify();
-    }
-
-    /// Slice A4: "Logged In with Telegram" overlay (TGX
-    /// `SettingsWebsitesController` / `WebSessionsTitle`): the red
-    /// "Disconnect All Websites" action (`TerminateAllWebSessions`), the
-    /// "Connected Websites" section (`OtherWebSessions`) with per-row
-    /// Disconnect (`DisconnectWebsiteAction` / "Disconnect %1$s?"), and
-    /// the empty state (`NoActiveLogins`). Renders the authoritative
-    /// state only — loading and error lines are honest, never
-    /// optimistic.
-    fn websites_overlay(&self, cx: &mut Context<Self>) -> AnyElement {
-        let session = self.session();
-        let has_websites = session
-            .as_ref()
-            .is_some_and(|s| s.connected_websites.is_some());
-        let mut websites = session
-            .as_ref()
-            .and_then(|s| s.connected_websites.clone())
-            .unwrap_or_default();
-        websites.sort_by(|a, b| b.last_active_date.cmp(&a.last_active_date));
-        let loading = session.is_some_and(|s| s.connected_websites_loading);
-        let mutating = session.is_some_and(|s| s.websites_mutating);
-        let stale = session.is_some_and(|s| s.websites_stale);
-        let error = session.as_ref().and_then(|s| s.websites_error.clone());
-
-        let mut body = div().flex().flex_col().gap_2();
-        if let Some(line) = error {
-            body = body.child(
-                div()
-                    .text_xs()
-                    .text_color(DANGER)
-                    .child(format!("Error: {line}")),
-            );
-        }
-        if let Some(confirm) = self.websites_confirm {
-            body = body.child(self.websites_confirm_banner(confirm, &websites, mutating, cx));
-        }
-        if websites.is_empty() {
-            body = body.child(
-                div()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(if loading {
-                        "Loading…"
-                    } else if has_websites {
-                        // TGX `NoActiveLogins` (bold header + help), in one
-                        // honest line: the list is genuinely empty. Gated on
-                        // `connected_websites.is_some()` — a failed fetch
-                        // (None) shows only the error line above, never an
-                        // unverified "no logins" claim.
-                        "No active logins — you can log in on websites that support signing in with Telegram."
-                    } else {
-                        "No website data yet."
-                    }),
-            );
-        } else {
-            // A disconnect just landed: the old list stays visible while
-            // the authoritative refetch is in flight (never an optimistic
-            // delete).
-            if stale && loading {
-                body = body.child(
-                    div()
-                        .text_xs()
-                        .text_color(cx.theme().muted_foreground)
-                        .child("Refreshing…"),
-                );
-            }
-            body = body
-                .child(
-                    div().flex().justify_end().child(
-                        Button::new("disconnect-all-websites")
-                            .label("Disconnect All Websites")
-                            .danger()
-                            .disabled(mutating)
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.begin_disconnect_all_websites(cx);
-                            })),
-                    ),
-                )
-                .child(
-                    div()
-                        .text_xs()
-                        .text_color(cx.theme().muted_foreground)
-                        // TGX `ClearOtherWebSessionsHelp`, verbatim.
-                        .child("You can log in on websites that support signing in with Telegram."),
-                )
-                .child(
-                    div()
-                        .text_xs()
-                        .font_medium()
-                        .text_color(cx.theme().muted_foreground)
-                        // TGX `OtherWebSessions`, verbatim.
-                        .child("Connected Websites"),
-                );
-            for w in &websites {
-                body = body.child(self.website_row(w, mutating, cx));
-            }
-            // TGX `ConnectedWebsitesDesc`, verbatim.
-            body = body.child(
-                div()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .child("Tap to disconnect from your Telegram account."),
-            );
-        }
-        div()
-            .id("websites-overlay")
-            .absolute()
-            .top_0()
-            .left_0()
-            .right_0()
-            .bottom_0()
-            .flex()
-            .items_center()
-            .justify_center()
-            .child(
-                div()
-                    .id("websites-backdrop")
-                    .absolute()
-                    .top_0()
-                    .left_0()
-                    .right_0()
-                    .bottom_0()
-                    .bg(SCRIM)
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.close_websites(cx);
-                    })),
-            )
-            .child(
-                div()
-                    .id("websites-dialog")
-                    .flex()
-                    .flex_col()
-                    .gap_2()
-                    .px_4()
-                    .py_3()
-                    .rounded_lg()
-                    .bg(cx.theme().sidebar)
-                    .border_1()
-                    .border_color(cx.theme().border)
-                    .min_w(px(380.))
-                    .max_w(px(520.))
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .justify_between()
-                            // TGX `WebSessionsTitle`, verbatim.
-                            .child(div().font_semibold().child("Logged In with Telegram"))
-                            .child(
-                                div()
-                                    .flex()
-                                    .gap_2()
-                                    .child(
-                                        Button::new("websites-refresh")
-                                            .label("Refresh")
-                                            .ghost()
-                                            .on_click(cx.listener(|this, _, _, cx| {
-                                                this.refresh_websites(cx);
-                                            })),
-                                    )
-                                    .child(
-                                        Button::new("close-websites")
-                                            .label("Close")
-                                            .ghost()
-                                            .on_click(cx.listener(|this, _, _, cx| {
-                                                this.close_websites(cx);
-                                            })),
-                                    ),
-                            ),
-                    )
-                    .child(body),
-            )
-            .into_any_element()
     }
 
     /// Slice A4: the disconnect confirmation banner (the
@@ -31257,151 +32398,6 @@ impl QuillApp {
         Some(panel.into_any_element())
     }
 
-    /// Slice G1: centered modal shell shared by the group-management
-    /// dialogs (mirrors `add_contact_dialog_overlay`): a backdrop
-    /// sibling closes on click, the panel never bubbles into it.
-    fn g1_modal(
-        &self,
-        id_prefix: &str,
-        close: G1DialogClose,
-        title: &str,
-        body: AnyElement,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let title = title.to_string();
-        div()
-            .id(format!("{id_prefix}-overlay"))
-            .absolute()
-            .top_0()
-            .left_0()
-            .right_0()
-            .bottom_0()
-            .flex()
-            .items_center()
-            .justify_center()
-            .child(
-                div()
-                    .id(format!("{id_prefix}-backdrop"))
-                    .absolute()
-                    .top_0()
-                    .left_0()
-                    .right_0()
-                    .bottom_0()
-                    .bg(SCRIM)
-                    .on_click(cx.listener(move |this, _, _, cx| match close {
-                        G1DialogClose::CreateChat => this.close_create_chat_dialog(cx),
-                        G1DialogClose::Member => this.close_member_dialog(cx),
-                        G1DialogClose::Permissions => this.close_permissions_dialog(cx),
-                        G1DialogClose::Username => this.close_username_dialog(cx),
-                        G1DialogClose::Restrict => this.close_restrict_dialog(cx),
-                        G1DialogClose::GroupConfirm => this.close_group_confirm(cx),
-                        G1DialogClose::QuoteReply => this.close_quote_reply_dialog(cx),
-                        G1DialogClose::ForumManage => this.close_forum_manage_dialog(cx),
-                        G1DialogClose::CommentThread => this.close_comment_thread_dialog(cx),
-                        G1DialogClose::PollVoters => this.close_poll_voters_dialog(cx),
-                        G1DialogClose::WelcomeMessage => this.close_welcome_dialog(cx),
-                        G1DialogClose::ImportContacts => this.close_import_contacts_dialog(cx),
-                    })),
-            )
-            .child(
-                div()
-                    .id(format!("{id_prefix}-panel"))
-                    .flex()
-                    .flex_col()
-                    .gap_2()
-                    .p_4()
-                    .w(px(420.))
-                    .max_h(px(560.))
-                    .rounded_md()
-                    .border_1()
-                    .border_color(cx.theme().border)
-                    .bg(cx.theme().sidebar)
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .justify_between()
-                            .child(div().text_sm().font_semibold().child(title))
-                            .child(
-                                Button::new(format!("{id_prefix}-close"))
-                                    .label("✕")
-                                    .ghost()
-                                    .on_click(cx.listener(move |this, _, _, cx| match close {
-                                        G1DialogClose::CreateChat => {
-                                            this.close_create_chat_dialog(cx)
-                                        }
-                                        G1DialogClose::Member => this.close_member_dialog(cx),
-                                        G1DialogClose::Permissions => {
-                                            this.close_permissions_dialog(cx)
-                                        }
-                                        G1DialogClose::Username => this.close_username_dialog(cx),
-                                        G1DialogClose::Restrict => this.close_restrict_dialog(cx),
-                                        G1DialogClose::GroupConfirm => this.close_group_confirm(cx),
-                                        G1DialogClose::QuoteReply => {
-                                            this.close_quote_reply_dialog(cx)
-                                        }
-                                        G1DialogClose::ForumManage => {
-                                            this.close_forum_manage_dialog(cx)
-                                        }
-                                        G1DialogClose::CommentThread => {
-                                            this.close_comment_thread_dialog(cx)
-                                        }
-                                        G1DialogClose::PollVoters => {
-                                            this.close_poll_voters_dialog(cx)
-                                        }
-                                        G1DialogClose::WelcomeMessage => {
-                                            this.close_welcome_dialog(cx)
-                                        }
-                                        G1DialogClose::ImportContacts => {
-                                            this.close_import_contacts_dialog(cx)
-                                        }
-                                    })),
-                            ),
-                    )
-                    .child(body),
-            )
-            .into_any_element()
-    }
-
-    /// Slice G1: dispatch to whichever group-management dialog is open.
-    fn g1_dialogs_overlay(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        if self.create_chat_dialog.is_some() {
-            return Some(self.create_chat_dialog_overlay(cx));
-        }
-        if self.member_dialog.is_some() {
-            return Some(self.member_dialog_overlay(cx));
-        }
-        if self.permissions_dialog.is_some() {
-            return Some(self.permissions_dialog_overlay(cx));
-        }
-        if self.username_dialog.is_some() {
-            return Some(self.username_dialog_overlay(cx));
-        }
-        if self.restrict_dialog.is_some() {
-            return Some(self.restrict_dialog_overlay(cx));
-        }
-        if self.group_confirm_dialog.is_some() {
-            return Some(self.group_confirm_overlay(cx));
-        }
-        if self.quote_reply_dialog.is_some() {
-            return Some(self.quote_reply_dialog_overlay(cx));
-        }
-        // Slice G2 dialogs.
-        if self.forum_manage_dialog.is_some() {
-            return Some(self.forum_manage_dialog_overlay(cx));
-        }
-        if self.comment_thread_dialog.is_some() {
-            return Some(self.comment_thread_dialog_overlay(cx));
-        }
-        if self.poll_voters_dialog.is_some() {
-            return Some(self.poll_voters_dialog_overlay(cx));
-        }
-        if self.welcome_dialog.is_some() {
-            return Some(self.welcome_dialog_overlay(cx));
-        }
-        None
-    }
-
     /// Slice G1: contact rows filtered by a dialog search query.
     fn g1_contact_rows(&self, query: &str, _cx: &mut Context<Self>) -> Vec<ContactRow> {
         let query = query.trim().to_lowercase();
@@ -31462,109 +32458,6 @@ impl QuillApp {
         }
     }
 
-    /// Slice G1: creation dialog — name (+ description for
-    /// supergroups/channels) and the basic-group contact picker.
-    fn create_chat_dialog_overlay(&self, cx: &mut Context<Self>) -> AnyElement {
-        let dialog = match self.create_chat_dialog.as_ref() {
-            Some(dialog) => dialog,
-            None => return div().into_any_element(),
-        };
-        let kind = dialog.kind;
-        let picks_members = kind.picks_members();
-        let query = dialog.search_input.read(cx).value();
-        let rows = if picks_members {
-            self.g1_contact_rows(&query, cx)
-        } else {
-            Vec::new()
-        };
-        let selected = dialog.selected_users.clone();
-        let mut body = div().flex().flex_col().gap_2();
-        body = body
-            .child(
-                div()
-                    .flex_1()
-                    .child(Textarea::new(&dialog.title_input).h(px(40.))),
-            )
-            .when(kind != CreateChatKind::BasicGroup, |this| {
-                this.child(
-                    div()
-                        .flex_1()
-                        .child(Textarea::new(&dialog.description_input).h(px(64.))),
-                )
-            });
-        if picks_members {
-            body = body.child(
-                div().flex().items_center().gap_2().child(
-                    div()
-                        .flex_1()
-                        .child(Textarea::new(&dialog.search_input).h(px(40.))),
-                ),
-            );
-            let mut list = div()
-                .id("g1-create-contacts")
-                .flex()
-                .flex_col()
-                .gap_1()
-                .max_h(px(220.))
-                .overflow_y_scroll();
-            if rows.is_empty() {
-                list = list.child(
-                    div()
-                        .text_sm()
-                        .text_color(cx.theme().muted_foreground)
-                        .child("No contacts found"),
-                );
-            }
-            for row in rows.iter().take(50) {
-                let is_selected = selected.contains(&row.user_id);
-                list = list.child(self.g1_contact_checkbox(
-                    "g1-create".to_string(),
-                    row,
-                    is_selected,
-                    row.user_id,
-                    cx,
-                ));
-            }
-            body = body.child(list);
-            if !selected.is_empty() {
-                body = body.child(
-                    div()
-                        .text_xs()
-                        .text_color(cx.theme().muted_foreground)
-                        .child(format!("{} members selected", selected.len())),
-                );
-            }
-        }
-        body = body.child(
-            div()
-                .flex()
-                .justify_end()
-                .gap_2()
-                .child(
-                    Button::new("g1-create-cancel")
-                        .label("Cancel")
-                        .ghost()
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.close_create_chat_dialog(cx);
-                        })),
-                )
-                .child(
-                    Button::new("g1-create-submit")
-                        .label(format!("Create {}", kind.title().to_lowercase()))
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.submit_create_chat_dialog(cx);
-                        })),
-                ),
-        );
-        self.g1_modal(
-            "g1-create",
-            G1DialogClose::CreateChat,
-            kind.title(),
-            body.into_any_element(),
-            cx,
-        )
-    }
-
     /// Slice G1: the member page the dialog's current tab shows.
     fn member_dialog_fetch(&self, cx: &mut Context<Self>) -> Option<SupergroupMembersFetch> {
         let dialog = self.member_dialog.as_ref()?;
@@ -31607,273 +32500,6 @@ impl QuillApp {
             ChannelMemberStatus::Left => "left",
             ChannelMemberStatus::Unknown => "",
         }
-    }
-
-    /// Slice G1: member-management dialog — tab bar, search, member
-    /// rows with per-tab actions, and the add-members section.
-    fn member_dialog_overlay(&self, cx: &mut Context<Self>) -> AnyElement {
-        let dialog = match self.member_dialog.as_ref() {
-            Some(dialog) => dialog,
-            None => return div().into_any_element(),
-        };
-        let chat_id = dialog.chat_id;
-        let is_basic_group = dialog.is_basic_group;
-        let tab = dialog.tab;
-        let add_open = dialog.add_open;
-        let add_query = dialog.add_search.read(cx).value();
-        let add_selected = dialog.add_selected.clone();
-        let can_restrict = self
-            .session()
-            .is_some_and(|session| session.chat_can_restrict_members(chat_id));
-        let can_add = self
-            .session()
-            .is_some_and(|session| session.chat_can_add_members(chat_id));
-        let fetch = self.member_dialog_fetch(cx);
-
-        let mut body = div().flex().flex_col().gap_2();
-        // Tab bar.
-        let mut tabs = div().id("g1-member-tabs").flex().gap_1();
-        for member_tab in [
-            MemberTab::All,
-            MemberTab::Administrators,
-            MemberTab::Restricted,
-            MemberTab::Banned,
-        ] {
-            // Restricted/banned tabs only exist for supergroups
-            // (`getSupergroupMembers` filters, schema 1.8.67 lines
-            // 2571/2574) — and only for viewers who can restrict
-            // members; the driver refuses the fetch otherwise and the
-            // tab would spin on "Loading members…" forever.
-            if is_basic_group && member_tab != MemberTab::All {
-                continue;
-            }
-            if !can_restrict && matches!(member_tab, MemberTab::Restricted | MemberTab::Banned) {
-                continue;
-            }
-            let label = if member_tab == tab {
-                format!("✓ {}", member_tab.label())
-            } else {
-                member_tab.label().to_string()
-            };
-            tabs = tabs.child(
-                Button::new(format!("g1-member-tab-{}", member_tab.label()))
-                    .label(label)
-                    .ghost()
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.member_dialog_tab(member_tab, cx);
-                    })),
-            );
-        }
-        body = body.child(tabs);
-        // Slice G1: surface member-action failures (custom title,
-        // restrict/ban) where the action was taken — the dialog reads
-        // the member-list fetch states, not `admin_lists`.
-        if let Some(error) = self
-            .session()
-            .and_then(|session| session.member_action_error.get(&chat_id.0))
-            .cloned()
-        {
-            body = body.child(
-                div()
-                    .w_full()
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .gap_2()
-                    .p_2()
-                    .rounded_md()
-                    .bg(DANGER_BG_DEEP)
-                    .child(div().text_sm().text_color(DANGER_PALE).child(error))
-                    .child(
-                        Button::new("g1-member-action-error-dismiss")
-                            .label("Dismiss")
-                            .ghost()
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.dismiss_member_action_error(chat_id, cx);
-                            })),
-                    ),
-            );
-        }
-        // Search (supergroups only — basic groups list everyone).
-        if !is_basic_group {
-            body = body.child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap_2()
-                    .child(
-                        div()
-                            .flex_1()
-                            .child(Textarea::new(&dialog.search_input).h(px(40.))),
-                    )
-                    .child(
-                        Button::new("g1-member-search")
-                            .label("Search")
-                            .ghost()
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.refresh_member_dialog(cx);
-                            })),
-                    ),
-            );
-        }
-        // Member rows.
-        let mut list = div()
-            .id("g1-member-list")
-            .flex()
-            .flex_col()
-            .gap_1()
-            .max_h(px(240.))
-            .overflow_y_scroll();
-        match fetch {
-            None | Some(SupergroupMembersFetch::Loading) => {
-                list = list.child(
-                    div()
-                        .text_sm()
-                        .text_color(cx.theme().muted_foreground)
-                        .child("Loading members…"),
-                );
-            }
-            Some(SupergroupMembersFetch::Failed(message)) => {
-                list = list.child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap_2()
-                        .child(
-                            div()
-                                .flex_1()
-                                .text_sm()
-                                .text_color(cx.theme().muted_foreground)
-                                .child(message),
-                        )
-                        .child(
-                            Button::new("g1-member-retry")
-                                .label("Retry")
-                                .ghost()
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.refresh_member_dialog(cx);
-                                })),
-                        ),
-                );
-            }
-            Some(SupergroupMembersFetch::Loaded { members, .. }) => {
-                if members.is_empty() {
-                    list = list.child(
-                        div()
-                            .text_sm()
-                            .text_color(cx.theme().muted_foreground)
-                            .child("No members"),
-                    );
-                }
-                for member in members.iter().take(200) {
-                    list = list.child(self.member_row(chat_id, member, tab, can_restrict, cx));
-                }
-            }
-        }
-        body = body.child(list);
-        // Add-members section.
-        if can_add && tab == MemberTab::All {
-            let toggle_label = if add_open {
-                "▾ Add members"
-            } else {
-                "▸ Add members"
-            };
-            body = body.child(
-                Button::new("g1-add-toggle")
-                    .label(toggle_label)
-                    .ghost()
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        if let Some(dialog) = this.member_dialog.as_mut() {
-                            dialog.add_open = !dialog.add_open;
-                            cx.notify();
-                        }
-                    })),
-            );
-            if add_open {
-                // Surface bulk-add failures (`failedToAddMembers`,
-                // schema 1.8.67 line 3640).
-                if let Some(failed) = self
-                    .session()
-                    .and_then(|session| session.add_members_failed.get(&chat_id.0))
-                    .copied()
-                    .filter(|count| *count > 0)
-                {
-                    body = body.child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap_2()
-                            .child(
-                                div()
-                                    .flex_1()
-                                    .text_xs()
-                                    .text_color(DANGER)
-                                    .child(format!("{failed} member(s) could not be added")),
-                            )
-                            .child(
-                                Button::new("g1-add-failed-dismiss")
-                                    .label("Dismiss")
-                                    .ghost()
-                                    .on_click(cx.listener(move |this, _, _, cx| {
-                                        if let Some(live) = this.live.as_mut() {
-                                            live.driver
-                                                .session
-                                                .add_members_failed
-                                                .remove(&chat_id.0);
-                                        }
-                                        cx.notify();
-                                    })),
-                            ),
-                    );
-                }
-                body = body.child(
-                    div()
-                        .flex_1()
-                        .child(Textarea::new(&dialog.add_search).h(px(40.))),
-                );
-                let mut add_list = div()
-                    .id("g1-add-contacts")
-                    .flex()
-                    .flex_col()
-                    .gap_1()
-                    .max_h(px(160.))
-                    .overflow_y_scroll();
-                let rows = self.g1_contact_rows(&add_query, cx);
-                for row in rows.iter().take(50) {
-                    let is_selected = add_selected.contains(&row.user_id);
-                    add_list = add_list.child(self.g1_contact_checkbox(
-                        "g1-add".to_string(),
-                        row,
-                        is_selected,
-                        row.user_id,
-                        cx,
-                    ));
-                }
-                body = body.child(add_list);
-                body = body.child(
-                    Button::new("g1-add-submit")
-                        .label(if add_selected.is_empty() {
-                            "Add members".to_string()
-                        } else {
-                            format!("Add {} member(s)", add_selected.len())
-                        })
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.submit_member_add(cx);
-                        })),
-                );
-            }
-        }
-        self.g1_modal(
-            "g1-members",
-            G1DialogClose::Member,
-            if is_basic_group {
-                "Group members"
-            } else {
-                "Manage members"
-            },
-            body.into_any_element(),
-            cx,
-        )
     }
 
     /// Slice G1: one member row — name, status, and the tab's actions
@@ -32076,186 +32702,6 @@ impl QuillApp {
         list.into_any_element()
     }
 
-    /// Slice G1: default-permissions editor (`setChatPermissions`).
-    fn permissions_dialog_overlay(&self, cx: &mut Context<Self>) -> AnyElement {
-        let dialog = match self.permissions_dialog.as_ref() {
-            Some(dialog) => dialog,
-            None => return div().into_any_element(),
-        };
-        let body = div()
-            .flex()
-            .flex_col()
-            .gap_2()
-            .child(
-                div()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .child("What new members may do by default"),
-            )
-            .child(self.permission_checkboxes(&dialog.permissions, cx))
-            .child(
-                div()
-                    .flex()
-                    .justify_end()
-                    .gap_2()
-                    .child(
-                        Button::new("g1-permissions-cancel")
-                            .label("Cancel")
-                            .ghost()
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.close_permissions_dialog(cx);
-                            })),
-                    )
-                    .child(Button::new("g1-permissions-submit").label("Save").on_click(
-                        cx.listener(|this, _, _, cx| {
-                            this.submit_permissions_dialog(cx);
-                        }),
-                    )),
-            )
-            .into_any_element();
-        self.g1_modal(
-            "g1-permissions",
-            G1DialogClose::Permissions,
-            "Default permissions",
-            body,
-            cx,
-        )
-    }
-
-    /// Slice G1: public-username editor (`setSupergroupUsername`).
-    fn username_dialog_overlay(&self, cx: &mut Context<Self>) -> AnyElement {
-        let dialog = match self.username_dialog.as_ref() {
-            Some(dialog) => dialog,
-            None => return div().into_any_element(),
-        };
-        let (title, hint) = match dialog.kind {
-            TextPromptKind::Username => (
-                "Public username",
-                "Public link t.me/username — empty removes it",
-            ),
-            TextPromptKind::CustomTitle { .. } => (
-                "Custom title",
-                "Admin title shown instead of \"admin\" — empty removes it",
-            ),
-        };
-        let body =
-            div()
-                .flex()
-                .flex_col()
-                .gap_2()
-                .child(
-                    div()
-                        .text_xs()
-                        .text_color(cx.theme().muted_foreground)
-                        .child(hint),
-                )
-                .child(
-                    div()
-                        .flex_1()
-                        .child(Textarea::new(&dialog.input).h(px(40.))),
-                )
-                .child(
-                    div()
-                        .flex()
-                        .justify_end()
-                        .gap_2()
-                        .child(
-                            Button::new("g1-username-cancel")
-                                .label("Cancel")
-                                .ghost()
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.close_username_dialog(cx);
-                                })),
-                        )
-                        .child(Button::new("g1-username-submit").label("Save").on_click(
-                            cx.listener(|this, _, _, cx| {
-                                this.submit_username_dialog(cx);
-                            }),
-                        )),
-                )
-                .into_any_element();
-        self.g1_modal("g1-username", G1DialogClose::Username, title, body, cx)
-    }
-
-    /// Slice G1: restrict/ban dialog — permission checkboxes (restrict
-    /// mode) plus a duration cycler (forever / 1d / 7d / 30d).
-    fn restrict_dialog_overlay(&self, cx: &mut Context<Self>) -> AnyElement {
-        let dialog = match self.restrict_dialog.as_ref() {
-            Some(dialog) => dialog,
-            None => return div().into_any_element(),
-        };
-        let name = self
-            .session()
-            .and_then(|session| session.user(dialog.user_id))
-            .map(|user| user.display_name())
-            .unwrap_or_else(|| format!("User {}", dialog.user_id));
-        let duration_label = match dialog.banned_until_days {
-            0 => "Forever".to_string(),
-            1 => "1 day".to_string(),
-            days => format!("{days} days"),
-        };
-        let mut body = div().flex().flex_col().gap_2();
-        if !dialog.ban {
-            body = body
-                .child(
-                    div()
-                        .text_xs()
-                        .text_color(cx.theme().muted_foreground)
-                        .child("Allowed while restricted"),
-                )
-                .child(self.restrict_permission_checkboxes(&dialog.permissions, cx));
-        }
-        body = body
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap_2()
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(cx.theme().muted_foreground)
-                            .child("Duration:"),
-                    )
-                    .child(
-                        Button::new("g1-restrict-duration")
-                            .label(duration_label)
-                            .ghost()
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.cycle_restrict_duration(cx);
-                            })),
-                    ),
-            )
-            .child(
-                div()
-                    .flex()
-                    .justify_end()
-                    .gap_2()
-                    .child(
-                        Button::new("g1-restrict-cancel")
-                            .label("Cancel")
-                            .ghost()
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.close_restrict_dialog(cx);
-                            })),
-                    )
-                    .child(
-                        Button::new("g1-restrict-submit")
-                            .label(if dialog.ban { "Ban" } else { "Restrict" })
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.submit_restrict_dialog(cx);
-                            })),
-                    ),
-            );
-        self.g1_modal(
-            "g1-restrict",
-            G1DialogClose::Restrict,
-            &format!("{} {name}", if dialog.ban { "Ban" } else { "Restrict" }),
-            body.into_any_element(),
-            cx,
-        )
-    }
-
     /// Slice G1: permission checkboxes for the restrict dialog (same
     /// labels, separate toggle handler).
     fn restrict_permission_checkboxes(
@@ -32288,269 +32734,6 @@ impl QuillApp {
             }
         }
         list.into_any_element()
-    }
-
-    /// Slice G1: delete / leave / broadcast-upgrade confirmation.
-    fn group_confirm_overlay(&self, cx: &mut Context<Self>) -> AnyElement {
-        let dialog = match self.group_confirm_dialog.as_ref() {
-            Some(dialog) => dialog,
-            None => return div().into_any_element(),
-        };
-        let (title, message, confirm_label): (String, String, String) = match dialog.action {
-            GroupConfirmAction::DeleteChat => (
-                "Delete group".to_string(),
-                "Delete this group for everyone? This cannot be undone.".to_string(),
-                "Delete".to_string(),
-            ),
-            GroupConfirmAction::RemoveFromList => (
-                "Delete chat".to_string(),
-                "Delete this chat and its history from your chat list?".to_string(),
-                "Delete".to_string(),
-            ),
-            GroupConfirmAction::ReportChat => (
-                "Report chat".to_string(),
-                "Report this chat to Telegram moderators as spam?".to_string(),
-                "Report".to_string(),
-            ),
-            GroupConfirmAction::BlockUser { block } => {
-                if block {
-                    (
-                        "Block user".to_string(),
-                        "Block this user? They won't be able to send you messages.".to_string(),
-                        "Block".to_string(),
-                    )
-                } else {
-                    (
-                        "Unblock user".to_string(),
-                        "Unblock this user?".to_string(),
-                        "Unblock".to_string(),
-                    )
-                }
-            }
-            GroupConfirmAction::RemoveSelectedChats => (
-                "Delete chats".to_string(),
-                "Delete the selected chats and their history from your chat list?".to_string(),
-                "Delete".to_string(),
-            ),
-            GroupConfirmAction::LeaveChat => (
-                "Leave chat".to_string(),
-                "Leave this chat? You can rejoin with an invite link.".to_string(),
-                "Leave".to_string(),
-            ),
-            GroupConfirmAction::BroadcastUpgrade => (
-                "Convert to broadcast group".to_string(),
-                "Only admins will be able to post. Non-admin members become \
-                 subscribers. This cannot be undone."
-                    .to_string(),
-                "Convert".to_string(),
-            ),
-            GroupConfirmAction::ClearHistory { revoke } => (
-                "Clear history".to_string(),
-                if revoke {
-                    "Delete all messages in this chat for everyone? This cannot be undone."
-                } else {
-                    "Delete all messages in this chat for you? This cannot be undone."
-                }
-                .to_string(),
-                "Clear".to_string(),
-            ),
-            // Slice B2: "Restart bot" — history clear + /start re-send.
-            GroupConfirmAction::RestartBot => (
-                "Restart bot".to_string(),
-                "Clear this bot's chat history and send /start again? This cannot be undone."
-                    .to_string(),
-                "Restart".to_string(),
-            ),
-            // Slice A2: TGX `AbortRecoveryEmailConfirm` ("Are you sure
-            // you want to abort recovery email setup?").
-            GroupConfirmAction::AbortRecoveryEmailSetup => (
-                "Abort recovery email setup".to_string(),
-                "Are you sure you want to abort recovery email setup? The new address will not be activated."
-                    .to_string(),
-                "Abort".to_string(),
-            ),
-            // Slice A6: user-panel block — TGX `BlockUserConfirm`
-            // ("Are you sure you want to block %1$s?").
-            GroupConfirmAction::BlockContact { user_id, block } => {
-                let name = self.contact_display_name(user_id);
-                if block {
-                    (
-                        "Block user".to_string(),
-                        format!("Are you sure you want to block {name}?"),
-                        "Block".to_string(),
-                    )
-                } else {
-                    (
-                        "Unblock user".to_string(),
-                        format!("Unblock {name}?"),
-                        "Unblock".to_string(),
-                    )
-                }
-            }
-            // Slice A6: user-panel delete contact — TGX
-            // `DeleteContactConfirm` ("Delete %1$s from contacts?").
-            GroupConfirmAction::DeleteContact { user_id } => {
-                let name = self.contact_display_name(user_id);
-                (
-                    "Delete contact".to_string(),
-                    format!("Delete {name} from contacts?"),
-                    "Delete".to_string(),
-                )
-            }
-            // Slice A6: TGX `SyncContactsDeleteInfo` ("This will remove
-            // your contacts from the Telegram servers. If 'Sync Contacts'
-            // is enabled, contacts will be re-synced.").
-            GroupConfirmAction::DeleteSyncedContacts => (
-                "Delete synced contacts".to_string(),
-                "This will remove your contacts from the Telegram servers. If 'Sync contacts' is enabled, contacts will be re-synced.".to_string(),
-                "Delete".to_string(),
-            ),
-        };
-        // Slice A6: TGX renders the confirm button red for the
-        // destructive contact actions (OptionColor.RED).
-        let destructive = matches!(
-            dialog.action,
-            GroupConfirmAction::DeleteContact { .. }
-                | GroupConfirmAction::BlockUser { block: true, .. }
-                | GroupConfirmAction::BlockContact { block: true, .. }
-                | GroupConfirmAction::DeleteSyncedContacts
-        );
-        let body = div()
-            .flex()
-            .flex_col()
-            .gap_3()
-            .child(div().text_sm().child(message))
-            .child(
-                div()
-                    .flex()
-                    .justify_end()
-                    .gap_2()
-                    .child(
-                        Button::new("g1-confirm-cancel")
-                            .label("Cancel")
-                            .ghost()
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.close_group_confirm(cx);
-                            })),
-                    )
-                    .child(
-                        Button::new("g1-confirm-submit")
-                            .label(confirm_label)
-                            .when(destructive, |button| button.danger())
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.submit_group_confirm(cx);
-                            })),
-                    ),
-            )
-            .into_any_element();
-        self.g1_modal("g1-confirm", G1DialogClose::GroupConfirm, &title, body, cx)
-    }
-
-    /// Slice G1: partial-quote dialog — the input starts as the full
-    /// message text; the user trims it to the quoted part.
-    fn quote_reply_dialog_overlay(&self, cx: &mut Context<Self>) -> AnyElement {
-        let dialog = match self.quote_reply_dialog.as_ref() {
-            Some(dialog) => dialog,
-            None => return div().into_any_element(),
-        };
-        let body = div()
-            .flex()
-            .flex_col()
-            .gap_2()
-            .child(
-                div()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .child("Trim the text below to the part you want to quote"),
-            )
-            .child(
-                div()
-                    .flex_1()
-                    .child(Textarea::new(&dialog.input).h(px(120.))),
-            )
-            .child(
-                div()
-                    .flex()
-                    .justify_end()
-                    .gap_2()
-                    .child(
-                        Button::new("g1-quote-cancel")
-                            .label("Cancel")
-                            .ghost()
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.close_quote_reply_dialog(cx);
-                            })),
-                    )
-                    .child(
-                        Button::new("g1-quote-submit")
-                            .label("Quote reply")
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.submit_quote_reply_dialog(window, cx);
-                            })),
-                    ),
-            )
-            .into_any_element();
-        self.g1_modal(
-            "g1-quote",
-            G1DialogClose::QuoteReply,
-            "Quote part of message",
-            body,
-            cx,
-        )
-    }
-
-    /// Slice G2: forum-topic management dialog (`createForumTopic`
-    /// / `editForumTopic` / close-reopen / pin-unpin / delete /
-    /// General hide-show; schema 1.8.67, lines 12665–12736). The topic
-    /// list is the cached `getForumTopics` result; the General topic
-    /// gets Hide/Show instead of close/pin/delete.
-    fn forum_manage_dialog_overlay(&self, cx: &mut Context<Self>) -> AnyElement {
-        let dialog = match self.forum_manage_dialog.as_ref() {
-            Some(dialog) => dialog,
-            None => return div().into_any_element(),
-        };
-        let chat_id = dialog.chat_id;
-        let topics: Vec<ForumTopic> = self
-            .session()
-            .map(|session| session.ordered_forum_topics(chat_id))
-            .unwrap_or_default();
-        let editing = dialog.editing_topic;
-        let mut body = div().flex().flex_col().gap_2().child(
-            div()
-                .flex()
-                .items_center()
-                .gap_1()
-                .child(
-                    div()
-                        .flex_1()
-                        .child(Textarea::new(&dialog.new_topic_input).h(px(36.))),
-                )
-                .child(
-                    Button::new("g2-topic-create")
-                        .label("Create")
-                        .on_click(cx.listener(|this, _, window, cx| {
-                            this.submit_forum_topic_create(window, cx);
-                        })),
-                ),
-        );
-        let mut list = div()
-            .id("g2-topic-list")
-            .flex()
-            .flex_col()
-            .gap_1()
-            .max_h(px(320.))
-            .overflow_y_scroll();
-        for topic in &topics {
-            list = list.child(self.forum_topic_manage_row(chat_id, topic, editing, cx));
-        }
-        body = body.child(list);
-        self.g1_modal(
-            "g2-forum-manage",
-            G1DialogClose::ForumManage,
-            "Manage topics",
-            body.into_any_element(),
-            cx,
-        )
     }
 
     /// Slice G2: one topic row in the management dialog — name +
@@ -32679,215 +32862,6 @@ impl QuillApp {
             row = row.child(actions);
         }
         row.into_any_element()
-    }
-
-    /// Slice G2: channel-post comment-thread viewer (`getMessageThreadHistory`,
-    /// schema 1.8.67, line 11839). Honest states: loading / failed-with-retry /
-    /// loaded comments (sender attribution falls back to "You" / the
-    /// post's author signature — `ParsedMessage` keeps neither sender
-    /// id nor date).
-    fn comment_thread_dialog_overlay(&self, cx: &mut Context<Self>) -> AnyElement {
-        let (chat_id, message_id) = match self.comment_thread_dialog.as_ref() {
-            Some(dialog) => (dialog.chat_id, dialog.message_id),
-            None => return div().into_any_element(),
-        };
-        let fetch = self
-            .session()
-            .and_then(|session| session.comment_thread.clone());
-        let mut body = div().flex().flex_col().gap_2();
-        match fetch {
-            Some(thread) if thread.chat_id == chat_id && thread.message_id == message_id => {
-                if let Some(error) = thread.failed {
-                    body = body.child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .w_full()
-                            .gap_1()
-                            .child(
-                                div()
-                                    .flex_1()
-                                    .text_sm()
-                                    .text_color(cx.theme().muted_foreground)
-                                    .child(error),
-                            )
-                            .child(
-                                Button::new("g2-comments-retry")
-                                    .label("Retry")
-                                    .ghost()
-                                    .on_click(cx.listener(move |this, _, window, cx| {
-                                        this.open_comment_thread_dialog(
-                                            chat_id, message_id, window, cx,
-                                        );
-                                    })),
-                            ),
-                    );
-                } else if thread.messages.is_empty() {
-                    body = body.child(
-                        div()
-                            .text_sm()
-                            .text_color(cx.theme().muted_foreground)
-                            .child("No comments yet."),
-                    );
-                } else {
-                    let mut list = div()
-                        .id("g2-comment-list")
-                        .flex()
-                        .flex_col()
-                        .gap_2()
-                        .max_h(px(360.))
-                        .overflow_y_scroll();
-                    for message in &thread.messages {
-                        let name = if message.is_outgoing {
-                            "You".to_string()
-                        } else {
-                            message
-                                .author_signature
-                                .clone()
-                                .unwrap_or_else(|| "Comment".to_string())
-                        };
-                        let text = Self::message_copyable_text(effective_content(
-                            &message.content,
-                            message.ephemeral.as_ref(),
-                        ))
-                        .unwrap_or_else(|| "(no text)".to_string());
-                        list = list.child(
-                            div()
-                                .flex()
-                                .flex_col()
-                                .gap_1()
-                                .child(
-                                    div()
-                                        .text_xs()
-                                        .font_semibold()
-                                        .text_color(cx.theme().muted_foreground)
-                                        .child(name),
-                                )
-                                .child(div().text_sm().child(text)),
-                        );
-                    }
-                    body = body.child(list);
-                }
-            }
-            _ => {
-                body = body.child(
-                    div()
-                        .text_sm()
-                        .text_color(cx.theme().muted_foreground)
-                        .child("Loading comments…"),
-                );
-            }
-        }
-        self.g1_modal(
-            "g2-comments",
-            G1DialogClose::CommentThread,
-            "Comments",
-            body.into_any_element(),
-            cx,
-        )
-    }
-
-    /// Slice G2: chat welcome-message editor (`loadChatWelcomeMessages`
-    /// / `addChatWelcomeMessage` / `editChatWelcomeMessage` /
-    /// `deleteChatWelcomeMessage`; schema 1.8.67, lines 12630–12654).
-    /// Honest states: loading / failed-with-retry / the pack list with
-    /// inline edit and delete per row. Only text content is supported
-    /// in this slice — `ParsedWelcomeMessage` keeps text only.
-    fn welcome_dialog_overlay(&self, cx: &mut Context<Self>) -> AnyElement {
-        let dialog = match self.welcome_dialog.as_ref() {
-            Some(dialog) => dialog,
-            None => return div().into_any_element(),
-        };
-        let chat_id = dialog.chat_id;
-        let editing = dialog.editing;
-        let fetch = self
-            .session()
-            .and_then(|session| session.welcome_message_fetches.get(&chat_id.0).cloned());
-        let messages: Vec<ParsedWelcomeMessage> = self
-            .session()
-            .and_then(|session| session.welcome_messages.get(&chat_id.0).cloned())
-            .unwrap_or_default();
-        let mut body = div().flex().flex_col().gap_2().child(
-            div()
-                .flex()
-                .items_center()
-                .gap_1()
-                .child(
-                    div()
-                        .flex_1()
-                        .child(Textarea::new(&dialog.new_input).h(px(64.))),
-                )
-                .child(
-                    Button::new("g2-welcome-add")
-                        .label("Add")
-                        .on_click(cx.listener(|this, _, window, cx| {
-                            this.submit_welcome_add(window, cx);
-                        })),
-                ),
-        );
-        match fetch {
-            Some(WelcomeMessagesFetch::Failed(error)) => {
-                body = body.child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .w_full()
-                        .gap_1()
-                        .child(
-                            div()
-                                .flex_1()
-                                .text_sm()
-                                .text_color(cx.theme().muted_foreground)
-                                .child(error),
-                        )
-                        .child(
-                            Button::new("g2-welcome-retry")
-                                .label("Retry")
-                                .ghost()
-                                .on_click(cx.listener(move |this, _, window, cx| {
-                                    this.open_welcome_dialog(chat_id, window, cx);
-                                })),
-                        ),
-                );
-            }
-            Some(WelcomeMessagesFetch::Loaded) | None => {
-                if messages.is_empty() {
-                    body = body.child(
-                        div()
-                            .text_sm()
-                            .text_color(cx.theme().muted_foreground)
-                            .child("No welcome messages yet."),
-                    );
-                } else {
-                    let mut list = div()
-                        .id("g2-welcome-list")
-                        .flex()
-                        .flex_col()
-                        .gap_2()
-                        .max_h(px(300.))
-                        .overflow_y_scroll();
-                    for message in &messages {
-                        list = list.child(self.welcome_message_row(chat_id, message, editing, cx));
-                    }
-                    body = body.child(list);
-                }
-            }
-            Some(WelcomeMessagesFetch::Loading) => {
-                body = body.child(
-                    div()
-                        .text_sm()
-                        .text_color(cx.theme().muted_foreground)
-                        .child("Loading welcome messages…"),
-                );
-            }
-        }
-        self.g1_modal(
-            "g2-welcome",
-            G1DialogClose::WelcomeMessage,
-            "Welcome message",
-            body.into_any_element(),
-            cx,
-        )
     }
 
     /// Slice G2: one welcome-message row — text preview, inline edit,
@@ -36730,8 +36704,9 @@ impl Render for QuillApp {
             live.driver.session.app_active = window.is_window_active();
         }
         self.flush_notifications(window, cx);
-        // Phase 1 (kit adoption): arm the status-toast dismiss timer.
-        self.arm_status_toast(cx);
+        // kit Phase 2 (redo): hand-rolled toast pill replaced by kit
+        // notifications; new status notes are consumed here.
+        self.push_status_note(window, cx);
         // Slice P1 fix-up: the checkout dialog opens on Buy press before
         // the form arrives — prefill the saved order info once, on the
         // first frame after the form answer lands. (This can't live in
@@ -36981,7 +36956,6 @@ impl Render for QuillApp {
                     // Slice media-shared-gallery: shared-media gallery panel.
                     .when_some(self.shared_media_panel(cx), |this, panel| this.child(panel)),
             )
-            .child(self.status_toast(cx))
             .when(self.media_viewer.is_open(), |this| {
                 this.child(self.media_viewer_overlay(window, cx))
             })
@@ -36993,61 +36967,32 @@ impl Render for QuillApp {
             .when(self.story_composer.open, |this| {
                 this.child(self.story_composer_overlay(cx))
             })
-            // Phase 6: add-contact dialog above everything else.
-            .when_some(self.add_contact_dialog_overlay(cx), |this, overlay| {
-                this.child(overlay)
-            })
-            // A5: edit-profile dialog above everything else.
-            .when_some(self.edit_profile_dialog_overlay(cx), |this, overlay| {
-                this.child(overlay)
-            })
-            // Slice A6: vCard import dialog above everything else.
-            .when_some(self.import_contacts_dialog_overlay(cx), |this, overlay| {
-                this.child(overlay)
-            })
-            // Slice G1: group/channel management dialogs (create,
-            // members, permissions, username, restrict/ban, confirms,
-            // quote reply) above everything else.
-            .when_some(self.g1_dialogs_overlay(cx), |this, overlay| {
-                this.child(overlay)
-            })
-            // B1: bot-keyboard dialogs (2-step password prompt, login-URL
-            // confirmation) above everything else.
-            .when_some(self.b1_dialogs_overlay(cx), |this, overlay| {
-                this.child(overlay)
-            })
-            // Parity slice: folder manage / editor / delete-confirm above
-            // everything else.
-            .when_some(self.folder_overlays(cx), |this, overlay| {
-                this.child(overlay)
-            })
-            // Phase C2i: confirm-before-calling dialog.
-            .when_some(self.call_confirm_overlay(cx), |this, overlay| {
-                this.child(overlay)
-            })
-            // Parity slice: scope-default notification settings dialog.
-            .when(self.notification_defaults_open, |this| {
-                this.child(self.notification_defaults_overlay(cx))
-            })
-            // Phase S2: storage usage overlay.
-            .when(self.storage_usage_open, |this| {
-                this.child(self.storage_usage_overlay(cx))
-            })
-            // Slice A2: two-step verification overlay.
-            .when(self.twofa_open, |this| this.child(self.twofa_overlay(cx)))
-            // Slice A3: Active Sessions overlay.
-            .when(self.sessions_open, |this| {
-                this.child(self.sessions_overlay(cx))
-            })
-            // Slice A4: Connected Websites overlay.
-            .when(self.websites_open, |this| {
-                this.child(self.websites_overlay(cx))
-            })
-            // Slice CL2: archive auto-settings overlay.
-            .when(
-                self.session().is_some_and(|s| s.archive_settings_open),
-                |this| this.child(self.archive_settings_overlay(cx)),
-            )
+            // kit Phase 2 (redo): add-contact now hosted in a kit Dialog
+            // via the shell sync — render wiring deleted.
+            // kit Phase 2 (redo): edit-profile now hosted in a kit Dialog
+            // via the shell sync — render wiring deleted.
+            // kit Phase 2 (redo): vCard import now hosted in a kit Dialog
+            // via the shell sync — render wiring deleted.
+            // kit Phase 2 (redo): G1 dialogs now hosted in kit Dialogs
+            // via the shell sync — render wiring deleted.
+            // kit Phase 2 (redo): B1 dialogs now hosted in kit Dialogs via
+            // the shell sync — render wiring deleted.
+            // kit Phase 2 (redo): folder dialogs now hosted in kit Dialogs
+            // via the shell sync — render wiring deleted.
+            // kit Phase 2 (redo): call confirm now hosted in a kit Dialog
+            // via the shell sync — render wiring deleted.
+            // kit Phase 2 (redo): notification defaults now hosted in a kit
+            // Dialog via the shell sync — render wiring deleted.
+            // kit Phase 2 (redo): storage usage now hosted in a kit Dialog
+            // via the shell sync — render wiring deleted.
+            // kit Phase 2 (redo): two-step verification now hosted in a kit
+            // Dialog via the shell sync — render wiring deleted.
+            // kit Phase 2 (redo): sessions now hosted in a kit Dialog via
+            // the shell sync — render wiring deleted.
+            // kit Phase 2 (redo): websites now hosted in a kit Dialog via
+            // the shell sync — render wiring deleted.
+            // kit Phase 2 (redo): archive settings now hosted in a kit
+            // Dialog via the shell sync — render wiring deleted.
             // Phase C1: call overlay above everything else.
             .when_some(self.call_overlay(cx), |this, overlay| this.child(overlay))
             // Phase C3a: group-call (voice chat) overlay above the call
@@ -37055,15 +37000,10 @@ impl Render for QuillApp {
             .when_some(self.group_call_overlay(cx), |this, overlay| {
                 this.child(overlay)
             })
-            // Phase C2h: start/schedule dialog above the group-call
-            // overlay.
-            .when_some(self.group_call_start_overlay(cx), |this, overlay| {
-                this.child(overlay)
-            })
-            // M1: scheduled-messages dialog.
-            .when(self.scheduled_dialog_open, |this| {
-                this.child(self.scheduled_dialog(cx))
-            })
+            // kit Phase 2 (redo): group-call start now hosted in a kit
+            // Dialog via the shell sync — render wiring deleted.
+            // kit Phase 2 (redo): scheduled messages now hosted in a kit
+            // Dialog via the shell sync — render wiring deleted.
             // M1: right-click message context menu.
             .when_some(self.message_menu, |this, menu| {
                 this.child(self.message_menu_overlay(menu, cx))
@@ -47256,55 +47196,276 @@ fn auth_action_note(auth: &AuthView, connect_status: &ConnectUiStatus) -> impl I
     div().text_xs().child(label)
 }
 impl QuillApp {
-    /// Phase 1 (kit adoption): arms a one-shot 5 s dismiss timer the first
-    /// time a new `status_note` renders. The `status_note` call sites keep
-    /// writing the field directly; only the newest note survives (a newer
-    /// note's timer wins via the generation counter).
-    fn arm_status_toast(&mut self, cx: &mut Context<Self>) {
-        if self.status_note.is_empty() || self.toast_armed_for == self.status_note {
+    /// kit Phase 2 (redo): the hand-rolled toast pill is gone — new
+    /// `status_note`s go to the kit notification layer (auto-dismiss,
+    /// stacking, theme from `cx.theme()`). Call sites keep writing
+    /// `status_note`; render consumes it here.
+    fn push_status_note(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.status_note.is_empty() {
             return;
         }
-        self.toast_armed_for = self.status_note.clone();
-        self.toast_seq += 1;
-        let seq = self.toast_seq;
-        cx.spawn(async move |this, cx| {
-            cx.background_executor().timer(Duration::from_secs(5)).await;
-            let _ = this.update(cx, |this, cx| {
-                if this.toast_seq == seq {
-                    this.status_note.clear();
-                    this.toast_armed_for.clear();
-                    cx.notify();
-                }
-            });
-        })
-        .detach();
-    }
-
-    /// Phase 1 (kit adoption): transient toast pill replacing the deleted
-    /// permanent debug status bar. Renders nothing when there is no note,
-    /// so the layout is clean in the steady state.
-    fn status_toast(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        div().when(!self.status_note.is_empty(), |this| {
-            this.child(
-                div().flex().justify_center().py_2().child(
-                    div()
-                        .px_4()
-                        .py_2()
-                        .rounded_full()
-                        .bg(cx.theme().popover)
-                        .border_1()
-                        .border_color(cx.theme().border)
-                        .text_xs()
-                        .text_color(cx.theme().popover_foreground)
-                        .child(self.status_note.clone()),
-                ),
-            )
-        })
+        let note = std::mem::take(&mut self.status_note);
+        window.push_notification(Notification::info(note), cx);
     }
 }
 
 impl Focusable for QuillApp {
     fn focus_handle(&self, _cx: &App) -> FocusHandle {
         self.focus_sidebar.clone()
+    }
+}
+
+// kit Phase 2 (redo): dialog/notification shell.
+// Thin view between the kit [`Root`] and [`QuillApp`] that mounts the
+// kit-managed dialog and notification layers.
+//
+// Why a shell: `window.open_dialog` builders read live [`QuillApp`]
+// state through `Entity<QuillApp>`, which panics while `QuillApp` is
+// leased — and `QuillApp` is leased for the whole of its own `render`.
+// Building the layers here keeps every builder outside that lease.
+// Re-render chaining needs no manual observe: `cx.notify()` on the app
+// marks ancestor views (this shell) dirty, so the layers rebuild on
+// every app notify and dialog content stays live.
+
+/// kit Phase 2 (redo): every dialog migrated to `window.open_dialog`.
+/// The shell's sync opens/closes the kit dialog to match the app-side
+/// open flag; the flag remains the single source of truth so trigger
+/// sites are untouched.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum DialogKind {
+    Scheduled,
+    PaymentForm,
+    PaymentReceipt,
+    CallbackPassword,
+    LoginUrlConfirm,
+    PollVoters,
+    ArchiveSettings,
+    ImportContacts,
+    AddContact,
+    EditProfile,
+    GroupCallStart,
+    FolderEditor,
+    FolderDelete,
+    FolderManage,
+    CallConfirm,
+    NotificationDefaults,
+    StorageUsage,
+    TwoFa,
+    Sessions,
+    Websites,
+    CreateChat,
+    Member,
+    Permissions,
+    Username,
+    Restrict,
+    GroupConfirm,
+    QuoteReply,
+    ForumManage,
+    CommentThread,
+    Welcome,
+}
+
+/// Builder for one dialog kind: `(app, shell, dialog, cx) -> dialog`.
+/// Runs during the shell's render (the app is not leased there), so
+/// `app.update`/`app.read` are safe inside.
+pub type DialogBuilder = fn(&Entity<QuillApp>, &Entity<QuillShell>, Dialog, &mut App) -> Dialog;
+
+pub struct QuillShell {
+    app: Entity<QuillApp>,
+    /// The kit dialog is modal: at most one is shown at a time.
+    /// `None` means no kit dialog is currently open.
+    open_dialog: Option<DialogKind>,
+}
+
+impl QuillShell {
+    pub fn new(app: Entity<QuillApp>) -> Self {
+        Self {
+            app,
+            open_dialog: None,
+        }
+    }
+
+    /// The app-side open flag for each dialog kind. Stays in sync with
+    /// the render-time overlay conditions the hand-rolled dialogs used.
+    fn dialog_is_open(app: &QuillApp, kind: DialogKind) -> bool {
+        match kind {
+            DialogKind::Scheduled => app.scheduled_dialog_open,
+            DialogKind::PaymentForm => {
+                app.payment_dialog.is_some()
+                    && app
+                        .session()
+                        .is_some_and(|s| s.payment_form.is_some() || s.payment_form_loading)
+            }
+            DialogKind::PaymentReceipt => app.session().is_some_and(|s| s.payment_receipt_open),
+            DialogKind::CallbackPassword => app.callback_password_dialog.is_some(),
+            DialogKind::LoginUrlConfirm => app.login_url_confirm.is_some(),
+            DialogKind::PollVoters => app.poll_voters_dialog.is_some(),
+            DialogKind::ArchiveSettings => app.session().is_some_and(|s| s.archive_settings_open),
+            DialogKind::ImportContacts => app.import_contacts_dialog.is_some(),
+            DialogKind::AddContact => app.add_contact_dialog.is_some(),
+            DialogKind::EditProfile => app.edit_profile_dialog.is_some(),
+            DialogKind::GroupCallStart => app.group_call_start_dialog.is_some(),
+            DialogKind::FolderEditor => app.folder_editor.is_some(),
+            DialogKind::FolderDelete => app.folder_delete_confirm.is_some(),
+            DialogKind::FolderManage => app.folder_manage_open,
+            DialogKind::CallConfirm => app.call_confirm.is_some(),
+            DialogKind::NotificationDefaults => app.notification_defaults_open,
+            DialogKind::StorageUsage => app.storage_usage_open,
+            DialogKind::TwoFa => app.twofa_open,
+            DialogKind::Sessions => app.sessions_open,
+            DialogKind::Websites => app.websites_open,
+            DialogKind::CreateChat => app.create_chat_dialog.is_some(),
+            DialogKind::Member => app.member_dialog.is_some(),
+            DialogKind::Permissions => app.permissions_dialog.is_some(),
+            DialogKind::Username => app.username_dialog.is_some(),
+            DialogKind::Restrict => app.restrict_dialog.is_some(),
+            DialogKind::GroupConfirm => app.group_confirm_dialog.is_some(),
+            DialogKind::QuoteReply => app.quote_reply_dialog.is_some(),
+            DialogKind::ForumManage => app.forum_manage_dialog.is_some(),
+            DialogKind::CommentThread => app.comment_thread_dialog.is_some(),
+            DialogKind::Welcome => app.welcome_dialog.is_some(),
+        }
+    }
+
+    fn dialog_builder(kind: DialogKind) -> DialogBuilder {
+        match kind {
+            DialogKind::Scheduled => QuillApp::build_scheduled_dialog,
+            DialogKind::PaymentForm => QuillApp::build_payment_dialog,
+            DialogKind::PaymentReceipt => QuillApp::build_payment_receipt_dialog,
+            DialogKind::CallbackPassword => QuillApp::build_callback_password_dialog,
+            DialogKind::LoginUrlConfirm => QuillApp::build_login_url_confirm_dialog,
+            DialogKind::PollVoters => QuillApp::build_poll_voters_dialog,
+            DialogKind::ArchiveSettings => QuillApp::build_archive_settings_dialog,
+            DialogKind::ImportContacts => QuillApp::build_import_contacts_dialog,
+            DialogKind::AddContact => QuillApp::build_add_contact_dialog,
+            DialogKind::EditProfile => QuillApp::build_edit_profile_dialog,
+            DialogKind::GroupCallStart => QuillApp::build_group_call_start_dialog,
+            DialogKind::FolderEditor => QuillApp::build_folder_editor_dialog,
+            DialogKind::FolderDelete => QuillApp::build_folder_delete_dialog,
+            DialogKind::FolderManage => QuillApp::build_folder_manage_dialog,
+            DialogKind::CallConfirm => QuillApp::build_call_confirm_dialog,
+            DialogKind::NotificationDefaults => QuillApp::build_notification_defaults_dialog,
+            DialogKind::StorageUsage => QuillApp::build_storage_usage_dialog,
+            DialogKind::TwoFa => QuillApp::build_twofa_dialog,
+            DialogKind::Sessions => QuillApp::build_sessions_dialog,
+            DialogKind::Websites => QuillApp::build_websites_dialog,
+            DialogKind::CreateChat => QuillApp::build_create_chat_dialog,
+            DialogKind::Member => QuillApp::build_member_dialog,
+            DialogKind::Permissions => QuillApp::build_permissions_dialog,
+            DialogKind::Username => QuillApp::build_username_dialog,
+            DialogKind::Restrict => QuillApp::build_restrict_dialog,
+            DialogKind::GroupConfirm => QuillApp::build_group_confirm_dialog,
+            DialogKind::QuoteReply => QuillApp::build_quote_reply_dialog,
+            DialogKind::ForumManage => QuillApp::build_forum_manage_dialog,
+            DialogKind::CommentThread => QuillApp::build_comment_thread_dialog,
+            DialogKind::Welcome => QuillApp::build_welcome_dialog,
+        }
+    }
+
+    /// All dialog kinds in a fixed order (matches the old overlay
+    /// priority: first open flag wins when several are set).
+    const KINDS: [DialogKind; 30] = [
+        DialogKind::Scheduled,
+        DialogKind::PaymentForm,
+        DialogKind::PaymentReceipt,
+        DialogKind::CallbackPassword,
+        DialogKind::LoginUrlConfirm,
+        DialogKind::PollVoters,
+        DialogKind::ArchiveSettings,
+        DialogKind::ImportContacts,
+        DialogKind::AddContact,
+        DialogKind::EditProfile,
+        DialogKind::GroupCallStart,
+        DialogKind::FolderEditor,
+        DialogKind::FolderDelete,
+        DialogKind::FolderManage,
+        DialogKind::CallConfirm,
+        DialogKind::NotificationDefaults,
+        DialogKind::StorageUsage,
+        DialogKind::TwoFa,
+        DialogKind::Sessions,
+        DialogKind::Websites,
+        DialogKind::CreateChat,
+        DialogKind::Member,
+        DialogKind::Permissions,
+        DialogKind::Username,
+        DialogKind::Restrict,
+        DialogKind::GroupConfirm,
+        DialogKind::QuoteReply,
+        DialogKind::ForumManage,
+        DialogKind::CommentThread,
+        DialogKind::Welcome,
+    ];
+
+    /// Keep the single kit dialog in sync with the app-side open flags.
+    /// The kit dialog is modal, so at most one flag wins, by `KINDS`
+    /// priority. A flag cleared without a kit close (e.g. an action
+    /// button that only clears state) closes the kit dialog on the next
+    /// render; a flag set while another dialog shows closes the old one
+    /// first, so dialogs never stack.
+    ///
+    /// Runs inside the shell's render: the app is not leased here, so
+    /// `open_dialog`/`close_dialog` (which lease only `Root`) are safe.
+    fn sync_kit_dialogs(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let app = self.app.clone();
+        let shell = cx.entity();
+        // Snapshot the flags once; the app is not leased here.
+        let first_open = {
+            let app_ref = app.read(cx);
+            Self::KINDS
+                .iter()
+                .find(|kind| Self::dialog_is_open(app_ref, **kind))
+                .copied()
+        };
+        if self.open_dialog != first_open {
+            // Close the currently shown dialog (if any) before opening
+            // the next one, so a transition (e.g. folder manager ->
+            // editor) never stacks two kit dialogs.
+            if self.open_dialog.is_some() {
+                window.close_dialog(cx);
+            }
+            self.open_dialog = first_open;
+            if let Some(kind) = first_open {
+                let build = Self::dialog_builder(kind);
+                let app_c = app.clone();
+                let shell_c = shell.clone();
+                window.open_dialog(cx, move |dialog, _window, cx| {
+                    build(&app_c, &shell_c, dialog, cx)
+                });
+            }
+        }
+    }
+
+    /// Shared `Dialog::on_close` for every migrated dialog: the kit
+    /// already closed the dialog (Esc / backdrop / ✕), so this clears
+    /// the app-side open flag and drops the tracked kind — it must NOT
+    /// call `close_dialog` again.
+    fn on_close_kind(
+        app: &Entity<QuillApp>,
+        shell: &Entity<QuillShell>,
+        kind: DialogKind,
+        clear: impl Fn(&mut QuillApp, &mut Window, &mut Context<QuillApp>) + Clone + 'static,
+    ) -> impl Fn(&ClickEvent, &mut Window, &mut App) + Clone + 'static {
+        let app = app.clone();
+        let shell = shell.clone();
+        move |_, window, cx: &mut App| {
+            app.update(cx, |this, cx| clear(this, window, cx));
+            shell.update(cx, |shell, _| {
+                if shell.open_dialog == Some(kind) {
+                    shell.open_dialog = None;
+                }
+            });
+        }
+    }
+}
+
+impl Render for QuillShell {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.sync_kit_dialogs(window, cx);
+        div()
+            .size_full()
+            .child(self.app.clone())
+            .children(Root::render_dialog_layer(window, cx))
+            .children(Root::render_notification_layer(window, cx))
     }
 }
