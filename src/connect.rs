@@ -10459,6 +10459,14 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() || self.session.websites_mutating {
             return Err(ConnectSendError::InvalidRequest);
         }
+        if !self
+            .session
+            .connected_websites
+            .as_ref()
+            .is_some_and(|s| !s.is_empty())
+        {
+            return Err(ConnectSendError::InvalidRequest);
+        }
         self.session.websites_error = None;
         let extra = self
             .session
@@ -21373,15 +21381,14 @@ mod tests {
         assert_invalid(driver.toggle_session_can_accept_calls(99));
         assert_eq!(recorder.snapshot().len(), sent_before);
         // The fixture rejects secret chats: the toggle sends `true`.
-        // (The S1 builder sends `session_id` as a JSON string — TDLib
-        // accepts both forms for int64; the assertion matches the
-        // builder's actual shape.)
+        // (The builder sends `session_id` as a JSON number, like
+        // `terminateSession`.)
         driver
             .toggle_session_can_accept_secret_chats(22)
             .expect("toggle send");
         assert!(recorder.snapshot().iter().any(|s| {
             s.contains("\"@type\":\"toggleSessionCanAcceptSecretChats\"")
-                && s.contains("\"session_id\":\"22\"")
+                && s.contains("\"session_id\":22")
                 && s.contains("\"can_accept_secret_chats\":true")
         }));
         // A second mutation while in flight is refused.
@@ -21467,6 +21474,13 @@ mod tests {
     #[test]
     fn websites_disconnect_guards() {
         let (dir, mut driver, recorder, _sink, _dyn_sink, _seq) = sessions_driver();
+        // Disconnect-all with no cache (or an empty one): refused,
+        // nothing sent.
+        let sent_before = recorder.snapshot().len();
+        assert_invalid(driver.disconnect_all_websites());
+        driver.session.connected_websites = Some(vec![]);
+        assert_invalid(driver.disconnect_all_websites());
+        assert_eq!(recorder.snapshot().len(), sent_before);
         driver.session.connected_websites = Some(vec![ParsedWebsite {
             id: 55,
             domain_name: "example.com".into(),

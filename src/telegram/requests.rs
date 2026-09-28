@@ -1821,7 +1821,7 @@ pub fn toggle_session_can_accept_secret_chats(
     json!({
         "@type": "toggleSessionCanAcceptSecretChats",
         "@extra": extra.as_extra(),
-        "session_id": session_id.to_string(),
+        "session_id": session_id,
         "can_accept_secret_chats": can_accept_secret_chats,
     })
     .to_string()
@@ -5191,12 +5191,12 @@ mod tests {
     fn toggle_session_can_accept_secret_chats_shape_matches_1_8_67() {
         // Phase S1: `toggleSessionCanAcceptSecretChats session_id:int64
         // can_accept_secret_chats:Bool = Ok` (schema 1.8.67, line 15117);
-        // int64 serializes as a JSON string like other int64 ids here.
+        // int64 serializes as a JSON number, like `terminateSession`.
         let json = toggle_session_can_accept_secret_chats(RequestId(31), 123456789, true);
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(v["@type"], "toggleSessionCanAcceptSecretChats");
         assert_eq!(v["@extra"], "31");
-        assert_eq!(v["session_id"], "123456789");
+        assert_eq!(v["session_id"], 123456789);
         assert_eq!(v["can_accept_secret_chats"], true);
 
         let off = toggle_session_can_accept_secret_chats(RequestId(32), 123456789, false);
