@@ -1762,6 +1762,128 @@ Research snapshot 2026-09-16, pin recheck **2026-09-17**.
   supergroup (`getChatsToPostStories` 13698, admin story rights);
   repost (`from_story_full_id` fixed null).
 
+## Phase 9.5 — Story viewers list, report, stealth mode (2026-09-28)
+
+- **Rationale:** complete the story viewer loop (Phase 9.1–9.4): see who
+  viewed an own story, report someone else's story through the
+  multi-step server flow, and activate story stealth mode.
+- **Schema (1.8.67, pinned commit `d1085f9`, concept-level search on all
+  three levels — never a single-name grep):**
+  - (1) `schema/td_api.tl`: `getStoryInteractions story_id:int32
+    query:string only_contacts:Bool prefer_forwards:Bool
+    prefer_with_reaction:Bool offset:string limit:int32 =
+    StoryInteractions` (:13819) — comment: "Returns interactions with a
+    story. The method can be called only for stories posted on behalf of
+    the current user". There is **no `getStoryViewers` constructor** (no
+    `getStoryViewer*` / `storyViewer*` method anywhere in the schema;
+    the viewers concept surfaces only as `getStoryInteractions` and
+    `getChatStoryInteractions` — the latter is chat-admin-only, :13823).
+    `story.can_get_interactions` (:6732): "True, if interactions with the
+    story can be received through getStoryInteractions".
+    `storyInteractions total_count:int32 total_forward_count:int32
+    total_reaction_count:int32 interactions:vector<storyInteraction>
+    next_offset:string = StoryInteractions` (:6811);
+    `storyInteraction actor_id:MessageSender interaction_date:int32
+    block_list:BlockList type:StoryInteractionType = StoryInteraction`
+    (:6803) with `storyInteractionTypeView/Forward/Repost` (:6789–6795).
+    `reportStory story_poster_chat_id:int53 story_id:int32 option_id:bytes
+    text:string = ReportStoryResult` (:13835) — comment: "Reports a
+    story to the Telegram moderators"; option_id/text empty for the
+    initial request. `ReportStoryResult` (:9221–9231):
+    `reportStoryResultOk`; `reportStoryResultOptionRequired title:string
+    options:vector<reportOption>` ("The user must choose an option …
+    and repeat request"); `reportStoryResultTextRequired option_id:bytes
+    is_optional:Bool` ("The user must add additional text details").
+    `activateStoryStealthMode = Ok` (:13839) — comment: "Activates
+    stealth mode for stories, which hides all views of stories from the
+    current user in the last \"story_stealth_mode_past_period\" seconds
+    and for the next \"story_stealth_mode_future_period\" seconds; for
+    Telegram Premium users only". `updateStoryStealthMode
+    active_until_date:int32 cooldown_until_date:int32 = Update`
+    (:10919): "Story stealth mode settings have changed … 0 if it is
+    disabled / 0 if there is no active cooldown".
+  - (2) raw `telegram_api.tl` (@d1085f9):
+    `stories.getStoryViewsList#7ed23c57` (:5382) — the raw method behind
+    `getStoryInteractions`; `stories.report#19d8eb45 peer:InputPeer
+    id:Vector<int> option:bytes message:string = ReportResult` (:5389);
+    `stories.activateStealthMode#57bbd166` (:5391);
+    `updateStoriesStealthMode#2c084dc1` (:918);
+    `storiesStealthMode#712e27fd` (:3029) with the two date fields.
+  - (3) TDLib source (@d1085f9): `StoryManager::get_story_interactions`
+    (`td/telegram/StoryManager.h:389`) → `GetStoryViewsListQuery`
+    (`StoryManager.cpp:484`) sending
+    `telegram_api::stories_getStoryViewsList`;
+    `StoryManager::report_story` (`StoryManager.h:404`) →
+    `ReportStoryQuery` (`StoryManager.cpp:1362`) mapping
+    `reportResultReported`→Ok, `reportResultChooseOption`→OptionRequired,
+    `reportResultAddComment`→TextRequired — **including the edge case
+    that an empty option list maps to Ok** (:1414–1416), which the
+    reducer mirrors; `StoryManager::activate_stealth_mode`
+    (`StoryManager.h:448`), `on_update_story_stealth_mode` (:468),
+    `get_update_story_stealth_mode` (:797) emitting the td_api update.
+  - Telegram X (local source, `~/workspace/telegram-x`): stores and
+    broadcasts the two stealth timestamps (`Tdlib.java:472`,
+    `:8630–8635`; `StoryListener.java:13`; `TdlibListeners.java:1303`)
+    but has **no** story-viewers UI and **no** stealth-activation UI
+    (no `StoryViews` / `activateStoryStealthMode` references anywhere in
+    the app source) — the schema is the authority for those surfaces.
+- **Parser (`src/telegram/envelope.rs`).** `ReportStoryResult::{Ok,
+  OptionRequired, TextRequired}`, `StoryInteractionsView` /
+  `StoryInteractionView` / `StoryInteractionKind::{View, Forward,
+  Repost}` (unknown interaction types are skipped, per the lenient-parse
+  convention), `EnvelopePayload::{ReportStoryResult, StoryInteractions,
+  UpdateStoryStealthMode}`; parser unit tests for all variants.
+- **Requests (`src/telegram/requests.rs`).**
+  `get_story_interactions` (defaults `query:""`,
+  `only_contacts:false`, `prefer_forwards:false`,
+  `prefer_with_reaction:false`, `limit:50`), `report_story`,
+  `activate_story_stealth_mode`; shape test
+  `s4_story_requests_match_1_8_67`.
+- **Reducer (`src/state.rs`).** `RequestPurpose::{GetStoryInteractions,
+  ReportStory, ActivateStoryStealthMode}`; `StoryViewersState`
+  (per-story rows + `next_offset` pagination, stale-page rejection,
+  error string); `StoryReportFlow` /
+  `StoryReportStage::{Checking, PickOption, Sending, TextRequired,
+  Reported, Failed}` (stale-story answers dropped; empty option list →
+  `Reported`, mirroring TDLib); `StoryStealthMode` with
+  `is_active`/`is_cooling_down` predicates; `updateStoryStealthMode`
+  applies to state, refused activations surface as
+  `Session::story_stealth_error`. Reducer unit tests for pagination /
+  stale rejection / error, the report stage transitions, and stealth
+  predicates.
+- **Driver (`src/connect.rs`).** `get_story_interactions` — gated on
+  the cached story's `can_get_interactions`, deduped per story while in
+  flight (`Ok(None)`); `report_story` — gated on the cached story, own
+  (deletable) stories rejected; `activate_story_stealth_mode` — deduped
+  while in flight. Driver tests for the gates, dedupe, and request
+  shapes.
+- **UI (`src/ui/mod.rs`).** Viewer action row gains Viewers (own
+  stories with `can_get_interactions`), Report (other people's
+  stories), and Stealth (label reflects pushed
+  `updateStoryStealthMode` state: "Stealth" / "Stealth on" / "Stealth
+  cooling down"; the schema exposes no getter, so the button never
+  claims to know more than pushed state). Viewers panel: actor names
+  from cached users/chats (raw id fallback — never invented),
+  reaction-emoji or kind label + relative time, "Load more" while
+  `next_offset` is non-empty, honest loading/error/empty states. Report
+  UI mirrors the flow stages: spinner, the server-provided reason
+  picker, the details field (required or skippable per `is_optional`),
+  success/failure. Demo says so honestly ("demo — … run with live
+  TDLib"). Screenshot proof:
+  `docs/screenshots/ready-story-viewers.png` (new `ReadyStoryViewers`
+  demo: the `ReadyStoryPost` fixture plus a `storyInteractions` page
+  injected through the real reducer path).
+- **Out of this slice (→ future):** `getChatStoryInteractions`
+  (:13823, chat-admin viewers — needs admin-state plumbing);
+  viewers-list search (`query`), `only_contacts` filter, and
+  `prefer_forwards`/`prefer_with_reaction` sort toggles (request
+  builder takes them; the UI sends defaults); `getStoryPublicForwards`
+  (:13847); `getStoryStatistics` (:15773); story albums
+  (`getChatStoryAlbums` :13850, `getStoryAlbumStories` :13857);
+  stealth-mode periods display (the raw `storiesStealthMode` periods
+  come from `getAllStories`, not yet parsed — the button shows
+  active/cooldown only).
+
 ## Parity slice — Forum-topic posting (2026-09-26)
 
 - **Rationale:** Phase 5.1 made forum topics read-only (composer hidden

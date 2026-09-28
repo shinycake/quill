@@ -43,11 +43,14 @@ use crate::telegram::ffi::{LibraryOrigin, TdJsonError, resolve_tdjson_path};
 use crate::telegram::requests::{
     AnimationSend, ArchiveChatListSettings, CallPrivacySetting, ChatEventLogFilterSet,
     GroupCallJoinParams, InputGroupCallRef, MessageSenderRef, PollSend, PollTypeSend, PrivacyWho,
-    SendReply, SetTdlibParameters, StickerSend, VideoNoteSend, VideoNoteThumbnailSend, VideoSend,
-    VoiceNoteSend, accept_call_with_protocol, add_chat_member, add_chat_members, add_chat_to_list,
-    add_chat_to_list_value, add_chat_welcome_message, add_contact, add_message_reaction,
-    add_recently_found_chat, ban_group_call_participants, boost_chat,
-    can_post_story as can_post_story_request, cancel_download_file as cancel_download_file_request,
+    SendReply,
+    SetTdlibParameters, StickerSend, VideoNoteSend, VideoNoteThumbnailSend, VideoSend,
+    VoiceNoteSend, accept_call_with_protocol,
+    activate_story_stealth_mode as activate_story_stealth_mode_request, add_chat_member,
+    add_chat_members, add_chat_to_list, add_chat_to_list_value, add_chat_welcome_message,
+    add_contact, add_message_reaction, add_recently_found_chat, ban_group_call_participants,
+    boost_chat, can_post_story as can_post_story_request,
+    cancel_download_file as cancel_download_file_request,
     cancel_recovery_email_address_verification, chat_member_status_administrator_json,
     chat_member_status_banned_json, chat_member_status_member_json,
     chat_member_status_restricted_json, check_authentication_code, check_authentication_password,
@@ -70,22 +73,24 @@ use crate::telegram::requests::{
     get_chat_scheduled_messages, get_chat_sponsored_messages, get_chat_statistics, get_commands,
     get_contacts, get_forum_topics, get_full_rich_message, get_group_call,
     get_installed_sticker_sets, get_link_preview, get_login_url, get_login_url_info, get_me,
-    get_message_link, get_message_properties, get_message_thread_history, get_password_state,
-    get_saved_animations, get_saved_notification_sounds, get_scope_notification_settings,
-    get_secret_chat, get_sticker_set, get_storage_statistics, get_story,
-    get_story_available_reactions, get_supergroup, get_supergroup_full_info,
-    get_supergroup_members, get_user_full_info, get_user_privacy_setting_rules,
-    get_video_chat_invite_link, get_video_chat_rtmp_url, get_web_page_instant_view,
-    input_message_photo, input_message_video, invite_group_call_participant, join_chat,
-    join_group_call, join_video_chat, leave_chat, leave_group_call, load_active_stories,
-    load_chat_welcome_messages, load_chats, load_chats_list, load_group_call_participants,
-    open_chat, open_message_content, open_story, pin_chat_message,
+    get_message_link,
+    get_message_properties, get_message_thread_history, get_password_state, get_saved_animations,
+    get_saved_notification_sounds, get_scope_notification_settings, get_secret_chat,
+    get_sticker_set, get_storage_statistics, get_story, get_story_available_reactions,
+    get_story_interactions as get_story_interactions_request, get_supergroup,
+    get_supergroup_full_info, get_supergroup_members, get_user_full_info,
+    get_user_privacy_setting_rules, get_video_chat_invite_link, get_video_chat_rtmp_url,
+    get_web_page_instant_view, input_message_photo, input_message_video,
+    invite_group_call_participant, join_chat, join_group_call, join_video_chat, leave_chat,
+    leave_group_call, load_active_stories, load_chat_welcome_messages, load_chats, load_chats_list,
+    load_group_call_participants, open_chat, open_message_content, open_story, pin_chat_message,
     post_story as post_story_request, process_chat_join_request, read_chat_list, recognize_speech,
     remove_message_reaction, reorder_chat_folders, replace_primary_chat_invite_link,
     replace_video_chat_rtmp_url, report_chat, report_chat_sponsored_message,
-    request_qr_code_authentication, resend_authentication_code, resend_messages,
-    resend_recovery_email_address_code, revoke_chat_invite_link, revoke_group_call_invite_link,
-    search_call_messages, search_chat_messages, search_chats, search_messages, search_public_chats,
+    report_story as report_story_request, request_qr_code_authentication,
+    resend_authentication_code, resend_messages, resend_recovery_email_address_code,
+    revoke_chat_invite_link, revoke_group_call_invite_link, search_call_messages,
+    search_chat_messages, search_chats, search_messages, search_public_chats,
     search_recently_found_chats, send_animation,
     send_bot_start_message as send_bot_start_message_request, send_call_debug_information,
     send_call_log, send_call_rating_detail, send_call_signaling_data, send_chat_action,
@@ -8012,6 +8017,126 @@ impl<S: JsonSender> ConnectDriver<S> {
         let json = send_text_story_reply(extra, chat_id, chat_id, story_id, text);
         match self.sender.send_json(&json) {
             Ok(()) => Ok(extra),
+            Err(err) => {
+                self.session.requests.take(extra);
+                Err(err)
+            }
+        }
+    }
+
+    /// Phase 9.5: `getStoryInteractions` — one page of an own story's
+    /// viewers. Gated on the cached story and its
+    /// `can_get_interactions` flag (the schema comment at
+    /// `td_api.tl:6732` names this function as what the flag allows).
+    /// Deduped per story while a fetch is in flight; the UI passes the
+    /// previous page's `next_offset` for pagination.
+    pub fn get_story_interactions(
+        &mut self,
+        chat_id: ChatId,
+        story_id: i32,
+        offset: &str,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let can_get = self
+            .session
+            .stories
+            .get(&(chat_id.0, story_id))
+            .is_some_and(|story| story.can_get_interactions);
+        if !can_get {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if self.session.requests.has_purpose_for_story(
+            RequestPurpose::GetStoryInteractions,
+            chat_id,
+            story_id,
+        ) {
+            return Ok(None);
+        }
+        let extra =
+            self.session
+                .request_for_story(RequestPurpose::GetStoryInteractions, chat_id, story_id);
+        let json = get_story_interactions_request(extra, story_id, "", offset, 50);
+        match self.sender.send_json(&json) {
+            Ok(()) => {
+                if let Some(state) = self.session.story_viewers.as_mut()
+                    && state.chat_id == chat_id.0
+                    && state.story_id == story_id
+                {
+                    state.loading = true;
+                }
+                Ok(Some(extra))
+            }
+            Err(err) => {
+                self.session.requests.take(extra);
+                Err(err)
+            }
+        }
+    }
+
+    /// Phase 9.5: `reportStory` — one step of the report flow. The UI
+    /// starts with empty `option_id`/`text`; the
+    /// `reportStoryResultOptionRequired` / `reportStoryResultTextRequired`
+    /// answers tell it what to send next. Gated on the cached story;
+    /// own stories (deletable) are not reportable.
+    pub fn report_story(
+        &mut self,
+        chat_id: ChatId,
+        story_id: i32,
+        option_id: &str,
+        text: &str,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let reportable = self
+            .session
+            .stories
+            .get(&(chat_id.0, story_id))
+            .is_some_and(|story| !story.can_be_deleted);
+        if !reportable {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self
+            .session
+            .request_for_story(RequestPurpose::ReportStory, chat_id, story_id);
+        let json = report_story_request(extra, chat_id, story_id, option_id, text);
+        match self.sender.send_json(&json) {
+            Ok(()) => Ok(extra),
+            Err(err) => {
+                self.session.requests.take(extra);
+                Err(err)
+            }
+        }
+    }
+
+    /// Phase 9.5: `activateStoryStealthMode` — hides the current user's
+    /// story views (Premium only; the server decides). The state arrives
+    /// as `updateStoryStealthMode`; a refused call surfaces as
+    /// `Session::story_stealth_error`. Deduped while in flight.
+    pub fn activate_story_stealth_mode(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if self
+            .session
+            .requests
+            .has_purpose(RequestPurpose::ActivateStoryStealthMode)
+        {
+            return Ok(None);
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::ActivateStoryStealthMode, None);
+        match self
+            .sender
+            .send_json(&activate_story_stealth_mode_request(extra))
+        {
+            Ok(()) => {
+                self.session.story_stealth_error = None;
+                Ok(Some(extra))
+            }
             Err(err) => {
                 self.session.requests.take(extra);
                 Err(err)
@@ -17024,6 +17149,133 @@ mod tests {
         assert_eq!(v["story_poster_chat_id"], 7);
         assert_eq!(v["story_id"], 6);
 
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn driver_get_story_interactions_gates_and_dedupes() {
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = Arc::new(RecordingSender::new());
+        let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+        let mut driver =
+            ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+        let seq = AtomicU64::new(0);
+        seed_ready_alice(&mut driver, &seq, &dyn_sink);
+
+        // Uncached story and a story without `can_get_interactions` are
+        // rejected.
+        assert_eq!(
+            driver.get_story_interactions(ChatId(7), 5, ""),
+            Err(ConnectSendError::InvalidRequest)
+        );
+        seed_story(&mut driver, &seq, &dyn_sink, 7, 5, "storyContentPhoto", "");
+        assert_eq!(
+            driver.get_story_interactions(ChatId(7), 5, ""),
+            Err(ConnectSendError::InvalidRequest)
+        );
+        seed_story(
+            &mut driver,
+            &seq,
+            &dyn_sink,
+            7,
+            6,
+            "storyContentPhoto",
+            r#""can_get_interactions":true,"#,
+        );
+        let extra = driver
+            .get_story_interactions(ChatId(7), 6, "")
+            .unwrap()
+            .expect("getStoryInteractions sends");
+        let json = recorder
+            .snapshot()
+            .last()
+            .cloned()
+            .expect("getStoryInteractions");
+        let v: Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "getStoryInteractions");
+        assert_eq!(v["@extra"], extra.0.to_string());
+        assert_eq!(v["story_id"], 6);
+        assert_eq!(v["offset"], "");
+        assert_eq!(v["limit"], 50);
+        // In-flight fetch dedupes to None (no second request).
+        assert_eq!(driver.get_story_interactions(ChatId(7), 6, ""), Ok(None));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn driver_report_story_gates_own_stories() {
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = Arc::new(RecordingSender::new());
+        let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+        let mut driver =
+            ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+        let seq = AtomicU64::new(0);
+        seed_ready_alice(&mut driver, &seq, &dyn_sink);
+
+        // Uncached and own (deletable) stories are not reportable.
+        assert_eq!(
+            driver.report_story(ChatId(7), 5, "", ""),
+            Err(ConnectSendError::InvalidRequest)
+        );
+        seed_story(
+            &mut driver,
+            &seq,
+            &dyn_sink,
+            7,
+            5,
+            "storyContentPhoto",
+            r#""can_be_deleted":true,"#,
+        );
+        assert_eq!(
+            driver.report_story(ChatId(7), 5, "", ""),
+            Err(ConnectSendError::InvalidRequest)
+        );
+        seed_story(&mut driver, &seq, &dyn_sink, 7, 6, "storyContentPhoto", "");
+        let extra = driver.report_story(ChatId(7), 6, "", "").unwrap();
+        let json = recorder.snapshot().last().cloned().expect("reportStory");
+        let v: Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "reportStory");
+        assert_eq!(v["@extra"], extra.0.to_string());
+        assert_eq!(v["story_poster_chat_id"], 7);
+        assert_eq!(v["story_id"], 6);
+        assert_eq!(v["option_id"], "");
+        assert_eq!(v["text"], "");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn driver_activate_story_stealth_mode_sends_and_dedupes() {
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = Arc::new(RecordingSender::new());
+        let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+        let mut driver =
+            ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+        let seq = AtomicU64::new(0);
+        seed_ready_alice(&mut driver, &seq, &dyn_sink);
+
+        let extra = driver
+            .activate_story_stealth_mode()
+            .unwrap()
+            .expect("activateStoryStealthMode sends");
+        let json = recorder
+            .snapshot()
+            .last()
+            .cloned()
+            .expect("activateStoryStealthMode");
+        let v: Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "activateStoryStealthMode");
+        assert_eq!(v["@extra"], extra.0.to_string());
+        // A second activation while the first is in flight is a no-op.
+        assert_eq!(driver.activate_story_stealth_mode(), Ok(None));
         let _ = std::fs::remove_dir_all(&dir);
     }
 

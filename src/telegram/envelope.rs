@@ -615,6 +615,18 @@ pub enum EnvelopePayload {
     /// `ReportSponsoredResult` — `reportChatSponsoredMessage` /
     /// `reportSponsoredChat` response.
     ReportSponsoredResult(ReportSponsoredResult),
+    /// Phase 9.5: `ReportStoryResult` — `reportStory` response.
+    ReportStoryResult(ReportStoryResult),
+    /// Phase 9.5: `storyInteractions` — one page of `getStoryInteractions`
+    /// results (an own story's viewers).
+    StoryInteractions {
+        interactions: StoryInteractionsView,
+    },
+    /// Phase 9.5: `updateStoryStealthMode` — stealth-mode state changed.
+    UpdateStoryStealthMode {
+        active_until_date: i32,
+        cooldown_until_date: i32,
+    },
     /// `updateSavedAnimations` — file ids of saved GIFs, newest first.
     UpdateSavedAnimations {
         animation_ids: Vec<i32>,
@@ -5245,6 +5257,66 @@ pub enum ReportChatOutcome {
     MoreInfoRequired,
 }
 
+/// Phase 9.5: `ReportStoryResult` (TDLib 1.8.67,
+/// `schema/td_api.tl:9222`–`9231`) — outcome of `reportStory`. Unlike
+/// `ReportSponsoredResult` there is no `Failed` variant; a refused report
+/// arrives as a raw `error` answer on the request instead.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ReportStoryResult {
+    Ok,
+    OptionRequired {
+        title: String,
+        options: Vec<ReportOption>,
+    },
+    TextRequired {
+        option_id: String,
+        is_optional: bool,
+    },
+}
+
+impl ReportStoryResult {
+    /// Short user-facing note (no TDLib text is echoed).
+    pub fn user_message(&self) -> &'static str {
+        match self {
+            ReportStoryResult::Ok => "Story reported",
+            ReportStoryResult::OptionRequired { .. } => "Choose a report reason",
+            ReportStoryResult::TextRequired { .. } => "Add report details",
+        }
+    }
+}
+
+/// Phase 9.5: one `storyInteraction` (TDLib 1.8.67,
+/// `schema/td_api.tl:6805`) — who interacted with an own story, when,
+/// and how. `storyInteractionTypeView` carries an optional chosen
+/// reaction (`reactionTypeEmoji` only — custom/paid drop to `None`,
+/// same as the story parser); forwards and reposts keep only their
+/// kind (the embedded message/story is dropped — the viewers list
+/// shows who and when, not the forwarded payload).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StoryInteractionView {
+    pub actor: MessageSender,
+    pub interaction_date: i32,
+    pub reaction_emoji: Option<String>,
+    pub kind: StoryInteractionKind,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StoryInteractionKind {
+    View,
+    Forward,
+    Repost,
+}
+
+/// Phase 9.5: `storyInteractions` (TDLib 1.8.67,
+/// `schema/td_api.tl:6811`) — one page of `getStoryInteractions`
+/// results. `next_offset` empty = no more pages.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StoryInteractionsView {
+    pub total_count: i32,
+    pub interactions: Vec<StoryInteractionView>,
+    pub next_offset: String,
+}
+
 impl ReportSponsoredResult {
     /// Short user-facing note (no TDLib text is echoed).
     pub fn user_message(&self) -> &'static str {
@@ -6850,6 +6922,35 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
         "reportSponsoredResultPremiumRequired" => Ok(EnvelopePayload::ReportSponsoredResult(
             ReportSponsoredResult::PremiumRequired,
         )),
+        "reportStoryResultOk" => Ok(EnvelopePayload::ReportStoryResult(ReportStoryResult::Ok)),
+        "reportStoryResultOptionRequired" => Ok(EnvelopePayload::ReportStoryResult(
+            ReportStoryResult::OptionRequired {
+                title: json_field_str(&value, "title"),
+                options: parse_report_options(value.get("options")),
+            },
+        )),
+        "reportStoryResultTextRequired" => Ok(EnvelopePayload::ReportStoryResult(
+            ReportStoryResult::TextRequired {
+                option_id: json_field_str(&value, "option_id"),
+                is_optional: value
+                    .get("is_optional")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
+            },
+        )),
+        "storyInteractions" => Ok(EnvelopePayload::StoryInteractions {
+            interactions: parse_story_interactions(&value),
+        }),
+        "updateStoryStealthMode" => Ok(EnvelopePayload::UpdateStoryStealthMode {
+            active_until_date: value
+                .get("active_until_date")
+                .and_then(Value::as_i64)
+                .unwrap_or(0) as i32,
+            cooldown_until_date: value
+                .get("cooldown_until_date")
+                .and_then(Value::as_i64)
+                .unwrap_or(0) as i32,
+        }),
         "updateSavedAnimations" => Ok(EnvelopePayload::UpdateSavedAnimations {
             animation_ids: value
                 .get("animation_ids")
@@ -9784,6 +9885,52 @@ fn parse_report_options(value: Option<&Value>) -> Vec<ReportOption> {
         });
     }
     options
+}
+
+/// Phase 9.5: `storyInteractions` — one page of an own story's viewers
+/// (`getStoryInteractions`, `schema/td_api.tl:13819`). Entries with an
+/// unparsable actor are skipped; the page itself is kept.
+fn parse_story_interactions(value: &Value) -> StoryInteractionsView {
+    let mut interactions = Vec::new();
+    if let Some(entries) = value.get("interactions").and_then(Value::as_array) {
+        for entry in entries {
+            let Ok(actor) = parse_message_sender(entry.get("actor_id")) else {
+                continue;
+            };
+            let interaction_type = entry.get("type");
+            let (kind, reaction_emoji) = match interaction_type
+                .and_then(|t| t.get("@type"))
+                .and_then(Value::as_str)
+            {
+                Some("storyInteractionTypeView") => (
+                    StoryInteractionKind::View,
+                    parse_story_chosen_reaction(
+                        interaction_type.and_then(|t| t.get("chosen_reaction_type")),
+                    ),
+                ),
+                Some("storyInteractionTypeForward") => (StoryInteractionKind::Forward, None),
+                Some("storyInteractionTypeRepost") => (StoryInteractionKind::Repost, None),
+                _ => continue,
+            };
+            interactions.push(StoryInteractionView {
+                actor,
+                interaction_date: entry
+                    .get("interaction_date")
+                    .and_then(Value::as_i64)
+                    .unwrap_or(0) as i32,
+                reaction_emoji,
+                kind,
+            });
+        }
+    }
+    StoryInteractionsView {
+        total_count: value
+            .get("total_count")
+            .and_then(Value::as_i64)
+            .unwrap_or(0) as i32,
+        interactions,
+        next_offset: json_field_str(value, "next_offset"),
+    }
 }
 
 fn parse_message_audio(value: &Value) -> (MessageContent, Vec<ParsedFile>) {
@@ -15653,5 +15800,95 @@ mod notification_sound_tests {
         assert!(parse_chat_permissions(Some(&Value::Null)).is_none());
         let wrong = serde_json::json!({"@type": "chatAdministratorRights"});
         assert!(parse_chat_permissions(Some(&wrong)).is_none());
+    }
+
+    /// Phase 9.5: all three `reportStoryResult*` variants parse —
+    /// `Ok`, the option picker (`reportOption` ids are kept verbatim),
+    /// and the text step (`is_optional` honored).
+    #[test]
+    fn report_story_results_parse() {
+        let ok = parse_envelope(r#"{"@type":"reportStoryResultOk"}"#).unwrap();
+        assert!(matches!(
+            ok.payload,
+            EnvelopePayload::ReportStoryResult(ReportStoryResult::Ok)
+        ));
+        let options = parse_envelope(
+            r#"{"@type":"reportStoryResultOptionRequired","title":"Why report?","options":[{"@type":"reportOption","id":"aGk=","text":"Spam"},{"@type":"reportOption","id":"","text":""}]}"#,
+        )
+        .unwrap();
+        match options.payload {
+            EnvelopePayload::ReportStoryResult(ReportStoryResult::OptionRequired {
+                title,
+                options,
+            }) => {
+                assert_eq!(title, "Why report?");
+                assert_eq!(options.len(), 2);
+                assert_eq!(options[0].id, "aGk=");
+                assert_eq!(options[0].text, "Spam");
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+        let text = parse_envelope(
+            r#"{"@type":"reportStoryResultTextRequired","option_id":"aGk=","is_optional":true}"#,
+        )
+        .unwrap();
+        assert!(matches!(
+            text.payload,
+            EnvelopePayload::ReportStoryResult(ReportStoryResult::TextRequired {
+                option_id,
+                is_optional: true,
+            }) if option_id == "aGk="
+        ));
+    }
+
+    /// Phase 9.5: `storyInteractions` parses viewers with view/reaction
+    /// / forward / repost kinds; unknown actor or interaction types are
+    /// skipped without dropping the page.
+    #[test]
+    fn story_interactions_parse() {
+        let json = r#"{"@type":"storyInteractions","total_count":4,"total_forward_count":1,"total_reaction_count":1,"interactions":[
+            {"actor_id":{"@type":"messageSenderUser","user_id":777},"interaction_date":1700000100,"block_list":null,"type":{"@type":"storyInteractionTypeView","chosen_reaction_type":{"@type":"reactionTypeEmoji","emoji":"❤"}}},
+            {"actor_id":{"@type":"messageSenderChat","chat_id":11},"interaction_date":1700000200,"block_list":null,"type":{"@type":"storyInteractionTypeView","chosen_reaction_type":null}},
+            {"actor_id":{"@type":"messageSenderUser","user_id":778},"interaction_date":1700000300,"block_list":null,"type":{"@type":"storyInteractionTypeForward","message":{"@type":"message"}}},
+            {"actor_id":{"@type":"messageSenderUser"},"interaction_date":1,"block_list":null,"type":{"@type":"storyInteractionTypeView"}},
+            {"actor_id":{"@type":"messageSenderUser","user_id":779},"interaction_date":1,"block_list":null,"type":{"@type":"storyInteractionTypeMystery"}}
+        ],"next_offset":"50"}"#;
+        let env = parse_envelope(json).unwrap();
+        match env.payload {
+            EnvelopePayload::StoryInteractions { interactions } => {
+                assert_eq!(interactions.total_count, 4);
+                assert_eq!(interactions.next_offset, "50");
+                assert_eq!(interactions.interactions.len(), 3);
+                let first = &interactions.interactions[0];
+                assert_eq!(first.actor, MessageSender::User { user_id: 777 });
+                assert_eq!(first.interaction_date, 1700000100);
+                assert_eq!(first.kind, StoryInteractionKind::View);
+                assert_eq!(first.reaction_emoji.as_deref(), Some("❤"));
+                let second = &interactions.interactions[1];
+                assert_eq!(second.actor, MessageSender::Chat { chat_id: 11 });
+                assert_eq!(second.reaction_emoji, None);
+                assert_eq!(
+                    interactions.interactions[2].kind,
+                    StoryInteractionKind::Forward
+                );
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+
+    /// Phase 9.5: `updateStoryStealthMode` parses the two timestamps.
+    #[test]
+    fn update_story_stealth_mode_parses() {
+        let env = parse_envelope(
+            r#"{"@type":"updateStoryStealthMode","active_until_date":1700003600,"cooldown_until_date":1700007200}"#,
+        )
+        .unwrap();
+        assert!(matches!(
+            env.payload,
+            EnvelopePayload::UpdateStoryStealthMode {
+                active_until_date: 1700003600,
+                cooldown_until_date: 1700007200,
+            }
+        ));
     }
 }
