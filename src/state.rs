@@ -497,6 +497,14 @@ pub enum RequestPurpose {
     /// 14492). Response is `ok`; the new state arrives via
     /// `updateChatBlockList`.
     SetMessageSenderBlockList,
+    /// Slice B2: `sendBotStartMessage` (schema 1.8.67, line 12216) from
+    /// the START button / "Restart bot". Response is the sent `message`.
+    SendBotStartMessage,
+    /// Slice B2: `getBotSimilarBots` (schema 1.8.67, line 11640) for the
+    /// similar-bots section of the bot profile. Response is `users`;
+    /// the bot ids land in `Session::similar_bots` (keyed by the pending
+    /// request's `user_id`).
+    GetBotSimilarBots,
     /// Slice CL2: `getArchiveChatListSettings` (schema 1.8.67, line
     /// 13421). Response is `archiveChatListSettings`; stored in
     /// `Session::archive_chat_list_settings`.
@@ -1037,6 +1045,17 @@ pub struct SponsoredReportOutcome {
     pub result: ReportSponsoredResult,
 }
 
+/// Slice B2: fetch state of `getBotSimilarBots` for a bot profile. The
+/// `users` payload carries only ids (names resolve through
+/// `Session::users`); presence records "fetched" so the driver never
+/// retries, and `Loading` dedupes the request.
+#[derive(Debug, Clone, Default)]
+pub enum SimilarBotsFetch {
+    #[default]
+    Loading,
+    Loaded(Vec<i64>),
+}
+
 impl SponsoredReportOutcome {
     pub fn user_message(&self) -> &'static str {
         self.result.user_message()
@@ -1443,6 +1462,36 @@ pub fn unread_badge_text(count: i32) -> Option<String> {
     } else {
         Some(count.to_string())
     }
+}
+
+/// Slice B2: parse a bot deep link of the form
+/// `t.me/<bot_username>?start=<start_parameter>` (with or without the
+/// `https://` scheme) into `(bot_username, start_parameter)` — the two
+/// pieces of `internalLinkTypeBotStart` (schema 1.8.67, line 9399) the
+/// START button needs. Returns `None` for anything that isn't that shape
+/// (different host, multi-segment path, missing/empty `start`).
+/// URL-decoding of the parameter is deliberately skipped: the parameter
+/// goes to `sendBotStartMessage` verbatim (schema line 12216), and
+/// inventing a decode here would corrupt parameters the bot generated.
+pub fn parse_bot_start_link(link: &str) -> Option<(String, String)> {
+    let rest = link
+        .strip_prefix("https://t.me/")
+        .or_else(|| link.strip_prefix("http://t.me/"))
+        .or_else(|| link.strip_prefix("https://telegram.me/"))
+        .or_else(|| link.strip_prefix("t.me/"))?;
+    let (path, query) = rest.split_once('?')?;
+    if path.is_empty() || path.contains('/') {
+        return None;
+    }
+    let parameter = query
+        .split('&')
+        .filter_map(|pair| pair.split_once('='))
+        .find(|(key, _)| *key == "start")
+        .map(|(_, value)| value.to_string())?;
+    if parameter.is_empty() {
+        return None;
+    }
+    Some((path.to_string(), parameter))
 }
 
 pub fn outgoing_status_label(pending: bool, receipt: OutboxReceipt) -> &'static str {
@@ -3312,6 +3361,16 @@ pub struct Session {
     /// by bot user id. `None` records "fetched, not a bot" so a null
     /// `bot_info` does not trigger a refetch loop.
     pub bot_info: HashMap<i64, Option<BotInfo>>,
+    /// Slice B2: pending bot `start_parameter` per chat
+    /// (`internalLinkTypeBotStart`, schema 1.8.67 line 9399) — from a
+    /// `t.me/<bot>?start=<param>` deep link. The UI shows the START
+    /// button while set; pressing it sends `sendBotStartMessage` (line
+    /// 12216) with the parameter and clears the entry.
+    pub bot_start_params: HashMap<i64, String>,
+    /// Slice B2: `getBotSimilarBots` results (schema 1.8.67, line 11640)
+    /// for the similar-bots section of the bot profile, keyed by bot
+    /// user id. The `users` ids resolve to names via `Session::users`.
+    pub similar_bots: HashMap<i64, SimilarBotsFetch>,
     /// Cached `getCommands` results for the default scope (a null `scope`
     /// selects `botCommandScopeDefault`, Phase 3.3), keyed by bot user id. Presence records "fetched"
     /// so the driver never retries — including when the response was an
@@ -3925,6 +3984,8 @@ impl Session {
             gifs: GifPanel::default(),
             bot_user_ids: HashSet::new(),
             bot_info: HashMap::new(),
+            bot_start_params: HashMap::new(),
+            similar_bots: HashMap::new(),
             bot_commands: HashMap::new(),
             draft_dirty: HashSet::new(),
             draft_clears: Vec::new(),
@@ -4790,6 +4851,16 @@ impl Session {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetContacts) {
                     self.contacts = Some(user_ids);
                     self.contacts_error = false;
+                } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetBotSimilarBots)
+                    && let Some(pending) = pending
+                    && let Some(bot_user_id) = pending.user_id
+                {
+                    // Slice B2: `getBotSimilarBots` answer — the user
+                    // objects arrive via `updateUser`; ids alone drive the
+                    // list (Telegram X `SharedChatsController` similarly
+                    // resolves users from its cache).
+                    self.similar_bots
+                        .insert(bot_user_id, SimilarBotsFetch::Loaded(user_ids));
                 }
             }
             EnvelopePayload::SupergroupFullInfo {
@@ -6894,6 +6965,16 @@ impl Session {
                     Some(RequestPurpose::DeleteChatHistory) => {
                         self.chat_action_error =
                             Some(format!("could not clear history (error {})", err.code));
+                    }
+                    // Slice B2: refused `sendBotStartMessage` / `getBotSimilarBots` —
+                    // a refusal is never shown as success.
+                    Some(RequestPurpose::SendBotStartMessage) => {
+                        self.chat_action_error =
+                            Some(format!("could not start the bot (error {})", err.code));
+                    }
+                    Some(RequestPurpose::GetBotSimilarBots) => {
+                        self.chat_action_error =
+                            Some(format!("could not load similar bots (error {})", err.code));
                     }
                     Some(RequestPurpose::RemoveChatFromList) => {
                         self.chat_action_error =
@@ -15696,6 +15777,94 @@ mod tests {
         assert_eq!(
             session.chat_action_error.as_deref(),
             Some("could not change the block state (error 403)")
+        );
+    }
+
+    #[test]
+    fn b2_bot_start_link_parser_only_accepts_start_links() {
+        // Slice B2: `t.me/<bot>?start=<param>` parses to
+        // `internalLinkTypeBotStart`'s two pieces (schema 1.8.67, line
+        // 9399); anything else is not a bot-start link.
+        assert_eq!(
+            parse_bot_start_link("https://t.me/demo_bot?start=demo_xyz"),
+            Some(("demo_bot".into(), "demo_xyz".into()))
+        );
+        assert_eq!(
+            parse_bot_start_link("t.me/demo_bot?start=demo_xyz&foo=bar"),
+            Some(("demo_bot".into(), "demo_xyz".into()))
+        );
+        assert_eq!(parse_bot_start_link("https://t.me/demo_bot?start="), None);
+        assert_eq!(parse_bot_start_link("https://t.me/demo_bot"), None);
+        assert_eq!(
+            parse_bot_start_link("https://t.me/demo_bot?startattach=x"),
+            None
+        );
+        assert_eq!(
+            parse_bot_start_link("https://t.me/s/demo_bot?start=x"),
+            None
+        );
+        assert_eq!(
+            parse_bot_start_link("https://example.com/demo_bot?start=x"),
+            None
+        );
+    }
+
+    #[test]
+    fn b2_similar_bots_users_response_lands_by_pending_user() {
+        // Slice B2: a `users` answer to our `getBotSimilarBots` fetch is
+        // keyed by the pending request's `user_id`; strangers' `users`
+        // payloads don't touch it.
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        let extra = session.request_for_user(RequestPurpose::GetBotSimilarBots, 21);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"users","@extra":"{}","total_count":2,"user_ids":[31,32]}}"#,
+                extra.0
+            ),
+        );
+        assert!(matches!(
+            session.similar_bots.get(&21),
+            Some(SimilarBotsFetch::Loaded(ids)) if ids == &[31, 32]
+        ));
+    }
+
+    #[test]
+    fn b2_start_and_similar_bots_errors_surface() {
+        // Slice B2: a refused `sendBotStartMessage` / `getBotSimilarBots`
+        // surfaces in `chat_action_error` — never shown as success.
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        let extra = session.request(RequestPurpose::SendBotStartMessage, Some(ChatId(21)));
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"error","@extra":"{}","code":400,"message":"BOT_START_FAILED"}}"#,
+                extra.0
+            ),
+        );
+        assert_eq!(
+            session.chat_action_error.as_deref(),
+            Some("could not start the bot (error 400)")
+        );
+        let extra = session.request_for_user(RequestPurpose::GetBotSimilarBots, 21);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"error","@extra":"{}","code":403,"message":"FORBIDDEN"}}"#,
+                extra.0
+            ),
+        );
+        assert_eq!(
+            session.chat_action_error.as_deref(),
+            Some("could not load similar bots (error 403)")
         );
     }
 

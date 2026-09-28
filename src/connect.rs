@@ -62,36 +62,38 @@ use crate::telegram::requests::{
     edit_chat_welcome_message, edit_forum_topic, edit_message_caption, edit_message_text,
     end_group_call, end_group_call_recording, end_group_call_screen_sharing, forward_messages,
     get_archive_chat_list_settings, get_authorization_state, get_available_chat_boost_slots,
-    get_basic_group_full_info, get_callback_query_answer, get_callback_query_answer_game,
-    get_callback_query_answer_with_password, get_chat_active_stories, get_chat_administrators,
-    get_chat_boost_status, get_chat_event_log, get_chat_folder, get_chat_history,
-    get_chat_invite_links, get_chat_join_requests, get_chat_lists_to_add_chat, get_chat_member,
-    get_chat_scheduled_messages, get_chat_sponsored_messages, get_chat_statistics, get_commands,
-    get_contacts, get_forum_topics, get_full_rich_message, get_group_call,
-    get_installed_sticker_sets, get_login_url, get_login_url_info, get_me, get_message_link,
-    get_message_properties, get_message_thread_history, get_saved_animations,
-    get_saved_notification_sounds, get_scope_notification_settings, get_secret_chat,
-    get_sticker_set, get_storage_statistics, get_story, get_story_available_reactions,
-    get_supergroup, get_supergroup_full_info, get_supergroup_members, get_user_full_info,
-    get_user_privacy_setting_rules, get_video_chat_invite_link, get_video_chat_rtmp_url,
-    get_web_page_instant_view, input_message_photo, input_message_video,
-    invite_group_call_participant, join_chat, join_group_call, join_video_chat, leave_chat,
-    leave_group_call, load_active_stories, load_chat_welcome_messages, load_chats, load_chats_list,
-    load_group_call_participants, open_chat, open_message_content, open_story, pin_chat_message,
+    get_basic_group_full_info, get_bot_similar_bots, get_callback_query_answer,
+    get_callback_query_answer_game, get_callback_query_answer_with_password,
+    get_chat_active_stories, get_chat_administrators, get_chat_boost_status, get_chat_event_log,
+    get_chat_folder, get_chat_history, get_chat_invite_links, get_chat_join_requests,
+    get_chat_lists_to_add_chat, get_chat_member, get_chat_scheduled_messages,
+    get_chat_sponsored_messages, get_chat_statistics, get_commands, get_contacts, get_forum_topics,
+    get_full_rich_message, get_group_call, get_installed_sticker_sets, get_login_url,
+    get_login_url_info, get_me, get_message_link, get_message_properties,
+    get_message_thread_history, get_saved_animations, get_saved_notification_sounds,
+    get_scope_notification_settings, get_secret_chat, get_sticker_set, get_storage_statistics,
+    get_story, get_story_available_reactions, get_supergroup, get_supergroup_full_info,
+    get_supergroup_members, get_user_full_info, get_user_privacy_setting_rules,
+    get_video_chat_invite_link, get_video_chat_rtmp_url, get_web_page_instant_view,
+    input_message_photo, input_message_video, invite_group_call_participant, join_chat,
+    join_group_call, join_video_chat, leave_chat, leave_group_call, load_active_stories,
+    load_chat_welcome_messages, load_chats, load_chats_list, load_group_call_participants,
+    open_chat, open_message_content, open_story, pin_chat_message,
     post_story as post_story_request, process_chat_join_request, read_chat_list, recognize_speech,
     remove_message_reaction, reorder_chat_folders, replace_primary_chat_invite_link,
     replace_video_chat_rtmp_url, report_chat, report_chat_sponsored_message,
     request_qr_code_authentication, resend_authentication_code, resend_messages,
     revoke_chat_invite_link, revoke_group_call_invite_link, search_call_messages,
     search_chat_messages, search_chats, search_messages, search_public_chats,
-    search_recently_found_chats, send_animation, send_call_debug_information, send_call_log,
-    send_call_rating_detail, send_call_signaling_data, send_chat_action, send_chat_action_kind,
-    send_document, send_group_call_message, send_message_album, send_photo, send_poll,
-    send_rich_message, send_sticker, send_text, send_text_story_reply, send_video, send_video_note,
-    send_voice_note, set_archive_chat_list_settings, set_authentication_phone_number,
-    set_chat_draft_message, set_chat_member_status, set_chat_member_tag,
-    set_chat_message_auto_delete_time, set_chat_notification_settings, set_chat_permissions,
-    set_chat_slow_mode_delay, set_group_call_participant_volume_level,
+    search_recently_found_chats, send_animation,
+    send_bot_start_message as send_bot_start_message_request, send_call_debug_information,
+    send_call_log, send_call_rating_detail, send_call_signaling_data, send_chat_action,
+    send_chat_action_kind, send_document, send_group_call_message, send_message_album, send_photo,
+    send_poll, send_rich_message, send_sticker, send_text, send_text_story_reply, send_video,
+    send_video_note, send_voice_note, set_archive_chat_list_settings,
+    set_authentication_phone_number, set_chat_draft_message, set_chat_member_status,
+    set_chat_member_tag, set_chat_message_auto_delete_time, set_chat_notification_settings,
+    set_chat_permissions, set_chat_slow_mode_delay, set_group_call_participant_volume_level,
     set_message_sender_block_list, set_pinned_chats, set_poll_answer,
     set_scope_notification_settings, set_story_reaction, set_supergroup_username,
     set_user_privacy_setting_rules, set_video_chat_title, start_group_call_recording,
@@ -7094,6 +7096,86 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(err);
         }
         Ok(Some(extra))
+    }
+
+    /// Slice B2: `sendBotStartMessage` (schema 1.8.67, line 12216) — what
+    /// the START button and "Restart bot" send. `parameter` is the
+    /// `internalLinkTypeBotStart.start_parameter` (line 9399); empty for
+    /// a plain restart (Telegram X `Tdlib.sendBotStartMessage` likewise
+    /// unblocks first when the chat is fully blocked).
+    pub fn send_bot_start_message(
+        &mut self,
+        chat_id: ChatId,
+        bot_user_id: i64,
+        parameter: &str,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let purpose = RequestPurpose::SendBotStartMessage;
+        if self.session.requests.has_purpose_for_chat(purpose, chat_id) {
+            return Ok(None);
+        }
+        let extra = self.session.request(purpose, Some(chat_id));
+        if let Err(err) = self.sender.send_json(&send_bot_start_message_request(
+            extra,
+            bot_user_id,
+            chat_id.0,
+            parameter,
+        )) {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(Some(extra))
+    }
+
+    /// Slice B2: `getBotSimilarBots` (schema 1.8.67, line 11640) for the
+    /// similar-bots section of the bot profile. Fires once per bot
+    /// (deduped by `Session::similar_bots` and in-flight purpose);
+    /// response `users` lands via the reducer by `user_id`.
+    pub fn fetch_similar_bots(
+        &mut self,
+        bot_user_id: i64,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if self.session.similar_bots.contains_key(&bot_user_id) {
+            return Ok(None);
+        }
+        let purpose = RequestPurpose::GetBotSimilarBots;
+        if self
+            .session
+            .requests
+            .has_purpose_for_user(purpose, bot_user_id)
+        {
+            return Ok(None);
+        }
+        let extra = self.session.request_for_user(purpose, bot_user_id);
+        if let Err(err) = self
+            .sender
+            .send_json(&get_bot_similar_bots(extra, bot_user_id))
+        {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(Some(extra))
+    }
+
+    /// Slice B2: "Restart bot" — clear the chat's history (`deleteChatHistory`,
+    /// schema line 11845, kept in the chat list, `revoke: false`), then
+    /// send `sendBotStartMessage` with an empty parameter. The clear is
+    /// confirm-gated in the UI (both calls fail closed: a send failure
+    /// leaves the request bookkeeping clean).
+    pub fn restart_bot(
+        &mut self,
+        chat_id: ChatId,
+        bot_user_id: i64,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if self.clear_chat_history(chat_id, false)?.is_none() {
+            return Ok(None);
+        }
+        self.send_bot_start_message(chat_id, bot_user_id, "")
     }
 
     /// Slice CL3: `setMessageSenderBlockList` (TDLib 1.8.67, schema line

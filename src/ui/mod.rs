@@ -46,10 +46,10 @@ use quill::state::{
     ActiveCall, ActiveGroupCall, AdminListFetch, AdminRightsFetch, CallSummary, ChatEventLogFetch,
     ChatSearchJump, ChatStatisticsFetch, ChatSummary, ContactRow, ForceReplyTarget, ForwardResult,
     HistoryMessage, InfoPanelTarget, InviteLinkFetch, JoinRequestFetch, LoginUrlRequest,
-    MemberListFilter, OutboxReceipt, RequestPurpose, SearchStatus, Session, SponsoredReportFlight,
-    StoryPostOutcome, StoryPostState, SupergroupMembersFetch, WelcomeMessagesFetch,
-    active_custom_keyboard, effective_preview, event_log_relative_time, outgoing_status_label,
-    unix_ms_now, unread_badge_text,
+    MemberListFilter, OutboxReceipt, RequestPurpose, SearchStatus, Session, SimilarBotsFetch,
+    SponsoredReportFlight, StoryPostOutcome, StoryPostState, SupergroupMembersFetch,
+    WelcomeMessagesFetch, active_custom_keyboard, effective_preview, event_log_relative_time,
+    outgoing_status_label, unix_ms_now, unread_badge_text,
 };
 use quill::story_composer::{StoryComposer, StoryExpiry, StoryMediaKind, StoryPrivacy};
 use quill::story_viewer::{StoryViewer, StoryViewerItem, StoryViewerKind, collect_story_items};
@@ -881,6 +881,12 @@ pub enum GroupConfirmAction {
     /// are read from the live selection at submit time (the dialog
     /// blocks selection changes while open).
     RemoveSelectedChats,
+    /// Slice B2: "Restart bot" — clears the bot chat's history
+    /// (`deleteChatHistory`, schema line 11845, kept in the chat list)
+    /// and re-sends `sendBotStartMessage` with an empty parameter (schema
+    /// line 12216). Telegram X's "Restart" (the unblock-slot action) only
+    /// re-sends; the clear is the profile-action contract here.
+    RestartBot,
 }
 
 pub struct GroupConfirmDialog {
@@ -1782,6 +1788,11 @@ pub enum ScreenshotDemo {
     /// scope) so the `/` command menu renders open above the composer
     /// with the bot-specific and "Global" sections (Phase 3.3).
     ReadyBotCommandMenu,
+    /// Bot profile actions demo (injected, no live Telegram): like
+    /// `ReadyBotChat`, plus an armed `bot_start_params` entry (START
+    /// button), `botInfo` with a menu button and a privacy-policy URL,
+    /// and a loaded `getBotSimilarBots` answer (Slice B2).
+    ReadyBotProfile,
     /// Text-entity demo (injected, no live Telegram): a message with mixed
     /// entities (bold/italic/underline/strikethrough/spoiler/code/pre, incl.
     /// nested runs) plus a photo whose caption carries entities (Phase 4.1).
@@ -2920,6 +2931,15 @@ impl QuillApp {
                     ConnectUiStatus::DemoReadyChats,
                     None,
                     "screenshot demo — bot chat with / command menu".into(),
+                    AuthorizationState::Ready,
+                )
+            }
+            Some(ScreenshotDemo::ReadyBotProfile) => {
+                demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
+                (
+                    ConnectUiStatus::DemoReadyChats,
+                    None,
+                    "screenshot demo — B2 bot profile actions".into(),
                     AuthorizationState::Ready,
                 )
             }
@@ -4434,6 +4454,13 @@ impl QuillApp {
             });
             app.rich_editor_open = true;
             app.status_note = "screenshot demo — rich editor".into();
+        }
+        if matches!(demo, Some(ScreenshotDemo::ReadyBotProfile)) {
+            if let Some(session) = app.demo_session.as_mut() {
+                app.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_bot_profile(session, &app.demo_sink, &app.demo_seq);
+            }
+            app.status_note = "screenshot demo — B2 bot profile actions".into();
         }
         if matches!(demo, Some(ScreenshotDemo::ReadyBotCommandMenu)) {
             if let Some(session) = app.demo_session.as_mut() {
@@ -12944,6 +12971,14 @@ impl QuillApp {
                 "request already in flight".to_string()
             }
         }
+        // Slice B2: read before the live borrow — the RestartBot arm
+        // needs the session while `live` is mutably borrowed.
+        let restart_bot_user_id = if matches!(dialog.action, GroupConfirmAction::RestartBot) {
+            self.session()
+                .and_then(|session| session.bot_user_id_for_chat(dialog.chat_id))
+        } else {
+            None
+        };
         let note = match self.live.as_mut() {
             Some(live) => {
                 let result = match dialog.action {
@@ -12970,6 +13005,18 @@ impl QuillApp {
                         .driver
                         .clear_chat_history(dialog.chat_id, revoke)
                         .map(|sent| sent_note(sent, "clearing history…")),
+                    // Slice B2: "Restart bot" — `deleteChatHistory` +
+                    // `sendBotStartMessage` (schema lines 11845 / 12216).
+                    // The bot user id is read from the session before the
+                    // live borrow; a missing id fails closed with a status
+                    // note, never silently.
+                    GroupConfirmAction::RestartBot => match restart_bot_user_id {
+                        Some(bot_user_id) => live
+                            .driver
+                            .restart_bot(dialog.chat_id, bot_user_id)
+                            .map(|sent| sent_note(sent, "restarting bot…")),
+                        None => Ok("Couldn't reach Telegram; try again.".to_string()),
+                    },
                     // Slice CL1: chat-list "Delete chat" —
                     // `deleteChatHistory` with `remove_from_chat_list:
                     // true` (Telegram X `Tdlib.deleteChat`).
@@ -24321,18 +24368,31 @@ impl QuillApp {
     }
 
     /// Phase 3.1: bot info panel rendered below the conversation header when
-    /// the open chat is a bot chat with cached `botInfo` (lazy
-    /// `getUserFullInfo` on chat open). Shows the bot description and its
-    /// command list; tapping a command inserts it into the composer (the
-    /// full `/` command menu is 3.3). Returns `None` when there is no bot
-    /// info to show.
+    /// the open chat is a bot chat (lazy `getUserFullInfo` on chat open).
+    /// Slice B2 extends it into the bot profile actions: the START button
+    /// (when a `t.me/<bot>?start=<param>` deep link armed
+    /// `Session::bot_start_params`, per `internalLinkTypeBotStart`,
+    /// schema 1.8.67 line 9399), the bot menu button
+    /// (`botInfo.menu_button`, schema line 834), Restart bot
+    /// (`deleteChatHistory` + `sendBotStartMessage`), Share (copies the
+    /// `t.me/<username>` link, Telegram X `ProfileController.share`),
+    /// Block/Unblock (`setMessageSenderBlockList`, CL3 plumbing), the
+    /// privacy-policy link (`botInfo.privacy_policy_url`, schema line
+    /// 2414), and the similar-bots section (`getBotSimilarBots`, schema
+    /// line 11640). Returns `None` for non-bot chats.
     fn bot_info_panel(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let session = self.session()?;
         let open = session.open_chat?;
+        let bot_id = session.bot_user_id_for_chat(open)?;
         let info: BotInfo = session.bot_info_for_chat(open)?.clone();
-        if info.description.is_empty() && info.commands.is_empty() {
-            return None;
-        }
+        let start_param = session.bot_start_params.get(&open.0).cloned();
+        let blocked = session.chats.get(&open.0).is_some_and(|chat| chat.blocked);
+        let username = session
+            .users
+            .get(&bot_id)
+            .map(|user| user.username.clone())
+            .unwrap_or_default();
+        let similar = session.similar_bots.get(&bot_id).cloned();
         let mut panel = div()
             .id("bot-info")
             .flex()
@@ -24349,6 +24409,18 @@ impl QuillApp {
                     .text_color(cx.theme().muted_foreground)
                     .child("Bot"),
             );
+        // Slice B2: START button — pressing sends `sendBotStartMessage`
+        // with the deep-link parameter (schema 1.8.67, line 12216;
+        // Telegram X shows it until the chat gains messages).
+        if let Some(parameter) = start_param {
+            panel = panel.child(
+                Button::new("bot-start")
+                    .label("START")
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.press_bot_start(open, bot_id, parameter.clone(), cx);
+                    })),
+            );
+        }
         if !info.description.is_empty() {
             panel = panel.child(div().text_sm().child(info.description.clone()));
         }
@@ -24372,7 +24444,184 @@ impl QuillApp {
             }
             panel = panel.child(row);
         }
+        // Slice B2: bot menu button (`botMenuButton`, schema line 834).
+        // The URL opens in the OS browser — the honest fallback used for
+        // B1 web-app buttons (no in-app web view).
+        if let Some(menu) = &info.menu_button {
+            if !menu.url.is_empty() {
+                let text = if menu.text.is_empty() {
+                    "Menu".to_string()
+                } else {
+                    menu.text.clone()
+                };
+                let url = menu.url.clone();
+                panel = panel.child(Button::new("bot-menu-button").label(text).on_click(
+                    cx.listener(move |this, _, _, cx| {
+                        this.open_message_url(&url, cx);
+                    }),
+                ));
+            }
+        }
+        // Slice B2: profile actions row.
+        let mut actions = div().id("bot-actions").flex().flex_wrap().gap_1();
+        actions = actions.child(
+            Button::new("bot-restart")
+                .label("Restart bot")
+                .ghost()
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.open_group_confirm(open, GroupConfirmAction::RestartBot, cx);
+                })),
+        );
+        if !username.is_empty() {
+            let link = format!("https://t.me/{username}");
+            actions = actions.child(Button::new("bot-share").label("Share").ghost().on_click(
+                cx.listener(move |this, _, _, cx| {
+                    cx.write_to_clipboard(ClipboardItem::new_string(link.clone()));
+                    this.set_status_note("bot link copied", cx);
+                }),
+            ));
+        }
+        actions = actions.child(
+            Button::new("bot-block")
+                .label(if blocked { "Unblock bot" } else { "Block bot" })
+                .ghost()
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.open_group_confirm(
+                        open,
+                        GroupConfirmAction::BlockUser { block: !blocked },
+                        cx,
+                    );
+                })),
+        );
+        panel = panel.child(actions);
+        // Slice B2: privacy policy. Schema line 2414: the link when the
+        // bot published one; otherwise `/privacy` when the bot lists that
+        // command; otherwise the fallback page. Read-only — there is no
+        // client-side bot-privacy setting in the schema.
+        if !info.privacy_policy_url.is_empty() {
+            let url = info.privacy_policy_url.clone();
+            panel = panel.child(
+                Button::new("bot-privacy-policy")
+                    .label("Privacy policy")
+                    .ghost()
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.open_message_url(&url, cx);
+                    })),
+            );
+        } else if info.commands.iter().any(|c| c.command == "privacy") {
+            panel = panel.child(
+                Button::new("bot-privacy-command")
+                    .label("Privacy (/privacy)")
+                    .ghost()
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.insert_bot_command("privacy", window, cx);
+                    })),
+            );
+        } else {
+            panel = panel.child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("Privacy: telegram.org/privacy-tpa"),
+            );
+        }
+        // Slice B2: similar bots (`getBotSimilarBots`, schema line 11640;
+        // Telegram X `SharedChatsController.Mode.SIMILAR_BOTS`). The
+        // button fetches once; the names resolve through `Session::users`
+        // and open the bot's chat.
+        match &similar {
+            Some(SimilarBotsFetch::Loaded(ids)) => {
+                let mut row = div().id("bot-similar").flex().flex_wrap().gap_1().child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child("Similar bots"),
+                );
+                for id in ids {
+                    let id = *id;
+                    let name = session
+                        .users
+                        .get(&id)
+                        .map(|user| user.display_name())
+                        .unwrap_or_else(|| format!("Bot {id}"));
+                    row = row.child(
+                        Button::new(format!("bot-similar-{id}"))
+                            .label(name)
+                            .ghost()
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                this.open_user_chat(id, window, cx);
+                            })),
+                    );
+                }
+                panel = panel.child(row);
+            }
+            _ => {
+                panel = panel.child(
+                    Button::new("bot-similar-fetch")
+                        .label("Similar bots")
+                        .ghost()
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.fetch_similar_bots(bot_id, cx);
+                        })),
+                );
+            }
+        }
         Some(panel.into_any_element())
+    }
+
+    /// Slice B2: START press — `sendBotStartMessage` with the deep-link
+    /// parameter (schema 1.8.67, line 12216); the button clears like
+    /// Telegram X's `hideActionButton` after the send.
+    fn press_bot_start(
+        &mut self,
+        chat_id: ChatId,
+        bot_id: i64,
+        parameter: String,
+        cx: &mut Context<Self>,
+    ) {
+        let note = self.live.as_mut().map(|live| {
+            match live
+                .driver
+                .send_bot_start_message(chat_id, bot_id, &parameter)
+            {
+                Ok(Some(_)) => {
+                    live.driver.session.bot_start_params.remove(&chat_id.0);
+                    "starting bot…".to_string()
+                }
+                Ok(None) => "request already in flight".to_string(),
+                Err(_) => "Couldn't reach Telegram; try again.".to_string(),
+            }
+        });
+        self.set_status_note(
+            note.as_deref()
+                .unwrap_or("Couldn't reach Telegram; try again."),
+            cx,
+        );
+    }
+
+    /// Slice B2: fetch `getBotSimilarBots` for the open bot profile; the
+    /// reducer keys the `users` answer by bot id.
+    fn fetch_similar_bots(&mut self, bot_id: i64, cx: &mut Context<Self>) {
+        let note = self
+            .live
+            .as_mut()
+            .map(|live| match live.driver.fetch_similar_bots(bot_id) {
+                Ok(Some(_)) => {
+                    live.driver
+                        .session
+                        .similar_bots
+                        .entry(bot_id)
+                        .or_insert(SimilarBotsFetch::Loading);
+                    "loading similar bots…".to_string()
+                }
+                Ok(None) => "already loading".to_string(),
+                Err(_) => "Couldn't reach Telegram; try again.".to_string(),
+            });
+        self.set_status_note(
+            note.as_deref()
+                .unwrap_or("Couldn't reach Telegram; try again."),
+            cx,
+        );
     }
 
     /// Phase 3.1: insert a tapped bot command into the composer. Empty
@@ -26340,6 +26589,12 @@ impl QuillApp {
                     "Delete all messages in this chat for you? This cannot be undone."
                 },
                 "Clear",
+            ),
+            // Slice B2: "Restart bot" — history clear + /start re-send.
+            GroupConfirmAction::RestartBot => (
+                "Restart bot",
+                "Clear this bot's chat history and send /start again? This cannot be undone.",
+                "Restart",
             ),
         };
         let body = div()
@@ -33904,6 +34159,46 @@ fn apply_ready_bot_command_menu(session: &mut Session, sink: &Arc<MemorySink>, s
     let json = format!(
         r#"{{"@type":"botCommands","@extra":"{}","bot_user_id":21,"commands":[{{"@type":"botCommand","command":"settings","description":"Tweak the bot","is_ephemeral":false}}]}}"#,
         cmd_extra.0,
+    );
+    if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
+        session.apply(owned);
+    }
+}
+
+/// `ReadyBotProfile` fixture (Slice B2): like `apply_ready_bot_chat`,
+/// plus an armed `bot_start_params` entry (START button), a re-fetched
+/// `userFullInfo` whose `botInfo` carries a menu button and a
+/// privacy-policy URL, and a loaded `getBotSimilarBots` answer with two
+/// similar bots.
+fn apply_ready_bot_profile(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
+    apply_ready_bot_chat(session, sink, seq);
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    // Armed deep-link start parameter (t.me/demo_bot?start=demo_xyz).
+    session.bot_start_params.insert(21, "demo_xyz".to_string());
+    let info_extra = session.request(RequestPurpose::GetUserFullInfo, Some(ChatId(21)));
+    let jsons = [
+        // Bot gains a username so Share renders; similar bots get names.
+        r#"{"@type":"updateUser","user":{"id":21,"first_name":"Demo","usernames":{"@type":"usernames","active_usernames":["demo_bot"],"disabled_usernames":[],"editable_username":"demo_bot","collectible_usernames":[]},"type":{"@type":"userTypeBot","can_be_edited":false,"can_join_groups":false,"can_read_all_group_messages":false,"has_main_web_app":false,"has_topics":false,"allows_users_to_create_topics":false,"can_manage_bots":false,"is_inline":false,"inline_query_placeholder":"","supports_guest_queries":false,"is_guard":false,"need_location":false,"can_connect_to_business":false,"can_be_added_to_attachment_menu":false,"active_user_count":0}}}"#
+            .to_string(),
+        r#"{"@type":"updateUser","user":{"id":31,"first_name":"Echo","usernames":{"@type":"usernames","active_usernames":["echo_bot"],"disabled_usernames":[],"editable_username":"echo_bot","collectible_usernames":[]},"type":{"@type":"userTypeBot","can_be_edited":false,"can_join_groups":false,"can_read_all_group_messages":false,"has_main_web_app":false,"has_topics":false,"allows_users_to_create_topics":false,"can_manage_bots":false,"is_inline":false,"inline_query_placeholder":"","supports_guest_queries":false,"is_guard":false,"need_location":false,"can_connect_to_business":false,"can_be_added_to_attachment_menu":false,"active_user_count":0}}}"#
+            .to_string(),
+        r#"{"@type":"updateUser","user":{"id":32,"first_name":"Foxtrot","usernames":{"@type":"usernames","active_usernames":["foxtrot_bot"],"disabled_usernames":[],"editable_username":"foxtrot_bot","collectible_usernames":[]},"type":{"@type":"userTypeBot","can_be_edited":false,"can_join_groups":false,"can_read_all_group_messages":false,"has_main_web_app":false,"has_topics":false,"allows_users_to_create_topics":false,"can_manage_bots":false,"is_inline":false,"inline_query_placeholder":"","supports_guest_queries":false,"is_guard":false,"need_location":false,"can_connect_to_business":false,"can_be_added_to_attachment_menu":false,"active_user_count":0}}}"#
+            .to_string(),
+        format!(
+            r#"{{"@type":"userFullInfo","@extra":"{}","bot_info":{{"@type":"botInfo","short_description":"A demo bot","description":"Demo Bot answers questions and shows how the info panel looks. It understands /start, /help and /ping.","menu_button":{{"@type":"botMenuButton","text":"Open app","url":"https://example.com/app"}},"privacy_policy_url":"https://example.com/privacy","commands":[{{"@type":"botCommand","command":"start","description":"Start the bot","is_ephemeral":false}},{{"@type":"botCommand","command":"help","description":"Show help","is_ephemeral":false}}]}}}}"#,
+            info_extra.0,
+        ),
+    ];
+    for json in jsons {
+        if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
+            session.apply(owned);
+        }
+    }
+    // Similar bots, through the real `getBotSimilarBots` reducer path.
+    let similar_extra = session.request_for_user(RequestPurpose::GetBotSimilarBots, 21);
+    let json = format!(
+        r#"{{"@type":"users","@extra":"{}","total_count":2,"user_ids":[31,32]}}"#,
+        similar_extra.0,
     );
     if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
         session.apply(owned);
