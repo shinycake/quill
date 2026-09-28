@@ -1659,6 +1659,7 @@ pub struct QuillApp {
     /// for. The permanent debug status bar is gone; `status_note` now shows
     /// as an auto-dismissing toast pill instead.
     toast_armed_for: String,
+    toast_seq: u64,
     /// Screenshot / synthetic demo: show the matching auth field without a live client.
     demo_auth_inputs: bool,
     /// Screenshot Ready list: same reducers as live, injected JSON only.
@@ -4134,6 +4135,7 @@ impl QuillApp {
             live,
             status_note,
             toast_armed_for: String::new(),
+            toast_seq: 0,
             demo_auth_inputs: matches!(
                 demo,
                 Some(
@@ -42690,6 +42692,7 @@ fn title_bar(
                         .icon(IconName::ChevronsUp)
                         .ghost()
                         .tooltip("Load older messages")
+                        .accessibility_label("Load older messages")
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.load_older_action(cx);
                         })),
@@ -42704,6 +42707,11 @@ fn title_bar(
                             })
                             .ghost()
                             .tooltip(if search_open {
+                                "Close search"
+                            } else {
+                                "Search"
+                            })
+                            .accessibility_label(if search_open {
                                 "Close search"
                             } else {
                                 "Search"
@@ -42729,6 +42737,11 @@ fn title_bar(
                             } else {
                                 "Find in chat"
                             })
+                            .accessibility_label(if chat_search_open {
+                                "Close find in chat"
+                            } else {
+                                "Find in chat"
+                            })
                             .on_click(cx.listener(|this, _, window, cx| {
                                 if this.chat_search_is_open() {
                                     this.close_chat_search_ui(window, cx);
@@ -42744,6 +42757,7 @@ fn title_bar(
                             .icon(IconName::RotateCcw)
                             .ghost()
                             .tooltip("Cycle auth state")
+                            .accessibility_label("Cycle auth state")
                             .on_click(cx.listener(|this, _, _, cx| this.cycle_auth(cx))),
                     )
                 }),
@@ -47243,19 +47257,20 @@ fn auth_action_note(auth: &AuthView, connect_status: &ConnectUiStatus) -> impl I
 }
 impl QuillApp {
     /// Phase 1 (kit adoption): arms a one-shot 5 s dismiss timer the first
-    /// time a new `status_note` renders. The 541 call sites keep writing the
-    /// field directly; only the newest note survives (a newer note cancels
-    /// the older timer via the text comparison).
+    /// time a new `status_note` renders. The `status_note` call sites keep
+    /// writing the field directly; only the newest note survives (a newer
+    /// note's timer wins via the generation counter).
     fn arm_status_toast(&mut self, cx: &mut Context<Self>) {
         if self.status_note.is_empty() || self.toast_armed_for == self.status_note {
             return;
         }
         self.toast_armed_for = self.status_note.clone();
-        let note = self.status_note.clone();
+        self.toast_seq += 1;
+        let seq = self.toast_seq;
         cx.spawn(async move |this, cx| {
             cx.background_executor().timer(Duration::from_secs(5)).await;
             let _ = this.update(cx, |this, cx| {
-                if this.status_note == note {
+                if this.toast_seq == seq {
                     this.status_note.clear();
                     this.toast_armed_for.clear();
                     cx.notify();
