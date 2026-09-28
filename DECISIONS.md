@@ -4597,3 +4597,52 @@ start time, real `callStateReady.emojis` from a live call, real
 **Out of this slice:** nothing from the three items was deferred —
 `parity:calls-schedule-notify`, `parity:calls-verify-emoji`, and
 `parity:calls-group-video-pause` are all checked.
+
+## Build-infra experiment: ConnectDriver de-genericization (2026-09-28)
+
+**What changed (branch `parity/connect-driver-dyn`, not merged):**
+`ConnectDriver<S: JsonSender>` became a non-generic struct holding
+`sender: Box<dyn JsonSender>`; `new` takes `impl JsonSender + 'static`
+(the `'static` bound is required to box the trait object — E0310 otherwise).
+`wait_closed`, `drive_until_terminal`, `LiveConnect.driver`, and all test
+helpers were de-genericized accordingly (`src/connect.rs`,
+`src/connect_smoke.rs`). Pure refactor: send ordering, failure rollback
+(`requests.take(extra)` on send error), recording, retries, and
+`LiveConnect` shutdown/Drop field ordering are untouched. No README
+checkbox changes (build-infra only).
+
+**Behavior evidence:** full suite green — 866 unit + 59 replay tests, 0
+failures. Injected-failure coverage under the dyn version: existing
+`view_messages_send_failure_unsticks_gate_and_retries` (send failure →
+registry rollback → retry with fresh `@extra`),
+`view_messages_tdlib_error_unsticks_gate_and_retries` (TDLib error → retry
+with fresh extra), `cl2_set_pinned_chat_order_sends_full_list_and_rolls_back`
+(optimistic rollback on refusal), `call_transport_retries_same_params_three_times_then_stops`;
+plus new `dyn_send_failure_preserves_order_rolls_back_and_retries`, which
+injects a mid-sequence send failure through the `Box<dyn JsonSender>`
+dispatch and asserts earlier payloads stay in order, the failed send records
+nothing, the request registry is rolled back, and the retry goes out last
+with a fresh `@extra`.
+
+**Measured** (cargo's own "Finished" times, same worktree, lock-serialized
+2-core box; wall times are larger due to build-lock queueing):
+- Warm UI-edit rebuild (`touch src/ui/mod.rs` + `build --features ui`):
+  before 37.87s → after 1m42s. The "after" run also recompiled the edited
+  connect.rs itself — a one-time cost of the changed file, not steady state.
+- Core test-compile (`touch src/connect.rs` +
+  `test --no-default-features --locked --no-run`): before 24.21s → after
+  29.19s, repeat 19.35s.
+
+**Verdict: DROP — do not merge.** The three test-compile samples
+(24.2s / 29.2s / 19.4s) span a wider range than any before/after delta:
+incremental rebuilds are noise-dominated on this box and show no
+compile-time win from de-genericization. Runtime cost would have been
+negligible (one vtable indirection per `send_json`, dwarfed by JSON
+serialization + the tdjson FFI call), and behavior is provably identical,
+but the keep criterion was *faster compiles* and the experiment did not
+demonstrate it.
+
+**Gates on the experiment branch:** `cargo fmt --check` clean;
+`quill-build clippy --no-default-features --all-targets -- -D warnings`
+green; `quill-build test --no-default-features --locked` green (866 + 59);
+`LIBRARY_PATH=/tmp/xkb-lib quill-build build --features ui` green.

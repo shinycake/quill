@@ -3,8 +3,7 @@
 //! passwords.
 
 use crate::connect::{
-    CLIENT_CLOSE_TIMEOUT, ConnectBlocker, ConnectDriver, JsonSender, LiveConnect,
-    start_live_connect,
+    CLIENT_CLOSE_TIMEOUT, ConnectBlocker, ConnectDriver, LiveConnect, start_live_connect,
 };
 use crate::credentials::{self, TelegramCredentials};
 use crate::platform::live_secret_store;
@@ -100,8 +99,8 @@ pub fn smoke_preflight(
 
 /// Ingest until WaitPhoneNumber (or another terminal auth state / send failure /
 /// timeout). Used by the live CLI and by unit tests with a recording sender.
-pub fn drive_until_terminal<S: JsonSender>(
-    driver: &mut ConnectDriver<S>,
+pub fn drive_until_terminal(
+    driver: &mut ConnectDriver,
     mut recv: impl FnMut(Duration) -> Option<OwnedEnvelope>,
     timeout: Duration,
 ) -> SmokeOutcome {

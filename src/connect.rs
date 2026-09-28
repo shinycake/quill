@@ -430,9 +430,9 @@ type VideoFrameSlots = Arc<Mutex<HashMap<(i32, bool), VideoFrame>>>;
 type GroupVideoFrameSlots = Arc<Mutex<HashMap<(i32, i64, bool), VideoFrame>>>;
 
 /// Session + outbound sender that auto-replies to `WaitTdlibParameters`.
-pub struct ConnectDriver<S: JsonSender> {
+pub struct ConnectDriver {
     pub session: Session,
-    sender: S,
+    sender: Box<dyn JsonSender>,
     call_engine: Option<Box<dyn CallEngine>>,
     signaling_outbox: SignalingOutbox,
     transport_outbox: TransportOutbox,
@@ -544,16 +544,16 @@ fn group_video_sources(participants: &[ParsedGroupCallParticipant]) -> Vec<Group
     sources
 }
 
-impl<S: JsonSender> ConnectDriver<S> {
+impl ConnectDriver {
     pub fn new(
         session: Session,
-        sender: S,
+        sender: impl JsonSender + 'static,
         credentials: TelegramCredentials,
         prepared: PreparedConnect,
     ) -> Self {
         Self {
             session,
-            sender,
+            sender: Box::new(sender),
             call_engine: None,
             signaling_outbox: Arc::new(Mutex::new(VecDeque::new())),
             transport_outbox: Arc::new(Mutex::new(VecDeque::new())),
@@ -10505,8 +10505,8 @@ pub const CLIENT_CLOSE_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Send `close` and ingest until Closed. Does not join a receive thread or
 /// unload tdjson. Returns whether Closed was observed.
-pub fn wait_closed<S: JsonSender>(
-    driver: &mut ConnectDriver<S>,
+pub fn wait_closed(
+    driver: &mut ConnectDriver,
     mut recv: impl FnMut(Duration) -> Option<OwnedEnvelope>,
     timeout: Duration,
 ) -> bool {
@@ -10542,7 +10542,7 @@ pub fn wait_closed<S: JsonSender>(
 /// Field order: `bridge` is dropped before `_live` (declaration order) so
 /// `td_receive` is not in-flight during `dlclose`.
 pub struct LiveConnect {
-    pub driver: ConnectDriver<LiveSender>,
+    pub driver: ConnectDriver,
     pub bridge: ReceiveBridge,
     _live: LiveTdJson,
 }
@@ -10621,7 +10621,7 @@ pub fn start_live_connect(
     })
 }
 
-impl<S: JsonSender> ConnectDriver<S> {
+impl ConnectDriver {
     /// Phase C2i: persist the call preferences edited from the Calls
     /// tab (same account-scoped dir as the other settings files).
     pub fn save_call_prefs(&mut self) -> std::io::Result<()> {
@@ -12324,7 +12324,7 @@ mod tests {
         prepared: PreparedConnect,
         dyn_sink: &Arc<dyn DiagnosticSink>,
         seq: &AtomicU64,
-    ) -> ConnectDriver<Arc<RecordingSender>> {
+    ) -> ConnectDriver {
         let session = Session::new(AccountKey::primary(), dyn_sink.clone());
         let mut driver =
             ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
@@ -13056,7 +13056,7 @@ mod tests {
     }
 
     fn ready_private_chat(
-        driver: &mut ConnectDriver<Arc<ViewCtlSender>>,
+        driver: &mut ConnectDriver,
         seq: &AtomicU64,
         sink: &Arc<dyn DiagnosticSink>,
     ) {
@@ -13211,6 +13211,58 @@ mod tests {
                 .has_purpose_for_chat(RequestPurpose::ViewMessages, ChatId(7))
         );
         assert!(!sink.rendered().contains("CANARY_VIEW_TD"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn dyn_send_failure_preserves_order_rolls_back_and_retries() {
+        // De-genericization check: the non-generic driver routes through
+        // `Box<dyn JsonSender>`. A mid-sequence injected send failure must
+        // leave every earlier payload in order, roll the failed request
+        // back out of the registry, and retry it later with a fresh @extra.
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let sender = ViewCtlSender::new();
+        let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+        let mut driver = ConnectDriver::new(session, sender.clone(), test_credentials(), prepared);
+        let seq = AtomicU64::new(0);
+        ready_private_chat(&mut driver, &seq, &dyn_sink);
+        let sent_before = sender.snapshot().len();
+
+        sender.set_fail_view(true);
+        assert_eq!(driver.select_chat(ChatId(7)), Err(ConnectSendError::Native));
+        // The failed send recorded nothing: sends before it (`openChat`)
+        // stay in order, no `viewMessages` went out, and the registry was
+        // rolled back so the message ids are still pending.
+        let snapshot = sender.snapshot();
+        assert_eq!(snapshot.len(), sent_before + 1);
+        assert!(snapshot.last().unwrap().contains("openChat"));
+        assert_eq!(sender.view_count(), 0);
+        assert!(
+            !driver
+                .session
+                .requests
+                .has_purpose(RequestPurpose::ViewMessages)
+        );
+        assert_eq!(
+            driver.session.message_ids_to_view(ChatId(7)),
+            vec![MessageId(11)]
+        );
+
+        // The retry goes out after every earlier payload, with a fresh extra.
+        sender.set_fail_view(false);
+        let extra = driver
+            .maybe_view_open_messages()
+            .unwrap()
+            .expect("retry viewMessages");
+        let snapshot = sender.snapshot();
+        assert_eq!(snapshot.len(), sent_before + 2);
+        let last = snapshot.last().unwrap();
+        assert!(last.contains("viewMessages"));
+        assert!(last.contains(&format!("\"@extra\":\"{}\"", extra.0)));
+        assert!(driver.session.message_ids_to_view(ChatId(7)).is_empty());
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -14853,10 +14905,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    fn commit_typed_search<S: JsonSender>(
-        driver: &mut ConnectDriver<S>,
-        query: &str,
-    ) -> SearchFlight {
+    fn commit_typed_search(driver: &mut ConnectDriver, query: &str) -> SearchFlight {
         match driver.set_search_query(query).unwrap() {
             SearchQueryOutcome::Debounced { token } => driver
                 .commit_debounced_search(token)
@@ -14942,8 +14991,8 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    fn seed_ready_alice<S: JsonSender>(
-        driver: &mut ConnectDriver<S>,
+    fn seed_ready_alice(
+        driver: &mut ConnectDriver,
         seq: &AtomicU64,
         dyn_sink: &Arc<dyn DiagnosticSink>,
     ) {
@@ -14990,10 +15039,7 @@ mod tests {
         driver.select_chat(ChatId(7)).unwrap();
     }
 
-    fn commit_typed_chat_search<S: JsonSender>(
-        driver: &mut ConnectDriver<S>,
-        query: &str,
-    ) -> ChatSearchFlight {
+    fn commit_typed_chat_search(driver: &mut ConnectDriver, query: &str) -> ChatSearchFlight {
         match driver.set_chat_search_query(query).unwrap() {
             ChatSearchQueryOutcome::Debounced { token } => driver
                 .commit_debounced_chat_search(token)
@@ -16098,8 +16144,8 @@ mod tests {
 
     /// Phase 9.2: ingest a full `story` object into the driver's session,
     /// like the `getStory` response would.
-    fn seed_story<S: JsonSender>(
-        driver: &mut ConnectDriver<S>,
+    fn seed_story(
+        driver: &mut ConnectDriver,
         seq: &AtomicU64,
         dyn_sink: &Arc<dyn DiagnosticSink>,
         chat_id: i64,
@@ -16873,7 +16919,7 @@ mod tests {
     // Phase 4.2: driver guards around `send_poll_answer` / `send_poll_draft`.
     type PollDriverHarness = (
         std::path::PathBuf,
-        ConnectDriver<Arc<RecordingSender>>,
+        ConnectDriver,
         Arc<RecordingSender>,
         Arc<MemorySink>,
         Arc<dyn DiagnosticSink>,
@@ -17084,7 +17130,7 @@ mod tests {
 
     type CallDriverHarness = (
         std::path::PathBuf,
-        ConnectDriver<Arc<RecordingSender>>,
+        ConnectDriver,
         Arc<RecordingSender>,
         Arc<dyn DiagnosticSink>,
         AtomicU64,
@@ -17101,7 +17147,7 @@ mod tests {
     }
 
     fn ingest_call_json(
-        driver: &mut ConnectDriver<Arc<RecordingSender>>,
+        driver: &mut ConnectDriver,
         seq: &AtomicU64,
         sink: &Arc<dyn DiagnosticSink>,
         json: &str,
@@ -17204,7 +17250,7 @@ mod tests {
     }
 
     fn seed_ready_call_user(
-        driver: &mut ConnectDriver<Arc<RecordingSender>>,
+        driver: &mut ConnectDriver,
         seq: &AtomicU64,
         sink: &Arc<dyn DiagnosticSink>,
     ) {
@@ -17360,7 +17406,7 @@ mod tests {
 
     fn ready_call_driver() -> (
         std::path::PathBuf,
-        ConnectDriver<Arc<RecordingSender>>,
+        ConnectDriver,
         MockEngine,
         Arc<dyn DiagnosticSink>,
         AtomicU64,
@@ -17698,7 +17744,7 @@ mod tests {
     /// Phase C2b: driver harness with a failing-first sender.
     type FailingCallDriverHarness = (
         std::path::PathBuf,
-        ConnectDriver<Arc<FailFirstCallSender>>,
+        ConnectDriver,
         Arc<FailFirstCallSender>,
         Arc<dyn DiagnosticSink>,
         AtomicU64,
@@ -17715,7 +17761,7 @@ mod tests {
     }
 
     fn ingest_failing(
-        driver: &mut ConnectDriver<Arc<FailFirstCallSender>>,
+        driver: &mut ConnectDriver,
         seq: &AtomicU64,
         sink: &Arc<dyn DiagnosticSink>,
         json: &str,
@@ -18000,7 +18046,7 @@ mod tests {
     fn group_call_test_driver() -> (
         std::path::PathBuf,
         Arc<RecordingSender>,
-        ConnectDriver<Arc<RecordingSender>>,
+        ConnectDriver,
         AtomicU64,
     ) {
         let store = MemorySecretStore::new();
@@ -18467,7 +18513,7 @@ mod tests {
                 .filter(|json| json.contains("\"joinVideoChat\""))
                 .count()
         };
-        let fail_last_join = |driver: &mut ConnectDriver<Arc<RecordingSender>>| {
+        let fail_last_join = |driver: &mut ConnectDriver| {
             let sent: Value = serde_json::from_str(recorder.snapshot().last().unwrap()).unwrap();
             let extra = sent["@extra"].as_str().unwrap().to_string();
             driver
@@ -18561,7 +18607,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    fn call_state_for_rejoin(driver: &mut ConnectDriver<Arc<RecordingSender>>) {
+    fn call_state_for_rejoin(driver: &mut ConnectDriver) {
         let call = tracked_group_call(true, false, false);
         driver.session.active_group_call = Some(call);
         driver
@@ -18576,7 +18622,7 @@ mod tests {
     /// -> call 555) and an available mock engine.
     type GroupCallDriverHarness = (
         std::path::PathBuf,
-        ConnectDriver<Arc<RecordingSender>>,
+        ConnectDriver,
         Arc<RecordingSender>,
         MockEngine,
         Arc<dyn DiagnosticSink>,
@@ -19045,7 +19091,7 @@ mod tests {
         let recorder = Arc::new(RecordingSender::new());
         let seq = AtomicU64::new(0);
         let mut driver = ready_driver(&recorder, prepared, &dyn_sink, &seq);
-        let ingest_json = |driver: &mut ConnectDriver<Arc<RecordingSender>>, json: &str| {
+        let ingest_json = |driver: &mut ConnectDriver, json: &str| {
             driver
                 .ingest(copy_and_parse(json, &seq, &dyn_sink).unwrap())
                 .unwrap();
@@ -19131,7 +19177,7 @@ mod tests {
         let recorder = Arc::new(RecordingSender::new());
         let seq = AtomicU64::new(0);
         let mut driver = ready_driver(&recorder, prepared, &dyn_sink, &seq);
-        let ingest_json = |driver: &mut ConnectDriver<Arc<RecordingSender>>, json: &str| {
+        let ingest_json = |driver: &mut ConnectDriver, json: &str| {
             driver
                 .ingest(copy_and_parse(json, &seq, &dyn_sink).unwrap())
                 .unwrap();
@@ -19192,7 +19238,7 @@ mod tests {
         let recorder = Arc::new(RecordingSender::new());
         let seq = AtomicU64::new(0);
         let mut driver = ready_driver(&recorder, prepared, &dyn_sink, &seq);
-        let ingest_json = |driver: &mut ConnectDriver<Arc<RecordingSender>>, json: &str| {
+        let ingest_json = |driver: &mut ConnectDriver, json: &str| {
             driver
                 .ingest(copy_and_parse(json, &seq, &dyn_sink).unwrap())
                 .unwrap();
@@ -19284,7 +19330,7 @@ mod tests {
         let recorder = Arc::new(RecordingSender::new());
         let seq = AtomicU64::new(0);
         let mut driver = ready_driver(&recorder, prepared, &dyn_sink, &seq);
-        let ingest_json = |driver: &mut ConnectDriver<Arc<RecordingSender>>, json: &str| {
+        let ingest_json = |driver: &mut ConnectDriver, json: &str| {
             driver
                 .ingest(copy_and_parse(json, &seq, &dyn_sink).unwrap())
                 .unwrap();
@@ -19561,7 +19607,7 @@ mod tests {
         let recorder = Arc::new(RecordingSender::new());
         let seq = AtomicU64::new(0);
         let mut driver = ready_driver(&recorder, prepared, &dyn_sink, &seq);
-        let ingest_json = |driver: &mut ConnectDriver<Arc<RecordingSender>>, json: &str| {
+        let ingest_json = |driver: &mut ConnectDriver, json: &str| {
             driver
                 .ingest(copy_and_parse(json, &seq, &dyn_sink).unwrap())
                 .unwrap();
