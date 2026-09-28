@@ -5,6 +5,7 @@ pub(crate) use chat_theme::*;
 
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
+use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::input::{InputEvent, Textarea, TextareaState};
 use gpui_kit::component::slider::{Slider, SliderEvent, SliderState, SliderValue};
 use gpui_kit::component::*;
@@ -906,51 +907,25 @@ fn b1_modal(
     body: AnyElement,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
+    // Phase 2 (kit adoption): dialog chrome (dim, panel, title, backdrop/Esc
+    // dismissal) comes from kit `Dialog`; only the body content is Quill's.
     let title = title.to_string();
-    div()
-        .id(format!("{id_prefix}-overlay"))
-        .absolute()
-        .top_0()
-        .left_0()
-        .right_0()
-        .bottom_0()
-        .flex()
-        .items_center()
-        .justify_center()
-        .child(
-            div()
-                .id(format!("{id_prefix}-backdrop"))
-                .absolute()
-                .top_0()
-                .left_0()
-                .right_0()
-                .bottom_0()
-                .bg(SCRIM)
-                .on_click(cx.listener(move |this, _, _, cx| match close {
-                    B1DialogClose::CallbackPassword => this.close_callback_password_dialog(cx),
-                    B1DialogClose::LoginUrlConfirm => {
-                        this.login_url_confirm = None;
-                        cx.notify();
-                    }
-                    B1DialogClose::PaymentForm => this.close_payment_dialog(cx),
-                    B1DialogClose::PaymentReceipt => this.close_payment_receipt(cx),
-                })),
-        )
-        .child(
-            div()
-                .id(format!("{id_prefix}-panel"))
-                .flex()
-                .flex_col()
-                .gap_3()
-                .p_5()
-                .rounded_lg()
-                .bg(BG_CANVAS)
-                .border_1()
-                .border_color(BORDER)
-                .w(px(420.))
-                .child(div().text_lg().font_semibold().child(title))
-                .child(body),
-        )
+    let quill = cx.entity();
+    Dialog::new(cx)
+        .title(div().text_lg().font_semibold().child(title))
+        .child(body)
+        .width(px(420.))
+        .on_close(move |_, _, cx| {
+            quill.update(cx, |this, cx| match close {
+                B1DialogClose::CallbackPassword => this.close_callback_password_dialog(cx),
+                B1DialogClose::LoginUrlConfirm => {
+                    this.login_url_confirm = None;
+                    cx.notify();
+                }
+                B1DialogClose::PaymentForm => this.close_payment_dialog(cx),
+                B1DialogClose::PaymentReceipt => this.close_payment_receipt(cx),
+            });
+        })
         .into_any_element()
 }
 
@@ -31258,8 +31233,8 @@ impl QuillApp {
     }
 
     /// Slice G1: centered modal shell shared by the group-management
-    /// dialogs (mirrors `add_contact_dialog_overlay`): a backdrop
-    /// sibling closes on click, the panel never bubbles into it.
+    /// dialogs. Phase 2 (kit adoption): chrome comes from kit `Dialog`
+    /// (backdrop/Esc dismissal, close button); only the body is Quill's.
     fn g1_modal(
         &self,
         id_prefix: &str,
@@ -31268,101 +31243,31 @@ impl QuillApp {
         body: AnyElement,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let _ = id_prefix;
         let title = title.to_string();
-        div()
-            .id(format!("{id_prefix}-overlay"))
-            .absolute()
-            .top_0()
-            .left_0()
-            .right_0()
-            .bottom_0()
-            .flex()
-            .items_center()
-            .justify_center()
-            .child(
-                div()
-                    .id(format!("{id_prefix}-backdrop"))
-                    .absolute()
-                    .top_0()
-                    .left_0()
-                    .right_0()
-                    .bottom_0()
-                    .bg(SCRIM)
-                    .on_click(cx.listener(move |this, _, _, cx| match close {
-                        G1DialogClose::CreateChat => this.close_create_chat_dialog(cx),
-                        G1DialogClose::Member => this.close_member_dialog(cx),
-                        G1DialogClose::Permissions => this.close_permissions_dialog(cx),
-                        G1DialogClose::Username => this.close_username_dialog(cx),
-                        G1DialogClose::Restrict => this.close_restrict_dialog(cx),
-                        G1DialogClose::GroupConfirm => this.close_group_confirm(cx),
-                        G1DialogClose::QuoteReply => this.close_quote_reply_dialog(cx),
-                        G1DialogClose::ForumManage => this.close_forum_manage_dialog(cx),
-                        G1DialogClose::CommentThread => this.close_comment_thread_dialog(cx),
-                        G1DialogClose::PollVoters => this.close_poll_voters_dialog(cx),
-                        G1DialogClose::WelcomeMessage => this.close_welcome_dialog(cx),
-                        G1DialogClose::ImportContacts => this.close_import_contacts_dialog(cx),
-                    })),
-            )
-            .child(
-                div()
-                    .id(format!("{id_prefix}-panel"))
-                    .flex()
-                    .flex_col()
-                    .gap_2()
-                    .p_4()
-                    .w(px(420.))
-                    .max_h(px(560.))
-                    .rounded_md()
-                    .border_1()
-                    .border_color(cx.theme().border)
-                    .bg(cx.theme().sidebar)
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .justify_between()
-                            .child(div().text_sm().font_semibold().child(title))
-                            .child(
-                                Button::new(format!("{id_prefix}-close"))
-                                    .label("✕")
-                                    .ghost()
-                                    .on_click(cx.listener(move |this, _, _, cx| match close {
-                                        G1DialogClose::CreateChat => {
-                                            this.close_create_chat_dialog(cx)
-                                        }
-                                        G1DialogClose::Member => this.close_member_dialog(cx),
-                                        G1DialogClose::Permissions => {
-                                            this.close_permissions_dialog(cx)
-                                        }
-                                        G1DialogClose::Username => this.close_username_dialog(cx),
-                                        G1DialogClose::Restrict => this.close_restrict_dialog(cx),
-                                        G1DialogClose::GroupConfirm => this.close_group_confirm(cx),
-                                        G1DialogClose::QuoteReply => {
-                                            this.close_quote_reply_dialog(cx)
-                                        }
-                                        G1DialogClose::ForumManage => {
-                                            this.close_forum_manage_dialog(cx)
-                                        }
-                                        G1DialogClose::CommentThread => {
-                                            this.close_comment_thread_dialog(cx)
-                                        }
-                                        G1DialogClose::PollVoters => {
-                                            this.close_poll_voters_dialog(cx)
-                                        }
-                                        G1DialogClose::WelcomeMessage => {
-                                            this.close_welcome_dialog(cx)
-                                        }
-                                        G1DialogClose::ImportContacts => {
-                                            this.close_import_contacts_dialog(cx)
-                                        }
-                                    })),
-                            ),
-                    )
-                    .child(body),
-            )
+        let quill = cx.entity();
+        Dialog::new(cx)
+            .title(div().text_sm().font_semibold().child(title))
+            .child(body)
+            .width(px(420.))
+            .on_close(move |_, _, cx| {
+                quill.update(cx, |this, cx| match close {
+                    G1DialogClose::CreateChat => this.close_create_chat_dialog(cx),
+                    G1DialogClose::Member => this.close_member_dialog(cx),
+                    G1DialogClose::Permissions => this.close_permissions_dialog(cx),
+                    G1DialogClose::Username => this.close_username_dialog(cx),
+                    G1DialogClose::Restrict => this.close_restrict_dialog(cx),
+                    G1DialogClose::GroupConfirm => this.close_group_confirm(cx),
+                    G1DialogClose::QuoteReply => this.close_quote_reply_dialog(cx),
+                    G1DialogClose::ForumManage => this.close_forum_manage_dialog(cx),
+                    G1DialogClose::CommentThread => this.close_comment_thread_dialog(cx),
+                    G1DialogClose::PollVoters => this.close_poll_voters_dialog(cx),
+                    G1DialogClose::WelcomeMessage => this.close_welcome_dialog(cx),
+                    G1DialogClose::ImportContacts => this.close_import_contacts_dialog(cx),
+                });
+            })
             .into_any_element()
     }
-
     /// Slice G1: dispatch to whichever group-management dialog is open.
     fn g1_dialogs_overlay(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         if self.create_chat_dialog.is_some() {
