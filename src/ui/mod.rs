@@ -1,4 +1,7 @@
+mod chat_theme;
 mod synthetic;
+
+pub(crate) use chat_theme::*;
 
 use gpui_kit::component::button::*;
 use gpui_kit::component::input::{InputEvent, Textarea, TextareaState};
@@ -921,7 +924,7 @@ fn b1_modal(
                 .left_0()
                 .right_0()
                 .bottom_0()
-                .bg(rgba(0x000000e6))
+                .bg(SCRIM)
                 .on_click(cx.listener(move |this, _, _, cx| match close {
                     B1DialogClose::CallbackPassword => this.close_callback_password_dialog(cx),
                     B1DialogClose::LoginUrlConfirm => {
@@ -940,9 +943,9 @@ fn b1_modal(
                 .gap_3()
                 .p_5()
                 .rounded_lg()
-                .bg(rgb(0x161b22))
+                .bg(BG_CANVAS)
                 .border_1()
-                .border_color(rgb(0x30363d))
+                .border_color(BORDER)
                 .w(px(420.))
                 .child(div().text_lg().font_semibold().child(title))
                 .child(body),
@@ -6693,7 +6696,7 @@ impl QuillApp {
                 .px_2()
                 .py_1()
                 .rounded_md()
-                .bg(rgb(0x161b22))
+                .bg(BG_CANVAS)
                 // Cap the preview so a long draft can't squeeze the history
                 // to zero height on short windows.
                 .max_h(px(320.))
@@ -6725,13 +6728,13 @@ impl QuillApp {
             .py_2()
             .rounded_md()
             .border_1()
-            .border_color(rgb(0x58a6ff))
-            .bg(rgb(0x161b22))
+            .border_color(ACCENT)
+            .bg(BG_CANVAS)
             .child(
                 div()
                     .text_sm()
                     .font_semibold()
-                    .text_color(rgb(0x58a6ff))
+                    .text_color(ACCENT)
                     .child("Schedule message"),
             );
         for (id, label, secs) in [
@@ -6941,8 +6944,8 @@ impl QuillApp {
             .py_1()
             .rounded_md()
             .border_1()
-            .border_color(rgb(0x58a6ff))
-            .bg(rgb(0x161b22));
+            .border_color(ACCENT)
+            .bg(BG_CANVAS);
         macro_rules! item {
             ($id:expr, $label:expr, $this:ident, $window:ident, $cx:ident, $body:block) => {
                 panel = panel.child(
@@ -6952,8 +6955,8 @@ impl QuillApp {
                         // Slice CL3 drive-by: same dark-panel text fix CL1
                         // applied to the chat-row menu (commit 5cd5c25) —
                         // ghost buttons inherit unreadable dark text on
-                        // the rgb(0x161b22) panel without it.
-                        .text_color(rgb(0xe6edf3))
+                        // the BG_CANVAS panel without it.
+                        .text_color(TEXT_MENU)
                         .on_click($cx.listener(move |$this, _, $window, $cx| $body)),
                 );
             };
@@ -7220,7 +7223,7 @@ impl QuillApp {
             .overflow_y_scroll()
             .max_h(px(360.));
         if let Some(failed) = failed {
-            body = body.child(div().text_sm().text_color(rgb(0xf85149)).child(failed));
+            body = body.child(div().text_sm().text_color(DANGER).child(failed));
         } else if !lines.is_empty() {
             for (name, text, id) in lines {
                 body = body.child(
@@ -7261,7 +7264,7 @@ impl QuillApp {
             .rounded_md()
             .border_1()
             .border_color(cx.theme().border)
-            .bg(rgb(0x161b22))
+            .bg(BG_CANVAS)
             .child(
                 div()
                     .px_3()
@@ -7342,15 +7345,15 @@ impl QuillApp {
             .py_1()
             .rounded_md()
             .border_1()
-            .border_color(rgb(0x58a6ff))
-            .bg(rgb(0x161b22));
+            .border_color(ACCENT)
+            .bg(BG_CANVAS);
         macro_rules! item {
             ($id:expr, $label:expr, $this:ident, $cx:ident, $body:block) => {
                 panel = panel.child(
                     Button::new($id)
                         .label($label)
                         .ghost()
-                        .text_color(rgb(0xe6edf3))
+                        .text_color(TEXT_MENU)
                         .on_click($cx.listener(move |$this, _, _, $cx| $body)),
                 );
             };
@@ -7537,7 +7540,7 @@ impl QuillApp {
                 .id("instant-view-overlay")
                 .absolute()
                 .inset_0()
-                .bg(rgb(0x0d1117))
+                .bg(BG_DEEP)
                 .flex()
                 .flex_col()
                 .child(
@@ -7548,7 +7551,7 @@ impl QuillApp {
                         .px_4()
                         .py_2()
                         .border_b_1()
-                        .border_color(rgb(0x30363d))
+                        .border_color(BORDER)
                         .child(div().text_sm().font_medium().child("Instant View"))
                         .child(Button::new("instant-view-close").label("Close").on_click(
                             cx.listener(|this, _, _, cx| {
@@ -7566,7 +7569,7 @@ impl QuillApp {
                         .flex()
                         .flex_col()
                         .gap_2()
-                        .child(div().text_xs().text_color(rgb(0x8b949e)).child(url))
+                        .child(div().text_xs().text_color(TEXT_MUTED).child(url))
                         .child(message_rich_block(
                             (0, 0),
                             ChatId(0),
@@ -7703,7 +7706,7 @@ impl QuillApp {
                     .left_0()
                     .right_0()
                     .bottom_0()
-                    .bg(rgba(0x00000099))
+                    .bg(SCRIM_LIGHT)
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.scheduled_dialog_open = false;
                         cx.notify();
@@ -8324,8 +8327,8 @@ impl QuillApp {
             .py_2()
             .rounded_md()
             .border_1()
-            .border_color(rgb(0xf0b429))
-            .bg(rgb(0x2a2318))
+            .border_color(WARNING_BRIGHT)
+            .bg(WARNING_BG)
             .child(
                 div()
                     .flex()
@@ -8335,13 +8338,13 @@ impl QuillApp {
                         div()
                             .text_xs()
                             .font_medium()
-                            .text_color(rgb(0xf0b429))
+                            .text_color(WARNING_BRIGHT)
                             .child("Quill"),
                     )
                     .child(
                         div()
                             .text_sm()
-                            .text_color(rgb(0xc9d1d9))
+                            .text_color(TEXT_PRIMARY)
                             .child(
                                 "Please note that inline bots are provided by third-party developers. \
                                  For the bot to work, the symbols you type after the bot's username \
@@ -8766,7 +8769,7 @@ impl QuillApp {
                         .child(form.product_title.clone()),
                 )
                 .child(if invoice.is_test {
-                    div().text_xs().text_color(rgb(0xffd479)).child("TEST")
+                    div().text_xs().text_color(WARNING_TEXT).child("TEST")
                 } else {
                     div()
                 }),
@@ -9440,7 +9443,7 @@ impl QuillApp {
         } else {
             grid = grid.py_2();
         }
-        grid = grid.border_t_1().border_color(rgb(0x30363d));
+        grid = grid.border_t_1().border_color(BORDER);
         for (row_index, row) in keyboard.rows.iter().enumerate() {
             if row.is_empty() {
                 continue;
@@ -9573,7 +9576,7 @@ impl QuillApp {
             .child(
                 div()
                     .text_sm()
-                    .text_color(rgb(0x8b949e))
+                    .text_color(TEXT_MUTED)
                     .child("This button is protected by your two-step verification password."),
             )
             .child(Textarea::new(&dialog.password_input).h(px(40.)))
@@ -9624,14 +9627,14 @@ impl QuillApp {
                 .flex()
                 .flex_col()
                 .gap_3()
-                .child(div().text_sm().text_color(rgb(0x8b949e)).child(format!(
+                .child(div().text_sm().text_color(TEXT_MUTED).child(format!(
                     "The bot wants to open a login URL for {domain}. Open it in your browser?"
                 )));
         if request_write_access {
             body = body.child(
                 div()
                     .text_sm()
-                    .text_color(rgb(0x8b949e))
+                    .text_color(TEXT_MUTED)
                     .child("The bot also asks for permission to send you messages."),
             );
         }
@@ -14484,11 +14487,7 @@ impl QuillApp {
                     Button::new(format!("poll-voters-option-{index}"))
                         .label(label)
                         .ghost()
-                        .text_color(if is_selected {
-                            rgb(0x58a6ff)
-                        } else {
-                            rgb(0xe6edf3)
-                        })
+                        .text_color(if is_selected { ACCENT } else { TEXT_MENU })
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.select_poll_voters_option(index, cx);
                         })),
@@ -14508,17 +14507,17 @@ impl QuillApp {
             None => body.child(
                 div()
                     .text_xs()
-                    .text_color(rgb(0x8b949e))
+                    .text_color(TEXT_MUTED)
                     .child("Select an option to see its voters."),
             ),
             Some(PollVotersFetch::Loading) => body.child(
                 div()
                     .text_xs()
-                    .text_color(rgb(0x8b949e))
+                    .text_color(TEXT_MUTED)
                     .child("Loading voters…"),
             ),
             Some(PollVotersFetch::Failed(reason)) => body
-                .child(div().text_xs().text_color(rgb(0xf85149)).child(reason))
+                .child(div().text_xs().text_color(DANGER).child(reason))
                 .child(
                     Button::new("poll-voters-retry")
                         .label("Retry")
@@ -14541,7 +14540,7 @@ impl QuillApp {
                     list = list.child(
                         div()
                             .text_xs()
-                            .text_color(rgb(0x8b949e))
+                            .text_color(TEXT_MUTED)
                             .child("No voters yet."),
                     );
                 }
@@ -14549,7 +14548,7 @@ impl QuillApp {
                     list = list.child(
                         div()
                             .text_sm()
-                            .text_color(rgb(0xe6edf3))
+                            .text_color(TEXT_MENU)
                             .child(self.poll_voter_name(voter)),
                     );
                 }
@@ -14558,7 +14557,7 @@ impl QuillApp {
                         Button::new("poll-voters-more")
                             .label("Load more")
                             .ghost()
-                            .text_color(rgb(0x58a6ff))
+                            .text_color(ACCENT)
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.load_more_poll_voters(cx);
                             })),
@@ -17425,7 +17424,7 @@ impl QuillApp {
                     .left_0()
                     .right_0()
                     .bottom_0()
-                    .bg(rgba(0x000000e6))
+                    .bg(SCRIM)
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.set_archive_settings_open(false);
                         cx.notify();
@@ -17849,7 +17848,7 @@ impl QuillApp {
                 div().flex().flex_col().min_w_0().flex_1().child(
                     div()
                         .text_sm()
-                        .when(missed, |this| this.text_color(rgb(0xe17076)))
+                        .when(missed, |this| this.text_color(DANGER_SOFT))
                         .child(label),
                 ),
             )
@@ -18061,7 +18060,7 @@ impl QuillApp {
                 div()
                     .text_xs()
                     .font_medium()
-                    .text_color(rgb(0xe17076))
+                    .text_color(DANGER_SOFT)
                     .child("missed")
                     .into_any_element()
             } else {
@@ -18982,18 +18981,13 @@ impl QuillApp {
             );
         if active {
             row = row.child(
-                div()
-                    .w_full()
-                    .h(px(4.))
-                    .rounded_full()
-                    .bg(rgb(0x30363d))
-                    .child(
-                        div()
-                            .h_full()
-                            .w(relative(progress.unwrap_or(0.0)))
-                            .rounded_full()
-                            .bg(rgb(0x58a6ff)),
-                    ),
+                div().w_full().h(px(4.)).rounded_full().bg(BORDER).child(
+                    div()
+                        .h_full()
+                        .w(relative(progress.unwrap_or(0.0)))
+                        .rounded_full()
+                        .bg(ACCENT),
+                ),
             );
         }
         let actions = if active {
@@ -19002,7 +18996,7 @@ impl QuillApp {
                     .id(("download-cancel", file_id as u64))
                     .cursor_pointer()
                     .text_xs()
-                    .text_color(rgb(0x58a6ff))
+                    .text_color(ACCENT)
                     .child("Cancel")
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.cancel_media_download(FileId(file_id), cx);
@@ -19014,7 +19008,7 @@ impl QuillApp {
                     .id(("download-retry", file_id as u64))
                     .cursor_pointer()
                     .text_xs()
-                    .text_color(rgb(0x58a6ff))
+                    .text_color(ACCENT)
                     .child("Retry")
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.request_media_download(FileId(file_id), None, cx);
@@ -19029,7 +19023,7 @@ impl QuillApp {
                         .id(("download-open", file_id as u64))
                         .cursor_pointer()
                         .text_xs()
-                        .text_color(rgb(0x58a6ff))
+                        .text_color(ACCENT)
                         .child("Open")
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.open_downloaded_file(FileId(file_id), cx);
@@ -19040,7 +19034,7 @@ impl QuillApp {
                         .id(("download-reveal", file_id as u64))
                         .cursor_pointer()
                         .text_xs()
-                        .text_color(rgb(0x58a6ff))
+                        .text_color(ACCENT)
                         .child("Show in folder")
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.reveal_downloaded_file(FileId(file_id), cx);
@@ -19210,7 +19204,7 @@ impl QuillApp {
                         .py_1()
                         .rounded_md()
                         .text_sm()
-                        .text_color(rgb(0x58a6ff))
+                        .text_color(ACCENT)
                         .child("Retry")
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.retry_shared_media_ui(cx);
@@ -21891,7 +21885,7 @@ impl QuillApp {
                         .left_0()
                         .right_0()
                         .bottom_0()
-                        .bg(rgba(0x000000e6))
+                        .bg(SCRIM)
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.close_add_contact_dialog(cx);
                         })),
@@ -22027,16 +22021,12 @@ impl QuillApp {
                 .into_any_element()
         } else if let Some(result) = verdict {
             let (text, color) = match result {
-                UsernameCheckResult::Available => ("Available", rgb(0x3fb950)),
-                UsernameCheckResult::Occupied => ("Occupied", rgb(0xf85149)),
-                UsernameCheckResult::Invalid => ("Invalid username", rgb(0xf85149)),
-                UsernameCheckResult::Purchasable => {
-                    ("Taken — purchasable on Fragment", rgb(0xf85149))
-                }
-                UsernameCheckResult::PublicChatsTooMany => {
-                    ("Too many public usernames", rgb(0xf85149))
-                }
-                UsernameCheckResult::PublicGroupsUnavailable => ("Unavailable", rgb(0xf85149)),
+                UsernameCheckResult::Available => ("Available", SUCCESS),
+                UsernameCheckResult::Occupied => ("Occupied", DANGER),
+                UsernameCheckResult::Invalid => ("Invalid username", DANGER),
+                UsernameCheckResult::Purchasable => ("Taken — purchasable on Fragment", DANGER),
+                UsernameCheckResult::PublicChatsTooMany => ("Too many public usernames", DANGER),
+                UsernameCheckResult::PublicGroupsUnavailable => ("Unavailable", DANGER),
             };
             div()
                 .text_sm()
@@ -22136,7 +22126,7 @@ impl QuillApp {
             .bg(cx.theme().sidebar)
             .child(div().text_sm().font_semibold().child("Edit profile"));
         if let Some(error) = error {
-            panel = panel.child(div().text_sm().text_color(rgb(0xf85149)).child(error));
+            panel = panel.child(div().text_sm().text_color(DANGER).child(error));
         }
         panel = panel
             .child(
@@ -22266,7 +22256,7 @@ impl QuillApp {
                         .left_0()
                         .right_0()
                         .bottom_0()
-                        .bg(rgba(0x000000e6))
+                        .bg(SCRIM)
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.close_edit_profile_dialog(cx);
                         })),
@@ -22360,7 +22350,7 @@ impl QuillApp {
                     .left_0()
                     .right_0()
                     .bottom_0()
-                    .bg(rgba(0x000000e6)),
+                    .bg(SCRIM),
             )
             .child(card)
     }
@@ -22398,7 +22388,7 @@ impl QuillApp {
                 .child(
                     div()
                         .text_xs()
-                        .text_color(rgb(0x9a9a9a))
+                        .text_color(TEXT_FAINT)
                         .child(text.to_string()),
                 )
         };
@@ -22433,13 +22423,13 @@ impl QuillApp {
                     div()
                         .text_xs()
                         .font_semibold()
-                        .text_color(rgb(0xffffff))
+                        .text_color(TEXT_BRIGHT)
                         .child(name.to_string()),
                 )
                 .child(
                     div()
                         .text_xs()
-                        .text_color(rgb(0x9a9a9a))
+                        .text_color(TEXT_FAINT)
                         .child("Peer's camera is off"),
                 )
                 .into_any_element(),
@@ -22470,7 +22460,7 @@ impl QuillApp {
                     .w_full()
                     .h(px(240.))
                     .rounded_md()
-                    .bg(rgb(0x161616))
+                    .bg(BG_VIDEO)
                     .overflow_hidden()
                     .flex()
                     .items_center()
@@ -22485,10 +22475,10 @@ impl QuillApp {
                     .w(px(160.))
                     .h(px(120.))
                     .rounded_md()
-                    .bg(rgb(0x161616))
+                    .bg(BG_VIDEO)
                     .overflow_hidden()
                     .border_1()
-                    .border_color(rgb(0x333333))
+                    .border_color(BORDER_VIDEO)
                     .child(local),
             )
     }
@@ -22651,17 +22641,12 @@ impl QuillApp {
             card = card.child(
                 div()
                     .text_xs()
-                    .text_color(rgb(0xe17076))
+                    .text_color(DANGER_SOFT)
                     .child(error.to_string()),
             );
         }
         if let Some(error) = &call.transport_error {
-            card = card.child(
-                div()
-                    .text_xs()
-                    .text_color(rgb(0xe17076))
-                    .child(error.clone()),
-            );
+            card = card.child(div().text_xs().text_color(DANGER_SOFT).child(error.clone()));
         }
         if matches!(call.state, CallState::Ready) {
             // Phase C2c: microphone/speaker pickers. Live state comes
@@ -22953,12 +22938,7 @@ impl QuillApp {
             );
         }
         if let Some(error) = &summary.debug_information_error {
-            card = card.child(
-                div()
-                    .text_xs()
-                    .text_color(rgb(0xe17076))
-                    .child(error.clone()),
-            );
+            card = card.child(div().text_xs().text_color(DANGER_SOFT).child(error.clone()));
         }
         if summary.need_log && !summary.log_sent {
             card = card.child(
@@ -22978,12 +22958,7 @@ impl QuillApp {
             );
         }
         if let Some(error) = &summary.log_error {
-            card = card.child(
-                div()
-                    .text_xs()
-                    .text_color(rgb(0xe17076))
-                    .child(error.clone()),
-            );
+            card = card.child(div().text_xs().text_color(DANGER_SOFT).child(error.clone()));
         }
         if summary.need_rating && !summary.rating_sent {
             card = card.child(div().text_sm().child("How was the call quality?"));
@@ -23294,7 +23269,7 @@ impl QuillApp {
                     .items_center()
                     .justify_center()
                     .rounded_md()
-                    .bg(rgb(0x161616))
+                    .bg(BG_VIDEO)
                     .child(video_or_avatar),
             )
             .child(
@@ -23452,7 +23427,7 @@ impl QuillApp {
                 .child(
                     div()
                         .text_xs()
-                        .text_color(rgb(0x9a9a9a))
+                        .text_color(TEXT_FAINT)
                         .child("Starting camera…"),
                 )
                 .into_any_element(),
@@ -23516,8 +23491,8 @@ impl QuillApp {
                     .gap_2()
                     .p_2()
                     .rounded_md()
-                    .bg(rgb(0x3a1414))
-                    .child(div().text_sm().text_color(rgb(0xff8a8a)).child(error))
+                    .bg(DANGER_BG_DEEP)
+                    .child(div().text_sm().text_color(DANGER_PALE).child(error))
                     .child(
                         Button::new("group-call-error-dismiss")
                             .label("Dismiss")
@@ -23611,7 +23586,7 @@ impl QuillApp {
                     .left_0()
                     .right_0()
                     .bottom_0()
-                    .bg(rgba(0x000000e6)),
+                    .bg(SCRIM),
             )
             .child(card)
     }
@@ -23629,11 +23604,11 @@ impl QuillApp {
         if call.reconnecting {
             card = card
                 .child(
-                    div().w_full().p_2().rounded_md().bg(rgb(0x3a2a10)).child(
+                    div().w_full().p_2().rounded_md().bg(WARNING_BG_DEEP).child(
                         div()
                             .text_sm()
                             .font_semibold()
-                            .text_color(rgb(0xffc861))
+                            .text_color(WARNING_SOFT)
                             .child("Connection lost — the voice chat needs to be rejoined."),
                     ),
                 )
@@ -23912,7 +23887,7 @@ impl QuillApp {
                 div()
                     .text_sm()
                     .font_semibold()
-                    .text_color(rgb(0xff6b6b))
+                    .text_color(DANGER_VIVID)
                     .child(format!(
                         "● Recording ({}) {}",
                         label,
@@ -25081,7 +25056,7 @@ impl QuillApp {
             .left_0()
             .right_0()
             .bottom_0()
-            .bg(rgba(0x000000e6))
+            .bg(SCRIM)
             .on_click(cx.listener(|this, _, _, cx| {
                 this.close_folder_manage(cx);
             }))
@@ -25281,7 +25256,7 @@ impl QuillApp {
                 div()
                     .id("folder-editor-error")
                     .text_xs()
-                    .text_color(rgb(0xd44a3a))
+                    .text_color(DANGER_DARK)
                     .child(error),
             );
         }
@@ -27960,7 +27935,7 @@ impl QuillApp {
                     .left_0()
                     .right_0()
                     .bottom_0()
-                    .bg(rgba(0x000000e6))
+                    .bg(SCRIM)
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.notification_defaults_open = false;
                         this.defaults_sound_picker = None;
@@ -28082,7 +28057,7 @@ impl QuillApp {
                     .left_0()
                     .right_0()
                     .bottom_0()
-                    .bg(rgba(0x000000e6))
+                    .bg(SCRIM)
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.storage_usage_open = false;
                         cx.notify();
@@ -28388,7 +28363,7 @@ impl QuillApp {
             body = body.child(
                 div()
                     .text_xs()
-                    .text_color(rgb(0xf85149))
+                    .text_color(DANGER)
                     .child(format!("Error: {line}")),
             );
         }
@@ -28427,7 +28402,7 @@ impl QuillApp {
                     .left_0()
                     .right_0()
                     .bottom_0()
-                    .bg(rgba(0x000000e6))
+                    .bg(SCRIM)
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.close_twofa(window, cx);
                     })),
@@ -28749,7 +28724,7 @@ impl QuillApp {
             .flex_col()
             .gap_2()
             .when_some(self.twofa_notice.clone(), |this, note| {
-                this.child(div().text_xs().text_color(rgb(0xf85149)).child(note))
+                this.child(div().text_xs().text_color(DANGER).child(note))
             })
             .child(
                 div()
@@ -28841,7 +28816,7 @@ impl QuillApp {
             body = body.child(
                 div()
                     .text_xs()
-                    .text_color(rgb(0xf85149))
+                    .text_color(DANGER)
                     .child(format!("Error: {line}")),
             );
         }
@@ -28943,7 +28918,7 @@ impl QuillApp {
                     .left_0()
                     .right_0()
                     .bottom_0()
-                    .bg(rgba(0x000000e6))
+                    .bg(SCRIM)
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.close_sessions(cx);
                     })),
@@ -29024,13 +28999,13 @@ impl QuillApp {
             .py_2()
             .rounded_md()
             .border_1()
-            .border_color(rgb(0xf85149))
-            .bg(rgb(0x3d1f1f))
+            .border_color(DANGER)
+            .bg(DANGER_BG)
             .child(
                 div()
                     .text_sm()
                     .font_medium()
-                    .text_color(rgb(0xf85149))
+                    .text_color(DANGER)
                     .child(question),
             )
             .child(
@@ -29139,8 +29114,8 @@ impl QuillApp {
                                         .px_2()
                                         .py(px(1.))
                                         .rounded_full()
-                                        .bg(rgb(0x2f81f7))
-                                        .text_color(rgb(0xffffff))
+                                        .bg(ACCENT_LIGHT)
+                                        .text_color(TEXT_BRIGHT)
                                         .child("This Device"),
                                 )
                             }),
@@ -29321,7 +29296,7 @@ impl QuillApp {
             body = body.child(
                 div()
                     .text_xs()
-                    .text_color(rgb(0xf85149))
+                    .text_color(DANGER)
                     .child(format!("Error: {line}")),
             );
         }
@@ -29414,7 +29389,7 @@ impl QuillApp {
                     .left_0()
                     .right_0()
                     .bottom_0()
-                    .bg(rgba(0x000000e6))
+                    .bg(SCRIM)
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.close_websites(cx);
                     })),
@@ -29506,13 +29481,13 @@ impl QuillApp {
             .py_2()
             .rounded_md()
             .border_1()
-            .border_color(rgb(0xf85149))
-            .bg(rgb(0x3d1f1f))
+            .border_color(DANGER)
+            .bg(DANGER_BG)
             .child(
                 div()
                     .text_sm()
                     .font_medium()
-                    .text_color(rgb(0xf85149))
+                    .text_color(DANGER)
                     .child(question),
             )
             .child(
@@ -30182,7 +30157,7 @@ impl QuillApp {
             .py_2()
             .border_b_1()
             .border_color(cx.theme().border)
-            .bg(rgb(0x161b22))
+            .bg(BG_CANVAS)
             .child(
                 div()
                     .id("pinned-message-jump")
@@ -30198,10 +30173,10 @@ impl QuillApp {
                         div()
                             .text_xs()
                             .font_medium()
-                            .text_color(rgb(0x58a6ff))
+                            .text_color(ACCENT)
                             .child("Pinned message"),
                     )
-                    .child(div().text_sm().text_color(rgb(0xc9d1d9)).child(preview)),
+                    .child(div().text_sm().text_color(TEXT_PRIMARY).child(preview)),
             )
             .child(
                 Button::new("unpin-banner")
@@ -30340,7 +30315,7 @@ impl QuillApp {
                                 .w(px(96.))
                                 .h(px(72.))
                                 .rounded_md()
-                                .bg(rgb(0x1f6feb))
+                                .bg(ACCENT_STRONG)
                                 .flex()
                                 .items_center()
                                 .justify_center()
@@ -30355,7 +30330,7 @@ impl QuillApp {
                     .w(px(96.))
                     .h(px(72.))
                     .rounded_md()
-                    .bg(rgb(0x1f6feb))
+                    .bg(ACCENT_STRONG)
                     .flex()
                     .items_center()
                     .justify_center()
@@ -30487,7 +30462,7 @@ impl QuillApp {
                                 .w(px(72.))
                                 .h(px(72.))
                                 .rounded_md()
-                                .bg(rgb(0x444c56))
+                                .bg(FILL_MUTED)
                                 .flex()
                                 .items_center()
                                 .justify_center()
@@ -30502,9 +30477,9 @@ impl QuillApp {
                     .w(px(72.))
                     .h(px(72.))
                     .rounded_md()
-                    .bg(rgb(0x21262d))
+                    .bg(BG_SUBTLE)
                     .border_1()
-                    .border_color(rgb(0x8b949e))
+                    .border_color(TEXT_MUTED)
                     .flex()
                     .items_center()
                     .justify_center()
@@ -30583,8 +30558,8 @@ impl QuillApp {
             .py_2()
             .rounded_md()
             .border_1()
-            .border_color(rgb(0xd29922))
-            .bg(rgb(0x21262d))
+            .border_color(WARNING)
+            .bg(BG_SUBTLE)
             .child(
                 div()
                     .flex()
@@ -30594,10 +30569,10 @@ impl QuillApp {
                         div()
                             .text_xs()
                             .font_medium()
-                            .text_color(rgb(0xd29922))
+                            .text_color(WARNING)
                             .child(kind),
                     )
-                    .child(div().text_sm().text_color(rgb(0xc9d1d9)).child(preview)),
+                    .child(div().text_sm().text_color(TEXT_PRIMARY).child(preview)),
             )
             .child(
                 Button::new("cancel-edit")
@@ -30765,11 +30740,11 @@ impl QuillApp {
             .child(
                 div()
                     .text_xs()
-                    .text_color(rgb(0x58a6ff))
+                    .text_color(ACCENT)
                     .child(format!("🔗 {first}")),
             );
         if let Some(line) = preview_line {
-            row = row.child(div().text_xs().text_color(rgb(0x8b949e)).child(line));
+            row = row.child(div().text_xs().text_color(TEXT_MUTED).child(line));
         }
         row = row.child(
             Button::new("composer-preview-chip-toggle")
@@ -30883,7 +30858,7 @@ impl QuillApp {
                         .child(
                             div()
                                 .text_xs()
-                                .text_color(rgb(0x8b949e))
+                                .text_color(TEXT_MUTED)
                                 .child("Add a caption…"),
                         )
                         .when(captionable && !self.open_chat_is_secret(), |this| {
@@ -30909,7 +30884,7 @@ impl QuillApp {
                 .child(
                     div()
                         .text_xs()
-                        .text_color(if over { rgb(0xff7b72) } else { rgb(0x8b949e) })
+                        .text_color(if over { DANGER_BRIGHT } else { TEXT_MUTED })
                         .child(format!("{text_len} / {limit}")),
                 )
                 .into_any_element(),
@@ -30941,8 +30916,8 @@ impl QuillApp {
             .py_2()
             .rounded_md()
             .border_1()
-            .border_color(rgb(0xf85149))
-            .bg(rgb(0x3d1f1f))
+            .border_color(DANGER)
+            .bg(DANGER_BG)
             .child(
                 div()
                     .flex()
@@ -30952,13 +30927,13 @@ impl QuillApp {
                         div()
                             .text_xs()
                             .font_medium()
-                            .text_color(rgb(0xf85149))
+                            .text_color(DANGER)
                             .child("Delete this message?"),
                     )
                     .child(
                         div()
                             .text_sm()
-                            .text_color(rgb(0xc9d1d9))
+                            .text_color(TEXT_PRIMARY)
                             .child(scope_label.to_string()),
                     ),
             )
@@ -31032,8 +31007,8 @@ impl QuillApp {
             .py_2()
             .rounded_md()
             .border_1()
-            .border_color(rgb(0xf85149))
-            .bg(rgb(0x3d1f1f))
+            .border_color(DANGER)
+            .bg(DANGER_BG)
             .child(
                 div()
                     .flex()
@@ -31043,10 +31018,10 @@ impl QuillApp {
                         div()
                             .text_xs()
                             .font_medium()
-                            .text_color(rgb(0xf85149))
+                            .text_color(DANGER)
                             .child(title),
                     )
-                    .child(div().text_sm().text_color(rgb(0xc9d1d9)).child(warning)),
+                    .child(div().text_sm().text_color(TEXT_PRIMARY).child(warning)),
             )
             .child(
                 div()
@@ -31088,8 +31063,8 @@ impl QuillApp {
             .py_2()
             .rounded_md()
             .border_1()
-            .border_color(rgb(0xf85149))
-            .bg(rgb(0x3d1f1f))
+            .border_color(DANGER)
+            .bg(DANGER_BG)
             .child(
                 div()
                     .flex()
@@ -31099,10 +31074,10 @@ impl QuillApp {
                         div()
                             .text_xs()
                             .font_medium()
-                            .text_color(rgb(0xf85149))
+                            .text_color(DANGER)
                             .child(title),
                     )
-                    .child(div().text_sm().text_color(rgb(0xc9d1d9)).child(body)),
+                    .child(div().text_sm().text_color(TEXT_PRIMARY).child(body)),
             )
             .child(
                 div()
@@ -31189,8 +31164,8 @@ impl QuillApp {
             .py_2()
             .rounded_md()
             .border_1()
-            .border_color(rgb(0x58a6ff))
-            .bg(rgb(0x21262d))
+            .border_color(ACCENT)
+            .bg(BG_SUBTLE)
             .child(
                 div()
                     .flex()
@@ -31200,12 +31175,12 @@ impl QuillApp {
                         div()
                             .text_xs()
                             .font_medium()
-                            .text_color(rgb(0x58a6ff))
+                            .text_color(ACCENT)
                             .child("Replying to"),
                     )
-                    .child(div().text_sm().text_color(rgb(0xc9d1d9)).child(preview))
+                    .child(div().text_sm().text_color(TEXT_PRIMARY).child(preview))
                     .when_some(quote_label, |this, label| {
-                        this.child(div().text_xs().text_color(rgb(0x8b949e)).child(label))
+                        this.child(div().text_xs().text_color(TEXT_MUTED).child(label))
                     }),
             )
             .child(
@@ -31230,8 +31205,8 @@ impl QuillApp {
             .p_3()
             .rounded_md()
             .border_1()
-            .border_color(rgb(0x58a6ff))
-            .bg(rgb(0x161b22))
+            .border_color(ACCENT)
+            .bg(BG_CANVAS)
             .child(div().text_sm().font_semibold().child("New invite link"))
             .child(Textarea::new(&dialog.name_input).h(px(40.)))
             .child(Textarea::new(&dialog.expiration_days_input).h(px(40.)))
@@ -31304,7 +31279,7 @@ impl QuillApp {
                     .left_0()
                     .right_0()
                     .bottom_0()
-                    .bg(rgba(0x000000e6))
+                    .bg(SCRIM)
                     .on_click(cx.listener(move |this, _, _, cx| match close {
                         G1DialogClose::CreateChat => this.close_create_chat_dialog(cx),
                         G1DialogClose::Member => this.close_member_dialog(cx),
@@ -31457,7 +31432,7 @@ impl QuillApp {
                         format!("☐ {name}")
                     })
                     .ghost()
-                    .text_color(rgb(0xffffff))
+                    .text_color(TEXT_BRIGHT)
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.toggle_g1_contact_pick(&id_prefix, user_id, cx);
                     })),
@@ -31699,8 +31674,8 @@ impl QuillApp {
                     .gap_2()
                     .p_2()
                     .rounded_md()
-                    .bg(rgb(0x3a1414))
-                    .child(div().text_sm().text_color(rgb(0xff8a8a)).child(error))
+                    .bg(DANGER_BG_DEEP)
+                    .child(div().text_sm().text_color(DANGER_PALE).child(error))
                     .child(
                         Button::new("g1-member-action-error-dismiss")
                             .label("Dismiss")
@@ -31824,7 +31799,7 @@ impl QuillApp {
                                 div()
                                     .flex_1()
                                     .text_xs()
-                                    .text_color(rgb(0xf85149))
+                                    .text_color(DANGER)
                                     .child(format!("{failed} member(s) could not be added")),
                             )
                             .child(
@@ -32079,7 +32054,7 @@ impl QuillApp {
                             format!("☐ {label}")
                         })
                         .ghost()
-                        .text_color(rgb(0xffffff))
+                        .text_color(TEXT_BRIGHT)
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.toggle_permission(index, cx);
                         })),
@@ -32293,7 +32268,7 @@ impl QuillApp {
                             format!("☐ {label}")
                         })
                         .ghost()
-                        .text_color(rgb(0xffffff))
+                        .text_color(TEXT_BRIGHT)
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.toggle_restrict_permission(index, cx);
                         })),
@@ -33049,7 +33024,7 @@ impl QuillApp {
                             format!("☐ {label}")
                         })
                         .ghost()
-                        .text_color(rgb(0xffffff))
+                        .text_color(TEXT_BRIGHT)
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.toggle_admin_right(prefix.as_str(), index, cx);
                         })),
@@ -33156,13 +33131,13 @@ impl QuillApp {
             .p_3()
             .rounded_md()
             .border_1()
-            .border_color(rgb(0x58a6ff))
-            .bg(rgb(0x161b22))
+            .border_color(ACCENT)
+            .bg(BG_CANVAS)
             .child(
                 div()
                     .text_sm()
                     .font_semibold()
-                    .text_color(rgb(0xffffff))
+                    .text_color(TEXT_BRIGHT)
                     .child("Promote member"),
             )
             .child(
@@ -33175,7 +33150,7 @@ impl QuillApp {
                         Button::new("admin-promote-search")
                             .label("Search")
                             .ghost()
-                            .text_color(rgb(0xffffff))
+                            .text_color(TEXT_BRIGHT)
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.search_promote_members(cx);
                             })),
@@ -33239,7 +33214,7 @@ impl QuillApp {
                                 format!("○ {name}")
                             })
                             .ghost()
-                            .text_color(rgb(0xffffff))
+                            .text_color(TEXT_BRIGHT)
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 if let Some(dialog) = this.admin_dialog.as_mut()
                                     && let AdminDialogKind::Promote { selected_user, .. } =
@@ -33288,7 +33263,7 @@ impl QuillApp {
                         Button::new("admin-promote-cancel")
                             .label("Cancel")
                             .ghost()
-                            .text_color(rgb(0xffffff))
+                            .text_color(TEXT_BRIGHT)
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.close_admin_dialog(cx);
                             })),
@@ -33330,13 +33305,13 @@ impl QuillApp {
             .p_3()
             .rounded_md()
             .border_1()
-            .border_color(rgb(0x58a6ff))
-            .bg(rgb(0x161b22))
+            .border_color(ACCENT)
+            .bg(BG_CANVAS)
             .child(
                 div()
                     .text_sm()
                     .font_semibold()
-                    .text_color(rgb(0xffffff))
+                    .text_color(TEXT_BRIGHT)
                     .child(format!("Edit rights — {name}")),
             );
         match rights {
@@ -33374,7 +33349,7 @@ impl QuillApp {
                     Button::new("admin-rights-cancel")
                         .label("Cancel")
                         .ghost()
-                        .text_color(rgb(0xffffff))
+                        .text_color(TEXT_BRIGHT)
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.close_admin_dialog(cx);
                         })),
@@ -33398,13 +33373,13 @@ impl QuillApp {
             .p_3()
             .rounded_md()
             .border_1()
-            .border_color(rgb(0x58a6ff))
-            .bg(rgb(0x161b22))
+            .border_color(ACCENT)
+            .bg(BG_CANVAS)
             .child(
                 div()
                     .text_sm()
                     .font_semibold()
-                    .text_color(rgb(0xffffff))
+                    .text_color(TEXT_BRIGHT)
                     .child(format!("Demote {name}?")),
             )
             .child(
@@ -33426,7 +33401,7 @@ impl QuillApp {
                         Button::new("admin-demote-cancel")
                             .label("Cancel")
                             .ghost()
-                            .text_color(rgb(0xffffff))
+                            .text_color(TEXT_BRIGHT)
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.close_admin_dialog(cx);
                             })),
@@ -33450,8 +33425,8 @@ impl QuillApp {
             .p_3()
             .rounded_md()
             .border_1()
-            .border_color(rgb(0x58a6ff))
-            .bg(rgb(0x161b22))
+            .border_color(ACCENT)
+            .bg(BG_CANVAS)
             .child(div().text_sm().font_semibold().child(if dialog.is_quiz {
                 "New quiz"
             } else {
@@ -33686,8 +33661,8 @@ impl QuillApp {
             .py_2()
             .rounded_md()
             .border_1()
-            .border_color(rgb(0x3fb950))
-            .bg(rgb(0x1b3324))
+            .border_color(SUCCESS)
+            .bg(SUCCESS_BG_SUBTLE)
             .child(
                 div()
                     .flex()
@@ -33697,10 +33672,10 @@ impl QuillApp {
                         div()
                             .text_xs()
                             .font_medium()
-                            .text_color(rgb(0x3fb950))
+                            .text_color(SUCCESS)
                             .child(label),
                     )
-                    .child(div().text_sm().text_color(rgb(0xc9d1d9)).child(detail)),
+                    .child(div().text_sm().text_color(TEXT_PRIMARY).child(detail)),
             )
             .child(
                 Button::new("dismiss-forward-success")
@@ -33733,9 +33708,9 @@ impl QuillApp {
             .py_2()
             .rounded_md()
             .border_1()
-            .border_color(rgb(0x58a6ff))
-            .bg(rgb(0x21262d))
-            .child(div().text_sm().text_color(rgb(0xc9d1d9)).child(label))
+            .border_color(ACCENT)
+            .bg(BG_SUBTLE)
+            .child(div().text_sm().text_color(TEXT_PRIMARY).child(label))
             .child(
                 div()
                     .flex()
@@ -33898,16 +33873,16 @@ impl QuillApp {
                     .w(px(zoom_w))
                     .h(px(zoom_h))
                     .object_fit(ObjectFit::Contain)
-                    .bg(rgb(0x0d1117))
+                    .bg(BG_DEEP)
                     .with_fallback(move || {
                         div()
                             .w(px(zoom_w))
                             .h(px(zoom_h))
-                            .bg(rgb(0x0d1117))
+                            .bg(BG_DEEP)
                             .flex()
                             .items_center()
                             .justify_center()
-                            .text_color(rgb(0xffffff))
+                            .text_color(TEXT_BRIGHT)
                             .child(format!("{kind_label} — could not render"))
                             .into_any_element()
                     })
@@ -33937,11 +33912,11 @@ impl QuillApp {
                     .id(("media-viewer-loading", row_id))
                     .w(px(zoom_w))
                     .h(px(zoom_h))
-                    .bg(rgb(0x0d1117))
+                    .bg(BG_DEEP)
                     .flex()
                     .items_center()
                     .justify_center()
-                    .child(div().text_sm().text_color(rgb(0xffffff)).child(status))
+                    .child(div().text_sm().text_color(TEXT_BRIGHT).child(status))
                     .into_any_element()
             }
         };
@@ -33958,7 +33933,7 @@ impl QuillApp {
                 .h(px(frame_h))
                 .overflow_hidden()
                 .rounded_md()
-                .bg(rgb(0x0d1117))
+                .bg(BG_DEEP)
                 .child(
                     div()
                         .absolute()
@@ -34051,28 +34026,26 @@ impl QuillApp {
                         .child(if extracting {
                             div()
                                 .text_sm()
-                                .text_color(rgb(0xffffff))
+                                .text_color(TEXT_BRIGHT)
                                 .child("Loading video…")
                                 .into_any_element()
                         } else {
                             Button::new(("media-viewer-play", row_id))
                                 .label(if playing { "❚❚ Pause" } else { "▶ Play" })
                                 .ghost()
-                                .text_color(rgb(0xffffff))
+                                .text_color(TEXT_BRIGHT)
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.toggle_viewer_video(cx);
                                 }))
                                 .into_any_element()
                         })
-                        .child(div().text_sm().text_color(rgb(0xffffff)).child(label))
+                        .child(div().text_sm().text_color(TEXT_BRIGHT).child(label))
                         // MED1: seek slider (created in `begin_viewer_video`).
                         .when_some(self.viewer_seek_slider.clone(), |this, slider| {
                             this.child(
-                                div().w(px(180.)).child(
-                                    Slider::new(&slider)
-                                        .bg(rgb(0x58a6ff))
-                                        .text_color(rgb(0xffffff)),
-                                ),
+                                div()
+                                    .w(px(180.))
+                                    .child(Slider::new(&slider).bg(ACCENT).text_color(TEXT_BRIGHT)),
                             )
                         })
                         // MED1: playback speed (TGX 0.5x–2x).
@@ -34080,7 +34053,7 @@ impl QuillApp {
                             Button::new(("media-viewer-speed", row_id))
                                 .label(speed_label)
                                 .ghost()
-                                .text_color(rgb(0xffffff))
+                                .text_color(TEXT_BRIGHT)
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.cycle_playback_speed(cx);
                                 })),
@@ -34092,17 +34065,13 @@ impl QuillApp {
                                     .flex()
                                     .items_center()
                                     .gap_1()
-                                    .child(
-                                        div().w(px(80.)).child(
-                                            Slider::new(&slider)
-                                                .bg(rgb(0x58a6ff))
-                                                .text_color(rgb(0xffffff)),
-                                        ),
-                                    )
+                                    .child(div().w(px(80.)).child(
+                                        Slider::new(&slider).bg(ACCENT).text_color(TEXT_BRIGHT),
+                                    ))
                                     .child(
                                         div()
                                             .text_xs()
-                                            .text_color(rgb(0xffffff))
+                                            .text_color(TEXT_BRIGHT)
                                             .child(format!("{volume_pct}%")),
                                     ),
                             )
@@ -34111,7 +34080,7 @@ impl QuillApp {
                             Button::new(("media-viewer-mute", row_id))
                                 .label(if muted { "Unmute" } else { "Mute" })
                                 .ghost()
-                                .text_color(rgb(0xffffff))
+                                .text_color(TEXT_BRIGHT)
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.toggle_playback_mute(cx);
                                 })),
@@ -34126,19 +34095,22 @@ impl QuillApp {
                         .flex()
                         .items_center()
                         .gap_2()
-                        .child(div().text_sm().text_color(rgb(0xffffff)).child(
-                            if clip_downloading {
-                                "Video — downloading clip…"
-                            } else {
-                                "Video — clip not downloaded"
-                            },
-                        ))
+                        .child(
+                            div()
+                                .text_sm()
+                                .text_color(TEXT_BRIGHT)
+                                .child(if clip_downloading {
+                                    "Video — downloading clip…"
+                                } else {
+                                    "Video — clip not downloaded"
+                                }),
+                        )
                         .when_some(play_id.filter(|_| !clip_downloading), |this, id| {
                             this.child(
                                 Button::new(("media-viewer-download", row_id))
                                     .label("Download")
                                     .ghost()
-                                    .text_color(rgb(0xffffff))
+                                    .text_color(TEXT_BRIGHT)
                                     .on_click(cx.listener(move |this, _, _, cx| {
                                         this.viewer_pending_play = Some((item.message_id, id));
                                         this.request_media_download(id, None, cx);
@@ -34159,17 +34131,17 @@ impl QuillApp {
                 Button::new(("media-viewer-zoom-out", row_id))
                     .label("−")
                     .ghost()
-                    .text_color(rgb(0xffffff))
+                    .text_color(TEXT_BRIGHT)
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.viewer_zoom_step(false, cx);
                     })),
             )
-            .child(div().text_sm().text_color(rgb(0xffffff)).child(zoom_pct))
+            .child(div().text_sm().text_color(TEXT_BRIGHT).child(zoom_pct))
             .child(
                 Button::new(("media-viewer-zoom-in", row_id))
                     .label("+")
                     .ghost()
-                    .text_color(rgb(0xffffff))
+                    .text_color(TEXT_BRIGHT)
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.viewer_zoom_step(true, cx);
                     })),
@@ -34178,7 +34150,7 @@ impl QuillApp {
                 Button::new(("media-viewer-zoom-reset", row_id))
                     .label("Reset")
                     .ghost()
-                    .text_color(rgb(0xffffff))
+                    .text_color(TEXT_BRIGHT)
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.viewer_reset_zoom(cx);
                     })),
@@ -34215,7 +34187,7 @@ impl QuillApp {
                     .left_0()
                     .right_0()
                     .bottom_0()
-                    .bg(rgba(0x000000e6))
+                    .bg(SCRIM)
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.close_media_viewer(cx);
                     })),
@@ -34239,7 +34211,7 @@ impl QuillApp {
                             .child(
                                 div()
                                     .font_semibold()
-                                    .text_color(rgb(0xffffff))
+                                    .text_color(TEXT_BRIGHT)
                                     .child(header_label),
                             )
                             .child(
@@ -34253,7 +34225,7 @@ impl QuillApp {
                                             Button::new(("media-viewer-rotate", row_id))
                                                 .label("Rotate")
                                                 .ghost()
-                                                .text_color(rgb(0xffffff))
+                                                .text_color(TEXT_BRIGHT)
                                                 .on_click(cx.listener(|this, _, _, cx| {
                                                     this.rotate_viewer_photo(cx);
                                                 })),
@@ -34264,7 +34236,7 @@ impl QuillApp {
                                         Button::new(("media-viewer-share", row_id))
                                             .label("Share")
                                             .ghost()
-                                            .text_color(rgb(0xffffff))
+                                            .text_color(TEXT_BRIGHT)
                                             .on_click(cx.listener(|this, _, window, cx| {
                                                 this.share_viewer_media(window, cx);
                                             })),
@@ -34274,7 +34246,7 @@ impl QuillApp {
                                         Button::new(("media-viewer-save", row_id))
                                             .label("Save")
                                             .ghost()
-                                            .text_color(rgb(0xffffff))
+                                            .text_color(TEXT_BRIGHT)
                                             .on_click(cx.listener(|this, _, _, cx| {
                                                 this.save_viewer_media(cx);
                                             })),
@@ -34284,7 +34256,7 @@ impl QuillApp {
                                         Button::new(("media-viewer-show-in-chat", row_id))
                                             .label("Show in chat")
                                             .ghost()
-                                            .text_color(rgb(0xffffff))
+                                            .text_color(TEXT_BRIGHT)
                                             .on_click(cx.listener(|this, _, _, cx| {
                                                 this.show_viewer_in_chat(cx);
                                             })),
@@ -34295,7 +34267,7 @@ impl QuillApp {
                                             Button::new(("media-viewer-pin-album", row_id))
                                                 .label(label)
                                                 .ghost()
-                                                .text_color(rgb(0xffffff))
+                                                .text_color(TEXT_BRIGHT)
                                                 .on_click(cx.listener(|this, _, _, cx| {
                                                     this.toggle_viewer_album_pin(cx);
                                                 })),
@@ -34308,7 +34280,7 @@ impl QuillApp {
                                             .px_2()
                                             .py_1()
                                             .rounded_md()
-                                            .text_color(rgb(0xffffff))
+                                            .text_color(TEXT_BRIGHT)
                                             .child("Close")
                                             .on_click(cx.listener(|this, _, _, cx| {
                                                 this.close_media_viewer(cx);
@@ -34321,10 +34293,10 @@ impl QuillApp {
                     // MED1: honest playback error (unsupported format /
                     // player failure) instead of a silent stall.
                     .when_some(self.playback_error.clone(), |this, err| {
-                        this.child(div().text_sm().text_color(rgb(0xff7b72)).child(err))
+                        this.child(div().text_sm().text_color(DANGER_BRIGHT).child(err))
                     })
                     .when_some(caption, |this, caption| {
-                        this.child(div().text_color(rgb(0xffffff)).child(caption))
+                        this.child(div().text_color(TEXT_BRIGHT).child(caption))
                     })
                     .child(
                         div()
@@ -34334,7 +34306,7 @@ impl QuillApp {
                                 Button::new("media-viewer-prev")
                                     .label("‹ Prev")
                                     .ghost()
-                                    .text_color(rgb(0xffffff))
+                                    .text_color(TEXT_BRIGHT)
                                     .disabled(position <= 1)
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         this.step_media_viewer(-1, cx);
@@ -34344,7 +34316,7 @@ impl QuillApp {
                                 Button::new("media-viewer-next")
                                     .label("Next ›")
                                     .ghost()
-                                    .text_color(rgb(0xffffff))
+                                    .text_color(TEXT_BRIGHT)
                                     .disabled(position >= total)
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         this.step_media_viewer(1, cx);
@@ -34417,14 +34389,14 @@ impl QuillApp {
             .max_w(px(360.))
             .p_2()
             .rounded_md()
-            .bg(rgb(0x161b22))
+            .bg(BG_CANVAS)
             .border_1()
-            .border_color(rgb(0x30363d));
+            .border_color(BORDER);
         if reactions.is_empty() {
             picker = picker.child(
                 div()
                     .text_sm()
-                    .text_color(rgb(0x8b949e))
+                    .text_color(TEXT_MUTED)
                     .child("Loading reactions…"),
             );
         }
@@ -34491,7 +34463,7 @@ impl QuillApp {
             Button::new("story-quick-react")
                 .label(quick_label)
                 .ghost()
-                .text_color(rgb(0xffffff))
+                .text_color(TEXT_BRIGHT)
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.quick_react_story(cx);
                 })),
@@ -34500,7 +34472,7 @@ impl QuillApp {
             Button::new("story-react-picker")
                 .label("React…")
                 .ghost()
-                .text_color(rgb(0xffffff))
+                .text_color(TEXT_BRIGHT)
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.toggle_story_reaction_picker(cx);
                 })),
@@ -34510,7 +34482,7 @@ impl QuillApp {
                 Button::new("story-reply")
                     .label("Reply")
                     .ghost()
-                    .text_color(rgb(0xffffff))
+                    .text_color(TEXT_BRIGHT)
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.toggle_story_reply(cx);
                     })),
@@ -34521,7 +34493,7 @@ impl QuillApp {
                 Button::new("story-delete")
                     .label("Delete")
                     .ghost()
-                    .text_color(rgb(0xffffff))
+                    .text_color(TEXT_BRIGHT)
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.delete_story_viewer(cx);
                     })),
@@ -34538,7 +34510,7 @@ impl QuillApp {
                 Button::new("story-viewers")
                     .label("Viewers")
                     .ghost()
-                    .text_color(rgb(0xffffff))
+                    .text_color(TEXT_BRIGHT)
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.toggle_story_viewers(cx);
                     })),
@@ -34549,7 +34521,7 @@ impl QuillApp {
                 Button::new("story-report")
                     .label("Report")
                     .ghost()
-                    .text_color(rgb(0xffffff))
+                    .text_color(TEXT_BRIGHT)
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.toggle_story_report(cx);
                     })),
@@ -34562,7 +34534,7 @@ impl QuillApp {
             Button::new("story-stealth")
                 .label(stealth_label)
                 .ghost()
-                .text_color(rgb(0xffffff))
+                .text_color(TEXT_BRIGHT)
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.toggle_story_stealth(cx);
                 })),
@@ -34576,7 +34548,7 @@ impl QuillApp {
                 Button::new("story-edit")
                     .label("Edit")
                     .ghost()
-                    .text_color(rgb(0xffffff))
+                    .text_color(TEXT_BRIGHT)
                     .disabled(manage_busy)
                     .on_click(cx.listener(|this, _, window, cx| {
                         let Some(item) = this.story_viewer.current().cloned() else {
@@ -34590,7 +34562,7 @@ impl QuillApp {
                     Button::new("story-cover")
                         .label("Cover")
                         .ghost()
-                        .text_color(rgb(0xffffff))
+                        .text_color(TEXT_BRIGHT)
                         .disabled(manage_busy)
                         .on_click(cx.listener(|this, _, _, cx| {
                             let Some(item) = this.story_viewer.current().cloned() else {
@@ -34606,7 +34578,7 @@ impl QuillApp {
                 Button::new("story-privacy")
                     .label("Privacy")
                     .ghost()
-                    .text_color(rgb(0xffffff))
+                    .text_color(TEXT_BRIGHT)
                     .disabled(manage_busy)
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.toggle_story_privacy_edit(window, cx);
@@ -34618,7 +34590,7 @@ impl QuillApp {
                 Button::new("story-repost")
                     .label("Repost")
                     .ghost()
-                    .text_color(rgb(0xffffff))
+                    .text_color(TEXT_BRIGHT)
                     .disabled(manage_busy)
                     .on_click(cx.listener(|this, _, window, cx| {
                         let Some(item) = this.story_viewer.current().cloned() else {
@@ -34662,7 +34634,7 @@ impl QuillApp {
             .session()
             .and_then(|session| session.story_stealth_error.clone())
         {
-            column = column.child(div().text_sm().text_color(rgb(0xf85149)).child(stealth_err));
+            column = column.child(div().text_sm().text_color(DANGER).child(stealth_err));
         }
         // Phase 9.5: cover-frame editor row (video stories) + privacy
         // editor panel + the management status line (pending / error).
@@ -34673,7 +34645,7 @@ impl QuillApp {
             column = column.child(self.story_privacy_panel(cx));
         }
         if let Some(status) = self.story_manage_status() {
-            column = column.child(div().text_xs().text_color(rgb(0x8b949e)).child(status));
+            column = column.child(div().text_xs().text_color(TEXT_MUTED).child(status));
         }
         column.into_any_element()
     }
@@ -34694,15 +34666,15 @@ impl QuillApp {
             .overflow_y_scroll()
             .p_2()
             .rounded_md()
-            .bg(rgb(0x161b22))
+            .bg(BG_CANVAS)
             .border_1()
-            .border_color(rgb(0x30363d));
+            .border_color(BORDER);
         let Some(state) = state else {
             return panel
                 .child(
                     div()
                         .text_sm()
-                        .text_color(rgb(0x8b949e))
+                        .text_color(TEXT_MUTED)
                         .child("No viewers yet"),
                 )
                 .into_any_element();
@@ -34711,7 +34683,7 @@ impl QuillApp {
             div()
                 .text_sm()
                 .font_medium()
-                .text_color(rgb(0xe6edf3))
+                .text_color(TEXT_MENU)
                 .child(format!(
                     "{} viewer{}",
                     state.total_count,
@@ -34737,19 +34709,19 @@ impl QuillApp {
                         div()
                             .flex()
                             .flex_col()
-                            .child(div().text_sm().text_color(rgb(0xe6edf3)).child(name))
-                            .child(div().text_xs().text_color(rgb(0x8b949e)).child(detail)),
+                            .child(div().text_sm().text_color(TEXT_MENU).child(name))
+                            .child(div().text_xs().text_color(TEXT_MUTED).child(detail)),
                     ),
             );
         }
         if let Some(error) = state.error.clone() {
-            panel = panel.child(div().text_sm().text_color(rgb(0xf85149)).child(error));
+            panel = panel.child(div().text_sm().text_color(DANGER).child(error));
         }
         if state.loading {
             panel = panel.child(
                 div()
                     .text_sm()
-                    .text_color(rgb(0x8b949e))
+                    .text_color(TEXT_MUTED)
                     .child("Loading viewers…"),
             );
         } else if !state.next_offset.is_empty() {
@@ -34764,7 +34736,7 @@ impl QuillApp {
             panel = panel.child(
                 div()
                     .text_sm()
-                    .text_color(rgb(0x8b949e))
+                    .text_color(TEXT_MUTED)
                     .child("No one has viewed this story yet"),
             );
         }
@@ -34784,12 +34756,12 @@ impl QuillApp {
             .max_w(px(360.))
             .p_2()
             .rounded_md()
-            .bg(rgb(0x161b22))
+            .bg(BG_CANVAS)
             .border_1()
-            .border_color(rgb(0x30363d));
+            .border_color(BORDER);
         let Some(flow) = flow else {
             return panel
-                .child(div().text_sm().text_color(rgb(0x8b949e)).child("Starting…"))
+                .child(div().text_sm().text_color(TEXT_MUTED).child("Starting…"))
                 .into_any_element();
         };
         match flow.stage {
@@ -34797,7 +34769,7 @@ impl QuillApp {
                 panel = panel.child(
                     div()
                         .text_sm()
-                        .text_color(rgb(0x8b949e))
+                        .text_color(TEXT_MUTED)
                         .child("Reporting story…"),
                 );
             }
@@ -34809,7 +34781,7 @@ impl QuillApp {
                     div()
                         .text_sm()
                         .font_medium()
-                        .text_color(rgb(0xe6edf3))
+                        .text_color(TEXT_MENU)
                         .child(title.clone()),
                 );
                 for option in options {
@@ -34828,13 +34800,16 @@ impl QuillApp {
                 is_optional,
             } => {
                 let option_id = option_id.clone();
-                panel = panel.child(div().text_sm().text_color(rgb(0x8b949e)).child(
-                    if is_optional {
-                        "Add details (optional)".to_string()
-                    } else {
-                        "Add details".to_string()
-                    },
-                ));
+                panel = panel.child(
+                    div()
+                        .text_sm()
+                        .text_color(TEXT_MUTED)
+                        .child(if is_optional {
+                            "Add details (optional)".to_string()
+                        } else {
+                            "Add details".to_string()
+                        }),
+                );
                 panel = panel.child(
                     div()
                         .flex()
@@ -34863,20 +34838,10 @@ impl QuillApp {
                 }
             }
             StoryReportStage::Reported => {
-                panel = panel.child(
-                    div()
-                        .text_sm()
-                        .text_color(rgb(0x3fb950))
-                        .child("Story reported"),
-                );
+                panel = panel.child(div().text_sm().text_color(SUCCESS).child("Story reported"));
             }
             StoryReportStage::Failed(ref error) => {
-                panel = panel.child(
-                    div()
-                        .text_sm()
-                        .text_color(rgb(0xf85149))
-                        .child(error.clone()),
-                );
+                panel = panel.child(div().text_sm().text_color(DANGER).child(error.clone()));
             }
         }
         panel.into_any_element()
@@ -35031,7 +34996,7 @@ impl QuillApp {
             div()
                 .text_sm()
                 .font_semibold()
-                .text_color(rgb(0xffffff))
+                .text_color(TEXT_BRIGHT)
                 .child("Who can see this story"),
         );
         for option in StoryPrivacy::ALL {
@@ -35045,7 +35010,7 @@ impl QuillApp {
                         format!("☐ {label}")
                     })
                     .ghost()
-                    .text_color(rgb(0xffffff))
+                    .text_color(TEXT_BRIGHT)
                     .on_click(cx.listener(move |this, _, _, cx| {
                         if let Some(edit) = this.story_privacy_edit.as_mut() {
                             edit.privacy = option;
@@ -35069,7 +35034,7 @@ impl QuillApp {
                 list = list.child(
                     div()
                         .text_sm()
-                        .text_color(rgb(0x8b949e))
+                        .text_color(TEXT_MUTED)
                         .child("No contacts found"),
                 );
             }
@@ -35111,7 +35076,7 @@ impl QuillApp {
                     Button::new("story-privacy-cancel")
                         .label("Cancel")
                         .ghost()
-                        .text_color(rgb(0xffffff))
+                        .text_color(TEXT_BRIGHT)
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.story_privacy_edit = None;
                             cx.notify();
@@ -35219,17 +35184,17 @@ impl QuillApp {
                 .h(px(640.))
                 .rounded_md()
                 .object_fit(ObjectFit::Contain)
-                .bg(rgb(0x0d1117))
+                .bg(BG_DEEP)
                 .with_fallback(move || {
                     div()
                         .w(px(360.))
                         .h(px(640.))
                         .rounded_md()
-                        .bg(rgb(0x0d1117))
+                        .bg(BG_DEEP)
                         .flex()
                         .items_center()
                         .justify_center()
-                        .text_color(rgb(0xffffff))
+                        .text_color(TEXT_BRIGHT)
                         .child(format!("{kind_label} — could not render"))
                         .into_any_element()
                 })
@@ -35257,11 +35222,11 @@ impl QuillApp {
                 .w(px(360.))
                 .h(px(640.))
                 .rounded_md()
-                .bg(rgb(0x0d1117))
+                .bg(BG_DEEP)
                 .flex()
                 .items_center()
                 .justify_center()
-                .child(div().text_sm().text_color(rgb(0xffffff)).child(status))
+                .child(div().text_sm().text_color(TEXT_BRIGHT).child(status))
                 .into_any_element()
         };
         let caption: Option<AnyElement> = (!item.caption.is_empty()).then(|| {
@@ -35294,7 +35259,7 @@ impl QuillApp {
                     .left_0()
                     .right_0()
                     .bottom_0()
-                    .bg(rgba(0x000000e6))
+                    .bg(SCRIM)
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.close_story_viewer(cx);
                     })),
@@ -35318,7 +35283,7 @@ impl QuillApp {
                             .child(
                                 div()
                                     .font_semibold()
-                                    .text_color(rgb(0xffffff))
+                                    .text_color(TEXT_BRIGHT)
                                     .child(header_label),
                             )
                             .child(
@@ -35328,7 +35293,7 @@ impl QuillApp {
                                     .px_2()
                                     .py_1()
                                     .rounded_md()
-                                    .text_color(rgb(0xffffff))
+                                    .text_color(TEXT_BRIGHT)
                                     .child("Close")
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         this.close_story_viewer(cx);
@@ -35337,14 +35302,14 @@ impl QuillApp {
                     )
                     .child(visual)
                     .when_some(caption, |this, caption| {
-                        this.child(div().text_color(rgb(0xffffff)).child(caption))
+                        this.child(div().text_color(TEXT_BRIGHT).child(caption))
                     })
                     .when_some(counts, |this, counts| {
-                        this.child(div().text_xs().text_color(rgb(0x8b949e)).child(counts))
+                        this.child(div().text_xs().text_color(TEXT_MUTED).child(counts))
                     })
                     // Phase 9.5: "Reposted from …" / "edited" marker.
                     .when_some(self.story_viewer_meta_line(), |this, meta| {
-                        this.child(div().text_xs().text_color(rgb(0x8b949e)).child(meta))
+                        this.child(div().text_xs().text_color(TEXT_MUTED).child(meta))
                     })
                     .child(self.story_action_row(cx))
                     .child(
@@ -35355,7 +35320,7 @@ impl QuillApp {
                                 Button::new("story-viewer-prev")
                                     .label("‹ Prev")
                                     .ghost()
-                                    .text_color(rgb(0xffffff))
+                                    .text_color(TEXT_BRIGHT)
                                     .disabled(position <= 1)
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         this.step_story_viewer(-1, cx);
@@ -35365,7 +35330,7 @@ impl QuillApp {
                                 Button::new("story-viewer-next")
                                     .label("Next ›")
                                     .ghost()
-                                    .text_color(rgb(0xffffff))
+                                    .text_color(TEXT_BRIGHT)
                                     .disabled(position >= total)
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         this.step_story_viewer(1, cx);
@@ -35407,17 +35372,17 @@ impl QuillApp {
                 .h(px(240.))
                 .rounded_md()
                 .object_fit(ObjectFit::Contain)
-                .bg(rgb(0x0d1117))
+                .bg(BG_DEEP)
                 .with_fallback(|| {
                     div()
                         .w(px(180.))
                         .h(px(240.))
                         .rounded_md()
-                        .bg(rgb(0x0d1117))
+                        .bg(BG_DEEP)
                         .flex()
                         .items_center()
                         .justify_center()
-                        .text_color(rgb(0xffffff))
+                        .text_color(TEXT_BRIGHT)
                         .child("could not render")
                         .into_any_element()
                 })
@@ -35427,12 +35392,12 @@ impl QuillApp {
                 .w(px(180.))
                 .h(px(240.))
                 .rounded_md()
-                .bg(rgb(0x0d1117))
+                .bg(BG_DEEP)
                 .flex()
                 .items_center()
                 .justify_center()
                 .text_sm()
-                .text_color(rgb(0xffffff))
+                .text_color(TEXT_BRIGHT)
                 .child("Video — uploads the full file")
                 .into_any_element(),
             _ => div()
@@ -35440,12 +35405,12 @@ impl QuillApp {
                 .w(px(180.))
                 .h(px(240.))
                 .rounded_md()
-                .bg(rgb(0x0d1117))
+                .bg(BG_DEEP)
                 .flex()
                 .items_center()
                 .justify_center()
                 .text_sm()
-                .text_color(rgb(0x8b949e))
+                .text_color(TEXT_MUTED)
                 .child("Photo/video preview")
                 .into_any_element(),
         };
@@ -35462,7 +35427,7 @@ impl QuillApp {
                         format!("☐ {label}")
                     })
                     .ghost()
-                    .text_color(rgb(0xffffff))
+                    .text_color(TEXT_BRIGHT)
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.story_composer.privacy = option;
                         this.story_composer.local_error = None;
@@ -35487,7 +35452,7 @@ impl QuillApp {
                     list = list.child(
                         div()
                             .text_sm()
-                            .text_color(rgb(0x8b949e))
+                            .text_color(TEXT_MUTED)
                             .child("No contacts found"),
                     );
                 }
@@ -35521,7 +35486,7 @@ impl QuillApp {
                         format!("☐ {label}")
                     })
                     .ghost()
-                    .text_color(rgb(0xffffff))
+                    .text_color(TEXT_BRIGHT)
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.story_composer.expiry = option;
                         this.story_composer.local_error = None;
@@ -35542,7 +35507,7 @@ impl QuillApp {
                         "☐ Post to chat page (keep accessible after expiry)"
                     })
                     .ghost()
-                    .text_color(rgb(0xffffff))
+                    .text_color(TEXT_BRIGHT)
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.story_composer.post_to_chat_page =
                             !this.story_composer.post_to_chat_page;
@@ -35558,7 +35523,7 @@ impl QuillApp {
                         "☐ Protect content (no forwarding)"
                     })
                     .ghost()
-                    .text_color(rgb(0xffffff))
+                    .text_color(TEXT_BRIGHT)
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.story_composer.protect_content = !this.story_composer.protect_content;
                         this.story_composer.local_error = None;
@@ -35602,7 +35567,7 @@ impl QuillApp {
                 Button::new("story-composer-as-self")
                     .label(if selected { "☑ Myself" } else { "☐ Myself" })
                     .ghost()
-                    .text_color(rgb(0xffffff))
+                    .text_color(TEXT_BRIGHT)
                     .disabled(busy)
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.story_composer.as_chat_id = None;
@@ -35620,7 +35585,7 @@ impl QuillApp {
                             format!("☐ {title}")
                         })
                         .ghost()
-                        .text_color(rgb(0xffffff))
+                        .text_color(TEXT_BRIGHT)
                         .disabled(busy)
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.story_composer.as_chat_id = Some(chat_id);
@@ -35633,7 +35598,7 @@ impl QuillApp {
                 .flex()
                 .flex_col()
                 .gap_1()
-                .child(div().text_xs().text_color(rgb(0x8b949e)).child("Post as"))
+                .child(div().text_xs().text_color(TEXT_MUTED).child("Post as"))
                 .child(picker)
                 .into_any_element()
         });
@@ -35656,7 +35621,7 @@ impl QuillApp {
                     .left_0()
                     .right_0()
                     .bottom_0()
-                    .bg(rgba(0x000000e6))
+                    .bg(SCRIM)
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.close_story_composer(cx);
                     })),
@@ -35674,13 +35639,13 @@ impl QuillApp {
                     // scroll instead of clipping the Post button.
                     .overflow_y_scroll()
                     .rounded_lg()
-                    .bg(rgb(0x161b22))
+                    .bg(BG_CANVAS)
                     .child(
                         div()
                             .flex()
                             .items_center()
                             .justify_between()
-                            .child(div().font_semibold().text_color(rgb(0xffffff)).child(title))
+                            .child(div().font_semibold().text_color(TEXT_BRIGHT).child(title))
                             .child(
                                 div()
                                     .id("story-composer-close")
@@ -35688,7 +35653,7 @@ impl QuillApp {
                                     .px_2()
                                     .py_1()
                                     .rounded_md()
-                                    .text_color(rgb(0xffffff))
+                                    .text_color(TEXT_BRIGHT)
                                     .child("Close")
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         this.close_story_composer(cx);
@@ -35711,7 +35676,7 @@ impl QuillApp {
                                     .child(
                                         div()
                                             .text_xs()
-                                            .text_color(rgb(0x8b949e))
+                                            .text_color(TEXT_MUTED)
                                             // Phase 9.5: in edit mode the
                                             // path is optional — empty
                                             // keeps the current media.
@@ -35723,9 +35688,7 @@ impl QuillApp {
                                             }),
                                     )
                                     .child(Textarea::new(&self.story_composer_path).h(px(40.)))
-                                    .child(
-                                        div().text_xs().text_color(rgb(0x8b949e)).child("Caption"),
-                                    )
+                                    .child(div().text_xs().text_color(TEXT_MUTED).child("Caption"))
                                     .child(Textarea::new(&self.story_composer_caption).h(px(64.))),
                             ),
                     )
@@ -35738,7 +35701,7 @@ impl QuillApp {
                         this.child(
                             div()
                                 .text_xs()
-                                .text_color(rgb(0x8b949e))
+                                .text_color(TEXT_MUTED)
                                 .child("Who can see it"),
                         )
                         .child(privacy)
@@ -35755,7 +35718,7 @@ impl QuillApp {
                         this.child(
                             div()
                                 .text_xs()
-                                .text_color(rgb(0x8b949e))
+                                .text_color(TEXT_MUTED)
                                 .child("Expires after"),
                         )
                         .child(expiry)
@@ -35764,30 +35727,30 @@ impl QuillApp {
                         this.child(
                             div()
                                 .text_xs()
-                                .text_color(rgb(0x8b949e))
+                                .text_color(TEXT_MUTED)
                                 .child("Story stickers"),
                         )
                         .child(
                             div()
                                 .text_xs()
-                                .text_color(rgb(0x8b949e))
+                                .text_color(TEXT_MUTED)
                                 .child("Link sticker URL"),
                         )
                         .child(Textarea::new(&self.story_composer_link).h(px(32.)))
                         .child(
                             div()
                                 .text_xs()
-                                .text_color(rgb(0x8b949e))
+                                .text_color(TEXT_MUTED)
                                 .child("Reaction stickers (emoji, space-separated)"),
                         )
                         .child(Textarea::new(&self.story_composer_reaction).h(px(32.)))
                     })
                     .when(!is_edit, |this| {
-                        this.child(div().text_xs().text_color(rgb(0x8b949e)).child("Options"))
+                        this.child(div().text_xs().text_color(TEXT_MUTED).child("Options"))
                             .child(toggles)
                     })
                     .when_some(status, |this, status| {
-                        this.child(div().text_sm().text_color(rgb(0xffffff)).child(status))
+                        this.child(div().text_sm().text_color(TEXT_BRIGHT).child(status))
                     })
                     .child(
                         Button::new("story-composer-post")
@@ -35862,8 +35825,8 @@ impl QuillApp {
             .py_2()
             .rounded_md()
             .border_1()
-            .border_color(rgb(0x58a6ff))
-            .bg(rgb(0x161b22))
+            .border_color(ACCENT)
+            .bg(BG_CANVAS)
             .child(
                 div()
                     .flex()
@@ -35873,7 +35836,7 @@ impl QuillApp {
                         div()
                             .text_sm()
                             .font_semibold()
-                            .text_color(rgb(0x58a6ff))
+                            .text_color(ACCENT)
                             .child("Forward to…"),
                     )
                     .child(
@@ -35885,7 +35848,7 @@ impl QuillApp {
                             })),
                     ),
             )
-            .child(div().text_xs().text_color(rgb(0xc9d1d9)).child(heading))
+            .child(div().text_xs().text_color(TEXT_PRIMARY).child(heading))
             .child(Textarea::new(&self.forward_search_input).h(px(36.)))
             // M1: `forwardMessages.send_copy` ("Hide sender name", TGX)
             // and `forwardMessages.remove_caption` (only applies to
@@ -37313,7 +37276,7 @@ impl QuillApp {
                                         // schema 1.8.67 line 1070).
                                         div()
                                             .text_xs()
-                                            .text_color(rgb(0xf0883e))
+                                            .text_color(ORANGE)
                                             .child("Polls restricted in this chat")
                                             .into_any_element()
                                     })
@@ -37433,10 +37396,10 @@ impl QuillApp {
                                         .py_2()
                                         .rounded_md()
                                         .border_1()
-                                        .border_color(rgb(0x8b949e))
-                                        .bg(rgb(0x21262d))
+                                        .border_color(TEXT_MUTED)
+                                        .bg(BG_SUBTLE)
                                         .child(div().text_sm().font_medium().child(label))
-                                        .child(div().text_xs().text_color(rgb(0xc9d1d9)).child(
+                                        .child(div().text_xs().text_color(TEXT_PRIMARY).child(
                                             if album {
                                                 "album · picked locally"
                                             } else {
@@ -37511,8 +37474,8 @@ impl QuillApp {
                                     .py_2()
                                     .rounded_md()
                                     .border_1()
-                                    .border_color(rgb(0x8b949e))
-                                    .bg(rgb(0x21262d))
+                                    .border_color(TEXT_MUTED)
+                                    .bg(BG_SUBTLE)
                                     .child(
                                         div()
                                             .text_sm()
@@ -37522,7 +37485,7 @@ impl QuillApp {
                                     .child(
                                         div()
                                             .text_xs()
-                                            .text_color(rgb(0xc9d1d9))
+                                            .text_color(TEXT_PRIMARY)
                                             .child("sending is paused until the timer expires"),
                                     ),
                             )
@@ -37751,8 +37714,8 @@ impl QuillApp {
             .py_2()
             .rounded_md()
             .border_1()
-            .border_color(rgb(0xf85149))
-            .bg(rgb(0x21262d))
+            .border_color(DANGER)
+            .bg(BG_SUBTLE)
             .flex()
             .flex_col()
             .gap_2()
@@ -37765,7 +37728,7 @@ impl QuillApp {
                         div()
                             .text_sm()
                             .font_medium()
-                            .text_color(rgb(0xffffff))
+                            .text_color(TEXT_BRIGHT)
                             .child(title),
                     )
                     .child(self.record_bar_actions(cx)),
@@ -37784,7 +37747,7 @@ impl QuillApp {
                 .child(
                     div()
                         .text_sm()
-                        .text_color(rgb(0xffffff))
+                        .text_color(TEXT_BRIGHT)
                         .child("Discard this recording?"),
                 )
                 .child(
@@ -38226,20 +38189,13 @@ impl QuillApp {
                     .when(highlighted || selected_forward, |this| {
                         this.rounded_lg()
                             .border_2()
-                            .border_color(if selected_forward {
-                                rgb(0x3fb950)
-                            } else {
-                                rgb(0x58a6ff)
-                            })
+                            .border_color(if selected_forward { SUCCESS } else { ACCENT })
                             .px_1()
                     })
                     // M1: failed sends get a red outline so the retry
                     // affordance is visible (`updateMessageSendFailed`).
                     .when(message.failed, |this| {
-                        this.rounded_lg()
-                            .border_1()
-                            .border_color(rgb(0xf85149))
-                            .px_1()
+                        this.rounded_lg().border_1().border_color(DANGER).px_1()
                     })
                     // M1: right-click opens the message context menu at
                     // the click position (window coordinates).
@@ -38283,7 +38239,7 @@ impl QuillApp {
                         this.child(
                             div()
                                 .text_xs()
-                                .text_color(rgb(0xf85149))
+                                .text_color(DANGER)
                                 .child("⚠ Failed to send — right-click → Retry send"),
                         )
                     }),
@@ -42825,8 +42781,8 @@ fn initials_avatar(name: &str, size: f32) -> impl IntoElement {
         .flex()
         .items_center()
         .justify_center()
-        .bg(rgb(0x2f81f7))
-        .text_color(rgb(0xffffff))
+        .bg(ACCENT_LIGHT)
+        .text_color(TEXT_BRIGHT)
         .text_sm()
         .font_semibold()
         .child(initials)
@@ -42889,7 +42845,7 @@ fn chat_avatar(
                 .items_center()
                 .justify_center()
                 .bg(chat_avatar_color(chat_id))
-                .text_color(rgb(0xffffff))
+                .text_color(TEXT_BRIGHT)
                 .text_sm()
                 .font_semibold()
                 .child(initials)
@@ -43246,8 +43202,8 @@ fn sponsored_message_row(
                 .px_2()
                 .py_1()
                 .rounded_md()
-                .bg(rgb(0x1f6feb))
-                .text_color(rgb(0xffffff))
+                .bg(ACCENT_STRONG)
+                .text_color(TEXT_BRIGHT)
                 .child(message.kind_label()),
         )
         .child(div().font_semibold().text_sm().child(message.title.clone()));
@@ -43372,8 +43328,8 @@ fn muted_badge(chat_id: ChatId) -> impl IntoElement {
         .flex()
         .items_center()
         .justify_center()
-        .bg(rgb(0x6e7681))
-        .text_color(rgb(0xffffff))
+        .bg(BG_BADGE_MUTED)
+        .text_color(TEXT_BRIGHT)
         .text_xs()
         .font_semibold()
         .child("Muted")
@@ -43389,8 +43345,8 @@ fn secret_badge(chat_id: ChatId) -> impl IntoElement {
         .flex()
         .items_center()
         .justify_center()
-        .bg(rgb(0x1f6feb))
-        .text_color(rgb(0xffffff))
+        .bg(ACCENT_STRONG)
+        .text_color(TEXT_BRIGHT)
         .text_xs()
         .font_semibold()
         .child("🔒")
@@ -43406,8 +43362,8 @@ fn forum_badge(chat_id: ChatId) -> impl IntoElement {
         .flex()
         .items_center()
         .justify_center()
-        .bg(rgb(0x8250df))
-        .text_color(rgb(0xffffff))
+        .bg(BG_PREMIUM)
+        .text_color(TEXT_BRIGHT)
         .text_xs()
         .font_semibold()
         .child("Topics")
@@ -43423,8 +43379,8 @@ fn unread_badge(label: String, chat_id: ChatId) -> impl IntoElement {
         .flex()
         .items_center()
         .justify_center()
-        .bg(rgb(0x1f6feb))
-        .text_color(rgb(0xffffff))
+        .bg(ACCENT_STRONG)
+        .text_color(TEXT_BRIGHT)
         .text_xs()
         .font_semibold()
         .child(label)
@@ -43442,8 +43398,8 @@ fn mention_badge(chat_id: ChatId) -> impl IntoElement {
         .flex()
         .items_center()
         .justify_center()
-        .bg(rgb(0x1f6feb))
-        .text_color(rgb(0xffffff))
+        .bg(ACCENT_STRONG)
+        .text_color(TEXT_BRIGHT)
         .text_xs()
         .font_semibold()
         .child("@")
@@ -43462,8 +43418,8 @@ fn reaction_badge(chat_id: ChatId, muted: bool) -> impl IntoElement {
         .flex()
         .items_center()
         .justify_center()
-        .bg(if muted { rgb(0x6e7681) } else { rgb(0x1f6feb) })
-        .text_color(rgb(0xffffff))
+        .bg(if muted { BG_BADGE_MUTED } else { ACCENT_STRONG })
+        .text_color(TEXT_BRIGHT)
         .text_xs()
         .font_semibold()
         .child("♥")
@@ -43480,13 +43436,13 @@ fn select_check(chat_id: ChatId, checked: bool) -> impl IntoElement {
         .justify_center()
         .rounded_full()
         .border_1()
-        .border_color(rgb(0x1f6feb))
+        .border_color(ACCENT_STRONG)
         .bg(if checked {
-            rgb(0x1f6feb)
+            ACCENT_STRONG
         } else {
-            rgb(0x000000).opacity(0.0)
+            BG_BLACK.opacity(0.0)
         })
-        .text_color(rgb(0xffffff))
+        .text_color(TEXT_BRIGHT)
         .text_xs()
         .font_semibold()
         .w(px(20.))
@@ -43620,7 +43576,7 @@ fn album_tile(
                             .with_fallback(|| {
                                 div()
                                     .size_full()
-                                    .bg(rgb(0x444c56))
+                                    .bg(FILL_MUTED)
                                     .flex()
                                     .items_center()
                                     .justify_center()
@@ -43633,14 +43589,14 @@ fn album_tile(
                 let open_id = photo.open_file_id().unwrap_or(FileId(0));
                 let downloading_now = file_is_downloading(open_id, files, downloading);
                 frame
-                    .bg(rgb(0x444c56))
+                    .bg(FILL_MUTED)
                     .flex()
                     .items_center()
                     .justify_center()
                     .child(
                         div()
                             .text_xs()
-                            .text_color(rgb(0xffffff))
+                            .text_color(TEXT_BRIGHT)
                             .child(if downloading_now {
                                 "Photo — downloading…"
                             } else {
@@ -43672,16 +43628,16 @@ fn album_tile(
                     .w(px(part.width as f32))
                     .h(px(part.height as f32))
                     .object_fit(ObjectFit::Cover)
-                    .with_fallback(|| div().size_full().bg(rgb(0x238636)).into_any_element())
+                    .with_fallback(|| div().size_full().bg(SUCCESS_BG).into_any_element())
                     .into_any_element()
             } else {
                 div()
                     .size_full()
-                    .bg(rgb(0x238636))
+                    .bg(SUCCESS_BG)
                     .flex()
                     .items_center()
                     .justify_center()
-                    .child(div().text_xs().text_color(rgb(0xffffff)).child("Video"))
+                    .child(div().text_xs().text_color(TEXT_BRIGHT).child("Video"))
                     .into_any_element()
             };
             frame
@@ -43693,9 +43649,9 @@ fn album_tile(
                         .left(px(4.))
                         .px_1()
                         .rounded_sm()
-                        .bg(rgb(0x010409))
+                        .bg(BG_TILE)
                         .text_xs()
-                        .text_color(rgb(0xffffff))
+                        .text_color(TEXT_BRIGHT)
                         .child(format!("Video · {duration}")),
                 )
                 .child(
@@ -43756,7 +43712,7 @@ fn stats_value_row(label: &str, value: &StatisticalValue) -> Div {
         .child(
             div()
                 .text_sm()
-                .text_color(rgb(0x8b949e))
+                .text_color(TEXT_MUTED)
                 .child(label.to_string()),
         )
         .child(div().text_sm().child(format!(
@@ -43839,7 +43795,7 @@ fn stats_graph_row(
                     .child(
                         div()
                             .text_sm()
-                            .text_color(rgb(0x8b949e))
+                            .text_color(TEXT_MUTED)
                             .child(label.to_string()),
                     )
                     .child(div().text_xs().child(spark))
@@ -43859,7 +43815,7 @@ fn stats_graph_row(
             .child(
                 div()
                     .text_sm()
-                    .text_color(rgb(0x8b949e))
+                    .text_color(TEXT_MUTED)
                     .child(label.to_string()),
             )
             .child(
@@ -44077,8 +44033,8 @@ fn invoice_body(
         .p_3()
         .rounded_md()
         .border_1()
-        .border_color(rgb(0x58a6ff))
-        .bg(rgb(0x161b22))
+        .border_color(ACCENT)
+        .bg(BG_CANVAS)
         .child(
             div()
                 .flex()
@@ -44087,7 +44043,7 @@ fn invoice_body(
                 .child(div().text_sm().font_semibold().child("🧾"))
                 .child(div().text_sm().font_semibold().child(invoice.title.clone()))
                 .child(if invoice.is_test {
-                    div().text_xs().text_color(rgb(0xffd479)).child("TEST")
+                    div().text_xs().text_color(WARNING_TEXT).child("TEST")
                 } else {
                     div()
                 }),
@@ -44183,11 +44139,11 @@ fn poll_body(
         body = body.child(
             div()
                 .text_xs()
-                .text_color(rgb(0x8b949e))
+                .text_color(TEXT_MUTED)
                 .child(content.description.clone()),
         );
     }
-    body = body.child(div().text_xs().text_color(rgb(0x8b949e)).child(format!(
+    body = body.child(div().text_xs().text_color(TEXT_MUTED).child(format!(
         "{} · {} · {}",
         kind_label,
         voter_count_label(poll.total_voter_count),
@@ -44205,7 +44161,7 @@ fn poll_body(
         body = body.child(
             div()
                 .text_xs()
-                .text_color(rgb(0xf0883e))
+                .text_color(ORANGE)
                 .child(poll_vote_restriction_label(reason)),
         );
     }
@@ -44221,7 +44177,7 @@ fn poll_body(
         body = body.child(
             div()
                 .text_xs()
-                .text_color(rgb(0xd29922))
+                .text_color(WARNING)
                 .child(format!("💡 {explanation}")),
         );
     }
@@ -44236,7 +44192,7 @@ fn poll_body(
                     voter_count_label(poll.total_voter_count)
                 ))
                 .ghost()
-                .text_color(rgb(0x58a6ff))
+                .text_color(ACCENT)
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.open_poll_voters_dialog(chat_id, message_id, cx);
                 })),
@@ -44295,8 +44251,8 @@ fn poll_option_row(
         .py_1p5()
         .rounded_md()
         .border_1()
-        .border_color(if chosen { rgb(0x58a6ff) } else { rgb(0x30363d) })
-        .bg(rgb(0x161b22))
+        .border_color(if chosen { ACCENT } else { BORDER })
+        .bg(BG_CANVAS)
         .child(
             div()
                 .flex()
@@ -44305,14 +44261,10 @@ fn poll_option_row(
                 .child(
                     div()
                         .text_sm()
-                        .text_color(if quiz_correct {
-                            rgb(0x3fb950)
-                        } else {
-                            rgb(0xe6edf3)
-                        })
+                        .text_color(if quiz_correct { SUCCESS } else { TEXT_MENU })
                         .child(option_label),
                 )
-                .child(div().text_sm().text_color(rgb(0x8b949e)).child(stats)),
+                .child(div().text_sm().text_color(TEXT_MUTED).child(stats)),
         )
         .child(
             div()
@@ -44321,11 +44273,11 @@ fn poll_option_row(
                 .h(px(6.))
                 .rounded_md()
                 .overflow_hidden()
-                .bg(rgb(0x0d1117))
+                .bg(BG_DEEP)
                 .child(
                     div()
                         .flex_grow(fill)
-                        .bg(if chosen { rgb(0x1f6feb) } else { rgb(0x30363d) }),
+                        .bg(if chosen { ACCENT_STRONG } else { BORDER }),
                 )
                 .child(div().flex_grow(1.0 - fill)),
         );
@@ -44640,16 +44592,16 @@ fn session_history_row(
                     .text_xs()
                     .cursor_pointer()
                     .when(chosen, |this| {
-                        this.bg(rgb(0x1f6feb))
-                            .text_color(rgb(0xffffff))
+                        this.bg(ACCENT_STRONG)
+                            .text_color(TEXT_BRIGHT)
                             .border_1()
-                            .border_color(rgb(0x58a6ff))
+                            .border_color(ACCENT)
                     })
                     .when(!chosen, |this| {
-                        this.bg(rgb(0x21262d))
-                            .text_color(rgb(0xc9d1d9))
+                        this.bg(BG_SUBTLE)
+                            .text_color(TEXT_PRIMARY)
                             .border_1()
-                            .border_color(rgb(0x8b949e))
+                            .border_color(TEXT_MUTED)
                     })
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.toggle_emoji_reaction(chat_id, message_id, emoji.clone(), cx);
@@ -44792,7 +44744,7 @@ fn session_history_row(
             .id(("self-destruct-badge", message.id.0 as u64))
             .mt_1()
             .text_xs()
-            .text_color(rgb(0xffd479))
+            .text_color(WARNING_TEXT)
             .child(label)
     });
     // Phase B4: auto-delete countdown chip (`message.auto_delete_in`,
@@ -44803,7 +44755,7 @@ fn session_history_row(
             .id(("auto-delete-chip", message.id.0 as u64))
             .mt_1()
             .text_xs()
-            .text_color(rgb(0xffd479))
+            .text_color(WARNING_TEXT)
             .child(label)
     });
     // MED4: caption element + position (`show_caption_above_media`,
@@ -44976,10 +44928,10 @@ fn rich_text_line(
             line = line.child(
                 div()
                     .id(run_id)
-                    .bg(rgb(0x444c56))
+                    .bg(FILL_MUTED)
                     .rounded_sm()
                     .px_1()
-                    .text_color(rgb(0x444c56))
+                    .text_color(FILL_MUTED)
                     .cursor_pointer()
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.spoiler_revealed.insert(key);
@@ -45006,19 +44958,13 @@ fn rich_text_line(
             el = el.font_family(MONO_FONT);
         }
         if style.pre {
-            el = el
-                .w_full()
-                .bg(rgb(0x22262d))
-                .rounded_md()
-                .px_2()
-                .py_1()
-                .my_1();
+            el = el.w_full().bg(BG_CODE).rounded_md().px_2().py_1().my_1();
         } else if style.code {
-            el = el.bg(rgb(0x444c56)).rounded_sm().px_1();
+            el = el.bg(FILL_MUTED).rounded_sm().px_1();
         }
         if let Some(href) = run.href {
             el = el
-                .text_color(rgb(0x9ecbff))
+                .text_color(ACCENT_INFO)
                 .underline()
                 .cursor_pointer()
                 .on_click(cx.listener(move |this, _, _, cx| {
@@ -45129,9 +45075,9 @@ fn link_preview_card(
                         .right_1()
                         .px_1()
                         .rounded_sm()
-                        .bg(rgb(0x000000))
+                        .bg(BG_BLACK)
                         .text_xs()
-                        .text_color(rgb(0xffffff))
+                        .text_color(TEXT_BRIGHT)
                         .child(badge),
                 )
                 .into_any_element()
@@ -45170,22 +45116,16 @@ fn link_preview_card(
         .min_w_0()
         .gap_0();
     if !site_empty {
-        copy = copy.child(
-            div()
-                .text_xs()
-                .font_medium()
-                .text_color(rgb(0x58a6ff))
-                .child(site),
-        );
+        copy = copy.child(div().text_xs().font_medium().text_color(ACCENT).child(site));
     }
     if !title_empty {
         copy = copy.child(div().text_sm().font_medium().child(title));
     }
     if !description_empty {
-        copy = copy.child(div().text_xs().text_color(rgb(0xc9d1d9)).child(description));
+        copy = copy.child(div().text_xs().text_color(TEXT_PRIMARY).child(description));
     }
     if site_empty && title_empty && description_empty && !display.is_empty() {
-        copy = copy.child(div().text_xs().text_color(rgb(0x58a6ff)).child(display));
+        copy = copy.child(div().text_xs().text_color(ACCENT).child(display));
     }
     let body = if preview.show_large_media {
         let mut column = div()
@@ -45228,8 +45168,8 @@ fn link_preview_card(
         .py_1()
         .rounded_md()
         .border_l_2()
-        .border_color(rgb(0x58a6ff))
-        .bg(rgb(0x161b22))
+        .border_color(ACCENT)
+        .bg(BG_CANVAS)
         .cursor_pointer()
         .on_click(cx.listener(move |this, _, _, cx| {
             // MED4: `instant_view_version > 0` (schema:4570) opens the IV
@@ -45503,7 +45443,7 @@ fn preview_thumb(
                     .w(w)
                     .h(h)
                     .rounded_md()
-                    .bg(rgb(0x444c56))
+                    .bg(FILL_MUTED)
                     .into_any_element()
             })
             .into_any_element();
@@ -45522,12 +45462,12 @@ fn preview_thumb(
         .w(w)
         .h(h)
         .rounded_md()
-        .bg(rgb(0x444c56))
+        .bg(FILL_MUTED)
         .flex()
         .flex_shrink_0()
         .items_center()
         .justify_center()
-        .child(div().text_xs().text_color(rgb(0xffffff)).child(label))
+        .child(div().text_xs().text_color(TEXT_BRIGHT).child(label))
         .into_any_element()
 }
 
@@ -45540,13 +45480,13 @@ fn forward_from_strip(row_id: MessageId, label: String) -> AnyElement {
         .py_1()
         .rounded_md()
         .border_l_2()
-        .border_color(rgb(0x3fb950))
-        .bg(rgb(0x161b22))
+        .border_color(SUCCESS)
+        .bg(BG_CANVAS)
         .child(
             div()
                 .text_xs()
                 .font_medium()
-                .text_color(rgb(0x3fb950))
+                .text_color(SUCCESS)
                 .child(label),
         )
         .into_any_element()
@@ -45630,8 +45570,8 @@ fn reply_quote_strip(
         .py_1()
         .rounded_md()
         .border_l_2()
-        .border_color(rgb(0x58a6ff))
-        .bg(rgb(0x161b22))
+        .border_color(ACCENT)
+        .bg(BG_CANVAS)
         .cursor_pointer()
         .on_click(cx.listener(move |this, _, _, cx| {
             this.jump_to_replied_message(target_id, cx);
@@ -45640,10 +45580,10 @@ fn reply_quote_strip(
             div()
                 .text_xs()
                 .font_medium()
-                .text_color(rgb(0x58a6ff))
+                .text_color(ACCENT)
                 .child("Reply"),
         )
-        .child(div().text_xs().text_color(rgb(0xc9d1d9)).child(preview))
+        .child(div().text_xs().text_color(TEXT_PRIMARY).child(preview))
         .into_any_element()
 }
 
@@ -45752,7 +45692,7 @@ fn photo_attachment(
                     .w(px(240.))
                     .h(px(140.))
                     .rounded_md()
-                    .bg(rgb(0x444c56))
+                    .bg(FILL_MUTED)
                     .flex()
                     .items_center()
                     .justify_center()
@@ -45789,7 +45729,7 @@ fn photo_attachment(
         .w(px(240.))
         .h(px(88.))
         .rounded_md()
-        .bg(rgb(0x444c56))
+        .bg(FILL_MUTED)
         .flex()
         .items_center()
         .justify_center()
@@ -45811,7 +45751,7 @@ fn photo_attachment(
                     }))
             },
         )
-        .child(div().text_xs().text_color(rgb(0xffffff)).child(status))
+        .child(div().text_xs().text_color(TEXT_BRIGHT).child(status))
         .into_any_element()
 }
 
@@ -45862,7 +45802,7 @@ fn animation_attachment(
                     .w(px(240.))
                     .h(px(140.))
                     .rounded_md()
-                    .bg(rgb(0x1f6feb))
+                    .bg(ACCENT_STRONG)
                     .into_any_element()
             })
             .into_any_element()
@@ -45884,11 +45824,11 @@ fn animation_attachment(
             .w(px(240.))
             .h(px(140.))
             .rounded_md()
-            .bg(rgb(0x1f6feb))
+            .bg(ACCENT_STRONG)
             .flex()
             .items_center()
             .justify_center()
-            .child(div().text_xs().text_color(rgb(0xffffff)).child(label))
+            .child(div().text_xs().text_color(TEXT_BRIGHT).child(label))
             .into_any_element()
     };
     div()
@@ -45905,9 +45845,9 @@ fn animation_attachment(
                     .left_1()
                     .px_1()
                     .rounded_sm()
-                    .bg(rgb(0x0d1117))
+                    .bg(BG_DEEP)
                     .text_xs()
-                    .text_color(rgb(0xffffff))
+                    .text_color(TEXT_BRIGHT)
                     .child(if playing { "GIF · playing" } else { "GIF" }),
             ),
         )
@@ -45980,7 +45920,7 @@ fn video_attachment(
                     .w(px(240.))
                     .h(px(140.))
                     .rounded_md()
-                    .bg(rgb(0x238636))
+                    .bg(SUCCESS_BG)
                     .into_any_element()
             })
             .into_any_element()
@@ -45999,11 +45939,11 @@ fn video_attachment(
             .w(px(240.))
             .h(px(140.))
             .rounded_md()
-            .bg(rgb(0x238636))
+            .bg(SUCCESS_BG)
             .flex()
             .items_center()
             .justify_center()
-            .child(div().text_xs().text_color(rgb(0xffffff)).child(label))
+            .child(div().text_xs().text_color(TEXT_BRIGHT).child(label))
             .into_any_element()
     };
     div()
@@ -46034,9 +45974,9 @@ fn video_attachment(
                         .left_1()
                         .px_1()
                         .rounded_sm()
-                        .bg(rgb(0x0d1117))
+                        .bg(BG_DEEP)
                         .text_xs()
-                        .text_color(rgb(0xffffff))
+                        .text_color(TEXT_BRIGHT)
                         .child(if playing { "Video · playing" } else { "Video" }),
                 )
                 .child(
@@ -46046,9 +45986,9 @@ fn video_attachment(
                         .left_1()
                         .px_1()
                         .rounded_sm()
-                        .bg(rgb(0x0d1117))
+                        .bg(BG_DEEP)
                         .text_xs()
-                        .text_color(rgb(0xffffff))
+                        .text_color(TEXT_BRIGHT)
                         .child(duration),
                 )
         })
@@ -46102,7 +46042,7 @@ fn transcription_row(
             .into_any_element(),
         Some(SpeechRecognition::Pending { partial_text }) => div()
             .text_xs()
-            .text_color(rgb(0x8b949e))
+            .text_color(TEXT_MUTED)
             .child(if partial_text.is_empty() {
                 "Transcribing…".to_string()
             } else {
@@ -46111,7 +46051,7 @@ fn transcription_row(
             .into_any_element(),
         Some(SpeechRecognition::Text { text }) => div()
             .text_xs()
-            .text_color(rgb(0xffffff))
+            .text_color(TEXT_BRIGHT)
             .child(format!("“{text}”"))
             .into_any_element(),
         Some(SpeechRecognition::Error { message }) => div()
@@ -46121,7 +46061,7 @@ fn transcription_row(
             .child(
                 div()
                     .text_xs()
-                    .text_color(rgb(0xf85149))
+                    .text_color(DANGER)
                     .child(format!("Transcription failed: {message}")),
             )
             .child(
@@ -46180,11 +46120,11 @@ fn video_note_attachment(
         "Video note"
     };
     let ring = if playing {
-        rgb(0x3fb950)
+        SUCCESS
     } else if unseen {
-        rgb(0x58a6ff)
+        ACCENT
     } else {
-        rgb(0x8b949e)
+        TEXT_MUTED
     };
     let picture = if !blocked && let Some(path) = visual {
         img(path)
@@ -46196,7 +46136,7 @@ fn video_note_attachment(
                 div()
                     .size(px(200.))
                     .rounded(px(100.))
-                    .bg(rgb(0x238636))
+                    .bg(SUCCESS_BG)
                     .into_any_element()
             })
             .into_any_element()
@@ -46214,7 +46154,7 @@ fn video_note_attachment(
             .id(("video-note-ph", row_id))
             .size(px(200.))
             .rounded(px(100.))
-            .bg(rgb(0x238636))
+            .bg(SUCCESS_BG)
             .flex()
             .items_center()
             .justify_center()
@@ -46223,7 +46163,7 @@ fn video_note_attachment(
                 div()
                     .text_xs()
                     .text_center()
-                    .text_color(rgb(0xffffff))
+                    .text_color(TEXT_BRIGHT)
                     .child(label),
             )
             .into_any_element()
@@ -46256,9 +46196,9 @@ fn video_note_attachment(
                             div()
                                 .px_1()
                                 .rounded_sm()
-                                .bg(rgb(0x0d1117))
+                                .bg(BG_DEEP)
                                 .text_xs()
-                                .text_color(rgb(0xffffff))
+                                .text_color(TEXT_BRIGHT)
                                 .child(badge),
                         ),
                 )
@@ -46274,9 +46214,9 @@ fn video_note_attachment(
                             div()
                                 .px_1()
                                 .rounded_sm()
-                                .bg(rgb(0x0d1117))
+                                .bg(BG_DEEP)
                                 .text_xs()
-                                .text_color(rgb(0xffffff))
+                                .text_color(TEXT_BRIGHT)
                                 .child(duration),
                         ),
                 ),
@@ -46336,7 +46276,7 @@ fn sticker_attachment(
                     .w(px(128.))
                     .h(px(128.))
                     .rounded_md()
-                    .bg(rgb(0x444c56))
+                    .bg(FILL_MUTED)
                     .flex()
                     .items_center()
                     .justify_center()
@@ -46359,7 +46299,7 @@ fn sticker_attachment(
         .w(px(128.))
         .h(px(88.))
         .rounded_md()
-        .bg(rgb(0x444c56))
+        .bg(FILL_MUTED)
         .flex()
         .items_center()
         .justify_center()
@@ -46369,7 +46309,7 @@ fn sticker_attachment(
                     this.request_media_download(display_id, None, cx);
                 }))
         })
-        .child(div().text_xs().text_color(rgb(0xffffff)).child(label))
+        .child(div().text_xs().text_color(TEXT_BRIGHT).child(label))
         .into_any_element()
 }
 
@@ -46401,7 +46341,7 @@ fn waveform_row(row_key: u64, bars: &[u8]) -> impl IntoElement {
                 .w(px(3.))
                 .h(px(h))
                 .rounded_sm()
-                .bg(rgb(0x58a6ff)),
+                .bg(ACCENT),
         );
     }
     row
@@ -46417,7 +46357,7 @@ fn seek_bar_element(row_key: u64, seek: &SeekBarView) -> AnyElement {
         div()
             .id(("seek-bar", row_key))
             .w_full()
-            .child(Slider::new(slider).bg(rgb(BAR)).text_color(rgb(0xffffff)))
+            .child(Slider::new(slider).bg(rgb(BAR)).text_color(TEXT_BRIGHT))
             .into_any_element()
     } else {
         div()
@@ -46425,7 +46365,7 @@ fn seek_bar_element(row_key: u64, seek: &SeekBarView) -> AnyElement {
             .w_full()
             .h(px(6.))
             .rounded_full()
-            .bg(rgb(0x30363d))
+            .bg(BORDER)
             .child(
                 div()
                     .h_full()
@@ -46464,7 +46404,7 @@ fn row_playback_controls(
                 })),
         )
         .when_some(seek.error.clone(), |this, err| {
-            this.child(div().text_xs().text_color(rgb(0xff7b72)).child(err))
+            this.child(div().text_xs().text_color(DANGER_BRIGHT).child(err))
         })
         .into_any_element()
 }
@@ -46525,8 +46465,8 @@ fn voice_note_row(
         .py_2()
         .rounded_md()
         .border_1()
-        .border_color(if active { rgb(0x3fb950) } else { rgb(0x8b949e) })
-        .bg(rgb(0x21262d))
+        .border_color(if active { SUCCESS } else { TEXT_MUTED })
+        .bg(BG_SUBTLE)
         .flex()
         .flex_col()
         .gap_1()
@@ -46553,10 +46493,10 @@ fn voice_note_row(
                     div()
                         .text_sm()
                         .font_medium()
-                        .text_color(rgb(0xffffff))
+                        .text_color(TEXT_BRIGHT)
                         .child("Voice message"),
                 )
-                .child(div().text_xs().text_color(rgb(0xffffff)).child(meta)),
+                .child(div().text_xs().text_color(TEXT_BRIGHT).child(meta)),
         )
         .child(waveform_row(message_id.0 as u64, &bars))
         .child(seek_bar_element(message_id.0 as u64, seek))
@@ -46651,7 +46591,7 @@ fn audio_row(
                     .w(px(56.))
                     .h(px(56.))
                     .rounded_md()
-                    .bg(rgb(0x444c56))
+                    .bg(FILL_MUTED)
                     .flex()
                     .items_center()
                     .justify_center()
@@ -46665,11 +46605,11 @@ fn audio_row(
             .w(px(56.))
             .h(px(56.))
             .rounded_md()
-            .bg(rgb(0x444c56))
+            .bg(FILL_MUTED)
             .flex()
             .items_center()
             .justify_center()
-            .child(div().text_xs().text_color(rgb(0xffffff)).child("Audio"))
+            .child(div().text_xs().text_color(TEXT_BRIGHT).child("Audio"))
             .into_any_element()
     };
     div()
@@ -46679,8 +46619,8 @@ fn audio_row(
         .py_2()
         .rounded_md()
         .border_1()
-        .border_color(if active { rgb(0x3fb950) } else { rgb(0x8b949e) })
-        .bg(rgb(0x21262d))
+        .border_color(if active { SUCCESS } else { TEXT_MUTED })
+        .bg(BG_SUBTLE)
         .flex()
         .items_center()
         .gap_3()
@@ -46695,10 +46635,10 @@ fn audio_row(
                     div()
                         .text_sm()
                         .font_medium()
-                        .text_color(rgb(0xffffff))
+                        .text_color(TEXT_BRIGHT)
                         .child(title),
                 )
-                .child(div().text_xs().text_color(rgb(0xc9d1d9)).child(meta))
+                .child(div().text_xs().text_color(TEXT_PRIMARY).child(meta))
                 .child(seek_bar_element(message_id.0 as u64, seek))
                 .child(
                     Button::new(format!("audio-play-{}", message_id.0))
@@ -46788,8 +46728,8 @@ fn document_chip(
         .py_2()
         .rounded_md()
         .border_1()
-        .border_color(rgb(0x8b949e))
-        .bg(rgb(0x21262d))
+        .border_color(TEXT_MUTED)
+        .bg(BG_SUBTLE)
         .child(
             div()
                 .id(("doc-chip-name", row_id))
@@ -46805,7 +46745,7 @@ fn document_chip(
                     }
                 })),
         )
-        .child(div().text_xs().text_color(rgb(0xc9d1d9)).child(detail))
+        .child(div().text_xs().text_color(TEXT_PRIMARY).child(detail))
         .when(downloading_now, |this| {
             this.child(
                 div()
@@ -46814,13 +46754,13 @@ fn document_chip(
                     .h(px(4.))
                     .mt_1()
                     .rounded_full()
-                    .bg(rgb(0x30363d))
+                    .bg(BORDER)
                     .child(
                         div()
                             .h_full()
                             .w(relative(progress.unwrap_or(0.0)))
                             .rounded_full()
-                            .bg(rgb(0x58a6ff)),
+                            .bg(ACCENT),
                     ),
             )
         })
@@ -46831,7 +46771,7 @@ fn document_chip(
                     .cursor_pointer()
                     .mt_1()
                     .text_xs()
-                    .text_color(rgb(0x58a6ff))
+                    .text_color(ACCENT)
                     .child(label)
                     .on_click(cx.listener(move |this, _, _, cx| {
                         if ready {
@@ -47099,27 +47039,27 @@ fn location_row(
         .py_2()
         .rounded_md()
         .border_1()
-        .border_color(rgb(0x8b949e))
-        .bg(rgb(0x21262d))
+        .border_color(TEXT_MUTED)
+        .bg(BG_SUBTLE)
         .child(div().text_sm().font_medium().child(header))
         .child(
             div()
                 .text_xs()
-                .text_color(rgb(0xc9d1d9))
+                .text_color(TEXT_PRIMARY)
                 .child(location.coords_label()),
         );
     if let Some(live) = live {
         body = body.child(
             div()
                 .text_xs()
-                .text_color(rgb(0x58a6ff))
+                .text_color(ACCENT)
                 .child(live.status_label()),
         );
     } else if location.accuracy_m > 0 {
         body = body.child(
             div()
                 .text_xs()
-                .text_color(rgb(0x8b949e))
+                .text_color(TEXT_MUTED)
                 .child(format!("accuracy ±{} m", location.accuracy_m)),
         );
     }
@@ -47127,7 +47067,7 @@ fn location_row(
         div()
             .id(("location-open-map", row_id))
             .text_sm()
-            .text_color(rgb(0x58a6ff))
+            .text_color(ACCENT)
             .cursor_pointer()
             .on_click(cx.listener(move |this, _, _, cx| {
                 this.open_message_url(&url, cx);
@@ -47162,14 +47102,14 @@ fn venue_row(
         .py_2()
         .rounded_md()
         .border_1()
-        .border_color(rgb(0x8b949e))
-        .bg(rgb(0x21262d))
+        .border_color(TEXT_MUTED)
+        .bg(BG_SUBTLE)
         .child(div().text_sm().font_medium().child(format!("📍 {title}")));
     if !venue.address.is_empty() {
         body = body.child(
             div()
                 .text_xs()
-                .text_color(rgb(0xc9d1d9))
+                .text_color(TEXT_PRIMARY)
                 .child(venue.address.clone()),
         );
     }
@@ -47178,12 +47118,12 @@ fn venue_row(
     } else {
         format!("{} · via {}", venue.location.coords_label(), venue.provider)
     };
-    body.child(div().text_xs().text_color(rgb(0x8b949e)).child(subtitle))
+    body.child(div().text_xs().text_color(TEXT_MUTED).child(subtitle))
         .child(
             div()
                 .id(("venue-open-map", row_id))
                 .text_sm()
-                .text_color(rgb(0x58a6ff))
+                .text_color(ACCENT)
                 .cursor_pointer()
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.open_message_url(&url, cx);
@@ -47210,8 +47150,8 @@ fn contact_row(row_id: u64, contact: &quill::telegram::envelope::ContactContent)
         .py_2()
         .rounded_md()
         .border_1()
-        .border_color(rgb(0x8b949e))
-        .bg(rgb(0x21262d))
+        .border_color(TEXT_MUTED)
+        .bg(BG_SUBTLE)
         .child(div().text_sm().font_medium().child(format!(
             "👤 {}",
             if name.is_empty() { "Contact" } else { &name }
@@ -47220,7 +47160,7 @@ fn contact_row(row_id: u64, contact: &quill::telegram::envelope::ContactContent)
         body = body.child(
             div()
                 .text_xs()
-                .text_color(rgb(0xc9d1d9))
+                .text_color(TEXT_PRIMARY)
                 .child(contact.phone_number.clone()),
         );
     }
@@ -47228,7 +47168,7 @@ fn contact_row(row_id: u64, contact: &quill::telegram::envelope::ContactContent)
         body = body.child(
             div()
                 .text_xs()
-                .text_color(rgb(0x8b949e))
+                .text_color(TEXT_MUTED)
                 .child("Telegram user"),
         );
     }
@@ -47251,8 +47191,8 @@ fn dice_row(row_id: u64, dice: &quill::telegram::envelope::DiceContent) -> AnyEl
         .py_3()
         .rounded_md()
         .border_1()
-        .border_color(rgb(0x8b949e))
-        .bg(rgb(0x21262d))
+        .border_color(TEXT_MUTED)
+        .bg(BG_SUBTLE)
         .child(div().text_size(px(64.0)).child(dice.face().to_string()))
         .child(
             div()
