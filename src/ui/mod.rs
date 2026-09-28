@@ -71,7 +71,7 @@ use quill::telegram::envelope::{
     PaymentFormTypeData, PaymentProviderKind, PaymentReceivedContent, PaymentSuccessContent,
     PollContent, PollOption, PollType, ReplyKeyboard, ReplyMarkup, ScopeNotificationSettings,
     SecretChatState, SpeechRecognition, SponsoredMessage, StatisticalGraph, StatisticalValue,
-    StorageFileTypeStats, StorageStats, UsernameCheckResult, call_entry_label,
+    StorageFileTypeStats, StorageStats, StoryOriginView, UsernameCheckResult, call_entry_label,
     chat_ttl_service_label, effective_content, format_payment_price, format_ttl_setting,
     price_parts_total, toggle_chosen_emoji_reaction,
 };
