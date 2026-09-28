@@ -958,8 +958,8 @@ pub enum EnvelopePayload {
     /// Phase 9.2: `updateStoryPostFailed` (TDLib 1.8.67,
     /// `schema/td_api.tl:10907`) — a story failed to post. The reducer drops
     /// the failed story from `Session::stories` and the poster's tray entry
-    /// (it never went live). Unreachable without `sendStory` (absent from
-    /// 1.8.67), parsed for schema completeness.
+    /// (it never went live). Phase 9.3: also feeds the composer's
+    /// `StoryPostOutcome::Failed` for our own pending post.
     UpdateStoryPostFailed {
         story: ParsedStory,
         error: TdError,
@@ -969,6 +969,12 @@ pub enum EnvelopePayload {
     /// it in `Session::story_available_reactions` for the viewer picker.
     StoryAvailableReactions {
         reactions: Vec<StoryAvailableReactionView>,
+    },
+    /// Phase 9.3: `canPostStory` answer (TDLib 1.8.67,
+    /// `schema/td_api.tl:8535` – `td_api.tl:8553`). The reducer honors it
+    /// only when the pending purpose is `CheckCanPostStory`.
+    CanPostStoryResult {
+        result: CanPostStoryResult,
     },
     Unknown(UnknownKind),
 }
@@ -3989,6 +3995,69 @@ pub enum StoryListView {
     Archive,
 }
 
+/// Phase 9.3: `canPostStoryResult*` — the `canPostStory` answer (TDLib
+/// 1.8.67, `schema/td_api.tl:8535` – `td_api.tl:8553`). Only the fields
+/// the composer shows survive: `retry_after` for the weekly/monthly
+/// limits, `story_id` for the live-story conflict.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CanPostStoryResult {
+    Ok { story_count: i32 },
+    PremiumNeeded,
+    BoostNeeded,
+    ActiveStoryLimitExceeded,
+    WeeklyLimitExceeded { retry_after: i32 },
+    MonthlyLimitExceeded { retry_after: i32 },
+    LiveStoryIsActive { story_id: i32 },
+}
+
+impl CanPostStoryResult {
+    pub fn can_post(&self) -> bool {
+        matches!(self, CanPostStoryResult::Ok { .. })
+    }
+
+    /// Honest one-line reason shown in the composer.
+    pub fn user_message(&self) -> String {
+        match self {
+            CanPostStoryResult::Ok { .. } => "Eligible to post".to_string(),
+            CanPostStoryResult::PremiumNeeded => {
+                "Telegram Premium is required to post stories".to_string()
+            }
+            CanPostStoryResult::BoostNeeded => {
+                "The chat needs more boosts before stories can be posted".to_string()
+            }
+            CanPostStoryResult::ActiveStoryLimitExceeded => {
+                "Too many active stories — delete one or wait for the oldest to expire".to_string()
+            }
+            CanPostStoryResult::WeeklyLimitExceeded { retry_after } => format!(
+                "Weekly story limit exceeded — try again in {}",
+                format_retry_after(*retry_after)
+            ),
+            CanPostStoryResult::MonthlyLimitExceeded { retry_after } => format!(
+                "Monthly story limit exceeded — try again in {}",
+                format_retry_after(*retry_after)
+            ),
+            CanPostStoryResult::LiveStoryIsActive { .. } => {
+                "A live story is active — delete it first".to_string()
+            }
+        }
+    }
+}
+
+/// `retry_after` seconds → "2h 15m" / "3d". Kept local (one caller).
+fn format_retry_after(seconds: i32) -> String {
+    let seconds = seconds.max(0) as i64;
+    let (days, rem) = (seconds / 86400, seconds % 86400);
+    let (hours, rem) = (rem / 3600, rem % 3600);
+    let minutes = rem / 60;
+    if days > 0 {
+        format!("{days}d")
+    } else if hours > 0 {
+        format!("{hours}h {minutes}m")
+    } else {
+        format!("{minutes}m")
+    }
+}
+
 /// Phase 9.1: `storyInfo` — basic information about one active story
 /// (TDLib 1.8.67, `schema/td_api.tl:6767-6773`). `chatActiveStories.stories`
 /// arrive in chronological order (increasing `story_id`).
@@ -4117,6 +4186,44 @@ fn parse_story_list(value: Option<&Value>) -> Option<StoryListView> {
     {
         Some("storyListMain") => Some(StoryListView::Main),
         Some("storyListArchive") => Some(StoryListView::Archive),
+        _ => None,
+    }
+}
+
+fn parse_can_post_story_result(value: &Value) -> Option<CanPostStoryResult> {
+    match value.get("@type").and_then(Value::as_str) {
+        Some("canPostStoryResultOk") => Some(CanPostStoryResult::Ok {
+            story_count: value
+                .get("story_count")
+                .and_then(Value::as_i64)
+                .unwrap_or(0) as i32,
+        }),
+        Some("canPostStoryResultPremiumNeeded") => Some(CanPostStoryResult::PremiumNeeded),
+        Some("canPostStoryResultBoostNeeded") => Some(CanPostStoryResult::BoostNeeded),
+        Some("canPostStoryResultActiveStoryLimitExceeded") => {
+            Some(CanPostStoryResult::ActiveStoryLimitExceeded)
+        }
+        Some("canPostStoryResultWeeklyLimitExceeded") => {
+            Some(CanPostStoryResult::WeeklyLimitExceeded {
+                retry_after: value
+                    .get("retry_after")
+                    .and_then(Value::as_i64)
+                    .unwrap_or(0) as i32,
+            })
+        }
+        Some("canPostStoryResultMonthlyLimitExceeded") => {
+            Some(CanPostStoryResult::MonthlyLimitExceeded {
+                retry_after: value
+                    .get("retry_after")
+                    .and_then(Value::as_i64)
+                    .unwrap_or(0) as i32,
+            })
+        }
+        Some("canPostStoryResultLiveStoryIsActive") => {
+            Some(CanPostStoryResult::LiveStoryIsActive {
+                story_id: value.get("story_id").and_then(Value::as_i64).unwrap_or(0) as i32,
+            })
+        }
         _ => None,
     }
 }
@@ -6009,6 +6116,19 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
                 })
                 .unwrap_or_default();
             Ok(EnvelopePayload::StoryAvailableReactions { reactions })
+        }
+        // Phase 9.3: `canPostStory` answer — one of the
+        // `canPostStoryResult*` variants (TDLib 1.8.67, `schema/td_api.tl:8535`
+        // – `td_api.tl:8553`).
+        "canPostStoryResultOk"
+        | "canPostStoryResultPremiumNeeded"
+        | "canPostStoryResultBoostNeeded"
+        | "canPostStoryResultActiveStoryLimitExceeded"
+        | "canPostStoryResultWeeklyLimitExceeded"
+        | "canPostStoryResultMonthlyLimitExceeded"
+        | "canPostStoryResultLiveStoryIsActive" => {
+            let result = parse_can_post_story_result(&value).ok_or(ParseError::MissingField)?;
+            Ok(EnvelopePayload::CanPostStoryResult { result })
         }
         "updateChatReadInbox" => Ok(EnvelopePayload::UpdateChatReadInbox {
             chat_id: ChatId(int53(value.get("chat_id"))?),
@@ -13439,6 +13559,58 @@ mod channel_envelope_tests {
             }
             other => panic!("{other:?}"),
         }
+    }
+
+    #[test]
+    fn can_post_story_results_parsed() {
+        // Phase 9.3: `canPostStoryResult*` (schema 1.8.67 lines
+        // 8535–8553) — the `canPostStory` answer.
+        let cases = [
+            (
+                r#"{"@type":"canPostStoryResultOk","story_count":3}"#,
+                CanPostStoryResult::Ok { story_count: 3 },
+            ),
+            (
+                r#"{"@type":"canPostStoryResultPremiumNeeded"}"#,
+                CanPostStoryResult::PremiumNeeded,
+            ),
+            (
+                r#"{"@type":"canPostStoryResultBoostNeeded"}"#,
+                CanPostStoryResult::BoostNeeded,
+            ),
+            (
+                r#"{"@type":"canPostStoryResultActiveStoryLimitExceeded"}"#,
+                CanPostStoryResult::ActiveStoryLimitExceeded,
+            ),
+            (
+                r#"{"@type":"canPostStoryResultWeeklyLimitExceeded","retry_after":9000}"#,
+                CanPostStoryResult::WeeklyLimitExceeded { retry_after: 9000 },
+            ),
+            (
+                r#"{"@type":"canPostStoryResultMonthlyLimitExceeded","retry_after":86400}"#,
+                CanPostStoryResult::MonthlyLimitExceeded { retry_after: 86400 },
+            ),
+            (
+                r#"{"@type":"canPostStoryResultLiveStoryIsActive","story_id":12}"#,
+                CanPostStoryResult::LiveStoryIsActive { story_id: 12 },
+            ),
+        ];
+        for (json, expected) in cases {
+            let env = parse_envelope(json).unwrap();
+            match env.payload {
+                EnvelopePayload::CanPostStoryResult { result } => {
+                    assert_eq!(result, expected);
+                }
+                other => panic!("{other:?}"),
+            }
+        }
+        assert!(CanPostStoryResult::Ok { story_count: 0 }.can_post());
+        assert!(!CanPostStoryResult::PremiumNeeded.can_post());
+        assert!(
+            CanPostStoryResult::WeeklyLimitExceeded { retry_after: 9000 }
+                .user_message()
+                .contains("2h 30m")
+        );
     }
 
     #[test]

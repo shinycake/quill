@@ -3,6 +3,7 @@ use crate::composer::{
 };
 use crate::ids::{ChatId, FileId, MessageId, RequestId, TopicId};
 use crate::pins::{TDLIB_CMAKE_VERSION, TDLIB_GIT_COMMIT};
+use crate::story_composer::StoryMediaKind;
 use serde_json::{Value, json};
 
 pub struct SetTdlibParameters {
@@ -4212,6 +4213,77 @@ pub fn send_text_story_reply(
     .to_string()
 }
 
+/// Phase 9.3: `canPostStory` (TDLib 1.8.67, `schema/td_api.tl:13702`) —
+/// `canPostStory chat_id:int53 = CanPostStoryResult;` The composer sends
+/// it with the Saved Messages chat id (`Session::my_user_id`) before
+/// every post.
+pub fn can_post_story(extra: RequestId, chat_id: ChatId) -> String {
+    json!({
+        "@type": "canPostStory",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0
+    })
+    .to_string()
+}
+
+/// Phase 9.3: `InputStoryContent` for `postStory` (TDLib 1.8.67,
+/// `schema/td_api.tl:6673` / `td_api.tl:6681`). Video `duration` is 0 —
+/// TDLib derives the real duration from the file during upload.
+pub fn input_story_content(kind: StoryMediaKind, path: &str) -> Value {
+    let file = json!({ "@type": "inputFileLocal", "path": path });
+    match kind {
+        StoryMediaKind::Photo => json!({
+            "@type": "inputStoryContentPhoto",
+            "photo": file,
+            "added_sticker_file_ids": []
+        }),
+        _ => json!({
+            "@type": "inputStoryContentVideo",
+            "video": file,
+            "added_sticker_file_ids": [],
+            "duration": 0.0,
+            "cover_frame_timestamp": 0.0,
+            "is_animation": false
+        }),
+    }
+}
+
+/// Phase 9.3: `postStory` (TDLib 1.8.67, `schema/td_api.tl:13715`) —
+/// posts a photo/video story as the current user (the Saved Messages chat
+/// id, `Session::my_user_id`). `active_period` is the fixed 24h default
+/// for non-Premium accounts (schema comment on the parameter); areas
+/// stay empty (story areas are out of this slice),
+/// `is_posted_to_chat_page` / `protect_content` are false. The caption
+/// gets the same markup→entities treatment as message captions
+/// (`formatted_caption`); `from_story_full_id` is null (not a repost —
+/// schema comment: "pass null if the story isn't repost of another
+/// story"). Response is a `story`; success/failure lands via
+/// `updateStoryPostSucceeded` / `updateStoryPostFailed`.
+pub fn post_story(
+    extra: RequestId,
+    chat_id: ChatId,
+    kind: StoryMediaKind,
+    path: &str,
+    caption: &str,
+    privacy_settings: Value,
+) -> String {
+    json!({
+        "@type": "postStory",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0,
+        "content": input_story_content(kind, path),
+        "areas": { "@type": "inputStoryAreas", "areas": [] },
+        "caption": formatted_caption(caption, false),
+        "privacy_settings": privacy_settings,
+        "album_ids": [],
+        "active_period": 86400,
+        "from_story_full_id": Value::Null,
+        "is_posted_to_chat_page": false,
+        "protect_content": false
+    })
+    .to_string()
+}
+
 pub fn add_chat_to_list(extra: RequestId, chat_id: ChatId, archive: bool) -> String {
     add_chat_to_list_value(
         extra,
@@ -6248,6 +6320,7 @@ mod tests {
 #[cfg(test)]
 mod channel_requests_tests {
     use super::*;
+    use crate::story_composer::StoryPrivacy;
 
     #[test]
     fn channel_request_shapes_match_1_8_67() {
@@ -7439,6 +7512,80 @@ mod channel_requests_tests {
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(v["@type"], "deleteChatWelcomeMessage");
         assert_eq!(v["welcome_message_id"], 5);
+    }
+
+    #[test]
+    fn s1_post_story_shapes_match_1_8_67() {
+        // Phase 9.3: `canPostStory chat_id:int53 = CanPostStoryResult`
+        // (schema 1.8.67, line 13702); `postStory chat_id:int53
+        // content:InputStoryContent areas:inputStoryAreas
+        // caption:formattedText privacy_settings:StoryPrivacySettings
+        // album_ids:vector<int32> active_period:int32
+        // from_story_full_id:storyFullId is_posted_to_chat_page:Bool
+        // protect_content:Bool = Story` (line 13715);
+        // `inputStoryContentPhoto photo:InputFile
+        // added_sticker_file_ids:vector<int32>` (line 6673);
+        // `inputStoryContentVideo video:InputFile
+        // added_sticker_file_ids:vector<int32> duration:double
+        // cover_frame_timestamp:double is_animation:Bool` (line 6681);
+        // `inputStoryAreas areas:vector<inputStoryArea>` (line 6619);
+        // `inputFileLocal path:string` (line 325).
+        let json = can_post_story(RequestId(70), ChatId(777));
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "canPostStory");
+        assert_eq!(v["@extra"], "70");
+        assert_eq!(v["chat_id"], 777);
+
+        let privacy = StoryPrivacy::Contacts.settings_json(&[]);
+        let json = post_story(
+            RequestId(71),
+            ChatId(777),
+            StoryMediaKind::Photo,
+            "/tmp/pic.jpg",
+            "hello **bold**",
+            privacy,
+        );
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "postStory");
+        assert_eq!(v["chat_id"], 777);
+        assert_eq!(v["content"]["@type"], "inputStoryContentPhoto");
+        assert_eq!(v["content"]["photo"]["@type"], "inputFileLocal");
+        assert_eq!(v["content"]["photo"]["path"], "/tmp/pic.jpg");
+        assert_eq!(
+            v["content"]["added_sticker_file_ids"],
+            serde_json::json!([])
+        );
+        assert_eq!(v["areas"]["@type"], "inputStoryAreas");
+        assert_eq!(v["areas"]["areas"], serde_json::json!([]));
+        assert_eq!(v["caption"]["text"], "hello bold");
+        assert!(!v["caption"]["entities"].as_array().unwrap().is_empty());
+        assert_eq!(
+            v["privacy_settings"]["@type"],
+            "storyPrivacySettingsContacts"
+        );
+        assert_eq!(v["album_ids"], serde_json::json!([]));
+        assert_eq!(v["active_period"], 86400);
+        assert!(v["from_story_full_id"].is_null());
+        assert_eq!(v["is_posted_to_chat_page"], false);
+        assert_eq!(v["protect_content"], false);
+
+        let json = post_story(
+            RequestId(72),
+            ChatId(777),
+            StoryMediaKind::Video,
+            "/tmp/clip.mp4",
+            "",
+            StoryPrivacy::CloseFriends.settings_json(&[]),
+        );
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["content"]["@type"], "inputStoryContentVideo");
+        assert_eq!(v["content"]["video"]["path"], "/tmp/clip.mp4");
+        assert_eq!(v["content"]["duration"], 0.0);
+        assert_eq!(v["content"]["is_animation"], false);
+        assert_eq!(
+            v["privacy_settings"]["@type"],
+            "storyPrivacySettingsCloseFriends"
+        );
     }
 
     #[test]

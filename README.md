@@ -311,17 +311,17 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [ ] "Only admins can send stories in this group" and story-restriction notices (TGX strings ChatDisabledStory / ChatRestrictedStory / ChatRestrictedStoryUntil; no Quill handling) <!-- parity:stories-restriction-notice -->
 
 #### Post stories
-- [ ] Story composer: photo picker (partial: post-success/fail updates parsed — telegram/envelope.rs:4774,4786) <!-- parity:stories-post-photo-composer -->
-- [ ] Video story upload (partial: inputStoryContentVideo exists in schema, unused) <!-- parity:stories-post-video -->
-- [ ] canPostStory eligibility check before posting (schema td_api.tl:13702, unused) <!-- parity:stories-can-post-check -->
-- [ ] postStory with caption + privacy selector (partial: schema constructor verified td_api.tl:13715; post-succeeded/failed reducer upserts story + queues tray refresh, DECISIONS.md 9.2) <!-- parity:stories-post-call -->
-- [ ] Privacy selector: Everyone / Contacts / Close friends / Selected users (schema storyPrivacySettings*, td_api.tl:8928-8937; unused) <!-- parity:stories-post-privacy -->
-- [ ] Formatted caption with entities on post <!-- parity:stories-post-caption -->
+- [x] Story composer: photo picker (path entry — native file picker deferred; `postStory` via td_api.tl:13715) <!-- parity:stories-post-photo-composer -->
+- [x] Video story upload (`inputStoryContentVideo`, td_api.tl:6681) <!-- parity:stories-post-video -->
+- [x] canPostStory eligibility check before posting (schema td_api.tl:13702) <!-- parity:stories-can-post-check -->
+- [x] postStory with caption + privacy selector (td_api.tl:13715; post-succeeded/failed reducer upserts story + queues tray refresh, DECISIONS.md 9.3) <!-- parity:stories-post-call -->
+- [x] Privacy selector: Everyone / Contacts / Close friends / Selected users (`storyPrivacySettings*`, td_api.tl:8928-8937) <!-- parity:stories-post-privacy -->
+- [x] Formatted caption with entities on post <!-- parity:stories-post-caption -->
 - [ ] Add story areas (stickers, links, reactions) on own post <!-- parity:stories-post-areas -->
 - [ ] Active period / expiry selection (postStory active_period param unused) <!-- parity:stories-post-expiry -->
 - [ ] "Post to chat page" toggle (postStory is_posted_to_chat_page / toggleStoryIsPostedToChatPage unused) <!-- parity:stories-post-to-chat-page -->
 - [ ] "Protect content" (no forwarding) toggle (postStory protect_content param unused) <!-- parity:stories-post-protect -->
-- [ ] Honest pending / succeeded / failed states (partial: updateStoryPostSucceeded/PostFailed parsed and applied — telegram/envelope.rs:10966,10985; no UI states) <!-- parity:stories-post-status -->
+- [x] Honest pending / succeeded / failed states (posting begins when `postStory` is sent; `updateStoryPostSucceeded`/`PostFailed` applied to the composer status line, DECISIONS.md 9.3) <!-- parity:stories-post-status -->
 - [ ] Edit own story content / caption / areas (editStory, td_api.tl:13732, unused) <!-- parity:stories-edit -->
 - [ ] Edit story cover frame (editStoryCover, td_api.tl:13738, unused) <!-- parity:stories-edit-cover -->
 - [ ] Change a posted story's privacy settings (setStoryPrivacySettings, td_api.tl:13743, unused) <!-- parity:stories-post-change-privacy -->

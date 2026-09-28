@@ -31,6 +31,7 @@ use crate::state::{
     RequestRollback, SearchStatus, Session, ShutdownPhase, SupergroupMembersFetch,
     WelcomeMessagesFetch,
 };
+use crate::story_composer::{StoryMediaKind, StoryPrivacy};
 use crate::telegram::client::{LiveTdJson, OwnedEnvelope, ReceiveBridge};
 use crate::telegram::envelope::{
     AuthorizationState, CallState, ChatAdminRights, ChatDraft, ChatFolderSpec, ChatKind,
@@ -46,48 +47,50 @@ use crate::telegram::requests::{
     VoiceNoteSend, accept_call_with_protocol, add_chat_member, add_chat_members, add_chat_to_list,
     add_chat_to_list_value, add_chat_welcome_message, add_contact, add_message_reaction,
     add_recently_found_chat, ban_group_call_participants, boost_chat,
-    cancel_download_file as cancel_download_file_request, chat_member_status_administrator_json,
-    chat_member_status_banned_json, chat_member_status_member_json,
-    chat_member_status_restricted_json, check_authentication_code, check_authentication_password,
-    clear_recently_found_chats, click_chat_sponsored_message, close_chat, close_request,
-    close_secret_chat as close_secret_chat_request, close_story, create_call_with_protocol,
-    create_chat_folder, create_chat_invite_link, create_forum_topic, create_new_basic_group_chat,
-    create_new_secret_chat, create_new_supergroup_chat, create_private_chat, create_video_chat,
-    decline_group_call_invitation, delete_chat, delete_chat_folder, delete_chat_history,
-    delete_chat_welcome_message, delete_forum_topic, delete_messages, delete_story,
-    discard_call as discard_call_request, download_file as download_file_request, edit_chat_folder,
-    edit_chat_invite_link, edit_chat_welcome_message, edit_forum_topic, edit_message_caption,
-    edit_message_text, end_group_call, end_group_call_recording, end_group_call_screen_sharing,
-    forward_messages, get_archive_chat_list_settings, get_authorization_state,
-    get_available_chat_boost_slots, get_basic_group_full_info, get_callback_query_answer,
-    get_chat_active_stories, get_chat_administrators, get_chat_boost_status, get_chat_event_log,
-    get_chat_folder, get_chat_history, get_chat_invite_links, get_chat_join_requests,
-    get_chat_lists_to_add_chat, get_chat_member, get_chat_scheduled_messages,
-    get_chat_sponsored_messages, get_chat_statistics, get_commands, get_contacts, get_forum_topics,
-    get_full_rich_message, get_group_call, get_installed_sticker_sets, get_me, get_message_link,
-    get_message_properties, get_message_thread_history, get_saved_animations,
-    get_saved_notification_sounds, get_scope_notification_settings, get_secret_chat,
-    get_sticker_set, get_storage_statistics, get_story, get_story_available_reactions,
-    get_supergroup, get_supergroup_full_info, get_supergroup_members, get_user_full_info,
-    get_user_privacy_setting_rules, get_video_chat_invite_link, get_video_chat_rtmp_url,
-    get_web_page_instant_view, input_message_photo, input_message_video,
-    invite_group_call_participant, join_chat, join_group_call, join_video_chat, leave_chat,
-    leave_group_call, load_active_stories, load_chat_welcome_messages, load_chats, load_chats_list,
-    load_group_call_participants, open_chat, open_message_content, open_story, pin_chat_message,
-    process_chat_join_request, read_chat_list, recognize_speech, remove_message_reaction,
-    reorder_chat_folders, replace_primary_chat_invite_link, replace_video_chat_rtmp_url,
-    report_chat, report_chat_sponsored_message, resend_messages, revoke_chat_invite_link,
-    revoke_group_call_invite_link, search_call_messages, search_chat_messages, search_chats,
-    search_messages, search_public_chats, search_recently_found_chats, send_animation,
-    send_call_debug_information, send_call_log, send_call_rating_detail, send_call_signaling_data,
-    send_chat_action, send_chat_action_kind, send_document, send_group_call_message,
-    send_message_album, send_photo, send_poll, send_rich_message, send_sticker, send_text,
-    send_text_story_reply, send_video, send_video_note, send_voice_note,
-    set_archive_chat_list_settings, set_authentication_phone_number, set_chat_draft_message,
-    set_chat_member_status, set_chat_member_tag, set_chat_message_auto_delete_time,
-    set_chat_notification_settings, set_chat_permissions, set_chat_slow_mode_delay,
-    set_group_call_participant_volume_level, set_message_sender_block_list, set_pinned_chats,
-    set_poll_answer, set_scope_notification_settings, set_story_reaction, set_supergroup_username,
+    can_post_story as can_post_story_request, cancel_download_file as cancel_download_file_request,
+    chat_member_status_administrator_json, chat_member_status_banned_json,
+    chat_member_status_member_json, chat_member_status_restricted_json, check_authentication_code,
+    check_authentication_password, clear_recently_found_chats, click_chat_sponsored_message,
+    close_chat, close_request, close_secret_chat as close_secret_chat_request, close_story,
+    create_call_with_protocol, create_chat_folder, create_chat_invite_link, create_forum_topic,
+    create_new_basic_group_chat, create_new_secret_chat, create_new_supergroup_chat,
+    create_private_chat, create_video_chat, decline_group_call_invitation, delete_chat,
+    delete_chat_folder, delete_chat_history, delete_chat_welcome_message, delete_forum_topic,
+    delete_messages, delete_story, discard_call as discard_call_request,
+    download_file as download_file_request, edit_chat_folder, edit_chat_invite_link,
+    edit_chat_welcome_message, edit_forum_topic, edit_message_caption, edit_message_text,
+    end_group_call, end_group_call_recording, end_group_call_screen_sharing, forward_messages,
+    get_archive_chat_list_settings, get_authorization_state, get_available_chat_boost_slots,
+    get_basic_group_full_info, get_callback_query_answer, get_chat_active_stories,
+    get_chat_administrators, get_chat_boost_status, get_chat_event_log, get_chat_folder,
+    get_chat_history, get_chat_invite_links, get_chat_join_requests, get_chat_lists_to_add_chat,
+    get_chat_member, get_chat_scheduled_messages, get_chat_sponsored_messages, get_chat_statistics,
+    get_commands, get_contacts, get_forum_topics, get_full_rich_message, get_group_call,
+    get_installed_sticker_sets, get_me, get_message_link, get_message_properties,
+    get_message_thread_history, get_saved_animations, get_saved_notification_sounds,
+    get_scope_notification_settings, get_secret_chat, get_sticker_set, get_storage_statistics,
+    get_story, get_story_available_reactions, get_supergroup, get_supergroup_full_info,
+    get_supergroup_members, get_user_full_info, get_user_privacy_setting_rules,
+    get_video_chat_invite_link, get_video_chat_rtmp_url, get_web_page_instant_view,
+    input_message_photo, input_message_video, invite_group_call_participant, join_chat,
+    join_group_call, join_video_chat, leave_chat, leave_group_call, load_active_stories,
+    load_chat_welcome_messages, load_chats, load_chats_list, load_group_call_participants,
+    open_chat, open_message_content, open_story, pin_chat_message,
+    post_story as post_story_request, process_chat_join_request, read_chat_list, recognize_speech,
+    remove_message_reaction, reorder_chat_folders, replace_primary_chat_invite_link,
+    replace_video_chat_rtmp_url, report_chat, report_chat_sponsored_message, resend_messages,
+    revoke_chat_invite_link, revoke_group_call_invite_link, search_call_messages,
+    search_chat_messages, search_chats, search_messages, search_public_chats,
+    search_recently_found_chats, send_animation, send_call_debug_information, send_call_log,
+    send_call_rating_detail, send_call_signaling_data, send_chat_action, send_chat_action_kind,
+    send_document, send_group_call_message, send_message_album, send_photo, send_poll,
+    send_rich_message, send_sticker, send_text, send_text_story_reply, send_video, send_video_note,
+    send_voice_note, set_archive_chat_list_settings, set_authentication_phone_number,
+    set_chat_draft_message, set_chat_member_status, set_chat_member_tag,
+    set_chat_message_auto_delete_time, set_chat_notification_settings, set_chat_permissions,
+    set_chat_slow_mode_delay, set_group_call_participant_volume_level,
+    set_message_sender_block_list, set_pinned_chats, set_poll_answer,
+    set_scope_notification_settings, set_story_reaction, set_supergroup_username,
     set_user_privacy_setting_rules, set_video_chat_title, start_group_call_recording,
     start_group_call_screen_sharing, start_scheduled_video_chat,
     supergroup_members_filter_administrators_json, supergroup_members_filter_banned_json,
@@ -7762,6 +7765,88 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session
                 .request_for_story(RequestPurpose::SendStoryReply, chat_id, story_id);
         let json = send_text_story_reply(extra, chat_id, chat_id, story_id, text);
+        match self.sender.send_json(&json) {
+            Ok(()) => Ok(extra),
+            Err(err) => {
+                self.session.requests.take(extra);
+                Err(err)
+            }
+        }
+    }
+
+    /// Phase 9.3: `canPostStory` eligibility check (TDLib 1.8.67,
+    /// `schema/td_api.tl:13702`) for the Saved Messages chat
+    /// (`Session::my_user_id`). The composer calls this before every post;
+    /// the answer lands in `Session::story_post.eligibility`. Deduped while
+    /// a check is in flight.
+    pub fn check_can_post_story(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let Some(user_id) = self.session.my_user_id else {
+            return Err(ConnectSendError::InvalidRequest);
+        };
+        if self
+            .session
+            .requests
+            .has_purpose(RequestPurpose::CheckCanPostStory)
+        {
+            return Ok(None);
+        }
+        let chat_id = ChatId(user_id);
+        let extra = self
+            .session
+            .request(RequestPurpose::CheckCanPostStory, Some(chat_id));
+        match self
+            .sender
+            .send_json(&can_post_story_request(extra, chat_id))
+        {
+            Ok(()) => Ok(Some(extra)),
+            Err(err) => {
+                self.session.requests.take(extra);
+                Err(err)
+            }
+        }
+    }
+
+    /// Phase 9.3: `postStory` (TDLib 1.8.67, `schema/td_api.tl:13715`) —
+    /// posts the composer's photo/video with caption + privacy as the
+    /// current user (Saved Messages chat id). `kind` must be detected
+    /// and the file must exist; `SelectedUsers` needs at least one user.
+    /// The `story` response and `updateStoryPostSucceeded` /
+    /// `updateStoryPostFailed` drive `Session::story_post.outcome`.
+    pub fn post_story(
+        &mut self,
+        kind: StoryMediaKind,
+        path: &str,
+        caption: &str,
+        privacy: StoryPrivacy,
+        user_ids: &[i64],
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let Some(user_id) = self.session.my_user_id else {
+            return Err(ConnectSendError::InvalidRequest);
+        };
+        if kind == StoryMediaKind::Unknown || !std::path::Path::new(path).is_file() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if privacy == StoryPrivacy::SelectedUsers && user_ids.is_empty() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let chat_id = ChatId(user_id);
+        let extra = self
+            .session
+            .request(RequestPurpose::PostStory, Some(chat_id));
+        let json = post_story_request(
+            extra,
+            chat_id,
+            kind,
+            path,
+            caption,
+            privacy.settings_json(user_ids),
+        );
         match self.sender.send_json(&json) {
             Ok(()) => Ok(extra),
             Err(err) => {

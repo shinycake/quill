@@ -14,7 +14,7 @@ use crate::settings::{
 use crate::telegram::client::OwnedEnvelope;
 use crate::telegram::envelope::{
     AnimationItem, AuthorizationState, BotCommand, BotInfo, CallbackQueryAnswer,
-    ChannelMemberStatus, ChatAction, ChatActiveStoriesView, ChatAdminRights,
+    CanPostStoryResult, ChannelMemberStatus, ChatAction, ChatActiveStoriesView, ChatAdminRights,
     ChatAdministratorEntry, ChatDraft, ChatFolderInfo, ChatFolderSpec, ChatJoinResult, ChatKind,
     ChatList, ChatNotificationSettings, ChatPermissions, ChatPositionUpdate, ChatStatistics,
     ConnectionState, EnvelopePayload, EphemeralMessageContent, ErrorClass, ForumTopic,
@@ -513,6 +513,13 @@ pub enum RequestPurpose {
     /// `inputMessageReplyToStory`. Response is `message`; the normal
     /// message-send updates handle it.
     SendStoryReply,
+    /// Phase 9.3: `canPostStory`. Response is a `canPostStoryResult*`;
+    /// the reducer stores it in `Session::story_post.eligibility`.
+    CheckCanPostStory,
+    /// Phase 9.3: `postStory`. Response is a `story` (the pending
+    /// story, id = temporary); success/failure lands via
+    /// `updateStoryPostSucceeded` / `updateStoryPostFailed`.
+    PostStory,
     /// Parity slice: `createChatFolder`. Response is `chatFolderInfo`;
     /// upserted into `Session::chat_folders` (`updateChatFolders` stays the
     /// source of truth).
@@ -826,6 +833,19 @@ fn call_request_error_line(err: &TdError, action: &str) -> String {
         format!("{action}: no answer — the call timed out")
     } else {
         format!("{action} (error {})", err.code)
+    }
+}
+
+/// Phase 9.3: one-line `TdError` reason for the story composer. Never
+/// includes the native TDLib message (it can contain secrets — see
+/// `TdError`).
+fn error_reason(err: &TdError) -> String {
+    match err.class {
+        ErrorClass::NotFound => "not found".to_string(),
+        ErrorClass::Unauthorized => "not authorized".to_string(),
+        ErrorClass::Flood => "too many requests — try again later".to_string(),
+        ErrorClass::Invalid => "invalid request".to_string(),
+        ErrorClass::Other => format!("error {}", err.code),
     }
 }
 
@@ -3388,10 +3408,41 @@ pub struct Session {
     /// live — e.g. our own) and drained by the UI each render, like
     /// `pending_story_open`.
     pub story_tray_refresh: HashSet<i64>,
+    /// Phase 9.3: story-posting round-trip state — `canPostStory`
+    /// eligibility plus the `postStory` pending/succeeded/failed outcome
+    /// the composer renders.
+    pub story_post: StoryPostState,
     /// Phase 9.1: `loadActiveStories(storyListMain)` was issued. A retry is
     /// allowed (the flag is reset) if the attempt failed.
     pub stories_active_loaded: bool,
     diagnostics: Arc<dyn DiagnosticSink>,
+}
+
+/// Phase 9.3: honest `postStory` UI states — pending while TDLib uploads,
+/// succeeded / failed when `updateStoryPostSucceeded` /
+/// `updateStoryPostFailed` arrive.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum StoryPostOutcome {
+    #[default]
+    None,
+    /// `postStory` answered with a `story`; `story_id` is the temporary
+    /// id the succeeded/failed updates correlate against
+    /// (`old_story_id` / `story.id`).
+    Posting {
+        story_id: i32,
+    },
+    Succeeded,
+    Failed(String),
+}
+
+/// Phase 9.3: the composer's server-side state — latest `canPostStory`
+/// answer (checked before every post), its last error, and the
+/// `postStory` outcome.
+#[derive(Debug, Clone, Default)]
+pub struct StoryPostState {
+    pub eligibility: Option<CanPostStoryResult>,
+    pub check_error: Option<String>,
+    pub outcome: StoryPostOutcome,
 }
 
 /// Phase 6: which info panel is open in the side panel.
@@ -3825,6 +3876,7 @@ impl Session {
             stories_active_loaded: false,
             story_available_reactions: None,
             story_tray_refresh: HashSet::new(),
+            story_post: StoryPostState::default(),
             diagnostics,
         }
     }
@@ -5387,7 +5439,22 @@ impl Session {
             EnvelopePayload::Story { story, files } => {
                 // Phase 9.1: `getStory` response or `updateStory` update.
                 self.remember_files(&files);
+                // Phase 9.3: a `postStory` answer is the pending story —
+                // its id is the temporary id the succeeded/failed updates
+                // correlate against.
+                if pending.is_some_and(|p| p.purpose == RequestPurpose::PostStory) {
+                    self.story_post.outcome = StoryPostOutcome::Posting { story_id: story.id };
+                }
                 self.stories.insert((story.poster_chat_id, story.id), story);
+            }
+            EnvelopePayload::CanPostStoryResult { result } => {
+                // Phase 9.3: `canPostStory` answer — honored only for the
+                // composer's own check (purpose-gated, so a stray result
+                // never flips the UI).
+                if pending.is_some_and(|p| p.purpose == RequestPurpose::CheckCanPostStory) {
+                    self.story_post.eligibility = Some(result);
+                    self.story_post.check_error = None;
+                }
             }
             EnvelopePayload::UpdateStoryDeleted {
                 poster_chat_id,
@@ -5410,20 +5477,40 @@ impl Session {
             EnvelopePayload::UpdateStoryPostSucceeded {
                 story,
                 files,
-                old_story_id: _,
+                old_story_id,
             } => {
                 // Phase 9.2: a story posted from another client is live —
                 // upsert it and refresh the poster's tray row so an own
                 // story appears in the tray.
                 self.remember_files(&files);
                 let poster_chat_id = story.poster_chat_id;
+                // Phase 9.3: our own pending post went live — the composer
+                // shows "Posted".
+                if matches!(
+                    self.story_post.outcome,
+                    StoryPostOutcome::Posting { story_id } if story_id == old_story_id
+                ) {
+                    self.story_post.outcome = StoryPostOutcome::Succeeded;
+                }
                 self.stories.insert((story.poster_chat_id, story.id), story);
                 self.story_tray_refresh.insert(poster_chat_id);
             }
-            EnvelopePayload::UpdateStoryPostFailed { story, error: _ } => {
+            EnvelopePayload::UpdateStoryPostFailed { story, error } => {
                 // Phase 9.2: a story failed to post — drop it like a delete
-                // (it never went live). Unreachable without `sendStory`,
-                // which is absent from TDLib 1.8.67.
+                // (it never went live).
+                // Phase 9.3: the failure reaches our own pending post (the
+                // `sendStory` blocker was retracted — the constructor is
+                // `postStory`, schema `td_api.tl:13715`) and the composer
+                // shows it.
+                if matches!(
+                    self.story_post.outcome,
+                    StoryPostOutcome::Posting { story_id } if story_id == story.id
+                ) {
+                    self.story_post.outcome = StoryPostOutcome::Failed(format!(
+                        "Posting failed: {}",
+                        error_reason(&error)
+                    ));
+                }
                 self.stories.remove(&(story.poster_chat_id, story.id));
                 let empty = if let Some(tray) = self.story_tray.get_mut(&story.poster_chat_id) {
                     tray.stories.retain(|info| info.story_id != story.id);
@@ -6453,6 +6540,21 @@ impl Session {
                 }
             }
             EnvelopePayload::Error(err) => {
+                // Phase 9.3: a `postStory` / `canPostStory` error — the
+                // composer shows it instead of spinning forever.
+                match pending.map(|p| p.purpose) {
+                    Some(RequestPurpose::PostStory) => {
+                        self.story_post.outcome = StoryPostOutcome::Failed(format!(
+                            "Posting failed: {}",
+                            error_reason(&err)
+                        ));
+                    }
+                    Some(RequestPurpose::CheckCanPostStory) => {
+                        self.story_post.check_error =
+                            Some(format!("Eligibility check failed: {}", error_reason(&err)));
+                    }
+                    _ => {}
+                }
                 // Slice G1: roll back optimistic mutations the server
                 // rejected — the pre-request value rides on
                 // `PendingRequest::rollback`.
@@ -13235,6 +13337,119 @@ mod tests {
         // The driver's `tick` drains this into a `getChatActiveStories`
         // refresh for the poster's tray entry.
         assert!(session.story_tray_refresh.contains(&11));
+    }
+
+    #[test]
+    fn story_post_outcome_transitions() {
+        // Phase 9.3: the composer's honest pending / succeeded / failed
+        // states, driven by purpose-gated reducers.
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+
+        // `canPostStory` answer (purpose-gated into `story_post.eligibility`).
+        let extra = session.request(RequestPurpose::CheckCanPostStory, None);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"canPostStoryResultWeeklyLimitExceeded","@extra":"{}","retry_after":9000}}"#,
+                extra.0
+            ),
+        );
+        let eligibility = session
+            .story_post
+            .eligibility
+            .clone()
+            .expect("eligibility stored");
+        assert!(!eligibility.can_post());
+        assert!(eligibility.user_message().contains("2h 30m"));
+
+        // A stray result with no matching pending purpose is ignored.
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"canPostStoryResultOk","story_count":1}"#,
+        );
+        assert!(!session.story_post.eligibility.clone().unwrap().can_post());
+
+        // `postStory` answer → Posting with the temporary story id.
+        let extra = session.request(RequestPurpose::PostStory, None);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"story","@extra":"{}","id":8,"poster_chat_id":777,"date":1,"content":{{"@type":"storyContentUnsupported"}},"caption":{{"@type":"formattedText","text":"","entities":[]}}}}"#,
+                extra.0
+            ),
+        );
+        assert_eq!(
+            session.story_post.outcome,
+            StoryPostOutcome::Posting { story_id: 8 }
+        );
+
+        // `updateStoryPostSucceeded` with a matching old_story_id →
+        // Succeeded (and the 9.2 upsert still runs).
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateStoryPostSucceeded","story":{"@type":"story","id":9,"poster_chat_id":777,"date":1,"content":{"@type":"storyContentUnsupported"},"caption":{"@type":"formattedText","text":"","entities":[]}},"old_story_id":8}"#,
+        );
+        assert_eq!(session.story_post.outcome, StoryPostOutcome::Succeeded);
+        assert!(session.stories.contains_key(&(777, 9)));
+
+        // Failed path: new pending post, then `updateStoryPostFailed`.
+        let extra = session.request(RequestPurpose::PostStory, None);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"story","@extra":"{}","id":10,"poster_chat_id":777,"date":1,"content":{{"@type":"storyContentUnsupported"}},"caption":{{"@type":"formattedText","text":"","entities":[]}}}}"#,
+                extra.0
+            ),
+        );
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateStoryPostFailed","story":{"@type":"story","id":10,"poster_chat_id":777,"date":1,"content":{"@type":"storyContentUnsupported"},"caption":{"@type":"formattedText","text":"","entities":[]}},"error":{"@type":"error","code":400,"message":"x"},"error_type":{"@type":"canPostStoryResultOk"}}"#,
+        );
+        assert!(matches!(
+            session.story_post.outcome,
+            StoryPostOutcome::Failed(_)
+        ));
+
+        // A raw `error` answer on `postStory` → Failed; on `canPostStory`
+        // → check_error (the composer stops spinning either way).
+        let extra = session.request(RequestPurpose::PostStory, None);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"error","@extra":"{}","code":400,"message":"x"}}"#,
+                extra.0
+            ),
+        );
+        assert!(matches!(
+            session.story_post.outcome,
+            StoryPostOutcome::Failed(_)
+        ));
+        let extra = session.request(RequestPurpose::CheckCanPostStory, None);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"error","@extra":"{}","code":401,"message":"x"}}"#,
+                extra.0
+            ),
+        );
+        assert!(session.story_post.check_error.is_some());
     }
 
     #[test]

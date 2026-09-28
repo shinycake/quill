@@ -46,10 +46,11 @@ use quill::state::{
     ActiveCall, ActiveGroupCall, AdminListFetch, AdminRightsFetch, CallSummary, ChatEventLogFetch,
     ChatSearchJump, ChatStatisticsFetch, ChatSummary, ContactRow, ForwardResult, HistoryMessage,
     InfoPanelTarget, InviteLinkFetch, JoinRequestFetch, MemberListFilter, OutboxReceipt,
-    RequestPurpose, SearchStatus, Session, SponsoredReportFlight, SupergroupMembersFetch,
-    WelcomeMessagesFetch, effective_preview, event_log_relative_time, outgoing_status_label,
-    unix_ms_now, unread_badge_text,
+    RequestPurpose, SearchStatus, Session, SponsoredReportFlight, StoryPostOutcome, StoryPostState,
+    SupergroupMembersFetch, WelcomeMessagesFetch, effective_preview, event_log_relative_time,
+    outgoing_status_label, unix_ms_now, unread_badge_text,
 };
+use quill::story_composer::{StoryComposer, StoryMediaKind, StoryPrivacy};
 use quill::story_viewer::{StoryViewer, StoryViewerItem, StoryViewerKind, collect_story_items};
 use quill::telegram::client::copy_and_parse;
 use quill::telegram::envelope::{
@@ -1468,6 +1469,12 @@ pub struct QuillApp {
     story_reply_open: bool,
     /// Phase 9.2: reply-to-story draft (the viewer overlay's reply row).
     story_reply_input: Entity<TextareaState>,
+    /// Phase 9.3: story posting composer state (pure) + its path /
+    /// caption / user-search inputs.
+    story_composer: StoryComposer,
+    story_composer_path: Entity<TextareaState>,
+    story_composer_caption: Entity<TextareaState>,
+    story_composer_user_search: Entity<TextareaState>,
     /// Phase 6: sidebar tab — `true` shows the contacts list instead of
     /// the chat list.
     contacts_tab_open: bool,
@@ -1686,11 +1693,17 @@ pub enum ScreenshotDemo {
     /// `ReadyStories`, but Demo chat A's photo story carries a chosen ❤
     /// reaction, interaction counts, and deletable/repliable flags; the
     /// viewer opens with the **reaction picker** and **reply row** visible,
-    /// plus a seeded `availableReactions` response (Phase 9.2). The photo
-    /// composer itself is absent: the pinned TDLib 1.8.67 schema posts
-    /// stories via the `postStory` constructor, and the composer wiring
-    /// against it is queued as future work.
+    /// plus a seeded `availableReactions` response (Phase 9.2). The demo
+    /// keeps its viewer-only shape — the posting composer is the
+    /// `ReadyStoryComposer` demo (Phase 9.3).
     ReadyStoryPost,
+    /// Phase 9.3: story posting composer (injected, no live Telegram) —
+    /// the `ReadyStories` fixture plus the composer overlay open: a
+    /// seeded photo path (the demo thumbnail), a caption draft, the
+    /// privacy selector on Close friends, and a seeded
+    /// `canPostStoryResultOk` so the status line shows "✓ Eligible to
+    /// post".
+    ReadyStoryComposer,
     /// MED3 downloads-manager demo (injected, no live Telegram): the
     /// `ReadyMedia` seed plus an actively downloading document (file 24,
     /// 42% through `notes.txt`), a failed document (file 26, "Retry"
@@ -2109,6 +2122,27 @@ impl QuillApp {
                 .placeholder("Reply to story")
                 .auto_grow(1, 3)
                 .submit_on_enter(true)
+        });
+        // Phase 9.3: story composer inputs — media path (path entry; no
+        // native file-picker infrastructure yet), caption, and the
+        // selected-users search.
+        let story_composer_path = cx.new(|cx| {
+            TextareaState::new(window, cx)
+                .placeholder("/path/to/photo.jpg")
+                .auto_grow(1, 1)
+                .submit_on_enter(false)
+        });
+        let story_composer_caption = cx.new(|cx| {
+            TextareaState::new(window, cx)
+                .placeholder("Caption… (**bold** markup supported)")
+                .auto_grow(1, 3)
+                .submit_on_enter(false)
+        });
+        let story_composer_user_search = cx.new(|cx| {
+            TextareaState::new(window, cx)
+                .placeholder("Search contacts")
+                .auto_grow(1, 1)
+                .submit_on_enter(false)
         });
         cx.subscribe_in(
             &composer,
@@ -2802,6 +2836,17 @@ impl QuillApp {
                     AuthorizationState::Ready,
                 )
             }
+            // Phase 9.3: story posting composer (injected, no live
+            // Telegram) — ReadyStories fixture plus the composer overlay.
+            Some(ScreenshotDemo::ReadyStoryComposer) => {
+                demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
+                (
+                    ConnectUiStatus::DemoReadyChats,
+                    None,
+                    "screenshot demo — story posting composer".into(),
+                    AuthorizationState::Ready,
+                )
+            }
             Some(ScreenshotDemo::ReadySeekBars) => {
                 demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
                 (
@@ -3106,6 +3151,10 @@ impl QuillApp {
             chat_search_input,
             forward_search_input,
             story_reply_input,
+            story_composer: StoryComposer::default(),
+            story_composer_path,
+            story_composer_caption,
+            story_composer_user_search,
             auth_demo,
             focus_sidebar: cx.focus_handle(),
             connect_status,
@@ -4019,8 +4068,9 @@ impl QuillApp {
             }
             // Phase 9.2: viewer opens on the seeded own photo story with
             // the reaction picker and the reply row visible, seeded
-            // `availableReactions`, and a chosen ❤ reaction. No composer:
-            // the pinned schema has no `sendStory`.
+            // `availableReactions`, and a chosen ❤ reaction. The composer
+            // isn't opened here — it has its own `ReadyStoryComposer`
+            // demo (Phase 9.3).
             app.open_story_viewer(ChatId(11), 5, cx);
             app.story_reaction_picker_open = true;
             app.story_reply_open = true;
@@ -4028,6 +4078,31 @@ impl QuillApp {
                 input.set_value("Great photo!", window, cx);
             });
             app.status_note = "screenshot demo — story reactions / reply / delete".into();
+        }
+        if matches!(demo, Some(ScreenshotDemo::ReadyStoryComposer)) {
+            // Phase 9.3: the composer opens with a seeded photo path (the
+            // demo thumbnail, so the preview renders), a caption draft,
+            // and the privacy selector on Close friends. (open resets the
+            // server-side round-trip state, so eligibility is seeded after.)
+            app.open_story_composer(window, cx);
+            if let Some(session) = app.demo_session.as_mut() {
+                app.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_stories(session, &app.demo_sink, &app.demo_seq);
+                // Phase 9.3: the Saved Messages chat id `postStory` posts
+                // to, and a seeded `canPostStoryResultOk` so the status
+                // line shows "✓ Eligible to post".
+                session.my_user_id = Some(777);
+                session.story_post.eligibility =
+                    Some(quill::telegram::envelope::CanPostStoryResult::Ok { story_count: 0 });
+            }
+            app.story_composer_path.update(cx, |input, cx| {
+                input.set_value(&demo_thumb_png_path(), window, cx);
+            });
+            app.story_composer_caption.update(cx, |input, cx| {
+                input.set_value("Posting my first story **from Quill**!", window, cx);
+            });
+            app.story_composer.privacy = StoryPrivacy::CloseFriends;
+            app.status_note = "screenshot demo — story posting composer".into();
         }
         if matches!(demo, Some(ScreenshotDemo::ReadySponsored)) {
             if let Some(session) = app.demo_session.as_mut() {
@@ -7199,6 +7274,12 @@ impl QuillApp {
     }
 
     fn cancel_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // Phase 9.3: the story composer is the topmost overlay — Escape
+        // closes it before the story viewer.
+        if self.story_composer.open {
+            self.close_story_composer(cx);
+            return;
+        }
         // Phase 9.1: the story viewer is the topmost overlay — Escape
         // closes it before the media viewer.
         if self.story_viewer.is_open() {
@@ -9467,6 +9548,154 @@ impl QuillApp {
         self.pending_story_open = None;
         self.story_reaction_picker_open = false;
         self.story_reply_open = false;
+        cx.notify();
+    }
+
+    /// Phase 9.3: open the story composer (tray "+" tile). Resets the
+    /// server-side round-trip state so a reopened composer doesn't show
+    /// the previous post's outcome.
+    fn open_story_composer(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.story_composer = StoryComposer::open();
+        self.story_composer_path
+            .update(cx, |input, cx| input.set_value("", window, cx));
+        self.story_composer_caption
+            .update(cx, |input, cx| input.set_value("", window, cx));
+        self.story_composer_user_search
+            .update(cx, |input, cx| input.set_value("", window, cx));
+        if let Some(live) = self.live.as_mut() {
+            live.driver.session.story_post = StoryPostState::default();
+        }
+        if let Some(session) = self.demo_session.as_mut() {
+            session.story_post = StoryPostState::default();
+        }
+        cx.notify();
+    }
+
+    /// Phase 9.3: close the story composer (Escape / backdrop / Close).
+    fn close_story_composer(&mut self, cx: &mut Context<Self>) {
+        self.story_composer.close();
+        cx.notify();
+    }
+
+    /// Phase 9.3: Post pressed — validate the path, then run the
+    /// `canPostStory` eligibility check. The render tick converts the
+    /// answer into a `postStory` or an ineligible reason
+    /// (`story_composer_after_check`).
+    fn story_composer_post(&mut self, cx: &mut Context<Self>) {
+        let path = self.story_composer_path.read(cx).value().trim().to_string();
+        let kind = StoryMediaKind::detect(&path);
+        let error = if path.is_empty() {
+            Some("Enter a photo or video file path")
+        } else if kind == StoryMediaKind::Unknown {
+            Some("Not a photo or video file — check the extension")
+        } else if !std::path::Path::new(&path).is_file() {
+            Some("File not found — check the path")
+        } else if self.story_composer.needs_users() {
+            Some("Pick at least one user for \"Selected users\"")
+        } else {
+            None
+        };
+        if let Some(error) = error {
+            self.story_composer.local_error = Some(error.into());
+            cx.notify();
+            return;
+        }
+        if let Some(live) = self.live.as_mut() {
+            self.story_composer.local_error = None;
+            self.story_composer.check_sent = true;
+            live.driver.session.story_post.check_error = None;
+            live.driver.session.story_post.eligibility = None;
+            live.driver.session.story_post.outcome = StoryPostOutcome::None;
+            if live.driver.check_can_post_story().is_err() {
+                self.story_composer.check_sent = false;
+                self.story_composer.local_error =
+                    Some("Could not check posting eligibility".into());
+            }
+        } else if self.demo_session.is_some() {
+            self.story_composer.local_error = Some("demo — posting runs with live TDLib".into());
+        }
+        cx.notify();
+    }
+
+    /// Phase 9.3: the `canPostStory` answer landed (render tick) — post
+    /// when eligible, otherwise surface the reason in the composer.
+    fn story_composer_after_check(&mut self, cx: &mut Context<Self>) {
+        let (eligibility, check_error) = match self.session() {
+            Some(session) => (
+                session.story_post.eligibility.clone(),
+                session.story_post.check_error.clone(),
+            ),
+            None => (None, None),
+        };
+        if let Some(error) = check_error {
+            self.story_composer.local_error = Some(error);
+        } else if let Some(result) = eligibility {
+            if !result.can_post() {
+                self.story_composer.local_error = Some(result.user_message());
+            } else if let Some(live) = self.live.as_mut() {
+                let path = self.story_composer_path.read(cx).value().trim().to_string();
+                let caption = self.story_composer_caption.read(cx).value().to_string();
+                let kind = StoryMediaKind::detect(&path);
+                let privacy = self.story_composer.privacy;
+                let user_ids = self.story_composer.selected_user_ids.clone();
+                match live
+                    .driver
+                    .post_story(kind, &path, &caption, privacy, &user_ids)
+                {
+                    Ok(_) => {
+                        self.story_composer.local_error = None;
+                        // Fresh eligibility for the next post.
+                        live.driver.session.story_post.eligibility = None;
+                    }
+                    Err(_) => {
+                        self.story_composer.local_error =
+                            Some("Could not send the post request".into());
+                    }
+                }
+            } else {
+                self.story_composer.local_error =
+                    Some("demo — posting runs with live TDLib".into());
+            }
+        }
+        cx.notify();
+    }
+
+    /// Phase 9.3: one status line for the composer — local validation
+    /// errors first, then the server-side pending / succeeded / failed
+    /// outcome, then the eligibility check state.
+    fn story_composer_status(&self) -> Option<String> {
+        let composer = &self.story_composer;
+        if let Some(error) = &composer.local_error {
+            return Some(format!("✗ {error}"));
+        }
+        let post = self.session().map(|session| session.story_post.clone())?;
+        match &post.outcome {
+            StoryPostOutcome::Posting { .. } => Some("Posting…".into()),
+            StoryPostOutcome::Succeeded => {
+                Some("✓ Posted — it will appear in your story tray".into())
+            }
+            StoryPostOutcome::Failed(message) => Some(format!("✗ {message}")),
+            StoryPostOutcome::None => {
+                if composer.check_sent {
+                    Some("Checking eligibility…".into())
+                } else if let Some(error) = &post.check_error {
+                    Some(format!("✗ {error}"))
+                } else {
+                    post.eligibility.as_ref().map(|result| {
+                        if result.can_post() {
+                            "✓ Eligible to post".into()
+                        } else {
+                            format!("✗ {}", result.user_message())
+                        }
+                    })
+                }
+            }
+        }
+    }
+
+    /// Phase 9.3: toggle a contact in the composer's "Selected users" set.
+    fn toggle_story_composer_user(&mut self, user_id: i64, cx: &mut Context<Self>) {
+        self.story_composer.toggle_user(user_id);
         cx.notify();
     }
 
@@ -13025,14 +13254,14 @@ impl QuillApp {
     /// Each entry shows the poster's avatar with an unread (accent) or read
     /// (muted) ring; tapping opens the story viewer on that chat's latest
     /// story (`getStory` prefetches any missing story details first).
-    fn story_tray(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+    /// Phase 9.3: the row always renders — the leading "+" tile is the
+    /// story composer entry point (kept visible even with no active
+    /// stories).
+    fn story_tray(&self, cx: &mut Context<Self>) -> AnyElement {
         let entries: Vec<quill::telegram::envelope::ChatActiveStoriesView> = self
             .session()
             .map(|s| s.ordered_story_tray().into_iter().cloned().collect())
             .unwrap_or_default();
-        if entries.is_empty() {
-            return None;
-        }
         let mut row = div()
             .id("story-tray")
             .flex()
@@ -13041,7 +13270,40 @@ impl QuillApp {
             .items_start()
             .gap_2()
             .px_3()
-            .py_2();
+            .py_2()
+            .child(
+                div()
+                    .id("story-tray-add")
+                    .cursor_pointer()
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .w(px(60.))
+                    .gap_1()
+                    .child(
+                        div()
+                            .rounded_full()
+                            .p(px(2.))
+                            .border_2()
+                            .border_color(cx.theme().accent)
+                            .child(
+                                div()
+                                    .w(px(40.))
+                                    .h(px(40.))
+                                    .rounded_full()
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .text_xl()
+                                    .text_color(cx.theme().accent)
+                                    .child("+"),
+                            ),
+                    )
+                    .child(div().text_xs().child("Post"))
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.open_story_composer(window, cx);
+                    })),
+            );
         for entry in entries {
             let unread = entry.has_unread();
             let chat_id = entry.chat_id;
@@ -13083,7 +13345,7 @@ impl QuillApp {
                     })),
             );
         }
-        Some(row.into_any_element())
+        row.into_any_element()
     }
 
     fn open_chats_tab(&mut self, cx: &mut Context<Self>) {
@@ -24278,6 +24540,8 @@ impl QuillApp {
         match id_prefix {
             "g1-create" => self.toggle_create_chat_user(user_id, cx),
             "g1-add" => self.toggle_member_add_user(user_id, cx),
+            // Phase 9.3: the story composer's "Selected users" picker.
+            "story-composer" => self.toggle_story_composer_user(user_id, cx),
             _ => {}
         }
     }
@@ -27329,6 +27593,238 @@ impl QuillApp {
             )
     }
 
+    /// Phase 9.3: the story composer overlay — path entry (no native file
+    /// picker yet), photo preview, caption, the 4-way privacy selector
+    /// with a contact picker for "Selected users", and the Post button.
+    /// `canPostStory` is checked on every Post press; the status line
+    /// shows the honest pending / succeeded / failed states.
+    fn story_composer_overlay(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let path = self.story_composer_path.read(cx).value().trim().to_string();
+        let kind = StoryMediaKind::detect(&path);
+        let file_exists = !path.is_empty() && std::path::Path::new(&path).is_file();
+
+        let preview: AnyElement = match (kind, file_exists) {
+            (StoryMediaKind::Photo, true) => img(std::path::Path::new(&path))
+                .id("story-composer-preview")
+                .w(px(180.))
+                .h(px(240.))
+                .rounded_md()
+                .object_fit(ObjectFit::Contain)
+                .bg(rgb(0x0d1117))
+                .with_fallback(|| {
+                    div()
+                        .w(px(180.))
+                        .h(px(240.))
+                        .rounded_md()
+                        .bg(rgb(0x0d1117))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .text_color(rgb(0xffffff))
+                        .child("could not render")
+                        .into_any_element()
+                })
+                .into_any_element(),
+            (StoryMediaKind::Video, true) => div()
+                .id("story-composer-preview")
+                .w(px(180.))
+                .h(px(240.))
+                .rounded_md()
+                .bg(rgb(0x0d1117))
+                .flex()
+                .items_center()
+                .justify_center()
+                .text_sm()
+                .text_color(rgb(0xffffff))
+                .child("Video — uploads the full file")
+                .into_any_element(),
+            _ => div()
+                .id("story-composer-preview")
+                .w(px(180.))
+                .h(px(240.))
+                .rounded_md()
+                .bg(rgb(0x0d1117))
+                .flex()
+                .items_center()
+                .justify_center()
+                .text_sm()
+                .text_color(rgb(0x8b949e))
+                .child("Photo/video preview")
+                .into_any_element(),
+        };
+
+        let mut privacy = div().flex().flex_col().gap_1();
+        for option in StoryPrivacy::ALL {
+            let selected = self.story_composer.privacy == option;
+            let label = option.label();
+            privacy = privacy.child(
+                Button::new(format!("story-composer-privacy-{label}"))
+                    .label(if selected {
+                        format!("☑ {label}")
+                    } else {
+                        format!("☐ {label}")
+                    })
+                    .ghost()
+                    .text_color(rgb(0xffffff))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.story_composer.privacy = option;
+                        this.story_composer.local_error = None;
+                        cx.notify();
+                    })),
+            );
+        }
+
+        let users_picker: Option<AnyElement> =
+            (self.story_composer.privacy == StoryPrivacy::SelectedUsers).then(|| {
+                let query = self.story_composer_user_search.read(cx).value();
+                let rows = self.g1_contact_rows(&query, cx);
+                let selected = self.story_composer.selected_user_ids.clone();
+                let mut list = div()
+                    .id("story-composer-users")
+                    .flex()
+                    .flex_col()
+                    .gap_1()
+                    .max_h(px(160.))
+                    .overflow_y_scroll();
+                if rows.is_empty() {
+                    list = list.child(
+                        div()
+                            .text_sm()
+                            .text_color(rgb(0x8b949e))
+                            .child("No contacts found"),
+                    );
+                }
+                for row in rows.iter().take(50) {
+                    list = list.child(self.g1_contact_checkbox(
+                        "story-composer".to_string(),
+                        row,
+                        selected.contains(&row.user_id),
+                        row.user_id,
+                        cx,
+                    ));
+                }
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap_1()
+                    .child(Textarea::new(&self.story_composer_user_search).h(px(32.)))
+                    .child(list)
+                    .into_any_element()
+            });
+
+        let status = self.story_composer_status();
+        let busy = self.story_composer.check_sent
+            || self.session().is_some_and(|session| {
+                matches!(session.story_post.outcome, StoryPostOutcome::Posting { .. })
+            });
+
+        div()
+            .id("story-composer-overlay")
+            .absolute()
+            .top_0()
+            .left_0()
+            .right_0()
+            .bottom_0()
+            .flex()
+            .items_center()
+            .justify_center()
+            .child(
+                div()
+                    .id("story-composer-backdrop")
+                    .absolute()
+                    .top_0()
+                    .left_0()
+                    .right_0()
+                    .bottom_0()
+                    .bg(rgba(0x000000e6))
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.close_story_composer(cx);
+                    })),
+            )
+            .child(
+                div()
+                    .id("story-composer-panel")
+                    .flex()
+                    .flex_col()
+                    .gap_2()
+                    .p_4()
+                    .max_w(px(480.))
+                    .max_h_full()
+                    .rounded_lg()
+                    .bg(rgb(0x161b22))
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .justify_between()
+                            .child(
+                                div()
+                                    .font_semibold()
+                                    .text_color(rgb(0xffffff))
+                                    .child("New story"),
+                            )
+                            .child(
+                                div()
+                                    .id("story-composer-close")
+                                    .cursor_pointer()
+                                    .px_2()
+                                    .py_1()
+                                    .rounded_md()
+                                    .text_color(rgb(0xffffff))
+                                    .child("Close")
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.close_story_composer(cx);
+                                    })),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .items_center()
+                            .gap_2()
+                            .child(preview)
+                            .child(
+                                div()
+                                    .w_full()
+                                    .flex()
+                                    .flex_col()
+                                    .gap_1()
+                                    .child(
+                                        div()
+                                            .text_xs()
+                                            .text_color(rgb(0x8b949e))
+                                            .child(format!("{} file", kind.label())),
+                                    )
+                                    .child(Textarea::new(&self.story_composer_path).h(px(40.)))
+                                    .child(
+                                        div().text_xs().text_color(rgb(0x8b949e)).child("Caption"),
+                                    )
+                                    .child(Textarea::new(&self.story_composer_caption).h(px(64.))),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(rgb(0x8b949e))
+                            .child("Who can see it"),
+                    )
+                    .child(privacy)
+                    .when_some(users_picker, |this, picker| this.child(picker))
+                    .when_some(status, |this, status| {
+                        this.child(div().text_sm().text_color(rgb(0xffffff)).child(status))
+                    })
+                    .child(
+                        Button::new("story-composer-post")
+                            .label(if busy { "Working…" } else { "Post story" })
+                            .disabled(busy)
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.story_composer_post(cx);
+                            })),
+                    ),
+            )
+    }
+
     fn forward_picker_panel(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let query = self.forward_search_input.read(cx).value().to_string();
         let draft = self.pending_forward.clone();
@@ -28221,6 +28717,18 @@ impl Render for QuillApp {
                 let _ = live.driver.get_chat_active_stories(ChatId(chat_id));
             }
         }
+        // Phase 9.3: the composer sent `canPostStory` — once the answer
+        // lands, either post (eligible) or surface the reason in the
+        // composer. Eligibility is re-checked on every Post press.
+        if self.story_composer.check_sent {
+            let answered = self.session().is_some_and(|session| {
+                session.story_post.eligibility.is_some() || session.story_post.check_error.is_some()
+            });
+            if answered {
+                self.story_composer.check_sent = false;
+                self.story_composer_after_check(cx);
+            }
+        }
         // Phase 9.2: a story that vanished from the cache while being
         // viewed was deleted (`updateStoryDeleted`) — close the viewer.
         let current_deleted = self.story_viewer.current().is_some_and(|item| {
@@ -28374,6 +28882,10 @@ impl Render for QuillApp {
             // Phase 9.1: story viewer overlay above the media viewer.
             .when(self.story_viewer.is_open(), |this| {
                 this.child(self.story_viewer_overlay(cx))
+            })
+            // Phase 9.3: story composer overlay above the story viewer.
+            .when(self.story_composer.open, |this| {
+                this.child(self.story_composer_overlay(cx))
             })
             // Phase 6: add-contact dialog above everything else.
             .when_some(self.add_contact_dialog_overlay(cx), |this, overlay| {
@@ -30175,11 +30687,10 @@ impl QuillApp {
                                 cx.notify();
                             })),
                     );
-                    // Phase 9.1: tdesktop-style active-stories tray above the
-                    // chat rows; omitted for the contacts tab.
-                    if let Some(tray) = self.story_tray(cx) {
-                        list = list.child(tray);
-                    }
+                    // Phase 9.1/9.3: tdesktop-style active-stories tray above
+                    // the chat rows (leading "+" tile opens the story
+                    // composer); omitted for the contacts tab.
+                    list = list.child(self.story_tray(cx));
                     if self.search_is_open() {
                         list = list.child(self.search_results(cx));
                     } else {
@@ -31526,9 +32037,7 @@ fn apply_ready_stories(session: &mut Session, sink: &Arc<MemorySink>, seq: &Atom
 /// Demo chat A's photo story (id 5) is an *own* story — chosen ❤ reaction,
 /// interaction counts, `can_be_deleted` / `can_be_replied` — and an
 /// `availableReactions` response is injected through the reducer so the
-/// reaction picker has options. The caption states the honest limitation:
-/// the pinned TDLib 1.8.67 schema has no `sendStory` constructor, so a
-/// photo-story composer cannot be built against it yet.
+/// reaction picker has options.
 fn apply_ready_story_post(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
     let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
     let photo_file = demo_file_json(91, &demo_thumb_png_path(), true);
@@ -31557,7 +32066,8 @@ fn apply_ready_story_post(session: &mut Session, sink: &Arc<MemorySink>, seq: &A
     let own_photo_story = format!(
         r#"{{"@type":"story","id":5,"poster_chat_id":11,"date":1700000000,"content":{{"@type":"storyContentPhoto","photo":{{"@type":"photo","has_stickers":false,"sizes":[{{"@type":"photoSize","type":"y","photo":{photo_file},"width":960,"height":1280,"progressive_sizes":[]}}]}}}},"chosen_reaction_type":{{"@type":"reactionTypeEmoji","emoji":"❤"}},"interaction_info":{{"@type":"storyInteractionInfo","view_count":42,"forward_count":3,"reaction_count":7,"recent_viewer_user_ids":[]}},"can_be_deleted":true,"can_be_replied":true,"can_get_interactions":true,"caption":{}}}"#,
         caption(
-            "Phase 9.2: ❤ quick-react, reaction picker, reply and delete for own stories. Posting is blocked — pinned TDLib 1.8.67 has no sendStory constructor."
+            "Phase 9.2: ❤ quick-react, reaction picker, reply and delete for own stories. \
+             Post stories from the tray \"+\" composer (Phase 9.3).",
         ),
     );
     let jsons = [
