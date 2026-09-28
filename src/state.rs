@@ -28,7 +28,8 @@ use crate::telegram::envelope::{
     ReportOption, ReportSponsoredResult, ReportStoryResult, RichMessageContent,
     ScopeNotificationSettings, SecretChatState, SponsoredMessage, StickerFormat, StickerItem,
     StickerSetInfo, StorageStats, StoryAvailableReactionView, StoryInteractionView,
-    StoryInteractionsView, StoryListView, TdError, effective_content, reply_markup_demands_reply,
+    StoryInteractionsView, StoryListView, TdError, UsernameCheckResult, effective_content,
+    reply_markup_demands_reply,
 };
 use crate::telegram::envelope::{CallState, ReadyParams};
 use crate::telegram::requests::{
@@ -339,6 +340,32 @@ pub enum RequestPurpose {
     /// Phase 6: `addContact`. Response is `ok`; the contact row refreshes
     /// via `updateUser` (and the contacts list is invalidated for refetch).
     AddContact,
+    /// A5: `setName` (schema 1.8.67, line 14823). Response is `ok`; the
+    /// new name arrives via `updateUser`.
+    SetName,
+    /// A5: `setBio` (schema 1.8.67, line 14826). Response is `ok`; the
+    /// new bio arrives via `updateUserFullInfo`.
+    SetBio,
+    /// A5: `setUsername` (schema 1.8.67, line 14830). Response is `ok`;
+    /// the new usernames arrive via `updateUser`.
+    SetUsername,
+    /// A5: `checkChatUsername` with the private chat with self (schema
+    /// 1.8.67, line 11677) — the documented availability check for the
+    /// current user's own username (TGX `EditUsernameController` sends it
+    /// with `tdlib.selfChatId()`). Response is `checkChatUsernameResult*`.
+    CheckUsername,
+    /// A5: `reorderActiveUsernames` (schema 1.8.67, line 14838).
+    /// Response is `ok`; the new order arrives via `updateUser`.
+    ReorderActiveUsernames,
+    /// A5: `toggleUsernameIsActive` (schema 1.8.67, line 14835).
+    /// Response is `ok`; the new lists arrive via `updateUser`.
+    ToggleUsernameIsActive,
+    /// A5: `setProfilePhoto` (schema 1.8.67, line 14803). Response is
+    /// `ok`; the new photo arrives via `updateUserFullInfo`.
+    SetProfilePhoto,
+    /// A5: `deleteProfilePhoto` (schema 1.8.67, line 14806). Response is
+    /// `ok`; the removal arrives via `updateUserFullInfo`.
+    DeleteProfilePhoto,
     /// Phase 6: `getSupergroupFullInfo`. Response is `supergroupFullInfo`;
     /// correlated via `PendingRequest::supergroup_id`.
     GetSupergroupFullInfo,
@@ -3816,6 +3843,19 @@ pub struct Session {
     /// Phase 9.5: last `activateStoryStealthMode` error (e.g. Premium
     /// required), cleared when a new activation is sent.
     pub story_stealth_error: Option<String>,
+    /// A5: latest `checkChatUsername` verdict for the edit-profile
+    /// dialog: (checked username text, result). Written by the driver
+    /// before `apply` takes the pending request; the dialog only shows it
+    /// when it matches the current input text (stale verdicts ignored).
+    pub username_check: Option<(String, UsernameCheckResult)>,
+    /// A5: username text of the in-flight `checkChatUsername`.
+    pub username_check_pending: Option<String>,
+    /// A5: last profile-edit request failure
+    /// (`setName`/`setBio`/`setUsername`/`checkChatUsername`/
+    /// `reorderActiveUsernames`/`toggleUsernameIsActive`/
+    /// `setProfilePhoto`/`deleteProfilePhoto`), shown in the
+    /// edit-profile dialog. Cleared when the dialog opens.
+    pub profile_edit_error: Option<String>,
     /// Phase 9.1: `loadActiveStories(storyListMain)` was issued. A retry is
     /// allowed (the flag is reset) if the attempt failed.
     pub stories_active_loaded: bool,
@@ -3938,6 +3978,9 @@ pub struct UserFullInfoData {
     /// File id of the preferred `chatPhoto` size (`None` = no photo).
     /// The `ParsedFile` is cached in `Session::files` by the apply arm.
     pub photo_file_id: Option<i32>,
+    /// A5: `chatPhoto.id` (schema 1.8.67, line 1030) — the
+    /// `profile_photo_id` for `deleteProfilePhoto`.
+    pub photo_id: Option<i64>,
 }
 
 /// Phase 6: cached `supergroupFullInfo` subset (schema 1.8.67, line 2792).
@@ -4396,6 +4439,9 @@ impl Session {
             story_report: None,
             story_stealth: StoryStealthMode::default(),
             story_stealth_error: None,
+            username_check: None,
+            username_check_pending: None,
+            profile_edit_error: None,
             diagnostics,
         }
     }
@@ -6767,6 +6813,7 @@ impl Session {
                 bot_info,
                 bio,
                 photo,
+                photo_id,
             } => {
                 // `getUserFullInfo` response: resolve the user id from the
                 // pending request's explicit `user_id` (contacts-panel
@@ -6786,8 +6833,14 @@ impl Session {
                             self.upsert_file(file, false);
                             id
                         });
-                        self.user_full_infos
-                            .insert(user_id, UserFullInfoData { bio, photo_file_id });
+                        self.user_full_infos.insert(
+                            user_id,
+                            UserFullInfoData {
+                                bio,
+                                photo_file_id,
+                                photo_id,
+                            },
+                        );
                         if let Some(bot_id) = pending
                             .chat_id
                             .and_then(|chat_id| self.bot_user_id_for_chat(chat_id))
@@ -6805,6 +6858,7 @@ impl Session {
                 bot_info,
                 bio,
                 photo,
+                photo_id,
             } => {
                 self.bot_info.insert(user_id.0, bot_info);
                 let photo_file_id = photo.map(|file| {
@@ -6812,8 +6866,14 @@ impl Session {
                     self.upsert_file(file, false);
                     id
                 });
-                self.user_full_infos
-                    .insert(user_id.0, UserFullInfoData { bio, photo_file_id });
+                self.user_full_infos.insert(
+                    user_id.0,
+                    UserFullInfoData {
+                        bio,
+                        photo_file_id,
+                        photo_id,
+                    },
+                );
             }
             EnvelopePayload::BotCommands {
                 bot_user_id,
@@ -7018,6 +7078,10 @@ impl Session {
             // stashes the link in `Session::message_link_result` before
             // `apply` takes the pending request; nothing to reduce here.
             EnvelopePayload::MessageLink { .. } => {}
+            // A5: `checkChatUsername` answer — the driver stashes the
+            // verdict in `Session::username_check` before `apply` takes
+            // the pending request; nothing to reduce here.
+            EnvelopePayload::CheckChatUsernameResult(_) => {}
             // M2: handled by the driver before `apply` (blocks land in
             // history there); nothing to reduce here.
             EnvelopePayload::RichMessage { .. } => {}
@@ -7325,6 +7389,22 @@ impl Session {
                     Some(RequestPurpose::ActivateStoryStealthMode) => {
                         self.story_stealth_error =
                             Some(format!("Stealth mode failed: {}", error_reason(&err)));
+                    }
+                    // A5: profile-edit failures surface in the
+                    // edit-profile dialog. The message is classified by
+                    // `error_reason`, never the raw TDLib text.
+                    Some(
+                        RequestPurpose::SetName
+                        | RequestPurpose::SetBio
+                        | RequestPurpose::SetUsername
+                        | RequestPurpose::CheckUsername
+                        | RequestPurpose::ReorderActiveUsernames
+                        | RequestPurpose::ToggleUsernameIsActive
+                        | RequestPurpose::SetProfilePhoto
+                        | RequestPurpose::DeleteProfilePhoto,
+                    ) => {
+                        self.profile_edit_error =
+                            Some(format!("Profile update failed: {}", error_reason(&err)));
                     }
                     _ => {}
                 }

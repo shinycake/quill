@@ -4309,6 +4309,101 @@ pub fn delete_chat_reply_markup(
     .to_string()
 }
 
+/// A5: `setName` (TDLib 1.8.67, `schema/td_api.tl:14823`). First name is
+/// 1-64 chars; last name 0-64.
+pub fn set_name(extra: RequestId, first_name: &str, last_name: &str) -> String {
+    json!({
+        "@type": "setName",
+        "@extra": extra.as_extra(),
+        "first_name": first_name,
+        "last_name": last_name,
+    })
+    .to_string()
+}
+
+/// A5: `setBio` (TDLib 1.8.67, `schema/td_api.tl:14826`).
+pub fn set_bio(extra: RequestId, bio: &str) -> String {
+    json!({
+        "@type": "setBio",
+        "@extra": extra.as_extra(),
+        "bio": bio,
+    })
+    .to_string()
+}
+
+/// A5: `setUsername` (TDLib 1.8.67, `schema/td_api.tl:14830`). Changes the
+/// editable username; empty string removes it.
+pub fn set_username(extra: RequestId, username: &str) -> String {
+    json!({
+        "@type": "setUsername",
+        "@extra": extra.as_extra(),
+        "username": username,
+    })
+    .to_string()
+}
+
+/// A5: `checkChatUsername` (TDLib 1.8.67, `schema/td_api.tl:11677`). For
+/// the current user's own username the schema documents the private chat
+/// with self as the chat id (TGX `EditUsernameController` behavior).
+pub fn check_chat_username(extra: RequestId, chat_id: ChatId, username: &str) -> String {
+    json!({
+        "@type": "checkChatUsername",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0,
+        "username": username,
+    })
+    .to_string()
+}
+
+/// A5: `reorderActiveUsernames` (TDLib 1.8.67, `schema/td_api.tl:14838`).
+/// All currently active usernames, in the new order.
+pub fn reorder_active_usernames(extra: RequestId, usernames: &[String]) -> String {
+    json!({
+        "@type": "reorderActiveUsernames",
+        "@extra": extra.as_extra(),
+        "usernames": usernames,
+    })
+    .to_string()
+}
+
+/// A5: `toggleUsernameIsActive` (TDLib 1.8.67, `schema/td_api.tl:14835`).
+pub fn toggle_username_is_active(extra: RequestId, username: &str, is_active: bool) -> String {
+    json!({
+        "@type": "toggleUsernameIsActive",
+        "@extra": extra.as_extra(),
+        "username": username,
+        "is_active": is_active,
+    })
+    .to_string()
+}
+
+/// A5: `setProfilePhoto` (TDLib 1.8.67, `schema/td_api.tl:14803`) with
+/// `inputChatPhotoStatic` / `inputFileLocal` (schema lines 1042, 1039).
+/// `is_public` true = the public photo, visible even when the main photo
+/// is hidden by privacy settings.
+pub fn set_profile_photo(extra: RequestId, photo_path: &str, is_public: bool) -> String {
+    json!({
+        "@type": "setProfilePhoto",
+        "@extra": extra.as_extra(),
+        "photo": {
+            "@type": "inputChatPhotoStatic",
+            "photo": { "@type": "inputFileLocal", "path": photo_path },
+        },
+        "is_public": is_public,
+    })
+    .to_string()
+}
+
+/// A5: `deleteProfilePhoto` (TDLib 1.8.67, `schema/td_api.tl:14806`).
+pub fn delete_profile_photo(extra: RequestId, profile_photo_id: i64) -> String {
+    json!({
+        "@type": "deleteProfilePhoto",
+        "@extra": extra.as_extra(),
+        "profile_photo_id": profile_photo_id,
+    })
+    .to_string()
+}
+
 /// `pinChatMessage` (TDLib 1.8.67). Official Pin: notify when the chat allows
 /// it (`disable_notification` false); pin for everyone (`only_for_self` false).
 /// Schema: notifications are always disabled in channels and private chats.
@@ -8682,5 +8777,91 @@ mod channel_requests_tests {
         assert_eq!(v["@extra"], "64");
         assert_eq!(v["chat_id"], 21);
         assert_eq!(v["message_id"], 306);
+    }
+
+    #[test]
+    fn a5_set_name_shape_matches_1_8_67() {
+        // A5: `setName first_name:string last_name:string = Ok;`
+        // (schema 1.8.67, line 14823).
+        let json = set_name(RequestId(1), "Ada", "Lovelace");
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "setName");
+        assert_eq!(v["first_name"], "Ada");
+        assert_eq!(v["last_name"], "Lovelace");
+    }
+
+    #[test]
+    fn a5_set_bio_shape_matches_1_8_67() {
+        // A5: `setBio bio:string = Ok;` (schema 1.8.67, line 14826).
+        let json = set_bio(RequestId(2), "hello");
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "setBio");
+        assert_eq!(v["bio"], "hello");
+    }
+
+    #[test]
+    fn a5_set_username_shape_matches_1_8_67() {
+        // A5: `setUsername username:string = Ok;` (schema 1.8.67,
+        // line 14830).
+        let json = set_username(RequestId(3), "adalove");
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "setUsername");
+        assert_eq!(v["username"], "adalove");
+    }
+
+    #[test]
+    fn a5_check_chat_username_shape_matches_1_8_67() {
+        // A5: `checkChatUsername chat_id:int53 username:string =
+        // CheckChatUsernameResult;` (schema 1.8.67, line 11677).
+        let json = check_chat_username(RequestId(4), ChatId(777), "adalove");
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "checkChatUsername");
+        assert_eq!(v["chat_id"], 777);
+        assert_eq!(v["username"], "adalove");
+    }
+
+    #[test]
+    fn a5_reorder_active_usernames_shape_matches_1_8_67() {
+        // A5: `reorderActiveUsernames usernames:vector<string> = Ok;`
+        // (schema 1.8.67, line 14838).
+        let json = reorder_active_usernames(RequestId(5), &["b".to_string(), "a".to_string()]);
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "reorderActiveUsernames");
+        assert_eq!(v["usernames"], serde_json::json!(["b", "a"]));
+    }
+
+    #[test]
+    fn a5_toggle_username_is_active_shape_matches_1_8_67() {
+        // A5: `toggleUsernameIsActive username:string is_active:Bool =
+        // Ok;` (schema 1.8.67, line 14835).
+        let json = toggle_username_is_active(RequestId(6), "adalove", false);
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "toggleUsernameIsActive");
+        assert_eq!(v["username"], "adalove");
+        assert_eq!(v["is_active"], false);
+    }
+
+    #[test]
+    fn a5_set_profile_photo_shape_matches_1_8_67() {
+        // A5: `setProfilePhoto photo:InputChatPhoto is_public:Bool = Ok;`
+        // (schema 1.8.67, line 14803) with
+        // `inputChatPhotoStatic photo:InputFile` (line 1042).
+        let json = set_profile_photo(RequestId(7), "/tmp/me.png", true);
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "setProfilePhoto");
+        assert_eq!(v["photo"]["@type"], "inputChatPhotoStatic");
+        assert_eq!(v["photo"]["photo"]["@type"], "inputFileLocal");
+        assert_eq!(v["photo"]["photo"]["path"], "/tmp/me.png");
+        assert_eq!(v["is_public"], true);
+    }
+
+    #[test]
+    fn a5_delete_profile_photo_shape_matches_1_8_67() {
+        // A5: `deleteProfilePhoto profile_photo_id:int64 = Ok;`
+        // (schema 1.8.67, line 14806).
+        let json = delete_profile_photo(RequestId(8), 12345);
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "deleteProfilePhoto");
+        assert_eq!(v["profile_photo_id"], 12345);
     }
 }

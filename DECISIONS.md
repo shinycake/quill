@@ -5061,3 +5061,37 @@ ntgcalls v3.0.0 prebuilt lib, bindings verified against
   - "Open Chat" from a website row (TGX `openPrivateChat(botUserId)`) — needs a users-cache lookup to open the bot chat; backlog.
   - Website avatar / bot username subtext (needs users cache for `bot_user_id`); empty-state bold header styling; TGX's "Disconnect All Websites" as a settings row with inline progress instead of a red button — cosmetic divergences, noted.
   - Per-website in-progress spinners (TGX animates a progress view per disconnecting row); Quill disables the buttons via `websites_mutating` instead — same guarantee, less chrome.
+## Slice A5 — PROFILE MANAGEMENT: EDIT NAME / BIO, USERNAME CHECK + MULTI-USERNAME LIST, SET / REMOVE PHOTO (2026-09-28)
+
+- **Schema (pinned TDLib 1.8.67, `schema/td_api.tl`, verified verbatim):**
+  - `setName first_name:string last_name:string = Ok;` (:14823).
+  - `setBio bio:string = Ok;` (:14826) — "0-getOption(\"bio_length_max\") characters without line feeds".
+  - `setUsername username:string = Ok;` (:14830) — "Changes the editable username of the current user"; "Use an empty string to remove the username. The username can't be completely removed if there is another active or disabled username".
+  - `toggleUsernameIsActive username:string is_active:Bool = Ok;` (:14835) — "The editable username can't be disabled".
+  - `reorderActiveUsernames usernames:vector<string> = Ok;` (:14838) — "All currently active usernames must be specified".
+  - `checkChatUsername chat_id:int53 username:string = CheckChatUsernameResult;` (:11677) — documented as the check for "a private chat with self", i.e. the sanctioned self-username check.
+  - `checkChatUsernameResultOk / UsernameInvalid / UsernameOccupied / UsernamePurchasable / PublicChatsTooMany / PublicGroupsUnavailable` (:8580–8598) — all six verdicts parsed.
+  - `usernames` (:2368–2371): ordered `active_usernames`, `disabled_usernames`, `editable_username` — now retained on `ParsedUser`.
+  - `setProfilePhoto photo:InputChatPhoto is_public:Bool = Ok;` (:14803); `inputChatPhotoStatic photo:InputFile` (:1042, only `inputFileLocal`/`inputFileGenerated` allowed); `inputFileLocal path:string = InputFile;` (:325).
+  - `deleteProfilePhoto profile_photo_id:int64 = Ok;` (:14806); `chatPhoto id:int64 ...` (:1030) — the id now retained via `UserFullInfo.photo_id`.
+  - **Negative-claim discipline:** concept-level search for `check`+`username` in td_api.tl finds only `checkChatUsername` (:11677) and `checkBotUsername` (:15020) — there is no standalone `checkUsername` constructor in the TDLib surface. (Raw MTProto does have `account.checkUsername#2714d86c` per core.telegram.org/schema — irrelevant here because Quill speaks TDLib, and TGX itself uses `CheckChatUsername` for self.)
+- **Telegram X evidence (local TGX-Android source, `~/workspace/telegram-x`):**
+  - `EditUsernameController.checkUsernameInternal` sends `CheckChatUsername(tdlib.selfChatId(), username)` — Quill does the same with the private-chat-with-self id.
+  - `AvatarPickerManager` sets the photo via `InputChatPhotoStatic(inputFile)` — Quill mirrors this with `inputFileLocal`.
+  - Main profile photo is the private one: Quill sends `is_public = false` (the earlier `true` was wrong; TGX passes a contextual flag and the main avatar is not the public one).
+- **Built:**
+  - Requests + driver (`telegram/requests.rs`, `connect.rs`): `set_name`, `set_bio`, `set_username`, `check_chat_username`, `reorder_active_usernames`, `toggle_username_is_active`, `set_profile_photo` (static + `inputFileLocal`, `is_public=false`), `delete_profile_photo`. Request-shape tests pin all eight shapes against the schema.
+  - State (`state.rs`, `envelope.rs`): `ParsedUser` keeps `active_usernames`/`disabled_usernames`/`editable_username`; `UserFullInfoData.photo_id` retained; `username_check` + `username_check_pending` + `profile_edit_error` session fields; classified async error handling (never raw TDLib text).
+  - UI (`ui/mod.rs`): "Edit profile" button on the own info panel; `EditProfileDialog` with Photo / Name / Username / Bio sections in one grouped dialog (TGX has no single edit-profile screen — its editors are separate) — save name, save bio, Check username with all six verdicts, set username (empty clears it per schema), up/down reorder, activate/deactivate (no Deactivate on the editable username per schema), set photo from a local path, remove photo via the retained `chatPhoto.id`.
+  - Screenshot fixtures `ready-profile-edit` / `ready-username` (`docs/screenshots/ready-profile-edit.png`, `docs/screenshots/ready-username.png`) — injected user 777 with two active + one disabled username, bio, photo id; the username demo seeds a `checkChatUsernameResultOk` verdict.
+- **Key decisions (ponytail):**
+  - No local username-format validation: the server verdict (`UsernameInvalid`) covers it; TGX's client-side length/charset rules are left out deliberately.
+  - No native file picker: photo upload takes a local path, same as the story composer.
+  - No optimistic UI: each section sends one request and reports classified errors inline.
+- **Not verifiable without live Telegram:** server acceptance of the sends, the check verdict round-trip, photo upload progress.
+- **Out of this slice (left unchecked with evidence):**
+  - `parity:auth-qr-authorize-other`, `parity:auth-registration`, `parity:auth-email-login`, `parity:auth-premium-login`, `parity:auth-password-recovery`, `parity:auth-session-toggles`, `parity:auth-web-sessions`, `parity:auth-logout-warning` — other auth boxes, untouched.
+  - Local username-format pre-validation (TGX `EditUsernameController` length/charset rules) — server verdict suffices for now.
+  - Animated/sticker profile photos (`inputChatPhotoAnimation`, `inputChatPhotoSticker`), public profile photos (`is_public=true` contexts), photo crop/rotate UI.
+  - Bio line-feed enforcement client-side (server-enforced "without line feeds").
+  - Profile photo history / "suggested photos" from recent pictures.
