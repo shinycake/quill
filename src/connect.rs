@@ -9369,56 +9369,6 @@ impl<S: JsonSender> ConnectDriver<S> {
         let json = get_payment_receipt(extra, chat_id, message_id);
         self.send_json_request(extra, &json)
     }
-
-    /// Shared gate for callback-query sends: real (non-pending) messages in
-    /// a supported chat. Returns the reserved `@extra`.
-    fn callback_query_extra(
-        &mut self,
-        chat_id: ChatId,
-        message_id: MessageId,
-        purpose: RequestPurpose,
-    ) -> Result<RequestId, ConnectSendError> {
-        if !self.chats_path_active() {
-            return Err(ConnectSendError::InvalidRequest);
-        }
-        let supported = self
-            .session
-            .chats
-            .get(&chat_id.0)
-            .is_some_and(|chat| chat.supported());
-        if !supported {
-            return Err(ConnectSendError::InvalidRequest);
-        }
-        let Some(message) = self
-            .session
-            .histories
-            .get(&chat_id.0)
-            .and_then(|history| history.messages.get(&message_id.0))
-        else {
-            return Err(ConnectSendError::InvalidRequest);
-        };
-        if message.pending || message.id.0 <= 0 {
-            return Err(ConnectSendError::InvalidRequest);
-        }
-        Ok(self.session.request(purpose, Some(chat_id)))
-    }
-
-    /// Send a prebuilt request JSON; roll the reserved `@extra` back when
-    /// the sender refuses it.
-    fn send_json_request(
-        &mut self,
-        extra: RequestId,
-        json: &str,
-    ) -> Result<RequestId, ConnectSendError> {
-        match self.sender.send_json(json) {
-            Ok(()) => Ok(extra),
-            Err(err) => {
-                self.session.requests.take(extra);
-                Err(err)
-            }
-        }
-    }
-
     /// A5: `toggleUsernameIsActive` (schema 1.8.67, line 14835).
     pub fn toggle_username_is_active(
         &mut self,
