@@ -4442,7 +4442,7 @@ pub struct StoryRepostInfoView {
 /// where a reposted story came from.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StoryOriginView {
-    /// `storyOriginPublicStory` (`td_api.tl:6695`) — a known public story.
+    /// `storyOriginPublicStory` (`td_api.tl:6696`) — a known public story.
     PublicStory { chat_id: i64, story_id: i32 },
     /// `storyOriginHiddenUser` (`td_api.tl:6699`) — an unknown poster's name.
     HiddenUser { poster_name: String },
@@ -14529,7 +14529,7 @@ mod channel_envelope_tests {
     #[test]
     fn story_repost_info_and_manage_gates_parsed() {
         // Phase 9.5: `repost_info` (storyRepostInfo, td_api.tl:6705) with
-        // a public-story origin (td_api.tl:6695), the edit / privacy /
+        // a public-story origin (td_api.tl:6696), the edit / privacy /
         // forward gates, and `is_edited` (td_api.tl:6742).
         let json = r#"{"@type":"story","id":8,"poster_chat_id":11,"date":1,"is_edited":true,"can_be_edited":true,"can_be_forwarded":true,"can_set_privacy_settings":true,"repost_info":{"@type":"storyRepostInfo","origin":{"@type":"storyOriginPublicStory","chat_id":22,"story_id":3},"is_content_modified":false},"content":{"@type":"storyContentUnsupported"},"caption":{"@type":"formattedText","text":"","entities":[]}}"#;
         let env = parse_envelope(json).unwrap();

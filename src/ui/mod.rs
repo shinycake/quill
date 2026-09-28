@@ -32620,6 +32620,10 @@ impl QuillApp {
             .as_ref()
             .is_some_and(|story| story.can_set_privacy_settings);
         let can_forward = story.as_ref().is_some_and(|story| story.can_be_forwarded);
+        // Phase 9.5 (review fix-up): one shared `story_manage.pending`
+        // slot — disable the management buttons while a call is in
+        // flight so two ops can't overwrite each other's state.
+        let manage_busy = self.session().is_some_and(|s| s.story_manage.pending);
         let is_video = self
             .story_viewer
             .current()
@@ -32726,6 +32730,7 @@ impl QuillApp {
                     .label("Edit")
                     .ghost()
                     .text_color(rgb(0xffffff))
+                    .disabled(manage_busy)
                     .on_click(cx.listener(|this, _, window, cx| {
                         let Some(item) = this.story_viewer.current().cloned() else {
                             return;
@@ -32739,6 +32744,7 @@ impl QuillApp {
                         .label("Cover")
                         .ghost()
                         .text_color(rgb(0xffffff))
+                        .disabled(manage_busy)
                         .on_click(cx.listener(|this, _, _, cx| {
                             let Some(item) = this.story_viewer.current().cloned() else {
                                 return;
@@ -32754,6 +32760,7 @@ impl QuillApp {
                     .label("Privacy")
                     .ghost()
                     .text_color(rgb(0xffffff))
+                    .disabled(manage_busy)
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.toggle_story_privacy_edit(window, cx);
                     })),
@@ -32765,6 +32772,7 @@ impl QuillApp {
                     .label("Repost")
                     .ghost()
                     .text_color(rgb(0xffffff))
+                    .disabled(manage_busy)
                     .on_click(cx.listener(|this, _, window, cx| {
                         let Some(item) = this.story_viewer.current().cloned() else {
                             return;
@@ -32808,6 +32816,7 @@ impl QuillApp {
             .and_then(|session| session.story_stealth_error.clone())
         {
             column = column.child(div().text_sm().text_color(rgb(0xf85149)).child(stealth_err));
+        }
         // Phase 9.5: cover-frame editor row (video stories) + privacy
         // editor panel + the management status line (pending / error).
         if self.story_cover_target.is_some() {
@@ -33024,11 +33033,12 @@ impl QuillApp {
             }
         }
         panel.into_any_element()
+    }
     /// Phase 9.5: one-line status for posted-story management —
     /// pending spinner or the sanitized failure. `None` when idle.
     fn story_manage_status(&self) -> Option<String> {
         let manage = self.session()?.story_manage.clone();
-        if manage.pending.is_some() {
+        if manage.pending {
             Some("Saving…".into())
         } else {
             manage.error
@@ -33048,6 +33058,9 @@ impl QuillApp {
 
     /// Phase 9.5: the cover-frame editor row — seconds input + Set.
     fn story_cover_editor(&self, cx: &mut Context<Self>) -> AnyElement {
+        // Review fix-up: shared `story_manage.pending` slot — no second
+        // op while one is in flight.
+        let manage_busy = self.session().is_some_and(|s| s.story_manage.pending);
         div()
             .flex()
             .gap_2()
@@ -33065,6 +33078,7 @@ impl QuillApp {
                     } else {
                         "Set"
                     })
+                    .disabled(manage_busy)
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.story_cover_save(cx);
                     })),
@@ -33082,6 +33096,15 @@ impl QuillApp {
         let Some((chat_id, story_id)) = self.story_cover_target else {
             return;
         };
+        // Demo mode: surface the same notice as `story_composer_save_edit`
+        // — management calls need live TDLib.
+        if self.live.is_none() {
+            if let Some(demo) = self.demo_session.as_mut() {
+                demo.story_manage.error = Some("demo — editing runs with live TDLib".into());
+            }
+            cx.notify();
+            return;
+        }
         let raw = self.story_cover_input.read(cx).value().trim().to_string();
         let timestamp: f64 = match raw.parse() {
             Ok(seconds) if seconds >= 0.0 => seconds,
@@ -33222,6 +33245,9 @@ impl QuillApp {
             );
         }
         let busy = self.story_privacy_sent;
+        // Review fix-up: shared `story_manage.pending` slot — no second
+        // op while one is in flight.
+        let manage_busy = self.session().is_some_and(|s| s.story_manage.pending);
         panel = panel.child(
             div()
                 .flex()
@@ -33229,6 +33255,7 @@ impl QuillApp {
                 .child(
                     Button::new("story-privacy-save")
                         .label(if busy { "Saving…" } else { "Save" })
+                        .disabled(manage_busy)
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.story_privacy_save(cx);
                         })),
@@ -33258,6 +33285,15 @@ impl QuillApp {
         let Some(edit) = self.story_privacy_edit.clone() else {
             return;
         };
+        // Demo mode: surface the same notice as `story_composer_save_edit`
+        // — management calls need live TDLib.
+        if self.live.is_none() {
+            if let Some(demo) = self.demo_session.as_mut() {
+                demo.story_manage.error = Some("demo — editing runs with live TDLib".into());
+            }
+            cx.notify();
+            return;
+        }
         if edit.privacy == StoryPrivacy::SelectedUsers && edit.selected_user_ids.is_empty() {
             if let Some(live) = self.live.as_mut() {
                 live.driver.session.story_manage.error =
@@ -34850,7 +34886,7 @@ impl Render for QuillApp {
         if self.story_composer.save_sent
             && self
                 .session()
-                .is_some_and(|session| session.story_manage.pending.is_none())
+                .is_some_and(|session| !session.story_manage.pending)
         {
             self.story_composer.save_sent = false;
             let failed = self.session().and_then(|s| s.story_manage.error.clone());
@@ -34862,11 +34898,7 @@ impl Render for QuillApp {
         // Phase 9.5: the viewer cover editor / privacy editor sent a
         // management call — once `story_manage.pending` clears, close
         // the panel on success or leave it open showing the error.
-        if self.story_cover_sent
-            && self
-                .session()
-                .is_some_and(|s| s.story_manage.pending.is_none())
-        {
+        if self.story_cover_sent && self.session().is_some_and(|s| !s.story_manage.pending) {
             self.story_cover_sent = false;
             if self
                 .session()
@@ -34875,11 +34907,7 @@ impl Render for QuillApp {
                 self.story_cover_target = None;
             }
         }
-        if self.story_privacy_sent
-            && self
-                .session()
-                .is_some_and(|s| s.story_manage.pending.is_none())
-        {
+        if self.story_privacy_sent && self.session().is_some_and(|s| !s.story_manage.pending) {
             self.story_privacy_sent = false;
             if self
                 .session()

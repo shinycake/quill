@@ -5116,8 +5116,10 @@ ntgcalls v3.0.0 prebuilt lib, bindings verified against
     privacy_settings:StoryPrivacySettings album_ids:vector<int32>
     active_period:int32 from_story_full_id:storyFullId
     is_posted_to_chat_page:Bool protect_content:Bool = Story;` (line
-    13715) — the repost mechanism is `from_story_full_id` ("Repost the
-    specified story; pass null if none", line 6761 region).
+    13715) — the repost mechanism is `from_story_full_id` ("Full
+    identifier of the original story, which content was used to create
+    the story; pass null if the story isn't repost of another story",
+    line 13713; the `storyFullId` type is at line 6766).
   - `editStory story_poster_chat_id:int53 story_id:int32
     content:InputStoryContent areas:inputStoryAreas
     caption:formattedText = Ok;` (line 13732); comments: "Changes
@@ -5241,6 +5243,6 @@ ntgcalls v3.0.0 prebuilt lib, bindings verified against
   `story_sound_id`, `show_story_poster`, lines 3354–3358); restriction
   notices (story restriction reasons on content); live stories
   (`storyInfo.is_live`, line 6772 — posting and viewing); stealth mode
-  (`activateStoryStealthMode`, `premiumStoryFeatureStealthMode`, line
-  8205, `updateStoryStealthMode`, lines 10917–10919); viewers list
+  (`activateStoryStealthMode`, line 13839, `premiumStoryFeatureStealthMode`,
+  line 8205, `updateStoryStealthMode`, lines 10917–10919); viewers list
   (`getStoryInteractions`); report story (`reportStory`, line 13835).

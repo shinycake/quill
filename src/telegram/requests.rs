@@ -4984,7 +4984,7 @@ pub fn get_chats_to_post_stories(extra: RequestId) -> String {
 /// after expiration") and `protect_content` ("Pass true if the content
 /// of the story must be protected from forwarding and screenshotting").
 /// Phase 9.5: `from_story` carries a repost source as `storyFullId`
-/// (`td_api.tl:6761`); `chat_id` may be a channel/supergroup from
+/// (`td_api.tl:6766`); `chat_id` may be a channel/supergroup from
 /// `getChatsToPostStories` (privacy is server-ignored for those —
 /// schema comment on `postStory`).
 /// Response is a `story`; success/failure lands via
@@ -8751,7 +8751,7 @@ mod channel_requests_tests {
         // Phase 9.5: `editStory` (td_api.tl:13732), `editStoryCover`
         // (td_api.tl:13738), `setStoryPrivacySettings` (td_api.tl:13743),
         // `getChatsToPostStories` (td_api.tl:13698), and `postStory` with
-        // a repost source (`storyFullId`, td_api.tl:6761).
+        // a repost source (`storyFullId`, td_api.tl:6766).
         let json = edit_story(
             RequestId(80),
             ChatId(11),

@@ -8223,7 +8223,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// of the schema-legal values (21600 / 43200 / 86400 / 172800 —
     /// `td_api.tl:13715` comment); anything else is rejected before
     /// sending. Phase 9.5: `from_story` carries a repost source
-    /// (`storyFullId`, `td_api.tl:6761`). The `story` response and
+    /// (`storyFullId`, `td_api.tl:6766`). The `story` response and
     /// `updateStoryPostSucceeded` / `updateStoryPostFailed` drive
     /// `Session::story_post.outcome`.
     #[allow(clippy::too_many_arguments)] // mirrors requests::post_story, one arg per schema field
@@ -8336,7 +8336,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request_for_story(RequestPurpose::EditStory, chat_id, story_id);
-        self.session.story_manage.pending = Some(StoryManageOp::EditStory);
+        self.session.story_manage.pending = true;
         self.session.story_manage.error = None;
         match self.sender.send_json(&edit_story_request(
             extra, chat_id, story_id, content, areas, caption,
@@ -8344,7 +8344,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             Ok(()) => Ok(extra),
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.story_manage.pending = None;
+                self.session.story_manage.pending = false;
                 Err(err)
             }
         }
@@ -8372,7 +8372,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra =
             self.session
                 .request_for_story(RequestPurpose::EditStoryCover, chat_id, story_id);
-        self.session.story_manage.pending = Some(StoryManageOp::EditStoryCover);
+        self.session.story_manage.pending = true;
         self.session.story_manage.error = None;
         match self.sender.send_json(&edit_story_cover_request(
             extra,
@@ -8383,7 +8383,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             Ok(()) => Ok(extra),
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.story_manage.pending = None;
+                self.session.story_manage.pending = false;
                 Err(err)
             }
         }
@@ -8414,7 +8414,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             chat_id,
             story_id,
         );
-        self.session.story_manage.pending = Some(StoryManageOp::SetPrivacy);
+        self.session.story_manage.pending = true;
         self.session.story_manage.error = None;
         match self.sender.send_json(&set_story_privacy_settings_request(
             extra,
@@ -8424,7 +8424,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             Ok(()) => Ok(extra),
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.story_manage.pending = None;
+                self.session.story_manage.pending = false;
                 Err(err)
             }
         }
@@ -18019,20 +18019,14 @@ mod tests {
         assert!(v["content"].is_null());
         assert!(v["areas"].is_null());
         assert_eq!(v["caption"]["text"], "new");
-        assert_eq!(
-            driver.session.story_manage.pending,
-            Some(StoryManageOp::EditStory)
-        );
+        assert!(driver.session.story_manage.pending);
 
         let extra = driver.edit_story_cover(ChatId(7), 6, 2.5).unwrap();
         let v: Value = serde_json::from_str(recorder.snapshot().last().unwrap()).unwrap();
         assert_eq!(v["@type"], "editStoryCover");
         assert_eq!(v["@extra"], extra.0.to_string());
         assert_eq!(v["cover_frame_timestamp"], 2.5);
-        assert_eq!(
-            driver.session.story_manage.pending,
-            Some(StoryManageOp::EditStoryCover)
-        );
+        assert!(driver.session.story_manage.pending);
 
         let extra = driver
             .set_story_privacy_settings(ChatId(7), 6, StoryPrivacy::Contacts.settings_json(&[]))
@@ -18044,13 +18038,8 @@ mod tests {
             v["privacy_settings"]["@type"],
             "storyPrivacySettingsContacts"
         );
-        assert_eq!(
-            driver.session.story_manage.pending,
-            Some(StoryManageOp::SetPrivacy)
-        );
+        assert!(driver.session.story_manage.pending);
 
-        let _ = std::fs::remove_dir_all(&dir);
-    }
         let _ = std::fs::remove_dir_all(&dir);
     }
 
