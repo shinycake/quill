@@ -126,6 +126,29 @@ impl SyntheticChat {
     }
 }
 
+/// Settings → Appearance: bubble look for history message rows (font
+/// size + bubble/plain style). Bubble fill colors stay fixed
+/// (Telegram-style colored bubbles); `text` is white in bubble mode and
+/// the theme foreground in plain mode (computed at the call site, which
+/// owns `cx`).
+#[derive(Clone, Copy)]
+pub(crate) struct BubbleLook {
+    pub font: Pixels,
+    pub plain: bool,
+    pub text: Hsla,
+}
+
+impl BubbleLook {
+    /// Pre-login synthetic placeholder: today's fixed look.
+    pub(crate) fn demo() -> Self {
+        Self {
+            font: px(14.),
+            plain: false,
+            text: Hsla::from(rgb(0xffffff)),
+        }
+    }
+}
+
 fn row(
     id: u64,
     sender: impl Into<SharedString>,
@@ -186,8 +209,7 @@ pub(crate) struct MessageChrome {
     pub avatar: Option<AnyElement>,
     /// `HH:MM` + delivery checkmarks → kit `MessageFooter` (below the
     /// bubble, right-aligned). `None` hides the footer.
-    pub footer: Option<AnyElement>,
-}
+    pub footer: Option<AnyElement>,}
 
 pub(crate) fn session_bubble_quoted(
     id: u64,
@@ -196,6 +218,7 @@ pub(crate) fn session_bubble_quoted(
     outgoing: bool,
     extra: Option<AnyElement>,
     quote: Option<AnyElement>,
+    look: BubbleLook,
 ) -> AnyElement {
     message_bubble_with_quote(
         row(
@@ -209,7 +232,7 @@ pub(crate) fn session_bubble_quoted(
         quote,
         None,
         chrome,
-    )
+        look,    )
 }
 
 pub(crate) fn session_bubble_rich(
@@ -219,6 +242,7 @@ pub(crate) fn session_bubble_rich(
     body: AnyElement,
     extra: Option<AnyElement>,
     quote: Option<AnyElement>,
+    look: BubbleLook,
 ) -> AnyElement {
     message_bubble_with_quote(
         row(
@@ -232,7 +256,7 @@ pub(crate) fn session_bubble_rich(
         quote,
         Some(body),
         chrome,
-    )
+        look,    )
 }
 
 fn message_bubble(row: SyntheticRow) -> AnyElement {
@@ -240,8 +264,7 @@ fn message_bubble(row: SyntheticRow) -> AnyElement {
         sender: Some(row.sender.clone()),
         ..Default::default()
     };
-    message_bubble_with_quote(row, None, None, None, chrome)
-}
+    message_bubble_with_quote(row, None, None, None, chrome, BubbleLook::demo())}
 
 fn message_bubble_with_quote(
     row: SyntheticRow,
@@ -249,7 +272,7 @@ fn message_bubble_with_quote(
     quote: Option<AnyElement>,
     body_el: Option<AnyElement>,
     chrome: MessageChrome,
-) -> AnyElement {
+    look: BubbleLook,) -> AnyElement {
     let image_h = match row.kind {
         SyntheticKind::Image { loaded: false } => px(40.),
         SyntheticKind::Image { loaded: true } => px(96.),
@@ -271,28 +294,24 @@ fn message_bubble_with_quote(
     };
     // kit Phase 4: the bubble surface keeps the Phase 0 palette
     // (`accent_strong()` / `bg_bubble_incoming()`); the kit only supplies
-    // the shape/chrome, never the colors. Phase 8: outgoing bubbles are a
-    // solid fill so their text stays white in both modes; incoming bubbles
-    // use the mode-aware text token. Sender and
-    // footer live in the kit `MessageHeader` / `MessageFooter` slots —
-    // the header above the bubble, the footer below it, right-aligned
-    // like the old in-bubble timestamp.
+    // the shape/chrome, never the colors. Sender and footer live in the kit
+    // `MessageHeader` / `MessageFooter` slots — the header above the bubble,
+    // the footer below it, right-aligned like the old in-bubble timestamp.
+    // Settings → Appearance: font size + bubble/plain style ride on top —
+    // `look.text` overrides the text color; plain mode renders the kit
+    // `Ghost` variant (no surface, padding, or border).
     let bubble_content = component::bubble::BubbleContent::new()
         .bg(if row.outgoing {
             accent_strong()
         } else {
             bg_bubble_incoming()
         })
-        .text_color(if row.outgoing {
-            text_on_fill()
-        } else {
-            text_bright()
-        })
+        .text_color(look.text)
         .when(rtl, |this| this.text_right())
         .when_some(quote, |this, quote| this.child(quote))
         .when_some(body_el, |this, body_el| this.child(body_el))
         .when(!rich_body && has_body, |this| {
-            this.child(div().text_sm().child(body))
+            this.child(div().text_size(look.font).child(body))
         })
         .when(image_h > px(0.), |this| {
             this.child(
@@ -315,9 +334,12 @@ fn message_bubble_with_quote(
             )
         })
         .when_some(extra, |this, el| this.child(el));
-    let bubble = component::bubble::Bubble::new()
+    let mut bubble = component::bubble::Bubble::new()
         .alignment(alignment)
         .content(bubble_content);
+    if look.plain {
+        bubble = bubble.with_variant(component::bubble::BubbleVariant::Ghost);
+    }
     let mut message = component::message::Message::new()
         .alignment(alignment)
         .content(component::message::MessageContent::new().bubble(bubble));

@@ -5362,6 +5362,37 @@ ntgcalls v3.0.0 prebuilt lib, bindings verified against
   - `parity:bots-poll-show-voters` — no such creation field exists; TGX implements it as the inverse of `is_anonymous` (already have the Anonymous toggle). Voter-list display is `getPollVoters` = `parity:bots-poll-voters` (separate box, still unchecked).
   - Poll media (`InputPollMedia`), `members_only`, `hide_results_until_closes`, explanation media, voter list, stop poll, quiz-explanation display, vote-restriction reasons, `can_send_polls` gating, stopped service message.
 
+
+## Slice SETTINGS → APPEARANCE (2026-09-28)
+
+- **Schema (pinned TDLib 1.8.67, concept-level, never single-grep):**
+  - No TDLib constructor sets the app theme, accent color, font size, or auto-night mode. `accentColor` (`peerColors`, td_api.tl ~:9000s) is per-peer name/profile tinting, not app chrome.
+  - `setChatBackground chat_id:int53 background:InputBackground old_message_id:int53 only_for_self:Bool = Ok;` (:13473) sets a **per-chat, server-side** background (`inputBackgroundLocal`/`inputBackgroundRemote`/`inputBackgroundWallpaper`, :8449+). This slice deliberately does not touch it: Quill's wallpaper is a client-local solid color painted behind the message list; per-chat server backgrounds are backlog.
+  - App-theme sync across devices is not a TDLib concept. The entire slice is client-side state in `appearance_prefs.json` (new `AppearancePrefs` in `src/settings.rs`, `load_appearance_prefs`/`save_appearance_prefs`), next to `call_prefs.json`/`media_prefs.json` — which now share the new generic `load_json_prefs`/`save_json_prefs` (the three near-identical load/save bodies collapsed; unused `call_prefs_path` deleted).
+- **Telegram X reference (behavior, verified verbatim):**
+  - Night modes (`Settings.java:460-464`): `NIGHT_MODE_NONE` / `NIGHT_MODE_AUTO` (ambient-light sensor) / `NIGHT_MODE_SCHEDULED` / `NIGHT_MODE_SYSTEM`; system is the default on Android 10+.
+  - Scheduled window (`Settings.java:229`): `SETTINGS_NIGHT_MODE_START`/`END`-style hour/minute keys; defaults 22:00 → 07:00.
+  - Per-theme accent color ids in account/theme settings (`SettingsThemeController.java`); solid wallpapers via the backgrounds API (`Settings.java:364-368` wallpaper preference keys).
+  - Divergences (documented, not hidden): TGX's `NIGHT_MODE_AUTO` (lux sensor) has no desktop equivalent → Quill offers Off / System / Scheduled. Neither TGX nor tdesktop has a user-facing "bubble vs plain" toggle; Quill's Plain mode is an addition (default Bubbles, today's look). Accent/wallpaper are preset swatches, not free color input.
+- **Built:**
+  - `src/settings.rs`: `ThemeChoice { Light, Dark }`, `AutoNight { Off, System, Scheduled }`, `AppearancePrefs` (theme, auto_night, night_start_minutes, night_end_minutes, accent_rgb, wallpaper_rgb, font_size_px, bubbles), `clamp_font_size` (12–20px), pure `night_active(start, end, now)` predicate (wrap-midnight + empty-window cases), `local_minutes_since_midnight` via `libc::localtime_r` (new `libc = "0.2"` dep — stdlib only, no chrono/time crate for one call).
+  - `src/ui/appearance.rs` (new): the "🎨 Appearance" overlay — Theme chips (Light/Dark), Auto-night chips (Off/System/Scheduled) + 30-min steppers for start/end when Scheduled + the OS-appearance note for System, Accent swatches (Default + 7 presets), Wallpaper swatches (Default + 5 solid presets), Message text size A−/A+ stepper (12–20px), Chat style chips (Bubbles/Plain). One `set_appearance` funnel: mutate → clamp → persist immediately → `apply_appearance` → `notify`. `apply_appearance` pushes `(ThemeMode, accent)` into the gpui-component global `Theme` (`Theme::change`, accent re-applied after since `change` resets the palette) and only notifies when the (mode, accent) key actually changed; a 1-minute tick (`mod.rs:5061`) re-evaluates scheduled/system auto-night against local time. `bubble_look` (`&App`, not `&mut Context` — callers keep using `cx`) returns `BubbleLook { font, plain, text }`.
+  - `src/ui/synthetic.rs`: `BubbleLook` threaded through `session_bubble_quoted` / `session_bubble_rich` / `message_bubble_with_quote` — plain mode drops background + rounding (keeps sender, alignment, metadata), text stays white in bubble mode / theme foreground in plain. `msg_font`/`BubbleLook.font` threaded through `rich_text_line` (was hardcoded `text_sm()`), `message_text_block`, `message_rich_block`, `rich_block_element` — covers history, album/sponsored captions, media/story viewer captions, instant view, rich-editor preview.
+  - `src/ui/mod.rs`: `QuillApp` fields `appearance` (loaded before first frame), `appearance_open`, `appearance_applied`; sidebar "🎨 Appearance" entry (next to Storage usage); overlay stack + Esc + backdrop close (shared `render_overlay_stack` pattern); wallpaper painted on the history list (`history_message_list`); all live calls rerouted through `BubbleLook`.
+  - Screenshot demo: `quill --screenshot-demo ready-appearance` (in-memory non-defaults — dark theme, blue accent, dark wallpaper, 16px — applied live; nothing persisted) → `docs/screenshots/ready-appearance.png`.
+  - Tests: `appearance_prefs_roundtrip_and_defaults`, `appearance_prefs_corrupt_file_falls_back`, `night_active_cases` (wrap/boundaries/empty), `font_size_clamps_to_range`. The libc local-time call stays untested behind the pure predicate (environment-dependent tests are a smell).
+- **Key decisions (ponytail):**
+  - Font size threads as an explicit `Pixels` param instead of hijacking the global `theme().font_size` (which semantically sizes all app chrome).
+  - Accent/wallpaper swatches use `on_click` closures writing into `set_appearance`, the same pattern as the storage-usage overlay's radio rows — no new dialog framework.
+  - The System mode's Linux reality (no desktop portal → `window_appearance` reports Light) is documented in DECISIONS rather than papered over in the dialog.
+- **Not verifiable without live Telegram:** nothing in this slice touches TDLib — it is entirely client-side. The scheduled flip is verified by unit-testing the `night_active` predicate, not by waiting for a real minute boundary.
+- **Out of this slice (left unchecked with evidence):**
+  - Custom wallpaper images / gradients / blur (TGX supports photo wallpapers via the backgrounds API) — solid presets only.
+  - Per-chat server wallpaper via `setChatBackground` (:13473) — server-side concept, untouched.
+  - Theme sync across devices — no TDLib concept.
+  - Ambient-light Auto mode — no desktop equivalent.
+  - Composer/chat-list font scaling — the setting covers message text only (TGX's text size likewise targets chat text).
+
 ## Slice A4 — CONNECTED WEBSITES + PER-SESSION SECRET-CHAT / CALL TOGGLES (2026-09-28)
 
 - **Schema (pinned TDLib 1.8.67, `schema/td_api.tl`, verified verbatim — concept-level, never single-grep):**

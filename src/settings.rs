@@ -3,6 +3,7 @@
 use crate::ids::AccountKey;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 pub const APP_DIR_NAME: &str = "Quill";
 pub const PREFS_VERSION: u32 = 1;
@@ -38,29 +39,43 @@ pub struct CallPrefs {
     pub less_data_for_calls: bool,
 }
 
-fn call_prefs_path(paths: &AccountPaths) -> PathBuf {
-    paths.root.join("call_prefs.json")
-}
-
-/// Load call prefs; missing or corrupt files fall back to defaults
-/// (never a hard error — prefs must not block startup).
-pub fn load_call_prefs(paths: &AccountPaths) -> CallPrefs {
-    std::fs::read(call_prefs_path(paths))
+/// Shared load: a missing or corrupt prefs file falls back to defaults —
+/// prefs must never block startup or panic.
+fn load_json_prefs<T>(paths: &AccountPaths, file_name: &str) -> T
+where
+    T: Default + for<'de> Deserialize<'de>,
+{
+    std::fs::read(paths.root.join(file_name))
         .ok()
         .and_then(|bytes| serde_json::from_slice(&bytes).ok())
         .unwrap_or_default()
 }
 
-/// Persist call prefs; failures are returned to the caller to surface
-/// in the status note.
-pub fn save_call_prefs(paths: &AccountPaths, prefs: &CallPrefs) -> std::io::Result<()> {
-    let path = call_prefs_path(paths);
+/// Shared save: creates the parent dir; failures are returned to the
+/// caller to surface in the status note.
+fn save_json_prefs<T>(paths: &AccountPaths, file_name: &str, prefs: &T) -> std::io::Result<()>
+where
+    T: Serialize,
+{
+    let path = paths.root.join(file_name);
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
     let bytes = serde_json::to_vec_pretty(prefs)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
     std::fs::write(path, bytes)
+}
+
+/// Load call prefs; missing or corrupt files fall back to defaults
+/// (never a hard error — prefs must not block startup).
+pub fn load_call_prefs(paths: &AccountPaths) -> CallPrefs {
+    load_json_prefs(paths, "call_prefs.json")
+}
+
+/// Persist call prefs; failures are returned to the caller to surface
+/// in the status note.
+pub fn save_call_prefs(paths: &AccountPaths, prefs: &CallPrefs) -> std::io::Result<()> {
+    save_json_prefs(paths, "call_prefs.json", prefs)
 }
 
 /// MED3: auto-download bitflags per media type, mirroring TGX
@@ -170,29 +185,157 @@ impl MediaPrefs {
     }
 }
 
-fn media_prefs_path(paths: &AccountPaths) -> PathBuf {
-    paths.root.join("media_prefs.json")
-}
-
 /// Load media prefs; missing or corrupt files fall back to defaults
 /// (never a hard error — prefs must not block startup).
 pub fn load_media_prefs(paths: &AccountPaths) -> MediaPrefs {
-    std::fs::read(media_prefs_path(paths))
-        .ok()
-        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
-        .unwrap_or_default()
+    load_json_prefs(paths, "media_prefs.json")
 }
 
 /// Persist media prefs; failures are returned to the caller to surface
 /// in the status note.
 pub fn save_media_prefs(paths: &AccountPaths, prefs: &MediaPrefs) -> std::io::Result<()> {
-    let path = media_prefs_path(paths);
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
+    save_json_prefs(paths, "media_prefs.json", prefs)
+}
+
+/// Settings → Appearance slice: client-side look-and-feel, persisted as
+/// JSON next to the account root (`appearance_prefs.json`). Entirely
+/// client-side — no TDLib setting exists for the app theme, accent, or
+/// font size (TDLib's `accentColor` is per-peer name/profile tinting,
+/// not app chrome; chat backgrounds exist server-side as
+/// `setChatBackground`, schema 1.8.67 :13473, but this slice paints
+/// local solid colors only — see DECISIONS.md).
+///
+/// TGX reference (`Settings.java`, `SettingsThemeController.java`):
+/// night modes None/Auto(lux)/Scheduled/System, per-theme accent color
+/// ids, solid wallpapers via the backgrounds API, a text-size slider,
+/// and bubble chat style.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ThemeChoice {
+    #[default]
+    Light,
+    Dark,
+}
+
+/// Auto-night mode (TGX `NIGHT_MODE_*`, `Settings.java:460-464`). `Auto`
+/// (ambient-light sensor) has no desktop equivalent, so Quill offers
+/// Off / System (OS appearance) / Scheduled (local-time window).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AutoNight {
+    #[default]
+    Off,
+    System,
+    Scheduled,
+}
+
+/// Message text size bounds, in px. The default 14px matches the
+/// previous hardcoded `text_sm()` at the 16px rem base.
+pub const FONT_SIZE_MIN: u8 = 12;
+pub const FONT_SIZE_MAX: u8 = 20;
+pub const FONT_SIZE_DEFAULT: u8 = 14;
+
+/// Clamp a font size into the supported range (the stepper can't
+/// produce out-of-range values, but prefs files are user-editable).
+pub fn clamp_font_size(px: u8) -> u8 {
+    px.clamp(FONT_SIZE_MIN, FONT_SIZE_MAX)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AppearancePrefs {
+    /// Manual theme choice; auto-night overrides it while active.
+    #[serde(default)]
+    pub theme: ThemeChoice,
+    #[serde(default)]
+    pub auto_night: AutoNight,
+    /// Scheduled auto-night window, minutes since local midnight
+    /// (defaults 22:00 → 07:00, TGX's usual night window).
+    #[serde(default = "default_night_start")]
+    pub night_start_minutes: u16,
+    #[serde(default = "default_night_end")]
+    pub night_end_minutes: u16,
+    /// Accent color as 0xRRGGBB; 0 = the theme's default accent.
+    #[serde(default)]
+    pub accent_rgb: u32,
+    /// Chat wallpaper as 0xRRGGBB; None = the theme background.
+    #[serde(default)]
+    pub wallpaper_rgb: Option<u32>,
+    /// Message text size in px.
+    #[serde(default = "default_font_size")]
+    pub font_size_px: u8,
+    /// Bubble style (true) vs plain full-width rows (false).
+    #[serde(default = "default_true")]
+    pub bubbles: bool,
+}
+
+fn default_night_start() -> u16 {
+    22 * 60
+}
+
+fn default_night_end() -> u16 {
+    7 * 60
+}
+
+fn default_font_size() -> u8 {
+    FONT_SIZE_DEFAULT
+}
+
+fn default_true() -> bool {
+    true
+}
+
+impl Default for AppearancePrefs {
+    fn default() -> Self {
+        Self {
+            theme: ThemeChoice::Light,
+            auto_night: AutoNight::Off,
+            night_start_minutes: default_night_start(),
+            night_end_minutes: default_night_end(),
+            accent_rgb: 0,
+            wallpaper_rgb: None,
+            font_size_px: FONT_SIZE_DEFAULT,
+            bubbles: true,
+        }
     }
-    let bytes = serde_json::to_vec_pretty(prefs)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-    std::fs::write(path, bytes)
+}
+
+/// Load appearance prefs; missing or corrupt files fall back to
+/// defaults (never a hard error — prefs must not block startup).
+pub fn load_appearance_prefs(paths: &AccountPaths) -> AppearancePrefs {
+    load_json_prefs(paths, "appearance_prefs.json")
+}
+
+/// Persist appearance prefs; failures are returned to the caller to
+/// surface in the status note.
+pub fn save_appearance_prefs(paths: &AccountPaths, prefs: &AppearancePrefs) -> std::io::Result<()> {
+    save_json_prefs(paths, "appearance_prefs.json", prefs)
+}
+
+/// Pure predicate behind scheduled auto-night: is `now` (minutes since
+/// local midnight) inside the [start, end) night window? Windows that
+/// wrap past midnight (22:00 → 07:00) are the normal case; start == end
+/// is the empty window (never night).
+pub fn night_active(start_minutes: u16, end_minutes: u16, now_minutes: u16) -> bool {
+    if start_minutes <= end_minutes {
+        now_minutes >= start_minutes && now_minutes < end_minutes
+    } else {
+        now_minutes >= start_minutes || now_minutes < end_minutes
+    }
+}
+
+/// Minutes since local midnight, for scheduled auto-night. A thin
+/// `libc::localtime_r` wrapper — no chrono/time dependency for one
+/// call; the testable predicate is `night_active`.
+pub fn local_minutes_since_midnight() -> u16 {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs() as libc::time_t)
+        .unwrap_or(0);
+    let mut broken: libc::tm = unsafe { std::mem::zeroed() };
+    if unsafe { libc::localtime_r(&now, &mut broken) }.is_null() {
+        return 0;
+    }
+    (broken.tm_hour.max(0) as u16) * 60 + (broken.tm_min.max(0) as u16)
 }
 
 fn default_true() -> bool {
@@ -439,5 +582,82 @@ mod tests {
                 ".gitignore must contain exact entry: {entry}"
             );
         }
+    /// Settings → Appearance: prefs survive a save/load roundtrip and a
+    /// missing file falls back to defaults (never an error).
+    #[test]
+    fn appearance_prefs_roundtrip_and_defaults() {
+        let dir = std::env::temp_dir().join(format!("quill-appearance-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let paths = AccountPaths::for_root(&dir, &AccountKey::primary());
+
+        // Missing file → defaults (light theme, auto-night off, 14px, bubbles).
+        let defaults = load_appearance_prefs(&paths);
+        assert_eq!(defaults, AppearancePrefs::default());
+        assert_eq!(defaults.theme, ThemeChoice::Light);
+        assert_eq!(defaults.auto_night, AutoNight::Off);
+        assert_eq!(defaults.font_size_px, FONT_SIZE_DEFAULT);
+        assert!(defaults.bubbles);
+
+        let prefs = AppearancePrefs {
+            theme: ThemeChoice::Dark,
+            auto_night: AutoNight::Scheduled,
+            night_start_minutes: 23 * 60,
+            night_end_minutes: 6 * 60,
+            accent_rgb: 0x2f81f7,
+            wallpaper_rgb: Some(0x0e1621),
+            font_size_px: 17,
+            bubbles: false,
+        };
+        save_appearance_prefs(&paths, &prefs).unwrap();
+        assert_eq!(load_appearance_prefs(&paths), prefs);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Settings → Appearance: a corrupt prefs file falls back to
+    /// defaults instead of blocking startup.
+    #[test]
+    fn appearance_prefs_corrupt_file_falls_back() {
+        let dir =
+            std::env::temp_dir().join(format!("quill-appearance-corrupt-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let paths = AccountPaths::for_root(&dir, &AccountKey::primary());
+        fs::create_dir_all(&paths.root).unwrap();
+        fs::write(
+            paths.root.join("appearance_prefs.json"),
+            b"{ this is not json",
+        )
+        .unwrap();
+        assert_eq!(load_appearance_prefs(&paths), AppearancePrefs::default());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Settings → Appearance: scheduled auto-night boundaries, including
+    /// the wrap-past-midnight case and the empty window.
+    #[test]
+    fn night_active_cases() {
+        // Wrap-past-midnight window 22:00 → 07:00.
+        assert!(night_active(22 * 60, 7 * 60, 23 * 60));
+        assert!(night_active(22 * 60, 7 * 60, 3 * 60));
+        assert!(!night_active(22 * 60, 7 * 60, 12 * 60));
+        // Boundaries: inclusive start, exclusive end.
+        assert!(night_active(22 * 60, 7 * 60, 22 * 60));
+        assert!(!night_active(22 * 60, 7 * 60, 7 * 60));
+        // Same-day window 09:00 → 17:00.
+        assert!(night_active(9 * 60, 17 * 60, 12 * 60));
+        assert!(!night_active(9 * 60, 17 * 60, 8 * 60));
+        assert!(!night_active(9 * 60, 17 * 60, 17 * 60));
+        // Degenerate window (start == end) is never night.
+        assert!(!night_active(7 * 60, 7 * 60, 7 * 60));
+        assert!(!night_active(7 * 60, 7 * 60, 12 * 60));
+    }
+
+    /// Settings → Appearance: out-of-range font sizes clamp to 12–20px.
+    #[test]
+    fn font_size_clamps_to_range() {
+        assert_eq!(clamp_font_size(0), FONT_SIZE_MIN);
+        assert_eq!(clamp_font_size(11), FONT_SIZE_MIN);
+        assert_eq!(clamp_font_size(14), 14);
+        assert_eq!(clamp_font_size(20), 20);
+        assert_eq!(clamp_font_size(255), FONT_SIZE_MAX);
     }
 }

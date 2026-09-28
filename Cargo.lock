@@ -5206,6 +5206,7 @@ dependencies = [
  "directories",
  "gpui-kit",
  "image",
+ "libc",
  "libloading",
  "ntgcalls-sys",
  "pretty_assertions",
