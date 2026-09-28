@@ -1811,8 +1811,10 @@ pub fn close_secret_chat(extra: RequestId, secret_chat_id: i32) -> String {
 /// `toggleSessionCanAcceptSecretChats session_id:int64 can_accept_secret_chats:Bool = Ok;`
 /// Per-session toggle — the session accepts (or rejects) new secret chats.
 /// TGX surfaces it in the session editor ("Secret Chats" Accept/Reject,
-/// `EditSessionController`); Quill has no sessions screen yet, so this is
-/// request-layer only until one lands.
+/// `EditSessionController`); slice A4 wires it into A3's session rows,
+/// and this request-layer builder sends the raw i64 `session_id` (numeric
+/// in the JSON body — asserted by
+/// `toggle_session_can_accept_secret_chats_shape_matches_1_8_67`).
 pub fn toggle_session_can_accept_secret_chats(
     extra: RequestId,
     session_id: i64,

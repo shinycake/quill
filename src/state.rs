@@ -1013,7 +1013,7 @@ fn sessions_error_line(action: &str, err: &TdError) -> String {
         ErrorClass::Flood => "too many requests — wait and try again",
         ErrorClass::Unauthorized => "session is no longer authorized",
         ErrorClass::Invalid => "Telegram refused the request",
-        ErrorClass::NotFound => "session no longer exists",
+        ErrorClass::NotFound => "no longer exists",
         ErrorClass::Other => return format!("Could not {action} (error {})", err.code),
     };
     format!("Could not {action}: {detail}")
@@ -7851,8 +7851,14 @@ impl Session {
                     // Slice A4: a failed websites fetch or disconnect
                     // clears the in-flight flags and parks the honest,
                     // classified error line on the overlay.
+                    // A failed stale-refetch also clears `websites_stale`
+                    // (mirroring A3's sessions arm): otherwise the next
+                    // ingest retries the fetch and flood state worsens;
+                    // retry is user-driven via the Refresh button. The old
+                    // cache stays visible.
                     Some(RequestPurpose::GetConnectedWebsites) => {
                         self.connected_websites_loading = false;
+                        self.websites_stale = false;
                         self.websites_error =
                             Some(sessions_error_line("load the websites list", &err));
                     }
@@ -17846,12 +17852,18 @@ mod tests {
     }
 
     /// Slice A4: a failed websites fetch clears the spinner and parks the
-    /// error on the overlay.
+    /// error on the overlay — and clears `websites_stale` so the next
+    /// ingest does not auto-retry (mirroring A3's
+    /// `sessions_fetch_error_clears_loading`).
     #[test]
     fn websites_fetch_error_clears_loading() {
         let (mut session, sink) = session();
         let seq = AtomicU64::new(0);
         session.connected_websites_loading = true;
+        // A failed stale-refetch (e.g. after a disconnect-ok marked the
+        // cache stale) must NOT leave the cache stale — otherwise the
+        // next ingest retries the fetch and flood state worsens.
+        session.websites_stale = true;
         let extra = session.request(RequestPurpose::GetConnectedWebsites, None);
         apply_json(
             &mut session,
@@ -17863,6 +17875,9 @@ mod tests {
             ),
         );
         assert!(!session.connected_websites_loading);
+        // The failed stale-refetch clears staleness: no auto-retry on
+        // the next ingest; the user retries via the Refresh button.
+        assert!(!session.websites_stale);
         assert_eq!(
             session.websites_error.as_deref(),
             Some("Could not load the websites list: too many requests — wait and try again")

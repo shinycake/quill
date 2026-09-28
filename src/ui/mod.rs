@@ -25845,7 +25845,7 @@ impl QuillApp {
                             .text_color(cx.theme().muted_foreground)
                             .child("Current session"),
                     )
-                    .child(self.session_row(current, mutating, false, cx));
+                    .child(self.session_row(current, mutating, true, cx));
             }
             if !incomplete.is_empty() {
                 body = body
@@ -26026,13 +26026,14 @@ impl QuillApp {
     /// chip), app + version, platform + version, IP + location, last
     /// active; a Terminate button for non-current sessions (TGX
     /// `SettingsSessionsController` row content).
-    /// Slice A4: `show_toggles` (only for other, non-incomplete sessions,
-    /// like TGX's `EditSessionController`) adds the per-session
-    /// "Secret Chats" / "Calls" accept/reject toggles (TGX
-    /// `SessionSecretChats` / `SessionAcceptsCalls`, `SessionAccept` /
-    /// `SessionReject`). They toggle directly — TGX shows no
-    /// confirmation — and the value refreshes from the authoritative
-    /// TDLib response, never optimistically.
+    /// Slice A4: `show_toggles` (the current card, plus other
+    /// non-incomplete sessions — like TGX's `EditSessionController`, whose
+    /// `SessionAccepts` section is gated only on `!isPasswordPending`)
+    /// adds the per-session "Secret Chats" / "Calls" accept/reject
+    /// toggles (TGX `SessionSecretChats` / `SessionAcceptsCalls`,
+    /// `SessionAccept` / `SessionReject`). They toggle directly — TGX
+    /// shows no confirmation — and the value refreshes from the
+    /// authoritative TDLib response, never optimistically.
     fn session_row(
         &self,
         s: &ParsedSession,
@@ -26116,47 +26117,54 @@ impl QuillApp {
                             .child(sub.join("\n")),
                     ),
             );
+        // The toggles render on the current card too — TGX's
+        // `EditSessionController` opens for the current session as well
+        // (`SettingsSessionsController` `R.id.btn_currentSession`), and
+        // its `SessionAccepts` section is gated only on
+        // `!isPasswordPending`. The Terminate button stays
+        // non-current-only.
+        let session_id = s.id;
+        let incomplete = s.is_password_pending;
+        let mut actions = div().flex().flex_col().items_end().gap_1();
+        if show_toggles {
+            let secret_label = format!(
+                "Secret Chats: {}",
+                if s.can_accept_secret_chats {
+                    "Accept"
+                } else {
+                    "Reject"
+                }
+            );
+            let calls_label = format!(
+                "Calls: {}",
+                if s.can_accept_calls {
+                    "Accept"
+                } else {
+                    "Reject"
+                }
+            );
+            actions = actions
+                .child(
+                    Button::new(format!("toggle-secret-chats-{session_id}"))
+                        .label(secret_label)
+                        .ghost()
+                        .disabled(mutating)
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.toggle_session_secret_chats(session_id, cx);
+                        })),
+                )
+                .child(
+                    Button::new(format!("toggle-calls-{session_id}"))
+                        .label(calls_label)
+                        .ghost()
+                        .disabled(mutating)
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.toggle_session_calls(session_id, cx);
+                        })),
+                );
+        }
+        // TGX never offers to terminate the current session.
         if !s.is_current {
-            let session_id = s.id;
-            let incomplete = s.is_password_pending;
-            let mut actions = div().flex().flex_col().items_end().gap_1();
-            if show_toggles {
-                let secret_label = format!(
-                    "Secret Chats: {}",
-                    if s.can_accept_secret_chats {
-                        "Accept"
-                    } else {
-                        "Reject"
-                    }
-                );
-                let calls_label = format!(
-                    "Calls: {}",
-                    if s.can_accept_calls {
-                        "Accept"
-                    } else {
-                        "Reject"
-                    }
-                );
-                actions = actions
-                    .child(
-                        Button::new(format!("toggle-secret-chats-{session_id}"))
-                            .label(secret_label)
-                            .ghost()
-                            .disabled(mutating)
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.toggle_session_secret_chats(session_id, cx);
-                            })),
-                    )
-                    .child(
-                        Button::new(format!("toggle-calls-{session_id}"))
-                            .label(calls_label)
-                            .ghost()
-                            .disabled(mutating)
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.toggle_session_calls(session_id, cx);
-                            })),
-                    );
-            }
             actions = actions.child(
                 Button::new(format!("terminate-session-{session_id}"))
                     .label("Terminate")
@@ -26166,6 +26174,8 @@ impl QuillApp {
                         this.begin_terminate_session(session_id, incomplete, cx);
                     })),
             );
+        }
+        if show_toggles || !s.is_current {
             row = row.child(actions);
         }
         row.into_any_element()
@@ -26258,6 +26268,9 @@ impl QuillApp {
     /// optimistic.
     fn websites_overlay(&self, cx: &mut Context<Self>) -> AnyElement {
         let session = self.session();
+        let has_websites = session
+            .as_ref()
+            .is_some_and(|s| s.connected_websites.is_some());
         let mut websites = session
             .as_ref()
             .and_then(|s| s.connected_websites.clone())
@@ -26287,10 +26300,15 @@ impl QuillApp {
                     .text_color(cx.theme().muted_foreground)
                     .child(if loading {
                         "Loading…"
-                    } else {
+                    } else if has_websites {
                         // TGX `NoActiveLogins` (bold header + help), in one
-                        // honest line: the list is genuinely empty.
+                        // honest line: the list is genuinely empty. Gated on
+                        // `connected_websites.is_some()` — a failed fetch
+                        // (None) shows only the error line above, never an
+                        // unverified "no logins" claim.
                         "No active logins — you can log in on websites that support signing in with Telegram."
+                    } else {
+                        "No website data yet."
                     }),
             );
         } else {
