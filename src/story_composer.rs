@@ -106,6 +106,31 @@ impl StoryPrivacy {
             }),
         }
     }
+
+    /// Phase 9.5: parse a posted story's `privacy_settings` back into the
+    /// composer enum (schema 1.8.67, `td_api.tl:8928` – `td_api.tl:8937`)
+    /// so the privacy editor can prefill the current level.
+    /// `except_user_ids` has no UI surface — dropped, like in 9.3.
+    /// Returns the level plus the `SelectedUsers` user ids (empty
+    /// otherwise).
+    pub fn from_settings_json(value: &Value) -> Option<(StoryPrivacy, Vec<i64>)> {
+        let user_ids = value
+            .get("user_ids")
+            .and_then(Value::as_array)
+            .map(|ids| ids.iter().filter_map(Value::as_i64).collect())
+            .unwrap_or_default();
+        match value.get("@type").and_then(Value::as_str) {
+            Some("storyPrivacySettingsEveryone") => Some((StoryPrivacy::Everyone, Vec::new())),
+            Some("storyPrivacySettingsContacts") => Some((StoryPrivacy::Contacts, Vec::new())),
+            Some("storyPrivacySettingsCloseFriends") => {
+                Some((StoryPrivacy::CloseFriends, Vec::new()))
+            }
+            Some("storyPrivacySettingsSelectedUsers") => {
+                Some((StoryPrivacy::SelectedUsers, user_ids))
+            }
+            _ => None,
+        }
+    }
 }
 
 /// Phase 9.4: story expiry — the only `active_period` values TDLib
@@ -188,9 +213,28 @@ pub struct StoryComposer {
     /// duplicate story). The UI tick clears it once
     /// `Session::story_post.outcome` leaves `None`.
     pub post_sent: bool,
+    /// Phase 9.5: `editStory` was sent in edit mode and its `ok` answer
+    /// has not landed yet. The UI tick clears it once
+    /// `Session::story_manage.pending` clears — success closes the
+    /// composer, failure surfaces `story_manage.error`.
+    pub save_sent: bool,
     /// UI-local validation / flow error (no valid media path yet, no
     /// users selected, demo mode, …). Cleared on open.
     pub local_error: Option<String>,
+    /// Phase 9.5: edit mode — `(poster_chat_id, story_id)` of the posted
+    /// story being edited (`editStory`, `td_api.tl:13732`). The media path
+    /// is optional (empty = keep current content); caption + areas are
+    /// prefilled from the story.
+    pub edit_target: Option<(i64, i32)>,
+    /// Phase 9.5: repost mode — `(poster_chat_id, story_id)` of the
+    /// source story; sent as `postStory.from_story_full_id`
+    /// (`td_api.tl:13715`).
+    pub repost_source: Option<(i64, i32)>,
+    /// Phase 9.5: post on behalf of this chat (`getChatsToPostStories`,
+    /// `td_api.tl:13698`); `None` = the current user's own stories.
+    /// Privacy is server-ignored for channel/supergroup posts, so the UI
+    /// hides the selector when this is `Some`.
+    pub as_chat_id: Option<i64>,
 }
 
 impl StoryComposer {
@@ -199,6 +243,29 @@ impl StoryComposer {
             open: true,
             ..Default::default()
         }
+    }
+
+    /// Phase 9.5: open the composer in edit mode for a posted story.
+    pub fn open_edit(poster_chat_id: i64, story_id: i32) -> Self {
+        Self {
+            open: true,
+            edit_target: Some((poster_chat_id, story_id)),
+            ..Default::default()
+        }
+    }
+
+    /// Phase 9.5: open the composer in repost mode for a source story.
+    pub fn open_repost(poster_chat_id: i64, story_id: i32) -> Self {
+        Self {
+            open: true,
+            repost_source: Some((poster_chat_id, story_id)),
+            ..Default::default()
+        }
+    }
+
+    /// Phase 9.5: true in edit mode — the media path may be empty (keep).
+    pub fn is_edit(&self) -> bool {
+        self.edit_target.is_some()
     }
 
     pub fn close(&mut self) {
@@ -374,5 +441,54 @@ mod tests {
         }
         c.link_url = "t.me/quill".into();
         assert!(c.link_url_error().is_some());
+    }
+
+    #[test]
+    fn privacy_from_settings_json_round_trips() {
+        // Phase 9.5: posted-story `privacy_settings` (td_api.tl:8928-8937)
+        // parse back into the composer enum for the privacy editor.
+        for (json, expected) in [
+            (
+                json!({"@type": "storyPrivacySettingsEveryone", "except_user_ids": []}),
+                StoryPrivacy::Everyone,
+            ),
+            (
+                json!({"@type": "storyPrivacySettingsContacts", "except_user_ids": []}),
+                StoryPrivacy::Contacts,
+            ),
+            (
+                json!({"@type": "storyPrivacySettingsCloseFriends"}),
+                StoryPrivacy::CloseFriends,
+            ),
+            (
+                json!({"@type": "storyPrivacySettingsSelectedUsers", "user_ids": [7, 9]}),
+                StoryPrivacy::SelectedUsers,
+            ),
+        ] {
+            let (privacy, user_ids) = StoryPrivacy::from_settings_json(&json).expect("parsed");
+            assert_eq!(privacy, expected);
+            if expected == StoryPrivacy::SelectedUsers {
+                assert_eq!(user_ids, vec![7, 9]);
+            } else {
+                assert!(user_ids.is_empty());
+            }
+        }
+        assert!(
+            StoryPrivacy::from_settings_json(&json!({"@type": "storyPrivacySettingsNope"}))
+                .is_none()
+        );
+        assert!(StoryPrivacy::from_settings_json(&Value::Null).is_none());
+    }
+
+    #[test]
+    fn edit_and_repost_modes() {
+        let c = StoryComposer::open_edit(11, 5);
+        assert!(c.open && c.is_edit());
+        assert_eq!(c.edit_target, Some((11, 5)));
+        assert_eq!(c.repost_source, None);
+        let c = StoryComposer::open_repost(22, 3);
+        assert!(c.open && !c.is_edit());
+        assert_eq!(c.repost_source, Some((22, 3)));
+        assert_eq!(c.as_chat_id, None);
     }
 }

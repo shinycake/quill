@@ -236,6 +236,14 @@ mod tests {
             can_be_deleted: false,
             can_be_replied: false,
             can_get_interactions: false,
+            can_be_edited: false,
+            can_set_privacy_settings: false,
+            can_be_forwarded: false,
+            is_edited: false,
+            repost_info: None,
+            privacy_settings: None,
+            area_link_url: None,
+            area_reaction_emojis: Vec::new(),
         }
     }
 
@@ -264,6 +272,14 @@ mod tests {
             can_be_deleted: false,
             can_be_replied: false,
             can_get_interactions: false,
+            can_be_edited: false,
+            can_set_privacy_settings: false,
+            can_be_forwarded: false,
+            is_edited: false,
+            repost_info: None,
+            privacy_settings: None,
+            area_link_url: None,
+            area_reaction_emojis: Vec::new(),
         }
     }
 

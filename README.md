@@ -322,12 +322,12 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] "Post to chat page" toggle (`postStory` is_posted_to_chat_page, td_api.tl:13715) <!-- parity:stories-post-to-chat-page -->
 - [x] "Protect content" (no forwarding) toggle (`postStory` protect_content, td_api.tl:13715) <!-- parity:stories-post-protect -->
 - [x] Honest pending / succeeded / failed states (`Posting` is set when the `postStory` answer lands; `updateStoryPostSucceeded`/`PostFailed` applied to the composer status line, DECISIONS.md 9.3) <!-- parity:stories-post-status -->
-- [ ] Edit own story content / caption / areas (editStory, td_api.tl:13732, unused) <!-- parity:stories-edit -->
-- [ ] Edit story cover frame (editStoryCover, td_api.tl:13738, unused) <!-- parity:stories-edit-cover -->
-- [ ] Change a posted story's privacy settings (setStoryPrivacySettings, td_api.tl:13743, unused) <!-- parity:stories-post-change-privacy -->
-- [ ] Post stories on behalf of a channel/supergroup (getChatsToPostStories, canPostStory chat_id unused) <!-- parity:stories-post-as-channel -->
-- [ ] Admin story rights management (post / edit / delete others' stories; TGX strings RightStories*; not in Quill) <!-- parity:stories-admin-rights -->
-- [ ] Repost / re-share a story (storyRepostInfo / storyInteractionTypeRepost in schema; parser drops repost info) <!-- parity:stories-repost -->
+- [x] Edit own story content / caption / areas (editStory, td_api.tl:13732, wired in viewer+composer, Phase 9.5) <!-- parity:stories-edit -->
+- [x] Edit story cover frame (editStoryCover, td_api.tl:13738, viewer cover editor, Phase 9.5) <!-- parity:stories-edit-cover -->
+- [x] Change a posted story's privacy settings (setStoryPrivacySettings, td_api.tl:13743, viewer privacy editor, Phase 9.5) <!-- parity:stories-post-change-privacy -->
+- [x] Post stories on behalf of a channel/supergroup (getChatsToPostStories, canPostStory target chat, Phase 9.5) <!-- parity:stories-post-as-channel -->
+- [x] Admin story rights management (post / edit / delete others' stories; TGX strings RightStories*; covered by the existing admin-rights UI which reads/writes can_post/edit/delete_stories) <!-- parity:stories-admin-rights -->
+- [x] Repost / re-share a story (storyRepostInfo / storyInteractionTypeRepost parsed; repost via postStory from_story_full_id, Phase 9.5) <!-- parity:stories-repost -->
 
 ### Calls
 

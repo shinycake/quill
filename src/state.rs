@@ -651,6 +651,16 @@ pub enum RequestPurpose {
     /// story, id = temporary); success/failure lands via
     /// `updateStoryPostSucceeded` / `updateStoryPostFailed`.
     PostStory,
+    /// Phase 9.5: `editStory`. Response is `ok`; the edited story
+    /// arrives via `updateStory`.
+    EditStory,
+    /// Phase 9.5: `editStoryCover`. Response is `ok`.
+    EditStoryCover,
+    /// Phase 9.5: `setStoryPrivacySettings`. Response is `ok`.
+    SetStoryPrivacySettings,
+    /// Phase 9.5: `getChatsToPostStories`. Response is `chats`;
+    /// stored in `Session::story_post_as_chats`.
+    GetChatsToPostStories,
     /// Parity slice: `createChatFolder`. Response is `chatFolderInfo`;
     /// upserted into `Session::chat_folders` (`updateChatFolders` stays the
     /// source of truth).
@@ -3856,6 +3866,13 @@ pub struct Session {
     /// `setProfilePhoto`/`deleteProfilePhoto`), shown in the
     /// edit-profile dialog. Cleared when the dialog opens.
     pub profile_edit_error: Option<String>,
+    /// Phase 9.5: chat ids from the last `getChatsToPostStories` answer —
+    /// the composer's "post as" picker (channels/supergroups where the
+    /// user has the `can_post_stories` admin right).
+    pub story_post_as_chats: Vec<i64>,
+    /// Phase 9.5: posted-story management round-trip state (edit /
+    /// cover / privacy) rendered as one status line.
+    pub story_manage: StoryManageState,
     /// Phase 9.1: `loadActiveStories(storyListMain)` was issued. A retry is
     /// allowed (the flag is reset) if the attempt failed.
     pub stories_active_loaded: bool,
@@ -3954,6 +3971,24 @@ impl StoryStealthMode {
     pub fn is_cooling_down(&self, now: i64) -> bool {
         !self.is_active(now) && i64::from(self.cooldown_until_date) > now
     }
+}
+
+/// Phase 9.5: which posted-story management call is in flight.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StoryManageOp {
+    EditStory,
+    EditStoryCover,
+    SetPrivacy,
+}
+
+/// Phase 9.5: honest pending/failed states for `editStory` /
+/// `editStoryCover` / `setStoryPrivacySettings` — all `= Ok` calls, so
+/// success only clears the spinner (the edited story itself arrives via
+/// `updateStory`); failures surface the sanitized TDLib error.
+#[derive(Debug, Clone, Default)]
+pub struct StoryManageState {
+    pub pending: Option<StoryManageOp>,
+    pub error: Option<String>,
 }
 
 /// Phase 6: which info panel is open in the side panel.
@@ -4442,6 +4477,8 @@ impl Session {
             username_check: None,
             username_check_pending: None,
             profile_edit_error: None,
+            story_post_as_chats: Vec::new(),
+            story_manage: StoryManageState::default(),
             diagnostics,
         }
     }
@@ -6378,6 +6415,12 @@ impl Session {
                     self.folder_chats_to_leave
                         .insert(folder_id, chat_ids.iter().map(|id| id.0).collect());
                 }
+                // Phase 9.5: `getChatsToPostStories` answer — the
+                // composer's "post as" picker options. Runs before the
+                // search branch below consumes `chat_ids`.
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetChatsToPostStories) {
+                    self.story_post_as_chats = chat_ids.iter().map(|id| id.0).collect();
+                }
                 if self.search.matches_generation(pending) {
                     match pending.map(|p| p.purpose) {
                         Some(
@@ -7223,6 +7266,16 @@ impl Session {
                             self.welcome_message_fetches.remove(&chat_id.0);
                         }
                     }
+                    // Phase 9.5: a posted-story management call landed —
+                    // clear the spinner; the edited story itself arrives
+                    // via `updateStory`.
+                    Some(
+                        RequestPurpose::EditStory
+                        | RequestPurpose::EditStoryCover
+                        | RequestPurpose::SetStoryPrivacySettings,
+                    ) => {
+                        self.story_manage.pending = None;
+                    }
                     _ => {}
                 }
                 // Phase C2i: `sendCallLog` confirmed — the log upload for
@@ -7389,6 +7442,16 @@ impl Session {
                     Some(RequestPurpose::ActivateStoryStealthMode) => {
                         self.story_stealth_error =
                             Some(format!("Stealth mode failed: {}", error_reason(&err)));
+                    // Phase 9.5: a posted-story management call failed —
+                    // clear the spinner and surface the sanitized error.
+                    Some(
+                        RequestPurpose::EditStory
+                        | RequestPurpose::EditStoryCover
+                        | RequestPurpose::SetStoryPrivacySettings,
+                    ) => {
+                        self.story_manage.pending = None;
+                        self.story_manage.error =
+                            Some(format!("Story update failed: {}", error_reason(&err)));
                     }
                     // A5: profile-edit failures surface in the
                     // edit-profile dialog. The message is classified by
@@ -14550,6 +14613,14 @@ mod tests {
                 can_be_deleted: false,
                 can_be_replied: false,
                 can_get_interactions: false,
+                can_be_edited: false,
+                can_set_privacy_settings: false,
+                can_be_forwarded: false,
+                is_edited: false,
+                repost_info: None,
+                privacy_settings: None,
+                area_link_url: None,
+                area_reaction_emojis: Vec::new(),
             },
         );
         apply_json(
@@ -14926,6 +14997,54 @@ mod tests {
             ),
         );
         assert!(session.story_post.check_error.is_some());
+    }
+
+    #[test]
+    fn story_manage_state_transitions() {
+        // Phase 9.5: `editStory` / `editStoryCover` /
+        // `setStoryPrivacySettings` pending is cleared by the `ok`
+        // answer and the sanitized error lands on failure;
+        // `getChatsToPostStories` stores the chat ids.
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+
+        let extra = session.request(RequestPurpose::EditStory, None);
+        session.story_manage.pending = Some(StoryManageOp::EditStory);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
+        );
+        assert_eq!(session.story_manage.pending, None);
+        assert_eq!(session.story_manage.error, None);
+
+        let extra = session.request(RequestPurpose::EditStoryCover, None);
+        session.story_manage.pending = Some(StoryManageOp::EditStoryCover);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"error","@extra":"{}","code":400,"message":"STORY_NOT_EDITABLE"}}"#,
+                extra.0
+            ),
+        );
+        assert_eq!(session.story_manage.pending, None);
+        let error = session.story_manage.error.clone().expect("manage error");
+        assert!(error.contains("Story update failed"), "{error}");
+
+        let extra = session.request(RequestPurpose::GetChatsToPostStories, None);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"chats","@extra":"{}","total_count":2,"chat_ids":[111,222]}}"#,
+                extra.0
+            ),
+        );
+        assert_eq!(session.story_post_as_chats, vec![111, 222]);
     }
 
     #[test]

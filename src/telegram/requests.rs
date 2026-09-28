@@ -4889,6 +4889,87 @@ pub fn input_story_content(kind: StoryMediaKind, path: &str) -> Value {
     }
 }
 
+/// Phase 9.5: `editStory` (TDLib 1.8.67, `schema/td_api.tl:13732`) —
+/// `editStory story_poster_chat_id:int53 story_id:int32
+/// content:InputStoryContent areas:inputStoryAreas caption:formattedText
+/// = Ok;` The schema comment: "pass null to keep the current
+/// content/areas/caption". `content: None` keeps the media; `areas:
+/// None` keeps the areas (areas can't change unless content does —
+/// the driver rejects area-only edits); `caption: None` keeps the
+/// caption. Response is `ok`; the edited story arrives via
+/// `updateStory`.
+pub fn edit_story(
+    extra: RequestId,
+    chat_id: ChatId,
+    story_id: i32,
+    content: Option<Value>,
+    areas: Option<Value>,
+    caption: Option<&str>,
+) -> String {
+    json!({
+        "@type": "editStory",
+        "@extra": extra.as_extra(),
+        "story_poster_chat_id": chat_id.0,
+        "story_id": story_id,
+        "content": content.unwrap_or(Value::Null),
+        "areas": areas.unwrap_or(Value::Null),
+        "caption": caption.map(|text| formatted_caption(text, false)).unwrap_or(Value::Null)
+    })
+    .to_string()
+}
+
+/// Phase 9.5: `editStoryCover` (TDLib 1.8.67, `schema/td_api.tl:13738`) —
+/// `editStoryCover story_poster_chat_id:int53 story_id:int32
+/// cover_frame_timestamp:double = Ok;` Changes the video story's cover
+/// frame. Only when `story.can_be_edited` (driver-gated).
+pub fn edit_story_cover(
+    extra: RequestId,
+    chat_id: ChatId,
+    story_id: i32,
+    cover_frame_timestamp: f64,
+) -> String {
+    json!({
+        "@type": "editStoryCover",
+        "@extra": extra.as_extra(),
+        "story_poster_chat_id": chat_id.0,
+        "story_id": story_id,
+        "cover_frame_timestamp": cover_frame_timestamp
+    })
+    .to_string()
+}
+
+/// Phase 9.5: `setStoryPrivacySettings` (TDLib 1.8.67,
+/// `schema/td_api.tl:13743`) — `setStoryPrivacySettings story_id:int32
+/// privacy_settings:StoryPrivacySettings = Ok;` Only for stories posted
+/// on behalf of the current user with `story.can_set_privacy_settings`
+/// (driver-gated). Response is `ok`.
+pub fn set_story_privacy_settings(
+    extra: RequestId,
+    story_id: i32,
+    privacy_settings: Value,
+) -> String {
+    json!({
+        "@type": "setStoryPrivacySettings",
+        "@extra": extra.as_extra(),
+        "story_id": story_id,
+        "privacy_settings": privacy_settings
+    })
+    .to_string()
+}
+
+/// Phase 9.5: `getChatsToPostStories` (TDLib 1.8.67,
+/// `schema/td_api.tl:13698`) — `getChatsToPostStories = Chats;`
+/// "Returns supergroup and channel chats in which the current user has
+/// the right to post stories. The chats must be rechecked with
+/// canPostStory before actually trying to post a story there."
+pub fn get_chats_to_post_stories(extra: RequestId) -> String {
+    json!({
+        "@type": "getChatsToPostStories",
+        "@extra": extra.as_extra()
+    })
+    .to_string()
+}
+
 /// Phase 9.3 / 9.4: `postStory` (TDLib 1.8.67, `schema/td_api.tl:13715`)
 /// — posts a photo/video story as the current user (the Saved Messages
 /// chat id, `Session::my_user_id`). The caption gets the same
@@ -4902,6 +4983,10 @@ pub fn input_story_content(kind: StoryMediaKind, path: &str) -> Value {
 /// `is_posted_to_chat_page` ("Pass true to keep the story accessible
 /// after expiration") and `protect_content` ("Pass true if the content
 /// of the story must be protected from forwarding and screenshotting").
+/// Phase 9.5: `from_story` carries a repost source as `storyFullId`
+/// (`td_api.tl:6761`); `chat_id` may be a channel/supergroup from
+/// `getChatsToPostStories` (privacy is server-ignored for those —
+/// schema comment on `postStory`).
 /// Response is a `story`; success/failure lands via
 /// `updateStoryPostSucceeded` / `updateStoryPostFailed`.
 #[allow(clippy::too_many_arguments)] // one arg per schema field, like the other request builders
@@ -4914,9 +4999,17 @@ pub fn post_story(
     privacy_settings: Value,
     areas: Value,
     active_period: i32,
+    from_story: Option<(i64, i32)>,
     is_posted_to_chat_page: bool,
     protect_content: bool,
 ) -> String {
+    let from_story_full_id = from_story.map(|(poster_chat_id, story_id)| {
+        json!({
+            "@type": "storyFullId",
+            "poster_chat_id": poster_chat_id,
+            "story_id": story_id
+        })
+    });
     json!({
         "@type": "postStory",
         "@extra": extra.as_extra(),
@@ -4927,7 +5020,7 @@ pub fn post_story(
         "privacy_settings": privacy_settings,
         "album_ids": [],
         "active_period": active_period,
-        "from_story_full_id": Value::Null,
+        "from_story_full_id": from_story_full_id.unwrap_or(Value::Null),
         "is_posted_to_chat_page": is_posted_to_chat_page,
         "protect_content": protect_content
     })
@@ -8558,6 +8651,7 @@ mod channel_requests_tests {
             privacy,
             areas.clone(),
             86400,
+            None,
             false,
             false,
         );
@@ -8594,6 +8688,7 @@ mod channel_requests_tests {
             StoryPrivacy::CloseFriends.settings_json(&[]),
             json!({ "@type": "inputStoryAreas", "areas": [] }),
             86400,
+            None,
             false,
             false,
         );
@@ -8636,6 +8731,7 @@ mod channel_requests_tests {
             StoryPrivacy::Everyone.settings_json(&[]),
             areas,
             172800,
+            None,
             true,
             true,
         );
@@ -8648,6 +8744,87 @@ mod channel_requests_tests {
         assert_eq!(v["active_period"], 172800);
         assert_eq!(v["is_posted_to_chat_page"], true);
         assert_eq!(v["protect_content"], true);
+    }
+
+    #[test]
+    fn s3_manage_story_request_shapes_match_1_8_67() {
+        // Phase 9.5: `editStory` (td_api.tl:13732), `editStoryCover`
+        // (td_api.tl:13738), `setStoryPrivacySettings` (td_api.tl:13743),
+        // `getChatsToPostStories` (td_api.tl:13698), and `postStory` with
+        // a repost source (`storyFullId`, td_api.tl:6761).
+        let json = edit_story(
+            RequestId(80),
+            ChatId(11),
+            5,
+            None,
+            None,
+            Some("new caption"),
+        );
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "editStory");
+        assert_eq!(v["story_poster_chat_id"], 11);
+        assert_eq!(v["story_id"], 5);
+        assert!(v["content"].is_null());
+        assert!(v["areas"].is_null());
+        assert_eq!(v["caption"]["text"], "new caption");
+
+        // New media + areas ride as input blocks (null = keep).
+        let json = edit_story(
+            RequestId(81),
+            ChatId(11),
+            5,
+            Some(input_story_content(StoryMediaKind::Photo, "/tmp/new.jpg")),
+            Some(json!({ "@type": "inputStoryAreas", "areas": [] })),
+            None,
+        );
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["content"]["@type"], "inputStoryContentPhoto");
+        assert_eq!(v["areas"]["@type"], "inputStoryAreas");
+        assert!(v["caption"].is_null());
+
+        let json = edit_story_cover(RequestId(82), ChatId(11), 5, 3.5);
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "editStoryCover");
+        assert_eq!(v["story_poster_chat_id"], 11);
+        assert_eq!(v["story_id"], 5);
+        assert_eq!(v["cover_frame_timestamp"], 3.5);
+
+        let json = set_story_privacy_settings(
+            RequestId(83),
+            5,
+            StoryPrivacy::CloseFriends.settings_json(&[]),
+        );
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "setStoryPrivacySettings");
+        assert_eq!(v["story_id"], 5);
+        assert_eq!(
+            v["privacy_settings"]["@type"],
+            "storyPrivacySettingsCloseFriends"
+        );
+
+        let json = get_chats_to_post_stories(RequestId(84));
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "getChatsToPostStories");
+
+        // Repost: `from_story_full_id` carries the source story.
+        let json = post_story(
+            RequestId(85),
+            ChatId(777),
+            StoryMediaKind::Photo,
+            "/tmp/pic.jpg",
+            "",
+            StoryPrivacy::Everyone.settings_json(&[]),
+            json!({ "@type": "inputStoryAreas", "areas": [] }),
+            86400,
+            Some((22, 3)),
+            false,
+            false,
+        );
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "postStory");
+        assert_eq!(v["from_story_full_id"]["@type"], "storyFullId");
+        assert_eq!(v["from_story_full_id"]["poster_chat_id"], 22);
+        assert_eq!(v["from_story_full_id"]["story_id"], 3);
     }
 
     #[test]
