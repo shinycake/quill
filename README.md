@@ -36,10 +36,10 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Enable / change / disable the two-step password: "Two-Step Verification" overlay (TGX wording) shows the authoritative getPasswordState; setPassword enable (empty old, optional recovery email in the same call), change, and disable (empty new); no optimistic mutations, one op in flight, passwords zeroized and never logged <!-- parity:auth-2fa-manage -->
 - [x] Set / change recovery email, pending-confirmation state, abort setup: setRecoveryEmailAddress (current password required), pending pattern card (TGX PendingEmailText), resend (resendRecoveryEmailAddressCode, no invented cooldown) and "Abort recovery email setup" (TGX AbortRecoveryEmail verbatim) <!-- parity:auth-recovery-email -->
 - [ ] Password recovery via 6-digit email code (partial: login password screen only hints "recovery email is available in the official client", auth.rs:54) <!-- parity:auth-password-recovery -->
-- [ ] Active Sessions list: device/app/IP/location with current-device marker (schema: getActiveSessions) <!-- parity:auth-sessions-list -->
-- [ ] Incomplete login attempts list with per-attempt terminate (TGX SessionsIncompleteTitle/Info) <!-- parity:auth-sessions-incomplete -->
-- [ ] Terminate one session, with confirmation (schema: terminateSession; TGX TerminateSessionQuestion) <!-- parity:auth-session-terminate-one -->
-- [ ] Terminate all other sessions, with confirmation (schema: terminateAllOtherSessions; TGX AreYouSureSessions) <!-- parity:auth-sessions-terminate-all -->
+- [x] Active Sessions list: device/app/IP/location with current-device marker (schema: getActiveSessions) <!-- parity:auth-sessions-list --> (telegram/requests.rs:57; telegram/envelope.rs:8110; ui/mod.rs:24263)
+- [x] Incomplete login attempts list with per-attempt terminate (TGX SessionsIncompleteTitle/Info) <!-- parity:auth-sessions-incomplete --> (ui/mod.rs:24263 — is_password_pending section)
+- [x] Terminate one session, with confirmation (schema: terminateSession; TGX TerminateSessionQuestion) <!-- parity:auth-session-terminate-one --> (telegram/requests.rs:67; connect.rs: terminate_session; ui/mod.rs: confirm banner)
+- [x] Terminate all other sessions, with confirmation (schema: terminateAllOtherSessions; TGX AreYouSureSessions) <!-- parity:auth-sessions-terminate-all --> (telegram/requests.rs:79; connect.rs: terminate_all_other_sessions; ui/mod.rs: confirm banner)
 - [ ] Per-session toggles: accept secret chats / accept calls (schema: toggleSessionCanAcceptSecretChats, toggleSessionCanAcceptCalls; TGX SessionAccepts) <!-- parity:auth-session-toggles -->
 - [ ] "Logged in with Telegram" websites list + disconnect all (TGX WebSessionsTitle, TerminateAllWebSessions) <!-- parity:auth-web-sessions -->
 - [x] Log out (telegram/requests.rs:98; state.rs:6502 invalidates account) <!-- parity:auth-logout -->

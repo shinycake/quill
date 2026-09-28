@@ -63,7 +63,8 @@ use quill::telegram::envelope::{
     LoginUrlInfo, MUTE_FOR_1_HOUR, MUTE_FOR_2_DAYS, MUTE_FOR_8_HOURS, MUTE_FOREVER, MessageContent,
     MessageInteractionInfo, MessageSchedulingState, MessageSender, NotificationSettingsScope,
     NotificationSound, ParsedChatEvent, ParsedFile, ParsedGroupCallParticipant, ParsedMessage,
-    ParsedSecretChat, ParsedStory, ParsedWelcomeMessage, PasswordState, PollContent, PollOption,
+    ParsedSecretChat, ParsedSession, ParsedStory, ParsedWelcomeMessage, PasswordState, PollContent,
+    PollOption,
     PollType, ReplyKeyboard, ReplyMarkup, ScopeNotificationSettings, SecretChatState,
     SpeechRecognition, SponsoredMessage, StatisticalGraph, StatisticalValue, StorageFileTypeStats,
     StorageStats, call_entry_label, chat_ttl_service_label, effective_content, format_ttl_setting,
@@ -1044,6 +1045,26 @@ fn format_record_duration(secs: i32) -> String {
     }
 }
 
+/// Slice A3: relative "last active" for a session unix timestamp
+/// (TGX `SessionLastActiveDate`) — relative only, no timezone math,
+/// the `format_starts_in` precedent.
+fn format_session_last_active(last_active_date: i32) -> String {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    let secs = (now - last_active_date as i64).max(0);
+    if secs < 60 {
+        "just now".to_string()
+    } else if secs < 3600 {
+        format!("{}m ago", secs / 60)
+    } else if secs < 86400 {
+        format!("{}h ago", secs / 3600)
+    } else {
+        format!("{}d ago", secs / 86400)
+    }
+}
+
 /// Phase C3a: voice-chat title rename dialog (`setVideoChatTitle`,
 /// schema 1.8.67, line 14312). Created when the dialog opens with the
 /// current title pre-filled.
@@ -1189,6 +1210,18 @@ pub struct FolderDeleteConfirm {
     folder_id: i32,
     name: String,
     leave_with_folder: bool,
+}
+
+/// Slice A3: which terminate the sessions overlay is confirming (TGX
+/// `TerminateSessionQuestion` / `TerminateIncompleteSessionQuestion` /
+/// `AreYouSureSessions`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SessionsConfirm {
+    /// `terminateSession` for one session; `incomplete` picks the login-
+    /// attempt wording.
+    TerminateOne { session_id: i64, incomplete: bool },
+    /// `terminateAllOtherSessions`.
+    TerminateAll,
 }
 
 /// Phase C2i: rating-detail draft for the call-end card. `problems` is
@@ -1383,6 +1416,13 @@ pub struct QuillApp {
     /// your current password") — the driver rejects doomed requests
     /// silently, so the form must speak before sending.
     twofa_notice: Option<String>,
+    /// Slice A3: Active Sessions overlay (TGX Settings → Devices /
+    /// `SettingsSessionsController`).
+    sessions_open: bool,
+    /// Slice A3: pending terminate confirmation on the sessions overlay
+    /// (TGX `TerminateSessionQuestion` / `TerminateIncompleteSessionQuestion`
+    /// / `AreYouSureSessions`).
+    sessions_confirm: Option<SessionsConfirm>,
     /// Slice CL2: chat-list category filter (TGX `ChatFilter` unread /
     /// archive categories, `MainController` pager categories). `All` is
     /// the unfiltered list; `Unread` filters to unread chats;
@@ -1958,6 +1998,10 @@ pub enum ScreenshotDemo {
     /// fixture `getStorageStatistics` stats with the "Secret media and
     /// files" category, dialog open.
     ReadyStorageUsage,
+    /// Slice A3: Active Sessions overlay (injected, no live Telegram) —
+    /// fixture `getActiveSessions` sessions (current device + two other
+    /// sessions + one incomplete login attempt), dialog open.
+    ReadySessions,
     /// Phase B3: self-destructing media (injected, no live Telegram) —
     /// a Ready *private* (1:1 cloud) chat with Zed: an incoming photo
     /// with a live 60s `messageSelfDestructTypeTimer` countdown, an
@@ -3224,6 +3268,17 @@ impl QuillApp {
                     AuthorizationState::Ready,
                 )
             }
+            // Slice A3: Active Sessions fixture (injected, no live
+            // Telegram).
+            Some(ScreenshotDemo::ReadySessions) => {
+                demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
+                (
+                    ConnectUiStatus::DemoReadyChats,
+                    None,
+                    "screenshot demo — active sessions (injected, no live Telegram)".into(),
+                    AuthorizationState::Ready,
+                )
+            }
             Some(ScreenshotDemo::ReadyRecoveryEmail) => {
                 demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
                 (
@@ -3495,6 +3550,8 @@ impl QuillApp {
             event_log_search: None,
             event_log_admin_filter: None,
             storage_usage_open: false,
+            sessions_open: false,
+            sessions_confirm: None,
             chat_filter: ChatListFilter::All,
             new_secret_picker_open: false,
             pending_forward: None,
@@ -4013,6 +4070,18 @@ impl QuillApp {
             }
             app.twofa_open = true;
             app.status_note = "screenshot demo — recovery email pending".into();
+        // Slice A3: Active Sessions fixture — fixture sessions (current
+        // device, two other sessions, one incomplete login attempt) with
+        // the overlay open (injected, no live Telegram).
+        if matches!(demo, Some(ScreenshotDemo::ReadySessions)) {
+            if let Some(session) = app.demo_session.as_mut() {
+                app.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                session.sessions = Some(demo_sessions());
+                session.sessions_loading = false;
+                session.sessions_error = None;
+            }
+            app.sessions_open = true;
+            app.status_note = "screenshot demo — active sessions".into();
         }
         // Phase B2: key verification fixture — the Ready secret chat with
         // a real 36-byte key_hash and Zed's info panel open on the
@@ -8267,6 +8336,12 @@ impl QuillApp {
             self.notification_defaults_open = false;
             self.defaults_sound_picker = None;
             cx.notify();
+            return;
+        }
+        // Slice A3: Esc on the sessions overlay cancels a pending
+        // terminate confirmation first, then closes the overlay.
+        if self.sessions_open {
+            self.close_sessions(cx);
             return;
         }
         if self.mute_menu_open {
@@ -24226,6 +24301,18 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// Slice A3: open the Active Sessions overlay. Live: guarded fetch of
+    /// the authoritative `getActiveSessions` answer (cached state reused,
+    /// in-flight fetch deduped). Demo: the fixture is already injected.
+    fn open_sessions(&mut self, cx: &mut Context<Self>) {
+        self.sessions_open = true;
+        self.sessions_confirm = None;
+        if let Some(live) = self.live.as_mut() {
+            let _ = live.driver.maybe_fetch_active_sessions();
+        }
+        cx.notify();
+    }
+
     /// Slice A2: close the overlay and clear every 2FA input — passwords
     /// must not linger in the form after the dialog is gone.
     fn close_twofa(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -24238,6 +24325,28 @@ impl QuillApp {
             &self.twofa_email,
         ] {
             input.update(cx, |input, cx| input.set_value("", window, cx));
+        }
+    }
+
+    /// Slice A3: close the overlay and drop any pending terminate
+    /// confirmation.
+    fn close_sessions(&mut self, cx: &mut Context<Self>) {
+        self.sessions_open = false;
+        self.sessions_confirm = None;
+        cx.notify();
+    }
+
+    /// Slice A3: refresh the list — live drops the cache so the guarded
+    /// fetch refires; demo re-injects the fixture.
+    fn refresh_sessions(&mut self, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            live.driver.session.sessions = None;
+            live.driver.session.sessions_stale = false;
+            let _ = live.driver.maybe_fetch_active_sessions();
+        } else if let Some(session) = self.demo_session.as_mut() {
+            session.sessions = Some(demo_sessions());
+            session.sessions_loading = false;
+            session.sessions_error = None;
         }
         cx.notify();
     }
@@ -24348,6 +24457,57 @@ impl QuillApp {
     fn resend_twofa_code(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.resend_recovery_email_code();
+        }
+        cx.notify();
+    }
+
+    /// Slice A3: arm the terminate confirmation for one session
+    /// (TGX `TerminateSessionQuestion` /
+    /// `TerminateIncompleteSessionQuestion`).
+    fn begin_terminate_session(
+        &mut self,
+        session_id: i64,
+        incomplete: bool,
+        cx: &mut Context<Self>,
+    ) {
+        self.sessions_confirm = Some(SessionsConfirm::TerminateOne {
+            session_id,
+            incomplete,
+        });
+        cx.notify();
+    }
+
+    /// Slice A3: arm the "terminate all other sessions" confirmation
+    /// (TGX `AreYouSureSessions`).
+    fn begin_terminate_all_sessions(&mut self, cx: &mut Context<Self>) {
+        self.sessions_confirm = Some(SessionsConfirm::TerminateAll);
+        cx.notify();
+    }
+
+    /// Slice A3: drop the pending terminate confirmation.
+    fn cancel_sessions_confirm(&mut self, cx: &mut Context<Self>) {
+        self.sessions_confirm = None;
+        cx.notify();
+    }
+
+    /// Slice A3: send the confirmed terminate. Live only — the demo has
+    /// no TDLib; the list refreshes from the authoritative `ok` answer,
+    /// never optimistically.
+    fn confirm_sessions_terminate(&mut self, cx: &mut Context<Self>) {
+        let confirm = self.sessions_confirm.take();
+        if let (Some(live), Some(confirm)) = (self.live.as_mut(), confirm) {
+            let result = match confirm {
+                SessionsConfirm::TerminateOne { session_id, .. } => {
+                    live.driver.terminate_session(session_id).map(|_| ())
+                }
+                SessionsConfirm::TerminateAll => {
+                    live.driver.terminate_all_other_sessions().map(|_| ())
+                }
+            };
+            self.status_note = match result {
+                Ok(()) => "Terminating session…".into(),
+                Err(_) => "Could not terminate the session.".into(),
+            };
         }
         cx.notify();
     }
@@ -24754,6 +24914,360 @@ impl QuillApp {
                             })),
                     ),
             )
+    }
+
+    /// Slice A3: "Active Sessions" overlay (TGX `SettingsSessionsController`
+    /// / `SessionsTitle`): the current-device card, the Incomplete Login
+    /// Attempts section (TGX `SessionsIncompleteTitle` /
+    /// `SessionsIncompleteInfo`, verbatim), other sessions with
+    /// per-session Terminate (TGX `TerminateSessionQuestion`), and
+    /// "Terminate all other sessions" (TGX `TerminateAllSessions` /
+    /// `AreYouSureSessions`). Renders the authoritative state only —
+    /// loading and error lines are honest, never optimistic.
+    fn sessions_overlay(&self, cx: &mut Context<Self>) -> AnyElement {
+        let session = self.session();
+        let sessions = session
+            .as_ref()
+            .and_then(|s| s.sessions.clone())
+            .unwrap_or_default();
+        let loading = session.is_some_and(|s| s.sessions_loading);
+        let mutating = session.is_some_and(|s| s.sessions_mutating);
+        let stale = session.is_some_and(|s| s.sessions_stale);
+        let error = session.as_ref().and_then(|s| s.sessions_error.clone());
+        let current = sessions.iter().find(|s| s.is_current);
+        let mut incomplete: Vec<&ParsedSession> = sessions
+            .iter()
+            .filter(|s| !s.is_current && s.is_password_pending)
+            .collect();
+        incomplete.sort_by(|a, b| b.last_active_date.cmp(&a.last_active_date));
+        let mut others: Vec<&ParsedSession> = sessions
+            .iter()
+            .filter(|s| !s.is_current && !s.is_password_pending)
+            .collect();
+        others.sort_by(|a, b| b.last_active_date.cmp(&a.last_active_date));
+
+        let mut body = div().flex().flex_col().gap_2();
+        if let Some(line) = error {
+            body = body.child(
+                div()
+                    .text_xs()
+                    .text_color(rgb(0xf85149))
+                    .child(format!("Error: {line}")),
+            );
+        }
+        if let Some(confirm) = self.sessions_confirm {
+            body = body.child(self.sessions_confirm_banner(confirm, mutating, cx));
+        }
+        if sessions.is_empty() {
+            body = body.child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(if loading {
+                        "Loading…"
+                    } else {
+                        "No session data yet."
+                    }),
+            );
+        } else {
+            // A terminate just landed: the old list stays visible while
+            // the authoritative refetch is in flight (never an optimistic
+            // delete).
+            if stale && loading {
+                body = body.child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child("Refreshing…"),
+                );
+            }
+            if let Some(current) = current {
+                body = body
+                    .child(
+                        div()
+                            .text_xs()
+                            .font_medium()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("Current session"),
+                    )
+                    .child(self.session_row(current, true, mutating, cx));
+            }
+            if !incomplete.is_empty() {
+                body = body
+                    .child(
+                        div()
+                            .text_xs()
+                            .font_medium()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("Incomplete Login Attempts"),
+                    )
+                    .child(
+                        div().text_xs().text_color(cx.theme().muted_foreground).child(
+                            "The devices above have no access to your messages. The code was entered correctly, but no correct password was given.",
+                        ),
+                    );
+                for s in incomplete {
+                    body = body.child(self.session_row(s, false, mutating, cx));
+                }
+            }
+            if !others.is_empty() {
+                body = body.child(
+                    div()
+                        .text_xs()
+                        .font_medium()
+                        .text_color(cx.theme().muted_foreground)
+                        .child("Other sessions"),
+                );
+                for s in others {
+                    body = body.child(self.session_row(s, false, mutating, cx));
+                }
+            }
+            let any_other = sessions.iter().any(|s| !s.is_current);
+            body = body.child(
+                div().flex().justify_end().child(
+                    Button::new("terminate-all-sessions")
+                        .label("Terminate All Other Sessions")
+                        .danger()
+                        .disabled(!any_other || mutating)
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.begin_terminate_all_sessions(cx);
+                        })),
+                ),
+            );
+        }
+        div()
+            .id("sessions-overlay")
+            .absolute()
+            .top_0()
+            .left_0()
+            .right_0()
+            .bottom_0()
+            .flex()
+            .items_center()
+            .justify_center()
+            .child(
+                div()
+                    .id("sessions-backdrop")
+                    .absolute()
+                    .top_0()
+                    .left_0()
+                    .right_0()
+                    .bottom_0()
+                    .bg(rgba(0x000000e6))
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.close_sessions(cx);
+                    })),
+            )
+            .child(
+                div()
+                    .id("sessions-dialog")
+                    .flex()
+                    .flex_col()
+                    .gap_2()
+                    .px_4()
+                    .py_3()
+                    .rounded_lg()
+                    .bg(cx.theme().sidebar)
+                    .border_1()
+                    .border_color(cx.theme().border)
+                    .min_w(px(380.))
+                    .max_w(px(520.))
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .justify_between()
+                            .child(div().font_semibold().child("Active Sessions"))
+                            .child(
+                                div()
+                                    .flex()
+                                    .gap_2()
+                                    .child(
+                                        Button::new("sessions-refresh")
+                                            .label("Refresh")
+                                            .ghost()
+                                            .on_click(cx.listener(|this, _, _, cx| {
+                                                this.refresh_sessions(cx);
+                                            })),
+                                    )
+                                    .child(
+                                        Button::new("close-sessions")
+                                            .label("Close")
+                                            .ghost()
+                                            .on_click(cx.listener(|this, _, _, cx| {
+                                                this.close_sessions(cx);
+                                            })),
+                                    ),
+                            ),
+                    )
+                    .child(body),
+            )
+            .into_any_element()
+    }
+
+    /// Slice A3: the terminate confirmation banner (the
+    /// `delete_confirm_banner` pattern) — TGX `TerminateSessionQuestion` /
+    /// `TerminateIncompleteSessionQuestion` / `AreYouSureSessions`,
+    /// verbatim.
+    fn sessions_confirm_banner(
+        &self,
+        confirm: SessionsConfirm,
+        mutating: bool,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let question = match confirm {
+            SessionsConfirm::TerminateOne {
+                incomplete: true, ..
+            } => "Terminate this login attempt?",
+            SessionsConfirm::TerminateOne { .. } => "Terminate this session?",
+            SessionsConfirm::TerminateAll => {
+                "Are you sure you want to terminate all other sessions?"
+            }
+        };
+        div()
+            .id("sessions-confirm")
+            .flex()
+            .items_center()
+            .justify_between()
+            .gap_2()
+            .px_3()
+            .py_2()
+            .rounded_md()
+            .border_1()
+            .border_color(rgb(0xf85149))
+            .bg(rgb(0x3d1f1f))
+            .child(
+                div()
+                    .text_sm()
+                    .font_medium()
+                    .text_color(rgb(0xf85149))
+                    .child(question),
+            )
+            .child(
+                div()
+                    .flex()
+                    .gap_2()
+                    .child(
+                        Button::new("sessions-confirm-cancel")
+                            .label("Cancel")
+                            .ghost()
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.cancel_sessions_confirm(cx);
+                            })),
+                    )
+                    .child(
+                        Button::new("sessions-confirm-terminate")
+                            .label(if mutating { "Working…" } else { "Terminate" })
+                            .danger()
+                            .disabled(mutating)
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.confirm_sessions_terminate(cx);
+                            })),
+                    ),
+            )
+    }
+
+    /// Slice A3: one session row — device model title (+ "This device"
+    /// chip), app + version, platform + version, IP + location, last
+    /// active; a Terminate button for non-current sessions (TGX
+    /// `SettingsSessionsController` row content).
+    fn session_row(
+        &self,
+        s: &ParsedSession,
+        is_current_card: bool,
+        mutating: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let app_line = format!(
+            "{} {}",
+            s.application_name.trim(),
+            s.application_version.trim()
+        )
+        .trim()
+        .to_string();
+        let platform_line = format!("{} {}", s.platform.trim(), s.system_version.trim())
+            .trim()
+            .to_string();
+        let mut sub = Vec::new();
+        if !app_line.is_empty() {
+            sub.push(app_line);
+        }
+        if !platform_line.is_empty() {
+            sub.push(platform_line);
+        }
+        let mut meta = Vec::new();
+        if !s.ip_address.is_empty() {
+            meta.push(s.ip_address.clone());
+        }
+        if !s.location.is_empty() {
+            meta.push(s.location.clone());
+        }
+        meta.push(format!(
+            "Last active: {}",
+            format_session_last_active(s.last_active_date)
+        ));
+        sub.push(meta.join(" · "));
+        let title = if s.device_model.trim().is_empty() {
+            "Unknown device".to_string()
+        } else {
+            s.device_model.clone()
+        };
+        let mut row = div()
+            .id(format!("session-row-{}", s.id))
+            .flex()
+            .items_center()
+            .justify_between()
+            .gap_2()
+            .px_3()
+            .py_2()
+            .rounded_md()
+            .border_1()
+            .border_color(cx.theme().border)
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .min_w_0()
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .child(div().text_sm().font_medium().child(title))
+                            .when(is_current_card, |this| {
+                                this.child(
+                                    div()
+                                        .text_xs()
+                                        .px_2()
+                                        .py(px(1.))
+                                        .rounded_full()
+                                        .bg(rgb(0x2f81f7))
+                                        .text_color(rgb(0xffffff))
+                                        .child("This Device"),
+                                )
+                            }),
+                    )
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(sub.join("\n")),
+                    ),
+            );
+        if !s.is_current {
+            let session_id = s.id;
+            let incomplete = s.is_password_pending;
+            row = row.child(
+                Button::new(format!("terminate-session-{session_id}"))
+                    .label("Terminate")
+                    .danger()
+                    .disabled(mutating)
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.begin_terminate_session(session_id, incomplete, cx);
+                    })),
+            );
+        }
+        row.into_any_element()
     }
 
     /// Parity slice: one scope's section in the defaults dialog.
@@ -30861,6 +31375,10 @@ impl Render for QuillApp {
             })
             // Slice A2: two-step verification overlay.
             .when(self.twofa_open, |this| this.child(self.twofa_overlay(cx)))
+            // Slice A3: Active Sessions overlay.
+            .when(self.sessions_open, |this| {
+                this.child(self.sessions_overlay(cx))
+            })
             // Slice CL2: archive auto-settings overlay.
             .when(
                 self.session().is_some_and(|s| s.archive_settings_open),
@@ -32650,6 +33168,18 @@ impl QuillApp {
                             .label("🔐 Two-step verification")
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.open_twofa(cx);
+                            })),
+                    );
+                    // Slice A3: Active Sessions overlay entry (TGX
+                    // Settings → Devices). Quill has no settings screen,
+                    // so it sits next to the storage entry; it fetches
+                    // `getActiveSessions` on open (guarded: cached state
+                    // reused, in-flight fetch deduped).
+                    list = list.child(
+                        Button::new("active-sessions")
+                            .label("📱 Active sessions")
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.open_sessions(cx);
                             })),
                     );
                     // Phase 9.1/9.3: tdesktop-style active-stories tray above
@@ -40188,6 +40718,70 @@ fn format_bytes(n: i64) -> String {
 /// Phase S2: storage-stats fixture for the screenshot demo (injected,
 /// no live Telegram) — includes a nonzero `fileTypeSecret` entry so
 /// the "Secret media and files" category is visible.
+/// Slice A3: `getActiveSessions` fixture for the `ready-sessions`
+/// screenshot demo — the current device, two other sessions, and one
+/// incomplete login attempt (injected, no live Telegram).
+fn demo_sessions() -> Vec<ParsedSession> {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i32)
+        .unwrap_or(0);
+    vec![
+        ParsedSession {
+            id: 987654321,
+            is_current: true,
+            is_password_pending: false,
+            device_model: "ThinkPad X1 Carbon".into(),
+            application_name: "Quill".into(),
+            application_version: "0.1.0".into(),
+            platform: "Linux".into(),
+            system_version: "6.8.0".into(),
+            last_active_date: now,
+            ip_address: "192.168.1.42".into(),
+            location: "Austin, United States".into(),
+        },
+        ParsedSession {
+            id: 123456789,
+            is_current: false,
+            is_password_pending: false,
+            device_model: "iPhone 15 Pro".into(),
+            application_name: "Quill".into(),
+            application_version: "0.1.0".into(),
+            platform: "iOS".into(),
+            system_version: "18.4".into(),
+            last_active_date: now - 3600,
+            ip_address: "203.0.113.7".into(),
+            location: "Austin, United States".into(),
+        },
+        ParsedSession {
+            id: 555111222,
+            is_current: false,
+            is_password_pending: false,
+            device_model: "Pixel 8".into(),
+            application_name: "Quill".into(),
+            application_version: "0.0.9".into(),
+            platform: "Android".into(),
+            system_version: "15".into(),
+            last_active_date: now - 2 * 86400,
+            ip_address: "198.51.100.23".into(),
+            location: "Dallas, United States".into(),
+        },
+        ParsedSession {
+            id: 999888777,
+            is_current: false,
+            is_password_pending: true,
+            device_model: "".into(),
+            application_name: "".into(),
+            application_version: "".into(),
+            platform: "".into(),
+            system_version: "".into(),
+            last_active_date: now - 600,
+            ip_address: "203.0.113.99".into(),
+            location: "Unknown".into(),
+        },
+    ]
+}
+
 fn demo_storage_stats() -> StorageStats {
     StorageStats {
         total_size: 1_234_567_890,

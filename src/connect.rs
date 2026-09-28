@@ -61,16 +61,16 @@ use crate::telegram::requests::{
     download_file as download_file_request, edit_chat_folder, edit_chat_invite_link,
     edit_chat_welcome_message, edit_forum_topic, edit_message_caption, edit_message_text,
     end_group_call, end_group_call_recording, end_group_call_screen_sharing, forward_messages,
-    get_archive_chat_list_settings, get_authorization_state, get_available_chat_boost_slots,
-    get_basic_group_full_info, get_bot_similar_bots, get_callback_query_answer,
-    get_callback_query_answer_game, get_callback_query_answer_with_password,
-    get_chat_active_stories, get_chat_administrators, get_chat_boost_status, get_chat_event_log,
-    get_chat_folder, get_chat_history, get_chat_invite_links, get_chat_join_requests,
-    get_chat_lists_to_add_chat, get_chat_member, get_chat_scheduled_messages,
-    get_chat_sponsored_messages, get_chat_statistics, get_commands, get_contacts, get_forum_topics,
-    get_full_rich_message, get_group_call, get_installed_sticker_sets, get_login_url,
-    get_login_url_info, get_me, get_message_link, get_message_properties,
-    get_message_thread_history, get_password_state, get_saved_animations,
+    get_active_sessions, get_archive_chat_list_settings, get_authorization_state,
+    get_available_chat_boost_slots, get_basic_group_full_info, get_bot_similar_bots,
+    get_callback_query_answer, get_callback_query_answer_game,
+    get_callback_query_answer_with_password, get_chat_active_stories, get_chat_administrators,
+    get_chat_boost_status, get_chat_event_log, get_chat_folder, get_chat_history,
+    get_chat_invite_links, get_chat_join_requests, get_chat_lists_to_add_chat, get_chat_member,
+    get_chat_scheduled_messages, get_chat_sponsored_messages, get_chat_statistics, get_commands,
+    get_contacts, get_forum_topics, get_full_rich_message, get_group_call,
+    get_installed_sticker_sets, get_login_url, get_login_url_info, get_me, get_message_link,
+    get_message_properties, get_message_thread_history, get_password_state, get_saved_animations,
     get_saved_notification_sounds, get_scope_notification_settings, get_secret_chat,
     get_sticker_set, get_storage_statistics, get_story, get_story_available_reactions,
     get_supergroup, get_supergroup_full_info, get_supergroup_members, get_user_full_info,
@@ -100,9 +100,9 @@ use crate::telegram::requests::{
     start_group_call_recording, start_group_call_screen_sharing, start_scheduled_video_chat,
     supergroup_members_filter_administrators_json, supergroup_members_filter_banned_json,
     supergroup_members_filter_recent_json, supergroup_members_filter_restricted_json,
-    supergroup_members_filter_search_json, toggle_chat_folder_tags,
-    toggle_chat_is_marked_as_unread, toggle_chat_is_pinned, toggle_forum_topic_closed,
-    toggle_forum_topic_pinned, toggle_general_forum_topic_hidden,
+    supergroup_members_filter_search_json, terminate_all_other_sessions, terminate_session,
+    toggle_chat_folder_tags, toggle_chat_is_marked_as_unread, toggle_chat_is_pinned,
+    toggle_forum_topic_closed, toggle_forum_topic_pinned, toggle_general_forum_topic_hidden,
     toggle_group_call_are_messages_allowed, toggle_group_call_is_my_video_enabled,
     toggle_group_call_is_my_video_paused, toggle_group_call_participant_is_hand_raised,
     toggle_group_call_participant_is_muted, toggle_supergroup_aggressive_anti_spam,
@@ -1087,6 +1087,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         // Parity slice: `updateSavedNotificationSounds` may have marked the
         // list stale between ingests.
         let _ = self.refresh_notification_sounds_if_stale();
+        // Slice A3: a `terminateSession` / `terminateAllOtherSessions`
+        // `ok` marks the sessions list stale in the reducer; refetch the
+        // authoritative answer on the same ingest.
+        let _ = self.refresh_active_sessions_if_stale();
         if view_after {
             self.maybe_view_open_messages()?;
         }
@@ -9928,6 +9932,104 @@ impl<S: JsonSender> ConnectDriver<S> {
             .take_purpose(RequestPurpose::GetStorageStatistics);
     }
 
+    /// Slice A3: `getActiveSessions` (schema 1.8.67, line 15102) — once
+    /// per session unless the list was marked stale by a terminate or an
+    /// explicit refresh (guarded by the cache and the in-flight purpose).
+    /// `Ok(None)` = no request needed.
+    pub fn maybe_fetch_active_sessions(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if (self.session.sessions.is_some() && !self.session.sessions_stale)
+            || self
+                .session
+                .requests
+                .has_purpose(RequestPurpose::GetActiveSessions)
+        {
+            return Ok(None);
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::GetActiveSessions, None);
+        self.session.sessions_loading = true;
+        self.session.sessions_error = None;
+        match self.sender.send_json(&get_active_sessions(extra)) {
+            Ok(()) => Ok(Some(extra)),
+            Err(err) => {
+                self.session.requests.take(extra);
+                self.session.sessions_loading = false;
+                Err(err)
+            }
+        }
+    }
+
+    /// Slice A3: refetch the sessions list after a terminate marked it
+    /// stale — the reducer kept the old cache and marked it stale on the
+    /// authoritative `ok` (the `refresh_notification_sounds_if_stale`
+    /// pattern).
+    pub fn refresh_active_sessions_if_stale(
+        &mut self,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.session.sessions_stale {
+            return Ok(None);
+        }
+        self.maybe_fetch_active_sessions()
+    }
+
+    /// Slice A3: send `terminateSession` (schema 1.8.67, line 15105).
+    /// One mutation at a time; the list is refetched from the
+    /// authoritative `ok` response — never optimistic. A doomed request
+    /// (no such session in the cache) is rejected before it leaves;
+    /// TDLib is the authority for the rest.
+    pub fn terminate_session(&mut self, session_id: i64) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() || self.session.sessions_mutating {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if !self
+            .session
+            .sessions
+            .as_ref()
+            .is_some_and(|s| s.iter().any(|s| s.id == session_id))
+        {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        self.session.sessions_error = None;
+        let extra = self
+            .session
+            .request(RequestPurpose::TerminateSession { session_id }, None);
+        self.session.sessions_mutating = true;
+        match self.sender.send_json(&terminate_session(extra, session_id)) {
+            Ok(()) => Ok(extra),
+            Err(err) => {
+                self.session.requests.take(extra);
+                self.session.sessions_mutating = false;
+                Err(err)
+            }
+        }
+    }
+
+    /// Slice A3: send `terminateAllOtherSessions` (schema 1.8.67, line
+    /// 15108). One mutation at a time; the list is refetched from the
+    /// authoritative `ok` response — never optimistic.
+    pub fn terminate_all_other_sessions(&mut self) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() || self.session.sessions_mutating {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        self.session.sessions_error = None;
+        let extra = self
+            .session
+            .request(RequestPurpose::TerminateAllOtherSessions, None);
+        self.session.sessions_mutating = true;
+        match self.sender.send_json(&terminate_all_other_sessions(extra)) {
+            Ok(()) => Ok(extra),
+            Err(err) => {
+                self.session.requests.take(extra);
+                self.session.sessions_mutating = false;
+                Err(err)
+            }
+        }
+    }
+
     /// Parity slice: `getScopeNotificationSettings` for the scopes not yet
     /// loaded and not in flight — once per Ready.
     pub fn maybe_fetch_scope_notification_settings(&mut self) -> Result<(), ConnectSendError> {
@@ -10861,6 +10963,7 @@ mod tests {
     use crate::state::{ActiveCall, ActiveGroupCall};
     use crate::telegram::client::copy_and_parse;
     use crate::telegram::envelope::ChannelMemberStatus;
+    use crate::telegram::envelope::ParsedSession;
     use serde_json::Value;
     use std::sync::Mutex as StdMutex;
     use std::sync::atomic::AtomicU64;
@@ -20350,6 +20453,178 @@ mod tests {
             .expect("request id");
         assert_eq!(of_type("setMessageSenderBlockList").len(), 1);
         assert_eq!(of_type("sendBotStartMessage").len(), 2);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // Slice A3: driver harness for the sessions flow.
+    type SessionsDriverHarness = (
+        std::path::PathBuf,
+        ConnectDriver<Arc<RecordingSender>>,
+        Arc<RecordingSender>,
+        Arc<MemorySink>,
+        Arc<dyn DiagnosticSink>,
+        AtomicU64,
+    );
+
+    fn sessions_driver() -> SessionsDriverHarness {
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = Arc::new(RecordingSender::new());
+        let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+        let mut driver =
+            ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+        let seq = AtomicU64::new(0);
+        seed_ready_alice(&mut driver, &seq, &dyn_sink);
+        (dir, driver, recorder, sink, dyn_sink, seq)
+    }
+
+    fn session_fixture(id: i64, current: bool, pending: bool) -> ParsedSession {
+        ParsedSession {
+            id,
+            is_current: current,
+            is_password_pending: pending,
+            device_model: format!("Device {id}"),
+            application_name: "Quill".into(),
+            application_version: "0.1".into(),
+            platform: "Linux".into(),
+            system_version: "6.8".into(),
+            last_active_date: 1759000000,
+            ip_address: "1.2.3.4".into(),
+            location: "Austin".into(),
+        }
+    }
+
+    /// Slice A3: the fetch is guarded by Ready, deduped while in flight
+    /// and while the cache is fresh.
+    #[test]
+    fn sessions_fetch_guards() {
+        // Not ready: refused.
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = Arc::new(RecordingSender::new());
+        let session = Session::new(AccountKey::primary(), dyn_sink);
+        let mut driver = ConnectDriver::new(session, recorder, test_credentials(), prepared);
+        assert_invalid(driver.maybe_fetch_active_sessions());
+        let _ = std::fs::remove_dir_all(&dir);
+
+        // Ready: first fetch sends, the in-flight second is deduped.
+        let (dir, mut driver, recorder, _sink, _dyn_sink, _seq) = sessions_driver();
+        driver
+            .maybe_fetch_active_sessions()
+            .expect("send")
+            .expect("request id");
+        let snapshot = recorder.snapshot();
+        assert!(
+            snapshot
+                .iter()
+                .any(|s| s.contains("\"@type\":\"getActiveSessions\""))
+        );
+        let sent_before = snapshot.len();
+        assert!(
+            driver
+                .maybe_fetch_active_sessions()
+                .expect("dedupe")
+                .is_none()
+        );
+        assert_eq!(recorder.snapshot().len(), sent_before);
+        // Cached: no refetch.
+        driver.session.sessions = Some(vec![]);
+        assert!(
+            driver
+                .maybe_fetch_active_sessions()
+                .expect("cached")
+                .is_none()
+        );
+        assert_eq!(recorder.snapshot().len(), sent_before);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Slice A3: terminate guards — unknown id and concurrent mutations
+    /// are refused before anything is sent.
+    #[test]
+    fn sessions_terminate_guards() {
+        let (dir, mut driver, recorder, _sink, _dyn_sink, _seq) = sessions_driver();
+        driver.session.sessions = Some(vec![
+            session_fixture(11, true, false),
+            session_fixture(22, false, false),
+        ]);
+        // Unknown id: refused, nothing sent.
+        let sent_before = recorder.snapshot().len();
+        assert_invalid(driver.terminate_session(99));
+        assert_eq!(recorder.snapshot().len(), sent_before);
+        // Known id: sent; a second mutation while in flight is refused.
+        driver.terminate_session(22).expect("terminate send");
+        assert!(recorder.snapshot().iter().any(
+            |s| s.contains("\"@type\":\"terminateSession\"") && s.contains("\"session_id\":22")
+        ));
+        assert_invalid(driver.terminate_session(11));
+        assert_invalid(driver.terminate_all_other_sessions());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Slice A3: `terminateSession` → `ok` → the reducer marks the list
+    /// stale → the same ingest refetches `getActiveSessions` → the
+    /// authoritative answer replaces the cache (no optimistic deletion).
+    #[test]
+    fn sessions_terminate_ok_triggers_authoritative_refetch() {
+        let (dir, mut driver, recorder, _sink, dyn_sink, seq) = sessions_driver();
+        driver.session.sessions = Some(vec![
+            session_fixture(11, true, false),
+            session_fixture(22, false, false),
+        ]);
+        let extra = driver.terminate_session(22).expect("terminate send");
+        let sent = recorder.snapshot().len();
+        driver
+            .ingest(
+                copy_and_parse(
+                    &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        // The same ingest refetched the list (no optimistic deletion:
+        // the old cache stays visible, marked stale, until the
+        // authoritative answer replaces it).
+        let snapshot = recorder.snapshot();
+        assert_eq!(snapshot.len(), sent + 1);
+        assert!(snapshot[sent].contains("\"@type\":\"getActiveSessions\""));
+        assert_eq!(driver.session.sessions.as_ref().unwrap().len(), 2);
+        assert!(driver.session.sessions_stale);
+        assert!(!driver.session.sessions_mutating);
+        // The authoritative answer lands — the @extra comes from the
+        // recorded outbound JSON (what TDLib would echo back).
+        let fetch_extra: i64 = {
+            let snapshot = recorder.snapshot();
+            let sent = snapshot
+                .iter()
+                .rev()
+                .find(|s| s.contains("\"@type\":\"getActiveSessions\""))
+                .expect("refetch sent");
+            let v: serde_json::Value = serde_json::from_str(sent).unwrap();
+            v["@extra"].as_str().unwrap().parse().unwrap()
+        };
+        driver
+            .ingest(
+                copy_and_parse(
+                    &format!(
+                        r#"{{"@type":"sessions","@extra":"{fetch_extra}","sessions":[{{"@type":"session","id":11,"is_current":true,"device_model":"Device 11","application_name":"Quill"}}]}}"#
+                    ),
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        let sessions = driver.session.sessions.as_ref().expect("refetched");
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].id, 11);
+        assert!(!driver.session.sessions_stale);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
