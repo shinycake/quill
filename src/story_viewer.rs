@@ -9,8 +9,9 @@
 //!
 //! Scope: photo and video story content. Live and unsupported stories keep
 //! their item in the list but render a placeholder. Reactions and replies
-//! are Phase 9.2 (viewer overlay actions); posting is out of scope (no
-//! `sendStory` in TDLib 1.8.67 — see DECISIONS.md Phase 9.2).
+//! are Phase 9.2 (viewer overlay actions); posting is out of scope here
+//! (it has its own composer module and overlay — see
+//! `src/story_composer.rs` and DECISIONS.md Phase 9.3).
 
 use crate::ids::{ChatId, FileId};
 use crate::telegram::envelope::{ChatActiveStoriesView, ParsedStory, StoryContentView};

@@ -1576,11 +1576,101 @@ Research snapshot 2026-09-16, pin recheck **2026-09-17**.
   a `sendStory` blocker — retracted 2026-09-27, the function is
   `postStory`, line 13715).
 - **Out of this slice (→ future):** story posting / photo composer /
-  caption + privacy selector (now unblocked — queued as its own slice
-  after the call work, see retraction above);
+  caption + privacy selector (unblocked per the retraction above —
+  shipped in Phase 9.3);
   video uploads; story albums; privacy/close-friends management beyond
   the per-story read of `can_be_*`; joining/playing live stories;
   `getStoryInteractions` detailed viewer list; the archive-list tray.
+
+## Phase 9.3 — Story posting (2026-09-27)
+
+- **Rationale:** with the `sendStory` blocker retracted (the constructor
+  is `postStory`, 9.2 above), this slice completes the story loop: a
+  composer overlay posts photo/video stories via `canPostStory`
+  eligibility → `postStory` with caption + privacy, and the tray gains a
+  persistent "+" tile that opens it.
+- **Schema (1.8.67, verified in `schema/td_api.tl` — no invented
+  constructors/fields):** `canPostStory = CanPostStoryResult` (line
+  13702); `postStory chat_id:int53 content:InputStoryContent
+  areas:inputStoryAreas caption:formattedText
+  privacy_settings:StoryPrivacySettings album_ids:vector<int32>
+  active_period:int32 from_story_full_id:storyFullId
+  is_posted_to_chat_page:Bool protect_content:Bool = Story` (line
+  13715); `inputFileLocal path:string = InputFile` (line 325);
+  `inputStoryContentPhoto photo:InputFile
+  added_sticker_file_ids:vector<int32> = InputStoryContent` (line
+  6673); `inputStoryContentVideo video:InputFile
+  added_sticker_file_ids:vector<int32> duration:double
+  cover_frame_timestamp:double is_animation:Bool = InputStoryContent`
+  (line 6681); `inputStoryAreas areas:vector<inputStoryArea> =
+  InputStoryAreas` (line 6619 — sent empty, areas are out of slice);
+  `canPostStoryResultOk story_count:int32` (8535),
+  `canPostStoryResultPremiumNeeded` (8538), `canPostStoryResultBoostNeeded`
+  (8541), `canPostStoryResultActiveStoryLimitExceeded` (8544),
+  `canPostStoryResultWeeklyLimitExceeded retry_after:int32` (8547),
+  `canPostStoryResultMonthlyLimitExceeded retry_after:int32` (8550),
+  `canPostStoryResultLiveStoryIsActive story_id:int32` (8553);
+  `storyPrivacySettingsEveryone/Contacts/CloseFriends/SelectedUsers`
+  (lines 8928–8937 — SelectedUsers carries `user_ids:vector<int53>`);
+  `updateStoryPostSucceeded story:story old_story_id:int32 = Update`
+  (line 10901); `updateStoryPostFailed story:story error:error
+  error_type:CanPostStoryResult = Update` (line 10907).
+- **Composer (`src/story_composer.rs`, new).** Pure state machine (no
+  GPUI): media kind (photo/video extension sniff), the 4-way privacy
+  selector (Everyone / Contacts / Close friends / Selected users —
+  exact TDLib `storyPrivacySettings*` JSON mapping), and selected-user
+  toggle set. Unit tests cover privacy JSON, media-kind sniffing, and
+  user selection.
+- **Requests (`src/telegram/requests.rs`).** `can_post_story()`,
+  `input_story_content(kind, path)` (`inputFileLocal`),
+  `post_story(...)` — caption via `formattedText` entities, empty
+  `inputStoryAreas`, empty album ids, `active_period: 86400`,
+  `from_story_full_id: null`, `is_posted_to_chat_page: false`,
+  `protect_content: false`. Request-shape tests for photo/video,
+  caption entities, privacy, and all fixed fields.
+- **Parser (`src/telegram/envelope.rs`).** `CanPostStoryResult` enum for
+  all seven pinned-schema outcomes (Ok, PremiumNeeded, BoostNeeded,
+  ActiveStoryLimitExceeded, WeeklyLimitExceeded, MonthlyLimitExceeded,
+  LiveStoryIsActive), parsed
+  into `EnvelopePayload::CanPostStoryResult`, with user-facing messages
+  per variant. Parser tests cover every variant.
+- **Driver (`src/connect.rs`).** `check_can_post_story()` (posts to
+  `Session::my_user_id`, purpose `CheckCanPostStory`);
+  `post_story(kind, path, caption, privacy, user_ids)` — validates media
+  type, local file existence, and non-empty selected users before
+  sending (purpose `PostStory`).
+- **State (`src/state.rs`).** `Session::story_post` (`StoryPostState`):
+  purpose-gated eligibility / check errors / `StoryPostOutcome`
+  (none/posting/succeeded/failed). Reducers: eligibility is stored only
+  for the composer check purpose; the `postStory` response captures the
+  temporary story id; `updateStoryPostSucceeded`/`updateStoryPostFailed`
+  drive the succeeded/failed outcomes and queue the poster's tray
+  refresh; raw TDLib errors stop the spinners with sanitized messages.
+- **UI (`src/ui/mod.rs`).** The tray always renders (even empty) and
+  gains a persistent "+ / Post" tile that opens the composer. The
+  composer overlay: path textarea (path entry is the required temporary
+  picker — Quill has no native file-picker infrastructure yet), photo
+  preview (`img` with contain + fallback; videos get a note tile),
+  caption textarea, the 4 privacy buttons, and a contact picker for
+  Selected users (reuses the G1 contact-checkbox row + the session
+  contact cache). Post validates the path, then `canPostStory`; the
+  render tick converts the answer into `postStory` (eligible) or a
+  reason line (ineligible / check error). The status line shows local
+  validation errors, Checking…, Posting…, ✓ Posted, or ✗ failed —
+  honest about the pending state (pending begins when the `postStory`
+  *answer lands*, not when it is sent — the Post button stays disabled
+  in between). Escape closes the composer before
+  the story viewer. Screenshot proof:
+  `docs/screenshots/ready-story-composer.png` (`ready-story-composer`
+  demo — seeded photo path, caption draft, Close friends, seeded
+  `canPostStoryResultOk`).
+- **Out of this slice (→ future):** native file picker (path entry is
+  the required temporary UI); story areas (sent empty); expiry
+  selection (fixed 86400); post-to-chat-page / protect-content (fixed
+  false); story editing, covers, or privacy changes after posting;
+  posting as a channel / admin-rights nuances; repost
+  (`from_story_full_id` fixed null); the archive-list tray; stories in
+  the in-app updater (unchanged queue).
 
 ## Parity slice — Forum-topic posting (2026-09-26)
 
