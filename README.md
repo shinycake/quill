@@ -467,7 +467,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Web app buttons (partial: honest browser fallback; no in-app web view yet) <!-- parity:bots-inline-webapp -->
 - [x] Password-protected callback buttons prompt for 2-step password via callbackQueryPayloadDataWithPassword; wrong-password errors surfaced <!-- parity:bots-inline-callback-password -->
 - [x] Game buttons launch via getCallbackQueryAnswer with callbackQueryPayloadGame (messageGame short name); answer URL opens in browser <!-- parity:bots-inline-game -->
-- [ ] Buy buttons (partial: "Payment buttons are not supported yet" tooltip; invoice messages fall back to Unsupported) <!-- parity:bots-inline-buy -->
+- [x] Buy buttons open the payment checkout dialog (getPaymentForm → paymentForm) (ui/mod.rs) <!-- parity:bots-inline-buy -->
 - [x] User buttons open the private chat with the user (ui/mod.rs) <!-- parity:bots-inline-user -->
 - [ ] Per-button disabled flag on inline buttons (Bot API 10.3 `disabled` field; blocked: not exposed in TDLib 1.8.67 `inlineKeyboardButton` — the `inlineKeyboardButtonTypeDisabled` type is exposed and Quill already renders it disabled) <!-- parity:bots-inline-disabled-buttons -->
 - [x] Custom reply keyboards rendered above the composer; text sends, one-time hides on tap, contact/location/poll honestly disabled <!-- parity:bots-custom-keyboard -->
@@ -504,9 +504,9 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Vote restriction reasons display (closed / country / membership) <!-- parity:bots-poll-restrictions -->
 - [x] Poll entry gated on can_send_polls; restricted-poll notices <!-- parity:bots-poll-permissions -->
 - [x] Poll stopped service message <!-- parity:bots-poll-service-message -->
-- [ ] Invoice message rendering (falls back to Unsupported) <!-- parity:bots-payment-invoice -->
-- [ ] Payment checkout flow (order info, shipping, card credentials) <!-- parity:bots-payment-checkout -->
-- [ ] Payment receipts <!-- parity:bots-payment-receipt -->
+- [x] Invoice message rendering: product card with title, description, total price, TEST badge; paid invoices link to their receipt (ui/mod.rs) <!-- parity:bots-payment-invoice -->
+- [x] Payment checkout flow: getPaymentForm dialog, validateOrderInfo with shipping options, saved/new credentials, terms consent, sendPaymentForm; provider/additional-option/verification URLs open in the OS browser; Stars forms honestly declined (envelope.rs, requests.rs, connect.rs, state.rs, ui/mod.rs) <!-- parity:bots-payment-checkout -->
+- [x] Payment receipts: getPaymentReceipt dialog from paid invoices ("View receipt") plus messagePaymentSuccessful/messagePaymentSuccessfulBot rows (ui/mod.rs) <!-- parity:bots-payment-receipt -->
 - [ ] Recurring payments <!-- parity:bots-payment-recurring -->
 - [ ] Clear payment/shipping info (privacy) <!-- parity:bots-payment-clear -->
 - [ ] Signed gifts: personal comment when buying a collectible gift via Marketplace (sendResoldGift text) <!-- parity:gifts-signed-comment -->

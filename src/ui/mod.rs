@@ -58,25 +58,27 @@ use quill::story_composer::{StoryComposer, StoryExpiry, StoryMediaKind, StoryPri
 use quill::story_viewer::{StoryViewer, StoryViewerItem, StoryViewerKind, collect_story_items};
 use quill::telegram::client::copy_and_parse;
 use quill::telegram::envelope::{
-    AuthorizationState, BotInfo, CallDiscardReason, CallState, CallbackQueryAnswer,
+    AddressData, AuthorizationState, BotInfo, CallDiscardReason, CallState, CallbackQueryAnswer,
     ChannelMemberStatus, ChatAdminRights, ChatAdministratorEntry, ChatDraft, ChatEventAction,
     ChatFolderInfo, ChatFolderSpec, ChatKind, ChatList, ChatNotificationSettings, ChatPermissions,
     ChatStatistics, DEFAULT_EMOJI_REACTIONS, EphemeralMessageContent, ForumTopic,
-    InlineKeyboardButton, InlineKeyboardButtonStyle, InlineKeyboardButtonType, KeyboardButton,
-    KeyboardButtonType, LoginUrlInfo, MUTE_FOR_1_HOUR, MUTE_FOR_2_DAYS, MUTE_FOR_8_HOURS,
-    MUTE_FOREVER, MessageContent, MessageInteractionInfo, MessageSchedulingState, MessageSender,
-    NotificationSettingsScope, NotificationSound, ParsedChatEvent, ParsedFile,
-    ParsedGroupCallParticipant, ParsedMessage, ParsedSecretChat, ParsedSession, ParsedStory,
-    ParsedWebsite, ParsedWelcomeMessage, PasswordState, PollContent, PollOption, PollType,
+    InlineKeyboardButton, InlineKeyboardButtonStyle, InlineKeyboardButtonType, InvoiceContent,
+    KeyboardButton, KeyboardButtonType, LabeledPrice, LoginUrlInfo, MUTE_FOREVER, MUTE_FOR_1_HOUR,
+    MUTE_FOR_2_DAYS, MUTE_FOR_8_HOURS, MessageContent, MessageInteractionInfo,
+    MessageSchedulingState, MessageSender, NotificationSettingsScope, NotificationSound,
+    OrderInfoData, ParsedChatEvent, ParsedFile, ParsedGroupCallParticipant, ParsedMessage,
+    ParsedSecretChat, ParsedSession, ParsedStory, ParsedWebsite, ParsedWelcomeMessage,
+    PasswordState, PaymentFormData, PaymentFormTypeData, PaymentProviderKind, PaymentReceiptData,
+    PaymentReceivedContent, PaymentSuccessContent, PollContent, PollOption, PollType,
     ReplyKeyboard, ReplyMarkup, ScopeNotificationSettings, SecretChatState, SpeechRecognition,
     SponsoredMessage, StatisticalGraph, StatisticalValue, StorageFileTypeStats, StorageStats,
-    StoryOriginView, UsernameCheckResult, call_entry_label, chat_ttl_service_label,
-    effective_content, format_ttl_setting, toggle_chosen_emoji_reaction,
+    StoryOriginView, UsernameCheckResult, ValidatedOrderInfoData, call_entry_label,
+    chat_ttl_service_label, effective_content, format_ttl_setting, toggle_chosen_emoji_reaction,
 };
 use quill::telegram::requests::SelfDestructSend;
 use quill::telegram::requests::{
     ArchiveChatListSettings, CallPrivacySetting, ChatEventLogFilterSet, PrivacyWho,
-    input_story_content,
+    input_credentials_new, input_credentials_saved, input_story_content,
 };
 use quill::text::{TextEntity, styled_runs, utf8_to_utf16_offset};
 use quill::video::VideoNoteCapture;
@@ -310,6 +312,109 @@ impl PollDialog {
                 .option_inputs
                 .iter()
                 .any(|input| !value(input).trim().is_empty())
+    }
+}
+
+/// Slice P1: the payment checkout dialog. The text inputs mirror the
+/// `orderInfo` fields the invoice needs (`need_name` / `need_phone_number`
+/// / `need_email_address` / `need_shipping_address`, schema:4652); only
+/// the needed ones render. The credential choice is either a saved
+/// credential (`inputCredentialsSaved`, schema:4677) or a provider token
+/// (`inputCredentialsNew`, schema:4680).
+pub struct PaymentDialog {
+    name_input: Entity<TextareaState>,
+    phone_input: Entity<TextareaState>,
+    email_input: Entity<TextareaState>,
+    street1_input: Entity<TextareaState>,
+    street2_input: Entity<TextareaState>,
+    city_input: Entity<TextareaState>,
+    state_input: Entity<TextareaState>,
+    country_input: Entity<TextareaState>,
+    postal_input: Entity<TextareaState>,
+    token_input: Entity<TextareaState>,
+    credential_choice: PaymentCredentialChoice,
+    terms_accepted: bool,
+    allow_save_order: bool,
+    allow_save_credentials: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum PaymentCredentialChoice {
+    Saved(String),
+    NewToken,
+}
+
+impl PaymentDialog {
+    fn new(window: &mut Window, cx: &mut Context<QuillApp>) -> Self {
+        let mut input = |cx: &mut Context<QuillApp>, placeholder: &str| {
+            cx.new(|cx| {
+                TextareaState::new(window, cx)
+                    .placeholder(placeholder)
+                    .auto_grow(1, 1)
+                    .submit_on_enter(false)
+            })
+        };
+        Self {
+            name_input: input(cx, "Full name"),
+            phone_input: input(cx, "Phone number"),
+            email_input: input(cx, "Email address"),
+            street1_input: input(cx, "Street address"),
+            street2_input: input(cx, "Street address (line 2, optional)"),
+            city_input: input(cx, "City"),
+            state_input: input(cx, "State"),
+            country_input: input(cx, "Country code (e.g. US)"),
+            postal_input: input(cx, "Postal code"),
+            token_input: input(cx, "Provider credential token"),
+            credential_choice: PaymentCredentialChoice::NewToken,
+            terms_accepted: false,
+            allow_save_order: true,
+            allow_save_credentials: true,
+            // ponytail: no `validated` flag — the session's
+            // `payment_validated: Option<ValidatedOrderInfoData>` is the
+            // single source of truth for whether validation ran.
+        }
+    }
+
+    /// Prefill the order fields from the form's `saved_order_info`
+    /// (schema:4720) so returning buyers don't retype.
+    fn prefill(&self, order: &OrderInfoData, window: &mut Window, cx: &mut Context<QuillApp>) {
+        let mut set = |input: &Entity<TextareaState>, value: &str| {
+            if !value.is_empty() {
+                input.update(cx, |input, cx| input.set_value(value, window, cx));
+            }
+        };
+        set(&self.name_input, &order.name);
+        set(&self.phone_input, &order.phone_number);
+        set(&self.email_input, &order.email_address);
+        let addr = &order.shipping_address;
+        set(&self.street1_input, &addr.street_line1);
+        set(&self.street2_input, &addr.street_line2);
+        set(&self.city_input, &addr.city);
+        set(&self.state_input, &addr.state);
+        set(&self.country_input, &addr.country_code);
+        set(&self.postal_input, &addr.postal_code);
+    }
+
+    /// Freeze the dialog inputs into an `orderInfo` (schema:4658).
+    fn order(&self, cx: &App) -> OrderInfoData {
+        let value = |input: &Entity<TextareaState>| input.read(cx).value().to_string();
+        OrderInfoData {
+            name: value(&self.name_input),
+            phone_number: value(&self.phone_input),
+            email_address: value(&self.email_input),
+            shipping_address: AddressData {
+                country_code: value(&self.country_input),
+                state: value(&self.state_input),
+                city: value(&self.city_input),
+                street_line1: value(&self.street1_input),
+                street_line2: value(&self.street2_input),
+                postal_code: value(&self.postal_input),
+            },
+        }
+    }
+
+    fn token(&self, cx: &App) -> String {
+        self.token_input.read(cx).value().to_string()
     }
 }
 
@@ -753,6 +858,10 @@ pub struct LoginUrlConfirm {
 enum B1DialogClose {
     CallbackPassword,
     LoginUrlConfirm,
+    /// Slice P1: the payment checkout dialog.
+    PaymentForm,
+    /// Slice P1: the payment receipt dialog.
+    PaymentReceipt,
 }
 
 /// B1: centered modal shell for the bot-keyboard dialogs (mirrors the
@@ -791,6 +900,8 @@ fn b1_modal(
                         this.login_url_confirm = None;
                         cx.notify();
                     }
+                    B1DialogClose::PaymentForm => this.close_payment_dialog(cx),
+                    B1DialogClose::PaymentReceipt => this.close_payment_receipt(cx),
                 })),
         )
         .child(
@@ -1754,6 +1865,10 @@ pub struct QuillApp {
     spoiler_revealed: HashSet<(i64, u64, u64, bool)>,
     /// Phase 4.2: poll creation dialog (open above the composer).
     poll_dialog: Option<PollDialog>,
+    /// Slice P1: the payment checkout dialog's text inputs. The dialog
+    /// renders from the session's `payment_form`; this holds the live
+    /// text fields.
+    payment_dialog: Option<PaymentDialog>,
     /// Phase D3a: invite-link create dialog state.
     invite_link_dialog: Option<InviteLinkDialog>,
     /// Phase D3b: admin-management dialog state (promote picker /
@@ -2244,6 +2359,12 @@ pub enum ScreenshotDemo {
     /// the composer is live (a Pending chat would show "Waiting for Zed
     /// to come online…" and a Closed chat "Secret chat closed" instead).
     ReadySecretChat,
+    /// Slice P1 payments demo (injected, no live Telegram): a bot chat
+    /// with a `messageInvoice` (Buy button), a `messagePaymentSuccessful`
+    /// row, a paid invoice with a receipt link, and a seeded
+    /// `paymentForm` with the checkout dialog open (regular provider,
+    /// order fields, a saved credential, terms).
+    ReadyPayments,
     /// Phase B2: key verification UI (injected, no live Telegram) — the
     /// same Ready secret chat as `ReadySecretChat` but with a real
     /// 36-byte `key_hash` (deterministic fixture), and the partner's
@@ -3410,6 +3531,16 @@ impl QuillApp {
                     AuthorizationState::Ready,
                 )
             }
+            // Slice P1: payments fixture (injected, no live Telegram).
+            Some(ScreenshotDemo::ReadyPayments) => {
+                demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
+                (
+                    ConnectUiStatus::DemoReadyChats,
+                    None,
+                    "screenshot demo — payments: invoice + checkout".into(),
+                    AuthorizationState::Ready,
+                )
+            }
             Some(ScreenshotDemo::ReadyLocation) => {
                 demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
                 (
@@ -4004,6 +4135,7 @@ impl QuillApp {
             sponsored_demo: false,
             spoiler_revealed: HashSet::new(),
             poll_dialog: None,
+            payment_dialog: None,
             invite_link_dialog: None,
             admin_dialog: None,
             create_chat_dialog: None,
@@ -4854,6 +4986,15 @@ impl QuillApp {
             }
             app.status_note = "screenshot demo — polls: voted + closed".into();
         }
+        // Slice P1: invoice card, payment rows, and the checkout dialog.
+        if matches!(demo, Some(ScreenshotDemo::ReadyPayments)) {
+            if let Some(session) = app.demo_session.as_mut() {
+                app.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_payments(session, &app.demo_sink, &app.demo_seq);
+            }
+            app.open_payment_dialog(window, cx);
+            app.status_note = "screenshot demo — payments: invoice + checkout".into();
+        }
         if matches!(demo, Some(ScreenshotDemo::ReadyLocation)) {
             if let Some(session) = app.demo_session.as_mut() {
                 app.demo_seq.store(session.last_seq, Ordering::SeqCst);
@@ -5400,6 +5541,17 @@ impl QuillApp {
         });
         if let Some((info, request)) = login_url {
             self.present_login_url_info(info, request, cx);
+            progressed = true;
+        }
+        // Slice P1: a `paymentResult` verification URL — the provider's
+        // page the buyer must complete (schema:4740). Open it in the OS
+        // browser; the success/failure note is already on the session.
+        if let Some(url) = self
+            .live
+            .as_mut()
+            .and_then(|live| live.driver.session.payment_verification_url.take())
+        {
+            self.open_message_url(&url, cx);
             progressed = true;
         }
         self.finish_successful_sends(cx);
@@ -7700,7 +7852,12 @@ impl QuillApp {
                         // legacy text/caption path.
                         | MessageContent::RichMessage(_)
                         // B1: games carry no editable caption.
-                        | MessageContent::Game { .. } => {}
+                        | MessageContent::Game { .. }
+                        // Slice P1: invoices and payment notices carry no
+                        // editable caption.
+                        | MessageContent::Invoice(_)
+                        | MessageContent::PaymentSuccessful(_)
+                        | MessageContent::PaymentReceived(_) => {}
                     }
                 }
             }
@@ -8252,6 +8409,642 @@ impl QuillApp {
         }
     }
 
+    /// Slice P1: Buy button press — fetch the `paymentForm`
+    /// (`getPaymentForm`, schema 1.8.67, line 15262). The dialog opens when
+    /// the answer is applied; while it loads, the dialog shows a spinner.
+    fn press_buy_button(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let sent = self.live.as_mut().map(|live| {
+            live.driver.session.payment_form_loading = true;
+            live.driver.session.payment_note = None;
+            live.driver.send_payment_form_request(chat_id, message_id)
+        });
+        match sent {
+            Some(Ok(_)) => {
+                self.open_payment_dialog(window, cx);
+            }
+            _ => {
+                if let Some(live) = self.live.as_mut() {
+                    live.driver.session.payment_form_loading = false;
+                }
+                self.status_note = "could not load the payment form".into();
+            }
+        }
+        cx.notify();
+    }
+
+    /// Slice P1: create the checkout dialog inputs, prefilling the order
+    /// fields from the form's `saved_order_info` (schema:4720) when present.
+    fn open_payment_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let mut dialog = PaymentDialog::new(window, cx);
+        if let Some(form) = self.session().and_then(|s| s.payment_form.clone())
+            && let PaymentFormTypeData::Regular(regular) = &form.form_type
+        {
+            dialog.prefill(&regular.saved_order_info, window, cx);
+            if let Some(first) = regular.saved_credentials.first() {
+                dialog.credential_choice = PaymentCredentialChoice::Saved(first.id.clone());
+            }
+        }
+        self.payment_dialog = Some(dialog);
+    }
+
+    /// Slice P1: close the checkout dialog, discarding the form answers.
+    fn close_payment_dialog(&mut self, cx: &mut Context<Self>) {
+        self.payment_dialog = None;
+        if let Some(live) = self.live.as_mut() {
+            live.driver.session.payment_form = None;
+            live.driver.session.payment_form_loading = false;
+            live.driver.session.payment_note = None;
+            live.driver.session.payment_validated = None;
+            live.driver.session.payment_shipping_id = None;
+        }
+        cx.notify();
+    }
+
+    /// Slice P1: close the receipt dialog.
+    fn close_payment_receipt(&mut self, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            live.driver.session.payment_receipt = None;
+            live.driver.session.payment_receipt_open = false;
+        }
+        cx.notify();
+    }
+
+    /// Slice P1: the checkout dialog. Renders from the session's
+    /// `payment_form` — the single source of truth; the text inputs live in
+    /// `self.payment_dialog`.
+    fn payment_dialog_overlay(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let session = self.session()?;
+        if session.payment_form.is_none() && !session.payment_form_loading {
+            return None;
+        }
+        let dialog = self.payment_dialog.as_ref()?;
+        let mut body = div().flex().flex_col().gap_3();
+        if session.payment_form_loading {
+            body = body.child(div().text_sm().child("Loading payment form…"));
+        }
+        if let Some(note) = &session.payment_note {
+            body = body.child(
+                div()
+                    .text_sm()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(note.clone()),
+            );
+        }
+        let Some(form) = session.payment_form.as_ref() else {
+            return Some(b1_modal(
+                "p1-payment",
+                B1DialogClose::PaymentForm,
+                "Checkout",
+                body.into_any_element(),
+                cx,
+            ));
+        };
+        match &form.form_type {
+            PaymentFormTypeData::Stars { star_count } => {
+                body = body.child(div().text_sm().child(format!(
+                    "This invoice asks for {star_count} Telegram Stars — Stars checkout is not supported in this slice."
+                )));
+            }
+            PaymentFormTypeData::StarSubscription => {
+                body = body.child(
+                    div()
+                        .text_sm()
+                        .child("Star subscriptions are not supported in this slice."),
+                );
+            }
+            PaymentFormTypeData::Regular(regular) => {
+                body = self.payment_form_body(
+                    body,
+                    form,
+                    dialog,
+                    &regular.invoice,
+                    &regular.provider,
+                    &regular.additional_options,
+                    &regular.saved_credentials,
+                    regular.can_save_credentials,
+                    regular.need_password,
+                    session,
+                    cx,
+                );
+            }
+        }
+        Some(b1_modal(
+            "p1-payment",
+            B1DialogClose::PaymentForm,
+            "Checkout",
+            body.into_any_element(),
+            cx,
+        ))
+    }
+
+    /// Slice P1: the regular-form checkout body (split out so
+    /// `payment_dialog_overlay` stays readable).
+    #[allow(clippy::too_many_arguments)]
+    fn payment_form_body(
+        &self,
+        mut body: Div,
+        form: &PaymentFormData,
+        dialog: &PaymentDialog,
+        invoice: &quill::telegram::envelope::InvoiceForm,
+        provider: &PaymentProviderKind,
+        additional_options: &[quill::telegram::envelope::PaymentOption],
+        saved_credentials: &[quill::telegram::envelope::SavedCredential],
+        can_save_credentials: bool,
+        need_password: bool,
+        session: &Session,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let total = price_parts_total(&invoice.price_parts);
+        let mut header = div().flex().flex_col().gap_1().child(
+            div()
+                .flex()
+                .items_center()
+                .gap_2()
+                .child(
+                    div()
+                        .text_sm()
+                        .font_semibold()
+                        .child(form.product_title.clone()),
+                )
+                .child(if invoice.is_test {
+                    div().text_xs().text_color(rgb(0xffd479)).child("TEST")
+                } else {
+                    div()
+                }),
+        );
+        if !form.product_description.is_empty() {
+            header = header.child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(form.product_description.clone()),
+            );
+        }
+        body = body.child(header);
+        let mut prices = div().flex().flex_col().gap_1();
+        for part in &invoice.price_parts {
+            prices = prices.child(
+                div()
+                    .flex()
+                    .justify_between()
+                    .text_sm()
+                    .child(div().child(part.label.clone()))
+                    .child(div().child(format_payment_price(&invoice.currency, part.amount))),
+            );
+        }
+        prices = prices.child(
+            div()
+                .flex()
+                .justify_between()
+                .text_sm()
+                .font_semibold()
+                .child(div().child("Total"))
+                .child(div().child(format_payment_price(&invoice.currency, total))),
+        );
+        body = body.child(prices);
+        // Provider + additional options: Quill has no embedded web view,
+        // so web payments open in the OS browser (schema:4689).
+        match provider {
+            PaymentProviderKind::Web { url } => {
+                let url = url.clone();
+                body = body.child(
+                    Button::new("p1-payment-provider-open")
+                        .label("Open provider payment page")
+                        .ghost()
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.open_message_url(&url, cx);
+                        })),
+                );
+            }
+            PaymentProviderKind::Token { name } => {
+                body = body.child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(format!(
+                            "Card payments via {name}: paste the credential token the provider issued on its site."
+                        )),
+                );
+            }
+        }
+        for (index, option) in additional_options.iter().enumerate() {
+            let url = option.url.clone();
+            let title = option.title.clone();
+            body = body.child(
+                Button::new(format!("p1-payment-option-{index}"))
+                    .label(format!("Pay via {title}"))
+                    .ghost()
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.open_message_url(&url, cx);
+                    })),
+            );
+        }
+        // Order info — only the fields the invoice needs (schema:4677).
+        let field = |input: &Entity<TextareaState>| div().child(Textarea::new(input).h(px(36.)));
+        if invoice.need_name {
+            body = body.child(field(&dialog.name_input));
+        }
+        if invoice.need_phone_number {
+            body = body.child(field(&dialog.phone_input));
+        }
+        if invoice.need_email_address {
+            body = body.child(field(&dialog.email_input));
+        }
+        if invoice.need_shipping_address {
+            body = body.child(field(&dialog.street1_input));
+            body = body.child(field(&dialog.street2_input));
+            body = body.child(
+                div()
+                    .flex()
+                    .gap_2()
+                    .child(div().flex_1().child(field(&dialog.city_input)))
+                    .child(div().flex_1().child(field(&dialog.state_input))),
+            );
+            body = body.child(
+                div()
+                    .flex()
+                    .gap_2()
+                    .child(div().flex_1().child(field(&dialog.country_input)))
+                    .child(div().flex_1().child(field(&dialog.postal_input))),
+            );
+        }
+        let needs_order = invoice.need_name
+            || invoice.need_phone_number
+            || invoice.need_email_address
+            || invoice.need_shipping_address;
+        if needs_order {
+            let checked = dialog.allow_save_order;
+            body = body.child(
+                Button::new("p1-payment-save-order")
+                    .label(if checked {
+                        "☑ Remember order info"
+                    } else {
+                        "☐ Remember order info"
+                    })
+                    .ghost()
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        if let Some(dialog) = this.payment_dialog.as_mut() {
+                            dialog.allow_save_order = !dialog.allow_save_order;
+                        }
+                        cx.notify();
+                    })),
+            );
+            body = body.child(
+                Button::new("p1-payment-validate")
+                    .label("Continue")
+                    .primary()
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.validate_payment_order(cx);
+                    })),
+            );
+        }
+        if let Some(validated) = &session.payment_validated
+            && !validated.shipping_options.is_empty()
+        {
+            let mut shipping = div()
+                .flex()
+                .flex_col()
+                .gap_1()
+                .child(div().text_xs().font_semibold().child("Shipping"));
+            for option in &validated.shipping_options {
+                let selected = session.payment_shipping_id.as_deref() == Some(option.id.as_str());
+                let id = option.id.clone();
+                shipping = shipping.child(
+                    Button::new(format!("p1-payment-shipping-{id}"))
+                        .label(format!(
+                            "{} {} — {}",
+                            if selected { "◉" } else { "○" },
+                            option.title,
+                            format_payment_price(
+                                &invoice.currency,
+                                price_parts_total(&option.price_parts)
+                            )
+                        ))
+                        .ghost()
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            if let Some(live) = this.live.as_mut() {
+                                live.driver.session.payment_shipping_id = Some(id.clone());
+                            }
+                            cx.notify();
+                        })),
+                );
+            }
+            body = body.child(shipping);
+        }
+        // Credentials: saved credentials or a fresh provider token.
+        let mut creds = div()
+            .flex()
+            .flex_col()
+            .gap_1()
+            .child(div().text_xs().font_semibold().child("Payment method"));
+        for cred in saved_credentials {
+            let selected =
+                dialog.credential_choice == PaymentCredentialChoice::Saved(cred.id.clone());
+            let id = cred.id.clone();
+            let title = cred.title.clone();
+            creds = creds.child(
+                Button::new(format!("p1-payment-cred-{id}"))
+                    .label(format!("{} {title}", if selected { "◉" } else { "○" }))
+                    .ghost()
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        if let Some(dialog) = this.payment_dialog.as_mut() {
+                            dialog.credential_choice = PaymentCredentialChoice::Saved(id.clone());
+                        }
+                        cx.notify();
+                    })),
+            );
+        }
+        let use_token = dialog.credential_choice == PaymentCredentialChoice::NewToken;
+        creds = creds.child(
+            Button::new("p1-payment-cred-new")
+                .label(format!(
+                    "{} New card (provider token)",
+                    if use_token { "◉" } else { "○" }
+                ))
+                .ghost()
+                .on_click(cx.listener(|this, _, _, cx| {
+                    if let Some(dialog) = this.payment_dialog.as_mut() {
+                        dialog.credential_choice = PaymentCredentialChoice::NewToken;
+                    }
+                    cx.notify();
+                })),
+        );
+        if use_token {
+            creds = creds.child(div().child(Textarea::new(&dialog.token_input).h(px(36.))));
+            if can_save_credentials {
+                let checked = dialog.allow_save_credentials;
+                let caption = if need_password {
+                    " (needs a 2-step verification password)"
+                } else {
+                    ""
+                };
+                creds = creds.child(
+                    Button::new("p1-payment-save-creds")
+                        .label(format!(
+                            "{} Save card{caption}",
+                            if checked { "☑" } else { "☐" }
+                        ))
+                        .ghost()
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            if let Some(dialog) = this.payment_dialog.as_mut() {
+                                dialog.allow_save_credentials = !dialog.allow_save_credentials;
+                            }
+                            cx.notify();
+                        })),
+                );
+            }
+        }
+        body = body.child(creds);
+        if !invoice.terms_url.is_empty() {
+            let checked = dialog.terms_accepted;
+            let url = invoice.terms_url.clone();
+            body = body.child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .child(
+                        Button::new("p1-payment-terms")
+                            .label(if checked { "☑" } else { "☐" })
+                            .ghost()
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                if let Some(dialog) = this.payment_dialog.as_mut() {
+                                    dialog.terms_accepted = !dialog.terms_accepted;
+                                }
+                                cx.notify();
+                            })),
+                    )
+                    .child(
+                        Button::new("p1-payment-terms-open")
+                            .label("I accept the terms of service")
+                            .ghost()
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.open_message_url(&url, cx);
+                            })),
+                    ),
+            );
+        }
+        if !invoice.recurring_terms_url.is_empty() {
+            let url = invoice.recurring_terms_url.clone();
+            body = body.child(
+                Button::new("p1-payment-recurring-terms")
+                    .label("Recurring payment terms")
+                    .ghost()
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.open_message_url(&url, cx);
+                    })),
+            );
+        }
+        let can_pay = {
+            let terms_ok = invoice.terms_url.is_empty() || dialog.terms_accepted;
+            let order_ok = !needs_order || session.payment_validated.is_some();
+            let creds_ok = match &dialog.credential_choice {
+                PaymentCredentialChoice::Saved(_) => true,
+                PaymentCredentialChoice::NewToken => !dialog.token(cx).trim().is_empty(),
+            };
+            terms_ok && order_ok && creds_ok
+        };
+        let pay = Button::new("p1-payment-pay")
+            .label(format!(
+                "Pay {}",
+                format_payment_price(&invoice.currency, total)
+            ))
+            .primary();
+        body = body.child(if can_pay {
+            pay.on_click(cx.listener(|this, _, _, cx| {
+                this.submit_payment(cx);
+            }))
+        } else {
+            pay.disabled(true)
+        });
+        body
+    }
+
+    /// Slice P1: the `paymentReceipt` dialog (schema:4765).
+    fn payment_receipt_overlay(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let session = self.session()?;
+        if !session.payment_receipt_open {
+            return None;
+        }
+        let receipt = session.payment_receipt.as_ref()?;
+        let total = if receipt.is_stars {
+            format!("{} Stars", receipt.star_count)
+        } else {
+            format_payment_price(&receipt.currency, receipt.total_amount)
+        };
+        let mut body = div()
+            .flex()
+            .flex_col()
+            .gap_2()
+            .child(
+                div()
+                    .text_sm()
+                    .font_semibold()
+                    .child(format!("🧾 {}", receipt.product_title)),
+            )
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(format_unix_date_time(receipt.date as i64)),
+            )
+            .child(
+                div()
+                    .flex()
+                    .justify_between()
+                    .text_sm()
+                    .child(div().child("Total"))
+                    .child(div().font_semibold().child(total)),
+            );
+        if !receipt.credentials_title.is_empty() {
+            body = body.child(
+                div()
+                    .flex()
+                    .justify_between()
+                    .text_sm()
+                    .child(div().child("Paid with"))
+                    .child(div().child(receipt.credentials_title.clone())),
+            );
+        }
+        if receipt.tip_amount > 0 {
+            body = body.child(
+                div()
+                    .flex()
+                    .justify_between()
+                    .text_sm()
+                    .child(div().child("Tip"))
+                    .child(
+                        div().child(format_payment_price(&receipt.currency, receipt.tip_amount)),
+                    ),
+            );
+        }
+        Some(b1_modal(
+            "p1-receipt",
+            B1DialogClose::PaymentReceipt,
+            "Payment receipt",
+            body.into_any_element(),
+            cx,
+        ))
+    }
+
+    /// Slice P1: "View receipt" on a paid invoice — `getPaymentReceipt`
+    /// for the invoice's `receipt_message_id` (schema 1.8.67, line 15280).
+    fn open_payment_receipt(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        cx: &mut Context<Self>,
+    ) {
+        let sent = self.live.as_mut().map(|live| {
+            live.driver.session.payment_receipt_open = false;
+            live.driver.fetch_payment_receipt(chat_id, message_id)
+        });
+        if !matches!(sent, Some(Ok(_))) {
+            self.status_note = "could not load the receipt".into();
+        }
+        cx.notify();
+    }
+
+    /// Slice P1: "Continue" in the checkout dialog — `validateOrderInfo`
+    /// (schema 1.8.67, line 15268). The answer carries the `order_info_id`
+    /// and shipping options.
+    fn validate_payment_order(&mut self, cx: &mut Context<Self>) {
+        let order = self.payment_dialog.as_ref().map(|dialog| dialog.order(cx));
+        let request = self
+            .session()
+            .and_then(|session| session.payment_request.clone());
+        let allow_save = self
+            .payment_dialog
+            .as_ref()
+            .is_some_and(|dialog| dialog.allow_save_order);
+        let (Some(order), Some(request)) = (order, request) else {
+            self.status_note = "payment form not loaded".into();
+            cx.notify();
+            return;
+        };
+        let sent = self.live.as_mut().map(|live| {
+            live.driver.session.payment_note = None;
+            live.driver.validate_payment_order_info(
+                request.chat_id,
+                request.message_id,
+                &order,
+                allow_save,
+            )
+        });
+        if !matches!(sent, Some(Ok(_))) {
+            self.status_note = "could not validate order info".into();
+        }
+        cx.notify();
+    }
+
+    /// Slice P1: "Pay" in the checkout dialog — `sendPaymentForm`
+    /// (schema 1.8.67, line 15277). The credential token is read from the
+    /// input and never stored; only the submission uses it.
+    fn submit_payment(&mut self, cx: &mut Context<Self>) {
+        let snapshot = self.session().map(|session| {
+            (
+                session.payment_form.clone(),
+                session.payment_request.clone(),
+                session.payment_validated.clone(),
+                session.payment_shipping_id.clone(),
+            )
+        });
+        let dialog = self.payment_dialog.as_ref();
+        let (Some((Some(form), Some(request), validated, shipping_id)), Some(dialog)) =
+            (snapshot, dialog)
+        else {
+            self.status_note = "payment form not loaded".into();
+            cx.notify();
+            return;
+        };
+        let PaymentFormTypeData::Regular(regular) = &form.form_type else {
+            return;
+        };
+        let invoice = &regular.invoice;
+        let needs_order = invoice.need_name
+            || invoice.need_phone_number
+            || invoice.need_email_address
+            || invoice.need_shipping_address;
+        if needs_order && validated.is_none() {
+            self.status_note = "validate the order info first".into();
+            cx.notify();
+            return;
+        }
+        let credentials = match &dialog.credential_choice {
+            PaymentCredentialChoice::Saved(id) => input_credentials_saved(id),
+            PaymentCredentialChoice::NewToken => {
+                input_credentials_new(&dialog.token(cx), dialog.allow_save_credentials)
+            }
+        };
+        let order_info_id = validated
+            .as_ref()
+            .map(|validated| validated.order_info_id.as_str())
+            .unwrap_or("");
+        let shipping_option_id = shipping_id.as_deref().unwrap_or("");
+        let sent = self.live.as_mut().map(|live| {
+            live.driver.session.payment_note = None;
+            live.driver.submit_payment_form(
+                request.chat_id,
+                request.message_id,
+                form.id,
+                order_info_id,
+                shipping_option_id,
+                credentials,
+                0,
+            )
+        });
+        if !matches!(sent, Some(Ok(_))) {
+            self.status_note = "could not submit the payment".into();
+        }
+        cx.notify();
+    }
+
     /// B1: act on a `loginUrlInfo*` / `httpUrl` answer drained by
     /// `poll_live`. `loginUrlInfoOpen` (and the `httpUrl` from `getLoginUrl`)
     /// opens the authorized URL in the OS browser;
@@ -8556,6 +9349,13 @@ impl QuillApp {
         }
         if self.login_url_confirm.is_some() {
             return Some(self.login_url_confirm_overlay(cx));
+        }
+        // Slice P1: the payment checkout + receipt dialogs.
+        if let Some(overlay) = self.payment_dialog_overlay(cx) {
+            return Some(overlay);
+        }
+        if let Some(overlay) = self.payment_receipt_overlay(cx) {
+            return Some(overlay);
         }
         None
     }
@@ -9086,6 +9886,18 @@ impl QuillApp {
         }
         if self.poll_dialog.is_some() {
             self.request_close_poll_dialog(cx);
+            return;
+        }
+        // Slice P1: Esc closes the checkout and receipt dialogs.
+        if self.payment_dialog.is_some() {
+            self.close_payment_dialog(cx);
+            return;
+        }
+        if self
+            .session()
+            .is_some_and(|session| session.payment_receipt_open)
+        {
+            self.close_payment_receipt(cx);
             return;
         }
         // MED2: Esc never discards a recording silently. With the confirm
@@ -38537,6 +39349,73 @@ fn apply_ready_text_entities(session: &mut Session, sink: &Arc<MemorySink>, seq:
 /// reducer — an open regular poll with a voted option (percentage bars +
 /// counts, the chosen option marked) and a closed quiz poll (results only,
 /// no voting affordance, correct answer marked).
+/// Slice P1 payments demo (injected, no live Telegram): a bot chat with a
+/// `messageInvoice` (Buy button), a `messagePaymentSuccessful` row, a paid
+/// invoice linking to a receipt, and a seeded `paymentForm` (regular
+/// provider, order fields, a saved credential, terms) so the checkout
+/// dialog renders open.
+fn apply_ready_payments(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
+    use quill::state::RequestPurpose;
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let chat_id = 51;
+    let chat_json = format!(
+        r#"{{"@type":"updateNewChat","chat":{{"id":{chat_id},"title":"Demo shop bot","type":{{"@type":"chatTypePrivate","user_id":{chat_id}}},"unread_count":0}}}}"#
+    );
+    let position_json = format!(
+        r#"{{"@type":"updateChatPosition","chat_id":{chat_id},"position":{{"@type":"chatPosition","list":{{"@type":"chatListMain"}},"order":"49","is_pinned":false}}}}"#
+    );
+    for json in [chat_json, position_json] {
+        if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
+            session.apply(owned);
+        }
+    }
+    session.open_chat(ChatId(chat_id));
+
+    let formatted = |text: &str| -> String {
+        let text_json = serde_json::to_string(text).unwrap();
+        format!(r#"{{"@type":"formattedText","text":{text_json},"entities":[]}}"#)
+    };
+    let buy_markup = r#"{"@type":"replyMarkupInlineKeyboard","rows":[[{"@type":"inlineKeyboardButton","text":"💳 Buy","type":{"@type":"inlineKeyboardButtonTypeBuy"}}]]}"#;
+    let invoice_message = |message_id: i32,
+                           title: &str,
+                           description: &str,
+                           total: i64,
+                           is_test: bool,
+                           receipt: i64| {
+        format!(
+            r#"{{"@type":"updateNewMessage","message":{{"id":{message_id},"chat_id":{chat_id},"is_outgoing":false,"content":{{"@type":"messageInvoice","product_info":{{"@type":"productInfo","title":{title_json},"description":{description_json},"photo":null}},"currency":"USD","total_amount":{total},"start_parameter":"buy","is_test":{is_test},"need_shipping_address":false,"receipt_message_id":{receipt},"paid_media":null,"paid_media_caption":{empty_caption}}},"reply_markup":{buy_markup}}}}}"#,
+            title_json = serde_json::to_string(title).unwrap(),
+            description_json = formatted(description),
+            empty_caption = formatted(""),
+        )
+    };
+    let success_message = format!(
+        r#"{{"@type":"updateNewMessage","message":{{"id":203,"chat_id":{chat_id},"is_outgoing":false,"content":{{"@type":"messagePaymentSuccessful","invoice_chat_id":{chat_id},"invoice_message_id":201,"currency":"USD","total_amount":1999,"is_recurring":false,"invoice_name":"Time machine"}}}}}}"#
+    );
+    for json in [
+        invoice_message(201, "Time machine", "Visit your ancestors", 1999, true, 0),
+        success_message,
+        invoice_message(204, "Time machine — paid", "Delivered", 1999, false, 205),
+    ] {
+        if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
+            session.apply(owned);
+        }
+    }
+
+    // Seed a `paymentForm` answer (regular provider, order fields, one
+    // saved credential, terms) through a reserved GetPaymentForm extra so
+    // the reducer accepts it exactly like a live answer.
+    let extra = session.request(RequestPurpose::GetPaymentForm, Some(ChatId(chat_id)));
+    let form_json = format!(
+        r#"{{"@type":"paymentForm","@extra":"{}","id":7,"type":{{"@type":"paymentFormTypeRegular","invoice":{{"@type":"invoice","currency":"USD","price_parts":[{{"@type":"labeledPricePart","label":"Machine","amount":1999}}],"subscription_period":0,"max_tip_amount":0,"suggested_tip_amounts":[],"recurring_payment_terms_of_service_url":"","terms_of_service_url":"https://example.com/tos","is_test":true,"need_name":true,"need_phone_number":false,"need_email_address":true,"need_shipping_address":false,"send_phone_number_to_provider":false,"send_email_address_to_provider":false,"is_flexible":false}},"payment_provider_user_id":99,"payment_provider":{{"@type":"paymentProviderOther","url":"https://pay.example.com/x"}},"additional_payment_options":[],"saved_order_info":{{"@type":"orderInfo","name":"Ada","phone_number":"","email_address":"","shipping_address":{{"@type":"address","country_code":"","state":"","city":"","street_line1":"","street_line2":"","postal_code":""}}}},"saved_credentials":[{{"@type":"savedCredentials","id":"cred1","title":"Visa •• 4242"}}],"can_save_credentials":true,"need_password":false}},"seller_bot_user_id":{chat_id},"product_info":{{"@type":"productInfo","title":"Time machine","description":{description_json},"photo":null}}}}"#,
+        extra.0,
+        description_json = formatted("Visit your ancestors"),
+    );
+    if let Some(owned) = copy_and_parse(&form_json, seq, &dyn_sink) {
+        session.apply(owned);
+    }
+}
+
 fn apply_ready_poll(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
     let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
     let chat_id = 15;
@@ -42397,6 +43276,14 @@ fn inline_keyboard_button(
                 this.copy_inline_text(&text, cx);
             }))
         }
+        // Slice P1: the Buy button fetches the `paymentForm` and opens
+        // the checkout dialog (schema:15262). It is only ever attached to
+        // a `messageInvoice` (schema:3797).
+        InlineKeyboardButtonType::Buy => {
+            element.on_click(cx.listener(move |this, _, window, cx| {
+                this.press_buy_button(chat_id, message_id, window, cx);
+            }))
+        }
         _ => element.disabled(true),
     }
 }
@@ -42413,10 +43300,118 @@ fn button_tooltip(button: &InlineKeyboardButton) -> &'static str {
         | InlineKeyboardButtonType::SwitchInline { .. }
         | InlineKeyboardButtonType::CopyText { .. }
         | InlineKeyboardButtonType::User { .. } => "",
-        InlineKeyboardButtonType::Buy => "Payment buttons are not supported yet (payments slice)",
+        InlineKeyboardButtonType::Buy => "",
         InlineKeyboardButtonType::Disabled => "This button is disabled",
         InlineKeyboardButtonType::Unknown { .. } => "Unsupported button",
     }
+}
+
+/// Slice P1: format a TDLib smallest-unit amount as "USD 19.99".
+// ponytail: TDLib amounts are smallest units; a few currencies use 0 or 3
+// decimals (official clients use locale data) — Quill renders 2 decimals
+// uniformly and documents the ceiling here.
+fn format_payment_price(currency: &str, amount: i64) -> String {
+    format!("{} {:.2}", currency, amount as f64 / 100.0)
+}
+
+/// Slice P1: sum of a `labeledPricePart` list.
+fn price_parts_total(parts: &[LabeledPrice]) -> i64 {
+    parts.iter().map(|part| part.amount).sum()
+}
+
+/// Slice P1: `messageInvoice` card — product title/description, total
+/// price, TEST badge; paid invoices link to their receipt.
+fn invoice_body(
+    chat_id: ChatId,
+    message_id: MessageId,
+    invoice: &InvoiceContent,
+    cx: &mut Context<QuillApp>,
+) -> AnyElement {
+    let mut card = div()
+        .id(("invoice-card", message_id.0 as u64))
+        .flex()
+        .flex_col()
+        .gap_1()
+        .p_3()
+        .rounded_md()
+        .border_1()
+        .border_color(rgb(0x58a6ff))
+        .bg(rgb(0x161b22))
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .gap_2()
+                .child(div().text_sm().font_semibold().child("🧾"))
+                .child(div().text_sm().font_semibold().child(invoice.title.clone()))
+                .child(if invoice.is_test {
+                    div().text_xs().text_color(rgb(0xffd479)).child("TEST")
+                } else {
+                    div()
+                }),
+        );
+    if !invoice.description.is_empty() {
+        card = card.child(
+            div()
+                .text_xs()
+                .text_color(cx.theme().muted_foreground)
+                .child(invoice.description.clone()),
+        );
+    }
+    card = card.child(div().text_sm().font_semibold().child(format_payment_price(
+        &invoice.currency,
+        invoice.total_amount,
+    )));
+    if invoice.receipt_message_id != 0 {
+        // `receipt_message_id` is the `messagePaymentSuccessful` message
+        // (schema:5270); `getPaymentReceipt` takes that message's id
+        // (schema:15280).
+        let receipt_id = invoice.receipt_message_id;
+        card = card.child(
+            Button::new(format!("invoice-receipt-{receipt_id}"))
+                .label("View receipt")
+                .ghost()
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.open_payment_receipt(chat_id, MessageId(receipt_id), cx);
+                })),
+        );
+    }
+    card.into_any_element()
+}
+
+/// Slice P1: `messagePaymentSuccessful` / `messagePaymentSuccessfulBot`
+/// compact receipt row.
+fn payment_success_row(success: &PaymentSuccessContent, cx: &mut Context<QuillApp>) -> AnyElement {
+    let mut label = format!(
+        "✅ Payment successful — {}",
+        format_payment_price(&success.currency, success.total_amount)
+    );
+    if success.is_recurring {
+        label.push_str(" (recurring)");
+    }
+    div()
+        .text_xs()
+        .text_color(cx.theme().muted_foreground)
+        .child(label)
+        .into_any_element()
+}
+
+fn payment_received_row(
+    received: &PaymentReceivedContent,
+    cx: &mut Context<QuillApp>,
+) -> AnyElement {
+    let mut label = format!(
+        "💸 Payment received — {}",
+        format_payment_price(&received.currency, received.total_amount)
+    );
+    if received.is_recurring {
+        label.push_str(" (recurring)");
+    }
+    div()
+        .text_xs()
+        .text_color(cx.theme().muted_foreground)
+        .child(label)
+        .into_any_element()
 }
 
 /// Phase 4.2: `messagePoll` row — the question, one tappable option row per
@@ -43019,6 +44014,12 @@ fn session_history_row(
             cx,
         )),
         MessageContent::Poll(poll) => Some(poll_body(message.chat_id, message.id, poll, cx)),
+        // Slice P1: invoice card + payment receipt rows.
+        MessageContent::Invoice(invoice) => {
+            Some(invoice_body(message.chat_id, message.id, invoice, cx))
+        }
+        MessageContent::PaymentSuccessful(success) => Some(payment_success_row(success, cx)),
+        MessageContent::PaymentReceived(received) => Some(payment_received_row(received, cx)),
         MessageContent::Location(location) => Some(location_row(
             message.id.0 as u64,
             &location.location,

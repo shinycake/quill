@@ -5274,3 +5274,44 @@ ntgcalls v3.0.0 prebuilt lib, bindings verified against
   - Per-tab counts via `getChatMessageCount` (schema:11967) — the tab bar shows the page's `total_count` only when the tab is Ready.
   - Thumbnails / media grids for the Ready state.
   - The two README boxes stay checked only for what this slice delivers: the gallery UI with tabs, per-tab fetch, and per-tab empty/loading/failed states. Pagination and thumbnails, when built, extend — not reopen — this entry.
+
+## Slice P1 — PAYMENTS: INVOICE RENDERING, BUY BUTTONS, CHECKOUT FLOW, RECEIPTS (2026-09-28)
+
+- **Schema (pinned TDLib 1.8.67, `schema/td_api.tl`, verified verbatim):**
+  - `messageInvoice` (:5270): `product_info currency total_amount start_parameter is_test need_shipping_address receipt_message_id paid_media paid_media_caption`.
+  - `messagePaymentSuccessful` (:5436): `invoice_chat_id invoice_message_id currency total_amount subscription_until_date is_recurring is_first_recurring invoice_name`.
+  - `messagePaymentSuccessfulBot` (:5449): `currency total_amount subscription_until_date is_recurring is_first_recurring invoice_payload order_info telegram_payment_charge_id provider_payment_charge_id` — minimal buyer-side row only.
+  - `paymentForm` (:4734): `id:int64 type:PaymentFormType seller_bot_user_id product_info`.
+  - `paymentFormTypeRegular` (:4720): `invoice payment_provider_user_id payment_provider additional_payment_options saved_order_info saved_credentials can_save_credentials need_password` — \"True, if the user will be able to save credentials, if sets up a 2-step verification password\" (:4719), i.e. `need_password` gates *saving* credentials, not paying.
+  - `paymentFormTypeStars` (:4723) / `paymentFormTypeStarSubscription` — parsed so the dialog can decline them honestly.
+  - `inputCredentialsNew` (:4680): `data allow_save`; `inputCredentialsSaved` (:4677): `saved_credentials_id`.
+  - `getPaymentForm` (:15262): `input_invoice:InputInvoice theme:themeParameters` — Quill sends a real `themeParameters` object, not null.
+  - `validateOrderInfo` (:15268): `input_invoice order_info allow_save` → `validatedOrderInfo order_info_id shipping_options` (:4737).
+  - `sendPaymentForm` (:15277): `input_invoice payment_form_id order_info_id shipping_option_id credentials tip_amount` → `paymentResult success verification_url` (:4740).
+  - `getPaymentReceipt` (:15280): `chat_id message_id` → `paymentReceipt` (:4765).
+  - `invoice` (:4655): `currency price_parts max_tip_amount suggested_tip_amounts recurring_payment_terms_of_service_url terms_of_service_url is_test need_name need_phone_number need_email_address need_shipping_address send_phone_number_to_provider send_email_address_to_provider is_flexible`.
+  - `inlineKeyboardButtonTypeBuy` (:3798) — attached only to `messageInvoice`.
+- **Telegram X evidence (local TGX-Android source, `~/workspace/telegram-x`):**
+  - `TGMessageInvoice.java` exists but is mostly skeletal (fields parsed, no rich rendering).
+  - `TGInlineKeyboard.java` decorates Buy buttons with the invoice currency.
+  - The Buy button press handler is still a `TODO` in TGX (~line 1105) — TGX has no Buy-button checkout behavior to copy; Quill's checkout dialog is built from the schema alone.
+- **Built:**
+  - `telegram/envelope.rs`: `MessageContent::{Invoice, PaymentSuccessful, PaymentReceived}` + `InvoiceContent`, `PaymentSuccessContent`, `PaymentReceivedContent`, `PaymentFormData`/`PaymentFormTypeData::{Regular, Stars, StarSubscription}` (`Regular` payload is `Box<PaymentFormRegular>` — clippy `large_enum_variant`), `InvoiceForm`, `PaymentProviderKind::{Web, Token}`, `PaymentOption`, `SavedCredential`, `OrderInfoData`, `AddressData`, `ShippingOptionData`, `ValidatedOrderInfoData`, `PaymentResultData`, `PaymentReceiptData`; `EnvelopePayload::{PaymentForm, ValidatedOrderInfo, PaymentResult, PaymentReceipt}`; chat-list previews for invoices/payment notices; parser tests.
+  - `telegram/requests.rs`: `get_payment_form` (real theme params), `validate_order_info`, `send_payment_form`, `get_payment_receipt`, `input_credentials_new`, `input_credentials_saved`, `order_info_json`; request-shape tests.
+  - `connect.rs`: `send_payment_form_request`, `validate_payment_order_info`, `submit_payment_form`, `fetch_payment_receipt` — all keep a `PaymentRequest` (chat_id/message_id) and use the existing callback/message gating.
+  - `state.rs`: `RequestPurpose::{GetPaymentForm, ValidateOrderInfo, SendPaymentForm, GetPaymentReceipt}`; session fields `payment_request`, `payment_form`, `payment_form_loading`, `payment_note`, `payment_validated`, `payment_shipping_id`, `payment_receipt`, `payment_receipt_open`, `payment_verification_url`; reducer answers only own requests (matched by `@extra`); reducer unit tests.
+  - `ui/mod.rs`: invoice card (title, description, total, TEST badge; paid invoices get \"View receipt\"); `messagePaymentSuccessful`/`messagePaymentSuccessfulBot` compact rows; Buy button wired to `getPaymentForm` (no more \"not supported\" tooltip); checkout dialog — product + price parts, provider section (Web → OS-browser button; Token → provider-token note), additional payment options, order-info fields rendered only for the invoice's `need_*` flags, `validateOrderInfo` → shipping-option radios, saved-credential radios + new-token field (saved only when `can_save_credentials`, 2FA note when `need_password`), terms-of-service consent checkbox + recurring-terms link, explicit Pay button; `paymentResult` verification URL opens in the OS browser; receipt dialog from paid invoices; `paymentFormTypeStars`/`StarSubscription` decline honestly. Screenshot demo `ReadyPayments` (invoice + Buy + success row + paid invoice + open checkout dialog).
+- **Key decisions (ponytail):**
+  - No in-app web view and no card tokenization: Quill has no embedded browser, so provider/additional-payment/verification URLs open in the OS browser, and card providers take a provider-issued credential token (`inputCredentialsNew`) — never collected or stored by Quill (the token is read from the input and used only for the submission).
+  - Prices render with ISO 4217 exponents (`USD 19.99`, `JPY 2000`, `BHD 19.990`) — TDLib amounts are always smallest units, so the exponent comes from a hardcoded currency list in `envelope.rs` (0-decimal and 3-decimal sets verbatim from the standard, 2 otherwise).
+  - The dialog has no `validated` flag of its own — `session.payment_validated` is the single source of truth.
+  - Tips (`max_tip_amount`/`suggested_tip_amounts`) are parsed but the checkout sends `tip_amount: 0` — tip UI is out of this slice.
+  - `payment_note` is the single dialog-scoped status slot (errors and the ✅/❌ result); the verification URL is stored separately (`payment_verification_url`) and drained by `poll_live`, not encoded in a status string.
+- **Not verifiable without live Telegram:** server acceptance of `validateOrderInfo`/`sendPaymentForm` round-trips, real provider URLs, receipt fetching against a real paid invoice.
+- **Out of this slice (left unchecked with evidence):**
+  - `parity:bots-payment-recurring` — recurring metadata/terms render, but recurring-payment management (subscription control) has no verified TDLib path in this slice.
+  - `parity:bots-payment-clear` — clear saved payment/shipping info (`deleteSavedCredentials`/`deleteSavedOrderInfo` exist in the schema) not wired to any UI.
+  - Telegram Stars checkout (`paymentFormTypeStars` → `sendPaymentForm` with Stars credentials) — no verified credential flow; the dialog declines honestly.
+  - Payment tips UI (`tip_amount` sent as 0).
+  - Embedded provider webview / native card collection.
+  - `paid_media` on invoices (falls back to the invoice card; paid-media rendering is a media-slice concern).

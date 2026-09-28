@@ -951,6 +951,18 @@ pub enum EnvelopePayload {
     /// B1: `loginUrlInfo*` — response to `getLoginUrlInfo` after a
     /// login-URL button press.
     LoginUrlInfo(LoginUrlInfo),
+    /// Slice P1: `paymentForm` — the `getPaymentForm` answer after a Buy
+    /// button press (schema/td_api.tl:4734).
+    PaymentForm(PaymentFormData),
+    /// Slice P1: `validatedOrderInfo` — the `validateOrderInfo` answer
+    /// (schema/td_api.tl:4737).
+    ValidatedOrderInfo(ValidatedOrderInfoData),
+    /// Slice P1: `paymentResult` — the `sendPaymentForm` answer
+    /// (schema/td_api.tl:4740).
+    PaymentResult(PaymentResultData),
+    /// Slice P1: `paymentReceipt` — the `getPaymentReceipt` answer
+    /// (schema/td_api.tl:4765).
+    PaymentReceipt(PaymentReceiptData),
     /// `updateChatFolders` (TDLib 1.8.67, `schema/td_api.tl:10606`) — the
     /// full ordered folder list. There is no `getChatFolders` function in
     /// 1.8.67; TDLib pushes this update after authorization and whenever
@@ -2604,6 +2616,185 @@ pub struct CallbackQueryAnswer {
     pub text: String,
     pub show_alert: bool,
     pub url: String,
+}
+
+/// Slice P1: `messageInvoice` content (TDLib 1.8.67, `schema/td_api.tl:5270`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InvoiceContent {
+    pub title: String,
+    pub description: String,
+    pub currency: String,
+    pub total_amount: i64,
+    pub is_test: bool,
+    pub need_shipping_address: bool,
+    pub receipt_message_id: i64,
+}
+
+/// Slice P1: `messagePaymentSuccessful` content (TDLib 1.8.67,
+/// `schema/td_api.tl:5436`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PaymentSuccessContent {
+    pub invoice_chat_id: i64,
+    pub invoice_message_id: i64,
+    pub currency: String,
+    pub total_amount: i64,
+    pub is_recurring: bool,
+    pub invoice_name: String,
+}
+
+/// Slice P1: `messagePaymentSuccessfulBot` content (TDLib 1.8.67,
+/// `schema/td_api.tl:5449`) — minimal, buyer-side render only.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PaymentReceivedContent {
+    pub currency: String,
+    pub total_amount: i64,
+    pub is_recurring: bool,
+}
+
+/// Slice P1: `labeledPricePart` (TDLib 1.8.67, `schema/td_api.tl:4637`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LabeledPrice {
+    pub label: String,
+    pub amount: i64,
+}
+
+/// Slice P1: `invoice` (TDLib 1.8.67, `schema/td_api.tl:4652`) — the full
+/// invoice inside a `paymentFormTypeRegular`. Only the fields the checkout
+/// dialog needs are kept.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InvoiceForm {
+    pub currency: String,
+    pub price_parts: Vec<LabeledPrice>,
+    pub max_tip_amount: i64,
+    pub suggested_tip_amounts: Vec<i64>,
+    pub recurring_terms_url: String,
+    pub terms_url: String,
+    pub is_test: bool,
+    pub need_name: bool,
+    pub need_phone_number: bool,
+    pub need_email_address: bool,
+    pub need_shipping_address: bool,
+    pub is_flexible: bool,
+}
+
+/// Slice P1: the payment provider on a `paymentFormTypeRegular`
+/// (schema:4689–4702). Quill has no in-app web view, so both variants end
+/// at the OS browser: `Other` carries the provider's payment-page URL;
+/// card-token providers (Stripe/SmartGlocal) need a credential token the
+/// user obtains on the provider's site.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PaymentProviderKind {
+    /// `paymentProviderOther` — the URL of the provider's payment page.
+    Web { url: String },
+    /// Stripe / SmartGlocal / anything else — card credentials are a
+    /// provider-issued token (`inputCredentialsNew`).
+    Token { name: String },
+}
+
+/// Slice P1: `paymentOption` (schema:4709) — an additional web payment
+/// option, opened in the OS browser.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PaymentOption {
+    pub title: String,
+    pub url: String,
+}
+
+/// Slice P1: `savedCredentials` (schema:4671).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SavedCredential {
+    pub id: String,
+    pub title: String,
+}
+
+/// Slice P1: `address` (schema:4626) / `orderInfo` (schema:4658).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct AddressData {
+    pub country_code: String,
+    pub state: String,
+    pub city: String,
+    pub street_line1: String,
+    pub street_line2: String,
+    pub postal_code: String,
+}
+
+/// Slice P1: `orderInfo` (schema:4658).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct OrderInfoData {
+    pub name: String,
+    pub phone_number: String,
+    pub email_address: String,
+    pub shipping_address: AddressData,
+}
+
+/// Slice P1: `paymentFormType*` (schema:4716–4730). Stars payments are
+/// parsed so the dialog can decline them honestly — the Stars
+/// credentials flow has no verified TDLib path in this slice. The
+/// regular payload is boxed: `Stars`/`StarSubscription` carry almost
+/// nothing, which tripped clippy's `large_enum_variant` lint.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PaymentFormTypeData {
+    Regular(Box<PaymentFormRegular>),
+    Stars { star_count: i64 },
+    StarSubscription,
+}
+
+/// Slice P1: the regular payment-form payload (`paymentFormTypeRegular`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PaymentFormRegular {
+    pub invoice: InvoiceForm,
+    pub provider: PaymentProviderKind,
+    pub additional_options: Vec<PaymentOption>,
+    pub saved_order_info: OrderInfoData,
+    pub saved_credentials: Vec<SavedCredential>,
+    pub can_save_credentials: bool,
+    pub need_password: bool,
+}
+
+/// Slice P1: `paymentForm` (TDLib 1.8.67, `schema/td_api.tl:4734`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PaymentFormData {
+    pub id: i64,
+    pub form_type: PaymentFormTypeData,
+    pub seller_bot_user_id: i64,
+    pub product_title: String,
+    pub product_description: String,
+}
+
+/// Slice P1: `shippingOption` (schema:4665).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ShippingOptionData {
+    pub id: String,
+    pub title: String,
+    pub price_parts: Vec<LabeledPrice>,
+}
+
+/// Slice P1: `validatedOrderInfo` (schema:4737) — the
+/// `validateOrderInfo` answer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ValidatedOrderInfoData {
+    pub order_info_id: String,
+    pub shipping_options: Vec<ShippingOptionData>,
+}
+
+/// Slice P1: `paymentResult` (schema:4740) — the `sendPaymentForm` answer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PaymentResultData {
+    pub success: bool,
+    pub verification_url: String,
+}
+
+/// Slice P1: `paymentReceipt` (schema:4765) — the `getPaymentReceipt`
+/// answer. Stars receipts keep only the star count.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PaymentReceiptData {
+    pub product_title: String,
+    pub date: i32,
+    pub currency: String,
+    pub total_amount: i64,
+    pub credentials_title: String,
+    pub tip_amount: i64,
+    pub is_stars: bool,
+    pub star_count: i64,
 }
 
 /// Typed `ChatJoinResult` — `joinChat` response (TDLib 1.8.67: no
@@ -4911,6 +5102,17 @@ pub enum MessageContent {
     Game {
         short_name: String,
     },
+    /// Slice P1: `messageInvoice` (TDLib 1.8.67, `schema/td_api.tl:5270`) —
+    /// a bot's invoice card. Only the fields the card renders are kept.
+    Invoice(InvoiceContent),
+    /// Slice P1: `messagePaymentSuccessful` (TDLib 1.8.67,
+    /// `schema/td_api.tl:5436`) — the receipt row after a successful
+    /// payment.
+    PaymentSuccessful(PaymentSuccessContent),
+    /// Slice P1: `messagePaymentSuccessfulBot` (TDLib 1.8.67,
+    /// `schema/td_api.tl:5449`) — the seller-side notice. Quill is a
+    /// buyer client; kept minimal for a compact "payment received" row.
+    PaymentReceived(PaymentReceivedContent),
     Unsupported {
         type_name: String,
     },
@@ -5700,6 +5902,28 @@ impl MessageContent {
             // Phase S1: chat-list preview for `messageScreenshotTaken`
             // (TGX ChatContentScreenshot).
             MessageContent::ScreenshotTaken => "Took a screenshot".to_string(),
+            // Slice P1: chat-list previews for payments (TGX shows the
+            // invoice title / "Payment successful").
+            MessageContent::Invoice(invoice) => {
+                let title = invoice.title.trim();
+                if title.is_empty() {
+                    "🧾 Invoice".to_string()
+                } else {
+                    format!("🧾 {}", title.chars().take(76).collect::<String>())
+                }
+            }
+            MessageContent::PaymentSuccessful(success) => {
+                let name = success.invoice_name.trim();
+                if name.is_empty() {
+                    "✅ Payment successful".to_string()
+                } else {
+                    format!(
+                        "✅ Payment successful: {}",
+                        name.chars().take(60).collect::<String>()
+                    )
+                }
+            }
+            MessageContent::PaymentReceived(_) => "💸 Payment received".to_string(),
         }
     }
 
@@ -6952,6 +7176,31 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
                     .unwrap_or(false),
             },
         )),
+        // Slice P1: payment answers (TDLib 1.8.67, `schema/td_api.tl:4734` /
+        // `:4737` / `:4740` / `:4765`).
+        "paymentForm" => parse_payment_form(&value)
+            .map(EnvelopePayload::PaymentForm)
+            .ok_or(ParseError::MissingField),
+        "validatedOrderInfo" => Ok(EnvelopePayload::ValidatedOrderInfo(
+            ValidatedOrderInfoData {
+                order_info_id: json_field_str(&value, "order_info_id"),
+                shipping_options: value
+                    .get("shipping_options")
+                    .and_then(Value::as_array)
+                    .map(|arr| arr.iter().map(parse_shipping_option).collect())
+                    .unwrap_or_default(),
+            },
+        )),
+        "paymentResult" => Ok(EnvelopePayload::PaymentResult(PaymentResultData {
+            success: value
+                .get("success")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            verification_url: json_field_str(&value, "verification_url"),
+        })),
+        "paymentReceipt" => parse_payment_receipt(&value)
+            .map(EnvelopePayload::PaymentReceipt)
+            .ok_or(ParseError::MissingField),
         // Parity slice: `createChatFolder` / `editChatFolder` responses
         // (TDLib 1.8.67, `schema/td_api.tl:13358` / `:13361`).
         "chatFolderInfo" => parse_chat_folder_info(&value)
@@ -8533,6 +8782,299 @@ fn parse_callback_query_answer(value: &Value) -> CallbackQueryAnswer {
     }
 }
 
+/// Slice P1: `messageInvoice` (TDLib 1.8.67, `schema/td_api.tl:5270`).
+fn parse_message_invoice(value: &Value) -> (MessageContent, Vec<ParsedFile>) {
+    let info = value.get("product_info");
+    let description = info
+        .and_then(|info| info.get("description"))
+        .and_then(|desc| desc.get("text"))
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    (
+        MessageContent::Invoice(InvoiceContent {
+            title: info
+                .and_then(|info| info.get("title"))
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string(),
+            description,
+            currency: json_field_str(value, "currency"),
+            total_amount: int53(value.get("total_amount")).unwrap_or(0),
+            is_test: value
+                .get("is_test")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            need_shipping_address: value
+                .get("need_shipping_address")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            receipt_message_id: int53(value.get("receipt_message_id")).unwrap_or(0),
+        }),
+        Vec::new(),
+    )
+}
+
+/// Slice P1: `messagePaymentSuccessful` (TDLib 1.8.67,
+/// `schema/td_api.tl:5436`).
+fn parse_message_payment_successful(value: &Value) -> (MessageContent, Vec<ParsedFile>) {
+    (
+        MessageContent::PaymentSuccessful(PaymentSuccessContent {
+            invoice_chat_id: int53(value.get("invoice_chat_id")).unwrap_or(0),
+            invoice_message_id: int53(value.get("invoice_message_id")).unwrap_or(0),
+            currency: json_field_str(value, "currency"),
+            total_amount: int53(value.get("total_amount")).unwrap_or(0),
+            is_recurring: value
+                .get("is_recurring")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            invoice_name: json_field_str(value, "invoice_name"),
+        }),
+        Vec::new(),
+    )
+}
+
+/// Slice P1: `messagePaymentSuccessfulBot` (TDLib 1.8.67,
+/// `schema/td_api.tl:5449`) — minimal seller-side parse.
+fn parse_message_payment_received(value: &Value) -> (MessageContent, Vec<ParsedFile>) {
+    (
+        MessageContent::PaymentReceived(PaymentReceivedContent {
+            currency: json_field_str(value, "currency"),
+            total_amount: int53(value.get("total_amount")).unwrap_or(0),
+            is_recurring: value
+                .get("is_recurring")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+        }),
+        Vec::new(),
+    )
+}
+
+/// Slice P1: `labeledPricePart` list (schema:4637).
+fn parse_price_parts(value: Option<&Value>) -> Vec<LabeledPrice> {
+    value
+        .and_then(Value::as_array)
+        .map(|arr| {
+            arr.iter()
+                .map(|part| LabeledPrice {
+                    label: json_field_str(part, "label"),
+                    amount: int53(part.get("amount")).unwrap_or(0),
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Slice P1: `address` (schema:4626); `orderInfo.shipping_address` may be
+/// null (schema:4658) — `parse_address(None)` yields the empty address.
+fn parse_address(value: Option<&Value>) -> AddressData {
+    let empty = || String::new();
+    let get = |key: &str| {
+        value
+            .and_then(|v| v.get(key))
+            .and_then(Value::as_str)
+            .map(str::to_string)
+            .unwrap_or_else(empty)
+    };
+    AddressData {
+        country_code: get("country_code"),
+        state: get("state"),
+        city: get("city"),
+        street_line1: get("street_line1"),
+        street_line2: get("street_line2"),
+        postal_code: get("postal_code"),
+    }
+}
+
+/// Slice P1: `orderInfo` (schema:4658); `saved_order_info` may be null
+/// (schema:4720) — `parse_order_info(None)` yields the empty order.
+fn parse_order_info(value: Option<&Value>) -> OrderInfoData {
+    OrderInfoData {
+        name: value
+            .and_then(|v| v.get("name"))
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string(),
+        phone_number: value
+            .and_then(|v| v.get("phone_number"))
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string(),
+        email_address: value
+            .and_then(|v| v.get("email_address"))
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string(),
+        shipping_address: parse_address(value.and_then(|v| v.get("shipping_address"))),
+    }
+}
+
+/// Slice P1: `invoice` inside a `paymentFormTypeRegular` (schema:4652).
+fn parse_invoice_form(value: &Value) -> InvoiceForm {
+    let flag = |key: &str| value.get(key).and_then(Value::as_bool).unwrap_or(false);
+    InvoiceForm {
+        currency: json_field_str(value, "currency"),
+        price_parts: parse_price_parts(value.get("price_parts")),
+        max_tip_amount: int53(value.get("max_tip_amount")).unwrap_or(0),
+        suggested_tip_amounts: value
+            .get("suggested_tip_amounts")
+            .and_then(Value::as_array)
+            .map(|arr| arr.iter().filter_map(|v| int53(Some(v)).ok()).collect())
+            .unwrap_or_default(),
+        recurring_terms_url: json_field_str(value, "recurring_payment_terms_of_service_url"),
+        terms_url: json_field_str(value, "terms_of_service_url"),
+        is_test: flag("is_test"),
+        need_name: flag("need_name"),
+        need_phone_number: flag("need_phone_number"),
+        need_email_address: flag("need_email_address"),
+        need_shipping_address: flag("need_shipping_address"),
+        is_flexible: flag("is_flexible"),
+    }
+}
+
+/// Slice P1: `shippingOption` (schema:4668).
+fn parse_shipping_option(value: &Value) -> ShippingOptionData {
+    ShippingOptionData {
+        id: json_field_str(value, "id"),
+        title: json_field_str(value, "title"),
+        price_parts: parse_price_parts(value.get("price_parts")),
+    }
+}
+
+/// Slice P1: `paymentForm` (TDLib 1.8.67, `schema/td_api.tl:4734`).
+/// `None` when the form type is unknown (a new schema variant the pinned
+/// schema predates) — the caller degrades to a fetch error.
+fn parse_payment_form(value: &Value) -> Option<PaymentFormData> {
+    let form_type_value = value.get("type")?;
+    let form_type = match form_type_value.get("@type").and_then(Value::as_str)? {
+        "paymentFormTypeRegular" => {
+            let provider_value = form_type_value.get("payment_provider")?;
+            let provider = match provider_value.get("@type").and_then(Value::as_str) {
+                Some("paymentProviderOther") => PaymentProviderKind::Web {
+                    url: json_field_str(provider_value, "url"),
+                },
+                Some("paymentProviderStripe") => PaymentProviderKind::Token {
+                    name: "Stripe".into(),
+                },
+                Some("paymentProviderSmartGlocal") => PaymentProviderKind::Token {
+                    name: "Smart Glocal".into(),
+                },
+                _ => PaymentProviderKind::Token {
+                    name: "card".into(),
+                },
+            };
+            PaymentFormTypeData::Regular(Box::new(PaymentFormRegular {
+                invoice: parse_invoice_form(form_type_value.get("invoice")?),
+                provider,
+                additional_options: form_type_value
+                    .get("additional_payment_options")
+                    .and_then(Value::as_array)
+                    .map(|arr| {
+                        arr.iter()
+                            .map(|opt| PaymentOption {
+                                title: json_field_str(opt, "title"),
+                                url: json_field_str(opt, "url"),
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+                saved_order_info: parse_order_info(form_type_value.get("saved_order_info")),
+                saved_credentials: form_type_value
+                    .get("saved_credentials")
+                    .and_then(Value::as_array)
+                    .map(|arr| {
+                        arr.iter()
+                            .map(|cred| SavedCredential {
+                                id: json_field_str(cred, "id"),
+                                title: json_field_str(cred, "title"),
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+                can_save_credentials: form_type_value
+                    .get("can_save_credentials")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
+                need_password: form_type_value
+                    .get("need_password")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
+            }))
+        }
+        "paymentFormTypeStars" => PaymentFormTypeData::Stars {
+            star_count: int53(form_type_value.get("star_count")).unwrap_or(0),
+        },
+        "paymentFormTypeStarSubscription" => PaymentFormTypeData::StarSubscription,
+        _ => return None,
+    };
+    let product_info = value.get("product_info")?;
+    Some(PaymentFormData {
+        id: int53(value.get("id")).unwrap_or(0),
+        form_type,
+        seller_bot_user_id: int53(value.get("seller_bot_user_id")).unwrap_or(0),
+        product_title: product_info
+            .get("title")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string(),
+        product_description: product_info
+            .get("description")
+            .and_then(|desc| desc.get("text"))
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string(),
+    })
+}
+
+/// Slice P1: `paymentReceipt` (TDLib 1.8.67, `schema/td_api.tl:4765`).
+fn parse_payment_receipt(value: &Value) -> Option<PaymentReceiptData> {
+    let receipt_type = value.get("type")?;
+    let (currency, total_amount, credentials_title, tip_amount, is_stars, star_count) =
+        match receipt_type.get("@type").and_then(Value::as_str)? {
+            "paymentReceiptTypeRegular" => {
+                let invoice = receipt_type.get("invoice")?;
+                (
+                    json_field_str(invoice, "currency"),
+                    price_parts_total(&parse_price_parts(invoice.get("price_parts"))),
+                    json_field_str(receipt_type, "credentials_title"),
+                    int53(receipt_type.get("tip_amount")).unwrap_or(0),
+                    false,
+                    0,
+                )
+            }
+            "paymentReceiptTypeStars" => (
+                String::new(),
+                0,
+                String::new(),
+                0,
+                true,
+                int53(receipt_type.get("star_count")).unwrap_or(0),
+            ),
+            _ => return None,
+        };
+    let product_info = value.get("product_info")?;
+    Some(PaymentReceiptData {
+        product_title: product_info
+            .get("title")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string(),
+        date: value.get("date").and_then(Value::as_i64).unwrap_or(0) as i32,
+        currency,
+        total_amount,
+        credentials_title,
+        tip_amount,
+        is_stars,
+        star_count,
+    })
+}
+
+/// Slice P1: sum of a `labeledPricePart` list — the receipt carries no
+/// `total_amount`, only the invoice's price parts (schema:4752).
+fn price_parts_total(parts: &[LabeledPrice]) -> i64 {
+    parts.iter().map(|part| part.amount).sum()
+}
+
 /// `draftMessage` / `draftMessageContentText`. Other content constructors are
 /// not restored into the text field (Unigram only fills the field from text).
 fn parse_chat_draft(value: Option<&Value>) -> Option<ChatDraft> {
@@ -9140,6 +9682,13 @@ fn parse_content(value: Option<&Value>) -> (MessageContent, Vec<ParsedFile>) {
             },
             Vec::new(),
         ),
+        // Slice P1: `messageInvoice` (schema 1.8.67, line 5270).
+        Some("messageInvoice") => parse_message_invoice(value),
+        // Slice P1: `messagePaymentSuccessful` (schema 1.8.67, line 5436).
+        Some("messagePaymentSuccessful") => parse_message_payment_successful(value),
+        // Slice P1: `messagePaymentSuccessfulBot` (schema 1.8.67, line
+        // 5449) — seller-side notice, minimal parse.
+        Some("messagePaymentSuccessfulBot") => parse_message_payment_received(value),
         // Phase B4: `messageChatSetMessageAutoDeleteTime` (schema 1.8.67,
         // line 5387) — the chat's auto-delete / self-destruct timer was
         // changed. `from_user_id` is not kept (the row is a neutral
@@ -11720,6 +12269,178 @@ mod tests {
         match env.payload {
             EnvelopePayload::HttpUrl { url } => {
                 assert_eq!(url, "https://example.com/authed2");
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn p1_payment_parses() {
+        // `messageInvoice` (schema 1.8.67, line 5270).
+        let env = parse_envelope(
+            r#"{"@type":"updateNewMessage","message":{"id":401,"chat_id":21,"is_outgoing":false,"content":{"@type":"messageInvoice","product_info":{"@type":"productInfo","title":"Time machine","description":{"@type":"formattedText","text":"Visit your ancestors","entities":[]},"photo":null},"currency":"USD","total_amount":1999,"start_parameter":"buy","is_test":true,"need_shipping_address":true,"receipt_message_id":0,"paid_media":null,"paid_media_caption":{"@type":"formattedText","text":"","entities":[]}}}}"#,
+        )
+        .unwrap();
+        match env.payload {
+            EnvelopePayload::UpdateNewMessage(message) => match &message.content {
+                MessageContent::Invoice(invoice) => {
+                    assert_eq!(invoice.title, "Time machine");
+                    assert_eq!(invoice.description, "Visit your ancestors");
+                    assert_eq!(invoice.currency, "USD");
+                    assert_eq!(invoice.total_amount, 1999);
+                    assert!(invoice.is_test);
+                    assert!(invoice.need_shipping_address);
+                    assert_eq!(invoice.receipt_message_id, 0);
+                }
+                other => panic!("{other:?}"),
+            },
+            other => panic!("{other:?}"),
+        }
+        // `messagePaymentSuccessful` (schema 1.8.67, line 5436).
+        let env = parse_envelope(
+            r#"{"@type":"updateNewMessage","message":{"id":402,"chat_id":21,"is_outgoing":false,"content":{"@type":"messagePaymentSuccessful","invoice_chat_id":21,"invoice_message_id":401,"currency":"USD","total_amount":1999,"subscription_until_date":0,"is_recurring":false,"is_first_recurring":false,"invoice_name":"Time machine"}}}"#,
+        )
+        .unwrap();
+        match env.payload {
+            EnvelopePayload::UpdateNewMessage(message) => match &message.content {
+                MessageContent::PaymentSuccessful(success) => {
+                    assert_eq!(success.invoice_message_id, 401);
+                    assert_eq!(success.currency, "USD");
+                    assert_eq!(success.total_amount, 1999);
+                    assert!(!success.is_recurring);
+                    assert_eq!(success.invoice_name, "Time machine");
+                }
+                other => panic!("{other:?}"),
+            },
+            other => panic!("{other:?}"),
+        }
+        // `messagePaymentSuccessfulBot` (schema 1.8.67, line 5449) —
+        // minimal seller-side parse.
+        let env = parse_envelope(
+            r#"{"@type":"updateNewMessage","message":{"id":403,"chat_id":21,"is_outgoing":true,"content":{"@type":"messagePaymentSuccessfulBot","currency":"USD","total_amount":1999,"subscription_until_date":0,"is_recurring":true,"is_first_recurring":true,"invoice_payload":"cGF5","shipping_option_id":"","order_info":null,"telegram_payment_charge_id":"1","provider_payment_charge_id":"2"}}}"#,
+        )
+        .unwrap();
+        match env.payload {
+            EnvelopePayload::UpdateNewMessage(message) => match &message.content {
+                MessageContent::PaymentReceived(received) => {
+                    assert_eq!(received.currency, "USD");
+                    assert_eq!(received.total_amount, 1999);
+                    assert!(received.is_recurring);
+                }
+                other => panic!("{other:?}"),
+            },
+            other => panic!("{other:?}"),
+        }
+        // Previews.
+        assert_eq!(
+            MessageContent::Invoice(InvoiceContent {
+                title: "Time machine".into(),
+                description: String::new(),
+                currency: "USD".into(),
+                total_amount: 1999,
+                is_test: true,
+                need_shipping_address: false,
+                receipt_message_id: 0,
+            })
+            .preview(),
+            "🧾 Time machine"
+        );
+    }
+
+    #[test]
+    fn p1_payment_form_parsed() {
+        // `paymentForm` with a `paymentFormTypeRegular` (schema:4734/:4720).
+        let env = parse_envelope(
+            r#"{"@type":"paymentForm","@extra":"21","id":7,"type":{"@type":"paymentFormTypeRegular","invoice":{"@type":"invoice","currency":"USD","price_parts":[{"@type":"labeledPricePart","label":"Machine","amount":1999}],"subscription_period":0,"max_tip_amount":0,"suggested_tip_amounts":[],"recurring_payment_terms_of_service_url":"","terms_of_service_url":"https://example.com/tos","is_test":false,"need_name":true,"need_phone_number":false,"need_email_address":true,"need_shipping_address":false,"send_phone_number_to_provider":false,"send_email_address_to_provider":false,"is_flexible":false},"payment_provider_user_id":99,"payment_provider":{"@type":"paymentProviderOther","url":"https://pay.example.com/x"},"additional_payment_options":[],"saved_order_info":null,"saved_credentials":[{"@type":"savedCredentials","id":"cred1","title":"Visa •• 4242"}],"can_save_credentials":true,"need_password":false},"seller_bot_user_id":21,"product_info":{"@type":"productInfo","title":"Time machine","description":{"@type":"formattedText","text":"Visit your ancestors","entities":[]},"photo":null}}"#,
+        )
+        .unwrap();
+        match env.payload {
+            EnvelopePayload::PaymentForm(form) => {
+                assert_eq!(form.id, 7);
+                assert_eq!(form.product_title, "Time machine");
+                assert_eq!(form.product_description, "Visit your ancestors");
+                match form.form_type {
+                    PaymentFormTypeData::Regular(regular) => {
+                        let invoice = &regular.invoice;
+                        let provider = &regular.provider;
+                        let saved_credentials = &regular.saved_credentials;
+                        assert_eq!(invoice.currency, "USD");
+                        assert_eq!(invoice.price_parts.len(), 1);
+                        assert_eq!(invoice.price_parts[0].label, "Machine");
+                        assert_eq!(invoice.terms_url, "https://example.com/tos");
+                        assert!(invoice.need_name);
+                        assert!(invoice.need_email_address);
+                        assert!(!invoice.need_shipping_address);
+                        assert_eq!(
+                            *provider,
+                            PaymentProviderKind::Web {
+                                url: "https://pay.example.com/x".into()
+                            }
+                        );
+                        assert_eq!(saved_credentials.len(), 1);
+                        assert_eq!(saved_credentials[0].id, "cred1");
+                    }
+                    other => panic!("{other:?}"),
+                }
+            }
+            other => panic!("{other:?}"),
+        }
+        // Stars form type parses to the honest unsupported variant.
+        let env = parse_envelope(
+            r#"{"@type":"paymentForm","@extra":"22","id":8,"type":{"@type":"paymentFormTypeStars","star_count":50},"seller_bot_user_id":21,"product_info":{"@type":"productInfo","title":"Stars pack","description":{"@type":"formattedText","text":"","entities":[]},"photo":null}}"#,
+        )
+        .unwrap();
+        match env.payload {
+            EnvelopePayload::PaymentForm(form) => {
+                assert_eq!(
+                    form.form_type,
+                    PaymentFormTypeData::Stars { star_count: 50 }
+                );
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn p1_validated_order_info_and_result_parsed() {
+        // `validatedOrderInfo` (schema:4737).
+        let env = parse_envelope(
+            r#"{"@type":"validatedOrderInfo","@extra":"23","order_info_id":"oi1","shipping_options":[{"@type":"shippingOption","id":"fast","title":"Express","price_parts":[{"@type":"labeledPricePart","label":"Express","amount":500}]}]}"#,
+        )
+        .unwrap();
+        match env.payload {
+            EnvelopePayload::ValidatedOrderInfo(validated) => {
+                assert_eq!(validated.order_info_id, "oi1");
+                assert_eq!(validated.shipping_options.len(), 1);
+                assert_eq!(validated.shipping_options[0].id, "fast");
+                assert_eq!(validated.shipping_options[0].price_parts[0].amount, 500);
+            }
+            other => panic!("{other:?}"),
+        }
+        // `paymentResult` (schema:4740).
+        let env = parse_envelope(
+            r#"{"@type":"paymentResult","@extra":"24","success":true,"verification_url":""}"#,
+        )
+        .unwrap();
+        match env.payload {
+            EnvelopePayload::PaymentResult(result) => {
+                assert!(result.success);
+                assert!(result.verification_url.is_empty());
+            }
+            other => panic!("{other:?}"),
+        }
+        // `paymentReceipt` with a regular receipt type (schema:4765/:4752).
+        let env = parse_envelope(
+            r#"{"@type":"paymentReceipt","@extra":"25","product_info":{"@type":"productInfo","title":"Time machine","description":{"@type":"formattedText","text":"","entities":[]},"photo":null},"date":1790000000,"seller_bot_user_id":21,"type":{"@type":"paymentReceiptTypeRegular","payment_provider_user_id":99,"invoice":{"@type":"invoice","currency":"USD","price_parts":[{"@type":"labeledPricePart","label":"Machine","amount":1999}],"subscription_period":0,"max_tip_amount":0,"suggested_tip_amounts":[],"recurring_payment_terms_of_service_url":"","terms_of_service_url":"","is_test":false,"need_name":false,"need_phone_number":false,"need_email_address":false,"need_shipping_address":false,"send_phone_number_to_provider":false,"send_email_address_to_provider":false,"is_flexible":false},"order_info":null,"shipping_option":null,"credentials_title":"Visa •• 4242","tip_amount":0}}"#,
+        )
+        .unwrap();
+        match env.payload {
+            EnvelopePayload::PaymentReceipt(receipt) => {
+                assert_eq!(receipt.product_title, "Time machine");
+                assert_eq!(receipt.currency, "USD");
+                assert_eq!(receipt.total_amount, 1999);
+                assert_eq!(receipt.credentials_title, "Visa •• 4242");
+                assert!(!receipt.is_stars);
             }
             other => panic!("{other:?}"),
         }

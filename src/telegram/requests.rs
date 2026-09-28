@@ -5,6 +5,7 @@ use crate::composer::{
 use crate::ids::{ChatId, FileId, MessageId, RequestId, TopicId};
 use crate::pins::{TDLIB_CMAKE_VERSION, TDLIB_GIT_COMMIT};
 use crate::story_composer::StoryMediaKind;
+use crate::telegram::envelope::OrderInfoData;
 use serde_json::{Value, json};
 
 pub struct SetTdlibParameters {
@@ -5205,6 +5206,151 @@ pub fn expected_runtime_label() -> String {
     format!("{TDLIB_CMAKE_VERSION} ({TDLIB_GIT_COMMIT})")
 }
 
+/// Slice P1: minimal `themeParameters` (TDLib 1.8.67, `schema/td_api.tl:1111`)
+/// for `getPaymentForm`. Quill's UI is dark; these approximate the app
+/// palette. The theme only styles a provider page Quill would show in a
+/// web view — Quill opens provider URLs in the OS browser instead, so
+/// this is a formality the schema requires.
+fn payment_theme_parameters() -> Value {
+    json!({
+        "@type": "themeParameters",
+        "background_color": 0x17212b,
+        "secondary_background_color": 0x0e1621,
+        "header_background_color": 0x17212b,
+        "bottom_bar_background_color": 0x17212b,
+        "section_background_color": 0x17212b,
+        "section_separator_color": 0x0e1621,
+        "text_color": 0xffffff,
+        "accent_text_color": 0x6ab2f2,
+        "section_header_text_color": 0x6ab2f2,
+        "subtitle_text_color": 0x8a97a3,
+        "destructive_text_color": 0xe06c75,
+        "hint_color": 0x8a97a3,
+        "link_color": 0x6ab2f2,
+        "button_color": 0x5288c1,
+        "button_text_color": 0xffffff,
+    })
+}
+
+/// Slice P1: `getPaymentForm` (TDLib 1.8.67, `schema/td_api.tl:15262`) —
+/// the Buy button flow. Response is `paymentForm`.
+pub fn get_payment_form(extra: RequestId, chat_id: ChatId, message_id: MessageId) -> String {
+    json!({
+        "@type": "getPaymentForm",
+        "@extra": extra.as_extra(),
+        "input_invoice": {
+            "@type": "inputInvoiceMessage",
+            "chat_id": chat_id.0,
+            "message_id": message_id.0,
+        },
+        "theme": payment_theme_parameters(),
+    })
+    .to_string()
+}
+
+/// Slice P1: `orderInfo` JSON (schema:4658) for `validateOrderInfo` /
+/// `sendPaymentForm`.
+pub fn order_info_json(order: &OrderInfoData) -> Value {
+    json!({
+        "@type": "orderInfo",
+        "name": order.name,
+        "phone_number": order.phone_number,
+        "email_address": order.email_address,
+        "shipping_address": {
+            "@type": "address",
+            "country_code": order.shipping_address.country_code,
+            "state": order.shipping_address.state,
+            "city": order.shipping_address.city,
+            "street_line1": order.shipping_address.street_line1,
+            "street_line2": order.shipping_address.street_line2,
+            "postal_code": order.shipping_address.postal_code,
+        },
+    })
+}
+
+/// Slice P1: `validateOrderInfo` (TDLib 1.8.67, `schema/td_api.tl:15268`).
+/// Response is `validatedOrderInfo` with the shipping options.
+pub fn validate_order_info(
+    extra: RequestId,
+    chat_id: ChatId,
+    message_id: MessageId,
+    order: &OrderInfoData,
+    allow_save: bool,
+) -> String {
+    json!({
+        "@type": "validateOrderInfo",
+        "@extra": extra.as_extra(),
+        "input_invoice": {
+            "@type": "inputInvoiceMessage",
+            "chat_id": chat_id.0,
+            "message_id": message_id.0,
+        },
+        "order_info": order_info_json(order),
+        "allow_save": allow_save,
+    })
+    .to_string()
+}
+
+/// Slice P1: `inputCredentialsNew` (schema:4680) — a credential token the
+/// user obtained on the provider's site (e.g. a Stripe `tok_*`).
+pub fn input_credentials_new(data: &str, allow_save: bool) -> Value {
+    json!({
+        "@type": "inputCredentialsNew",
+        "data": data,
+        "allow_save": allow_save,
+    })
+}
+
+/// Slice P1: `inputCredentialsSaved` (schema:4677).
+pub fn input_credentials_saved(saved_credentials_id: &str) -> Value {
+    json!({
+        "@type": "inputCredentialsSaved",
+        "saved_credentials_id": saved_credentials_id,
+    })
+}
+
+/// Slice P1: `sendPaymentForm` (TDLib 1.8.67, `schema/td_api.tl:15277`).
+/// Response is `paymentResult`.
+#[allow(clippy::too_many_arguments)]
+pub fn send_payment_form(
+    extra: RequestId,
+    chat_id: ChatId,
+    message_id: MessageId,
+    payment_form_id: i64,
+    order_info_id: &str,
+    shipping_option_id: &str,
+    credentials: Value,
+    tip_amount: i64,
+) -> String {
+    json!({
+        "@type": "sendPaymentForm",
+        "@extra": extra.as_extra(),
+        "input_invoice": {
+            "@type": "inputInvoiceMessage",
+            "chat_id": chat_id.0,
+            "message_id": message_id.0,
+        },
+        "payment_form_id": payment_form_id,
+        "order_info_id": order_info_id,
+        "shipping_option_id": shipping_option_id,
+        "credentials": credentials,
+        "tip_amount": tip_amount,
+    })
+    .to_string()
+}
+
+/// Slice P1: `getPaymentReceipt` (TDLib 1.8.67, `schema/td_api.tl:15280`).
+/// Response is `paymentReceipt`.
+pub fn get_payment_receipt(extra: RequestId, chat_id: ChatId, message_id: MessageId) -> String {
+    json!({
+        "@type": "getPaymentReceipt",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0,
+        "message_id": message_id.0,
+    })
+    .to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -9101,5 +9247,61 @@ mod channel_requests_tests {
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(v["@type"], "deleteProfilePhoto");
         assert_eq!(v["profile_photo_id"], 12345);
+    }
+
+    #[test]
+    fn p1_payment_request_shapes_match_1_8_67() {
+        // `getPaymentForm` (schema 1.8.67, line 15262).
+        let json = get_payment_form(RequestId(71), ChatId(21), MessageId(401));
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "getPaymentForm");
+        assert_eq!(v["@extra"], "71");
+        assert_eq!(v["input_invoice"]["@type"], "inputInvoiceMessage");
+        assert_eq!(v["input_invoice"]["chat_id"], 21);
+        assert_eq!(v["input_invoice"]["message_id"], 401);
+        assert_eq!(v["theme"]["@type"], "themeParameters");
+        // `validateOrderInfo` (schema 1.8.67, line 15268).
+        let order = OrderInfoData {
+            name: "Ada".into(),
+            phone_number: "+1".into(),
+            email_address: "a@x.io".into(),
+            shipping_address: Default::default(),
+        };
+        let json = validate_order_info(RequestId(72), ChatId(21), MessageId(401), &order, true);
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "validateOrderInfo");
+        assert_eq!(v["order_info"]["@type"], "orderInfo");
+        assert_eq!(v["order_info"]["name"], "Ada");
+        assert_eq!(v["order_info"]["shipping_address"]["@type"], "address");
+        assert_eq!(v["allow_save"], true);
+        // `sendPaymentForm` (schema 1.8.67, line 15277).
+        let creds = input_credentials_new("tok_test", true);
+        let json = send_payment_form(
+            RequestId(73),
+            ChatId(21),
+            MessageId(401),
+            7,
+            "oi1",
+            "fast",
+            creds,
+            0,
+        );
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "sendPaymentForm");
+        assert_eq!(v["payment_form_id"], 7);
+        assert_eq!(v["order_info_id"], "oi1");
+        assert_eq!(v["shipping_option_id"], "fast");
+        assert_eq!(v["credentials"]["@type"], "inputCredentialsNew");
+        assert_eq!(v["credentials"]["data"], "tok_test");
+        assert_eq!(v["tip_amount"], 0);
+        let saved = input_credentials_saved("cred1");
+        assert_eq!(saved["@type"], "inputCredentialsSaved");
+        assert_eq!(saved["saved_credentials_id"], "cred1");
+        // `getPaymentReceipt` (schema 1.8.67, line 15280).
+        let json = get_payment_receipt(RequestId(74), ChatId(21), MessageId(401));
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "getPaymentReceipt");
+        assert_eq!(v["chat_id"], 21);
+        assert_eq!(v["message_id"], 401);
     }
 }

@@ -24,12 +24,12 @@ use crate::telegram::envelope::{
     ParsedCall, ParsedChatEvent, ParsedChatInviteLink, ParsedChatJoinRequest, ParsedChatMember,
     ParsedFile, ParsedGroupCall, ParsedGroupCallMessage, ParsedGroupCallParticipant, ParsedMessage,
     ParsedSecretChat, ParsedSession, ParsedStory, ParsedUser, ParsedVideoChat, ParsedWebsite,
-    ParsedWelcomeMessage, PasswordState, Poll, ReplyKeyboard, ReplyMarkup, ReportChatOutcome,
-    ReportOption, ReportSponsoredResult, ReportStoryResult, RichMessageContent,
-    ScopeNotificationSettings, SecretChatState, SponsoredMessage, StickerFormat, StickerItem,
-    StickerSetInfo, StorageStats, StoryAvailableReactionView, StoryInteractionView,
-    StoryInteractionsView, StoryListView, TdError, UsernameCheckResult, effective_content,
-    reply_markup_demands_reply,
+    ParsedWelcomeMessage, PasswordState, PaymentFormData, PaymentReceiptData, Poll,
+    ReplyKeyboard, ReplyMarkup, ReportChatOutcome, ReportOption, ReportSponsoredResult,
+    RichMessageContent, ScopeNotificationSettings, SecretChatState, SponsoredMessage,
+    StickerFormat, StickerItem, StickerSetInfo, StorageStats, StoryAvailableReactionView,
+    StoryInteractionView, StoryInteractionsView, StoryListView, TdError, UsernameCheckResult,
+    ValidatedOrderInfoData, effective_content, reply_markup_demands_reply,
 };
 use crate::telegram::envelope::{CallState, ReadyParams};
 use crate::telegram::requests::{
@@ -317,6 +317,19 @@ pub enum RequestPurpose {
     /// `loginUrlInfo*`; on error the button degrades to a plain URL button
     /// (schema 1.8.67 doc on `getLoginUrl`).
     GetLoginUrlInfo,
+    /// Slice P1: `getPaymentForm` after a Buy button press. Response is
+    /// `paymentForm` (schema 1.8.67, line 15262).
+    GetPaymentForm,
+    /// Slice P1: `validateOrderInfo` after the order-info form validates.
+    /// Response is `validatedOrderInfo` (schema 1.8.67, line 15268).
+    ValidateOrderInfo,
+    /// Slice P1: `sendPaymentForm` from the checkout dialog. Response is
+    /// `paymentResult` (schema 1.8.67, line 15277).
+    SendPaymentForm,
+    /// Slice P1: `getPaymentReceipt` for an invoice's
+    /// `receipt_message_id`. Response is `paymentReceipt` (schema 1.8.67,
+    /// line 15280).
+    GetPaymentReceipt,
     /// B1: `getLoginUrl` after the user consented to a
     /// `loginUrlInfoRequestConfirmation`. Response is `httpUrl`; on error
     /// the button degrades to a plain URL button (schema 1.8.67 doc on
@@ -1167,6 +1180,15 @@ pub struct LoginUrlRequest {
     pub button_id: i64,
     /// The button's raw URL — the plain-URL fallback.
     pub raw_url: String,
+}
+
+/// Slice P1: context of an in-flight payment request (`getPaymentForm`,
+/// `validateOrderInfo`, `sendPaymentForm`, `getPaymentReceipt`), kept so
+/// the answers / errors correlate to the right invoice message.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PaymentRequest {
+    pub chat_id: ChatId,
+    pub message_id: MessageId,
 }
 
 /// B1: pick the custom keyboard to show for a chat — the newest message
@@ -3893,6 +3915,30 @@ pub struct Session {
     /// (then `getLoginUrl`) is in flight so an error can degrade to a plain
     /// URL button press.
     pub login_url_request: Option<LoginUrlRequest>,
+    /// Slice P1: the in-flight payment request context (`getPaymentForm`,
+    /// `validateOrderInfo`, `sendPaymentForm`, `getPaymentReceipt`).
+    pub payment_request: Option<PaymentRequest>,
+    /// Slice P1: the fetched `paymentForm`, shown in the checkout dialog.
+    pub payment_form: Option<PaymentFormData>,
+    /// Slice P1: `getPaymentForm` is in flight (dialog shows a spinner).
+    pub payment_form_loading: bool,
+    /// Slice P1: the validated order info + shipping options from
+    /// `validateOrderInfo`.
+    pub payment_validated: Option<ValidatedOrderInfoData>,
+    /// Slice P1: the chosen shipping option id (default: the first).
+    pub payment_shipping_id: Option<String>,
+    /// Slice P1: the fetched `paymentReceipt`, shown in the receipt dialog.
+    pub payment_receipt: Option<PaymentReceiptData>,
+    /// Slice P1: receipt dialog visibility.
+    pub payment_receipt_open: bool,
+    /// Slice P1: latest payment error / outcome note, shown in the
+    /// checkout dialog (never a secret — order fields and credentials are
+    /// never echoed here).
+    pub payment_note: Option<String>,
+    /// Slice P1: `paymentResult.verification_url` from a non-successful
+    /// `sendPaymentForm` — the UI takes it on the next poll and opens it
+    /// in the OS browser (3-D Secure and similar).
+    pub payment_verification_url: Option<String>,
     /// B1: force-reply target set when an incoming message carrying
     /// force-reply markup (`replyMarkupForceReply`, or `force_reply` on an
     /// inline / show-keyboard markup) arrives. The UI drains it on the
@@ -4705,6 +4751,15 @@ impl Session {
             last_callback_answer: None,
             last_login_url_info: None,
             login_url_request: None,
+            payment_request: None,
+            payment_form: None,
+            payment_form_loading: false,
+            payment_validated: None,
+            payment_shipping_id: None,
+            payment_receipt: None,
+            payment_receipt_open: false,
+            payment_note: None,
+            payment_verification_url: None,
             pending_force_reply: None,
             files: HashMap::new(),
             downloading: HashSet::new(),
@@ -7316,6 +7371,54 @@ impl Session {
                     self.last_login_url_info = Some(info);
                 }
             }
+            EnvelopePayload::PaymentForm(form) => {
+                // Slice P1: `getPaymentForm` answer to our own Buy press
+                // (matched by `@extra`). Opens the checkout dialog.
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetPaymentForm) {
+                    self.payment_form = Some(form);
+                    self.payment_form_loading = false;
+                    self.payment_validated = None;
+                    self.payment_shipping_id = None;
+                    self.payment_note = None;
+                    self.payment_request = None;
+                }
+            }
+            EnvelopePayload::ValidatedOrderInfo(validated) => {
+                // Slice P1: `validateOrderInfo` answer (matched by `@extra`).
+                // The first shipping option is pre-selected, like the
+                // official clients.
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::ValidateOrderInfo) {
+                    self.payment_shipping_id =
+                        validated.shipping_options.first().map(|o| o.id.clone());
+                    self.payment_validated = Some(validated);
+                    self.payment_note = None;
+                    self.payment_request = None;
+                }
+            }
+            EnvelopePayload::PaymentResult(result) => {
+                // Slice P1: `sendPaymentForm` answer (matched by `@extra`).
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::SendPaymentForm) {
+                    self.payment_request = None;
+                    if result.success {
+                        self.payment_note = Some("✅ Payment successful".to_string());
+                    } else if !result.verification_url.is_empty() {
+                        // Schema: the URL is for additional payment
+                        // credentials verification (e.g. 3-D Secure) — the
+                        // UI opens it in the OS browser.
+                        self.payment_verification_url = Some(result.verification_url);
+                    } else {
+                        self.payment_note = Some("Payment failed".to_string());
+                    }
+                }
+            }
+            EnvelopePayload::PaymentReceipt(receipt) => {
+                // Slice P1: `getPaymentReceipt` answer (matched by `@extra`).
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetPaymentReceipt) {
+                    self.payment_receipt = Some(receipt);
+                    self.payment_receipt_open = true;
+                    self.payment_request = None;
+                }
+            }
             EnvelopePayload::UpdateSavedAnimations { .. } => {
                 if self.gifs.open {
                     self.gifs.stale = true;
@@ -7809,6 +7912,22 @@ impl Session {
                             "Could not load \"Post as\" chats: {}",
                             error_reason(&err)
                         ));
+                    }
+                    // Slice P1: a payment request failed — surface the
+                    // reason in the checkout dialog (or the status line for
+                    // the receipt fetch) instead of spinning forever.
+                    Some(
+                        RequestPurpose::GetPaymentForm
+                        | RequestPurpose::ValidateOrderInfo
+                        | RequestPurpose::SendPaymentForm,
+                    ) => {
+                        self.payment_form_loading = false;
+                        self.payment_note = Some(format!("Payment failed: {}", error_reason(&err)));
+                        self.payment_request = None;
+                    }
+                    Some(RequestPurpose::GetPaymentReceipt) => {
+                        self.payment_note = Some(format!("Receipt failed: {}", error_reason(&err)));
+                        self.payment_request = None;
                     }
                     _ => {}
                 }
@@ -18787,5 +18906,142 @@ mod tests {
         session.open_chat(ChatId(12));
         assert!(session.shared_media.open);
         assert_eq!(session.shared_media.chat_id, Some(ChatId(12)));
+    }
+
+    /// Slice P1: a `paymentForm` answer applies only to our own Buy press
+    /// (matched by `@extra`) — a stray form never opens the dialog.
+    #[test]
+    fn payment_form_applies_only_to_own_request() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        let form_json = |extra: &str| {
+            format!(
+                r#"{{"@type":"paymentForm","@extra":"{extra}","id":7,"type":{{"@type":"paymentFormTypeRegular","invoice":{{"@type":"invoice","currency":"USD","price_parts":[{{"@type":"labeledPricePart","label":"Machine","amount":1999}}],"subscription_period":0,"max_tip_amount":0,"suggested_tip_amounts":[],"recurring_payment_terms_of_service_url":"","terms_of_service_url":"","is_test":true,"need_name":true,"need_phone_number":false,"need_email_address":true,"need_shipping_address":false,"send_phone_number_to_provider":false,"send_email_address_to_provider":false,"is_flexible":false}},"payment_provider_user_id":99,"payment_provider":{{"@type":"paymentProviderOther","url":"https://pay.example.com/x"}},"additional_payment_options":[],"saved_order_info":null,"saved_credentials":[],"can_save_credentials":true,"need_password":false}},"seller_bot_user_id":51,"product_info":{{"@type":"productInfo","title":"Time machine","description":{{"@type":"formattedText","text":"","entities":[]}},"photo":null}}}}"#
+            )
+        };
+        apply_json(&mut session, &seq, &sink, &form_json("999"));
+        assert!(session.payment_form.is_none());
+        let extra = session.request(RequestPurpose::GetPaymentForm, Some(ChatId(51)));
+        session.payment_form_loading = true;
+        apply_json(&mut session, &seq, &sink, &form_json(&extra.0.to_string()));
+        let form = session.payment_form.as_ref().expect("form applies");
+        assert_eq!(form.id, 7);
+        assert_eq!(form.product_title, "Time machine");
+        assert!(!session.payment_form_loading);
+    }
+
+    /// Slice P1: a failed `getPaymentForm` clears the spinner and surfaces
+    /// the reason in the dialog note.
+    #[test]
+    fn payment_form_error_surfaces_note() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        session.payment_form_loading = true;
+        let extra = session.request(RequestPurpose::GetPaymentForm, Some(ChatId(51)));
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"error","@extra":"{}","code":400,"message":"MESSAGE_NOT_MODIFIED"}}"#,
+                extra.0
+            ),
+        );
+        assert!(!session.payment_form_loading);
+        assert!(
+            session
+                .payment_note
+                .as_deref()
+                .unwrap_or("")
+                .starts_with("Payment failed:")
+        );
+    }
+
+    /// Slice P1: `validateOrderInfo` stores the validated info and
+    /// preselects the first shipping option.
+    #[test]
+    fn validated_order_info_selects_first_shipping() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        let extra = session.request(RequestPurpose::ValidateOrderInfo, Some(ChatId(51)));
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"validatedOrderInfo","@extra":"{}","order_info_id":"oid1","shipping_options":[{{"@type":"shippingOption","id":"ship1","title":"Standard","price_parts":[{{"@type":"labeledPricePart","label":"Post","amount":100}}]}},{{"@type":"shippingOption","id":"ship2","title":"Express","price_parts":[]}}]}}"#,
+                extra.0
+            ),
+        );
+        let validated = session.payment_validated.as_ref().expect("validated");
+        assert_eq!(validated.order_info_id, "oid1");
+        assert_eq!(validated.shipping_options.len(), 2);
+        assert_eq!(session.payment_shipping_id.as_deref(), Some("ship1"));
+    }
+
+    /// Slice P1: `sendPaymentForm` answers — success notes, a verification
+    /// URL is stashed for the browser, a bare failure notes.
+    #[test]
+    fn payment_result_notes_and_verification_url() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        let result_json = |extra: &str, success: bool, url: &str| {
+            format!(
+                r#"{{"@type":"paymentResult","@extra":"{extra}","success":{success},"verification_url":"{url}"}}"#
+            )
+        };
+        let extra = session.request(RequestPurpose::SendPaymentForm, Some(ChatId(51)));
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &result_json(&extra.0.to_string(), true, ""),
+        );
+        assert_eq!(
+            session.payment_note.as_deref(),
+            Some("✅ Payment successful")
+        );
+        let extra = session.request(RequestPurpose::SendPaymentForm, Some(ChatId(51)));
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &result_json(&extra.0.to_string(), false, "https://pay.example.com/3ds"),
+        );
+        assert_eq!(
+            session.payment_verification_url.as_deref(),
+            Some("https://pay.example.com/3ds")
+        );
+        let extra = session.request(RequestPurpose::SendPaymentForm, Some(ChatId(51)));
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &result_json(&extra.0.to_string(), false, ""),
+        );
+        assert_eq!(session.payment_note.as_deref(), Some("Payment failed"));
+    }
+
+    /// Slice P1: `getPaymentReceipt` stores the receipt and opens the
+    /// receipt dialog.
+    #[test]
+    fn payment_receipt_opens_dialog() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        let extra = session.request(RequestPurpose::GetPaymentReceipt, Some(ChatId(51)));
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"paymentReceipt","@extra":"{}","product_info":{{"@type":"productInfo","title":"Time machine","description":{{"@type":"formattedText","text":"","entities":[]}},"photo":null}},"date":1727400000,"seller_bot_user_id":51,"type":{{"@type":"paymentReceiptTypeRegular","payment_provider_user_id":99,"invoice":{{"@type":"invoice","currency":"USD","price_parts":[{{"@type":"labeledPricePart","label":"Machine","amount":1999}}],"subscription_period":0,"max_tip_amount":0,"suggested_tip_amounts":[],"recurring_payment_terms_of_service_url":"","terms_of_service_url":"","is_test":false,"need_name":false,"need_phone_number":false,"need_email_address":false,"need_shipping_address":false,"send_phone_number_to_provider":false,"send_email_address_to_provider":false,"is_flexible":false}},"order_info":{{"@type":"orderInfo","name":"","phone_number":"","email_address":"","shipping_address":{{"@type":"address","country_code":"","state":"","city":"","street_line1":"","street_line2":"","postal_code":""}}}},"shipping_option":{{"@type":"shippingOption","id":"","title":"","price_parts":[]}},"credentials_title":"Visa •• 4242","tip_amount":0}}}}"#,
+                extra.0
+            ),
+        );
+        let receipt = session.payment_receipt.as_ref().expect("receipt");
+        assert_eq!(receipt.product_title, "Time machine");
+        assert_eq!(receipt.total_amount, 1999);
+        assert_eq!(receipt.credentials_title, "Visa •• 4242");
+        assert!(session.payment_receipt_open);
     }
 }

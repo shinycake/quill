@@ -257,6 +257,10 @@ impl ComposerEdit {
             | MessageContent::RichMessage(_)
             // B1: games are not editable.
             | MessageContent::Game { .. }
+            // Slice P1: invoices and payment notices are not editable.
+            | MessageContent::Invoice(_)
+            | MessageContent::PaymentSuccessful(_)
+            | MessageContent::PaymentReceived(_)
             | MessageContent::Unsupported { .. } => return None,
         };
         Some(Self {
