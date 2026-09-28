@@ -5419,3 +5419,27 @@ ntgcalls v3.0.0 prebuilt lib, bindings verified against
   correct timing only — the demo paints fine on a fresh Xvfb display
   with the lavapipe ICD (earlier black frames were captures taken
   after the demo's 5s quit timer).
+
+## Slice calls-group-self-tile — LOCAL CAMERA SELF TILE IN GROUP CALLS (2026-09-28)
+
+- **Schema (pinned TDLib 1.8.67, `schema/td_api.tl`, verified verbatim):**
+  - `groupCall.is_my_video_enabled` (`schema/td_api.tl:7154`, documented :7142 "True, if the current user's video is enabled"): the local truth for whether the self tile shows the live preview. `toggleGroupCallIsMyVideoPaused` / the join params drive it; the slice reads it, never fabricates it.
+  - `groupCallParticipant.is_current_user` (`schema/td_api.tl:7184`) marks the self participant in the roster; the self tile is that participant's grid tile, not a separate overlay.
+- **ntgcalls v3.0.0 (upstream source, tag v3.0.0, concept-level — not a single-name grep):**
+  - `ntgcalls/src/ntgcalls.cpp:126` — `NTgCalls::create` wires `on_frames` per connection keyed by `chat_id` for ALL connection types: `(void) frames_callback_(chat_id, mode, device, frames);`. Group calls are connections keyed by chat id, so group capture frames reach the C `ntg_on_frames_callback` exactly like P2P ones.
+  - `ntgcalls/src/media/stream_manager.cpp` `setup_capture_callbacks` — camera reader frames emit to the frames callback with mode=CAPTURE when `stream_type == Video && is_shared`, where `is_shared = desc.media_source == MediaSource::Device` (:469). Quill's `issue_group_sources` issues the group camera as `NTG_MEDIA_SOURCE_DEVICE` + `NTG_STREAM_MODE_CAPTURE`, so the local preview arrives as CAPTURE+CAMERA keyed by the group chat id.
+  - This closes the old README partial honestly: the frames were never missing — the trampoline deliberately dropped them ("no tile yet"). The slice stops dropping and delivers them as `is_local=true, participant_user_id=None`.
+- **Reference-client evidence (TGX first):** TGX (`~/workspace/telegram-x`, this checkout) has no group video-call tile grid — `groupCallParticipantVideoInfo` appears only in the generated TDLib bindings, no video-grid UI exists to compare against. Nothing to mirror or contradict; the tile follows Quill's own existing tile style (124px tile, 90px video area, initials avatar, badge row) and the 1:1 PiP's local-preview states.
+- **Built:**
+  - Engine (`src/calls/engine.rs`, `frames_trampoline`): group-branch CAPTURE+CAMERA frames now deliver `(group_call_id, None, is_local=true, false)` instead of being dropped. CAPTURE+SCREEN (local screen-share preview) still drops — no tile for it yet (honest: screen-share slice is separate).
+  - Driver (`src/connect.rs`): no routing change — the existing frame callback already routes `participant_user_id=None` frames into the `(call_id, is_local)` slots, so the group-local frame lands at `(group_call_id, true)`. `pump_group_call_transport` now also clears those slots when the group call ends (stale local previews can't render after leave).
+  - UI (`src/ui/mod.rs`): `group_self_tile_content` — the current-user participant's tile renders the local preview when `is_my_video_enabled` and a frame is retained (decoded via the existing per-participant `cached_group_video_image` cache), "Starting camera…" when enabled with no frame yet, the initials avatar when the camera is off. The self tile also shows the "🔇 muted" badge from the local `is_muted_self` flag (folded into the existing muted-badge condition so it can't double up).
+  - Demo fixture: `apply_ready_group_call` now has `is_my_video_enabled:true` and the ReadyGroupCall demo sets `demo_local_frame` (warm-gradient crosshair frame) — `docs/screenshots/ready-group-call.png` shows the live self tile.
+  - Tests: `group_local_frame_routes_to_shared_local_slot` (routing), `group_call_leave_clears_local_frame_slot` (cleanup).
+- **Key decisions (ponytail):**
+  - Reused the `(call_id, is_local)` slots and the existing tile/cache/badge machinery — no new slot map, no new VideoFrame field, no identity plumbing into the engine.
+  - Known edge (documented, not engineered): 1:1 call ids and group call ids share the i32 key space of those slots. A simultaneous live 1:1 call and group call with numerically equal ids would cross-read the local slot — but both frames depict the same local camera, and slots clear on call end. Not worth a second map.
+  - The self tile is the existing current-user grid tile, not a PiP overlay — matches how the roster already renders "(you)".
+- **Out of this slice (left unchecked with evidence):**
+  - Live (non-demo) verification: no ntgcalls runtime on this VM — the engine→UI path is code + mock-tested + demo-screenshotted only, same caveat as the sibling call items.
+  - Local screen-share preview tile in group calls (CAPTURE+SCREEN still dropped at the trampoline).

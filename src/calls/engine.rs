@@ -2282,25 +2282,36 @@ unsafe extern "C" fn frames_trampoline(
         .copied()
     {
         // Screen frames arrive as PLAYBACK+SCREEN; camera as
-        // PLAYBACK+CAMERA.
-        let is_screen = device == NTG_STREAM_DEVICE_SCREEN;
-        if mode != NTG_STREAM_MODE_PLAYBACK || (!is_screen && device != NTG_STREAM_DEVICE_CAMERA) {
-            // Group capture (local preview) has no tile yet; drop rather
-            // than misattribute.
-            return;
+        // PLAYBACK+CAMERA. Slice calls-group-self-tile: the local
+        // camera preview arrives as CAPTURE+CAMERA keyed by the chat id
+        // (ntgcalls emits capture frames per connection — v3.0.0
+        // ntgcalls.cpp:126 wires on_frames for group connections too,
+        // and stream_manager emits device captures to the callback);
+        // it renders as the self tile instead of being dropped.
+        if mode == NTG_STREAM_MODE_CAPTURE && device == NTG_STREAM_DEVICE_CAMERA {
+            (group_call_id, None, true, false)
+        } else {
+            let is_screen = device == NTG_STREAM_DEVICE_SCREEN;
+            if mode != NTG_STREAM_MODE_PLAYBACK
+                || (!is_screen && device != NTG_STREAM_DEVICE_CAMERA)
+            {
+                // Screen-share capture preview has no tile yet; drop
+                // rather than misattribute.
+                return;
+            }
+            // SAFETY: frames_len > 0 was checked above.
+            let ssrc = unsafe { &*frames.add(frames_len - 1) }.ssrc as u32;
+            let Some(participant) = shared
+                .group_video_ssrc_to_user
+                .lock()
+                .expect("ntgcalls group ssrc map")
+                .get(&(user_id, ssrc))
+                .copied()
+            else {
+                return;
+            };
+            (group_call_id, Some(participant), false, is_screen)
         }
-        // SAFETY: frames_len > 0 was checked above.
-        let ssrc = unsafe { &*frames.add(frames_len - 1) }.ssrc as u32;
-        let Some(participant) = shared
-            .group_video_ssrc_to_user
-            .lock()
-            .expect("ntgcalls group ssrc map")
-            .get(&(user_id, ssrc))
-            .copied()
-        else {
-            return;
-        };
-        (group_call_id, Some(participant), false, is_screen)
     } else {
         let is_local = mode == NTG_STREAM_MODE_CAPTURE && device == NTG_STREAM_DEVICE_CAMERA;
         if !is_local && !(mode == NTG_STREAM_MODE_PLAYBACK && device == NTG_STREAM_DEVICE_CAMERA) {
