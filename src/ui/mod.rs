@@ -7,9 +7,16 @@ use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::input::{InputEvent, Textarea, TextareaState};
+use gpui_kit::component::message_scroller::{MessageScroller, MessageScrollerState};
 use gpui_kit::component::notification::Notification;
 use gpui_kit::component::slider::{Slider, SliderEvent, SliderState, SliderValue};
+use gpui_kit::component::tab::{Tab, TabBar};
 use gpui_kit::component::*;
+// kit Phase 3: the geometry `Size` (row sizes for the kit `VirtualList`),
+// aliased because the `gpui_kit::*` glob also brings the component `Size`
+// enum into scope.
+use gpui_kit::gpui::Size as ItemSize;
+use gpui_kit::gpui::StyleRefinement;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::auth::{AuthAction, AuthView, view_for};
@@ -1552,9 +1559,120 @@ struct StoryPrivacyEdit {
     selected_user_ids: Vec<i64>,
 }
 
+/// kit Phase 3: one flat item for the virtualized chat list — a chat row
+/// (main list or archive) or the collapsible archive section header.
+#[derive(Clone)]
+enum ChatListItem {
+    // Boxed: `ChatSummary` is large; the other variants are tiny
+    // (clippy `large_enum_variant`).
+    Chat {
+        chat: Box<ChatSummary>,
+        archived: bool,
+    },
+    ArchiveHeader {
+        count: usize,
+        any_unread: bool,
+        collapsed: bool,
+    },
+    ArchiveEmpty,
+}
+
+/// kit Phase 3: per-render shared inputs for message-history rows.
+#[derive(Default)]
+struct HistoryShared {
+    files: HashMap<i32, ParsedFile>,
+    downloading: std::collections::HashSet<i32>,
+    failed: std::collections::HashSet<i32>,
+    media_roots: Vec<PathBuf>,
+}
+
+/// kit Phase 3: everything `session_history_row` needs for one message,
+/// snapshotted per render so the `MessageScroller` renderer can build
+/// visible rows without re-deriving per frame.
+#[derive(Clone)]
+struct HistoryRowInputs {
+    message: HistoryMessage,
+    label: String,
+    highlighted: bool,
+    selected_forward: bool,
+    quote_preview: Option<String>,
+    forward_from: Option<String>,
+    reaction_open: bool,
+    seek_bar: Option<SeekBarView>,
+    animation_playing: bool,
+    animation_frame: Option<PathBuf>,
+    video_playing: bool,
+    video_frame: Option<PathBuf>,
+    is_secret: bool,
+}
+
+/// kit Phase 3: one virtualized history row — a single message or a media
+/// album group (albums render as one row, as before).
+#[derive(Clone)]
+enum HistoryRow {
+    // Boxed: the per-row inputs are ~880 bytes; the album variant is
+    // small (clippy `large_enum_variant`).
+    Single(Box<HistoryRowInputs>),
+    Album {
+        album_id: i64,
+        messages: Vec<HistoryMessage>,
+        // Precomputed at row-build time ("You · sent" / sender name) —
+        // keeps the large `ChatSummary` out of the variant.
+        label: String,
+    },
+}
+
+impl HistoryRow {
+    fn first_id(&self) -> Option<MessageId> {
+        match self {
+            HistoryRow::Single(inputs) => Some(inputs.message.id),
+            HistoryRow::Album { messages, .. } => messages.first().map(|m| m.id),
+        }
+    }
+
+    fn last_id(&self) -> Option<MessageId> {
+        match self {
+            HistoryRow::Single(inputs) => Some(inputs.message.id),
+            HistoryRow::Album { messages, .. } => messages.last().map(|m| m.id),
+        }
+    }
+
+    fn contains(&self, id: MessageId) -> bool {
+        match self {
+            HistoryRow::Single(inputs) => inputs.message.id == id,
+            HistoryRow::Album { messages, .. } => messages.iter().any(|m| m.id == id),
+        }
+    }
+}
+
 pub struct QuillApp {
     chat: Entity<SyntheticChat>,
     composer: Entity<TextareaState>,
+    /// kit Phase 3: chat-list virtualization — scroll handle owned by the
+    /// app so scroll position survives re-renders (scroll restoration).
+    chat_list_scroll: VirtualListScrollHandle,
+    /// kit Phase 3: chat-list virtualization — the flat item list the
+    /// `VirtualList` renders (main rows + archive section).
+    chat_list_items: Vec<ChatListItem>,
+    /// kit Phase 3: message-history virtualization — scroller state with
+    /// tail-following, owned by the app so prepend/append keep the anchor.
+    history_scroller: Entity<MessageScrollerState>,
+    /// kit Phase 3: per-row render inputs for the visible history window.
+    /// Rebuilt each render; the `MessageScroller` renderer only builds
+    /// elements for visible indices.
+    history_rows: Vec<HistoryRow>,
+    /// kit Phase 3: per-render shared inputs for history rows (files,
+    /// downloads, media roots) so visible-row rendering doesn't re-clone.
+    history_shared: HistoryShared,
+    /// kit Phase 3: `(open_chat_id, open_topic)` the scroller state was
+    /// last synced for — a change means reset + scroll to bottom.
+    history_key: Option<(i64, Option<i32>)>,
+    /// kit Phase 3: first/last message ids of the last-synced history, to
+    /// tell appends apart from prepends without re-scanning.
+    history_ends: Option<(MessageId, MessageId)>,
+    /// kit Phase 3: last chat-search highlight the scroller jumped to —
+    /// avoids re-scrolling every frame while the highlight is set.
+    last_highlight: Option<MessageId>,
     /// Phase 3.3: `/` command menu state. Open while the composer text
     /// ends with a `/`-led token and the open bot chat has commands;
     /// `command_menu_selected` is the highlighted row (Up/Down/Enter).
@@ -4010,6 +4128,15 @@ impl QuillApp {
         let mut app = Self {
             chat,
             composer,
+            // kit Phase 3: chat list + message history virtualization.
+            chat_list_scroll: VirtualListScrollHandle::new(),
+            chat_list_items: Vec::new(),
+            history_scroller: cx.new(|cx| MessageScrollerState::new(0, cx)),
+            history_rows: Vec::new(),
+            history_shared: HistoryShared::default(),
+            history_key: None,
+            history_ends: None,
+            last_highlight: None,
             group_call_composer,
             command_menu_open: false,
             command_menu_selected: 0,
@@ -16380,52 +16507,35 @@ impl QuillApp {
 
     /// Sidebar "Chats | Contacts | Calls" tabs (Ready mode). Other modes
     /// keep the plain "Chats" title.
+    /// kit Phase 3: the Chats/Contacts/Calls strip as a kit segmented
+    /// `TabBar` — same three tabs and handlers as before.
     fn list_tabs(&self, cx: &mut Context<Self>) -> impl IntoElement {
         if self.pane_mode() != PaneMode::Ready {
             return div().font_semibold().child("Chats").into_any_element();
         }
-        let chats_active = !self.contacts_tab_open && !self.calls_tab_open;
-        let tab = |id: &'static str, label: &'static str, active: bool| {
-            div()
-                .id(id)
-                .cursor_pointer()
-                .px_2()
-                .py_1()
-                .rounded_md()
-                .text_sm()
-                .font_medium()
-                .bg(if active {
-                    cx.theme().accent.opacity(0.15)
-                } else {
-                    cx.theme().sidebar
-                })
-                .child(label)
+        let selected = if self.contacts_tab_open {
+            1
+        } else if self.calls_tab_open {
+            2
+        } else {
+            0
         };
-        div()
-            .flex()
-            .items_center()
-            .gap_2()
-            .child(
-                tab("tab-chats", "Chats", chats_active).on_click(cx.listener(|this, _, _, cx| {
-                    this.open_chats_tab(cx);
-                })),
-            )
-            .child(
-                tab("tab-contacts", "Contacts", self.contacts_tab_open).on_click(cx.listener(
-                    |this, _, _, cx| {
-                        this.open_contacts_tab(cx);
-                    },
-                )),
-            )
+        let weak = cx.weak_entity();
+        TabBar::new("list-tabs")
+            .segmented()
+            .selected_index(selected)
+            .child(Tab::new().label("Chats"))
+            .child(Tab::new().label("Contacts"))
             // Phase C2i: Recent-calls tab (server-side `searchCallMessages`
             // history + call settings).
-            .child(
-                tab("tab-calls", "Calls", self.calls_tab_open).on_click(cx.listener(
-                    |this, _, _, cx| {
-                        this.open_calls_tab(cx);
-                    },
-                )),
-            )
+            .child(Tab::new().label("Calls"))
+            .on_click(move |ix, _window, cx| {
+                let _ = weak.update(cx, |this, cx| match ix {
+                    0 => this.open_chats_tab(cx),
+                    1 => this.open_contacts_tab(cx),
+                    _ => this.open_calls_tab(cx),
+                });
+            })
             .into_any_element()
     }
 
@@ -16568,11 +16678,16 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// Phase 7.1: folder tabs (`Main` + `updateChatFolders` folders) above
-    /// the search field. Selecting a folder filters the chat list to
-    /// `chatListFolder` chats; selecting it live also fires a single-shot
-    /// `loadChats(chatListFolder)` so TDLib delivers the folder's chats.
-    /// Only rendered when the account actually has folders.
+    /// kit Phase 3: folder tabs as a kit `TabBar` — `Main` plus the
+    /// `updateChatFolders` folders, with the ⋯ manage entry as the bar's
+    /// suffix and the Unread/Archived category filters as trailing tabs.
+    /// Selecting a folder filters the chat list to `chatListFolder` chats
+    /// and fires a single-shot `loadChats(chatListFolder)` when live
+    /// (`open_folder_tab`). Slice CL2: the filters filter the loaded model,
+    /// never the server query; `Archived` is global, so it leaves any
+    /// folder tab. Only rendered when the account actually has folders —
+    /// the manage entry stays always present so folders can be created
+    /// even when the account has none yet.
     fn folder_tabs(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let folders: Vec<(i32, String)> = self
             .session()
@@ -16583,92 +16698,61 @@ impl QuillApp {
                     .collect()
             })
             .unwrap_or_default();
-        let selected = self.folder_tab;
-        let mut row = div()
-            .id("folder-tabs")
-            .flex()
-            .flex_row()
-            .flex_wrap()
-            .items_center()
-            .gap_1();
+        let weak = cx.weak_entity();
+        // Tab slots: Main, the folders, then the two category filters.
+        let mut bar = TabBar::new("folder-tabs").child(Tab::new().label("Main"));
+        for (_, name) in &folders {
+            bar = bar.child(Tab::new().label(name.clone()));
+        }
+        let unread_ix = folders.len() + 1;
+        let archived_ix = folders.len() + 2;
+        bar = bar
+            .child(Tab::new().label("Unread"))
+            .child(Tab::new().label("Archived"));
+        let selected = if self.chat_filter == ChatListFilter::Unread {
+            unread_ix
+        } else if self.chat_filter == ChatListFilter::Archived {
+            archived_ix
+        } else {
+            match self.folder_tab {
+                None => 0,
+                Some(id) => folders
+                    .iter()
+                    .position(|(folder_id, _)| *folder_id == id)
+                    .map(|pos| pos + 1)
+                    .unwrap_or(0),
+            }
+        };
         // Parity slice: the manage entry is always present so folders can
         // be created even when the account has none yet.
-        let tabs: Vec<(Option<i32>, String)> = std::iter::once((None, "Main".to_string()))
-            .chain(folders.into_iter().map(|(id, name)| (Some(id), name)))
+        let manage_weak = weak.clone();
+        let folder_ids: Vec<Option<i32>> = std::iter::once(None)
+            .chain(folders.iter().map(|(id, _)| Some(*id)))
             .collect();
-        for (folder, name) in tabs {
-            let active = selected == folder;
-            let id = match folder {
-                Some(folder_id) => format!("tab-folder-{folder_id}"),
-                None => "tab-folder-main".to_string(),
-            };
-            row = row.child(
-                div()
-                    .id(id)
-                    .cursor_pointer()
-                    .px_2()
-                    .py_1()
-                    .rounded_md()
-                    .text_xs()
-                    .font_medium()
-                    .bg(if active {
-                        cx.theme().accent.opacity(0.15)
-                    } else {
-                        cx.theme().sidebar
-                    })
-                    .child(name)
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.open_folder_tab(folder, cx);
-                    })),
-            );
-        }
-        row = row.child(
-            Button::new("folder-manage")
-                .label("⋯")
-                .ghost()
-                .on_click(cx.listener(|this, _, _, cx| {
-                    this.open_folder_manage(cx);
-                })),
-        );
-        // Slice CL2: category filters (TGX `ChatFilter` unread category
-        // and the archive pager category). They filter the loaded model
-        // — never the server query. `Archived` is global, so it leaves
-        // any folder tab.
-        for (filter, name) in [
-            (ChatListFilter::Unread, "Unread"),
-            (ChatListFilter::Archived, "Archived"),
-        ] {
-            let active = self.chat_filter == filter;
-            let id = match filter {
-                ChatListFilter::Unread => "tab-filter-unread",
-                ChatListFilter::Archived => "tab-filter-archived",
-                ChatListFilter::All => "tab-filter-all",
-            };
-            row = row.child(
-                div()
-                    .id(id)
-                    .cursor_pointer()
-                    .px_2()
-                    .py_1()
-                    .rounded_md()
-                    .text_xs()
-                    .font_medium()
-                    .bg(if active {
-                        cx.theme().accent.opacity(0.15)
-                    } else {
-                        cx.theme().sidebar
-                    })
-                    .child(name)
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.chat_filter = filter;
-                        if filter == ChatListFilter::Archived {
-                            this.folder_tab = None;
-                        }
+        bar.selected_index(selected)
+            .suffix(
+                Button::new("folder-manage")
+                    .label("⋯")
+                    .ghost()
+                    .on_click(move |_, _, cx| {
+                        let _ = manage_weak.update(cx, |this, cx| this.open_folder_manage(cx));
+                    }),
+            )
+            .on_click(move |ix, _window, cx| {
+                let _ = weak.update(cx, |this, cx| {
+                    if *ix == unread_ix {
+                        this.chat_filter = ChatListFilter::Unread;
                         cx.notify();
-                    })),
-            );
-        }
-        row.into_any_element()
+                    } else if *ix == archived_ix {
+                        this.chat_filter = ChatListFilter::Archived;
+                        this.folder_tab = None;
+                        cx.notify();
+                    } else if let Some(folder) = folder_ids.get(*ix).copied() {
+                        this.open_folder_tab(folder, cx);
+                    }
+                });
+            })
+            .into_any_element()
     }
 
     fn open_folder_tab(&mut self, folder: Option<i32>, cx: &mut Context<Self>) {
@@ -18762,37 +18846,43 @@ impl QuillApp {
             let fetch = this.member_dialog_fetch(cx);
 
             let mut body = div().flex().flex_col().gap_2();
-            // Tab bar.
-            let mut tabs = div().id("g1-member-tabs").flex().gap_1();
-            for member_tab in [
+            // kit Phase 3: the member tab strip as a kit segmented
+            // `TabBar` — the visible tabs depend on group type and the
+            // viewer's restrict permission, as before.
+            let visible_tabs: Vec<MemberTab> = [
                 MemberTab::All,
                 MemberTab::Administrators,
                 MemberTab::Restricted,
                 MemberTab::Banned,
-            ] {
-                if is_basic_group && member_tab != MemberTab::All {
-                    continue;
+            ]
+            .into_iter()
+            .filter(|member_tab| {
+                if is_basic_group && *member_tab != MemberTab::All {
+                    return false;
                 }
                 if !can_restrict && matches!(member_tab, MemberTab::Restricted | MemberTab::Banned)
                 {
-                    continue;
+                    return false;
                 }
-                let label = if member_tab == tab {
-                    format!("✓ {}", member_tab.label())
-                } else {
-                    member_tab.label().to_string()
-                };
-                tabs = tabs.child(
-                    Button::new(format!("g1-member-tab-{}", member_tab.label()))
-                        .label(label)
-                        .ghost()
-                        .on_click(cx.listener(move |this, _, window, cx| {
+                true
+            })
+            .collect();
+            let selected_tab = visible_tabs.iter().position(|t| *t == tab).unwrap_or(0);
+            let member_weak = cx.weak_entity();
+            let mut member_bar = TabBar::new("g1-member-tabs").segmented();
+            for member_tab in &visible_tabs {
+                member_bar = member_bar.child(Tab::new().label(member_tab.label()));
+            }
+            body = body.child(member_bar.selected_index(selected_tab).on_click(
+                move |ix, window, cx| {
+                    if let Some(member_tab) = visible_tabs.get(*ix).copied() {
+                        let _ = member_weak.update(cx, |this, cx| {
                             this.member_dialog_tab(member_tab, cx);
                             this.close_kit_dialog_if_done(DialogKind::Member, window, cx);
-                        })),
-                );
-            }
-            body = body.child(tabs);
+                        });
+                    }
+                },
+            ));
             if let Some(error) = this
                 .session()
                 .and_then(|session| session.member_action_error.get(&chat_id.0))
@@ -21548,12 +21638,11 @@ impl QuillApp {
                     ),
             )
             .child({
-                let mut bar = div()
-                    .id(("shared-media-tabs", chat_id.0 as u64))
-                    .flex()
-                    .overflow_x_scroll()
-                    .border_b_1()
-                    .border_color(cx.theme().border);
+                // kit Phase 3: the media/voice/links/files/music tab strip
+                // as a kit underline `TabBar` — the active tab keeps its
+                // "· count" suffix while the tab is ready.
+                let weak = cx.weak_entity();
+                let mut bar = TabBar::new(("shared-media-tabs", chat_id.0 as u64)).underline();
                 for tab_option in SharedMediaTab::ALL {
                     let is_active = tab_option == active_tab;
                     let label =
@@ -21562,32 +21651,16 @@ impl QuillApp {
                         } else {
                             tab_option.label().to_string()
                         };
-                    bar = bar.child(
-                        div()
-                            .id(("shared-media-tab", tab_option.index() as u64))
-                            .cursor_pointer()
-                            .px_3()
-                            .py_2()
-                            .text_sm()
-                            .border_b_2()
-                            .border_color(if is_active {
-                                cx.theme().accent
-                            } else {
-                                cx.theme().border
-                            })
-                            .text_color(if is_active {
-                                cx.theme().foreground
-                            } else {
-                                cx.theme().muted_foreground
-                            })
-                            .when(is_active, |this| this.font_semibold())
-                            .child(label)
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.select_shared_media_tab_ui(tab_option, cx);
-                            })),
-                    );
+                    bar = bar.child(Tab::new().label(label));
                 }
-                bar
+                bar.selected_index(active_tab.index())
+                    .on_click(move |ix, _window, cx| {
+                        if let Some(tab) = SharedMediaTab::ALL.get(*ix).copied() {
+                            let _ = weak.update(cx, |this, cx| {
+                                this.select_shared_media_tab_ui(tab, cx);
+                            });
+                        }
+                    })
             });
 
         let content: AnyElement = match status {
@@ -37027,7 +37100,7 @@ impl Render for QuillApp {
 }
 
 impl QuillApp {
-    fn conversation(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    fn conversation(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
         let mode = self.pane_mode();
         let history = match mode {
             PaneMode::Synthetic => div()
@@ -37824,7 +37897,7 @@ impl QuillApp {
             .child(list)
     }
 
-    fn session_history(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    fn session_history(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
         let session = self.session();
         let open = session.and_then(|s| s.open_chat);
         let title = open
@@ -37842,7 +37915,10 @@ impl QuillApp {
             .into_iter()
             .flatten()
             .collect();
-        let chat = open.and_then(|id| session.and_then(|s| s.chats.get(&id.0)));
+        // kit Phase 3: owned — `history_message_list` takes `&mut self`,
+        // so the chat summary can't borrow the session here.
+        let chat: Option<ChatSummary> =
+            open.and_then(|id| session.and_then(|s| s.chats.get(&id.0).cloned()));
         let files: HashMap<i32, ParsedFile> = session.map(|s| s.files.clone()).unwrap_or_default();
         let downloading: std::collections::HashSet<i32> =
             session.map(|s| s.downloading.clone()).unwrap_or_default();
@@ -37869,10 +37945,10 @@ impl QuillApp {
                 ))
             })
         });
-        let peer_typing = chat.is_some_and(|c| c.is_peer_typing());
+        let peer_typing = chat.as_ref().is_some_and(|c| c.is_peer_typing());
         // Phase 5.1: forum supergroups render a topic list instead of the
         // general history; a selected topic renders its own history.
-        let is_forum = chat.is_some_and(|c| c.is_forum_chat());
+        let is_forum = chat.as_ref().is_some_and(|c| c.is_forum_chat());
         let open_topic = session.and_then(|s| s.open_topic);
         let topic_info = open.and_then(|id| session.and_then(|s| s.open_topic_info(id)));
         let topic_messages: Vec<HistoryMessage> = match (open, open_topic) {
@@ -37964,13 +38040,13 @@ impl QuillApp {
                     self.history_message_list(
                         "topic-history",
                         &topic_messages,
-                        chat,
+                        chat.as_ref(),
                         &sender_name,
                         highlight_id,
-                        &files,
-                        &downloading,
-                        &failed,
-                        &media_roots,
+                        files,
+                        downloading,
+                        failed,
+                        media_roots,
                         cx,
                     )
                 }
@@ -37979,7 +38055,9 @@ impl QuillApp {
                 // encryption explainer (MessagesHolder TYPE_SECRET_CHAT_INFO:
                 // "Secret Chats" + EncryptedDescription1-4) instead of the
                 // generic placeholder.
-                let is_secret = chat.is_some_and(|c| matches!(c.kind, ChatKind::Secret { .. }));
+                let is_secret = chat
+                    .as_ref()
+                    .is_some_and(|c| matches!(c.kind, ChatKind::Secret { .. }));
                 if is_secret {
                     self.secret_empty_explainer(cx).into_any_element()
                 } else {
@@ -37994,142 +38072,322 @@ impl QuillApp {
                 self.history_message_list(
                     "session-history",
                     &messages,
-                    chat,
+                    chat.as_ref(),
                     &sender_name,
                     highlight_id,
-                    &files,
-                    &downloading,
-                    &failed,
-                    &media_roots,
+                    files,
+                    downloading,
+                    failed,
+                    media_roots,
                     cx,
                 )
             })
     }
 
-    /// Phase 5.1: the shared history row list used by both chat history and
-    /// per-topic history (topic view = same component with a `topic_id`
-    /// filter). `messages` are rendered oldest-first.
+    /// kit Phase 3: the shared history row list used by both chat history
+    /// and per-topic history, virtualized through the kit `MessageScroller`
+    /// — only visible rows build elements. `messages` are oldest-first.
+    /// Per-row inputs are snapshotted into `history_rows` each render;
+    /// `render_history_row` rebuilds the visible window from them, so all
+    /// existing row behavior (albums, replies, reactions, media, swipe,
+    /// context menu, failed sends) is unchanged.
     fn history_message_list(
-        &self,
+        &mut self,
         id: &'static str,
         messages: &[HistoryMessage],
         chat: Option<&ChatSummary>,
         sender_name: &str,
         highlight_id: Option<MessageId>,
-        files: &HashMap<i32, ParsedFile>,
-        downloading: &std::collections::HashSet<i32>,
-        failed: &std::collections::HashSet<i32>,
-        media_roots: &[PathBuf],
+        files: HashMap<i32, ParsedFile>,
+        downloading: std::collections::HashSet<i32>,
+        failed: std::collections::HashSet<i32>,
+        media_roots: Vec<PathBuf>,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let session = self.session();
-        let mut list = div()
-            .id(id)
-            .flex()
-            .flex_col()
-            .flex_1()
-            .min_h_0()
-            .px_3()
-            .pt_2()
-            .gap_1();
+        // Phase B4: secret chats word the timer-change service row as
+        // "Self-destruct".
+        let is_secret = chat.is_some_and(|c| matches!(c.kind, ChatKind::Secret { .. }));
+        // kit Phase 3: the scroller resets when the open chat/topic
+        // changes. Read the key up front — the `session` borrow must end
+        // before the state below is assigned.
+        let history_key = (
+            session
+                .and_then(|s| s.open_chat)
+                .map(|chat| chat.0)
+                .unwrap_or(-1),
+            session.and_then(|s| s.open_topic),
+        );
         let groups = quill::album::group_media_albums(
             messages,
             |message| message.media_album_id,
             |message| message.is_outgoing,
             |message| quill::album::is_album_media(&message.content),
         );
+        let mut rows: Vec<HistoryRow> = Vec::with_capacity(groups.len());
         for group in groups {
-            let quill::album::HistoryGroup::Single(message) = group else {
-                if let quill::album::HistoryGroup::Album { album_id, messages } = group {
-                    list = list.child(album_history_row(
+            match group {
+                quill::album::HistoryGroup::Album { album_id, messages } => {
+                    let album_messages: Vec<HistoryMessage> =
+                        messages.iter().map(|message| (*message).clone()).collect();
+                    // Same label rule as single rows: outgoing albums show
+                    // the outbox receipt, incoming ones the sender name.
+                    let label = match album_messages.first() {
+                        Some(first) if first.is_outgoing => {
+                            let receipt = chat
+                                .map(|summary| summary.outbox_receipt(first))
+                                .unwrap_or(OutboxReceipt::Sent);
+                            outgoing_status_label(first.pending, receipt).to_string()
+                        }
+                        _ => sender_name.to_string(),
+                    };
+                    rows.push(HistoryRow::Album {
                         album_id,
-                        &messages,
-                        &files,
-                        &downloading,
-                        &media_roots,
-                        chat,
-                        &sender_name,
-                        cx,
-                    ));
+                        messages: album_messages,
+                        label,
+                    })
                 }
-                continue;
-            };
-            let label = if message.is_outgoing {
-                let receipt = chat
-                    .map(|summary| summary.outbox_receipt(&message))
-                    .unwrap_or(OutboxReceipt::Sent);
-                outgoing_status_label(message.pending, receipt).to_string()
-            } else {
-                sender_name.to_string()
-            };
-            let highlighted = highlight_id == Some(message.id);
-            let selected_forward = self
-                .pending_forward
-                .as_ref()
-                .is_some_and(|draft| draft.contains(message.id));
-            let quote_preview = session.and_then(|s| s.reply_quote_preview(&message));
-            let forward_from = message
-                .forward_info
-                .as_ref()
-                .and_then(|info| session.map(|s| s.forward_from_label(info)));
-            let reaction_open = self
-                .pending_react
-                .is_some_and(|(chat, id)| chat == message.chat_id && id == message.id);
-            // Phase 4.6: audio/voice rows get a seek-bar view model.
-            let seek_bar = match &message.content {
-                MessageContent::VoiceNote(note) => {
-                    Some(self.seek_bar_view(message.id, f64::from(note.duration)))
+                quill::album::HistoryGroup::Single(message) => {
+                    let label = if message.is_outgoing {
+                        let receipt = chat
+                            .map(|summary| summary.outbox_receipt(message))
+                            .unwrap_or(OutboxReceipt::Sent);
+                        outgoing_status_label(message.pending, receipt).to_string()
+                    } else {
+                        sender_name.to_string()
+                    };
+                    // Phase 4.6: audio/voice rows get a seek-bar view model.
+                    let seek_bar = match &message.content {
+                        MessageContent::VoiceNote(note) => {
+                            Some(self.seek_bar_view(message.id, f64::from(note.duration)))
+                        }
+                        MessageContent::Audio(audio) => {
+                            Some(self.seek_bar_view(message.id, f64::from(audio.duration)))
+                        }
+                        _ => None,
+                    };
+                    let animation_playing = self.playing_animation == Some(message.id);
+                    let animation_frame = if animation_playing {
+                        self.animation_frames
+                            .get(self.animation_frame)
+                            .cloned()
+                            .or_else(|| self.animation_frames.first().cloned())
+                    } else {
+                        None
+                    };
+                    let video_playing = self.playing_video == Some(message.id);
+                    let video_frame = if video_playing {
+                        self.video_frames
+                            .get(self.video_frame)
+                            .cloned()
+                            .or_else(|| self.video_frames.first().cloned())
+                    } else {
+                        None
+                    };
+                    rows.push(HistoryRow::Single(Box::new(HistoryRowInputs {
+                        message: message.clone(),
+                        label,
+                        highlighted: highlight_id == Some(message.id),
+                        selected_forward: self
+                            .pending_forward
+                            .as_ref()
+                            .is_some_and(|draft| draft.contains(message.id)),
+                        quote_preview: session.and_then(|s| s.reply_quote_preview(message)),
+                        forward_from: message
+                            .forward_info
+                            .as_ref()
+                            .and_then(|info| session.map(|s| s.forward_from_label(info))),
+                        reaction_open: self
+                            .pending_react
+                            .is_some_and(|(chat, id)| chat == message.chat_id && id == message.id),
+                        seek_bar,
+                        animation_playing,
+                        animation_frame,
+                        video_playing,
+                        video_frame,
+                        is_secret,
+                    })));
                 }
-                MessageContent::Audio(audio) => {
-                    Some(self.seek_bar_view(message.id, f64::from(audio.duration)))
+            }
+        }
+        // kit Phase 3: stash the per-render shared inputs, then sync the
+        // scroller state with the new row list.
+        self.history_shared = HistoryShared {
+            files,
+            downloading,
+            failed,
+            media_roots,
+        };
+        let count = rows.len();
+        let (first, last) = (
+            rows.first().and_then(HistoryRow::first_id),
+            rows.last().and_then(HistoryRow::last_id),
+        );
+        if self.history_key != Some(history_key) {
+            // New chat/topic (or first render): reset and show the tail.
+            self.history_key = Some(history_key);
+            // Message ids are chat-local: a stale highlight id in the new
+            // chat must not suppress its search-jump scroll.
+            self.last_highlight = None;
+            self.history_scroller.update(cx, |state, cx| {
+                state.reset(count, cx);
+                state.scroll_to_end(cx);
+            });
+        } else if count != self.history_scroller.read(cx).item_count() {
+            let prev_count = self.history_scroller.read(cx).item_count();
+            match (first, last, self.history_ends) {
+                (Some(_), _, Some((prev_first, _)))
+                    if first == Some(prev_first) && count > prev_count =>
+                {
+                    // New messages appended at the tail — tail-follow keeps
+                    // the view pinned when the user is at the bottom.
+                    let added = count.saturating_sub(prev_count);
+                    self.history_scroller.update(cx, |state, cx| {
+                        state.append(added, cx);
+                    });
                 }
-                _ => None,
-            };
-            let animation_playing = self.playing_animation == Some(message.id);
-            let animation_frame = if animation_playing {
-                self.animation_frames
-                    .get(self.animation_frame)
-                    .cloned()
-                    .or_else(|| self.animation_frames.first().cloned())
-            } else {
-                None
-            };
-            let video_playing = self.playing_video == Some(message.id);
-            let video_frame = if video_playing {
-                self.video_frames
-                    .get(self.video_frame)
-                    .cloned()
-                    .or_else(|| self.video_frames.first().cloned())
-            } else {
-                None
-            };
-            let row = session_history_row(
-                &message,
-                &files,
-                &downloading,
-                failed,
-                &media_roots,
+                (_, Some(_), Some((_, prev_last)))
+                    if last == Some(prev_last) && count > prev_count =>
+                {
+                    // Older history prepended — the visible anchor stays.
+                    let added = count.saturating_sub(prev_count);
+                    self.history_scroller.update(cx, |state, cx| {
+                        state.prepend(added, cx);
+                    });
+                }
+                _ => {
+                    // Shrink or reorder (delete/edit): splice preserves the
+                    // scroll anchor (reset() would yank to the top and arm
+                    // tail-follow); stay at the tail only if the user was
+                    // following it.
+                    let follow = self.history_scroller.read(cx).is_following_tail();
+                    self.history_scroller.update(cx, |state, cx| {
+                        state.splice(0..prev_count, count, cx);
+                        if follow {
+                            state.scroll_to_end(cx);
+                        }
+                    });
+                }
+            }
+        } else if let (Some(first), Some(last)) = (first, last)
+            && self.history_ends != Some((first, last))
+        {
+            // Same row count but row identity changed (e.g. a second album
+            // photo turned a Single row into a taller Album row): cached
+            // measured heights are stale, so remeasure. This converges —
+            // history_ends is updated below — and must not run
+            // unconditionally or remeasure's notify() would loop.
+            self.history_scroller.update(cx, |state, cx| {
+                state.remeasure(cx);
+            });
+        }
+        self.history_ends = match (first, last) {
+            (Some(first), Some(last)) => Some((first, last)),
+            _ => None,
+        };
+        self.history_rows = rows;
+        // Chat-search jump: scroll the highlight into view once per new
+        // `highlight_id` (current code only outlined the message).
+        if highlight_id != self.last_highlight {
+            self.last_highlight = highlight_id;
+            if let Some(target) = highlight_id
+                && let Some(ix) = self
+                    .history_rows
+                    .iter()
+                    .position(|row| row.contains(target))
+            {
+                self.history_scroller.update(cx, |state, cx| {
+                    state.scroll_to_item(ix, cx);
+                });
+            }
+        }
+        // kit Phase 3: only visible rows render. Row 0 becoming visible
+        // pages older history (the driver dedupes in-flight requests and
+        // reports exhaustion; the loader notifies only when a request was
+        // actually sent, so this cannot notify-loop while pinned at top).
+        let weak = cx.weak_entity();
+        div()
+            .flex()
+            .flex_col()
+            .flex_1()
+            .min_h_0()
+            .child(
+                MessageScroller::new(id, self.history_scroller.clone(), move |ix, _window, cx| {
+                    if ix == 0 {
+                        let weak = weak.clone();
+                        cx.defer(move |cx| {
+                            let _ = weak.update(cx, |this, cx| this.maybe_auto_load_older(cx));
+                        });
+                    }
+                    weak.update(cx, |this, cx| this.render_history_row(ix, cx))
+                        .unwrap_or_else(|_| div().into_any_element())
+                })
+                // The kit's default row wrapper pads every non-last row with
+                // pb_8 (32px); override to pb_1 to restore the old gap_1
+                // density. The kit also supplies row px and list py, so the
+                // outer div needs neither.
+                .with_row_style(StyleRefinement::default().pb_1())
+                .size_full()
+                .min_h_0(),
+            )
+            .into_any_element()
+    }
+
+    /// kit Phase 3: resolve one virtualized history row to its element —
+    /// the per-render snapshot in `history_rows`/`history_shared`, with the
+    /// row's highlight, selected-forward, failed-send and mouse behavior
+    /// unchanged from the pre-virtualization list.
+    fn render_history_row(&self, ix: usize, cx: &mut Context<Self>) -> AnyElement {
+        let Some(row) = self.history_rows.get(ix) else {
+            return div().into_any_element();
+        };
+        let shared = &self.history_shared;
+        match row {
+            HistoryRow::Album {
+                album_id,
+                messages,
                 label,
-                quote_preview,
-                forward_from,
-                selected_forward,
-                reaction_open,
-                seek_bar,
-                animation_playing,
-                animation_frame,
-                video_playing,
-                video_frame,
-                &self.spoiler_revealed,
-                // Phase B4: secret chats word the timer-change service
-                // row as "Self-destruct".
-                chat.is_some_and(|c| matches!(c.kind, ChatKind::Secret { .. })),
-                self.session(),
-                cx,
-            );
-            // M1: `cx.listener` closures must be `'static`, so the row's
-            // ids are copied out of the borrowed message first.
-            let (row_chat, row_msg) = (message.chat_id, message.id);
-            list = list.child(
+            } => {
+                let refs: Vec<&HistoryMessage> = messages.iter().collect();
+                album_history_row(
+                    *album_id,
+                    &refs,
+                    &shared.files,
+                    &shared.downloading,
+                    &shared.media_roots,
+                    label.clone(),
+                    cx,
+                )
+            }
+            HistoryRow::Single(inputs) => {
+                let message = &inputs.message;
+                let row = session_history_row(
+                    message,
+                    &shared.files,
+                    &shared.downloading,
+                    &shared.failed,
+                    &shared.media_roots,
+                    inputs.label.clone(),
+                    inputs.quote_preview.clone(),
+                    inputs.forward_from.clone(),
+                    inputs.selected_forward,
+                    inputs.reaction_open,
+                    inputs.seek_bar.clone(),
+                    inputs.animation_playing,
+                    inputs.animation_frame.clone(),
+                    inputs.video_playing,
+                    inputs.video_frame.clone(),
+                    &self.spoiler_revealed,
+                    inputs.is_secret,
+                    self.session(),
+                    cx,
+                );
+                // M1: `cx.listener` closures must be `'static`, so the
+                // row's ids are copied out of the message first.
+                let (row_chat, row_msg) = (message.chat_id, message.id);
+                let highlighted = inputs.highlighted;
+                let selected_forward = inputs.selected_forward;
+                let failed = message.failed;
                 div()
                     .when(highlighted || selected_forward, |this| {
                         this.rounded_lg()
@@ -38139,7 +38397,7 @@ impl QuillApp {
                     })
                     // M1: failed sends get a red outline so the retry
                     // affordance is visible (`updateMessageSendFailed`).
-                    .when(message.failed, |this| {
+                    .when(failed, |this| {
                         this.rounded_lg().border_1().border_color(DANGER).px_1()
                     })
                     // M1: right-click opens the message context menu at
@@ -38180,17 +38438,38 @@ impl QuillApp {
                     )
                     .child(row)
                     // M1: explicit failed-send notice with a retry hint.
-                    .when(message.failed, |this| {
+                    .when(failed, |this| {
                         this.child(
                             div()
                                 .text_xs()
                                 .text_color(DANGER)
                                 .child("⚠ Failed to send — right-click → Retry send"),
                         )
-                    }),
-            );
+                    })
+                    .into_any_element()
+            }
         }
-        list.into_any_element()
+    }
+
+    /// kit Phase 3: automatic older-history paging — called (deferred) when
+    /// the top row of the virtualized history becomes visible. Notifies the
+    /// frame only when a request was actually sent (the driver dedupes
+    /// in-flight `getChatHistory` requests and stops at `loaded_complete`).
+    fn maybe_auto_load_older(&mut self, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            // Phase 5.1: a topic view pages its own history.
+            let sent = if live.driver.session.open_topic.is_some() {
+                live.driver.fetch_topic_history()
+            } else {
+                live.driver.fetch_history()
+            }
+            .ok()
+            .flatten()
+            .is_some();
+            if sent {
+                cx.notify();
+            }
+        }
     }
 
     /// Phase 5.1: strip shown above a topic's history — back to the topic
@@ -38833,7 +39112,6 @@ impl QuillApp {
                     if self.search_is_open() {
                         list = list.child(self.search_results(cx));
                     } else {
-                        let open = self.session().and_then(|s| s.open_chat);
                         let folder = self.folder_tab;
                         let filter = self.chat_filter;
                         // Parity slice: folder names + tags flag for chat-row
@@ -38978,42 +39256,19 @@ impl QuillApp {
                                     }),
                             );
                         }
-                        // Slice CL2: pin drag runs only on the unfiltered
-                        // list with at least two pinned chats (TGX
-                        // `ChatsAdapter`).
-                        let pin_draggable = filter == ChatListFilter::All
-                            && folder.is_none()
-                            && self
-                                .session()
-                                .is_some_and(|s| s.pinned_chat_ids(false).len() >= 2);
-                        // Parity slice: chat photos resolve here (once per
-                        // render) and are sandboxed before display.
-                        let media_roots = self.media_display_roots();
-                        let photo_for = |chat: &ChatSummary| {
-                            self.session()
-                                .and_then(|s| s.chat_photo_path(chat.id))
-                                .and_then(|path| sandboxed_display_path(path, &media_roots))
-                        };
-                        // Slice CL3: multi-select mode — rows toggle the
-                        // check instead of opening the chat.
-                        // (`selecting` is defined above, next to the
-                        // select bar.)
+                        // kit Phase 3: the chat rows (main list + archive
+                        // section) render through a kit `VirtualList` — only
+                        // the visible window builds elements. `open`,
+                        // photos, pin-drag and multi-select state resolve
+                        // per visible row in `chat_list_item_element`.
+                        // Rebuilt every render; the list below only reads it.
+                        self.chat_list_items.clear();
                         if show_main_list {
                             for chat in chats {
-                                let selected = open == Some(chat.id);
-                                let photo = photo_for(&chat);
-                                list = list.child(session_chat_row(
-                                    &chat,
-                                    selected,
-                                    &folder_names,
-                                    show_folder_tags,
-                                    photo.as_deref(),
-                                    pin_draggable && chat.is_pinned,
-                                    false,
-                                    selecting,
-                                    selecting && self.selected_chats.contains(&chat.id.0),
-                                    cx,
-                                ));
+                                self.chat_list_items.push(ChatListItem::Chat {
+                                    chat: Box::new(chat),
+                                    archived: false,
+                                });
                             }
                         }
                         // Parity slice: folder chats page eagerly — the driver
@@ -39022,7 +39277,9 @@ impl QuillApp {
                         // same pattern as the main list. No "Load more"
                         // button: paging is automatic, not user-triggered.
                         // Archive stays as-is under the main list; a folder
-                        // tab shows only that folder's chats.
+                        // tab shows only that folder's chats. kit Phase 3:
+                        // the archive header + rows are items in the same
+                        // virtual list so the whole chat list scrolls as one.
                         if folder.is_none() {
                             let mut archived: Vec<ChatSummary> = self
                                 .session()
@@ -39039,95 +39296,65 @@ impl QuillApp {
                                 let collapsed = filter != ChatListFilter::Archived
                                     && self.session().is_some_and(|s| s.archive_collapsed);
                                 let any_unread = archived.iter().any(|c| c.is_unread());
-                                let archive_draggable = (filter == ChatListFilter::All
-                                    || filter == ChatListFilter::Archived)
-                                    && self
-                                        .session()
-                                        .is_some_and(|s| s.pinned_chat_ids(true).len() >= 2);
-                                list = list.child(
-                                    div()
-                                        .id("archive-section")
-                                        .mt_2()
-                                        .flex()
-                                        .items_center()
-                                        .justify_between()
-                                        .child(
-                                            div()
-                                                .id("archive-section-toggle")
-                                                .cursor_pointer()
-                                                .text_xs()
-                                                .font_semibold()
-                                                .text_color(cx.theme().muted_foreground)
-                                                .child(format!(
-                                                    "{} Archived ({})",
-                                                    if collapsed { "▸" } else { "▾" },
-                                                    archived.len()
-                                                ))
-                                                .on_click(cx.listener(|this, _, _, cx| {
-                                                    this.toggle_archive_collapsed(cx);
-                                                })),
-                                        )
-                                        .child(
-                                            div()
-                                                .flex()
-                                                .items_center()
-                                                .gap_1()
-                                                .when(any_unread && !collapsed, |this| {
-                                                    this.child(
-                                                        Button::new("archive-mark-read")
-                                                            .label("✓")
-                                                            .ghost()
-                                                            .on_click(cx.listener(
-                                                                |this, _, _, cx| {
-                                                                    this.mark_all_chats_as_read(
-                                                                        true, cx,
-                                                                    );
-                                                                },
-                                                            )),
-                                                    )
-                                                })
-                                                .child(
-                                                    Button::new("archive-settings")
-                                                        .label("⚙")
-                                                        .ghost()
-                                                        .on_click(cx.listener(|this, _, _, cx| {
-                                                            this.open_archive_settings(cx);
-                                                        })),
-                                                ),
-                                        ),
-                                );
+                                let header = ChatListItem::ArchiveHeader {
+                                    count: archived.len(),
+                                    any_unread,
+                                    collapsed,
+                                };
+                                self.chat_list_items.push(header);
                                 if !collapsed {
                                     // Collapsed keeps the rows hidden; the
                                     // header above still shows the count.
                                     if archived.is_empty() {
-                                        list = list.child(
-                                            div()
-                                                .text_xs()
-                                                .text_color(cx.theme().muted_foreground)
-                                                .child("No archived chats."),
-                                        );
+                                        self.chat_list_items.push(ChatListItem::ArchiveEmpty);
                                     } else {
                                         for chat in archived {
-                                            let selected = open == Some(chat.id);
-                                            let photo = photo_for(&chat);
-                                            list = list.child(session_chat_row(
-                                                &chat,
-                                                selected,
-                                                &folder_names,
-                                                show_folder_tags,
-                                                photo.as_deref(),
-                                                archive_draggable && chat.archive_is_pinned,
-                                                true,
-                                                selecting,
-                                                selecting
-                                                    && self.selected_chats.contains(&chat.id.0),
-                                                cx,
-                                            ));
+                                            self.chat_list_items.push(ChatListItem::Chat {
+                                                chat: Box::new(chat),
+                                                archived: true,
+                                            });
                                         }
                                     }
                                 }
                             }
                         }
+                        // kit Phase 3: hand the flat item list to the kit
+                        // `VirtualList`. Item heights are fixed by
+                        // construction (see `chat_row_height`), so declared
+                        // sizes always match the rendered rows.
+                        let sizes: Rc<Vec<ItemSize<Pixels>>> = Rc::new(
+                            self.chat_list_items
+                                .iter()
+                                .map(|item| {
+                                    let height = match item {
+                                        ChatListItem::Chat { chat, .. } => chat_row_height(
+                                            &chat_row_tags(chat, &folder_names, show_folder_tags),
+                                        ),
+                                        ChatListItem::ArchiveHeader { .. } => px(32.),
+                                        ChatListItem::ArchiveEmpty => px(24.),
+                                    };
+                                    ItemSize::new(px(0.), height)
+                                })
+                                .collect(),
+                        );
+                        list = list.child(
+                            v_virtual_list(
+                                cx.entity(),
+                                "chat-list",
+                                sizes,
+                                |this: &mut QuillApp, range, _window, cx| {
+                                    range
+                                        .map(|ix| this.chat_list_item_element(ix, cx))
+                                        .collect::<Vec<_>>()
+                                },
+                            )
+                            // The app-owned handle keeps scroll position
+                            // across re-renders (scroll restoration).
+                            .track_scroll(&self.chat_list_scroll)
+                            .flex_1()
+                            .min_h_0()
+                            .w_full(),
+                        );
                     }
                 }
             }
@@ -42864,6 +43091,169 @@ fn description_snippet(description: &str, max_chars: usize) -> String {
     format!("{truncated}…")
 }
 
+/// kit Phase 3: folder-tag chip names for a chat row — shared by the row
+/// renderer and the virtual-list height computation so they agree.
+fn chat_row_tags(chat: &ChatSummary, folders: &[(i32, String)], show_tags: bool) -> Vec<String> {
+    if show_tags {
+        folders
+            .iter()
+            .filter(|(folder_id, _)| chat.folder_positions.contains_key(folder_id))
+            .map(|(_, name)| name.clone())
+            .collect()
+    } else {
+        Vec::new()
+    }
+}
+
+/// kit Phase 3: chat rows render at a fixed height so the kit
+/// `VirtualList` can position them from declared sizes — 56px base
+/// (avatar 40 + the old py_2), 80px when the folder-tag strip is present.
+/// `session_chat_row` enforces the same height on the element.
+fn chat_row_height(tags: &[String]) -> Pixels {
+    if tags.is_empty() { px(56.) } else { px(80.) }
+}
+
+impl QuillApp {
+    /// kit Phase 3: resolve one virtualized chat-list item to its element.
+    /// Only visible indices are built, once per frame — selection, badges,
+    /// pin-drag, multi-select and context-menu behavior are unchanged.
+    fn chat_list_item_element(&mut self, ix: usize, cx: &mut Context<Self>) -> AnyElement {
+        let item = self.chat_list_items.get(ix).cloned();
+        match item {
+            Some(ChatListItem::ArchiveHeader {
+                count,
+                any_unread,
+                collapsed,
+            }) => self.archive_header_element(count, any_unread, collapsed, cx),
+            Some(ChatListItem::ArchiveEmpty) => div()
+                .h(px(24.))
+                .flex()
+                .items_center()
+                .px_2()
+                .text_xs()
+                .text_color(cx.theme().muted_foreground)
+                .child("No archived chats.")
+                .into_any_element(),
+            Some(ChatListItem::Chat { chat, archived }) => {
+                let open = self.session().and_then(|s| s.open_chat);
+                let selected = open == Some(chat.id);
+                // Parity slice: folder names + tags flag for chat-row chips.
+                let (folder_names, show_folder_tags) = self
+                    .session()
+                    .map(|s| {
+                        (
+                            s.chat_folders
+                                .iter()
+                                .map(|f| (f.id, f.name.clone()))
+                                .collect::<Vec<_>>(),
+                            s.are_folder_tags_enabled,
+                        )
+                    })
+                    .unwrap_or_default();
+                // Parity slice: chat photos resolve per visible row and are
+                // sandboxed before display.
+                let media_roots = self.media_display_roots();
+                let photo = self
+                    .session()
+                    .and_then(|s| s.chat_photo_path(chat.id))
+                    .and_then(|path| sandboxed_display_path(path, &media_roots));
+                // Slice CL3: multi-select mode — rows toggle the check
+                // instead of opening the chat.
+                let selecting = !self.selected_chats.is_empty();
+                let checked = selecting && self.selected_chats.contains(&chat.id.0);
+                // Slice CL2: pin drag runs only on the unfiltered list with
+                // at least two pinned chats (TGX `ChatsAdapter`); the
+                // archive has its own pinned set.
+                let draggable = if archived {
+                    (self.chat_filter == ChatListFilter::All
+                        || self.chat_filter == ChatListFilter::Archived)
+                        && self
+                            .session()
+                            .is_some_and(|s| s.pinned_chat_ids(true).len() >= 2)
+                        && chat.archive_is_pinned
+                } else {
+                    self.chat_filter == ChatListFilter::All
+                        && self.folder_tab.is_none()
+                        && self
+                            .session()
+                            .is_some_and(|s| s.pinned_chat_ids(false).len() >= 2)
+                        && chat.is_pinned
+                };
+                session_chat_row(
+                    &chat,
+                    selected,
+                    &folder_names,
+                    show_folder_tags,
+                    photo.as_deref(),
+                    draggable,
+                    archived,
+                    selecting,
+                    checked,
+                    cx,
+                )
+                .into_any_element()
+            }
+            None => div().into_any_element(),
+        }
+    }
+
+    /// kit Phase 3: the archive section header as a fixed-height virtual
+    /// list item — collapses the section, marks the archive read, and
+    /// opens the auto-archive settings (Slice CL2, unchanged behavior).
+    fn archive_header_element(
+        &mut self,
+        count: usize,
+        any_unread: bool,
+        collapsed: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        div()
+            .id("archive-section")
+            .h(px(32.))
+            .flex()
+            .items_center()
+            .justify_between()
+            .child(
+                div()
+                    .id("archive-section-toggle")
+                    .cursor_pointer()
+                    .text_xs()
+                    .font_semibold()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(format!(
+                        "{} Archived ({})",
+                        if collapsed { "▸" } else { "▾" },
+                        count
+                    ))
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.toggle_archive_collapsed(cx);
+                    })),
+            )
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_1()
+                    .when(any_unread && !collapsed, |this| {
+                        this.child(
+                            Button::new("archive-mark-read")
+                                .label("✓")
+                                .ghost()
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.mark_all_chats_as_read(true, cx);
+                                })),
+                        )
+                    })
+                    .child(Button::new("archive-settings").label("⚙").ghost().on_click(
+                        cx.listener(|this, _, _, cx| {
+                            this.open_archive_settings(cx);
+                        }),
+                    )),
+            )
+            .into_any_element()
+    }
+}
+
 fn session_chat_row(
     chat: &ChatSummary,
     selected: bool,
@@ -42909,19 +43299,20 @@ fn session_chat_row(
         unread_badge_text(chat.unread_count)
     };
     let has_reactions = chat.unread_reaction_count > 0;
-    let tags: Vec<String> = if show_tags {
-        folders
-            .iter()
-            .filter(|(folder_id, _)| chat.folder_positions.contains_key(folder_id))
-            .map(|(_, name)| name.clone())
-            .collect()
-    } else {
-        Vec::new()
-    };
+    // kit Phase 3: tag chips via the shared helper — the row height
+    // (declared to the `VirtualList`) is derived from the same list.
+    let tags = chat_row_tags(chat, folders, show_tags);
     div()
         .id(("chat-row", id.0 as u64))
         .px_2()
-        .py_2()
+        // kit Phase 3: fixed height (see `chat_row_height`) — the
+        // `VirtualList` positions rows from declared sizes, so the row
+        // enforces the same height and centers its content. Title and
+        // preview truncate to one line so content can never overflow it.
+        .h(chat_row_height(&tags))
+        .flex()
+        .flex_col()
+        .justify_center()
         .rounded_md()
         .cursor_pointer()
         .bg(if selected {
@@ -43005,7 +43396,9 @@ fn session_chat_row(
                                         .items_center()
                                         .gap_1()
                                         .min_w_0()
-                                        .child(div().font_medium().min_w_0().child(title))
+                                        .child(
+                                            div().font_medium().min_w_0().truncate().child(title),
+                                        )
                                         .when(chat.is_muted(), |this| this.child(muted_badge(id)))
                                         .when(chat.is_forum_chat(), |this| {
                                             this.child(forum_badge(id))
@@ -43038,22 +43431,34 @@ fn session_chat_row(
                         .child(
                             div()
                                 .text_xs()
+                                .truncate()
                                 .text_color(cx.theme().muted_foreground)
                                 .child(preview),
                         ),
                 ),
         )
         .when(!tags.is_empty(), |this| {
-            this.child(div().flex().flex_row().flex_wrap().gap_1().pt_1().children(
-                tags.into_iter().map(|name| {
+            // kit Phase 3: the tag strip has a fixed height so tagged rows
+            // stay exactly `chat_row_height` tall; extra chips clip.
+            this.child(
+                div().pt_1().child(
                     div()
-                        .px_1()
-                        .rounded_sm()
-                        .bg(cx.theme().accent.opacity(0.12))
-                        .text_xs()
-                        .child(name)
-                }),
-            ))
+                        .flex()
+                        .flex_row()
+                        .flex_wrap()
+                        .gap_1()
+                        .h(px(20.))
+                        .overflow_hidden()
+                        .children(tags.into_iter().map(|name| {
+                            div()
+                                .px_1()
+                                .rounded_sm()
+                                .bg(cx.theme().accent.opacity(0.12))
+                                .text_xs()
+                                .child(name)
+                        })),
+                ),
+            )
         })
         // Slice CL2: pin-drag reorder — dropping a pinned chat onto
         // another pinned row moves it to that row's slot (TGX
@@ -43425,8 +43830,9 @@ fn album_history_row(
     files: &HashMap<i32, ParsedFile>,
     downloading: &std::collections::HashSet<i32>,
     media_roots: &[PathBuf],
-    chat: Option<&ChatSummary>,
-    sender_name: &str,
+    // kit Phase 3: the row label ("You · sent" / sender name) is computed
+    // at row-build time so the virtualized row doesn't carry the chat.
+    label: String,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
     let Some(first) = messages.first() else {
@@ -43465,14 +43871,6 @@ fn album_history_row(
         };
         if text.is_empty() { None } else { Some(text) }
     });
-    let label = if first.is_outgoing {
-        let receipt = chat
-            .map(|summary| summary.outbox_receipt(first))
-            .unwrap_or(OutboxReceipt::Sent);
-        outgoing_status_label(first.pending, receipt).to_string()
-    } else {
-        sender_name.to_string()
-    };
     let reply_target = ComposerReplyTo::new(
         first.chat_id,
         first.id,
