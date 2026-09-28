@@ -16,6 +16,7 @@ use gpui_kit::component::*;
 // aliased because the `gpui_kit::*` glob also brings the component `Size`
 // enum into scope.
 use gpui_kit::gpui::Size as ItemSize;
+use gpui_kit::gpui::StyleRefinement;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::auth::{AuthAction, AuthView, view_for};
@@ -38225,6 +38226,9 @@ impl QuillApp {
         if self.history_key != Some(history_key) {
             // New chat/topic (or first render): reset and show the tail.
             self.history_key = Some(history_key);
+            // Message ids are chat-local: a stale highlight id in the new
+            // chat must not suppress its search-jump scroll.
+            self.last_highlight = None;
             self.history_scroller.update(cx, |state, cx| {
                 state.reset(count, cx);
                 state.scroll_to_end(cx);
@@ -38252,17 +38256,30 @@ impl QuillApp {
                     });
                 }
                 _ => {
-                    // Shrink or reorder (delete/edit): reset; stay at the
-                    // tail only if the user was following it.
+                    // Shrink or reorder (delete/edit): splice preserves the
+                    // scroll anchor (reset() would yank to the top and arm
+                    // tail-follow); stay at the tail only if the user was
+                    // following it.
                     let follow = self.history_scroller.read(cx).is_following_tail();
                     self.history_scroller.update(cx, |state, cx| {
-                        state.reset(count, cx);
+                        state.splice(0..prev_count, count, cx);
                         if follow {
                             state.scroll_to_end(cx);
                         }
                     });
                 }
             }
+        } else if let (Some(first), Some(last)) = (first, last)
+            && self.history_ends != Some((first, last))
+        {
+            // Same row count but row identity changed (e.g. a second album
+            // photo turned a Single row into a taller Album row): cached
+            // measured heights are stale, so remeasure. This converges —
+            // history_ends is updated below — and must not run
+            // unconditionally or remeasure's notify() would loop.
+            self.history_scroller.update(cx, |state, cx| {
+                state.remeasure(cx);
+            });
         }
         self.history_ends = match (first, last) {
             (Some(first), Some(last)) => Some((first, last)),
@@ -38290,13 +38307,10 @@ impl QuillApp {
         // actually sent, so this cannot notify-loop while pinned at top).
         let weak = cx.weak_entity();
         div()
-            .id(id)
             .flex()
             .flex_col()
             .flex_1()
             .min_h_0()
-            .px_3()
-            .pt_2()
             .child(
                 MessageScroller::new(id, self.history_scroller.clone(), move |ix, _window, cx| {
                     if ix == 0 {
@@ -38308,6 +38322,11 @@ impl QuillApp {
                     weak.update(cx, |this, cx| this.render_history_row(ix, cx))
                         .unwrap_or_else(|_| div().into_any_element())
                 })
+                // The kit's default row wrapper pads every non-last row with
+                // pb_8 (32px); override to pb_1 to restore the old gap_1
+                // density. The kit also supplies row px and list py, so the
+                // outer div needs neither.
+                .with_row_style(StyleRefinement::default().pb_1())
                 .size_full()
                 .min_h_0(),
             )
