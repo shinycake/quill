@@ -4667,7 +4667,7 @@ repo):**
 - The complete proxy API surface is client-connection scope only:
   `addProxy` (:16206), `enableProxy` (:16216), `disableProxy`
   (:16219), `removeProxy` (:16222), `getProxies` (:16225),
-  `pingProxy` (:16229) (+ `getProxyLink`). No call-specific proxy
+  `pingProxy` (:16229). No call-specific proxy
   function, constructor, or `CallServer`-level proxy field exists
   anywhere in the schema.
 - The only "use-for-calls" mention is in the internal-link routing
@@ -4682,7 +4682,7 @@ repo):**
 **Native engine investigation (`crates/ntgcalls-sys`, pytgcalls
 ntgcalls v3.0.0 prebuilt lib, bindings verified against
 `vendor/ntgcalls/include/ntgcalls.h`):**
-- The full 78-function declared surface contains **zero**
+- The full 76-function declared surface contains **zero**
   echo/noise/AGC functions and **zero** proxy/SOCKS functions
   (case-insensitive search of `lib.rs` for
   echo/noise/agc/aec/vad/proxy/socks: no hits).
@@ -4690,7 +4690,7 @@ ntgcalls v3.0.0 prebuilt lib, bindings verified against
   device/source descriptors — no audio-FX fields.
 - `ntg_connect_p2p` / `ntg_create_call` / `ntg_init_exchange` take no
   proxy parameters; Quill passes NULL for `custom_parameters`
-  (`src/calls/engine.rs:1459`) and there is no documented channel to
+  (`src/calls/engine.rs:1460`) and there is no documented channel to
   inject audio-FX or proxy config through it.
 
 **Telegram X evidence (`~/workspace/telegram-x`):**
@@ -4704,7 +4704,7 @@ ntgcalls v3.0.0 prebuilt lib, bindings verified against
   toggles in TGX settings — and Quill's engine exposes no such
   config path at all.
 - "Use proxy for calls" is **client-side**: `SettingsProxyController`
-  has a `btn_useProxyForCalls` radio toggle; `Settings.java:4517`
+  has a `btn_useProxyForCalls` radio toggle; `Settings.java:4515`
   `getEffectiveCallsProxyId()` returns the enabled proxy id only when
   both `PROXY_FLAG_ENABLED` and `PROXY_FLAG_USE_FOR_CALLS` are set,
   and `VoIP.java:365,399` hands the enabled proxy as
