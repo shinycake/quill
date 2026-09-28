@@ -7103,8 +7103,9 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// `internalLinkTypeBotStart.start_parameter` (line 9399); empty for
     /// a plain restart. When the chat is fully blocked, unblocks first
     /// (Telegram X `MessagesController.ACTION_BOT_START` likewise
-    /// unblocks before the send, since TDLib processes the queued
-    /// requests in order).
+    /// unblocks before the send). Unlike TGX, the start is queued without
+    /// waiting for the unblock result; a refused unblock surfaces via
+    /// `chat_action_error` and the start fails closed.
     pub fn send_bot_start_message(
         &mut self,
         chat_id: ChatId,
