@@ -25,10 +25,10 @@ use crate::telegram::envelope::{
     ParsedFile, ParsedGroupCall, ParsedGroupCallMessage, ParsedGroupCallParticipant, ParsedMessage,
     ParsedSecretChat, ParsedSession, ParsedStory, ParsedUser, ParsedVideoChat,
     ParsedWelcomeMessage, PasswordState, Poll, ReplyKeyboard, ReplyMarkup, ReportChatOutcome,
-    ReportOption, ReportSponsoredResult, RichMessageContent, ScopeNotificationSettings,
-    SecretChatState, SponsoredMessage, StickerFormat, StickerItem, StickerSetInfo, StorageStats,
-    StoryAvailableReactionView, StoryListView, TdError, effective_content,
-    reply_markup_demands_reply,
+    ReportOption, ReportSponsoredResult, ReportStoryResult, RichMessageContent,
+    ScopeNotificationSettings, SecretChatState, SponsoredMessage, StickerFormat, StickerItem,
+    StickerSetInfo, StorageStats, StoryAvailableReactionView, StoryInteractionView,
+    StoryInteractionsView, StoryListView, TdError, effective_content, reply_markup_demands_reply,
 };
 use crate::telegram::envelope::{CallState, ReadyParams};
 use crate::telegram::requests::{
@@ -568,6 +568,19 @@ pub enum RequestPurpose {
     /// `inputMessageReplyToStory`. Response is `message`; the normal
     /// message-send updates handle it.
     SendStoryReply,
+    /// Phase 9.5: `getStoryInteractions` — an own story's viewers list.
+    /// Response is `storyInteractions`; pages accumulate in
+    /// `Session::story_viewers` (the previous page's `next_offset`
+    /// starts the next request).
+    GetStoryInteractions,
+    /// Phase 9.5: `reportStory`. Response is `ReportStoryResult`
+    /// (`Ok` / `OptionRequired` / `TextRequired`); driven by
+    /// `Session::story_report`.
+    ReportStory,
+    /// Phase 9.5: `activateStoryStealthMode`. Response is `ok`; the new
+    /// state lands as `updateStoryStealthMode` in
+    /// `Session::story_stealth`.
+    ActivateStoryStealthMode,
     /// Phase 9.3: `canPostStory`. Response is a `canPostStoryResult*`;
     /// the reducer stores it in `Session::story_post.eligibility`.
     CheckCanPostStory,
@@ -3730,6 +3743,23 @@ pub struct Session {
     /// eligibility plus the `postStory` pending/succeeded/failed outcome
     /// the composer renders.
     pub story_post: StoryPostState,
+    /// Phase 9.5: paginated viewers list for the story currently open in
+    /// the viewer (`getStoryInteractions` pages, `Session::story_viewers`
+    /// accumulates them). `None` when the panel is closed or the viewer
+    /// moved to a different story.
+    pub story_viewers: Option<StoryViewersState>,
+    /// Phase 9.5: the in-progress `reportStory` flow for the story open in
+    /// the viewer — the reason picker and the optional details step.
+    /// `None` when no report is in flight.
+    pub story_report: Option<StoryReportFlow>,
+    /// Phase 9.5: story stealth-mode state from `updateStoryStealthMode`
+    /// (TDLib 1.8.67, `schema/td_api.tl:10919`); 0/0 = disabled, no
+    /// cooldown — the schema exposes no getter, so this only ever
+    /// reflects updates TDLib has pushed.
+    pub story_stealth: StoryStealthMode,
+    /// Phase 9.5: last `activateStoryStealthMode` error (e.g. Premium
+    /// required), cleared when a new activation is sent.
+    pub story_stealth_error: Option<String>,
     /// Phase 9.1: `loadActiveStories(storyListMain)` was issued. A retry is
     /// allowed (the flag is reset) if the attempt failed.
     pub stories_active_loaded: bool,
@@ -3761,6 +3791,73 @@ pub struct StoryPostState {
     pub eligibility: Option<CanPostStoryResult>,
     pub check_error: Option<String>,
     pub outcome: StoryPostOutcome,
+}
+
+/// Phase 9.5: the viewers panel's accumulated `getStoryInteractions`
+/// pages for one story. `next_offset` empty = no more pages.
+#[derive(Debug, Clone, Default)]
+pub struct StoryViewersState {
+    pub chat_id: i64,
+    pub story_id: i32,
+    pub total_count: i32,
+    pub rows: Vec<StoryInteractionView>,
+    pub next_offset: String,
+    pub loading: bool,
+    pub error: Option<String>,
+}
+
+/// Phase 9.5: honest `reportStory` UI states. The initial request carries
+/// an empty option id; TDLib answers `OptionRequired` (reason picker),
+/// then `TextRequired` (optional details), then `Ok`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StoryReportStage {
+    /// The initial `reportStory` is in flight.
+    Checking,
+    /// The user must pick a reason before the flow can continue.
+    PickOption {
+        title: String,
+        options: Vec<ReportOption>,
+    },
+    /// A follow-up `reportStory` (option picked, or details submitted)
+    /// is in flight.
+    Sending,
+    /// The server wants extra text details for `option_id`.
+    TextRequired {
+        option_id: String,
+        is_optional: bool,
+    },
+    Reported,
+    Failed(String),
+}
+
+/// Phase 9.5: the in-progress `reportStory` flow for one story.
+#[derive(Debug, Clone)]
+pub struct StoryReportFlow {
+    pub chat_id: i64,
+    pub story_id: i32,
+    pub stage: StoryReportStage,
+}
+
+/// Phase 9.5: story stealth-mode state (`updateStoryStealthMode`,
+/// TDLib 1.8.67, `schema/td_api.tl:10919`). Unix timestamps; 0 = the
+/// corresponding state is off.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct StoryStealthMode {
+    pub active_until_date: i32,
+    pub cooldown_until_date: i32,
+}
+
+impl StoryStealthMode {
+    /// `true` while stealth hides the user's story views (`now` is a
+    /// Unix timestamp).
+    pub fn is_active(&self, now: i64) -> bool {
+        i64::from(self.active_until_date) > now
+    }
+
+    /// `true` while stealth cannot be re-enabled (and is not active).
+    pub fn is_cooling_down(&self, now: i64) -> bool {
+        !self.is_active(now) && i64::from(self.cooldown_until_date) > now
+    }
 }
 
 /// Phase 6: which info panel is open in the side panel.
@@ -4220,6 +4317,10 @@ impl Session {
             story_available_reactions: None,
             story_tray_refresh: HashSet::new(),
             story_post: StoryPostState::default(),
+            story_viewers: None,
+            story_report: None,
+            story_stealth: StoryStealthMode::default(),
+            story_stealth_error: None,
             diagnostics,
         }
     }
@@ -5880,6 +5981,34 @@ impl Session {
                 // viewer picker options.
                 self.story_available_reactions = Some(reactions);
             }
+            EnvelopePayload::StoryInteractions { interactions } => {
+                // Phase 9.5: a `getStoryInteractions` page — honored only
+                // for the viewer's own fetch (purpose-gated, and the page
+                // is dropped when the viewer moved to another story).
+                if pending.is_some_and(|p| p.purpose == RequestPurpose::GetStoryInteractions)
+                    && let Some(pending) = pending
+                {
+                    self.accept_story_interactions(pending, interactions);
+                }
+            }
+            EnvelopePayload::ReportStoryResult(result) => {
+                // Phase 9.5: a `reportStory` answer — honored only for the
+                // viewer's own report flow.
+                if pending.is_some_and(|p| p.purpose == RequestPurpose::ReportStory)
+                    && let Some(pending) = pending
+                {
+                    self.accept_story_report(pending, result);
+                }
+            }
+            EnvelopePayload::UpdateStoryStealthMode {
+                active_until_date,
+                cooldown_until_date,
+            } => {
+                // Phase 9.5: stealth-mode state changed (Telegram X keeps
+                // the same two timestamps; there is no getter, so updates
+                // are the only source).
+                self.apply_update_story_stealth_mode(active_until_date, cooldown_until_date);
+            }
             EnvelopePayload::UpdateNewMessage(message) => {
                 // Phase 8.1: decide before upserting; the queue is drained by
                 // the UI for OS dispatch. The sound decision is made at the
@@ -7002,6 +7131,30 @@ impl Session {
                     Some(RequestPurpose::CheckCanPostStory) => {
                         self.story_post.check_error =
                             Some(format!("Eligibility check failed: {}", error_reason(&err)));
+                    }
+                    // Phase 9.5: a `getStoryInteractions` / `reportStory` /
+                    // `activateStoryStealthMode` error — the viewer panel /
+                    // report flow / stealth button shows it instead of
+                    // spinning forever.
+                    Some(RequestPurpose::GetStoryInteractions) => {
+                        if let Some(pending) = pending {
+                            self.fail_story_viewers(
+                                pending,
+                                format!("Could not load viewers: {}", error_reason(&err)),
+                            );
+                        }
+                    }
+                    Some(RequestPurpose::ReportStory) => {
+                        if let Some(pending) = pending {
+                            self.fail_story_report(
+                                pending,
+                                format!("Reporting failed: {}", error_reason(&err)),
+                            );
+                        }
+                    }
+                    Some(RequestPurpose::ActivateStoryStealthMode) => {
+                        self.story_stealth_error =
+                            Some(format!("Stealth mode failed: {}", error_reason(&err)));
                     }
                     _ => {}
                 }
@@ -8956,6 +9109,163 @@ impl Session {
 
     pub fn clear_sponsored_report_outcome(&mut self) {
         self.last_sponsored_report = None;
+    }
+
+    /// Phase 9.5: (re)start the viewers panel for a story — resets rows
+    /// and pagination when the story changes, keeps them when the same
+    /// story is re-opened.
+    pub fn begin_story_viewers(&mut self, chat_id: i64, story_id: i32) {
+        let same = self
+            .story_viewers
+            .as_ref()
+            .is_some_and(|state| state.chat_id == chat_id && state.story_id == story_id);
+        if !same {
+            self.story_viewers = Some(StoryViewersState {
+                chat_id,
+                story_id,
+                ..Default::default()
+            });
+        }
+    }
+
+    pub fn clear_story_viewers(&mut self) {
+        self.story_viewers = None;
+    }
+
+    /// Phase 9.5: accumulate one `storyInteractions` page into the
+    /// viewers panel. A page for a different story (stale response after
+    /// the viewer moved on) is dropped.
+    pub fn accept_story_interactions(
+        &mut self,
+        pending: &PendingRequest,
+        view: StoryInteractionsView,
+    ) {
+        let (Some(chat_id), Some(story_id)) = (pending.chat_id, pending.story_id) else {
+            return;
+        };
+        let Some(state) = self.story_viewers.as_mut() else {
+            return;
+        };
+        if state.chat_id != chat_id.0 || state.story_id != story_id {
+            return;
+        }
+        state.loading = false;
+        state.error = None;
+        state.total_count = view.total_count;
+        state.next_offset = view.next_offset;
+        state.rows.extend(view.interactions);
+    }
+
+    /// Phase 9.5: mark the viewers fetch as failed; the panel shows the
+    /// error with a retry instead of spinning forever.
+    pub fn fail_story_viewers(&mut self, pending: &PendingRequest, message: String) {
+        let (Some(chat_id), Some(story_id)) = (pending.chat_id, pending.story_id) else {
+            return;
+        };
+        if let Some(state) = self.story_viewers.as_mut()
+            && state.chat_id == chat_id.0
+            && state.story_id == story_id
+        {
+            state.loading = false;
+            state.error = Some(message);
+        }
+    }
+
+    /// Phase 9.5: start the `reportStory` flow for a story — the UI
+    /// renders `Checking` until the first answer lands.
+    pub fn begin_story_report(&mut self, chat_id: i64, story_id: i32) {
+        self.story_report = Some(StoryReportFlow {
+            chat_id,
+            story_id,
+            stage: StoryReportStage::Checking,
+        });
+    }
+
+    pub fn clear_story_report(&mut self) {
+        self.story_report = None;
+    }
+
+    /// Phase 9.5: apply a `ReportStoryResult` answer. A result for a
+    /// different story (stale response) is dropped. Mirrors TDLib's
+    /// `ReportStoryQuery` mapping (`td/telegram/StoryManager.cpp:1406-1430`
+    /// @d1085f9): an empty option list is a success, not a picker.
+    pub fn accept_story_report(&mut self, pending: &PendingRequest, result: ReportStoryResult) {
+        let (Some(chat_id), Some(story_id)) = (pending.chat_id, pending.story_id) else {
+            return;
+        };
+        let Some(flow) = self.story_report.as_mut() else {
+            return;
+        };
+        if flow.chat_id != chat_id.0 || flow.story_id != story_id {
+            return;
+        }
+        flow.stage = match result {
+            ReportStoryResult::Ok => StoryReportStage::Reported,
+            ReportStoryResult::OptionRequired { title: _, options } if options.is_empty() => {
+                StoryReportStage::Reported
+            }
+            ReportStoryResult::OptionRequired { title, options } => {
+                StoryReportStage::PickOption { title, options }
+            }
+            ReportStoryResult::TextRequired {
+                option_id,
+                is_optional,
+            } => StoryReportStage::TextRequired {
+                option_id,
+                is_optional,
+            },
+        };
+    }
+
+    /// Phase 9.5: the follow-up `reportStory` (reason picked / details
+    /// submitted) is in flight.
+    pub fn story_report_sending(&mut self, chat_id: i64, story_id: i32) {
+        if let Some(flow) = self.story_report.as_mut()
+            && flow.chat_id == chat_id
+            && flow.story_id == story_id
+        {
+            flow.stage = StoryReportStage::Sending;
+        }
+    }
+
+    /// Phase 9.5: a raw TDLib error on a `reportStory` request ends the
+    /// flow with the sanitized message (there is no `Failed` result
+    /// variant — errors arrive as `error` answers).
+    pub fn fail_story_report(&mut self, pending: &PendingRequest, message: String) {
+        let (Some(chat_id), Some(story_id)) = (pending.chat_id, pending.story_id) else {
+            return;
+        };
+        if let Some(flow) = self.story_report.as_mut()
+            && flow.chat_id == chat_id.0
+            && flow.story_id == story_id
+        {
+            flow.stage = StoryReportStage::Failed(message);
+        }
+    }
+
+    /// Phase 9.5: `reportStory` failed to send at all — the driver took
+    /// the pending request back, so no answer will ever arrive. End the
+    /// flow with the error instead of spinning on `Checking`/`Sending`
+    /// forever.
+    pub fn fail_story_report_send(&mut self, chat_id: i64, story_id: i32, message: String) {
+        if let Some(flow) = self.story_report.as_mut()
+            && flow.chat_id == chat_id
+            && flow.story_id == story_id
+        {
+            flow.stage = StoryReportStage::Failed(message);
+        }
+    }
+
+    /// Phase 9.5: store the latest `updateStoryStealthMode` state.
+    pub fn apply_update_story_stealth_mode(
+        &mut self,
+        active_until_date: i32,
+        cooldown_until_date: i32,
+    ) {
+        self.story_stealth = StoryStealthMode {
+            active_until_date,
+            cooldown_until_date,
+        };
     }
 
     pub fn request_download(&mut self, file_id: FileId) -> RequestId {
@@ -13936,6 +14246,239 @@ mod tests {
         // Tray no longer references the deleted story; without an unread
         // story left, the entry is dropped.
         assert!(session.ordered_story_tray().is_empty());
+    }
+
+    /// Phase 9.5: `getStoryInteractions` pages accumulate into the
+    /// viewers panel; a stale page (viewer moved to another story) is
+    /// dropped; errors surface on the panel.
+    #[test]
+    fn story_viewers_accumulate_pages_and_drop_stale() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        session.begin_story_viewers(11, 5);
+        let page = |extra: u64, offset: &str| {
+            format!(
+                r#"{{"@type":"storyInteractions","@extra":"{extra}","total_count":3,"interactions":[{{"actor_id":{{"@type":"messageSenderUser","user_id":777}},"interaction_date":1700000100,"block_list":null,"type":{{"@type":"storyInteractionTypeView","chosen_reaction_type":null}}}}],"next_offset":"{offset}"}}"#
+            )
+        };
+        let extra1 = session.request_for_story(RequestPurpose::GetStoryInteractions, ChatId(11), 5);
+        apply_json(&mut session, &seq, &sink, &page(extra1.0, "1"));
+        let state = session.story_viewers.as_ref().unwrap();
+        assert_eq!(state.rows.len(), 1);
+        assert_eq!(state.next_offset, "1");
+        assert!(!state.loading);
+        // Second page appends.
+        let extra2 = session.request_for_story(RequestPurpose::GetStoryInteractions, ChatId(11), 5);
+        apply_json(&mut session, &seq, &sink, &page(extra2.0, ""));
+        assert_eq!(session.story_viewers.as_ref().unwrap().rows.len(), 2);
+        assert!(
+            session
+                .story_viewers
+                .as_ref()
+                .unwrap()
+                .next_offset
+                .is_empty()
+        );
+        // Stale page for another story is dropped.
+        session.begin_story_viewers(11, 6);
+        let extra3 = session.request_for_story(RequestPurpose::GetStoryInteractions, ChatId(11), 5);
+        apply_json(&mut session, &seq, &sink, &page(extra3.0, "9"));
+        assert!(session.story_viewers.as_ref().unwrap().rows.is_empty());
+        // Error lands on the current panel.
+        let extra4 = session.request_for_story(RequestPurpose::GetStoryInteractions, ChatId(11), 6);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"error","@extra":"{}","code":400,"message":"STORY_NOT_FOUND"}}"#,
+                extra4.0
+            ),
+        );
+        let state = session.story_viewers.as_ref().unwrap();
+        assert!(!state.loading);
+        // The server message is classified by `error_reason` (native
+        // text is never surfaced); the panel shows the failure.
+        assert!(
+            state
+                .error
+                .as_deref()
+                .unwrap()
+                .starts_with("Could not load viewers")
+        );
+    }
+
+    /// Phase 9.5 review: reopening the viewers panel must not duplicate
+    /// rows — `toggle_story_viewers` clears before the fresh page-1
+    /// fetch (`begin_story_viewers` alone keeps rows for the same
+    /// story, so the clear is what prevents [A,B] → [A,B,A,B]).
+    #[test]
+    fn story_viewers_reopen_resets_rows() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        let page = |extra: u64| {
+            format!(
+                r#"{{"@type":"storyInteractions","@extra":"{extra}","total_count":1,"interactions":[{{"actor_id":{{"@type":"messageSenderUser","user_id":777}},"interaction_date":1700000100,"block_list":null,"type":{{"@type":"storyInteractionTypeView","chosen_reaction_type":null}}}}],"next_offset":""}}"#
+            )
+        };
+        // Open the panel: begin + first page.
+        session.begin_story_viewers(11, 5);
+        let extra1 = session.request_for_story(RequestPurpose::GetStoryInteractions, ChatId(11), 5);
+        apply_json(&mut session, &seq, &sink, &page(extra1.0));
+        assert_eq!(session.story_viewers.as_ref().unwrap().rows.len(), 1);
+        // `begin_story_viewers` alone keeps the same story's rows —
+        // which is why the UI clears on re-open.
+        session.begin_story_viewers(11, 5);
+        assert_eq!(session.story_viewers.as_ref().unwrap().rows.len(), 1);
+        // Re-open (clear, then begin + fresh page-1) → no duplication.
+        session.clear_story_viewers();
+        session.begin_story_viewers(11, 5);
+        let extra2 = session.request_for_story(RequestPurpose::GetStoryInteractions, ChatId(11), 5);
+        apply_json(&mut session, &seq, &sink, &page(extra2.0));
+        assert_eq!(session.story_viewers.as_ref().unwrap().rows.len(), 1);
+    }
+
+    /// Phase 9.5: the `reportStory` flow — Checking → OptionRequired
+    /// arms the picker → TextRequired carries the option id → Ok
+    /// reports; errors end the flow honestly.
+    #[test]
+    fn story_report_flow_through_option_and_text_steps() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        session.begin_story_report(12, 6);
+        assert!(matches!(
+            session.story_report.as_ref().unwrap().stage,
+            StoryReportStage::Checking
+        ));
+        let extra = session.request_for_story(RequestPurpose::ReportStory, ChatId(12), 6);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"reportStoryResultOptionRequired","@extra":"{}","title":"Why?","options":[{{"@type":"reportOption","id":"aGk=","text":"Spam"}}]}}"#,
+                extra.0
+            ),
+        );
+        match &session.story_report.as_ref().unwrap().stage {
+            StoryReportStage::PickOption { title, options } => {
+                assert_eq!(title, "Why?");
+                assert_eq!(options[0].id, "aGk=");
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+        session.story_report_sending(12, 6);
+        let extra2 = session.request_for_story(RequestPurpose::ReportStory, ChatId(12), 6);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"reportStoryResultTextRequired","@extra":"{}","option_id":"aGk=","is_optional":false}}"#,
+                extra2.0
+            ),
+        );
+        assert!(matches!(
+            session.story_report.as_ref().unwrap().stage,
+            StoryReportStage::TextRequired { ref option_id, .. } if option_id == "aGk="
+        ));
+        let extra3 = session.request_for_story(RequestPurpose::ReportStory, ChatId(12), 6);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"reportStoryResultOk","@extra":"{}"}}"#,
+                extra3.0
+            ),
+        );
+        assert!(matches!(
+            session.story_report.as_ref().unwrap().stage,
+            StoryReportStage::Reported
+        ));
+        // A late error after the flow closed does not resurrect it.
+        session.clear_story_report();
+        let extra4 = session.request_for_story(RequestPurpose::ReportStory, ChatId(12), 6);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"error","@extra":"{}","code":400,"message":"LATE"}}"#,
+                extra4.0
+            ),
+        );
+        assert!(session.story_report.is_none());
+    }
+
+    /// Phase 9.5: an empty `options` list in
+    /// `reportStoryResultOptionRequired` is a success, not a picker —
+    /// TDLib's `ReportStoryQuery` maps it to Ok (StoryManager.cpp:1414).
+    #[test]
+    fn story_report_empty_options_means_reported() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        session.begin_story_report(12, 6);
+        let extra = session.request_for_story(RequestPurpose::ReportStory, ChatId(12), 6);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"reportStoryResultOptionRequired","@extra":"{}","title":"Why?","options":[]}}"#,
+                extra.0
+            ),
+        );
+        assert!(matches!(
+            session.story_report.as_ref().unwrap().stage,
+            StoryReportStage::Reported
+        ));
+    }
+
+    /// Phase 9.5 review: a `reportStory` send failure ends the flow
+    /// with `Failed` — the driver took the pending request back, so no
+    /// answer will ever arrive to move it off `Checking`/`Sending`.
+    #[test]
+    fn story_report_send_failure_ends_flow() {
+        let (mut session, _sink) = session();
+        session.begin_story_report(12, 6);
+        session.fail_story_report_send(12, 6, "could not report story".into());
+        assert!(matches!(
+            session.story_report.as_ref().unwrap().stage,
+            StoryReportStage::Failed(_)
+        ));
+        // A different story's flow is untouched.
+        session.begin_story_report(12, 7);
+        session.fail_story_report_send(12, 6, "could not report story".into());
+        assert!(matches!(
+            session.story_report.as_ref().unwrap().stage,
+            StoryReportStage::Checking
+        ));
+    }
+
+    /// Phase 9.5: `updateStoryStealthMode` stores the two timestamps;
+    /// `StoryStealthMode` active/cooldown predicates read them.
+    #[test]
+    fn update_story_stealth_mode_stored() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateStoryStealthMode","active_until_date":1700003600,"cooldown_until_date":1700007200}"#,
+        );
+        assert_eq!(
+            session.story_stealth,
+            StoryStealthMode {
+                active_until_date: 1700003600,
+                cooldown_until_date: 1700007200,
+            }
+        );
+        assert!(session.story_stealth.is_active(1700000000));
+        assert!(!session.story_stealth.is_active(1700003600));
+        assert!(session.story_stealth.is_cooling_down(1700003600));
+        assert!(!session.story_stealth.is_cooling_down(1700007200));
     }
 
     #[test]

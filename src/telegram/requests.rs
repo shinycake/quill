@@ -4554,6 +4554,68 @@ pub fn delete_story(extra: RequestId, chat_id: ChatId, story_id: i32) -> String 
     .to_string()
 }
 
+/// Phase 9.5: `getStoryInteractions` (TDLib 1.8.67,
+/// `schema/td_api.tl:13819`) — one page of an own story's viewers.
+/// `query` filters by name/username/title (empty = all);
+/// `offset` is the previous page's `next_offset` (empty = first page).
+/// The schema places no explicit max on `limit`; the viewer pages 50.
+pub fn get_story_interactions(
+    extra: RequestId,
+    story_id: i32,
+    query: &str,
+    offset: &str,
+    limit: i32,
+) -> String {
+    json!({
+        "@type": "getStoryInteractions",
+        "@extra": extra.as_extra(),
+        "story_id": story_id,
+        "query": query,
+        "only_contacts": false,
+        "prefer_forwards": false,
+        "prefer_with_reaction": false,
+        "offset": offset,
+        "limit": limit
+    })
+    .to_string()
+}
+
+/// Phase 9.5: `reportStory` (TDLib 1.8.67, `schema/td_api.tl:13835`) —
+/// reports a story to the Telegram moderators. `option_id` is the
+/// base64 `reportOption.id` from a `reportStoryResultOptionRequired`
+/// answer (empty for the initial call); `text` is the extra detail
+/// (empty for the initial call). Response is `ReportStoryResult`.
+pub fn report_story(
+    extra: RequestId,
+    chat_id: ChatId,
+    story_id: i32,
+    option_id: &str,
+    text: &str,
+) -> String {
+    json!({
+        "@type": "reportStory",
+        "@extra": extra.as_extra(),
+        "story_poster_chat_id": chat_id.0,
+        "story_id": story_id,
+        "option_id": option_id,
+        "text": text
+    })
+    .to_string()
+}
+
+/// Phase 9.5: `activateStoryStealthMode` (TDLib 1.8.67,
+/// `schema/td_api.tl:13839`) — hides the current user's story views in
+/// the last `story_stealth_mode_past_period` seconds and the next
+/// `story_stealth_mode_future_period` seconds; Premium only. Response
+/// is `ok`; the state lands as `updateStoryStealthMode`.
+pub fn activate_story_stealth_mode(extra: RequestId) -> String {
+    json!({
+        "@type": "activateStoryStealthMode",
+        "@extra": extra.as_extra(),
+    })
+    .to_string()
+}
+
 /// Phase 9.2: story reply target — `inputMessageReplyToStory` (TDLib 1.8.67,
 /// `schema/td_api.tl:3099`). Replying to a story sends a message to the
 /// story poster quoting the story.
@@ -6892,6 +6954,48 @@ mod channel_requests_tests {
         assert_eq!(v["reply_to"]["story_poster_chat_id"], 11);
         assert_eq!(v["reply_to"]["story_id"], 7);
         assert_eq!(v["input_message_content"]["text"]["text"], "Nice!");
+    }
+
+    #[test]
+    fn s4_story_requests_match_1_8_67() {
+        // Phase 9.5: `getStoryInteractions story_id:int32 query:string
+        // only_contacts:Bool prefer_forwards:Bool prefer_with_reaction:Bool
+        // offset:string limit:int32 = StoryInteractions` (schema line
+        // 13819) — note: there is no `getStoryViewers` constructor; the
+        // viewers list is this function.
+        let viewers = get_story_interactions(RequestId(75), 7, "", "", 50);
+        let v: serde_json::Value = serde_json::from_str(&viewers).unwrap();
+        assert_eq!(v["@type"], "getStoryInteractions");
+        assert_eq!(v["@extra"], "75");
+        assert_eq!(v["story_id"], 7);
+        assert_eq!(v["query"], "");
+        assert_eq!(v["only_contacts"], false);
+        assert_eq!(v["prefer_forwards"], false);
+        assert_eq!(v["prefer_with_reaction"], false);
+        assert_eq!(v["offset"], "");
+        assert_eq!(v["limit"], 50);
+
+        // `reportStory story_poster_chat_id:int53 story_id:int32
+        // option_id:bytes text:string = ReportStoryResult` (schema line
+        // 13835); the initial call leaves both empty.
+        let report = report_story(RequestId(76), ChatId(11), 7, "", "");
+        let v: serde_json::Value = serde_json::from_str(&report).unwrap();
+        assert_eq!(v["@type"], "reportStory");
+        assert_eq!(v["story_poster_chat_id"], 11);
+        assert_eq!(v["story_id"], 7);
+        assert_eq!(v["option_id"], "");
+        assert_eq!(v["text"], "");
+        let follow_up = report_story(RequestId(77), ChatId(11), 7, "aGk=", "details");
+        let v: serde_json::Value = serde_json::from_str(&follow_up).unwrap();
+        assert_eq!(v["option_id"], "aGk=");
+        assert_eq!(v["text"], "details");
+
+        // `activateStoryStealthMode = Ok` (schema line 13839) — no
+        // parameters; state arrives as `updateStoryStealthMode`.
+        let stealth = activate_story_stealth_mode(RequestId(78));
+        let v: serde_json::Value = serde_json::from_str(&stealth).unwrap();
+        assert_eq!(v["@type"], "activateStoryStealthMode");
+        assert_eq!(v["@extra"], "78");
     }
 
     #[test]

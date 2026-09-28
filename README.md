@@ -298,11 +298,11 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [ ] Chosen custom-emoji or paid reactions (parser drops them: chosen_reaction_emoji emoji-only, telegram/envelope.rs Phase 9.2) <!-- parity:stories-custom-reactions -->
 - [x] Reaction removal (setStoryReaction with null; request asserts, telegram/requests.rs:2556) <!-- parity:stories-reaction-remove -->
 - [x] Interaction counters (views / hearts / reposts, non-zero, when can_get_interactions) (ui/mod.rs Phase 9.2) <!-- parity:stories-interaction-counters -->
-- [ ] Detailed viewers list (getStoryInteractions — explicit schema surface kept out of Phase 9.2; not called anywhere) <!-- parity:stories-viewers-list -->
+- [x] Detailed viewers list (getStoryInteractions, gated on can_get_interactions; paginated panel with reactions, forwards, Load more; ui/mod.rs Phase 9.5) <!-- parity:stories-viewers-list -->
 - [x] Text reply to a story via sendMessage + inputMessageReplyToStory, gated on can_be_replied (telegram/requests.rs Phase 9.2; ui/mod.rs Reply row) <!-- parity:stories-reply -->
 - [x] Delete own story, gated on can_be_deleted; viewer closes when the story leaves the cache; updateStoryDeleted handled (telegram/requests.rs:2584, telegram/envelope.rs:4660) <!-- parity:stories-delete -->
-- [ ] Report story (reportStory in schema, unused) <!-- parity:stories-report -->
-- [ ] Stealth mode / hide view from poster (activateStoryStealthMode, updateStoryStealthMode in schema; TGX consumes them, Quill does not) <!-- parity:stories-stealth-mode -->
+- [x] Report story (reportStory multi-step flow: option picker → optional/required text → Reported/Failed; state.rs + connect.rs + ui/mod.rs Phase 9.5) <!-- parity:stories-report -->
+- [x] Stealth mode / hide view from poster (activateStoryStealthMode + updateStoryStealthMode state; viewer action-row button reflects active/cooldown; ui/mod.rs Phase 9.5) <!-- parity:stories-stealth-mode -->
 - [ ] Clickable story areas (location, venue, suggested reaction, message, link, weather, gift) — parser drops areas (telegram/envelope.rs:3328) <!-- parity:stories-areas-view -->
 - [ ] Story albums: view albums, add to album (schema getChatStoryAlbums / createStoryAlbum / ... in 1.8.67, unused) <!-- parity:stories-albums -->
 - [ ] Archive story list (storyListArchive trays remove the row; no archive UI) (DECISIONS.md Phase 9.1 "Out of this slice") <!-- parity:stories-archive -->

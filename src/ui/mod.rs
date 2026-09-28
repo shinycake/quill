@@ -47,9 +47,9 @@ use quill::state::{
     ChatSearchJump, ChatStatisticsFetch, ChatSummary, ContactRow, ForceReplyTarget, ForwardResult,
     HistoryMessage, InfoPanelTarget, InviteLinkFetch, JoinRequestFetch, LoginUrlRequest,
     MemberListFilter, OutboxReceipt, RequestPurpose, SearchStatus, Session, SimilarBotsFetch,
-    SponsoredReportFlight, StoryPostOutcome, StoryPostState, SupergroupMembersFetch,
-    WelcomeMessagesFetch, active_custom_keyboard, effective_preview, event_log_relative_time,
-    outgoing_status_label, unix_ms_now, unread_badge_text,
+    SponsoredReportFlight, StoryPostOutcome, StoryPostState, StoryReportStage,
+    SupergroupMembersFetch, WelcomeMessagesFetch, active_custom_keyboard, effective_preview,
+    event_log_relative_time, outgoing_status_label, unix_ms_now, unread_badge_text,
 };
 use quill::story_composer::{StoryComposer, StoryExpiry, StoryMediaKind, StoryPrivacy};
 use quill::story_viewer::{StoryViewer, StoryViewerItem, StoryViewerKind, collect_story_items};
@@ -1076,6 +1076,15 @@ const GROUP_CALL_SCHEDULE_PRESETS: [(i64, &str); 5] = [
     (24 * 3600, "In 24 hours"),
 ];
 
+/// Phase 9.5: current Unix timestamp (seconds) — stealth active /
+/// cooldown predicates and relative viewer times compare against this.
+fn now_unix_secs() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
+}
+
 /// Phase C2h: "in 3h" / "in 2d 4h" countdown for a scheduled video
 /// chat — relative only, no timezone math.
 fn format_starts_in(start_date: i64) -> String {
@@ -1779,6 +1788,15 @@ pub struct QuillApp {
     story_reply_open: bool,
     /// Phase 9.2: reply-to-story draft (the viewer overlay's reply row).
     story_reply_input: Entity<TextareaState>,
+    /// Phase 9.5: viewers panel open in the viewer overlay
+    /// (`getStoryInteractions`).
+    story_viewers_open: bool,
+    /// Phase 9.5: report flow UI open in the viewer overlay
+    /// (`reportStory`).
+    story_report_open: bool,
+    /// Phase 9.5: report details draft (the
+    /// `reportStoryResultTextRequired` step).
+    story_report_text_input: Entity<TextareaState>,
     /// Phase 9.3: story posting composer state (pure) + its path /
     /// caption / user-search inputs.
     story_composer: StoryComposer,
@@ -2029,6 +2047,11 @@ pub enum ScreenshotDemo {
     /// `canPostStoryResultOk` so the status line shows "✓ Eligible to
     /// post".
     ReadyStoryComposer,
+    /// Phase 9.5: story viewers list (injected, no live Telegram) — the
+    /// `ReadyStoryPost` fixture plus a seeded `getStoryInteractions`
+    /// response (two viewers, one with a ❤ reaction, one forward) with
+    /// the viewers panel open on the own story.
+    ReadyStoryViewers,
     /// MED3 downloads-manager demo (injected, no live Telegram): the
     /// `ReadyMedia` seed plus an actively downloading document (file 24,
     /// 42% through `notes.txt`), a failed document (file 26, "Retry"
@@ -2490,6 +2513,14 @@ impl QuillApp {
         let story_reply_input = cx.new(|cx| {
             TextareaState::new(window, cx)
                 .placeholder("Reply to story")
+                .auto_grow(1, 3)
+                .submit_on_enter(true)
+        });
+        // Phase 9.5: report details draft — shown when the server answers
+        // `reportStoryResultTextRequired`.
+        let story_report_text_input = cx.new(|cx| {
+            TextareaState::new(window, cx)
+                .placeholder("Report details (optional)")
                 .auto_grow(1, 3)
                 .submit_on_enter(true)
         });
@@ -3260,6 +3291,16 @@ impl QuillApp {
                     AuthorizationState::Ready,
                 )
             }
+            // Phase 9.5: story viewers list (injected, no live Telegram).
+            Some(ScreenshotDemo::ReadyStoryViewers) => {
+                demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
+                (
+                    ConnectUiStatus::DemoReadyChats,
+                    None,
+                    "screenshot demo — story viewers list".into(),
+                    AuthorizationState::Ready,
+                )
+            }
             Some(ScreenshotDemo::ReadySeekBars) => {
                 demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
                 (
@@ -3611,6 +3652,9 @@ impl QuillApp {
             chat_search_input,
             forward_search_input,
             story_reply_input,
+            story_viewers_open: false,
+            story_report_open: false,
+            story_report_text_input,
             story_composer: StoryComposer::default(),
             story_composer_path,
             story_composer_caption,
@@ -4636,6 +4680,18 @@ impl QuillApp {
                 input.set_value("Great photo!", window, cx);
             });
             app.status_note = "screenshot demo — story reactions / reply / delete".into();
+        }
+        if matches!(demo, Some(ScreenshotDemo::ReadyStoryViewers)) {
+            if let Some(session) = app.demo_session.as_mut() {
+                app.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_story_viewers(session, &app.demo_sink, &app.demo_seq);
+            }
+            // Phase 9.5: viewer opens on the seeded own photo story with
+            // the viewers panel open — the fixture injected a real
+            // `storyInteractions` page through the reducer.
+            app.open_story_viewer(ChatId(11), 5, cx);
+            app.story_viewers_open = true;
+            app.status_note = "screenshot demo — story viewers list".into();
         }
         if matches!(demo, Some(ScreenshotDemo::ReadyStoryComposer)) {
             // Phase 9.3: the composer opens with a seeded photo path (the
@@ -10806,6 +10862,9 @@ impl QuillApp {
             return false;
         };
         self.story_viewer = StoryViewer::open(items, index);
+        // Phase 9.5: viewers list and report flow are per-story.
+        self.story_viewers_open = false;
+        self.story_report_open = false;
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.open_story(chat_id, story_id);
         }
@@ -10958,6 +11017,264 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// Phase 9.5: toggle the viewers panel on the current story
+    /// (`getStoryInteractions`, `schema/td_api.tl:13819` — there is no
+    /// `getStoryViewers` constructor). Opening fetches the first page;
+    /// `Load more` pages with the previous `next_offset`.
+    fn toggle_story_viewers(&mut self, cx: &mut Context<Self>) {
+        let Some(item) = self.story_viewer.current().cloned() else {
+            return;
+        };
+        self.story_viewers_open = !self.story_viewers_open;
+        self.story_report_open = false;
+        if self.story_viewers_open {
+            // Phase 9.5 review: reset rows before the fresh page-1
+            // fetch — `begin_story_viewers` keeps rows for the same
+            // story, so reopening would otherwise duplicate them.
+            if let Some(live) = self.live.as_mut() {
+                live.driver.session.clear_story_viewers();
+            }
+            self.fetch_story_viewers(&item, "", cx);
+        }
+        cx.notify();
+    }
+
+    fn fetch_story_viewers(
+        &mut self,
+        item: &StoryViewerItem,
+        offset: &str,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(live) = self.live.as_mut() {
+            live.driver
+                .session
+                .begin_story_viewers(item.chat_id.0, item.story_id);
+            if live
+                .driver
+                .get_story_interactions(item.chat_id, item.story_id, offset)
+                .is_err()
+            {
+                self.status_note = "could not load story viewers".into();
+            }
+        } else if self.demo_session.is_some() {
+            // Demo seeds the panel state directly (see the
+            // `ReadyStoryViewers` demo); a live fetch says so honestly.
+            self.status_note = "demo — story viewers run with live TDLib".into();
+        }
+        cx.notify();
+    }
+
+    /// Phase 9.5: fetch the next viewers page (`next_offset` non-empty).
+    fn load_more_story_viewers(&mut self, cx: &mut Context<Self>) {
+        let Some(item) = self.story_viewer.current().cloned() else {
+            return;
+        };
+        let offset = self
+            .session()
+            .and_then(|session| session.story_viewers.as_ref())
+            .map(|state| state.next_offset.clone())
+            .unwrap_or_default();
+        if offset.is_empty() {
+            return;
+        }
+        self.fetch_story_viewers(&item, &offset, cx);
+    }
+
+    /// Phase 9.5: resolve a viewers-list actor to a display name —
+    /// cached user / chat names, falling back to the raw id (the panel
+    /// never invents a name).
+    fn story_viewer_actor_name(&self, actor: &MessageSender) -> String {
+        match actor {
+            MessageSender::User { user_id } => self
+                .session()
+                .and_then(|session| session.users.get(user_id))
+                .map(|user| user.display_name())
+                .unwrap_or_else(|| format!("User {user_id}")),
+            MessageSender::Chat { chat_id } => self
+                .session()
+                .and_then(|session| session.chats.get(chat_id))
+                .map(|chat| chat.title.clone())
+                .unwrap_or_else(|| format!("Chat {chat_id}")),
+        }
+    }
+
+    /// Phase 9.5: open the report flow on the current story — the
+    /// initial `reportStory` (empty option id / text); the server's
+    /// `ReportStoryResult` answers drive the picker and details steps.
+    fn toggle_story_report(&mut self, cx: &mut Context<Self>) {
+        let Some(item) = self.story_viewer.current().cloned() else {
+            return;
+        };
+        self.story_report_open = !self.story_report_open;
+        self.story_viewers_open = false;
+        if self.story_report_open {
+            self.send_story_report_step(&item, "", "", cx);
+        } else {
+            self.clear_terminal_story_report();
+        }
+        cx.notify();
+    }
+
+    /// Phase 9.5: drop a terminal (`Reported`/`Failed`) report flow when
+    /// its panel closes, so reopening starts a fresh `reportStory`
+    /// instead of silently re-sending the initial request. A failed
+    /// flow still retries: reopening begins a new flow and re-sends the
+    /// initial request.
+    fn clear_terminal_story_report(&mut self) {
+        let terminal = self
+            .session()
+            .and_then(|session| session.story_report.as_ref())
+            .is_some_and(|flow| {
+                matches!(
+                    flow.stage,
+                    StoryReportStage::Reported | StoryReportStage::Failed(_)
+                )
+            });
+        if !terminal {
+            return;
+        }
+        if let Some(live) = self.live.as_mut() {
+            live.driver.session.clear_story_report();
+        } else if let Some(session) = self.demo_session.as_mut() {
+            session.clear_story_report();
+        }
+    }
+
+    fn send_story_report_step(
+        &mut self,
+        item: &StoryViewerItem,
+        option_id: &str,
+        text: &str,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(live) = self.live.as_mut() {
+            if live
+                .driver
+                .session
+                .story_report
+                .as_ref()
+                .is_none_or(|flow| flow.story_id != item.story_id)
+            {
+                live.driver
+                    .session
+                    .begin_story_report(item.chat_id.0, item.story_id);
+            } else {
+                live.driver
+                    .session
+                    .story_report_sending(item.chat_id.0, item.story_id);
+            }
+            self.status_note =
+                match live
+                    .driver
+                    .report_story(item.chat_id, item.story_id, option_id, text)
+                {
+                    Ok(_) => "Reporting story…".into(),
+                    Err(_) => {
+                        // Phase 9.5 review: the driver took the pending
+                        // request back, so no answer will ever arrive —
+                        // end the flow here instead of spinning forever.
+                        live.driver.session.fail_story_report_send(
+                            item.chat_id.0,
+                            item.story_id,
+                            "could not report story".into(),
+                        );
+                        "could not report story".into()
+                    }
+                };
+        } else if self.demo_session.is_some() {
+            self.status_note = "demo — story reports run with live TDLib".into();
+        }
+        cx.notify();
+    }
+
+    /// Phase 9.5: the user picked a report reason — echo the option id
+    /// back into `reportStory` with empty text.
+    fn pick_story_report_option(&mut self, option_id: &str, cx: &mut Context<Self>) {
+        let Some(item) = self.story_viewer.current().cloned() else {
+            return;
+        };
+        self.send_story_report_step(&item, option_id, "", cx);
+    }
+
+    /// Phase 9.5: submit the details text (`reportStoryResultTextRequired`
+    /// step); an optional step can be skipped with empty text.
+    fn send_story_report_text(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(item) = self.story_viewer.current().cloned() else {
+            return;
+        };
+        let (option_id, is_optional) = self
+            .session()
+            .and_then(|session| session.story_report.as_ref())
+            .and_then(|flow| match &flow.stage {
+                StoryReportStage::TextRequired {
+                    option_id,
+                    is_optional,
+                } => Some((option_id.clone(), *is_optional)),
+                _ => None,
+            })
+            .unwrap_or_default();
+        if option_id.is_empty() && !is_optional {
+            return;
+        }
+        let text = self.story_report_text_input.read(cx).value().to_string();
+        if text.trim().is_empty() && !is_optional {
+            self.status_note = "add details or cancel the report".into();
+            cx.notify();
+            return;
+        }
+        self.send_story_report_step(&item, &option_id, text.trim(), cx);
+        self.story_report_text_input
+            .update(cx, |input, cx| input.set_value("", window, cx));
+    }
+
+    /// Phase 9.5: stealth-mode toggle. The button reflects
+    /// `Session::story_stealth` (from `updateStoryStealthMode` — the
+    /// schema exposes no getter, so the button is honest about only
+    /// knowing pushed state): active → informational; cooling down →
+    /// disabled; otherwise sends `activateStoryStealthMode`.
+    fn toggle_story_stealth(&mut self, cx: &mut Context<Self>) {
+        let now = now_unix_secs();
+        let stealth = self
+            .session()
+            .map(|session| session.story_stealth)
+            .unwrap_or_default();
+        if stealth.is_active(now) {
+            self.status_note = "Stealth mode is active — your story views are hidden".into();
+            cx.notify();
+            return;
+        }
+        if stealth.is_cooling_down(now) {
+            self.status_note = "Stealth mode is cooling down — try again later".into();
+            cx.notify();
+            return;
+        }
+        if let Some(live) = self.live.as_mut() {
+            self.status_note = match live.driver.activate_story_stealth_mode() {
+                Ok(_) => "Enabling stealth mode…".into(),
+                Err(_) => "could not enable stealth mode".into(),
+            };
+        } else if self.demo_session.is_some() {
+            self.status_note = "demo — stealth mode needs live TDLib".into();
+        }
+        cx.notify();
+    }
+
+    /// Phase 9.5: stealth button label for the action row.
+    fn story_stealth_label(&self) -> &'static str {
+        let now = now_unix_secs();
+        let stealth = self
+            .session()
+            .map(|session| session.story_stealth)
+            .unwrap_or_default();
+        if stealth.is_active(now) {
+            "Stealth on"
+        } else if stealth.is_cooling_down(now) {
+            "Stealth cooling down"
+        } else {
+            "Stealth"
+        }
+    }
+
     /// Phase 9.1: close the story viewer; `closeStory` marks the current
     /// story as no longer being viewed.
     fn close_story_viewer(&mut self, cx: &mut Context<Self>) {
@@ -10970,6 +11287,9 @@ impl QuillApp {
         self.pending_story_open = None;
         self.story_reaction_picker_open = false;
         self.story_reply_open = false;
+        self.story_viewers_open = false;
+        self.story_report_open = false;
+        self.clear_terminal_story_report();
         cx.notify();
     }
 
@@ -30384,6 +30704,8 @@ impl QuillApp {
     /// visual, plus the reaction picker popover and the reply input row.
     /// The quick-react toggles ❤; Reply is gated on
     /// `story.can_be_replied`; Delete on `story.can_be_deleted`.
+    /// Phase 9.5: Viewers (own stories, `can_get_interactions`), Report
+    /// (other people's stories) and the Stealth toggle join the row.
     fn story_action_row(&self, cx: &mut Context<Self>) -> AnyElement {
         let story = self.current_story();
         let chosen = story
@@ -30396,7 +30718,13 @@ impl QuillApp {
         } else {
             "❤️"
         };
-        let mut row = div().flex().gap_2().items_center().justify_center();
+        let mut row = div()
+            .flex()
+            .flex_row()
+            .flex_wrap()
+            .gap_2()
+            .items_center()
+            .justify_center();
         row = row.child(
             Button::new("story-quick-react")
                 .label(quick_label)
@@ -30437,6 +30765,46 @@ impl QuillApp {
                     })),
             );
         }
+        // Phase 9.5: Viewers on own stories (`can_get_interactions` —
+        // `getStoryInteractions` only serves stories posted on behalf of
+        // the current user); Report on other people's stories.
+        let can_get_interactions = story
+            .as_ref()
+            .is_some_and(|story| story.can_get_interactions);
+        if can_get_interactions {
+            row = row.child(
+                Button::new("story-viewers")
+                    .label("Viewers")
+                    .ghost()
+                    .text_color(rgb(0xffffff))
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.toggle_story_viewers(cx);
+                    })),
+            );
+        }
+        if !can_delete {
+            row = row.child(
+                Button::new("story-report")
+                    .label("Report")
+                    .ghost()
+                    .text_color(rgb(0xffffff))
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.toggle_story_report(cx);
+                    })),
+            );
+        }
+        // Phase 9.5: stealth toggle — the label reflects
+        // `updateStoryStealthMode` state.
+        let stealth_label = self.story_stealth_label();
+        row = row.child(
+            Button::new("story-stealth")
+                .label(stealth_label)
+                .ghost()
+                .text_color(rgb(0xffffff))
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.toggle_story_stealth(cx);
+                })),
+        );
         let mut column = div().flex().flex_col().gap_2().items_center().child(row);
         if self.story_reaction_picker_open {
             column = column.child(self.story_reaction_picker(cx));
@@ -30461,7 +30829,223 @@ impl QuillApp {
                         )),
                 );
         }
+        if self.story_viewers_open {
+            column = column.child(self.story_viewers_panel(cx));
+        }
+        if self.story_report_open {
+            column = column.child(self.story_report_ui(cx));
+        }
+        if let Some(stealth_err) = self
+            .session()
+            .and_then(|session| session.story_stealth_error.clone())
+        {
+            column = column.child(div().text_sm().text_color(rgb(0xf85149)).child(stealth_err));
+        }
         column.into_any_element()
+    }
+
+    /// Phase 9.5: the viewers panel — one row per interaction (actor
+    /// name, relative time, reaction emoji or Forwarded/Reposted), a
+    /// count header, "Load more" while `next_offset` is non-empty, and
+    /// the loading / error / empty states.
+    fn story_viewers_panel(&self, cx: &mut Context<Self>) -> AnyElement {
+        let state = self.session().and_then(|s| s.story_viewers.clone());
+        let mut panel = div()
+            .id("story-viewers-panel")
+            .flex()
+            .flex_col()
+            .gap_1()
+            .max_w(px(360.))
+            .max_h(px(260.))
+            .overflow_y_scroll()
+            .p_2()
+            .rounded_md()
+            .bg(rgb(0x161b22))
+            .border_1()
+            .border_color(rgb(0x30363d));
+        let Some(state) = state else {
+            return panel
+                .child(
+                    div()
+                        .text_sm()
+                        .text_color(rgb(0x8b949e))
+                        .child("No viewers yet"),
+                )
+                .into_any_element();
+        };
+        panel = panel.child(
+            div()
+                .text_sm()
+                .font_medium()
+                .text_color(rgb(0xe6edf3))
+                .child(format!(
+                    "{} viewer{}",
+                    state.total_count,
+                    if state.total_count == 1 { "" } else { "s" }
+                )),
+        );
+        for viewer in &state.rows {
+            let name = self.story_viewer_actor_name(&viewer.actor);
+            // Row suffix: the chosen reaction, or the interaction kind
+            // ("viewed" / "forwarded" / "reposted"), plus relative time.
+            let detail = format!(
+                "{} · {}",
+                viewer.kind_label(),
+                event_log_relative_time(viewer.interaction_date)
+            );
+            panel = panel.child(
+                div()
+                    .flex()
+                    .gap_2()
+                    .items_center()
+                    .child(initials_avatar(&name, 28.))
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .child(div().text_sm().text_color(rgb(0xe6edf3)).child(name))
+                            .child(div().text_xs().text_color(rgb(0x8b949e)).child(detail)),
+                    ),
+            );
+        }
+        if let Some(error) = state.error.clone() {
+            panel = panel.child(div().text_sm().text_color(rgb(0xf85149)).child(error));
+        }
+        if state.loading {
+            panel = panel.child(
+                div()
+                    .text_sm()
+                    .text_color(rgb(0x8b949e))
+                    .child("Loading viewers…"),
+            );
+        } else if !state.next_offset.is_empty() {
+            panel = panel.child(
+                Button::new("story-viewers-load-more")
+                    .label("Load more")
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.load_more_story_viewers(cx);
+                    })),
+            );
+        } else if state.rows.is_empty() && !state.loading {
+            panel = panel.child(
+                div()
+                    .text_sm()
+                    .text_color(rgb(0x8b949e))
+                    .child("No one has viewed this story yet"),
+            );
+        }
+        panel.into_any_element()
+    }
+
+    /// Phase 9.5: the report flow UI. Mirrors the `StoryReportStage`
+    /// states: Checking/Sending (spinner text), the server-provided
+    /// option picker, the details field, Reported / Failed.
+    fn story_report_ui(&self, cx: &mut Context<Self>) -> AnyElement {
+        let flow = self.session().and_then(|s| s.story_report.clone());
+        let mut panel = div()
+            .id("story-report-panel")
+            .flex()
+            .flex_col()
+            .gap_2()
+            .max_w(px(360.))
+            .p_2()
+            .rounded_md()
+            .bg(rgb(0x161b22))
+            .border_1()
+            .border_color(rgb(0x30363d));
+        let Some(flow) = flow else {
+            return panel
+                .child(div().text_sm().text_color(rgb(0x8b949e)).child("Starting…"))
+                .into_any_element();
+        };
+        match flow.stage {
+            StoryReportStage::Checking | StoryReportStage::Sending => {
+                panel = panel.child(
+                    div()
+                        .text_sm()
+                        .text_color(rgb(0x8b949e))
+                        .child("Reporting story…"),
+                );
+            }
+            StoryReportStage::PickOption {
+                ref title,
+                ref options,
+            } => {
+                panel = panel.child(
+                    div()
+                        .text_sm()
+                        .font_medium()
+                        .text_color(rgb(0xe6edf3))
+                        .child(title.clone()),
+                );
+                for option in options {
+                    let option_id = option.id.clone();
+                    panel = panel.child(
+                        Button::new(format!("story-report-option-{}", option.id))
+                            .label(option.text.clone())
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.pick_story_report_option(&option_id, cx);
+                            })),
+                    );
+                }
+            }
+            StoryReportStage::TextRequired {
+                ref option_id,
+                is_optional,
+            } => {
+                let option_id = option_id.clone();
+                panel = panel.child(div().text_sm().text_color(rgb(0x8b949e)).child(
+                    if is_optional {
+                        "Add details (optional)".to_string()
+                    } else {
+                        "Add details".to_string()
+                    },
+                ));
+                panel = panel.child(
+                    div()
+                        .flex()
+                        .gap_2()
+                        .items_center()
+                        .child(
+                            div()
+                                .flex_1()
+                                .child(Textarea::new(&self.story_report_text_input).h(px(40.))),
+                        )
+                        .child(Button::new("story-report-send").label("Send").on_click(
+                            cx.listener(|this, _, window, cx| {
+                                this.send_story_report_text(window, cx);
+                            }),
+                        )),
+                );
+                if is_optional {
+                    panel = panel.child(Button::new("story-report-skip").label("Skip").on_click(
+                        cx.listener(move |this, _, _, cx| {
+                            let Some(item) = this.story_viewer.current().cloned() else {
+                                return;
+                            };
+                            this.send_story_report_step(&item, &option_id, "", cx);
+                        }),
+                    ));
+                }
+            }
+            StoryReportStage::Reported => {
+                panel = panel.child(
+                    div()
+                        .text_sm()
+                        .text_color(rgb(0x3fb950))
+                        .child("Story reported"),
+                );
+            }
+            StoryReportStage::Failed(ref error) => {
+                panel = panel.child(
+                    div()
+                        .text_sm()
+                        .text_color(rgb(0xf85149))
+                        .child(error.clone()),
+                );
+            }
+        }
+        panel.into_any_element()
     }
 
     /// Phase 9.1: fullscreen story overlay, modeled on
@@ -35291,6 +35875,42 @@ fn apply_ready_dice(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU
         if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
             session.apply(owned);
         }
+    }
+}
+
+/// `ReadyStoryViewers` fixture (Phase 9.5): the `ReadyStoryPost` seed
+/// (own photo story 5 in chat 11, `can_get_interactions`), two demo
+/// users, and a `storyInteractions` page injected through the real
+/// reducer path — a registered `GetStoryInteractions` pending request
+/// answered with the JSON — so the viewers panel renders exactly as it
+/// would live: one ❤ view 5 minutes ago, one forward 2 hours ago.
+fn apply_ready_story_viewers(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
+    apply_ready_story_post(session, sink, seq);
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let user = |id: i64, first: &str, last: &str| -> String {
+        format!(
+            r#"{{"@type":"updateUser","user":{{"@type":"user","id":{id},"first_name":"{first}","last_name":"{last}","usernames":null,"phone_number":"","status":null,"profile_photo":null,"is_contact":false,"is_mutual_contact":false,"is_close_friend":false,"is_verified":false,"is_premium":false,"is_support":false,"restriction_reason":"","is_scam":false,"is_fake":false,"is_bot":false,"type":{{"@type":"userTypeRegular"}}}}}}"#
+        )
+    };
+    for json in [user(7001, "Dana", "Levi"), user(7002, "Omar", "Haddad")] {
+        if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
+            session.apply(owned);
+        }
+    }
+    // Register the pending fetch the way the driver does, then answer
+    // it — the purpose-gated reducer only honors the page for the
+    // viewer's own request.
+    session.begin_story_viewers(11, 5);
+    let extra = session.request_for_story(RequestPurpose::GetStoryInteractions, ChatId(11), 5);
+    let now = now_unix_secs() as i32;
+    let interactions = format!(
+        r#"{{"@type":"storyInteractions","@extra":"{}","total_count":2,"total_forward_count":1,"total_reaction_count":1,"next_offset":"","interactions":[{{"@type":"storyInteraction","actor_id":{{"@type":"messageSenderUser","user_id":7001}},"interaction_date":{},"block_list":null,"type":{{"@type":"storyInteractionTypeView","chosen_reaction_type":{{"@type":"reactionTypeEmoji","emoji":"❤"}}}}}},{{"@type":"storyInteraction","actor_id":{{"@type":"messageSenderUser","user_id":7002}},"interaction_date":{},"block_list":null,"type":{{"@type":"storyInteractionTypeForward"}}}}]}}"#,
+        extra.0,
+        now - 300,
+        now - 7200,
+    );
+    if let Some(owned) = copy_and_parse(&interactions, seq, &dyn_sink) {
+        session.apply(owned);
     }
 }
 
