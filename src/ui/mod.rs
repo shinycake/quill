@@ -18602,8 +18602,7 @@ impl QuillApp {
         // E2E verification emojis, straight from `callStateReady`
         // (:7068) — same rendering as the group-call card. Hidden
         // until TDLib sends the 4-emoji fingerprint.
-        if matches!(call.state, CallState::Ready)
-            && let Some(ready) = &call.ready
+        if let Some(ready) = &call.ready
             && !ready.emojis.is_empty()
         {
             card = card.child(
