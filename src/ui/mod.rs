@@ -6268,8 +6268,7 @@ impl QuillApp {
     }
 
     /// Slice CL: the long-press delay before the peek preview opens
-    /// (TGX `ChatPreviewAnimator` uses ~500 ms on mobile; 600 ms here
-    /// keeps quick taps unmistakably clicks).
+    /// (600 ms keeps quick taps unmistakably clicks).
     const CHAT_PREVIEW_LONG_PRESS: Duration = Duration::from_millis(600);
 
     /// Slice CL: start a long press on a chat-list row — after
@@ -6468,15 +6467,21 @@ impl QuillApp {
             .on_mouse_down(MouseButton::Left, |_, _, cx| {
                 cx.stop_propagation();
             })
+            // Same for right-clicks: don't let the rows' context menu
+            // open behind the preview.
+            .on_mouse_down(MouseButton::Right, |_, _, cx| {
+                cx.stop_propagation();
+            })
             .on_mouse_up(
                 MouseButton::Left,
                 cx.listener(move |this, _, _, cx| {
                     this.close_chat_preview(cx);
+                    // Consume the release that ends the long press: the
+                    // row's `pending_mouse_down` is still armed, and
+                    // without this the release would open the chat.
+                    cx.stop_propagation();
                 }),
             )
-            .on_click(cx.listener(move |this, _, _, cx| {
-                this.close_chat_preview(cx);
-            }))
             .child(
                 div()
                     .absolute()
@@ -37348,9 +37353,8 @@ fn session_chat_row(
             }),
         )
         // Slice CL: long-press (press-and-hold) peeks at the chat's
-        // recent messages without opening it (TGX `ChatPreviewAnimator`
-        // on mobile; tdesktop shows the same preview on hover). A quick
-        // release is still a plain click.
+        // recent messages without opening it (tdesktop shows the same
+        // preview on hover). A quick release is still a plain click.
         .on_mouse_down(
             MouseButton::Left,
             cx.listener(move |this, event: &MouseDownEvent, _, cx| {
