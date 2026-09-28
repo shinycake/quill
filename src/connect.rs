@@ -26,10 +26,10 @@ use crate::settings::{
 };
 use crate::state::{
     AdminListFetch, AdminRightsFetch, CHAT_EVENT_LOG_PAGE_SIZE, ChatEventLogFetch,
-    ChatSearchJumpNeed, ChatStatisticsFetch, ForwardFlight, InfoPanelTarget, InstantViewPage,
-    InviteLinkFetch, JoinRequestFetch, LoginUrlRequest, MemberListFilter, MemberStatusChange,
-    PasswordOp, RequestPurpose, RequestRollback, SearchStatus, Session, ShutdownPhase,
-    SupergroupMembersFetch, WelcomeMessagesFetch,
+    ChatSearchJumpNeed, ChatStatisticsFetch, ComposerLinkPreview, ForwardFlight, InfoPanelTarget,
+    InstantViewPage, InviteLinkFetch, JoinRequestFetch, LoginUrlRequest, MemberListFilter,
+    MemberStatusChange, PasswordOp, RequestPurpose, RequestRollback, SearchStatus, Session,
+    ShutdownPhase, SupergroupMembersFetch, WelcomeMessagesFetch,
 };
 use crate::story_composer::{StoryMediaKind, StoryPrivacy};
 use crate::telegram::client::{LiveTdJson, OwnedEnvelope, ReceiveBridge};
@@ -69,16 +69,17 @@ use crate::telegram::requests::{
     get_chat_invite_links, get_chat_join_requests, get_chat_lists_to_add_chat, get_chat_member,
     get_chat_scheduled_messages, get_chat_sponsored_messages, get_chat_statistics, get_commands,
     get_contacts, get_forum_topics, get_full_rich_message, get_group_call,
-    get_installed_sticker_sets, get_login_url, get_login_url_info, get_me, get_message_link,
-    get_message_properties, get_message_thread_history, get_password_state, get_saved_animations,
-    get_saved_notification_sounds, get_scope_notification_settings, get_secret_chat,
-    get_sticker_set, get_storage_statistics, get_story, get_story_available_reactions,
-    get_supergroup, get_supergroup_full_info, get_supergroup_members, get_user_full_info,
-    get_user_privacy_setting_rules, get_video_chat_invite_link, get_video_chat_rtmp_url,
-    get_web_page_instant_view, input_message_photo, input_message_video,
-    invite_group_call_participant, join_chat, join_group_call, join_video_chat, leave_chat,
-    leave_group_call, load_active_stories, load_chat_welcome_messages, load_chats, load_chats_list,
-    load_group_call_participants, open_chat, open_message_content, open_story, pin_chat_message,
+    get_installed_sticker_sets, get_link_preview, get_login_url, get_login_url_info, get_me,
+    get_message_link, get_message_properties, get_message_thread_history, get_password_state,
+    get_saved_animations, get_saved_notification_sounds, get_scope_notification_settings,
+    get_secret_chat, get_sticker_set, get_storage_statistics, get_story,
+    get_story_available_reactions, get_supergroup, get_supergroup_full_info,
+    get_supergroup_members, get_user_full_info, get_user_privacy_setting_rules,
+    get_video_chat_invite_link, get_video_chat_rtmp_url, get_web_page_instant_view,
+    input_message_photo, input_message_video, invite_group_call_participant, join_chat,
+    join_group_call, join_video_chat, leave_chat, leave_group_call, load_active_stories,
+    load_chat_welcome_messages, load_chats, load_chats_list, load_group_call_participants,
+    open_chat, open_message_content, open_story, pin_chat_message,
     post_story as post_story_request, process_chat_join_request, read_chat_list, recognize_speech,
     remove_message_reaction, reorder_chat_folders, replace_primary_chat_invite_link,
     replace_video_chat_rtmp_url, report_chat, report_chat_sponsored_message,
@@ -985,6 +986,40 @@ impl<S: JsonSender> ConnectDriver<S> {
             }),
             _ => None,
         };
+        // MED4b: capture the `getLinkPreview` answer before `apply` takes
+        // the pending request; the composer chip reads
+        // `Session::composer_preview`. A late answer for a superseded URL
+        // is dropped (the chip only cares about the latest request).
+        let link_preview_answer: Option<ComposerLinkPreview> = match &owned.envelope.payload {
+            EnvelopePayload::LinkPreview { preview } => owned
+                .envelope
+                .extra
+                .and_then(|id| {
+                    (self.session.requests.purpose(id) == Some(RequestPurpose::GetLinkPreview))
+                        .then_some(id)
+                })
+                .and_then(|id| {
+                    self.session
+                        .composer_preview_urls
+                        .remove(&id)
+                        .map(|url| ComposerLinkPreview {
+                            url,
+                            preview: Some(preview.clone()),
+                        })
+                }),
+            _ => None,
+        };
+        // MED4b: a failed `getLinkPreview` (TDLib 404 = no preview for
+        // this URL) is "no link info" (TGX `LinkPreview.isNotFound`) —
+        // never a card, never a crash.
+        let link_preview_failed: Option<String> = match &owned.envelope.payload {
+            EnvelopePayload::Error(_) => owned.envelope.extra.and_then(|id| {
+                (self.session.requests.purpose(id) == Some(RequestPurpose::GetLinkPreview))
+                    .then_some(id)
+                    .and_then(|id| self.session.composer_preview_urls.remove(&id))
+            }),
+            _ => None,
+        };
         // Slice CL2: our `createPrivateChat` answer — the bare `chat`
         // parses as `UpdateNewChat`; the `@extra` tells it apart from a
         // genuine `updateNewChat`. Captured before `apply` takes the
@@ -1118,6 +1153,27 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         if let Some(url) = instant_view_fallback {
             self.session.instant_view_fallback_url = Some(url);
+        }
+        // MED4b: stash the `getLinkPreview` answer for the composer
+        // chip; a 404 becomes "no link info" (`Some(None)`); answers for
+        // superseded URLs are dropped.
+        if let Some(answer) = link_preview_answer {
+            let current = self.session.composer_preview.as_ref();
+            if current.is_none_or(|p| p.url == answer.url) {
+                self.session.composer_preview = Some(answer);
+            }
+        }
+        if let Some(url) = link_preview_failed
+            && self
+                .session
+                .composer_preview
+                .as_ref()
+                .is_some_and(|p| p.url == url && p.preview.is_none())
+        {
+            self.session.composer_preview = Some(ComposerLinkPreview {
+                url,
+                preview: Some(None),
+            });
         }
         // M1 fix-up: "Share link" gate — chain to `getMessageLink` only
         // when `messageProperties.can_get_link` passed; otherwise tell
@@ -9543,6 +9599,34 @@ impl<S: JsonSender> ConnectDriver<S> {
             }
         }
     }
+
+    /// MED4b: `getLinkPreview` prefetch for the composer chip (TGX
+    /// `LinkPreview.loadLinkPreview`: `GetLinkPreview(FormattedText(url),
+    /// null)`). The UI debounces (schema: "Do not call this function too
+    /// often"); the answer (or 404) lands in
+    /// `Session::composer_preview` for the chip.
+    pub fn request_composer_link_preview(&mut self, url: &str) -> Result<(), ConnectSendError> {
+        let extra = self.session.request(RequestPurpose::GetLinkPreview, None);
+        let json = get_link_preview(extra, url);
+        match self.sender.send_json(&json) {
+            Ok(()) => {
+                self.session
+                    .composer_preview_urls
+                    .insert(extra, url.to_string());
+                // Loading state — the chip shows "Getting link info…"
+                // (TGX `LinkPreview.isLoading`).
+                self.session.composer_preview = Some(ComposerLinkPreview {
+                    url: url.to_string(),
+                    preview: None,
+                });
+                Ok(())
+            }
+            Err(err) => {
+                self.session.requests.take(extra);
+                Err(err)
+            }
+        }
+    }
     pub fn delete_scheduled_message(
         &mut self,
         chat_id: ChatId,
@@ -16036,6 +16120,104 @@ mod tests {
             driver.session.instant_view_fallback_url.as_deref(),
             Some("https://example.com/noiv")
         );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn driver_link_preview_prefetch_ingest() {
+        // MED4b: a `linkPreview` answer for a tracked `GetLinkPreview`
+        // request populates `session.composer_preview` (the chip reads
+        // it); a 404 becomes "no link info" (`Some(None)`), never a
+        // card. The URL rides `composer_preview_urls`, keyed by id.
+        use crate::telegram::client::copy_and_parse;
+
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = Arc::new(RecordingSender::new());
+        let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+        let mut driver =
+            ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+        let seq = AtomicU64::new(0);
+        seed_ready_alice(&mut driver, &seq, &dyn_sink);
+
+        // Register a request like `request_composer_link_preview` does.
+        let extra = driver.session.request(RequestPurpose::GetLinkPreview, None);
+        driver
+            .session
+            .composer_preview_urls
+            .insert(extra, "https://example.com/story".to_string());
+        driver.session.composer_preview = Some(ComposerLinkPreview {
+            url: "https://example.com/story".to_string(),
+            preview: None,
+        });
+
+        let json = format!(
+            r#"{{"@type":"linkPreview","url":"https://example.com/story","display_url":"example.com","site_name":"Example","title":"A short story","description":{{"@type":"formattedText","text":"Preview body","entities":[]}},"author":"","type":{{"@type":"linkPreviewTypeArticle"}},"has_large_media":true,"show_large_media":false,"show_media_above_description":false,"skip_confirmation":true,"show_above_text":false,"instant_view_version":0,"@extra":"{id}"}}"#,
+            id = extra.0,
+        );
+        let owned = copy_and_parse(&json, &seq, &dyn_sink).expect("parse preview");
+        driver.ingest(owned).expect("ingest preview");
+        let stored = driver
+            .session
+            .composer_preview
+            .as_ref()
+            .expect("preview stored");
+        assert_eq!(stored.url, "https://example.com/story");
+        let preview = stored
+            .preview
+            .as_ref()
+            .expect("loaded")
+            .as_ref()
+            .expect("card");
+        assert_eq!(preview.title, "A short story");
+        assert_eq!(preview.description, "Preview body");
+        assert!(preview.has_large_media);
+        assert!(!preview.show_large_media);
+
+        // A superseded URL's late answer must not clobber the chip.
+        let stale = driver.session.request(RequestPurpose::GetLinkPreview, None);
+        driver
+            .session
+            .composer_preview_urls
+            .insert(stale, "https://example.com/old".to_string());
+        let json = format!(
+            r#"{{"@type":"linkPreview","url":"https://example.com/old","display_url":"example.com","site_name":"","title":"Old","description":{{"@type":"formattedText","text":"","entities":[]}},"author":"","type":{{"@type":"linkPreviewTypeArticle"}},"has_large_media":false,"show_large_media":false,"show_media_above_description":false,"skip_confirmation":false,"show_above_text":false,"instant_view_version":0,"@extra":"{id}"}}"#,
+            id = stale.0,
+        );
+        let owned = copy_and_parse(&json, &seq, &dyn_sink).expect("parse stale");
+        driver.ingest(owned).expect("ingest stale");
+        let stored = driver
+            .session
+            .composer_preview
+            .as_ref()
+            .expect("preview kept");
+        assert_eq!(stored.url, "https://example.com/story");
+
+        // 404 for the current URL → "no link info", never a card.
+        let miss = driver.session.request(RequestPurpose::GetLinkPreview, None);
+        driver
+            .session
+            .composer_preview_urls
+            .insert(miss, "https://example.com/story".to_string());
+        driver.session.composer_preview = Some(ComposerLinkPreview {
+            url: "https://example.com/story".to_string(),
+            preview: None,
+        });
+        let json = format!(
+            r#"{{"@type":"error","code":404,"message":"Not Found","@extra":"{id}"}}"#,
+            id = miss.0,
+        );
+        let owned = copy_and_parse(&json, &seq, &dyn_sink).expect("parse 404");
+        driver.ingest(owned).expect("ingest 404");
+        let stored = driver
+            .session
+            .composer_preview
+            .as_ref()
+            .expect("state kept");
+        assert_eq!(stored.url, "https://example.com/story");
+        assert!(stored.preview.as_ref().expect("resolved").is_none());
         let _ = std::fs::remove_dir_all(&dir);
     }
 

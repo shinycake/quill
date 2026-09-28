@@ -451,11 +451,59 @@ pub struct SendOptions {
     /// `linkPreviewOptions.is_disabled` — the composer preview toggle.
     /// Secret chats force this on the driver side regardless.
     pub link_preview_disabled: bool,
+    /// MED4b: `linkPreviewOptions.show_above_text` (TDLib 1.8.67,
+    /// `schema/td_api.tl:2236`) — preview above the message text instead
+    /// of below. Ignored in secret chats.
+    pub link_preview_above_text: bool,
+    /// MED4b: `linkPreviewOptions.force_small_media` /
+    /// `force_large_media` (TDLib 1.8.67, `schema/td_api.tl:2234-2235`) —
+    /// TGX's large/small toggle cycles these. Ignored in secret chats or
+    /// when the URL isn't explicitly specified (the send path sets `url`
+    /// whenever this isn't `Auto`).
+    pub link_preview_media: PreviewMediaSize,
     /// M1 fix-up: the driver sets this when the target chat is a secret
     /// chat. `textEntityTypeBlockQuote` is not supported in secret chats
     /// (schema 1.8.67), so `send_text` strips blockquote entities instead
     /// of letting TDLib drop them.
     pub is_secret: bool,
+}
+
+/// MED4b: media-size half of `linkPreviewOptions` (TDLib 1.8.67,
+/// `schema/td_api.tl:2234-2235`). Two bools on the wire but at most one
+/// may be set — the enum makes the invalid both-true state
+/// unrepresentable. TGX (`MessagesController.onRequestToggleLargeMedia`
+/// → `LinkPreview.toggleLargeMedia`) flips these relative to the
+/// preview's current effective size.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PreviewMediaSize {
+    /// No force flags — TDLib uses the preview's own default.
+    #[default]
+    Auto,
+    /// `force_small_media: true`.
+    ForceSmall,
+    /// `force_large_media: true`.
+    ForceLarge,
+}
+
+impl PreviewMediaSize {
+    /// TGX toggle semantics: flip relative to the currently effective
+    /// size; never returns to `Auto`.
+    pub fn toggle(self, effective_large: bool) -> Self {
+        if effective_large {
+            Self::ForceSmall
+        } else {
+            Self::ForceLarge
+        }
+    }
+
+    /// Currently effective size given the preview's server default.
+    pub fn effective_large(self, preview_show_large_media: bool) -> bool {
+        match self {
+            Self::Auto => preview_show_large_media,
+            Self::ForceSmall => false,
+            Self::ForceLarge => true,
+        }
+    }
 }
 
 /// M1: `MessageSchedulingState` for a send (TDLib 1.8.67,

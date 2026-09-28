@@ -4364,6 +4364,31 @@ greps.
   - `RequestPurpose::GetWebPageInstantView` is a unit variant (not carrying the URL) to preserve the enum's `Copy`; URL correlation uses `Session::instant_view_urls: HashMap<RequestId, String>`.
 - **Not verifiable without live Telegram:** `getWebPageInstantView` round-trip (success page blocks, 404 → browser fallback); `message_caption_length_max` arriving via `updateOption` (default 1024 assumed until the option arrives); the exact TDLib caption-counting unit (chars vs UTF-16 code units); `instant_view_version > 0` on real cards.
 - **Out of this slice:** compose-time `getLinkPreview` prefetch with debounce/cache/pending/error card; `linkPreviewOptions.force_small_media` / `force_large_media` / `show_above_text` / URL selection; inline embedded-player playback; shared-media gallery + empty states (chat-info/profile work, README boxes `media-shared-gallery`, `media-shared-gallery-empty` stay unchecked).
+
+## Slice MED4b — LINK PREVIEW SEND OPTIONS (2026-09-28)
+
+Completes README `parity:media-link-preview-send-options` (MED4 left it partial: disable toggle + detected-URL chip only).
+
+- **Schema (pinned TDLib 1.8.67, `schema/td_api.tl`, verified verbatim):**
+  - `linkPreviewOptions is_disabled:Bool url:string force_small_media:Bool force_large_media:Bool show_above_text:Bool = LinkPreviewOptions;` (:2237). Comments: `force_small_media` "True, if shown media preview must be small; ignored in secret chats or if the URL isn't explicitly specified" (:2234); `force_large_media` same for large (:2235); `show_above_text` "True, if link preview must be shown above message text; otherwise, the link preview will be shown below the message text; ignored in secret chats" (:2236); `url` "If empty, then the first URL found in the message text will be used" (:2233).
+  - `getLinkPreview text:formattedText link_preview_options:linkPreviewOptions = LinkPreview;` (:14792) — "Returns a link preview by the text of a message. Do not call this function too often. Returns a 404 error if the text has no link preview".
+  - `inputMessageText text:formattedText link_preview_options:linkPreviewOptions clear_draft:Bool = InputMessageContent;` (:6081) — the ONLY `inputMessage*` constructor with `link_preview_options` (verified: `inputMessagePhoto` :6117, `inputMessageVideo` :6128, `inputMessageDocument` :6101, `inputMessageAudio` :6096, `inputMessageAnimation` :6091 have no such field), so media-caption sends have no equivalent — options wire through text sends only.
+- **Telegram X evidence (local TGX-Android source, `~/workspace/telegram-x`):**
+  - `MessagesController.MessageInputContext` (`ui/MessagesController.java` ~7016-7115): per-URL `LinkPreview` cache, `takeOutputLinkPreviewOptions` copies `forceLargeMedia`/`forceSmallMedia` into the options and **sets `options.url` explicitly when forcing** (schema requirement).
+  - `helper/LinkPreview.java`: prefetch is `GetLinkPreview(FormattedText(url), null)` with a 400ms rate limiter; `toggleLargeMedia()` flips force-small/force-large relative to the current effective size and no-ops when the preview has no media or no large variant; `getForcedTitle()` falls back description → title/siteName.
+  - `MessagesController.onRequestToggleLargeMedia` (~8595) + `onRequestToggleShowAbove` (~8612): separate controls; both no-op when the preview is disabled; hint strings `LinkPreviewShowAbove`/`LinkPreviewShowBelow` ("Link preview will appear above/below the text"), `LinkPreviewEnlarged`/`LinkPreviewMinimized`.
+- **Built:**
+  - Composer chip: detected URL + prefetched preview line (title — description, "Getting link info…" while loading, "No preview for this link" on 404) + Preview on/off + "Media: large/small" toggle (only when the prefetched preview has `has_large_media` and actual media — TGX gate) + "Above text"/"Below text" toggle (hidden while preview is off, like TGX's no-op). Toggles set `status_note` hints matching TGX's strings.
+  - `getLinkPreview` prefetch: `ConnectDriver::request_composer_link_preview` (`RequestPurpose::GetLinkPreview`, URL keyed by `RequestId` in `Session::composer_preview_urls` — the `Copy`-purpose pattern from MED4); UI debounces 500ms after the URL settles (schema "too often" guidance, TGX 400ms); success parses via a new `EnvelopePayload::LinkPreview` arm reusing `parse_link_preview`; 404 → `Some(None)` ("no link info", never a card); late answers for superseded URLs are dropped.
+  - Send path: `SendOptions` gains `link_preview_above_text: bool` + `link_preview_media: PreviewMediaSize::{Auto, ForceSmall, ForceLarge}` (enum makes the invalid both-true wire state unrepresentable; `toggle()` mirrors TGX's flip-relative-to-effective). `send_text` emits the full `linkPreviewOptions` object (with the detected first URL set explicitly, per schema/TGX) whenever above-text or a force flag is set; disabled and default behaviors unchanged.
+  - `LinkPreview` gains parsed `has_large_media` (was dropped; needed for the TGX size-toggle gate).
+- **Key decisions (ponytail):**
+  - No thumbnail downloads for the composer prefetch: `parse_link_preview`'s `ParsedFile`s are dropped in the `"linkPreview"` payload arm; the chip shows a 🖼 glyph + text only. Downloading transient preview files is out of slice.
+  - No `url` selector for multiple URLs: the first detected URL is used (same as MED4's chip and the schema default).
+  - New options persist across sends like the existing disable toggle (TGX-equivalent); secret chats still force `is_disabled: true` driver-side, which also nulls the new flags (schema ignores them there anyway).
+  - Prefetch fires only in live sessions; the screenshot demo injects a fake preview into `demo_session`.
+- **Not verifiable without live Telegram:** the `getLinkPreview` round-trip against a real server (success payload shape, 404 behavior); the exact server treatment of `force_small_media`/`force_large_media` on exotic preview types.
+- **Out of this slice:** per-URL preview selection when several URLs are typed; preview thumbnails in the chip; `show_above_text` for secret chats (schema-ignored); embedded-player inline playback (still MED4-out).
 ## Slice CL1 — CHAT LIST: ROW MENU, PIN, READ/UNREAD, MUTE, CLEAR/DELETE (2026-09-27)
 
 - **Schema (pinned TDLib 1.8.67, `schema/td_api.tl`, verified verbatim):**

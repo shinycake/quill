@@ -18,7 +18,7 @@ use crate::telegram::envelope::{
     ChatAdministratorEntry, ChatDraft, ChatFolderInfo, ChatFolderSpec, ChatJoinResult, ChatKind,
     ChatList, ChatNotificationSettings, ChatPermissions, ChatPositionUpdate, ChatStatistics,
     ConnectionState, EnvelopePayload, EphemeralMessageContent, ErrorClass, ForumTopic,
-    InviteGroupCallParticipantResult, LoginUrlInfo, MessageAutoDelete, MessageContent,
+    InviteGroupCallParticipantResult, LinkPreview, LoginUrlInfo, MessageAutoDelete, MessageContent,
     MessageForwardInfo, MessageInteractionInfo, MessageOrigin, MessageReaction, MessageReplyTo,
     MessageSelfDestruct, MessageSender, NotificationSettingsScope, NotificationSound, OptionValue,
     ParsedCall, ParsedChatEvent, ParsedChatInviteLink, ParsedChatJoinRequest, ParsedChatMember,
@@ -175,6 +175,11 @@ pub enum RequestPurpose {
     /// via `Session::instant_view_fallback_url` — a refusal is never
     /// shown as success.
     GetWebPageInstantView,
+    /// MED4b: `getLinkPreview` (TDLib 1.8.67, `schema/td_api.tl:14792`) —
+    /// the composer prefetch. Unit variant to keep the enum `Copy`; the
+    /// URL rides `Session::composer_preview_urls`, the result lands in
+    /// `Session::composer_preview`.
+    GetLinkPreview,
     /// M1: `resendMessages`. Response is `messages` (the retried sends).
     ResendMessages,
     /// M1: `getChatScheduledMessages`. Response is `messages`, stored in
@@ -3177,6 +3182,17 @@ pub struct InstantViewPage {
     pub rich: RichMessageContent,
 }
 
+/// MED4b: composer `getLinkPreview` prefetch state (TGX `LinkPreview`).
+#[derive(Debug, Clone, Default)]
+pub struct ComposerLinkPreview {
+    /// URL the prefetch was requested for.
+    pub url: String,
+    /// `None` while the request is in flight; `Some(None)` when TDLib
+    /// 404s (no preview for this URL) — a refusal is never rendered as
+    /// a card.
+    pub preview: Option<Option<LinkPreview>>,
+}
+
 pub struct Session {
     pub account: AccountKey,
     pub account_generation: AccountGeneration,
@@ -3253,6 +3269,13 @@ pub struct Session {
     /// MED4: pending `getWebPageInstantView` URLs by `RequestId`
     /// (`RequestPurpose` stays `Copy`, so the URL rides here).
     pub instant_view_urls: HashMap<RequestId, String>,
+    /// MED4b: composer `getLinkPreview` prefetch state — the chip reads
+    /// this. Replaced on every new request; cleared when the composer's
+    /// detected URL changes away or the composer is submitted.
+    pub composer_preview: Option<ComposerLinkPreview>,
+    /// MED4b: pending `getLinkPreview` URLs by `RequestId` (same
+    /// `Copy`-purpose pattern as `instant_view_urls`).
+    pub composer_preview_urls: HashMap<RequestId, String>,
     /// MED2 fix-up: one-shot; set when TDLib refuses a `recognizeSpeech`
     /// request. The UI drains it into the status note — previously the
     /// error fell into the `_ => {}` swallower and the user saw
@@ -4056,6 +4079,8 @@ impl Session {
             instant_view: None,
             instant_view_fallback_url: None,
             instant_view_urls: HashMap::new(),
+            composer_preview: None,
+            composer_preview_urls: HashMap::new(),
             message_link_error: None,
             recognize_speech_error: None,
             resend_error: None,
@@ -6731,6 +6756,10 @@ impl Session {
             // `Session::instant_view_fallback_url` (error); nothing to
             // reduce here.
             EnvelopePayload::WebPageInstantView { .. } => {}
+            // MED4b: `linkPreview` (`getLinkPreview` answer) — captured
+            // by the driver before `apply` into
+            // `Session::composer_preview`; nothing to reduce here.
+            EnvelopePayload::LinkPreview { .. } => {}
             // M1 fix-up: `getMessageProperties` returns
             // `messageProperties`. The driver gates the chained
             // `getMessageLink` on `can_get_link` before `apply` takes

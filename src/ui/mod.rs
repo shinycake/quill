@@ -10,10 +10,10 @@ use quill::auth::{AuthAction, AuthView, view_for};
 use quill::composer::{
     AttachmentKind, CommandMenuItem, ComposerAttachment, ComposerEdit, ComposerReplyTo,
     ComposerScheduling, ComposerSnapshot, DeleteConfirm, FormatAction, ForwardDraft,
-    QuoteSelection, SendOptions, apply_format_markup, begin_edit_keeping_reply, cancel_edit_draft,
-    cancel_edit_keeping_reply, cancel_forward_draft, cancel_reply_draft, clear_format_markup,
-    command_menu_trigger, draft_text_to_store, filter_command_menu_items, should_send_on_enter,
-    strip_command_menu_trigger,
+    PreviewMediaSize, QuoteSelection, SendOptions, apply_format_markup, begin_edit_keeping_reply,
+    cancel_edit_draft, cancel_edit_keeping_reply, cancel_forward_draft, cancel_reply_draft,
+    clear_format_markup, command_menu_trigger, draft_text_to_store, filter_command_menu_items,
+    find_urls, should_send_on_enter, strip_command_menu_trigger,
 };
 use quill::connect::{
     ChatSearchQueryOutcome, ConnectBlocker, ConnectGate, DraftSaveOutcome, LiveConnect,
@@ -1383,6 +1383,20 @@ pub struct QuillApp {
     /// M1: link-preview toggle (`linkPreviewOptions.is_disabled`, schema
     /// 1.8.67 line 2237). Persists across sends; secret chats force it on.
     composer_preview_disabled: bool,
+    /// MED4b: `linkPreviewOptions.show_above_text` (schema:2236, TGX
+    /// `onRequestToggleShowAbove`). Persists across sends like the
+    /// disable toggle; hidden while the preview is off.
+    composer_preview_above: bool,
+    /// MED4b: `linkPreviewOptions.force_small_media` /
+    /// `force_large_media` (schema:2234-2235, TGX
+    /// `onRequestToggleLargeMedia`). Persists across sends; the size
+    /// button only renders when the prefetched preview actually offers
+    /// large media.
+    composer_preview_media: PreviewMediaSize,
+    /// MED4b: debounce token for the `getLinkPreview` prefetch — each
+    /// keystroke bumps it so only the latest quiet window fires (schema:
+    /// "Do not call this function too often"; TGX rate-limits 400ms).
+    composer_preview_token: u64,
     /// M1: scheduling choice (`messageSchedulingState*`, schema 1.8.67
     /// lines 5902/5905). Reset to `None` after each successful send.
     composer_scheduling: ComposerScheduling,
@@ -3576,6 +3590,9 @@ impl QuillApp {
             composer_caption_above: false,
             composer_silent: false,
             composer_preview_disabled: false,
+            composer_preview_above: false,
+            composer_preview_media: PreviewMediaSize::Auto,
+            composer_preview_token: 0,
             composer_scheduling: ComposerScheduling::None,
             schedule_popup_open: false,
             scheduled_dialog_open: false,
@@ -4402,12 +4419,37 @@ impl QuillApp {
             }
             app.status_note = "screenshot demo — link preview".into();
         }
-        // MED4: composer link-preview chip — type a URL so the
-        // detected-URL chip + preview toggle render.
+        // MED4b: composer link-preview chip — type a URL so the
+        // detected-URL chip + preview controls render; inject a fake
+        // prefetched preview (no live TDLib in demo mode) with large
+        // media on offer so the size toggle renders too.
         if matches!(demo, Some(ScreenshotDemo::ReadyComposerPreview)) {
             app.composer.update(cx, |input, cx| {
                 input.set_value("see https://example.com/story", window, cx);
             });
+            if let Some(session) = app.demo_session.as_mut() {
+                session.composer_preview = Some(quill::state::ComposerLinkPreview {
+                    url: "https://example.com/story".to_string(),
+                    preview: Some(Some(quill::telegram::envelope::LinkPreview {
+                        url: "https://example.com/story".to_string(),
+                        display_url: "example.com".to_string(),
+                        site_name: "Example".to_string(),
+                        title: "A short story".to_string(),
+                        description: "Telegram-style link preview for a private chat.".to_string(),
+                        show_large_media: false,
+                        has_large_media: true,
+                        show_media_above_description: false,
+                        show_above_text: false,
+                        instant_view_version: 0,
+                        photo: None,
+                        kind: quill::telegram::envelope::LinkPreviewKind::EmbeddedPlayer {
+                            url: "https://example.com/embed/1".to_string(),
+                            duration_secs: 95,
+                            audio: false,
+                        },
+                    })),
+                });
+            }
             app.status_note = "screenshot demo — composer preview chip".into();
         }
         // MED4: embedded-player + album preview cards.
@@ -5630,6 +5672,8 @@ impl QuillApp {
             disable_notification: self.composer_silent,
             scheduling: self.composer_scheduling,
             link_preview_disabled: self.composer_preview_disabled,
+            link_preview_above_text: self.composer_preview_above,
+            link_preview_media: self.composer_preview_media,
             // The driver overrides this for secret chats at send time.
             is_secret: false,
         }
@@ -26558,45 +26602,228 @@ impl QuillApp {
             )
     }
 
-    /// MED4: detected-URL chip for send-time link-preview controls. The
-    /// format toolbar already toggles `linkPreviewOptions.is_disabled`;
-    /// this row surfaces WHICH url the toggle applies to. The actual
-    /// preview is rendered by the server on the sent message — no
-    /// `getLinkPreview` prefetch is done (out of slice, DECISIONS.md).
+    /// MED4b: debounced `getLinkPreview` prefetch for the detected-URL
+    /// chip. Fires 500ms after the URL settles (schema: "Do not call this
+    /// function too often"; TGX rate-limits the same call at 400ms).
+    /// Live sessions only — the screenshot demo injects its preview.
+    fn maybe_prefetch_link_preview(&mut self, cx: &mut Context<Self>) {
+        // Live sessions only — the screenshot demo injects its preview,
+        // and without a driver every frame would spawn a no-op timer.
+        if self.live.is_none() {
+            return;
+        }
+        let text = self.composer.read(cx).value().to_string();
+        let Some(url) = find_urls(&text).into_iter().next() else {
+            // No URL: drop any stale preview so the chip never shows a
+            // preview for a URL that's no longer there.
+            if let Some(live) = self.live.as_mut()
+                && live.driver.session.composer_preview.is_some()
+            {
+                live.driver.session.composer_preview = None;
+            }
+            return;
+        };
+        // TGX never prefetches a disabled preview.
+        if self.composer_preview_disabled {
+            return;
+        }
+        let already = self
+            .live
+            .as_ref()
+            .and_then(|live| live.driver.session.composer_preview.as_ref())
+            .is_some_and(|p| p.url == url);
+        if already {
+            return;
+        }
+        self.composer_preview_token = self.composer_preview_token.wrapping_add(1);
+        let token = self.composer_preview_token;
+        cx.spawn(async move |this, cx| {
+            cx.background_executor()
+                .timer(Duration::from_millis(500))
+                .await;
+            this.update(cx, |this, cx| {
+                if this.composer_preview_token != token {
+                    return;
+                }
+                // Re-check the URL survived the quiet window; a newer
+                // keystroke schedules its own timer.
+                let text = this.composer.read(cx).value().to_string();
+                if find_urls(&text).into_iter().next().as_deref() != Some(url.as_str()) {
+                    return;
+                }
+                if this.composer_preview_disabled {
+                    return;
+                }
+                if let Some(live) = this.live.as_mut()
+                    && live.driver.request_composer_link_preview(&url).is_err()
+                {
+                    this.status_note = "couldn't load link preview".into();
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// MED4b: TGX `LinkPreview.hasMedia` — the chip's size toggle needs
+    /// *some* media to resize (photo, embedded player, album strip).
+    fn preview_has_media(preview: &quill::telegram::envelope::LinkPreview) -> bool {
+        preview.photo.is_some()
+            || !matches!(
+                preview.kind,
+                quill::telegram::envelope::LinkPreviewKind::Plain
+            )
+    }
+
+    /// MED4: detected-URL chip for send-time link-preview controls
+    /// (schema 1.8.67 `linkPreviewOptions`, :2237). Shows the detected
+    /// URL, the debounced `getLinkPreview` prefetch (title/description,
+    /// "Getting link info…" while loading, "No preview" on 404), and —
+    /// TGX (`MessagesController.onRequestToggleLargeMedia` /
+    /// `onRequestToggleShowAbove`) — the large/small media toggle (only
+    /// when the preview offers large media) and the above/below-text
+    /// toggle. The choices ride the next send's
+    /// `inputMessageText.link_preview_options`.
     fn preview_chip(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         if !self.pending_attachments.is_empty() || self.pending_edit.is_some() {
             return None;
         }
         let text = self.composer.read(cx).value().to_string();
-        let first = quill::composer::find_urls(&text).into_iter().next()?;
-        Some(
-            div()
-                .id("composer-preview-chip")
-                .flex()
-                .items_center()
-                .gap_2()
-                .px_3()
-                .py_1()
-                .child(
-                    div()
-                        .text_xs()
-                        .text_color(rgb(0x58a6ff))
-                        .child(format!("🔗 {first}")),
-                )
-                .child(
-                    Button::new("composer-preview-chip-toggle")
-                        .label(if self.composer_preview_disabled {
-                            "Preview off"
+        let first = find_urls(&text).into_iter().next()?;
+        // Live prefetch state; the screenshot demo injects its own into
+        // the demo session.
+        let stored = self
+            .session()
+            .and_then(|s| s.composer_preview.clone())
+            .filter(|p| p.url == first);
+        let fetched: Option<quill::telegram::envelope::LinkPreview> =
+            stored.as_ref().and_then(|p| p.preview.clone()).flatten();
+        let preview_line: Option<String> = match &stored {
+            // Loaded: title/description (TGX `LinkPreview.getForcedTitle`
+            // falls back site → title the same way).
+            Some(s) => match &s.preview {
+                Some(Some(p)) => {
+                    let title = if p.title.is_empty() {
+                        p.site_name.clone()
+                    } else {
+                        p.title.clone()
+                    };
+                    let title = if title.is_empty() {
+                        p.display_url.clone()
+                    } else {
+                        title
+                    };
+                    let glyph = if Self::preview_has_media(p) {
+                        "🖼 "
+                    } else {
+                        ""
+                    };
+                    let mut line = format!("{glyph}{title}");
+                    if !p.description.is_empty() {
+                        let desc: String = p.description.chars().take(80).collect();
+                        line.push_str(&format!(" — {desc}"));
+                    }
+                    Some(line)
+                }
+                // TDLib 404: "no link info" (TGX
+                // `LinkPreview.isNotFound`) — honest, never a fake card.
+                Some(None) => Some("No preview for this link".to_string()),
+                // Request in flight.
+                None => Some("Getting link info…".to_string()),
+            },
+            None => None,
+        };
+        // TGX `LinkPreview.toggleLargeMedia`: the size toggle only
+        // exists when the preview offers large media.
+        let size_toggle = !self.composer_preview_disabled
+            && fetched
+                .as_ref()
+                .is_some_and(|p| p.has_large_media && Self::preview_has_media(p));
+        // The preview's own default; the toggle flips relative to the
+        // *current* effective size (TGX `LinkPreview.toggleLargeMedia`).
+        let preview_default_large = fetched
+            .as_ref()
+            .map(|p| p.show_large_media)
+            .unwrap_or(false);
+        let effective_large = self
+            .composer_preview_media
+            .effective_large(preview_default_large);
+        let mut row = div()
+            .id("composer-preview-chip")
+            .flex()
+            .items_center()
+            .gap_2()
+            .px_3()
+            .py_1()
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(rgb(0x58a6ff))
+                    .child(format!("🔗 {first}")),
+            );
+        if let Some(line) = preview_line {
+            row = row.child(div().text_xs().text_color(rgb(0x8b949e)).child(line));
+        }
+        row = row.child(
+            Button::new("composer-preview-chip-toggle")
+                .label(if self.composer_preview_disabled {
+                    "Preview off"
+                } else {
+                    "Preview on"
+                })
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.composer_preview_disabled = !this.composer_preview_disabled;
+                    cx.notify();
+                })),
+        );
+        if !self.composer_preview_disabled {
+            if size_toggle {
+                row = row.child(
+                    Button::new("composer-preview-chip-size")
+                        .label(if effective_large {
+                            "Media: large"
                         } else {
-                            "Preview on"
+                            "Media: small"
                         })
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.composer_preview_disabled = !this.composer_preview_disabled;
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            let before = this
+                                .composer_preview_media
+                                .effective_large(preview_default_large);
+                            this.composer_preview_media =
+                                this.composer_preview_media.toggle(before);
+                            let after = this
+                                .composer_preview_media
+                                .effective_large(preview_default_large);
+                            this.status_note = format!(
+                                "link preview media: {}",
+                                if after { "large" } else { "small" }
+                            );
                             cx.notify();
                         })),
-                )
-                .into_any_element(),
-        )
+                );
+            }
+            row = row.child(
+                Button::new("composer-preview-chip-above")
+                    .label(if self.composer_preview_above {
+                        "Above text"
+                    } else {
+                        "Below text"
+                    })
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.composer_preview_above = !this.composer_preview_above;
+                        // TGX hint strings (`LinkPreviewShowAbove` /
+                        // `LinkPreviewShowBelow`).
+                        this.status_note = if this.composer_preview_above {
+                            "Link preview will appear above the text".into()
+                        } else {
+                            "Link preview will appear below the text".into()
+                        };
+                        cx.notify();
+                    })),
+            );
+        }
+        Some(row.into_any_element())
     }
 
     /// caption…" affordance, the caption-above-media toggle
@@ -31429,6 +31656,9 @@ impl Render for QuillApp {
         // Phase C1: keep the call overlay's ringing / connected clock
         // fresh while a call is tracked (same 1s task pattern).
         self.ensure_call_tick(cx);
+        // MED4b: debounced `getLinkPreview` prefetch for the
+        // detected-URL chip (spawns at most one timer per new URL).
+        self.maybe_prefetch_link_preview(cx);
         // Phase 9.1: resolve a tapped story whose `story` response landed
         // since the click (`getStory` prefetch finished).
         // Parity slice: prefill the folder editor once its `getChatFolder`
