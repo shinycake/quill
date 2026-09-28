@@ -23,10 +23,10 @@ use crate::telegram::envelope::{
     MessageSelfDestruct, MessageSender, NotificationSettingsScope, NotificationSound, OptionValue,
     ParsedCall, ParsedChatEvent, ParsedChatInviteLink, ParsedChatJoinRequest, ParsedChatMember,
     ParsedFile, ParsedGroupCall, ParsedGroupCallMessage, ParsedGroupCallParticipant, ParsedMessage,
-    ParsedSecretChat, ParsedStory, ParsedUser, ParsedVideoChat, ParsedWelcomeMessage,
-    PasswordState, Poll, ReplyKeyboard, ReplyMarkup, ReportChatOutcome, ReportOption,
-    ReportSponsoredResult, RichMessageContent, ScopeNotificationSettings, SecretChatState,
-    SponsoredMessage, StickerFormat, StickerItem, StickerSetInfo, StorageStats,
+    ParsedSecretChat, ParsedSession, ParsedStory, ParsedUser, ParsedVideoChat,
+    ParsedWelcomeMessage, PasswordState, Poll, ReplyKeyboard, ReplyMarkup, ReportChatOutcome,
+    ReportOption, ReportSponsoredResult, RichMessageContent, ScopeNotificationSettings,
+    SecretChatState, SponsoredMessage, StickerFormat, StickerItem, StickerSetInfo, StorageStats,
     StoryAvailableReactionView, StoryListView, TdError, effective_content,
     reply_markup_demands_reply,
 };
@@ -188,6 +188,17 @@ pub enum RequestPurpose {
     /// Parity slice: `setScopeNotificationSettings`. Response is `ok`;
     /// the new defaults arrive as `updateScopeNotificationSettings`.
     SetScopeNotificationSettings,
+    /// Slice A3: `getActiveSessions`. Response is `sessions`; the list is
+    /// replaced from the authoritative answer (never optimistic).
+    GetActiveSessions,
+    /// Slice A3: `terminateSession`. Response is `ok`; the list is
+    /// refetched from the authoritative answer (never optimistic).
+    TerminateSession {
+        session_id: i64,
+    },
+    /// Slice A3: `terminateAllOtherSessions`. Response is `ok`; the list
+    /// is refetched from the authoritative answer (never optimistic).
+    TerminateAllOtherSessions,
     /// `addChatToList` (`chatListArchive` or `chatListMain`). Response is `ok`;
     /// list membership via position / added-to-list updates.
     AddChatToList,
@@ -942,6 +953,22 @@ fn password_op_error_line(op: PasswordOp, err: &TdError) -> String {
         _ => "Telegram rejected the request",
     };
     format!("Could not {}: {detail}", op.action_label())
+}
+
+/// Slice A3: honest one-line failure for a sessions fetch or terminate.
+/// The classification comes from TDLib's actual numeric error code
+/// (400 = invalid/refused — e.g. terminating a session TDLib won't let
+/// go, 429 = flood-wait); the native message is never stored (it can
+/// contain secrets — see `TdError`).
+fn sessions_error_line(action: &str, err: &TdError) -> String {
+    let detail = match err.class {
+        ErrorClass::Flood => "too many requests — wait and try again",
+        ErrorClass::Unauthorized => "session is no longer authorized",
+        ErrorClass::Invalid => "Telegram refused the request",
+        ErrorClass::NotFound => "session no longer exists",
+        ErrorClass::Other => return format!("Could not {action} (error {})", err.code),
+    };
+    format!("Could not {action}: {detail}")
 }
 
 /// Phase 9.3: one-line `TdError` reason for the story composer. Never
@@ -3281,6 +3308,23 @@ pub struct Session {
     /// request (TDLib's actual error, classified — never a fake
     /// success). Cleared on the next attempt and on success.
     pub password_op_error: Option<String>,
+    /// Slice A3: cached `getActiveSessions` answer (TGX `SessionsInfo`
+    /// style); drives the Active Sessions overlay. Incomplete login
+    /// attempts (`is_password_pending`) render in their own section.
+    pub sessions: Option<Vec<ParsedSession>>,
+    /// Slice A3: a `getActiveSessions` round trip is in flight.
+    pub sessions_loading: bool,
+    /// Slice A3: a `terminateSession` / `terminateAllOtherSessions` round
+    /// trip is in flight — terminate buttons stay disabled meanwhile.
+    pub sessions_mutating: bool,
+    /// Slice A3: honest one-line failure of the last sessions fetch or
+    /// terminate (classified from the TDLib error code, never the native
+    /// message). Cleared on the next successful fetch.
+    pub sessions_error: Option<String>,
+    /// Slice A3: a terminate succeeded — the old cache stays visible and
+    /// is refetched from the authoritative answer on the next ingest
+    /// (the `saved_sounds_stale` pattern); never an optimistic delete.
+    pub sessions_stale: bool,
     /// Parity slice: downloaded-file id → notification sound id, for files
     /// fetched as notification sounds.
     pub sound_file_ids: HashMap<i32, i64>,
@@ -4013,6 +4057,11 @@ impl Session {
             password_state: None,
             password_state_loading: false,
             password_op_error: None,
+            sessions: None,
+            sessions_loading: false,
+            sessions_mutating: false,
+            sessions_error: None,
+            sessions_stale: false,
             sound_file_ids: HashMap::new(),
             pending_sound_downloads: HashSet::new(),
             pending_sound_plays: Vec::new(),
@@ -6574,6 +6623,19 @@ impl Session {
                     self.password_op_error = None;
                 }
             }
+            EnvelopePayload::Sessions { sessions } => {
+                // Slice A3: `getActiveSessions` answer — only our own
+                // in-flight request writes the cache (matched by `@extra`).
+                // The answer is authoritative: it replaces the list and
+                // clears any stale error. No optimistic mutation ever
+                // happens client-side.
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetActiveSessions) {
+                    self.sessions = Some(sessions);
+                    self.sessions_loading = false;
+                    self.sessions_error = None;
+                    self.sessions_stale = false;
+                }
+            }
             EnvelopePayload::ArchiveChatListSettings { settings } => {
                 // Slice CL2: `getArchiveChatListSettings` answer — only
                 // our own in-flight request writes the cache.
@@ -6667,6 +6729,24 @@ impl Session {
                 }
             }
             EnvelopePayload::Ok => {
+                // Slice A3: a `terminateSession` /
+                // `terminateAllOtherSessions` succeeded — keep the old
+                // cache visible and mark it stale so the driver refetches
+                // the authoritative answer on this same ingest (the
+                // `saved_sounds_stale` pattern). No optimistic deletion:
+                // the terminated row stays until the server-confirmed
+                // list replaces it.
+                if matches!(
+                    pending.map(|p| p.purpose),
+                    Some(
+                        RequestPurpose::TerminateSession { .. }
+                            | RequestPurpose::TerminateAllOtherSessions
+                    )
+                ) {
+                    self.sessions_stale = true;
+                    self.sessions_mutating = false;
+                    self.sessions_error = None;
+                }
                 // Phase C3a: a successful `leaveGroupCall` /
                 // `endGroupCall` drops the tracked call (the `ok`
                 // confirms the server side; `updateGroupCall`
@@ -7432,6 +7512,28 @@ impl Session {
                     Some(RequestPurpose::PasswordStateOp { op }) => {
                         self.password_state_loading = false;
                         self.password_op_error = Some(password_op_error_line(op, &err));
+                    }
+                    // Slice A3: a failed sessions fetch or terminate
+                    // clears the in-flight flags and parks the honest,
+                    // classified error line on the overlay — never a fake
+                    // success, never an optimistic list change.
+                    // A failed stale-refetch also clears `sessions_stale`
+                    // so the next ingest does not retry the fetch and
+                    // flood state worsens; retry is user-driven via the
+                    // Refresh button. The old cache stays visible.
+                    Some(RequestPurpose::GetActiveSessions) => {
+                        self.sessions_loading = false;
+                        self.sessions_stale = false;
+                        self.sessions_error =
+                            Some(sessions_error_line("load the sessions list", &err));
+                    }
+                    Some(
+                        RequestPurpose::TerminateSession { .. }
+                        | RequestPurpose::TerminateAllOtherSessions,
+                    ) => {
+                        self.sessions_mutating = false;
+                        self.sessions_error =
+                            Some(sessions_error_line("terminate the session", &err));
                     }
                     // M1 fix-up: a failed `resendMessages` surfaces in the
                     // status note instead of vanishing into `_ => {}` —
@@ -16713,5 +16815,141 @@ mod tests {
         apply_json(&mut session, &seq, &sink, &remove(403));
         let messages = &session.histories.get(&21).expect("history").messages;
         assert!(active_custom_keyboard(messages, &none).is_none());
+    }
+
+    /// Slice A3: the `getActiveSessions` answer replaces the cache and
+    /// clears loading/error — but only for our own in-flight request
+    /// (matched by `@extra`).
+    #[test]
+    fn sessions_answer_replaces_cache_for_matching_request() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        let extra = session.request(RequestPurpose::GetActiveSessions, None);
+        session.sessions_loading = true;
+        session.sessions_error = Some("stale".into());
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"sessions","@extra":"{}","sessions":[{{"@type":"session","id":11,"is_current":true,"device_model":"Linux desktop","application_name":"Quill","application_version":"0.1","platform":"Linux","system_version":"6.8","last_active_date":1759000000,"ip_address":"1.2.3.4","location":"Austin, United States"}},{{"@type":"session","id":33,"is_current":false,"is_password_pending":true,"device_model":"Unknown","application_name":"Telegram Desktop","platform":"Windows","last_active_date":1758800000}}]}}"#,
+                extra.0,
+            ),
+        );
+        let sessions = session.sessions.as_ref().expect("cached");
+        assert_eq!(sessions.len(), 2);
+        assert!(sessions.iter().any(|s| s.is_current && s.id == 11));
+        assert!(sessions.iter().any(|s| s.is_password_pending && s.id == 33));
+        assert!(!session.sessions_loading);
+        assert!(session.sessions_error.is_none());
+        assert!(!session.sessions_stale);
+    }
+
+    /// Slice A3: a stray `sessions` answer (no matching pending purpose)
+    /// must not clobber the cache.
+    #[test]
+    fn sessions_answer_ignored_without_matching_request() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        session.sessions = Some(Vec::new());
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"sessions","sessions":[{"@type":"session","id":11,"is_current":true,"device_model":"X"}]}"#,
+        );
+        assert_eq!(session.sessions.as_ref().unwrap().len(), 0);
+    }
+
+    /// Slice A3: a successful `terminateSession` keeps the old cache
+    /// visible and marks it stale (the driver refetches the authoritative
+    /// answer on the same ingest) — the row is NOT removed
+    /// optimistically.
+    #[test]
+    fn terminate_session_ok_keeps_cache_and_marks_stale() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        session.sessions = Some(vec![ParsedSession {
+            id: 22,
+            is_current: false,
+            is_password_pending: false,
+            device_model: "iPhone".into(),
+            application_name: "Telegram iOS".into(),
+            application_version: "12.0".into(),
+            platform: "iOS".into(),
+            system_version: "18.0".into(),
+            last_active_date: 1758900000,
+            ip_address: "5.6.7.8".into(),
+            location: "Tel Aviv, Israel".into(),
+        }]);
+        session.sessions_mutating = true;
+        let extra = session.request(RequestPurpose::TerminateSession { session_id: 22 }, None);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
+        );
+        // The old cache stays visible until the authoritative refetch
+        // replaces it — no optimistic deletion.
+        assert_eq!(session.sessions.as_ref().unwrap().len(), 1);
+        assert!(session.sessions_stale);
+        assert!(!session.sessions_mutating);
+        assert!(session.sessions_error.is_none());
+    }
+
+    /// Slice A3: a refused terminate surfaces an honest classified error
+    /// and leaves the list untouched.
+    #[test]
+    fn terminate_session_error_surfaces_honestly() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        session.sessions_mutating = true;
+        let extra = session.request(RequestPurpose::TerminateSession { session_id: 22 }, None);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"error","@extra":"{}","code":400,"message":"SESSION_REVOKED"}}"#,
+                extra.0
+            ),
+        );
+        assert!(!session.sessions_mutating);
+        assert_eq!(
+            session.sessions_error.as_deref(),
+            Some("Could not terminate the session: Telegram refused the request")
+        );
+    }
+
+    /// Slice A3: a failed fetch clears the spinner and parks the error
+    /// on the overlay.
+    #[test]
+    fn sessions_fetch_error_clears_loading() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        session.sessions_loading = true;
+        // A failed stale-refetch (e.g. after a terminate-ok marked the
+        // cache stale) must NOT leave the cache stale — otherwise the
+        // next ingest retries the fetch and flood state worsens.
+        session.sessions_stale = true;
+        let extra = session.request(RequestPurpose::GetActiveSessions, None);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"error","@extra":"{}","code":429,"message":"FLOOD_WAIT_3"}}"#,
+                extra.0
+            ),
+        );
+        assert!(!session.sessions_loading);
+        // The failed stale-refetch clears staleness: no auto-retry on
+        // the next ingest; the user retries via the Refresh button.
+        assert!(!session.sessions_stale);
+        assert_eq!(
+            session.sessions_error.as_deref(),
+            Some("Could not load the sessions list: too many requests — wait and try again")
+        );
     }
 }

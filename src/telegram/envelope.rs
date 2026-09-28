@@ -633,6 +633,12 @@ pub enum EnvelopePayload {
     PasswordState {
         state: PasswordState,
     },
+    /// Slice A3: `sessions` — `getActiveSessions` response (schema
+    /// 1.8.67, lines 9147/15102). Stored in `Session::sessions` when the
+    /// pending purpose is `GetActiveSessions`.
+    Sessions {
+        sessions: Vec<ParsedSession>,
+    },
     /// Slice CL2: `archiveChatListSettings` — `getArchiveChatListSettings`
     /// response (schema 1.8.67, line 3512); stored in
     /// `Session::archive_chat_list_settings` when the pending purpose is
@@ -2683,6 +2689,34 @@ pub struct StorageFileTypeStats {
 pub struct StorageStats {
     pub total_size: i64,
     pub by_file_type: Vec<StorageFileTypeStats>,
+}
+
+/// Slice A3: one `session` from a `getActiveSessions` answer
+/// (`session id:int64 is_current:Bool is_password_pending:Bool
+/// is_unconfirmed:Bool can_accept_secret_chats:Bool can_accept_calls:Bool
+/// device_type:SessionDeviceType api_id:int32 application_name:string
+/// application_version:string is_official_application:Bool device_model:string
+/// platform:string system_version:string log_in_date:int32
+/// last_active_date:int32 ip_address:string location:string = Session;`,
+/// schema 1.8.67, line 9144). Only the fields the sessions list renders
+/// are kept; `is_unconfirmed`/`can_accept_*`/`device_type`/`log_in_date`
+/// are out of this slice (per-session toggles are A4).
+/// `is_password_pending` marks an incomplete login attempt — TGX
+/// (`Tdlib.java` `SessionsInfo`) treats exactly these as the
+/// "Incomplete Login Attempts" section.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParsedSession {
+    pub id: i64,
+    pub is_current: bool,
+    pub is_password_pending: bool,
+    pub device_model: String,
+    pub application_name: String,
+    pub application_version: String,
+    pub platform: String,
+    pub system_version: String,
+    pub last_active_date: i32,
+    pub ip_address: String,
+    pub location: String,
 }
 
 /// Phase S2: storage-usage category order, matching TGX
@@ -6914,6 +6948,17 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
                 },
             })
         }
+        // Slice A3: `sessions` — the `getActiveSessions` answer (schema
+        // 1.8.67, lines 9144/9147). Malformed entries are dropped rather
+        // than failing the whole list (a session id is required).
+        "sessions" => {
+            let sessions = value
+                .get("sessions")
+                .and_then(Value::as_array)
+                .map(|list| list.iter().filter_map(parse_session).collect())
+                .unwrap_or_default();
+            Ok(EnvelopePayload::Sessions { sessions })
+        }
         "updateSavedNotificationSounds" => Ok(EnvelopePayload::UpdateSavedNotificationSounds {
             sound_ids: value
                 .get("notification_sound_ids")
@@ -8136,6 +8181,41 @@ fn parse_notification_sound(value: &Value) -> Option<NotificationSound> {
             .unwrap_or_default()
             .to_string(),
         sound,
+    })
+}
+
+/// Slice A3: one `session` from a `sessions` answer (schema 1.8.67, line
+/// 9144). The `@type` guard keeps a malformed entry from poisoning the
+/// list; only the session id is required (`id:int64` is the terminate
+/// key).
+fn parse_session(value: &Value) -> Option<ParsedSession> {
+    if value.get("@type").and_then(Value::as_str) != Some("session") {
+        return None;
+    }
+    let id = json_i64_field(value.get("id"), 0);
+    if id == 0 {
+        return None;
+    }
+    let str_field = |name: &str| {
+        value
+            .get(name)
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string()
+    };
+    let bool_field = |name: &str| value.get(name).and_then(Value::as_bool).unwrap_or(false);
+    Some(ParsedSession {
+        id,
+        is_current: bool_field("is_current"),
+        is_password_pending: bool_field("is_password_pending"),
+        device_model: str_field("device_model"),
+        application_name: str_field("application_name"),
+        application_version: str_field("application_version"),
+        platform: str_field("platform"),
+        system_version: str_field("system_version"),
+        last_active_date: json_i32(value.get("last_active_date"), 0),
+        ip_address: str_field("ip_address"),
+        location: str_field("location"),
     })
 }
 
@@ -14372,6 +14452,68 @@ mod password_state_tests {
             "setRecoveryEmailAddress password:string new_recovery_email_address:string = PasswordState;",
             "resendRecoveryEmailAddressCode = PasswordState;",
             "cancelRecoveryEmailAddressVerification = PasswordState;",
+        ] {
+            assert!(
+                schema.lines().any(|l| l == line),
+                "schema pin missing: {line}"
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod sessions_tests {
+    use super::*;
+
+    /// Slice A3: `getActiveSessions` answer (schema 1.8.67 lines 9144 /
+    /// 9147 / 15102) — current, other, and an incomplete attempt
+    /// (`is_password_pending`) all parse; the `@type` guard and the
+    /// id-required rule drop malformed entries.
+    #[test]
+    fn sessions_parse_current_other_and_password_pending() {
+        let json = r#"{"@type":"sessions","inactive_session_ttl_days":180,"sessions":[
+{"@type":"session","id":11,"is_current":true,"is_password_pending":false,"is_unconfirmed":false,"can_accept_secret_chats":true,"can_accept_calls":true,"device_type":{"@type":"sessionDeviceTypeDesktop"},"api_id":1,"application_name":"Quill","application_version":"0.1","is_official_application":false,"device_model":"Linux desktop","platform":"Linux","system_version":"6.8","log_in_date":1700000000,"last_active_date":1759000000,"ip_address":"1.2.3.4","location":"Austin, United States"},
+{"@type":"session","id":22,"is_current":false,"is_password_pending":false,"device_model":"iPhone","application_name":"Telegram iOS","application_version":"12.0","platform":"iOS","system_version":"18.0","last_active_date":1758900000,"ip_address":"5.6.7.8","location":"Tel Aviv, Israel"},
+{"@type":"session","id":33,"is_current":false,"is_password_pending":true,"device_model":"Unknown","application_name":"Telegram Desktop","application_version":"5.0","platform":"Windows","system_version":"11","last_active_date":1758800000,"ip_address":"9.9.9.9","location":""},
+{"@type":"bogus","id":44},
+{"@type":"session","id":0,"device_model":"Ghost"}
+]}"#;
+        let env = parse_envelope(json).unwrap();
+        match env.payload {
+            EnvelopePayload::Sessions { sessions } => {
+                assert_eq!(sessions.len(), 3);
+                let current = sessions.iter().find(|s| s.id == 11).expect("current");
+                assert!(current.is_current);
+                assert!(!current.is_password_pending);
+                assert_eq!(current.device_model, "Linux desktop");
+                assert_eq!(current.application_name, "Quill");
+                assert_eq!(current.application_version, "0.1");
+                assert_eq!(current.platform, "Linux");
+                assert_eq!(current.system_version, "6.8");
+                assert_eq!(current.ip_address, "1.2.3.4");
+                assert_eq!(current.location, "Austin, United States");
+                let other = sessions.iter().find(|s| s.id == 22).expect("other");
+                assert!(!other.is_current);
+                assert!(!other.is_password_pending);
+                let pending = sessions.iter().find(|s| s.id == 33).expect("pending");
+                assert!(pending.is_password_pending);
+                assert_eq!(pending.location, "");
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+
+    /// Slice A3: every constructor the slice relies on must exist
+    /// verbatim in the pinned schema (1.8.67).
+    #[test]
+    fn schema_pins_session_constructors() {
+        let schema = include_str!("../../schema/td_api.tl");
+        for line in [
+            "session id:int64 is_current:Bool is_password_pending:Bool is_unconfirmed:Bool can_accept_secret_chats:Bool can_accept_calls:Bool device_type:SessionDeviceType api_id:int32 application_name:string application_version:string is_official_application:Bool device_model:string platform:string system_version:string log_in_date:int32 last_active_date:int32 ip_address:string location:string = Session;",
+            "sessions sessions:vector<session> inactive_session_ttl_days:int32 = Sessions;",
+            "getActiveSessions = Sessions;",
+            "terminateSession session_id:int64 = Ok;",
+            "terminateAllOtherSessions = Ok;",
         ] {
             assert!(
                 schema.lines().any(|l| l == line),

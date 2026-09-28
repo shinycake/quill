@@ -51,6 +51,39 @@ pub fn get_authorization_state(extra: RequestId) -> String {
     .to_string()
 }
 
+/// Slice A3: `getActiveSessions = Sessions;` (TDLib 1.8.67,
+/// `schema/td_api.tl:15102`): "Returns all active sessions of the current
+/// user."
+pub fn get_active_sessions(extra: RequestId) -> String {
+    json!({
+        "@type": "getActiveSessions",
+        "@extra": extra.as_extra(),
+    })
+    .to_string()
+}
+
+/// Slice A3: `terminateSession session_id:int64 = Ok;` (TDLib 1.8.67,
+/// `schema/td_api.tl:15105`): "Terminates a session of the current user."
+pub fn terminate_session(extra: RequestId, session_id: i64) -> String {
+    json!({
+        "@type": "terminateSession",
+        "@extra": extra.as_extra(),
+        "session_id": session_id,
+    })
+    .to_string()
+}
+
+/// Slice A3: `terminateAllOtherSessions = Ok;` (TDLib 1.8.67,
+/// `schema/td_api.tl:15108`): "Terminates all other sessions of the
+/// current user."
+pub fn terminate_all_other_sessions(extra: RequestId) -> String {
+    json!({
+        "@type": "terminateAllOtherSessions",
+        "@extra": extra.as_extra(),
+    })
+    .to_string()
+}
+
 /// `setAuthenticationPhoneNumber`. Callers must not log `phone_number`.
 pub fn set_authentication_phone_number(extra: RequestId, phone_number: &str) -> String {
     json!({
@@ -4844,6 +4877,28 @@ mod tests {
         assert_eq!(v["@type"], "clearRecentlyFoundChats");
         assert_eq!(v["@extra"], "55");
         assert!(v.get("query").is_none());
+    }
+
+    #[test]
+    fn a3_session_request_shapes_match_1_8_67() {
+        // Slice A3: `getActiveSessions = Sessions;` (line 15102),
+        // `terminateSession session_id:int64 = Ok;` (line 15105),
+        // `terminateAllOtherSessions = Ok;` (line 15108).
+        let v: serde_json::Value =
+            serde_json::from_str(&get_active_sessions(RequestId(71))).unwrap();
+        assert_eq!(v["@type"], "getActiveSessions");
+        assert_eq!(v["@extra"], "71");
+
+        let v: serde_json::Value =
+            serde_json::from_str(&terminate_session(RequestId(72), 123456789)).unwrap();
+        assert_eq!(v["@type"], "terminateSession");
+        assert_eq!(v["@extra"], "72");
+        assert_eq!(v["session_id"], 123456789);
+
+        let v: serde_json::Value =
+            serde_json::from_str(&terminate_all_other_sessions(RequestId(73))).unwrap();
+        assert_eq!(v["@type"], "terminateAllOtherSessions");
+        assert_eq!(v["@extra"], "73");
     }
 
     #[test]
