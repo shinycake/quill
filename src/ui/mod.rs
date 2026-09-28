@@ -2442,6 +2442,12 @@ pub enum ScreenshotDemo {
     /// duration clock, Mute / Hang up, and the honest no-video-transport
     /// note. Signaling only — no live Telegram, no media.
     ReadyCallVideo,
+    /// Phase C2i: connected video call with the 1:1 screen-share send
+    /// toggle engaged — the overlay shows "Sharing your screen", the
+    /// "Stop sharing" button, and the local tile's screen-share
+    /// status. Injected demo state, no live Telegram, no real
+    /// capture.
+    ReadyCallScreenShare,
     /// Phase C2c: connected voice call with microphone/speaker choices.
     ReadyCallDevices,
     /// Phase C2d: Ready voice call while the audio driver reconnects.
@@ -3870,6 +3876,15 @@ impl QuillApp {
                     AuthorizationState::Ready,
                 )
             }
+            Some(ScreenshotDemo::ReadyCallScreenShare) => {
+                demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
+                (
+                    ConnectUiStatus::DemoReadyChats,
+                    None,
+                    "screenshot demo — connected video call, screen-share send (injected, no live Telegram)".into(),
+                    AuthorizationState::Ready,
+                )
+            }
             Some(ScreenshotDemo::ReadyCallDevices) => {
                 demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
                 (
@@ -4766,6 +4781,42 @@ impl QuillApp {
             app.status_note =
                 "screenshot demo — connected video call with Zed (injected, no live Telegram)"
                     .into();
+        }
+        // Phase C2i: 1:1 screen-share send fixture — the connected
+        // video call with the toggle engaged (injected state, no live
+        // Telegram, no real capture). The demo devices carry a screen
+        // source so the "Stop sharing" button renders.
+        if matches!(demo, Some(ScreenshotDemo::ReadyCallScreenShare)) {
+            if let Some(session) = app.demo_session.as_mut() {
+                app.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_call_video(session, &app.demo_sink, &app.demo_seq);
+            }
+            app.demo_call_devices = Some(vec![
+                quill::calls::engine::MediaDevice {
+                    id: "demo-cam".into(),
+                    name: "Demo Camera (synthetic)".into(),
+                    kind: quill::calls::engine::MediaDeviceKind::Camera,
+                },
+                quill::calls::engine::MediaDevice {
+                    id: "demo-screen".into(),
+                    name: "Demo Screen (synthetic)".into(),
+                    kind: quill::calls::engine::MediaDeviceKind::Screen,
+                },
+            ]);
+            app.demo_remote_frame = Some(demo_video_frame(false));
+            app.demo_local_frame = Some(demo_video_frame(true));
+            if let Some(call) = app
+                .demo_session
+                .as_mut()
+                .and_then(|session| session.active_call.as_mut())
+            {
+                call.remote_video = quill::calls::engine::RemoteVideoState::Active;
+                call.transport = Some(quill::calls::engine::TransportState::Connected);
+                call.screen_sharing = true;
+                call.camera_on = false;
+            }
+            app.status_note =
+                "screenshot demo — 1:1 call screen-share send (injected, no live Telegram)".into();
         }
         if matches!(demo, Some(ScreenshotDemo::ReadyCallDevices)) {
             if let Some(session) = app.demo_session.as_mut() {
@@ -10465,6 +10516,38 @@ impl QuillApp {
         {
             call.camera_on = !call.camera_on;
             self.status_note = "demo: camera toggle (no live Telegram)".into();
+        }
+        cx.notify();
+    }
+
+    /// Phase C2i: 1:1 screen-share send toggle for a video call.
+    /// Live: flips the intent and pushes it to the engine; an engine
+    /// error surfaces in the status note without flipping the flag
+    /// (driver contract). Demo: flips the flag only, no live
+    /// Telegram.
+    fn toggle_call_screen_share(&mut self, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            let Some(call) = live.driver.session.active_call.as_ref() else {
+                return;
+            };
+            let (call_id, sharing) = (call.id, !call.screen_sharing);
+            self.status_note = match live.driver.set_call_screen_share(call_id, sharing) {
+                Ok(()) => {
+                    if sharing {
+                        "screen share on".into()
+                    } else {
+                        "screen share off".into()
+                    }
+                }
+                Err(err) => format!("could not change screen share state: {err}"),
+            };
+        } else if let Some(call) = self
+            .demo_session
+            .as_mut()
+            .and_then(|session| session.active_call.as_mut())
+        {
+            call.screen_sharing = !call.screen_sharing;
+            self.status_note = "demo: screen share toggle (no live Telegram)".into();
         }
         cx.notify();
     }
@@ -21931,7 +22014,14 @@ impl QuillApp {
                 None => status_text("Couldn't decode the camera preview").into_any_element(),
             },
             (true, None) => status_text("Starting camera…").into_any_element(),
-            (false, _) => status_text("Camera off").into_any_element(),
+            // Phase C2i: screen share replaces the camera track, so the
+            // local preview honestly says what's being sent.
+            (false, _) => status_text(if call.screen_sharing {
+                "Sharing screen"
+            } else {
+                "Camera off"
+            })
+            .into_any_element(),
         };
 
         div()
@@ -22104,6 +22194,19 @@ impl QuillApp {
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
                     .child("Microphone muted"),
+            );
+        }
+        // Phase C2i: local screen-share send state — the engine sends
+        // the desktop track instead of the camera (ntgcalls no-mix
+        // rule); the flag is the tracked toggle intent.
+        let show_screen_share_note =
+            call.screen_sharing && matches!(call.state, CallState::Ready | CallState::Unknown(_));
+        if show_screen_share_note {
+            card = card.child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("Sharing your screen"),
             );
         }
         if let Some(error) = error {
@@ -22308,6 +22411,37 @@ impl QuillApp {
                                 .text_xs()
                                 .text_color(cx.theme().muted_foreground)
                                 .child("No camera available"),
+                        );
+                    }
+                    // Phase C2i: screen-share send toggle for video
+                    // calls — shown only when a screen source can
+                    // actually be captured (live: enumerated by the
+                    // engine; demo: fixtures). Otherwise an honest
+                    // "No screen source available".
+                    let screen_ready = self
+                        .live
+                        .as_ref()
+                        .is_some_and(|live| live.driver.call_screen_source_available())
+                        || self.live.is_none();
+                    if screen_ready {
+                        buttons = buttons.child(
+                            Button::new("call-screenshare")
+                                .label(if call.screen_sharing {
+                                    "Stop sharing"
+                                } else {
+                                    "Share screen"
+                                })
+                                .ghost()
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.toggle_call_screen_share(cx);
+                                })),
+                        );
+                    } else {
+                        buttons = buttons.child(
+                            div()
+                                .text_xs()
+                                .text_color(cx.theme().muted_foreground)
+                                .child("No screen source available"),
                         );
                     }
                 }
