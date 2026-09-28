@@ -51,3 +51,16 @@ path = "src/main.rs"
 lto = "thin"
 codegen-units = 1
 strip = "debuginfo"
+
+# Local iteration: keep only line tables in the top crate and strip debuginfo
+# from dependencies entirely. Release profile is untouched; use
+# `--profile debugging` (full debuginfo) when real debug info is needed.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
+
+[profile.debugging]
+inherits = "dev"
+debug = true
