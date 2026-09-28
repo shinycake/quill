@@ -96,6 +96,10 @@ pub enum RequestPurpose {
     SetPhoneNumber,
     CheckAuthenticationCode,
     CheckAuthenticationPassword,
+    /// Slice A1: `resendAuthenticationCode` from the code-entry screen.
+    ResendAuthenticationCode,
+    /// Slice A1: `requestQrCodeAuthentication` from the phone screen.
+    RequestQrCodeAuthentication,
     LoadChats,
     /// Phase 7.1: single-shot `loadChats(chatListFolder(id))` when a folder
     /// tab is selected. Separate from `LoadChats` so the ok-response does
@@ -821,6 +825,8 @@ fn is_auth_submit(purpose: RequestPurpose) -> bool {
         RequestPurpose::SetPhoneNumber
             | RequestPurpose::CheckAuthenticationCode
             | RequestPurpose::CheckAuthenticationPassword
+            | RequestPurpose::ResendAuthenticationCode
+            | RequestPurpose::RequestQrCodeAuthentication
     )
 }
 
@@ -873,6 +879,14 @@ impl AuthRequestError {
             }
             (RequestPurpose::CheckAuthenticationPassword, ErrorClass::Flood) => {
                 "too many password attempts — wait and try again"
+            }
+            (RequestPurpose::ResendAuthenticationCode, ErrorClass::Invalid) => {
+                "couldn't resend the code"
+            }
+            // No invented local cooldown: a too-early resend fails
+            // server-side (429), and this is the honest surface for it.
+            (RequestPurpose::ResendAuthenticationCode, ErrorClass::Flood) => {
+                "too many resends — wait and try again"
             }
             (_, ErrorClass::Unauthorized) => "session is no longer authorized",
             _ => "Telegram rejected the request",

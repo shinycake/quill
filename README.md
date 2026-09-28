@@ -26,9 +26,9 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 
 - [x] Phone-number login: country code, invalid/banned-number errors, SMS hint <!-- parity:auth-phone-login --> (README:24; telegram/requests.rs:51)
 - [x] Verification-code entry: expected digit count, invalid-code handling <!-- parity:auth-code-entry --> (auth.rs:44; telegram/requests.rs:71)
-- [ ] Resend the login code (partial: code entry works; no resend UI — schema has resendPhoneNumberCode) <!-- parity:auth-code-resend -->
+- [x] Resend the login code: "Resend code" on the code screen sends resendAuthenticationCode (reason resendCodeReasonUserRequest); no invented local cooldown — a too-early resend fails server-side (429) and surfaces via the auth-error line <!-- parity:auth-code-resend -->
 - [x] Two-step password entry on login <!-- parity:auth-2fa-password --> (auth.rs:52; telegram/requests.rs:81)
-- [ ] Log in via QR code: request QR, display link, scan with phone (partial: WaitOtherDeviceConfirmation state text exists at auth.rs:62 but requestQrCodeAuthentication is never called) <!-- parity:auth-qr-login -->
+- [x] Log in via QR code: "Sign in with QR code" on the phone screen sends requestQrCodeAuthentication; the link from authorizationStateWaitOtherDeviceConfirmation renders as a real QR bitmap (never logged) <!-- parity:auth-qr-login -->
 - [ ] "Link desktop device": show QR so another device can log in as this account <!-- parity:auth-qr-authorize-other -->
 - [ ] New-user registration: first/last name + terms (partial: explicit UnsupportedHalt — "finish registration in an official client", auth.rs:83) <!-- parity:auth-registration -->
 - [ ] Email-based login flow (partial: explicit UnsupportedHalt, auth.rs:72) <!-- parity:auth-email-login -->

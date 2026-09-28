@@ -91,6 +91,30 @@ pub fn check_authentication_password(extra: RequestId, password: &str) -> String
     .to_string()
 }
 
+/// `resendAuthenticationCode` for the auth flow (NOT `resendPhoneNumberCode`,
+/// which belongs to the phone-number-verification flow). Reason is the
+/// user-initiated one; TDLib enforces its own server-side cooldown (429 on
+/// too-early resend), so no local countdown is invented.
+pub fn resend_authentication_code(extra: RequestId) -> String {
+    json!({
+        "@type": "resendAuthenticationCode",
+        "@extra": extra.as_extra(),
+        "reason": { "@type": "resendCodeReasonUserRequest" },
+    })
+    .to_string()
+}
+
+/// `requestQrCodeAuthentication`. `other_user_ids` is empty: this client has
+/// no other logged-in user to hint at.
+pub fn request_qr_code_authentication(extra: RequestId) -> String {
+    json!({
+        "@type": "requestQrCodeAuthentication",
+        "@extra": extra.as_extra(),
+        "other_user_ids": [],
+    })
+    .to_string()
+}
+
 pub fn close_request(extra: RequestId) -> String {
     json!({
         "@type": "close",
@@ -5445,6 +5469,24 @@ mod tests {
         assert_eq!(v["@type"], "checkAuthenticationPassword");
         assert_eq!(v["@extra"], "5");
         assert_eq!(v["password"], "unit-test-password");
+    }
+
+    #[test]
+    fn resend_authentication_code_shape() {
+        let json = resend_authentication_code(RequestId(6));
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "resendAuthenticationCode");
+        assert_eq!(v["@extra"], "6");
+        assert_eq!(v["reason"]["@type"], "resendCodeReasonUserRequest");
+    }
+
+    #[test]
+    fn request_qr_code_authentication_shape() {
+        let json = request_qr_code_authentication(RequestId(7));
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "requestQrCodeAuthentication");
+        assert_eq!(v["@extra"], "7");
+        assert_eq!(v["other_user_ids"], serde_json::json!([]));
     }
 
     #[test]
