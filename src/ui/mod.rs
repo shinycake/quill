@@ -47366,25 +47366,21 @@ impl QuillShell {
     /// priority: first open flag wins when several are set).
     const KINDS: [DialogKind; 30] = [
         DialogKind::Scheduled,
-        DialogKind::PaymentForm,
-        DialogKind::PaymentReceipt,
-        DialogKind::CallbackPassword,
-        DialogKind::LoginUrlConfirm,
-        DialogKind::PollVoters,
-        DialogKind::ArchiveSettings,
-        DialogKind::ImportContacts,
-        DialogKind::AddContact,
-        DialogKind::EditProfile,
         DialogKind::GroupCallStart,
+        DialogKind::ArchiveSettings,
+        DialogKind::Websites,
+        DialogKind::Sessions,
+        DialogKind::TwoFa,
+        DialogKind::StorageUsage,
+        DialogKind::NotificationDefaults,
+        DialogKind::CallConfirm,
         DialogKind::FolderEditor,
         DialogKind::FolderDelete,
         DialogKind::FolderManage,
-        DialogKind::CallConfirm,
-        DialogKind::NotificationDefaults,
-        DialogKind::StorageUsage,
-        DialogKind::TwoFa,
-        DialogKind::Sessions,
-        DialogKind::Websites,
+        DialogKind::CallbackPassword,
+        DialogKind::LoginUrlConfirm,
+        DialogKind::PaymentForm,
+        DialogKind::PaymentReceipt,
         DialogKind::CreateChat,
         DialogKind::Member,
         DialogKind::Permissions,
@@ -47394,7 +47390,11 @@ impl QuillShell {
         DialogKind::QuoteReply,
         DialogKind::ForumManage,
         DialogKind::CommentThread,
+        DialogKind::PollVoters,
         DialogKind::Welcome,
+        DialogKind::ImportContacts,
+        DialogKind::EditProfile,
+        DialogKind::AddContact,
     ];
 
     /// Keep the single kit dialog in sync with the app-side open flags.
@@ -47430,7 +47430,11 @@ impl QuillShell {
                 let app_c = app.clone();
                 let shell_c = shell.clone();
                 window.open_dialog(cx, move |dialog, _window, cx| {
-                    build(&app_c, &shell_c, dialog, cx)
+                    // The kit binds Enter to Confirm (which closes the dialog);
+                    // the hand-rolled dialogs had no dialog-level Enter behavior,
+                    // so keep it disabled. A builder that wants Enter-to-confirm
+                    // can set its own `on_ok`, which overrides this default.
+                    build(&app_c, &shell_c, dialog.on_ok(|_, _, _| false), cx)
                 });
             }
         }
