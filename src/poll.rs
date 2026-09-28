@@ -5,7 +5,7 @@
 //! `pollOption.id`. `Poll::chosen_indexes` (in `telegram::envelope`) bridges
 //! the two.
 
-use crate::telegram::Poll;
+use crate::telegram::{Poll, PollVoteRestrictionReason};
 
 /// Poll creation constraints (schema `inputMessagePoll`, `td_api.tl:6193`):
 /// `@question` is 1–255 characters and `@options` is
@@ -91,6 +91,69 @@ pub fn poll_answer_for_tap(poll: &Poll, index: usize) -> Option<Vec<i32>> {
         next.sort_unstable();
     }
     Some(next)
+}
+
+/// Human reason for the given `pollVoteRestrictionReason*` (schema
+/// `td_api.tl:494`-`:510`), surfaced where a vote tap would otherwise die
+/// silently. Labels follow the schema descriptions verbatim-ish.
+pub fn poll_vote_restriction_label(reason: &PollVoteRestrictionReason) -> String {
+    match reason {
+        PollVoteRestrictionReason::Closed => "Voting is closed".to_string(),
+        PollVoteRestrictionReason::YetUnsent => "This poll hasn't been sent yet".to_string(),
+        PollVoteRestrictionReason::Scheduled => {
+            "Voting opens when the scheduled poll is sent".to_string()
+        }
+        PollVoteRestrictionReason::CountryRestricted { country_code }
+            if !country_code.is_empty() =>
+        {
+            format!("Voting isn't available in your country ({country_code})")
+        }
+        PollVoteRestrictionReason::CountryRestricted { .. } => {
+            "Voting isn't available in your country".to_string()
+        }
+        PollVoteRestrictionReason::MembershipRequired { .. } => {
+            "You need to be a member of this chat for at least a day to vote".to_string()
+        }
+        PollVoteRestrictionReason::Other => {
+            "Voting isn't available for you in this poll".to_string()
+        }
+    }
+}
+
+/// The quiz explanation to display on the poll card, if any. Per the
+/// `pollTypeQuiz.explanation` doc (schema line 475-476): shown when the
+/// user chooses an answer (or taps the lamp icon) — empty for a yet
+/// unanswered poll — so it's only returned once the user has voted.
+pub fn quiz_explanation(poll: &Poll) -> Option<&str> {
+    match &poll.poll_type {
+        crate::telegram::PollType::Quiz { explanation, .. } => (!explanation.is_empty()
+            && !poll.chosen_indexes().is_empty())
+        .then_some(explanation.as_str()),
+        crate::telegram::PollType::Regular => None,
+    }
+}
+
+/// Whether the message menu should offer "Stop poll" / "Stop quiz".
+/// Mirrors TGX (`MessageView.java:707`): the item appears on an open poll
+/// the user can stop — `stopPoll` is gated by
+/// `messageProperties.can_be_edited` (schema line 12951), which for
+/// non-admins means the user's own polls.
+pub fn can_stop_poll(is_outgoing: bool, poll: &Poll) -> bool {
+    is_outgoing && !poll.is_closed
+}
+
+/// Whether the "View voters" affordance may be offered. `getPollVoters`
+/// is only valid when `poll.can_get_voters` (schema line 12941).
+pub fn can_view_poll_voters(poll: &Poll) -> bool {
+    poll.can_get_voters
+}
+
+/// Poll creation entry gating: `can_send_polls` (`chatPermissions`,
+/// schema `td_api.tl:1061` / `:1070`). An absent permissions block means
+/// unknown (e.g. not loaded yet) — never block on unknown, the send
+/// itself would 400.
+pub fn chat_allows_polls(permissions: Option<&crate::telegram::ChatPermissions>) -> bool {
+    permissions.is_none_or(|permissions| permissions.can_send_polls)
 }
 
 /// A composer poll dialog frozen at "Create poll" (validated before send).
@@ -222,6 +285,8 @@ mod tests {
             allows_revoting: revote,
             is_closed: closed,
             poll_type: PollType::Regular,
+            can_get_voters: false,
+            vote_restriction_reason: None,
         }
     }
 
@@ -229,6 +294,7 @@ mod tests {
         let mut poll = regular_poll(chosen, false, false, false);
         poll.poll_type = PollType::Quiz {
             correct_option_ids: vec![1],
+            explanation: "Paris is the capital of France".to_string(),
         };
         poll
     }
@@ -336,6 +402,95 @@ mod tests {
         // exists is rejected when revoting is disabled.
         let poll = quiz_poll(&[1]);
         assert_eq!(poll_answer_for_tap(&poll, 2), None);
+    }
+
+    #[test]
+    fn restriction_labels_cover_all_reasons() {
+        use PollVoteRestrictionReason::*;
+        assert_eq!(poll_vote_restriction_label(&Closed), "Voting is closed");
+        assert_eq!(
+            poll_vote_restriction_label(&YetUnsent),
+            "This poll hasn't been sent yet"
+        );
+        assert_eq!(
+            poll_vote_restriction_label(&Scheduled),
+            "Voting opens when the scheduled poll is sent"
+        );
+        assert_eq!(
+            poll_vote_restriction_label(&CountryRestricted {
+                country_code: "US".to_string()
+            }),
+            "Voting isn't available in your country (US)"
+        );
+        assert_eq!(
+            poll_vote_restriction_label(&CountryRestricted {
+                country_code: String::new()
+            }),
+            "Voting isn't available in your country"
+        );
+        assert_eq!(
+            poll_vote_restriction_label(&MembershipRequired { chat_id: 9 }),
+            "You need to be a member of this chat for at least a day to vote"
+        );
+        assert_eq!(
+            poll_vote_restriction_label(&Other),
+            "Voting isn't available for you in this poll"
+        );
+    }
+
+    #[test]
+    fn quiz_explanation_only_after_answering() {
+        // Unanswered quiz with a server-side explanation: hidden (schema:
+        // "empty for a yet unanswered poll").
+        let poll = quiz_poll(&[]);
+        assert_eq!(quiz_explanation(&poll), None);
+        // Answered quiz: shown.
+        let poll = quiz_poll(&[0]);
+        assert_eq!(
+            quiz_explanation(&poll),
+            Some("Paris is the capital of France")
+        );
+        // Regular polls never have one.
+        let poll = regular_poll(&[1], false, false, false);
+        assert_eq!(quiz_explanation(&poll), None);
+    }
+
+    #[test]
+    fn quiz_explanation_empty_is_hidden() {
+        let mut poll = quiz_poll(&[0]);
+        if let PollType::Quiz { explanation, .. } = &mut poll.poll_type {
+            explanation.clear();
+        }
+        assert_eq!(quiz_explanation(&poll), None);
+    }
+
+    #[test]
+    fn stop_offer_only_on_open_own_poll() {
+        let open = regular_poll(&[], false, false, false);
+        let closed = regular_poll(&[], false, false, true);
+        assert!(can_stop_poll(true, &open));
+        assert!(!can_stop_poll(true, &closed));
+        assert!(!can_stop_poll(false, &open));
+        assert!(!can_stop_poll(false, &closed));
+    }
+
+    #[test]
+    fn voters_offer_follows_can_get_voters() {
+        let mut poll = regular_poll(&[], false, false, false);
+        assert!(!can_view_poll_voters(&poll));
+        poll.can_get_voters = true;
+        assert!(can_view_poll_voters(&poll));
+    }
+
+    #[test]
+    fn poll_entry_allowed_unless_permissions_deny() {
+        use crate::telegram::ChatPermissions;
+        // Unknown (not loaded yet) never blocks.
+        assert!(chat_allows_polls(None));
+        let mut permissions = ChatPermissions::all();
+        assert!(chat_allows_polls(Some(&permissions)));
+        permissions.can_send_polls = false;
+        assert!(!chat_allows_polls(Some(&permissions)));
     }
 
     #[test]

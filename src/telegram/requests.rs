@@ -3766,6 +3766,49 @@ pub fn send_document(
     .to_string()
 }
 
+/// `getPollVoters` (TDLib 1.8.67, `schema/td_api.tl:12941`):
+/// `getPollVoters chat_id:int53 message_id:int53 option_id:int32
+/// offset:int32 limit:int32 = PollVoters;`
+/// `option_id` is the 0-based option index (like `setPollAnswer`,
+/// schema line 12932); `limit` must be positive and ≤ 50. Response is
+/// `pollVoters`; voters arrive page by page (offset = items already
+/// loaded). Only called when `poll.can_get_voters` (schema line 698).
+pub fn get_poll_voters(
+    extra: RequestId,
+    chat_id: ChatId,
+    message_id: MessageId,
+    option_id: i32,
+    offset: i32,
+    limit: i32,
+) -> String {
+    json!({
+        "@type": "getPollVoters",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0,
+        "message_id": message_id.0,
+        "option_id": option_id,
+        "offset": offset,
+        "limit": limit,
+    })
+    .to_string()
+}
+
+/// `stopPoll` (TDLib 1.8.67, `schema/td_api.tl:12953`):
+/// `stopPoll chat_id:int53 message_id:int53 reply_markup:ReplyMarkup = Ok;`
+/// `reply_markup` is "for bots only; pass null if none" (schema doc), so
+/// the human client always sends null. Response is `ok`; the poll closes
+/// via `updatePoll` (and `chatEventPollStopped` lands in the event log).
+pub fn stop_poll(extra: RequestId, chat_id: ChatId, message_id: MessageId) -> String {
+    json!({
+        "@type": "stopPoll",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0,
+        "message_id": message_id.0,
+        "reply_markup": Value::Null,
+    })
+    .to_string()
+}
+
 /// `setPollAnswer` (TDLib 1.8.67, `schema/td_api.tl:12932`): `option_ids` are
 /// 0-based indexes into the poll's option list (not the `pollOption.id`
 /// strings). Response is `ok`; the new counts arrive via `updatePoll`.
@@ -7050,6 +7093,7 @@ mod channel_requests_tests {
     }
 
     #[test]
+    #[test]
     fn s4_story_requests_match_1_8_67() {
         // Phase 9.5: `getStoryInteractions story_id:int32 query:string
         // only_contacts:Bool prefer_forwards:Bool prefer_with_reaction:Bool
@@ -7089,6 +7133,45 @@ mod channel_requests_tests {
         let v: serde_json::Value = serde_json::from_str(&stealth).unwrap();
         assert_eq!(v["@type"], "activateStoryStealthMode");
         assert_eq!(v["@extra"], "78");
+    }
+
+    #[test]
+    fn get_poll_voters_shape_matches_1_8_67() {
+        // Verbatim constructor at schema 1.8.67 line 12941 — the pin
+        // keeps the request shape honest if the schema is ever repinned.
+        let schema = include_str!("../../schema/td_api.tl");
+        assert!(schema.contains(
+            "getPollVoters chat_id:int53 message_id:int53 option_id:int32 \
+             offset:int32 limit:int32 = PollVoters;"
+        ));
+        let json = get_poll_voters(RequestId(9), ChatId(1), MessageId(42), 2, 50, 50);
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "getPollVoters");
+        assert_eq!(v["@extra"], "9");
+        assert_eq!(v["chat_id"], 1);
+        assert_eq!(v["message_id"], 42);
+        assert_eq!(v["option_id"], 2);
+        assert_eq!(v["offset"], 50);
+        assert_eq!(v["limit"], 50);
+    }
+
+    #[test]
+    fn stop_poll_shape_matches_1_8_67() {
+        // Verbatim constructor at schema 1.8.67 line 12953.
+        // `reply_markup` is "for bots only; pass null if none" (schema
+        // doc) — the human client always sends null.
+        let schema = include_str!("../../schema/td_api.tl");
+        assert!(
+            schema
+                .contains("stopPoll chat_id:int53 message_id:int53 reply_markup:ReplyMarkup = Ok;")
+        );
+        let json = stop_poll(RequestId(9), ChatId(1), MessageId(42));
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "stopPoll");
+        assert_eq!(v["@extra"], "9");
+        assert_eq!(v["chat_id"], 1);
+        assert_eq!(v["message_id"], 42);
+        assert!(v["reply_markup"].is_null());
     }
 
     #[test]

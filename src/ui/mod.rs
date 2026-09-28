@@ -35,7 +35,9 @@ use quill::notify::{NotificationSoundKind, QueuedNotification};
 use quill::platform::live_secret_store;
 use quill::playback::PlaybackClock;
 use quill::poll::{
-    POLL_OPTIONS_MAX, POLL_OPTIONS_MIN, PollDraft, poll_bar_fraction, voter_count_label,
+    POLL_OPTIONS_MAX, POLL_OPTIONS_MIN, PollDraft, can_stop_poll, can_view_poll_voters,
+    chat_allows_polls, poll_bar_fraction, poll_vote_restriction_label, quiz_explanation,
+    voter_count_label,
 };
 use quill::rich::RichBlock;
 use quill::settings::{
@@ -46,9 +48,8 @@ use quill::state::{
     ActiveCall, ActiveGroupCall, AdminListFetch, AdminRightsFetch, CallSummary, ChatEventLogFetch,
     ChatSearchJump, ChatStatisticsFetch, ChatSummary, ContactRow, ForceReplyTarget, ForwardResult,
     HistoryMessage, InfoPanelTarget, InviteLinkFetch, JoinRequestFetch, LoginUrlRequest,
-    MemberListFilter, OutboxReceipt, RequestPurpose, SearchStatus, Session, SimilarBotsFetch,
-    SponsoredReportFlight, StoryPostOutcome, StoryPostState, StoryReportStage,
-    SupergroupMembersFetch, WelcomeMessagesFetch, active_custom_keyboard, effective_preview,
+    MemberListFilter, OutboxReceipt, PollVotersFetch, RequestPurpose, SearchStatus, Session,
+    SimilarBotsFetch, SponsoredReportFlight, StoryPostOutcome, StoryPostState, StoryReportStage,
     event_log_relative_time, outgoing_status_label, unix_ms_now, unread_badge_text,
 };
 use quill::story_composer::{StoryComposer, StoryExpiry, StoryMediaKind, StoryPrivacy};
@@ -989,6 +990,8 @@ enum G1DialogClose {
     ForumManage,
     /// Slice G2: channel-post comment-thread viewer.
     CommentThread,
+    /// B4: poll voter-list viewer.
+    PollVoters,
     /// Slice G2: chat welcome-message editor.
     WelcomeMessage,
 }
@@ -1522,6 +1525,11 @@ pub struct QuillApp {
     saved_edit_reply: Option<ComposerReplyTo>,
     /// Delete confirm (tdesktop `DeleteMessagesBox` / Unigram popup).
     pending_delete: Option<DeleteConfirm>,
+    /// B4: pending "Stop poll" confirm (`stopPoll`, schema 1.8.67 line
+    /// 12953) — (chat, message, is_quiz) for the warning copy. TGX
+    /// `StopPollWarn` / `StopQuizWarn`: nobody can vote afterwards and
+    /// the action can't be undone.
+    pending_stop_poll: Option<(ChatId, MessageId, bool)>,
     /// Phase B1: pending "Close secret chat" confirm for the open chat
     /// (`closeSecretChat`, schema 1.8.67 line 15242).
     pending_close_secret_chat: Option<ChatId>,
@@ -1700,6 +1708,8 @@ pub struct QuillApp {
     forum_manage_dialog: Option<ForumManageDialog>,
     /// Slice G2: channel-post comment-thread viewer.
     comment_thread_dialog: Option<CommentThreadDialog>,
+    /// B4: poll voter-list viewer.
+    poll_voters_dialog: Option<PollVotersDialog>,
     /// Slice G2: chat welcome-message editor.
     welcome_dialog: Option<WelcomeDialog>,
     /// Slice G2: event-log search input for the info panel's
@@ -2357,6 +2367,16 @@ impl ForumManageDialog {
 pub struct CommentThreadDialog {
     chat_id: ChatId,
     message_id: MessageId,
+}
+
+/// B4: poll voter-list viewer (`getPollVoters`, schema 1.8.67 line
+/// 12941). One dialog per poll message; the selected option's voters
+/// page in below it with a "Load more" button (50 per page, the schema
+/// max).
+pub struct PollVotersDialog {
+    chat_id: ChatId,
+    message_id: MessageId,
+    selected_option: Option<usize>,
 }
 
 /// Slice G2: chat welcome-message editor (info panel → "Welcome
@@ -3761,11 +3781,13 @@ impl QuillApp {
             saved_edit_draft: String::new(),
             saved_edit_reply: None,
             pending_delete: None,
+            pending_stop_poll: None,
             pending_close_secret_chat: None,
             pending_inline_bot_alert: None,
             inline_bot_alert_shown: false,
             forum_manage_dialog: None,
             comment_thread_dialog: None,
+            poll_voters_dialog: None,
             welcome_dialog: None,
             event_log_search: None,
             event_log_admin_filter: None,
@@ -6438,6 +6460,21 @@ impl QuillApp {
             this.message_menu = None;
             cx.notify();
         });
+        // B4: stopPoll (schema 1.8.67 line 12953) — TGX `StopPollWarn`
+        // shows Stop Poll / Stop Quiz only for open polls with
+        // `messageProperties.can_be_edited` (schema line 12951); client
+        // side we offer it on own polls (`quill::poll::can_stop_poll`).
+        if let MessageContent::Poll(poll_content) = &message.content
+            && can_stop_poll(message.is_outgoing, &poll_content.poll)
+        {
+            let is_quiz = matches!(poll_content.poll.poll_type, PollType::Quiz { .. });
+            let label = if is_quiz { "Stop quiz" } else { "Stop poll" };
+            item!("menu-stop-poll", label, this, _window, cx, {
+                this.begin_stop_poll(chat_id, message_id, is_quiz, cx);
+                this.message_menu = None;
+                cx.notify();
+            });
+        }
         // Slice G2: channel-post comment threads (`getMessageThreadHistory`,
         // schema 1.8.67, line 11839). The dialog shows an honest error
         // when the post has no discussion thread.
@@ -7507,6 +7544,13 @@ impl QuillApp {
             .is_some_and(|confirm| confirm.chat_id != chat_id)
         {
             self.pending_delete = None;
+        }
+        // B4: a pending stop-poll confirm belongs to its own chat.
+        if self
+            .pending_stop_poll
+            .is_some_and(|(id, _, _)| id != chat_id)
+        {
+            self.pending_stop_poll = None;
         }
         if self
             .pending_forward
@@ -8907,6 +8951,11 @@ impl QuillApp {
             self.cancel_delete(cx);
             return;
         }
+        // B4: Escape cancels the stop-poll confirm too.
+        if self.pending_stop_poll.is_some() {
+            self.cancel_stop_poll(cx);
+            return;
+        }
         if self.chat_search_is_open() {
             self.close_chat_search_ui(window, cx);
             return;
@@ -9061,6 +9110,59 @@ impl QuillApp {
         } else if self.demo_session.is_some() {
             self.apply_demo_delete(confirm.chat_id, confirm.message_id);
             self.status_note = "demo delete applied locally (no live Telegram)".into();
+        }
+        cx.notify();
+    }
+
+    /// B4: open the "Stop poll" / "Stop quiz" confirm banner. TGX
+    /// `StopPollWarn` / `StopQuizWarn`: nobody can vote afterwards and
+    /// the action can't be undone.
+    fn begin_stop_poll(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        is_quiz: bool,
+        cx: &mut Context<Self>,
+    ) {
+        self.pending_stop_poll = Some((chat_id, message_id, is_quiz));
+        self.status_note = "confirm stop poll".into();
+        cx.notify();
+    }
+
+    fn cancel_stop_poll(&mut self, cx: &mut Context<Self>) {
+        self.pending_stop_poll = None;
+        self.status_note = "stop cancelled".into();
+        cx.notify();
+    }
+
+    /// B4: confirm `stopPoll` (schema 1.8.67 line 12953). The closed
+    /// poll arrives via `updatePoll`; demo mode flips it locally.
+    fn confirm_stop_poll(&mut self, cx: &mut Context<Self>) {
+        let Some((chat_id, message_id, _)) = self.pending_stop_poll.take() else {
+            return;
+        };
+        if self.live.is_some() {
+            let result = self
+                .live
+                .as_mut()
+                .expect("live")
+                .driver
+                .stop_poll(chat_id, message_id);
+            self.status_note = match result {
+                Ok(_) => "stopping poll…".into(),
+                Err(_) => "could not stop poll".into(),
+            };
+        } else if self.demo_session.is_some() {
+            if let Some(history) = self
+                .demo_session
+                .as_mut()
+                .and_then(|session| session.histories.get_mut(&chat_id.0))
+                && let Some(message) = history.messages.get_mut(&message_id.0)
+                && let MessageContent::Poll(poll_content) = &mut message.content
+            {
+                poll_content.poll.is_closed = true;
+            }
+            self.status_note = "poll stopped (demo)".into();
         }
         cx.notify();
     }
@@ -12869,6 +12971,213 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// B4: open the poll voter-list viewer. Live: fetches the first
+    /// option's page (`getPollVoters`, schema 1.8.67 line 12941). Demo
+    /// sessions have no TDLib — an honest note instead of a fake list.
+    fn open_poll_voters_dialog(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        cx: &mut Context<Self>,
+    ) {
+        if self.demo_session.is_some() {
+            self.status_note = "voter lists are unavailable in demo mode".into();
+            cx.notify();
+            return;
+        }
+        self.poll_voters_dialog = Some(PollVotersDialog {
+            chat_id,
+            message_id,
+            selected_option: None,
+        });
+        self.select_poll_voters_option(0, cx);
+    }
+
+    fn close_poll_voters_dialog(&mut self, cx: &mut Context<Self>) {
+        self.poll_voters_dialog = None;
+        cx.notify();
+    }
+
+    /// B4: switch the voters dialog to another option (first page).
+    fn select_poll_voters_option(&mut self, option_index: usize, cx: &mut Context<Self>) {
+        let Some(dialog) = self.poll_voters_dialog.as_mut() else {
+            return;
+        };
+        dialog.selected_option = Some(option_index);
+        let (chat_id, message_id) = (dialog.chat_id, dialog.message_id);
+        if let Some(live) = self.live.as_mut()
+            && live
+                .driver
+                .fetch_poll_voters(chat_id, message_id, option_index)
+                .is_err()
+        {
+            self.status_note = "could not load voters".into();
+        }
+        cx.notify();
+    }
+
+    /// B4: next `getPollVoters` page for the dialog's selected option.
+    fn load_more_poll_voters(&mut self, cx: &mut Context<Self>) {
+        let Some(dialog) = self.poll_voters_dialog.as_ref() else {
+            return;
+        };
+        let (chat_id, message_id) = (dialog.chat_id, dialog.message_id);
+        let option_index = dialog.selected_option.unwrap_or(0);
+        if let Some(live) = self.live.as_mut()
+            && live
+                .driver
+                .load_more_poll_voters(chat_id, message_id, option_index)
+                .is_err()
+        {
+            self.status_note = "could not load more voters".into();
+        }
+        cx.notify();
+    }
+
+    /// B4: display name for a poll voter (same resolution as the event
+    /// log's sender names).
+    fn poll_voter_name(&self, sender: &MessageSender) -> String {
+        match sender {
+            MessageSender::User { user_id } => self
+                .session()
+                .and_then(|session| session.user(*user_id))
+                .map(|user| user.display_name())
+                .unwrap_or_else(|| format!("User {user_id}")),
+            MessageSender::Chat { chat_id } => self
+                .session()
+                .and_then(|session| session.chats.get(chat_id))
+                .map(|chat| chat.title.clone())
+                .unwrap_or_else(|| format!("Chat {chat_id}")),
+        }
+    }
+
+    /// B4: the poll voters dialog body — option rows, then the selected
+    /// option's voters with a "Load more" button while the server
+    /// reports more than loaded.
+    fn poll_voters_dialog_body(&self, cx: &mut Context<Self>) -> AnyElement {
+        let Some(dialog) = self.poll_voters_dialog.as_ref() else {
+            return div().into_any_element();
+        };
+        let (chat_id, message_id) = (dialog.chat_id, dialog.message_id);
+        let selected = dialog.selected_option;
+        let poll = self
+            .session()
+            .and_then(|session| session.histories.get(&chat_id.0))
+            .and_then(|history| history.messages.get(&message_id.0))
+            .and_then(|message| match &message.content {
+                MessageContent::Poll(poll) => Some(poll.poll.clone()),
+                _ => None,
+            });
+        let mut body = div().flex().flex_col().gap_1();
+        if let Some(poll) = &poll {
+            for (index, option) in poll.options.iter().enumerate() {
+                let label = format!(
+                    "{} · {}",
+                    option.text,
+                    voter_count_label(option.voter_count)
+                );
+                let is_selected = selected == Some(index);
+                body = body.child(
+                    Button::new(format!("poll-voters-option-{index}"))
+                        .label(label)
+                        .ghost()
+                        .text_color(if is_selected {
+                            rgb(0x58a6ff)
+                        } else {
+                            rgb(0xe6edf3)
+                        })
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.select_poll_voters_option(index, cx);
+                        })),
+                );
+            }
+        }
+        let fetch = selected.and_then(|index| {
+            self.session()
+                .and_then(|session| {
+                    session
+                        .poll_voters
+                        .get(&(chat_id.0, message_id.0, index as i32))
+                })
+                .cloned()
+        });
+        body = match fetch {
+            None => body.child(
+                div()
+                    .text_xs()
+                    .text_color(rgb(0x8b949e))
+                    .child("Select an option to see its voters."),
+            ),
+            Some(PollVotersFetch::Loading) => body.child(
+                div()
+                    .text_xs()
+                    .text_color(rgb(0x8b949e))
+                    .child("Loading voters…"),
+            ),
+            Some(PollVotersFetch::Failed(reason)) => body
+                .child(div().text_xs().text_color(rgb(0xf85149)).child(reason))
+                .child(
+                    Button::new("poll-voters-retry")
+                        .label("Retry")
+                        .ghost()
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            let index = this
+                                .poll_voters_dialog
+                                .as_ref()
+                                .and_then(|dialog| dialog.selected_option)
+                                .unwrap_or(0);
+                            this.select_poll_voters_option(index, cx);
+                        })),
+                ),
+            Some(PollVotersFetch::Loaded {
+                voters,
+                total_count,
+            }) => {
+                let mut list = body;
+                if voters.is_empty() {
+                    list = list.child(
+                        div()
+                            .text_xs()
+                            .text_color(rgb(0x8b949e))
+                            .child("No voters yet."),
+                    );
+                }
+                for voter in &voters {
+                    list = list.child(
+                        div()
+                            .text_sm()
+                            .text_color(rgb(0xe6edf3))
+                            .child(self.poll_voter_name(voter)),
+                    );
+                }
+                if voters.len() < total_count as usize {
+                    list = list.child(
+                        Button::new("poll-voters-more")
+                            .label("Load more")
+                            .ghost()
+                            .text_color(rgb(0x58a6ff))
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.load_more_poll_voters(cx);
+                            })),
+                    );
+                }
+                list
+            }
+        };
+        body.into_any_element()
+    }
+
+    /// B4: the poll voters dialog overlay (`g1_modal` shell).
+    fn poll_voters_dialog_overlay(&self, cx: &mut Context<Self>) -> AnyElement {
+        self.g1_modal(
+            "poll-voters",
+            G1DialogClose::PollVoters,
+            "Poll voters",
+            self.poll_voters_dialog_body(cx),
+            cx,
+        )
+    }
+
     /// Slice G2: open the welcome-message editor and load the pack.
     fn open_welcome_dialog(
         &mut self,
@@ -15070,6 +15379,20 @@ impl QuillApp {
 
     /// Phase 4.2: open the poll creation dialog above the composer.
     fn open_poll_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // B4: defensive gate — the composer hides the Poll entry when
+        // `chatPermissions.can_send_polls` is false (schema 1.8.67 line
+        // 1070); this refuses a stale race (permissions changed after
+        // the entry rendered).
+        let polls_allowed = self.session().and_then(|s| s.open_chat).is_none_or(|id| {
+            self.session()
+                .and_then(|s| s.chats.get(&id.0))
+                .is_none_or(|chat| chat_allows_polls(chat.permissions.as_ref()))
+        });
+        if !polls_allowed {
+            self.status_note = "polls are restricted in this chat".into();
+            cx.notify();
+            return;
+        }
         self.poll_dialog = Some(PollDialog::new(window, cx));
         if let Some(dialog) = &self.poll_dialog {
             dialog
@@ -18849,6 +19172,15 @@ impl QuillApp {
             ChatEventAction::MessagePinned { text, .. } => with_text("pinned a message", text),
             ChatEventAction::MessageUnpinned { text, .. } => with_text("unpinned a message", text),
             ChatEventAction::MemberJoined => "joined the chat".to_owned(),
+            // B4: `chatEventPollStopped` (schema 1.8.67 line 7776) — TGX
+            // `EventLogPollStopped` / `EventLogQuizStopped` copy.
+            ChatEventAction::PollStopped { is_quiz } => {
+                if *is_quiz {
+                    "stopped the quiz".to_owned()
+                } else {
+                    "stopped the poll".to_owned()
+                }
+            }
             ChatEventAction::MemberJoinedByInviteLink {
                 invite_link_name, ..
             } => {
@@ -23650,6 +23982,13 @@ impl QuillApp {
         {
             self.pending_delete = None;
         }
+        // B4: a pending stop-poll confirm belongs to its own chat.
+        if self
+            .pending_stop_poll
+            .is_some_and(|(id, _, _)| id != chat_id)
+        {
+            self.pending_stop_poll = None;
+        }
         if self
             .pending_forward
             .as_ref()
@@ -27970,6 +28309,70 @@ impl QuillApp {
             )
     }
 
+    /// B4: "Stop poll" / "Stop quiz" confirm banner, styled like the
+    /// delete confirm. TGX `StopPollWarn` / `StopQuizWarn`: nobody can
+    /// vote afterwards, and the action can't be undone.
+    fn stop_poll_confirm_banner(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let is_quiz = self
+            .pending_stop_poll
+            .is_some_and(|(_, _, is_quiz)| is_quiz);
+        let title = if is_quiz {
+            "Stop this quiz?"
+        } else {
+            "Stop this poll?"
+        };
+        let warning = if is_quiz {
+            "If you stop this quiz now, nobody will be able to participate in it anymore.\nThis action cannot be undone."
+        } else {
+            "If you stop this poll now, nobody will be able to vote in it anymore.\nThis action cannot be undone."
+        };
+        div()
+            .id("stop-poll-confirm")
+            .flex()
+            .items_center()
+            .justify_between()
+            .gap_2()
+            .px_3()
+            .py_2()
+            .rounded_md()
+            .border_1()
+            .border_color(rgb(0xf85149))
+            .bg(rgb(0x3d1f1f))
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .min_w_0()
+                    .child(
+                        div()
+                            .text_xs()
+                            .font_medium()
+                            .text_color(rgb(0xf85149))
+                            .child(title),
+                    )
+                    .child(div().text_sm().text_color(rgb(0xc9d1d9)).child(warning)),
+            )
+            .child(
+                div()
+                    .flex()
+                    .gap_2()
+                    .child(
+                        Button::new("cancel-stop-poll")
+                            .label("Cancel")
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.cancel_stop_poll(cx);
+                            })),
+                    )
+                    .child(
+                        Button::new("confirm-stop-poll")
+                            .label(if is_quiz { "Stop quiz" } else { "Stop poll" })
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.confirm_stop_poll(cx);
+                            })),
+                    ),
+            )
+    }
+
     /// Phase B1: "Close secret chat" confirm banner, styled like the
     /// delete confirm. Closing is permanent — the chat can never send
     /// again once `secretChatStateClosed` lands.
@@ -28216,6 +28619,7 @@ impl QuillApp {
                         G1DialogClose::QuoteReply => this.close_quote_reply_dialog(cx),
                         G1DialogClose::ForumManage => this.close_forum_manage_dialog(cx),
                         G1DialogClose::CommentThread => this.close_comment_thread_dialog(cx),
+                        G1DialogClose::PollVoters => this.close_poll_voters_dialog(cx),
                         G1DialogClose::WelcomeMessage => this.close_welcome_dialog(cx),
                     })),
             )
@@ -28268,6 +28672,9 @@ impl QuillApp {
                                         G1DialogClose::CommentThread => {
                                             this.close_comment_thread_dialog(cx)
                                         }
+                                        G1DialogClose::PollVoters => {
+                                            this.close_poll_voters_dialog(cx)
+                                        }
                                         G1DialogClose::WelcomeMessage => {
                                             this.close_welcome_dialog(cx)
                                         }
@@ -28308,6 +28715,9 @@ impl QuillApp {
         }
         if self.comment_thread_dialog.is_some() {
             return Some(self.comment_thread_dialog_overlay(cx));
+        }
+        if self.poll_voters_dialog.is_some() {
+            return Some(self.poll_voters_dialog_overlay(cx));
         }
         if self.welcome_dialog.is_some() {
             return Some(self.welcome_dialog_overlay(cx));
@@ -33404,6 +33814,14 @@ impl QuillApp {
             }
             _ => None,
         };
+        // B4: `chatPermissions.can_send_polls` (schema 1.8.67 line 1070)
+        // gates the Poll composer entry; absent permissions = unknown =
+        // allowed.
+        let polls_allowed = self.session().and_then(|s| s.open_chat).is_none_or(|id| {
+            self.session()
+                .and_then(|s| s.chats.get(&id.0))
+                .is_none_or(|c| chat_allows_polls(c.permissions.as_ref()))
+        });
         div()
             .flex()
             .flex_col()
@@ -33475,11 +33893,24 @@ impl QuillApp {
                                                 this.attach_local(AttachmentKind::VideoNote, cx);
                                             })),
                                     )
-                                    .child(Button::new("open-poll-dialog").label("Poll").on_click(
-                                        cx.listener(|this, _, window, cx| {
-                                            this.open_poll_dialog(window, cx);
-                                        }),
-                                    ))
+                                    .child(if polls_allowed {
+                                        Button::new("open-poll-dialog")
+                                            .label("Poll")
+                                            .on_click(cx.listener(|this, _, window, cx| {
+                                                this.open_poll_dialog(window, cx);
+                                            }))
+                                            .into_any_element()
+                                    } else {
+                                        // B4: clear notice when the server
+                                        // disallows polls
+                                        // (`chatPermissions.can_send_polls`,
+                                        // schema 1.8.67 line 1070).
+                                        div()
+                                            .text_xs()
+                                            .text_color(rgb(0xf0883e))
+                                            .child("Polls restricted in this chat")
+                                            .into_any_element()
+                                    })
                                     .child(
                                         Button::new("open-gifs")
                                             .label(if self.gif_panel_open() {
@@ -33623,6 +34054,10 @@ impl QuillApp {
                         )
                         .when_some(self.pending_delete.clone(), |this, _| {
                             this.child(self.delete_confirm_banner(cx))
+                        })
+                        // B4: stop-poll / stop-quiz confirm banner.
+                        .when_some(self.pending_stop_poll, |this, _| {
+                            this.child(self.stop_poll_confirm_banner(cx))
                         })
                         // Phase B1: close-secret-chat confirm banner.
                         .when_some(self.pending_close_secret_chat, |this, _| {
@@ -36294,10 +36729,11 @@ fn apply_ready_poll(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU
                         allows_multiple_answers: bool,
                         allows_revoting: bool,
                         is_closed: bool,
-                        poll_type: &str| {
+                        poll_type: &str,
+                        vote_restriction_reason: &str| {
         let question_json = formatted(question);
         format!(
-            r#"{{"@type":"updateNewMessage","message":{{"id":{message_id},"chat_id":{chat_id},"is_outgoing":false,"content":{{"@type":"messagePoll","poll":{{"@type":"poll","id":{poll_id},"question":{question_json},"options":[{options}],"total_voter_count":{total_voter_count},"is_anonymous":{is_anonymous},"allows_multiple_answers":{allows_multiple_answers},"allows_revoting":{allows_revoting},"is_closed":{is_closed},"type":{poll_type}}},"description":{{"@type":"formattedText","text":"","entities":[]}},"can_add_option":false}}}}}}"#
+            r#"{{"@type":"updateNewMessage","message":{{"id":{message_id},"chat_id":{chat_id},"is_outgoing":false,"content":{{"@type":"messagePoll","poll":{{"@type":"poll","id":{poll_id},"question":{question_json},"options":[{options}],"total_voter_count":{total_voter_count},"is_anonymous":{is_anonymous},"allows_multiple_answers":{allows_multiple_answers},"allows_revoting":{allows_revoting},"is_closed":{is_closed},"vote_restriction_reason":{vote_restriction_reason},"type":{poll_type}}},"description":{{"@type":"formattedText","text":"","entities":[]}},"can_add_option":false}}}}}}"#
         )
     };
 
@@ -36319,10 +36755,12 @@ fn apply_ready_poll(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU
         true,
         false,
         r#"{"@type":"pollTypeRegular"}"#,
+        "null",
     );
 
     // Closed quiz poll: correct answer is "Mars" (index 0), user answered
-    // "Venus" (is_chosen) — results only, no voting affordance.
+    // "Venus" (is_chosen) — results only, no voting affordance. Non-empty
+    // explanation exercises the B4 quiz-explanation rendering.
     let closed_options = [
         option("opt-mars", "Mars", 18, 72, false),
         option("opt-venus", "Venus", 7, 28, true),
@@ -36338,10 +36776,32 @@ fn apply_ready_poll(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU
         false,
         false,
         true,
-        r#"{"@type":"pollTypeQuiz","correct_option_ids":[0],"explanation":{"@type":"formattedText","text":"","entities":[]}}"#,
+        r#"{"@type":"pollTypeQuiz","correct_option_ids":[0],"explanation":{"@type":"formattedText","text":"Mars looks red because iron oxide — rust — coats its surface.","entities":[]}}"#,
+        "null",
     );
 
-    for json in [open_poll, closed_poll] {
+    // Restricted poll: the server reports a vote-restriction reason, so the
+    // B4 restriction label renders instead of a dead tap.
+    let restricted_options = [
+        option("opt-rust", "Rust", 9, 60, false),
+        option("opt-go", "Go", 6, 40, false),
+    ]
+    .join(",");
+    let restricted_poll = poll_message(
+        108,
+        9003,
+        "Best systems language?",
+        &restricted_options,
+        15,
+        true,
+        false,
+        false,
+        false,
+        r#"{"@type":"pollTypeRegular"}"#,
+        r#"{"@type":"pollVoteRestrictionReasonMembershipRequired","chat_id":15}"#,
+    );
+
+    for json in [open_poll, closed_poll, restricted_poll] {
         if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
             session.apply(owned);
         }
@@ -40058,10 +40518,47 @@ fn poll_body(
             "public"
         },
     )));
+    // B4: `pollVoteRestrictionReason*` (schema `td_api.tl:494`-`:510`) —
+    // a human reason instead of a dead tap.
+    if let Some(reason) = &poll.vote_restriction_reason {
+        body = body.child(
+            div()
+                .text_xs()
+                .text_color(rgb(0xf0883e))
+                .child(poll_vote_restriction_label(reason)),
+        );
+    }
     for (index, option) in poll.options.iter().enumerate() {
         body = body.child(poll_option_row(
             chat_id, message_id, index, option, poll, cx,
         ));
+    }
+    // B4: quiz explanation (`pollTypeQuiz.explanation`, schema line
+    // 475-476) — shown after the user answers, per the schema doc.
+    if let Some(explanation) = quiz_explanation(poll) {
+        body = body.child(
+            div()
+                .text_xs()
+                .text_color(rgb(0xd29922))
+                .child(format!("💡 {explanation}")),
+        );
+    }
+    // B4: voter list (`getPollVoters`, schema line 12941) — a single
+    // affordance opens the per-option voters dialog; only when the
+    // server says voters are available (`can_get_voters`).
+    if can_view_poll_voters(poll) {
+        body = body.child(
+            Button::new(format!("poll-voters-{}", message_id.0))
+                .label(format!(
+                    "View voters · {}",
+                    voter_count_label(poll.total_voter_count)
+                ))
+                .ghost()
+                .text_color(rgb(0x58a6ff))
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.open_poll_voters_dialog(chat_id, message_id, cx);
+                })),
+        );
     }
     body.into_any_element()
 }
@@ -40081,7 +40578,7 @@ fn poll_option_row(
     let chosen = option.is_chosen;
     let votable = poll.can_vote();
     let quiz_correct = poll.is_closed
-        && matches!(&poll.poll_type, PollType::Quiz { correct_option_ids }
+        && matches!(&poll.poll_type, PollType::Quiz { correct_option_ids, .. }
             if correct_option_ids.contains(&(index as i32)));
     let option_label = if chosen {
         format!("✓ {}", option.text)

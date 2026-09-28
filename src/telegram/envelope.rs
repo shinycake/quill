@@ -435,6 +435,14 @@ pub enum EnvelopePayload {
     MessageProperties {
         can_get_link: bool,
     },
+    /// B4: `pollVoters` (TDLib 1.8.67, `schema/td_api.tl:2854`) — the
+    /// `getPollVoters` answer (schema line 12941). `total_count` is the
+    /// approximate total; `voters` is one page of senders, in server
+    /// order. Only the senders are kept (the `date` is unused).
+    PollVoters {
+        total_count: i32,
+        voters: Vec<MessageSender>,
+    },
     /// `chats` — `searchChats` / `searchRecentlyFoundChats` / similar.
     Chats {
         total_count: i32,
@@ -3203,6 +3211,11 @@ pub enum ChatEventAction {
     MessagePinned { message_id: i64, text: String },
     /// `chatEventMessageUnpinned` (line 7773).
     MessageUnpinned { message_id: i64, text: String },
+    /// `chatEventPollStopped` (line 7776) — a poll was stopped by the
+    /// event's actor. `is_quiz` distinguishes TGX's
+    /// `EventLogPollStopped` / `EventLogQuizStopped` copy; it degrades
+    /// to `false` when the embedded `message` can't be parsed.
+    PollStopped { is_quiz: bool },
     /// `chatEventMemberJoined` (line 7779).
     MemberJoined,
     /// `chatEventMemberJoinedByInviteLink` (line 7782).
@@ -3361,9 +3374,9 @@ fn chat_event_message_excerpt(message: Option<&Value>) -> (i64, String) {
     (id, excerpt)
 }
 
-/// Phase D3c: `chatEventAction` object → typed action. The 16 handled
-/// constructors (schema lines 7764/7767/7770/7773/7779/7782/7785/7788/
-/// 7794/7797/7812/7830/7842/7886/7889/7892) parse their fields; every
+/// Phase D3c: `chatEventAction` object → typed action. The 17 handled
+/// constructors (schema lines 7764/7767/7770/7773/7776/7779/7782/7785/
+/// 7788/7794/7797/7812/7830/7842/7886/7889/7892) parse their fields; every
 /// other constructor degrades to `ChatEventAction::Unsupported` with its
 /// constructor name (never invented details).
 fn parse_chat_event_action(value: Option<&Value>) -> ChatEventAction {
@@ -3413,6 +3426,15 @@ fn parse_chat_event_action(value: Option<&Value>) -> ChatEventAction {
         "chatEventMessageUnpinned" => {
             let (message_id, text) = chat_event_message_excerpt(value.get("message"));
             ChatEventAction::MessageUnpinned { message_id, text }
+        }
+        "chatEventPollStopped" => {
+            let poll = value
+                .get("message")
+                .and_then(|message| message.get("content"))
+                .and_then(|content| content.get("poll"));
+            let is_quiz = parse_poll(poll)
+                .is_some_and(|poll| matches!(poll.poll_type, PollType::Quiz { .. }));
+            ChatEventAction::PollStopped { is_quiz }
         }
         "chatEventMemberJoined" => ChatEventAction::MemberJoined,
         "chatEventMemberJoinedByInviteLink" => {
@@ -4883,17 +4905,39 @@ pub struct PollOption {
 }
 
 /// `pollType` (TDLib 1.8.67, `schema/td_api.tl:468` / `:475`).
-/// `pollTypeQuiz.explanation` and `explanation_media` are not kept.
+/// `pollTypeQuiz.explanation` is shown after the user answers (or on the
+/// lamp-icon tap, per the schema doc); `explanation_media` is not kept.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PollType {
     Regular,
-    Quiz { correct_option_ids: Vec<i32> },
+    Quiz {
+        correct_option_ids: Vec<i32>,
+        explanation: String,
+    },
+}
+
+/// `pollVoteRestrictionReason*` (TDLib 1.8.67, `schema/td_api.tl:494`-`:510`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PollVoteRestrictionReason {
+    /// `pollVoteRestrictionReasonClosed` — the poll is closed.
+    Closed,
+    /// `pollVoteRestrictionReasonYetUnsent` — the poll isn't sent yet.
+    YetUnsent,
+    /// `pollVoteRestrictionReasonScheduled` — from a scheduled message.
+    Scheduled,
+    /// `pollVoteRestrictionReasonCountryRestricted` — the user's country
+    /// can't vote here (`country_code` is the ISO 3166-1 alpha-2 code).
+    CountryRestricted { country_code: String },
+    /// `pollVoteRestrictionReasonMembershipRequired` — the user must have
+    /// joined the chat for at least a day.
+    MembershipRequired { chat_id: i64 },
+    /// `pollVoteRestrictionReasonOther` — some other reason.
+    Other,
 }
 
 /// `poll` (TDLib 1.8.67, `schema/td_api.tl:711`). `recent_voter_ids`,
-/// `can_get_voters`, `can_see_results`, `members_only`, `country_codes`,
-/// `option_order`, `open_period`, `close_date`, and `vote_restriction_reason`
-/// are not kept in this slice.
+/// `can_see_results`, `members_only`, `country_codes`, `option_order`,
+/// `open_period`, and `close_date` are not kept in this slice.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Poll {
     pub id: i64,
@@ -4905,6 +4949,11 @@ pub struct Poll {
     pub allows_revoting: bool,
     pub is_closed: bool,
     pub poll_type: PollType,
+    /// `can_get_voters` (schema line 698): `getPollVoters` may be used.
+    pub can_get_voters: bool,
+    /// `vote_restriction_reason` (schema line 711): why the current user
+    /// can't vote; `None` when the user can vote.
+    pub vote_restriction_reason: Option<PollVoteRestrictionReason>,
 }
 
 impl Poll {
@@ -4919,9 +4968,11 @@ impl Poll {
             .collect()
     }
 
-    /// The poll can receive a vote from the user.
+    /// The poll can receive a vote from the user. A non-null
+    /// `vote_restriction_reason` (`pollVoteRestrictionReason*`, schema
+    /// `td_api.tl:494`-`:510`) also blocks voting.
     pub fn can_vote(&self) -> bool {
-        !self.is_closed
+        !self.is_closed && self.vote_restriction_reason.is_none()
     }
 }
 
@@ -6622,6 +6673,24 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
                 .get("can_get_link")
                 .and_then(Value::as_bool)
                 .unwrap_or(false),
+        }),
+        // B4: `pollVoters` — the `getPollVoters` answer. Unparseable
+        // senders are dropped; the list never misattributes a vote.
+        "pollVoters" => Ok(EnvelopePayload::PollVoters {
+            total_count: value
+                .get("total_count")
+                .and_then(Value::as_i64)
+                .unwrap_or(0) as i32,
+            voters: value
+                .get("voters")
+                .and_then(Value::as_array)
+                .map(|voters| {
+                    voters
+                        .iter()
+                        .filter_map(|voter| parse_message_sender(voter.get("voter_id")).ok())
+                        .collect()
+                })
+                .unwrap_or_default(),
         }),
         // Phase C3a: `text` (schema 1.8.67, line 10071) — the
         // `joinVideoChat` / `joinGroupCall` answer ("join response
@@ -8979,6 +9048,7 @@ fn parse_poll_option(value: &Value) -> PollOption {
 }
 
 /// `pollType` (TDLib 1.8.67, `schema/td_api.tl:468` / `:475`).
+/// `explanation` is the `formattedText.text` of `pollTypeQuiz.explanation`.
 fn parse_poll_type(value: Option<&Value>) -> PollType {
     match value.and_then(|v| v.get("@type")).and_then(Value::as_str) {
         Some("pollTypeQuiz") => PollType::Quiz {
@@ -8992,8 +9062,42 @@ fn parse_poll_type(value: Option<&Value>) -> PollType {
                         .collect()
                 })
                 .unwrap_or_default(),
+            explanation: value
+                .map(|v| parse_formatted_text(v.get("explanation")))
+                .unwrap_or_default(),
         },
         _ => PollType::Regular,
+    }
+}
+
+/// `pollVoteRestrictionReason*` (TDLib 1.8.67, `schema/td_api.tl:494`-`:510`).
+/// `None` when the field is absent/null (the user can vote) or the
+/// constructor is unknown (never rendered as a fabricated reason).
+fn parse_poll_vote_restriction_reason(value: Option<&Value>) -> Option<PollVoteRestrictionReason> {
+    let value = value?;
+    if value.is_null() {
+        return None;
+    }
+    match value.get("@type").and_then(Value::as_str) {
+        Some("pollVoteRestrictionReasonClosed") => Some(PollVoteRestrictionReason::Closed),
+        Some("pollVoteRestrictionReasonYetUnsent") => Some(PollVoteRestrictionReason::YetUnsent),
+        Some("pollVoteRestrictionReasonScheduled") => Some(PollVoteRestrictionReason::Scheduled),
+        Some("pollVoteRestrictionReasonCountryRestricted") => {
+            Some(PollVoteRestrictionReason::CountryRestricted {
+                country_code: value
+                    .get("country_code")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string(),
+            })
+        }
+        Some("pollVoteRestrictionReasonMembershipRequired") => {
+            Some(PollVoteRestrictionReason::MembershipRequired {
+                chat_id: value.get("chat_id").and_then(Value::as_i64).unwrap_or(0),
+            })
+        }
+        Some("pollVoteRestrictionReasonOther") => Some(PollVoteRestrictionReason::Other),
+        _ => None,
     }
 }
 
@@ -9035,6 +9139,13 @@ fn parse_poll(value: Option<&Value>) -> Option<Poll> {
             .and_then(Value::as_bool)
             .unwrap_or(false),
         poll_type: parse_poll_type(value.get("type")),
+        can_get_voters: value
+            .get("can_get_voters")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        vote_restriction_reason: parse_poll_vote_restriction_reason(
+            value.get("vote_restriction_reason"),
+        ),
     })
 }
 
@@ -12711,8 +12822,12 @@ mod channel_envelope_tests {
                 assert!(poll.is_closed);
                 assert!(!poll.can_vote());
                 match &poll.poll_type {
-                    PollType::Quiz { correct_option_ids } => {
+                    PollType::Quiz {
+                        correct_option_ids,
+                        explanation,
+                    } => {
                         assert_eq!(correct_option_ids, &[0]);
+                        assert!(explanation.is_empty());
                     }
                     other => panic!("{other:?}"),
                 }
@@ -15646,6 +15761,9 @@ mod notification_sound_tests {
     /// generic `Unsupported` (the constructor name is kept for the
     /// schema-pin test, never rendered as fabricated details), and events
     /// whose `member_id` fails to parse are dropped, never misattributed.
+    /// B4: `chatEventPollStopped` parses to `PollStopped`; its minimal
+    /// `{"id":60}` message carries no poll content, so `is_quiz` is
+    /// honestly false rather than guessed.
     #[test]
     fn chat_events_unsupported_and_actorless() {
         let json = r#"{"@type":"chatEvents","events":[
@@ -15659,15 +15777,12 @@ mod notification_sound_tests {
             EnvelopePayload::ChatEvents { events } => events,
             other => panic!("unexpected {other:?}"),
         };
-        // The two actor-less events are dropped; `chatEventPollStopped`
-        // and `chatEventMemberLeft` are not among the 16 handled
-        // constructors, so both parse as honest generic `Unsupported`.
+        // The two actor-less events are dropped; `chatEventMemberLeft`
+        // stays an honest generic `Unsupported`.
         assert_eq!(events.len(), 2);
         assert_eq!(
             events[0].action,
-            ChatEventAction::Unsupported {
-                type_name: "chatEventPollStopped".to_owned()
-            }
+            ChatEventAction::PollStopped { is_quiz: false }
         );
         assert_eq!(
             events[1].action,
@@ -15676,6 +15791,17 @@ mod notification_sound_tests {
             }
         );
         assert_eq!(events[1].member_id, MessageSender::Chat { chat_id: 13 });
+    }
+
+    /// B4: `chatEventPollStopped` with a quiz message content parses
+    /// `is_quiz: true` (TGX `EventLogQuizStopped` vs
+    /// `EventLogPollStopped` copy).
+    #[test]
+    fn chat_event_poll_stopped_quiz_detected() {
+        let json = r#"{"@type":"chatEvent","id":205,"date":1700000000,"member_id":{"@type":"messageSenderUser","user_id":777},"action":{"@type":"chatEventPollStopped","message":{"id":60,"content":{"@type":"messagePoll","poll":{"@type":"poll","id":1,"question":{"@type":"formattedText","text":"Q?","entities":[]},"options":[],"total_voter_count":0,"is_anonymous":true,"allows_multiple_answers":false,"allows_revoting":false,"is_closed":true,"type":{"@type":"pollTypeQuiz","correct_option_ids":[0],"explanation":{"@type":"formattedText","text":"","entities":[]}}},"description":{"@type":"formattedText","text":"","entities":[]},"can_add_option":false}}}}"#;
+        let value: serde_json::Value = serde_json::from_str(json).unwrap();
+        let event = parse_chat_event(&value).unwrap();
+        assert_eq!(event.action, ChatEventAction::PollStopped { is_quiz: true });
     }
 
     /// Phase D3c: every constructor this slice relies on must exist verbatim
@@ -15690,6 +15816,7 @@ mod notification_sound_tests {
             "chatEventMessageDeleted message:message can_report_anti_spam_false_positive:Bool = ChatEventAction;",
             "chatEventMessagePinned message:message = ChatEventAction;",
             "chatEventMessageUnpinned message:message = ChatEventAction;",
+            "chatEventPollStopped message:message = ChatEventAction;",
             "chatEventMemberJoined = ChatEventAction;",
             "chatEventMemberJoinedByInviteLink invite_link:chatInviteLink via_chat_folder_invite_link:Bool = ChatEventAction;",
             "chatEventMemberJoinedByRequest approver_user_id:int53 invite_link:chatInviteLink = ChatEventAction;",

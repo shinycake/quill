@@ -475,12 +475,12 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Voting: single, multiple, retract-when-revoting, quiz answering, closed-poll blocked, optimistic UI with rollback on failure (poll.rs:51, connect.rs:5287) <!-- parity:bots-poll-vote -->
 - [x] Live poll updates applied in place via updatePoll (state.rs:3962) <!-- parity:bots-poll-live-update -->
 - [x] Results: percentage bars, voter counts, chosen marks, correct-answer mark on closed quizzes (ui/mod.rs:21764) <!-- parity:bots-poll-results -->
-- [ ] View voter list (getPollVoters) <!-- parity:bots-poll-voters -->
-- [ ] Stop poll / stop quiz with confirmation warning (zero stopPoll usage in src) <!-- parity:bots-poll-stop -->
-- [ ] Quiz explanation shown after answering <!-- parity:bots-poll-quiz-explanation -->
-- [ ] Vote restriction reasons display (closed / country / membership) <!-- parity:bots-poll-restrictions -->
-- [ ] Poll entry gated on can_send_polls; restricted-poll notices <!-- parity:bots-poll-permissions -->
-- [ ] Poll stopped service message <!-- parity:bots-poll-service-message -->
+- [x] View voter list (getPollVoters) <!-- parity:bots-poll-voters -->
+- [x] Stop poll / stop quiz with confirmation warning (stopPoll + red confirm banner; TGX warning copy) <!-- parity:bots-poll-stop -->
+- [x] Quiz explanation shown after answering <!-- parity:bots-poll-quiz-explanation -->
+- [x] Vote restriction reasons display (closed / country / membership) <!-- parity:bots-poll-restrictions -->
+- [x] Poll entry gated on can_send_polls; restricted-poll notices <!-- parity:bots-poll-permissions -->
+- [x] Poll stopped service message <!-- parity:bots-poll-service-message -->
 - [ ] Invoice message rendering (falls back to Unsupported) <!-- parity:bots-payment-invoice -->
 - [ ] Payment checkout flow (order info, shipping, card credentials) <!-- parity:bots-payment-checkout -->
 - [ ] Payment receipts <!-- parity:bots-payment-receipt -->
