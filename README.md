@@ -143,7 +143,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Delete chat from the list via deleteChatHistory(remove_from_chat_list:true) — not the destructive deleteChat (src/connect.rs, src/ui/mod.rs) <!-- parity:chatlist-delete-chat -->
 - [x] Clear chat history via deleteChatHistory(remove_from_chat_list:false), gated on delete capabilities (src/connect.rs, src/ui/mod.rs) <!-- parity:chatlist-clear-history -->
 - [x] Saved Messages entry row in the list: opens the existing self chat directly, otherwise createPrivateChat with getOption("my_id") and opens the returned chat (schema td_api.tl:9590; src/connect.rs: create_private_chat_with_self, src/ui/mod.rs: open_saved_messages) <!-- parity:chatlist-saved-messages -->
-- [ ] Chat preview on long-press / hover <!-- parity:chatlist-chat-preview -->
+- [x] Chat preview on long-press (press-and-hold; hover was deliberately rejected — see DECISIONS.md) <!-- parity:chatlist-chat-preview -->
 - [x] Clear recent searches: Clear button on the Recent heading, clearRecentlyFoundChats with optimistic local clear (TGX SearchManager parity), refusal surfaced as a status note (src/connect.rs: clear_recently_found_chats, src/ui/mod.rs: clear_search_recents) <!-- parity:chatlist-clear-recent-searches -->
 - [x] No-results state in search: "No chats or messages match “…”" (src/ui/mod.rs: search_results; demo quill --screenshot-demo ready-chat-list-search) <!-- parity:chatlist-search-no-results -->
 - [x] Collapsible archive section: clickable ▸/▾ header with count, per-session collapsed state (TGX archiveCollapsed) (src/state.rs: archive_collapsed, src/ui/mod.rs: toggle_archive_collapsed) <!-- parity:chatlist-archive-collapse -->

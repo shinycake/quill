@@ -17,8 +17,8 @@ use quill::composer::{
 };
 use quill::connect::{
     ChatSearchQueryOutcome, ConnectBlocker, ConnectGate, DraftSaveOutcome, LiveConnect,
-    SEARCH_DEBOUNCE, SearchQueryOutcome, SoundResolution, USER_DOWNLOAD_PRIORITY, evaluate_gate,
-    start_live_connect,
+    PREVIEW_HISTORY_LIMIT, SEARCH_DEBOUNCE, SearchQueryOutcome, SoundResolution,
+    USER_DOWNLOAD_PRIORITY, evaluate_gate, start_live_connect,
 };
 use quill::credentials::TelegramCredentials;
 use quill::diagnostics::{DiagnosticSink, MemorySink};
@@ -58,16 +58,16 @@ use quill::telegram::envelope::{
     AuthorizationState, BotInfo, CallDiscardReason, CallState, CallbackQueryAnswer,
     ChannelMemberStatus, ChatAdminRights, ChatAdministratorEntry, ChatDraft, ChatEventAction,
     ChatFolderInfo, ChatFolderSpec, ChatKind, ChatList, ChatNotificationSettings, ChatPermissions,
-    ChatStatistics, DEFAULT_EMOJI_REACTIONS, ForumTopic, InlineKeyboardButton,
-    InlineKeyboardButtonStyle, InlineKeyboardButtonType, KeyboardButton, KeyboardButtonType,
-    LoginUrlInfo, MUTE_FOR_1_HOUR, MUTE_FOR_2_DAYS, MUTE_FOR_8_HOURS, MUTE_FOREVER, MessageContent,
-    MessageInteractionInfo, MessageSchedulingState, MessageSender, NotificationSettingsScope,
-    NotificationSound, ParsedChatEvent, ParsedFile, ParsedGroupCallParticipant, ParsedMessage,
-    ParsedSecretChat, ParsedSession, ParsedStory, ParsedWelcomeMessage, PasswordState, PollContent,
-    PollOption, PollType, ReplyKeyboard, ReplyMarkup, ScopeNotificationSettings, SecretChatState,
-    SpeechRecognition, SponsoredMessage, StatisticalGraph, StatisticalValue, StorageFileTypeStats,
-    StorageStats, call_entry_label, chat_ttl_service_label, effective_content, format_ttl_setting,
-    toggle_chosen_emoji_reaction,
+    ChatStatistics, DEFAULT_EMOJI_REACTIONS, EphemeralMessageContent, ForumTopic,
+    InlineKeyboardButton, InlineKeyboardButtonStyle, InlineKeyboardButtonType, KeyboardButton,
+    KeyboardButtonType, LoginUrlInfo, MUTE_FOR_1_HOUR, MUTE_FOR_2_DAYS, MUTE_FOR_8_HOURS,
+    MUTE_FOREVER, MessageContent, MessageInteractionInfo, MessageSchedulingState, MessageSender,
+    NotificationSettingsScope, NotificationSound, ParsedChatEvent, ParsedFile,
+    ParsedGroupCallParticipant, ParsedMessage, ParsedSecretChat, ParsedSession, ParsedStory,
+    ParsedWelcomeMessage, PasswordState, PollContent, PollOption, PollType, ReplyKeyboard,
+    ReplyMarkup, ScopeNotificationSettings, SecretChatState, SpeechRecognition, SponsoredMessage,
+    StatisticalGraph, StatisticalValue, StorageFileTypeStats, StorageStats, call_entry_label,
+    chat_ttl_service_label, effective_content, format_ttl_setting, toggle_chosen_emoji_reaction,
 };
 use quill::telegram::requests::SelfDestructSend;
 use quill::telegram::requests::{
@@ -83,7 +83,7 @@ use std::process::{Child, Command, Stdio};
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use synthetic::{SyntheticChat, session_bubble_quoted, session_bubble_rich};
 use zeroize::Zeroize;
 
@@ -1248,6 +1248,37 @@ pub struct ChatMenuState {
     pub position: Point<Pixels>,
 }
 
+/// Slice CL: floating chat-list peek preview — the chat being previewed
+/// plus where it floated from (`MouseDownEvent.position` is in window
+/// coordinates, same as the overlay's `.left()`/`.top()`).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ChatPreviewState {
+    pub chat_id: ChatId,
+    pub anchor: Point<Pixels>,
+}
+
+/// Slice CL: one read-only peek-preview line — sender name + body text.
+/// The body is the same one-line `MessageContent::preview()` the chat
+/// list shows (media falls back to its type label, e.g. "Photo").
+/// Returns `(sender, body, message id)`. No interactive elements: the
+/// preview never opens chats, sends, or marks anything read.
+fn chat_preview_line(
+    peer_title: &str,
+    is_outgoing: bool,
+    author_signature: Option<&str>,
+    content: &MessageContent,
+    ephemeral: Option<&EphemeralMessageContent>,
+    id: u64,
+) -> (String, String, u64) {
+    let name = if is_outgoing {
+        "You".to_string()
+    } else {
+        author_signature.unwrap_or(peer_title).to_string()
+    };
+    let body = effective_content(content, ephemeral).preview();
+    (name, body, id)
+}
+
 /// Phase C2i: the nine `CallProblem` constructors (TDLib 1.8.67,
 /// `schema/td_api.tl:7253`-`:7277`) with their schema descriptions,
 /// in schema order. Index-aligned with `RatingDetail::problems`.
@@ -1369,6 +1400,12 @@ pub struct QuillApp {
     /// Slice CL1: right-click chat-row context menu target + window
     /// position.
     chat_menu: Option<ChatMenuState>,
+    /// Slice CL: the open peek preview — hovered/press-and-hold chat,
+    /// or `None`. Transient; never an open chat.
+    chat_preview: Option<ChatPreviewState>,
+    /// Slice CL: an in-progress long press on a chat-list row — the
+    /// row's chat id + press start, for the peek preview.
+    preview_press: Option<(ChatId, Instant)>,
     /// Slice CL3: multi-select mode — checked chat ids. Non-empty while
     /// selecting; rows toggle the check instead of opening the chat and
     /// the select bar offers the bulk actions.
@@ -1754,6 +1791,9 @@ pub enum ScreenshotDemo {
     /// and the row menu open showing Report / Block user (injected,
     /// no live Telegram).
     ReadyChatList3,
+    /// Slice CL: the floating peek preview open on "Demo chat B" with
+    /// recent messages (injected, no live Telegram).
+    ReadyChatPreview,
     /// Slice CL2: the archive auto-settings dialog over the
     /// `ReadyChatList` fixture (injected settings, no live Telegram).
     ReadyChatListArchive,
@@ -2771,6 +2811,16 @@ impl QuillApp {
                     AuthorizationState::Ready,
                 )
             }
+            Some(ScreenshotDemo::ReadyChatPreview) => {
+                demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
+                (
+                    ConnectUiStatus::DemoReadyChats,
+                    None,
+                    "screenshot demo — chat list peek preview (injected updates, no live Telegram)"
+                        .into(),
+                    AuthorizationState::Ready,
+                )
+            }
             Some(ScreenshotDemo::ReadyNotificationSound) => {
                 demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
                 (
@@ -3532,6 +3582,8 @@ impl QuillApp {
             rich_editor_open: false,
             message_menu: None,
             chat_menu: None,
+            chat_preview: None,
+            preview_press: None,
             selected_chats: HashSet::new(),
             swipe_reply_start: None,
             pending_reply: None,
@@ -3826,6 +3878,21 @@ impl QuillApp {
             });
             app.status_note =
                 "screenshot demo — mentions · reactions · multi-select · report · block".into();
+        }
+        // Slice CL: peek preview open on chat 12 ("Demo chat B") with a
+        // few injected messages; chat 11 stays the open chat so the
+        // panel floats over the chat list. The anchor sits just right of
+        // the second chat row.
+        if matches!(demo, Some(ScreenshotDemo::ReadyChatPreview)) {
+            if let Some(session) = app.demo_session.as_mut() {
+                app.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_chat_preview(session, &app.demo_sink, &app.demo_seq);
+            }
+            app.chat_preview = Some(ChatPreviewState {
+                chat_id: ChatId(12),
+                anchor: Point::new(px(170.), px(470.)),
+            });
+            app.status_note = "screenshot demo — chat peek preview".into();
         }
         if matches!(demo, Some(ScreenshotDemo::ReadyNotificationSound)) {
             if let Some(session) = app.demo_session.as_mut() {
@@ -6200,6 +6267,231 @@ impl QuillApp {
             .into_any_element()
     }
 
+    /// Slice CL: the long-press delay before the peek preview opens
+    /// (600 ms keeps quick taps unmistakably clicks).
+    const CHAT_PREVIEW_LONG_PRESS: Duration = Duration::from_millis(600);
+
+    /// Slice CL: start a long press on a chat-list row — after
+    /// `CHAT_PREVIEW_LONG_PRESS` without a release the read-only peek
+    /// preview opens; a quicker release stays a plain click.
+    fn begin_chat_preview_press(
+        &mut self,
+        chat_id: ChatId,
+        anchor: Point<Pixels>,
+        cx: &mut Context<Self>,
+    ) {
+        let started = Instant::now();
+        self.preview_press = Some((chat_id, started));
+        cx.spawn(async move |this, cx| {
+            cx.background_executor()
+                .timer(Self::CHAT_PREVIEW_LONG_PRESS)
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                // Still the same press (no release, no newer press)?
+                if this.preview_press == Some((chat_id, started)) {
+                    this.open_chat_preview(chat_id, anchor, cx);
+                }
+            });
+        })
+        .detach();
+    }
+
+    /// Slice CL: open the read-only peek preview for a chat — recent
+    /// messages in a floating panel beside the row. Never opens the
+    /// chat and never marks anything read.
+    fn open_chat_preview(
+        &mut self,
+        chat_id: ChatId,
+        anchor: Point<Pixels>,
+        cx: &mut Context<Self>,
+    ) {
+        self.chat_menu = None;
+        self.chat_preview = Some(ChatPreviewState { chat_id, anchor });
+        // Live fetch for unopened chats; already-loaded history renders
+        // immediately. Demo/no-driver sessions skip the network.
+        if let Some(live) = self.live.as_mut() {
+            let _ = live.driver.fetch_chat_preview_history(chat_id);
+        }
+        cx.notify();
+    }
+
+    /// Slice CL: dismiss the peek preview (click anywhere, the release
+    /// that ends the long press, or Escape). Also cancels a pending
+    /// long press.
+    fn close_chat_preview(&mut self, cx: &mut Context<Self>) {
+        if self.chat_preview.is_some() || self.preview_press.is_some() {
+            self.chat_preview = None;
+            self.preview_press = None;
+            cx.notify();
+        }
+    }
+
+    /// Slice CL: the floating peek preview — chat title + the most
+    /// recent messages as read-only sender/body rows. Rendered absolute
+    /// beside the pressed row (same pattern as `chat_menu_overlay`); any
+    /// click on the catcher closes it.
+    fn chat_preview_overlay(
+        &self,
+        preview: ChatPreviewState,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let chat_id = preview.chat_id;
+        let session = self.session();
+        let title = session
+            .and_then(|session| session.chats.get(&chat_id.0))
+            .map(|chat| chat.title.clone())
+            .unwrap_or_else(|| "Chat".to_string());
+        // Prefer already-loaded messages (open chats, recent traffic,
+        // demo fixtures); the one-shot live fetch fills unopened chats.
+        let mut lines: Vec<(String, String, u64)> = session
+            .and_then(|session| session.histories.get(&chat_id.0))
+            .map(|history| {
+                history
+                    .ordered()
+                    .iter()
+                    .rev()
+                    .take(PREVIEW_HISTORY_LIMIT as usize)
+                    .rev()
+                    .map(|message| {
+                        chat_preview_line(
+                            &title,
+                            message.is_outgoing,
+                            message.author_signature.as_deref(),
+                            &message.content,
+                            message.ephemeral.as_ref(),
+                            message.id.0 as u64,
+                        )
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        let fetch = session.and_then(|session| {
+            session
+                .chat_preview_fetch
+                .as_ref()
+                .filter(|fetch| fetch.chat_id == chat_id)
+        });
+        if lines.is_empty()
+            && let Some(fetch) = fetch
+        {
+            lines = fetch
+                .messages
+                .iter()
+                .map(|message| {
+                    chat_preview_line(
+                        &title,
+                        message.is_outgoing,
+                        message.author_signature.as_deref(),
+                        &message.content,
+                        message.ephemeral.as_ref(),
+                        message.id.0 as u64,
+                    )
+                })
+                .collect();
+        }
+        let failed = fetch.and_then(|fetch| fetch.failed.clone());
+        let in_flight = session.is_some_and(|session| {
+            session
+                .requests
+                .has_purpose_for_chat(RequestPurpose::GetChatPreview, chat_id)
+        });
+        let mut body = div()
+            .id(("chat-preview-scroll", chat_id.0 as u64))
+            .flex()
+            .flex_col()
+            .gap_2()
+            .p_3()
+            .overflow_y_scroll()
+            .max_h(px(360.));
+        if let Some(failed) = failed {
+            body = body.child(div().text_sm().text_color(rgb(0xf85149)).child(failed));
+        } else if !lines.is_empty() {
+            for (name, text, id) in lines {
+                body = body.child(
+                    div()
+                        .id(("chat-preview-row", id))
+                        .flex()
+                        .flex_col()
+                        .child(
+                            div()
+                                .text_xs()
+                                .font_semibold()
+                                .text_color(cx.theme().muted_foreground)
+                                .child(name),
+                        )
+                        .child(div().text_sm().child(text)),
+                );
+            }
+        } else if in_flight {
+            body = body.child(
+                div()
+                    .text_sm()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("Loading…"),
+            );
+        } else {
+            body = body.child(
+                div()
+                    .text_sm()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("No messages yet."),
+            );
+        }
+        let panel = div()
+            .id("chat-preview-panel")
+            .flex()
+            .flex_col()
+            .w(px(320.))
+            .rounded_md()
+            .border_1()
+            .border_color(cx.theme().border)
+            .bg(rgb(0x161b22))
+            .child(
+                div()
+                    .px_3()
+                    .py_2()
+                    .border_b_1()
+                    .border_color(cx.theme().border)
+                    .text_sm()
+                    .font_semibold()
+                    .child(title),
+            )
+            .child(body);
+        div()
+            .id("chat-preview-overlay")
+            .absolute()
+            .inset_0()
+            // The release that ends the long press lands here (the
+            // catcher is on top of the rows) — stop it before the rows
+            // behind can act on it.
+            .on_mouse_down(MouseButton::Left, |_, _, cx| {
+                cx.stop_propagation();
+            })
+            // Same for right-clicks: don't let the rows' context menu
+            // open behind the preview.
+            .on_mouse_down(MouseButton::Right, |_, _, cx| {
+                cx.stop_propagation();
+            })
+            .on_mouse_up(
+                MouseButton::Left,
+                cx.listener(move |this, _, _, cx| {
+                    this.close_chat_preview(cx);
+                    // Consume the release that ends the long press: the
+                    // row's `pending_mouse_down` is still armed, and
+                    // without this the release would open the chat.
+                    cx.stop_propagation();
+                }),
+            )
+            .child(
+                div()
+                    .absolute()
+                    .left(px(f32::from(preview.anchor.x) + 12.))
+                    .top(px((f32::from(preview.anchor.y) - 40.).max(8.)))
+                    .child(panel),
+            )
+            .into_any_element()
+    }
+
     /// Slice CL1: right-click chat-row context menu — Pin/Unpin, Mark
     /// as read/unread, Mute/Unmute, Archive/Unarchive, Clear history,
     /// Delete. Rendered absolute at the click position; any click on
@@ -8287,6 +8579,12 @@ impl QuillApp {
     }
 
     fn cancel_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // Slice CL: the peek preview is the most transient layer —
+        // Escape dismisses it before anything else.
+        if self.chat_preview.is_some() || self.preview_press.is_some() {
+            self.close_chat_preview(cx);
+            return;
+        }
         // Phase 9.3: the story composer is the topmost overlay — Escape
         // closes it before the story viewer.
         if self.story_composer.open {
@@ -31402,6 +31700,13 @@ impl Render for QuillApp {
             .when_some(self.chat_menu, |this, menu| {
                 this.child(self.chat_menu_overlay(menu, cx))
             })
+            // Slice CL: floating peek preview — read-only recent
+            // messages beside the pressed chat-list row. Rendered above
+            // the row menu; any click or the long-press release closes
+            // it.
+            .when_some(self.chat_preview, |this, preview| {
+                this.child(self.chat_preview_overlay(preview, cx))
+            })
             // MED4: Instant View reader overlay (above the menu).
             .when_some(self.instant_view_overlay(cx), |this, overlay| {
                 this.child(overlay)
@@ -36311,6 +36616,31 @@ fn apply_ready_chat_list_3(session: &mut Session, sink: &Arc<MemorySink>, seq: &
     }
 }
 
+/// Slice CL: chat peek-preview screenshot fixture — a few messages on
+/// chat 12 ("Demo chat B") so the preview has rows to show; chat 11
+/// stays the open chat. All injected through the normal reducer, no
+/// live Telegram.
+fn apply_ready_chat_preview(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let photo_file = demo_file_json(41, "", false);
+    let jsons = [
+        r#"{"@type":"updateNewMessage","message":{"id":41,"chat_id":12,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"Are we still on for lunch tomorrow?","entities":[]}}}}"#
+            .to_string(),
+        r#"{"@type":"updateNewMessage","message":{"id":42,"chat_id":12,"is_outgoing":true,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"Yes — noon at the usual place.","entities":[]}}}}"#
+            .to_string(),
+        format!(
+            r#"{{"@type":"updateNewMessage","message":{{"id":43,"chat_id":12,"is_outgoing":false,"content":{{"@type":"messagePhoto","photo":{{"@type":"photo","has_stickers":false,"sizes":[{{"@type":"photoSize","type":"m","photo":{photo_file},"width":240,"height":160,"progressive_sizes":[]}}]}},"caption":{{"@type":"formattedText","text":"The menu, in case you forgot","entities":[]}},"has_spoiler":false,"is_secret":false}}}}}}"#
+        ),
+        r#"{"@type":"updateNewMessage","message":{"id":44,"chat_id":12,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"See you there!","entities":[]}}}}"#
+            .to_string(),
+    ];
+    for json in jsons {
+        if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
+            session.apply(owned);
+        }
+    }
+}
+
 /// Slice CL2: chat-list screenshot fixture — folder tabs (Work/News;
 /// the chats stay on Main so the Main tab renders with the category
 /// chips), chat 12 moved to the archive (expanded section), chat 11
@@ -37020,6 +37350,32 @@ fn session_chat_row(
                     position: event.position,
                 });
                 cx.notify();
+            }),
+        )
+        // Slice CL: long-press (press-and-hold) peeks at the chat's
+        // recent messages without opening it (tdesktop shows the same
+        // preview on hover). A quick release is still a plain click.
+        .on_mouse_down(
+            MouseButton::Left,
+            cx.listener(move |this, event: &MouseDownEvent, _, cx| {
+                // Multi-select taps toggle the check — no preview there.
+                if !selecting {
+                    this.begin_chat_preview_press(id, event.position, cx);
+                }
+            }),
+        )
+        .on_mouse_up(
+            MouseButton::Left,
+            cx.listener(move |this, _, _, _| {
+                this.preview_press = None;
+            }),
+        )
+        // Release outside the row (e.g. press, drag off, let go) also
+        // cancels the pending long press.
+        .on_mouse_up_out(
+            MouseButton::Left,
+            cx.listener(move |this, _, _, _| {
+                this.preview_press = None;
             }),
         )
         .child(

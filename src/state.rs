@@ -107,6 +107,12 @@ pub enum RequestPurpose {
     /// not re-trigger main-list paging.
     LoadFolderChats,
     GetHistory,
+    /// Slice CL: one-shot `getChatHistory` for the chat-list peek preview
+    /// (`parity:chatlist-chat-preview`). The `messages` answer lands in
+    /// `Session::chat_preview_fetch` — it must NOT merge into the open
+    /// chat's history (the `GetHistory` branch drops answers for non-open
+    /// chats, and the preview never calls `openChat`).
+    GetChatPreview,
     /// Any `sendMessage` (text / photo / document). Response `message` is pending.
     SendMessage,
     /// M2: `getFullRichMessage`. Response `richMessage` replaces the
@@ -3606,6 +3612,9 @@ pub struct Session {
     /// Slice G2: channel-comments viewer — the latest
     /// `getMessageThreadHistory` result (channel post → comment thread).
     pub comment_thread: Option<CommentThreadFetch>,
+    /// Slice CL: chat-list peek preview — the latest `getChatHistory`
+    /// result for one unopened chat (`parity:chatlist-chat-preview`).
+    pub chat_preview_fetch: Option<PreviewHistoryFetch>,
     /// Parity slice: first active username per supergroup (`supergroup`
     /// object / `updateSupergroup`, schema 1.8.67 line 2746), keyed by
     /// supergroup id. Feeds the channel/supergroup header's @username.
@@ -3947,6 +3956,15 @@ pub struct CommentThreadFetch {
     pub failed: Option<String>,
 }
 
+/// Slice CL: the chat-list peek preview result — the latest
+/// `getChatHistory` answer for one unopened chat.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PreviewHistoryFetch {
+    pub chat_id: ChatId,
+    pub messages: Vec<ParsedMessage>,
+    pub failed: Option<String>,
+}
+
 /// Phase D3c: relative timestamp for admin-log rows. The log only
 /// covers the last 48 hours (schema 1.8.67, line 15252), so relative
 /// forms are always meaningful; no date crate is pulled in for this.
@@ -4154,6 +4172,7 @@ impl Session {
             boost_slots_by_chat: HashMap::new(),
             boost_intent: None,
             comment_thread: None,
+            chat_preview_fetch: None,
             supergroup_usernames: HashMap::new(),
             supergroup_member_status: HashMap::new(),
             supergroup_restrict_right: HashMap::new(),
@@ -6307,6 +6326,19 @@ impl Session {
                     });
                     return;
                 }
+                // Slice CL: chat-list peek preview — cache the latest
+                // messages for the previewed (unopened) chat.
+                if let Some(pending) = pending
+                    && pending.purpose == RequestPurpose::GetChatPreview
+                    && let Some(chat_id) = pending.chat_id
+                {
+                    self.chat_preview_fetch = Some(PreviewHistoryFetch {
+                        chat_id,
+                        messages: messages.to_vec(),
+                        failed: None,
+                    });
+                    return;
+                }
                 if let Some(pending) = pending
                     && pending.purpose == RequestPurpose::GetHistoryAround
                 {
@@ -7663,6 +7695,17 @@ impl Session {
                         message_id: MessageId(message_id),
                         messages: Vec::new(),
                         failed: Some(call_request_error_line(&err, "Could not load comments")),
+                    });
+                }
+                // Slice CL: failed preview-history fetch — mark the peek
+                // preview so it shows an error instead of a spinner.
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetChatPreview)
+                    && let Some(chat_id) = pending.and_then(|p| p.chat_id)
+                {
+                    self.chat_preview_fetch = Some(PreviewHistoryFetch {
+                        chat_id,
+                        messages: Vec::new(),
+                        failed: Some(call_request_error_line(&err, "Could not load preview")),
                     });
                 }
                 // Slice G2: the slots half of a boost failed — the chain
@@ -15713,6 +15756,56 @@ mod tests {
                 .as_ref()
                 .unwrap()
                 .contains("Could not load comments")
+        );
+    }
+
+    #[test]
+    fn cl_chat_preview_cached_for_unopened_chat() {
+        // Slice CL: a `getChatHistory` answer for `GetChatPreview` is
+        // retained under the requested chat even when that chat is not
+        // open (the normal history branch drops non-open answers);
+        // nothing leaks into the chat's history. A failure marks the
+        // preview failed so the panel shows an error, not a spinner.
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        let extra = session.request(RequestPurpose::GetChatPreview, Some(ChatId(12)));
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"messages","@extra":"{}","messages":[{{"@type":"message","id":7,"chat_id":12,"is_outgoing":false,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"hi","entities":[]}}}}}}],"total_count":1}}"#,
+                extra.0
+            ),
+        );
+        let fetch = session.chat_preview_fetch.as_ref().expect("preview fetch");
+        assert_eq!(fetch.chat_id, ChatId(12));
+        assert_eq!(fetch.messages.len(), 1);
+        assert_eq!(fetch.failed, None);
+        assert!(
+            session
+                .histories
+                .get(&12)
+                .is_none_or(|history| history.ordered().is_empty()),
+            "preview must not merge into the chat's history"
+        );
+        let extra = session.request(RequestPurpose::GetChatPreview, Some(ChatId(12)));
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"error","@extra":"{}","code":400,"message":"SOMETHING"}}"#,
+                extra.0
+            ),
+        );
+        let fetch = session.chat_preview_fetch.as_ref().expect("preview fetch");
+        assert!(
+            fetch
+                .failed
+                .as_ref()
+                .unwrap()
+                .contains("Could not load preview")
         );
     }
 
