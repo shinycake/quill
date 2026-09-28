@@ -13015,7 +13015,7 @@ impl QuillApp {
                             .driver
                             .restart_bot(dialog.chat_id, bot_user_id)
                             .map(|sent| sent_note(sent, "restarting bot…")),
-                        None => Ok("Couldn't reach Telegram; try again.".to_string()),
+                        None => Ok("This chat is no longer a bot chat.".to_string()),
                     },
                     // Slice CL1: chat-list "Delete chat" —
                     // `deleteChatHistory` with `remove_from_chat_list:

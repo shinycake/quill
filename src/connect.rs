@@ -7101,8 +7101,10 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// Slice B2: `sendBotStartMessage` (schema 1.8.67, line 12216) — what
     /// the START button and "Restart bot" send. `parameter` is the
     /// `internalLinkTypeBotStart.start_parameter` (line 9399); empty for
-    /// a plain restart (Telegram X `Tdlib.sendBotStartMessage` likewise
-    /// unblocks first when the chat is fully blocked).
+    /// a plain restart. When the chat is fully blocked, unblocks first
+    /// (Telegram X `MessagesController.ACTION_BOT_START` likewise
+    /// unblocks before the send, since TDLib processes the queued
+    /// requests in order).
     pub fn send_bot_start_message(
         &mut self,
         chat_id: ChatId,
@@ -7115,6 +7117,17 @@ impl<S: JsonSender> ConnectDriver<S> {
         let purpose = RequestPurpose::SendBotStartMessage;
         if self.session.requests.has_purpose_for_chat(purpose, chat_id) {
             return Ok(None);
+        }
+        // Slice B2: on a fully-blocked bot chat the start message would
+        // fail; unblock first so the send lands (no-op on unblocked or
+        // non-private chats).
+        if self
+            .session
+            .chats
+            .get(&chat_id.0)
+            .is_some_and(|chat| chat.blocked)
+        {
+            self.set_chat_user_blocked(chat_id, false)?;
         }
         let extra = self.session.request(purpose, Some(chat_id));
         if let Err(err) = self.sender.send_json(&send_bot_start_message_request(
@@ -19894,6 +19907,108 @@ mod tests {
         assert!(driver.session.failed_downloads.contains(&21));
         assert!(!driver.session.downloading.contains(&21));
         assert!(!driver.session.user_downloads.contains(&21));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Slice B2: `send_bot_start_message` unblocks a fully-blocked bot
+    /// chat first (Telegram X `MessagesController.ACTION_BOT_START`
+    /// behavior), so "Restart bot" / the START press doesn't clear the
+    /// chat and then fail the start.
+    #[test]
+    fn b2_bot_start_unblocks_first_on_fully_blocked_chat() {
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = Arc::new(RecordingSender::new());
+        let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+        let mut driver =
+            ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+        let seq = AtomicU64::new(0);
+        driver
+            .ingest(
+                copy_and_parse(
+                    r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+
+        // Chat 7: private bot chat, fully blocked (`blockListMain`).
+        driver
+            .ingest(
+                copy_and_parse(
+                    r#"{"@type":"updateNewChat","chat":{"id":7,"title":"Bot","type":{"@type":"chatTypePrivate","user_id":42},"unread_count":0,"block_list":{"@type":"blockListMain"}}}"#,
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        assert!(
+            driver
+                .session
+                .chats
+                .get(&7)
+                .is_some_and(|chat| chat.blocked)
+        );
+
+        let extra = driver
+            .send_bot_start_message(ChatId(7), 42, "startparam")
+            .expect("start send")
+            .expect("request id");
+
+        // Unblock goes out BEFORE the start message (other Ready/chat
+        // bookkeeping sends may also be in flight; filter like the
+        // existing driver tests do).
+        let of_type = |t: &str| {
+            recorder
+                .snapshot()
+                .into_iter()
+                .filter(|sent| sent.contains(&format!("\"@type\":\"{t}\"")))
+                .collect::<Vec<_>>()
+        };
+        let unblock_sends = of_type("setMessageSenderBlockList");
+        let start_sends = of_type("sendBotStartMessage");
+        assert_eq!(unblock_sends.len(), 1);
+        assert_eq!(start_sends.len(), 1);
+        let unblock: Value = serde_json::from_str(&unblock_sends[0]).unwrap();
+        assert!(unblock["block_list"].is_null());
+        assert_eq!(unblock["sender_id"]["user_id"], 42);
+        let start: Value = serde_json::from_str(&start_sends[0]).unwrap();
+        assert_eq!(start["parameter"], "startparam");
+        assert_eq!(start["@extra"], extra.0.to_string());
+        // Order: the unblock was recorded before the start message.
+        let snapshot = recorder.snapshot();
+        let unblock_at = snapshot
+            .iter()
+            .position(|sent| sent.contains("\"@type\":\"setMessageSenderBlockList\""))
+            .unwrap();
+        let start_at = snapshot
+            .iter()
+            .position(|sent| sent.contains("\"@type\":\"sendBotStartMessage\""))
+            .unwrap();
+        assert!(unblock_at < start_at);
+
+        // Chat 8: unblocked bot chat — only the start message, no unblock.
+        driver
+            .ingest(
+                copy_and_parse(
+                    r#"{"@type":"updateNewChat","chat":{"id":8,"title":"Bot2","type":{"@type":"chatTypePrivate","user_id":43},"unread_count":0}}"#,
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        driver
+            .send_bot_start_message(ChatId(8), 43, "")
+            .expect("start send")
+            .expect("request id");
+        assert_eq!(of_type("setMessageSenderBlockList").len(), 1);
+        assert_eq!(of_type("sendBotStartMessage").len(), 2);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
