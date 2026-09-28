@@ -62,7 +62,10 @@ pub fn voter_count_label(total_voter_count: i32) -> String {
 /// - regular multiple-answer polls: the tap toggles the option's membership
 ///   in the current answer set.
 pub fn poll_answer_for_tap(poll: &Poll, index: usize) -> Option<Vec<i32>> {
-    if poll.is_closed || index >= poll.options.len() {
+    // F5: restricted polls (closed / country / membership / ...) never
+    // produce an answer — keeps the demo tap path in sync with the live
+    // `send_poll_answer` gate.
+    if poll.is_closed || poll.vote_restriction_reason.is_some() || index >= poll.options.len() {
         return None;
     }
     let index = index as i32;
@@ -121,14 +124,22 @@ pub fn poll_vote_restriction_label(reason: &PollVoteRestrictionReason) -> String
 }
 
 /// The quiz explanation to display on the poll card, if any. Per the
-/// `pollTypeQuiz.explanation` doc (schema line 475-476): shown when the
-/// user chooses an answer (or taps the lamp icon) — empty for a yet
-/// unanswered poll — so it's only returned once the user has voted.
+/// `pollTypeQuiz.explanation` doc (schema line 475-476) and TGX
+/// (`TGMessagePoll.java:1085-1086`): auto-shown when the user chose an
+/// *incorrect* answer. TGX also reveals it on demand via a lamp-icon tap;
+/// Quill has no lamp affordance yet, so a correct answer shows no
+/// explanation (documented deviation in DECISIONS.md).
 pub fn quiz_explanation(poll: &Poll) -> Option<&str> {
     match &poll.poll_type {
-        crate::telegram::PollType::Quiz { explanation, .. } => (!explanation.is_empty()
-            && !poll.chosen_indexes().is_empty())
-        .then_some(explanation.as_str()),
+        crate::telegram::PollType::Quiz {
+            correct_option_ids,
+            explanation,
+        } => {
+            let chosen = poll.chosen_indexes();
+            let incorrect =
+                !chosen.is_empty() && !chosen.iter().any(|i| correct_option_ids.contains(i));
+            (incorrect && !explanation.is_empty()).then_some(explanation.as_str())
+        }
         crate::telegram::PollType::Regular => None,
     }
 }

@@ -477,7 +477,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Results: percentage bars, voter counts, chosen marks, correct-answer mark on closed quizzes (ui/mod.rs:21764) <!-- parity:bots-poll-results -->
 - [x] View voter list (getPollVoters) <!-- parity:bots-poll-voters -->
 - [x] Stop poll / stop quiz with confirmation warning (stopPoll + red confirm banner; TGX warning copy) <!-- parity:bots-poll-stop -->
-- [x] Quiz explanation shown after answering <!-- parity:bots-poll-quiz-explanation -->
+- [x] Quiz explanation auto-shown after an incorrect answer (`pollTypeQuiz.explanation`; no lamp-icon on-demand reveal yet — see DECISIONS.md) <!-- parity:bots-poll-quiz-explanation -->
 - [x] Vote restriction reasons display (closed / country / membership) <!-- parity:bots-poll-restrictions -->
 - [x] Poll entry gated on can_send_polls; restricted-poll notices <!-- parity:bots-poll-permissions -->
 - [x] Poll stopped service message <!-- parity:bots-poll-service-message -->
