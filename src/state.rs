@@ -24,12 +24,12 @@ use crate::telegram::envelope::{
     ParsedCall, ParsedChatEvent, ParsedChatInviteLink, ParsedChatJoinRequest, ParsedChatMember,
     ParsedFile, ParsedGroupCall, ParsedGroupCallMessage, ParsedGroupCallParticipant, ParsedMessage,
     ParsedSecretChat, ParsedSession, ParsedStory, ParsedUser, ParsedVideoChat, ParsedWebsite,
-    ParsedWelcomeMessage, PasswordState, PaymentFormData, PaymentReceiptData, Poll,
-    ReplyKeyboard, ReplyMarkup, ReportChatOutcome, ReportOption, ReportSponsoredResult,
-    RichMessageContent, ScopeNotificationSettings, SecretChatState, SponsoredMessage,
-    StickerFormat, StickerItem, StickerSetInfo, StorageStats, StoryAvailableReactionView,
-    StoryInteractionView, StoryInteractionsView, StoryListView, TdError, UsernameCheckResult,
-    ValidatedOrderInfoData, effective_content, reply_markup_demands_reply,
+    ParsedWelcomeMessage, PasswordState, PaymentFormData, PaymentReceiptData, Poll, ReplyKeyboard,
+    ReplyMarkup, ReportChatOutcome, ReportOption, ReportSponsoredResult, RichMessageContent,
+    ScopeNotificationSettings, SecretChatState, SponsoredMessage, StickerFormat, StickerItem,
+    StickerSetInfo, StorageStats, StoryAvailableReactionView, StoryInteractionView,
+    StoryInteractionsView, StoryListView, TdError, UsernameCheckResult, ValidatedOrderInfoData,
+    effective_content, reply_markup_demands_reply,
 };
 use crate::telegram::envelope::{CallState, ReadyParams};
 use crate::telegram::requests::{
@@ -1184,7 +1184,10 @@ pub struct LoginUrlRequest {
 
 /// Slice P1: context of an in-flight payment request (`getPaymentForm`,
 /// `validateOrderInfo`, `sendPaymentForm`, `getPaymentReceipt`), kept so
-/// the answers / errors correlate to the right invoice message.
+/// the answers / errors correlate to the right invoice message. Set when a
+/// payment request is sent (connect.rs), cleared when the checkout dialog
+/// closes — the answer reducers never clear it, because `validateOrderInfo`
+/// and `sendPaymentForm` need it after the form answer is applied.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PaymentRequest {
     pub chat_id: ChatId,
@@ -3935,6 +3938,14 @@ pub struct Session {
     /// checkout dialog (never a secret — order fields and credentials are
     /// never echoed here).
     pub payment_note: Option<String>,
+    /// Slice P1: `sendPaymentForm` is in flight — the Pay button shows
+    /// "Processing…" and is disabled until the `paymentResult` answer (or
+    /// error) lands, so a double-click can't submit twice.
+    pub payment_sending: bool,
+    /// Slice P1: a failed `getPaymentReceipt`, drained into the status
+    /// note by `poll_live` — the checkout dialog (which renders
+    /// `payment_note`) may be closed when the receipt fetch fails.
+    pub payment_receipt_error: Option<String>,
     /// Slice P1: `paymentResult.verification_url` from a non-successful
     /// `sendPaymentForm` — the UI takes it on the next poll and opens it
     /// in the OS browser (3-D Secure and similar).
@@ -4759,6 +4770,8 @@ impl Session {
             payment_receipt: None,
             payment_receipt_open: false,
             payment_note: None,
+            payment_sending: false,
+            payment_receipt_error: None,
             payment_verification_url: None,
             pending_force_reply: None,
             files: HashMap::new(),
@@ -7380,7 +7393,6 @@ impl Session {
                     self.payment_validated = None;
                     self.payment_shipping_id = None;
                     self.payment_note = None;
-                    self.payment_request = None;
                 }
             }
             EnvelopePayload::ValidatedOrderInfo(validated) => {
@@ -7392,13 +7404,12 @@ impl Session {
                         validated.shipping_options.first().map(|o| o.id.clone());
                     self.payment_validated = Some(validated);
                     self.payment_note = None;
-                    self.payment_request = None;
                 }
             }
             EnvelopePayload::PaymentResult(result) => {
                 // Slice P1: `sendPaymentForm` answer (matched by `@extra`).
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::SendPaymentForm) {
-                    self.payment_request = None;
+                    self.payment_sending = false;
                     if result.success {
                         self.payment_note = Some("✅ Payment successful".to_string());
                     } else if !result.verification_url.is_empty() {
@@ -7416,7 +7427,6 @@ impl Session {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetPaymentReceipt) {
                     self.payment_receipt = Some(receipt);
                     self.payment_receipt_open = true;
-                    self.payment_request = None;
                 }
             }
             EnvelopePayload::UpdateSavedAnimations { .. } => {
@@ -7914,20 +7924,22 @@ impl Session {
                         ));
                     }
                     // Slice P1: a payment request failed — surface the
-                    // reason in the checkout dialog (or the status line for
-                    // the receipt fetch) instead of spinning forever.
+                    // reason in the checkout dialog instead of spinning
+                    // forever. The receipt fetch has its own error field:
+                    // the checkout dialog may be closed, so `payment_note`
+                    // (rendered only there) would stay invisible.
                     Some(
                         RequestPurpose::GetPaymentForm
                         | RequestPurpose::ValidateOrderInfo
                         | RequestPurpose::SendPaymentForm,
                     ) => {
                         self.payment_form_loading = false;
+                        self.payment_sending = false;
                         self.payment_note = Some(format!("Payment failed: {}", error_reason(&err)));
-                        self.payment_request = None;
                     }
                     Some(RequestPurpose::GetPaymentReceipt) => {
-                        self.payment_note = Some(format!("Receipt failed: {}", error_reason(&err)));
-                        self.payment_request = None;
+                        self.payment_receipt_error =
+                            Some(format!("Receipt failed: {}", error_reason(&err)));
                     }
                     _ => {}
                 }
@@ -18928,6 +18940,56 @@ mod tests {
         assert_eq!(form.id, 7);
         assert_eq!(form.product_title, "Time machine");
         assert!(!session.payment_form_loading);
+    }
+
+    /// Slice P1 fix-up: `payment_request` survives the form and validated
+    /// answers — `validateOrderInfo` / `sendPaymentForm` need it after the
+    /// form answer is applied; only closing the dialog clears it.
+    #[test]
+    fn payment_request_survives_form_and_validated_answers() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        // Buy press: `getPaymentForm` sent, request context set.
+        let extra = session.request(RequestPurpose::GetPaymentForm, Some(ChatId(51)));
+        session.payment_request = Some(PaymentRequest {
+            chat_id: ChatId(51),
+            message_id: MessageId(7),
+        });
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"paymentForm","@extra":"{}","id":7,"type":{{"@type":"paymentFormTypeRegular","invoice":{{"@type":"invoice","currency":"USD","price_parts":[{{"@type":"labeledPricePart","label":"Machine","amount":1999}}],"subscription_period":0,"max_tip_amount":0,"suggested_tip_amounts":[],"recurring_payment_terms_of_service_url":"","terms_of_service_url":"","is_test":true,"need_name":true,"need_phone_number":false,"need_email_address":true,"need_shipping_address":false,"send_phone_number_to_provider":false,"send_email_address_to_provider":false,"is_flexible":false}},"payment_provider_user_id":99,"payment_provider":{{"@type":"paymentProviderOther","url":"https://pay.example.com/x"}},"additional_payment_options":[],"saved_order_info":null,"saved_credentials":[],"can_save_credentials":true,"need_password":false}},"seller_bot_user_id":51,"product_info":{{"@type":"productInfo","title":"Time machine","description":{{"@type":"formattedText","text":"","entities":[]}},"photo":null}}}}"#,
+                extra.0
+            ),
+        );
+        assert!(session.payment_form.is_some());
+        assert!(
+            session.payment_request.is_some(),
+            "form answer must not clear the payment request"
+        );
+        // Continue: `validateOrderInfo` sent, request context refreshed.
+        let extra = session.request(RequestPurpose::ValidateOrderInfo, Some(ChatId(51)));
+        session.payment_request = Some(PaymentRequest {
+            chat_id: ChatId(51),
+            message_id: MessageId(7),
+        });
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"validatedOrderInfo","@extra":"{}","order_info_id":"oid1","shipping_options":[{{"@type":"shippingOption","id":"ship1","title":"Standard","price_parts":[]}}]}}"#,
+                extra.0
+            ),
+        );
+        assert!(session.payment_validated.is_some());
+        assert_eq!(session.payment_shipping_id.as_deref(), Some("ship1"));
+        assert!(
+            session.payment_request.is_some(),
+            "validated answer must not clear the payment request"
+        );
     }
 
     /// Slice P1: a failed `getPaymentForm` clears the spinner and surfaces

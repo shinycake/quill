@@ -5248,7 +5248,7 @@ pub fn get_payment_form(extra: RequestId, chat_id: ChatId, message_id: MessageId
     .to_string()
 }
 
-/// Slice P1: `orderInfo` JSON (schema:4658) for `validateOrderInfo` /
+/// Slice P1: `orderInfo` JSON (schema:4662) for `validateOrderInfo` /
 /// `sendPaymentForm`.
 pub fn order_info_json(order: &OrderInfoData) -> Value {
     json!({

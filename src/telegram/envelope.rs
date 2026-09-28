@@ -2658,7 +2658,7 @@ pub struct LabeledPrice {
     pub amount: i64,
 }
 
-/// Slice P1: `invoice` (TDLib 1.8.67, `schema/td_api.tl:4652`) — the full
+/// Slice P1: `invoice` (TDLib 1.8.67, `schema/td_api.tl:4655`) — the full
 /// invoice inside a `paymentFormTypeRegular`. Only the fields the checkout
 /// dialog needs are kept.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2691,7 +2691,7 @@ pub enum PaymentProviderKind {
     Token { name: String },
 }
 
-/// Slice P1: `paymentOption` (schema:4709) — an additional web payment
+/// Slice P1: `paymentOption` (schema:4706) — an additional web payment
 /// option, opened in the OS browser.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PaymentOption {
@@ -2706,7 +2706,7 @@ pub struct SavedCredential {
     pub title: String,
 }
 
-/// Slice P1: `address` (schema:4626) / `orderInfo` (schema:4658).
+/// Slice P1: `address` (schema:4626) / `orderInfo` (schema:4662).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct AddressData {
     pub country_code: String,
@@ -2717,7 +2717,7 @@ pub struct AddressData {
     pub postal_code: String,
 }
 
-/// Slice P1: `orderInfo` (schema:4658).
+/// Slice P1: `orderInfo` (schema:4662).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct OrderInfoData {
     pub name: String,
@@ -2728,14 +2728,17 @@ pub struct OrderInfoData {
 
 /// Slice P1: `paymentFormType*` (schema:4716–4730). Stars payments are
 /// parsed so the dialog can decline them honestly — the Stars
-/// credentials flow has no verified TDLib path in this slice. The
-/// regular payload is boxed: `Stars`/`StarSubscription` carry almost
-/// nothing, which tripped clippy's `large_enum_variant` lint.
+/// credentials flow has no verified TDLib path in this slice. Unknown
+/// future variants parse to `Unknown` (never `None`) so the pending
+/// request resolves and the dialog declines honestly instead of spinning
+/// forever. The regular payload is boxed: `Stars`/`StarSubscription` carry
+/// almost nothing, which tripped clippy's `large_enum_variant` lint.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PaymentFormTypeData {
     Regular(Box<PaymentFormRegular>),
     Stars { star_count: i64 },
     StarSubscription,
+    Unknown,
 }
 
 /// Slice P1: the regular payment-form payload (`paymentFormTypeRegular`).
@@ -2760,7 +2763,7 @@ pub struct PaymentFormData {
     pub product_description: String,
 }
 
-/// Slice P1: `shippingOption` (schema:4665).
+/// Slice P1: `shippingOption` (schema:4668).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ShippingOptionData {
     pub id: String,
@@ -8866,7 +8869,7 @@ fn parse_price_parts(value: Option<&Value>) -> Vec<LabeledPrice> {
 }
 
 /// Slice P1: `address` (schema:4626); `orderInfo.shipping_address` may be
-/// null (schema:4658) — `parse_address(None)` yields the empty address.
+/// null (schema:4662) — `parse_address(None)` yields the empty address.
 fn parse_address(value: Option<&Value>) -> AddressData {
     let empty = || String::new();
     let get = |key: &str| {
@@ -8886,7 +8889,7 @@ fn parse_address(value: Option<&Value>) -> AddressData {
     }
 }
 
-/// Slice P1: `orderInfo` (schema:4658); `saved_order_info` may be null
+/// Slice P1: `orderInfo` (schema:4662); `saved_order_info` may be null
 /// (schema:4720) — `parse_order_info(None)` yields the empty order.
 fn parse_order_info(value: Option<&Value>) -> OrderInfoData {
     OrderInfoData {
@@ -8909,7 +8912,7 @@ fn parse_order_info(value: Option<&Value>) -> OrderInfoData {
     }
 }
 
-/// Slice P1: `invoice` inside a `paymentFormTypeRegular` (schema:4652).
+/// Slice P1: `invoice` inside a `paymentFormTypeRegular` (schema:4655).
 fn parse_invoice_form(value: &Value) -> InvoiceForm {
     let flag = |key: &str| value.get(key).and_then(Value::as_bool).unwrap_or(false);
     InvoiceForm {
@@ -8942,8 +8945,8 @@ fn parse_shipping_option(value: &Value) -> ShippingOptionData {
 }
 
 /// Slice P1: `paymentForm` (TDLib 1.8.67, `schema/td_api.tl:4734`).
-/// `None` when the form type is unknown (a new schema variant the pinned
-/// schema predates) — the caller degrades to a fetch error.
+/// `None` when the JSON is malformed; an unknown form *type* parses to
+/// `PaymentFormTypeData::Unknown` so the dialog can decline it honestly.
 fn parse_payment_form(value: &Value) -> Option<PaymentFormData> {
     let form_type_value = value.get("type")?;
     let form_type = match form_type_value.get("@type").and_then(Value::as_str)? {
@@ -9005,7 +9008,7 @@ fn parse_payment_form(value: &Value) -> Option<PaymentFormData> {
             star_count: int53(form_type_value.get("star_count")).unwrap_or(0),
         },
         "paymentFormTypeStarSubscription" => PaymentFormTypeData::StarSubscription,
-        _ => return None,
+        _ => PaymentFormTypeData::Unknown,
     };
     let product_info = value.get("product_info")?;
     Some(PaymentFormData {
@@ -9071,8 +9074,28 @@ fn parse_payment_receipt(value: &Value) -> Option<PaymentReceiptData> {
 
 /// Slice P1: sum of a `labeledPricePart` list — the receipt carries no
 /// `total_amount`, only the invoice's price parts (schema:4752).
-fn price_parts_total(parts: &[LabeledPrice]) -> i64 {
+pub(crate) fn price_parts_total(parts: &[LabeledPrice]) -> i64 {
     parts.iter().map(|part| part.amount).sum()
+}
+
+/// Slice P1: format a TDLib smallest-unit amount as "USD 19.99", using the
+/// ISO 4217 exponent (0 for JPY and friends, 3 for BHD and friends, 2
+/// otherwise) — amounts the API returns are always smallest units, so the
+/// exponent has to come from the currency, not the payload.
+pub fn format_payment_price(currency: &str, amount: i64) -> String {
+    let exponent: u32 = match currency {
+        "BIF" | "CLP" | "DJF" | "GNF" | "JPY" | "KMF" | "KRW" | "MGA" | "PYG" | "RWF" | "UGX"
+        | "UYI" | "VND" | "VUV" | "XAF" | "XOF" | "XPF" => 0,
+        "BHD" | "IQD" | "JOD" | "KWD" | "OMR" | "TND" => 3,
+        _ => 2,
+    };
+    let divisor = 10_i64.pow(exponent);
+    let (whole, frac) = (amount.div_euclid(divisor), amount.rem_euclid(divisor));
+    match exponent {
+        0 => format!("{currency} {whole}"),
+        3 => format!("{currency} {whole}.{frac:03}"),
+        _ => format!("{currency} {whole}.{frac:02}"),
+    }
 }
 
 /// `draftMessage` / `draftMessageContentText`. Other content constructors are
@@ -12444,6 +12467,34 @@ mod tests {
             }
             other => panic!("{other:?}"),
         }
+    }
+
+    #[test]
+    fn p1_unknown_payment_form_type_parses_honestly() {
+        // Slice P1 fix-up: an unknown `paymentFormType*` parses to
+        // `Unknown` (never `None`) so the pending request resolves and the
+        // dialog declines it instead of spinning forever.
+        let env = parse_envelope(
+            r#"{"@type":"paymentForm","@extra":"26","id":9,"type":{"@type":"paymentFormTypeFuture"},"seller_bot_user_id":21,"product_info":{"@type":"productInfo","title":"Future thing","description":{"@type":"formattedText","text":"","entities":[]},"photo":null}}"#,
+        )
+        .unwrap();
+        match env.payload {
+            EnvelopePayload::PaymentForm(form) => {
+                assert_eq!(form.form_type, PaymentFormTypeData::Unknown);
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn p1_payment_price_uses_currency_exponents() {
+        // Slice P1 fix-up: ISO 4217 exponents — zero-decimal (JPY),
+        // three-decimal (BHD), two otherwise.
+        assert_eq!(format_payment_price("USD", 1999), "USD 19.99");
+        assert_eq!(format_payment_price("JPY", 14322), "JPY 14322");
+        assert_eq!(format_payment_price("BHD", 1999), "BHD 1.999");
+        assert_eq!(format_payment_price("KRW", 1000), "KRW 1000");
+        assert_eq!(format_payment_price("EUR", 5), "EUR 0.05");
     }
 
     #[test]

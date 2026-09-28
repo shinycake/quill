@@ -63,17 +63,17 @@ use quill::telegram::envelope::{
     ChatFolderInfo, ChatFolderSpec, ChatKind, ChatList, ChatNotificationSettings, ChatPermissions,
     ChatStatistics, DEFAULT_EMOJI_REACTIONS, EphemeralMessageContent, ForumTopic,
     InlineKeyboardButton, InlineKeyboardButtonStyle, InlineKeyboardButtonType, InvoiceContent,
-    KeyboardButton, KeyboardButtonType, LabeledPrice, LoginUrlInfo, MUTE_FOREVER, MUTE_FOR_1_HOUR,
-    MUTE_FOR_2_DAYS, MUTE_FOR_8_HOURS, MessageContent, MessageInteractionInfo,
-    MessageSchedulingState, MessageSender, NotificationSettingsScope, NotificationSound,
-    OrderInfoData, ParsedChatEvent, ParsedFile, ParsedGroupCallParticipant, ParsedMessage,
-    ParsedSecretChat, ParsedSession, ParsedStory, ParsedWebsite, ParsedWelcomeMessage,
-    PasswordState, PaymentFormData, PaymentFormTypeData, PaymentProviderKind, PaymentReceiptData,
-    PaymentReceivedContent, PaymentSuccessContent, PollContent, PollOption, PollType,
-    ReplyKeyboard, ReplyMarkup, ScopeNotificationSettings, SecretChatState, SpeechRecognition,
-    SponsoredMessage, StatisticalGraph, StatisticalValue, StorageFileTypeStats, StorageStats,
-    StoryOriginView, UsernameCheckResult, ValidatedOrderInfoData, call_entry_label,
-    chat_ttl_service_label, effective_content, format_ttl_setting, toggle_chosen_emoji_reaction,
+    KeyboardButton, KeyboardButtonType, LoginUrlInfo, MUTE_FOR_1_HOUR, MUTE_FOR_2_DAYS,
+    MUTE_FOR_8_HOURS, MUTE_FOREVER, MessageContent, MessageInteractionInfo, MessageSchedulingState,
+    MessageSender, NotificationSettingsScope, NotificationSound, OrderInfoData, ParsedChatEvent,
+    ParsedFile, ParsedGroupCallParticipant, ParsedMessage, ParsedSecretChat, ParsedSession,
+    ParsedStory, ParsedWebsite, ParsedWelcomeMessage, PasswordState, PaymentFormData,
+    PaymentFormTypeData, PaymentProviderKind, PaymentReceiptData, PaymentReceivedContent,
+    PaymentSuccessContent, PollContent, PollOption, PollType, ReplyKeyboard, ReplyMarkup,
+    ScopeNotificationSettings, SecretChatState, SpeechRecognition, SponsoredMessage,
+    StatisticalGraph, StatisticalValue, StorageFileTypeStats, StorageStats, UsernameCheckResult,
+    ValidatedOrderInfoData, call_entry_label, chat_ttl_service_label, effective_content,
+    format_payment_price, format_ttl_setting, price_parts_total, toggle_chosen_emoji_reaction,
 };
 use quill::telegram::requests::SelfDestructSend;
 use quill::telegram::requests::{
@@ -317,7 +317,7 @@ impl PollDialog {
 
 /// Slice P1: the payment checkout dialog. The text inputs mirror the
 /// `orderInfo` fields the invoice needs (`need_name` / `need_phone_number`
-/// / `need_email_address` / `need_shipping_address`, schema:4652); only
+/// / `need_email_address` / `need_shipping_address`, schema:4655); only
 /// the needed ones render. The credential choice is either a saved
 /// credential (`inputCredentialsSaved`, schema:4677) or a provider token
 /// (`inputCredentialsNew`, schema:4680).
@@ -336,6 +336,9 @@ pub struct PaymentDialog {
     terms_accepted: bool,
     allow_save_order: bool,
     allow_save_credentials: bool,
+    /// Slice P1 fix-up: the dialog opens on Buy press before the form
+    /// arrives — the saved order info prefills once, when the form lands.
+    prefilled: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -369,10 +372,34 @@ impl PaymentDialog {
             terms_accepted: false,
             allow_save_order: true,
             allow_save_credentials: true,
+            prefilled: false,
             // ponytail: no `validated` flag — the session's
             // `payment_validated: Option<ValidatedOrderInfoData>` is the
             // single source of truth for whether validation ran.
         }
+    }
+
+    /// Slice P1 fix-up: prefill the order fields and credential choice
+    /// from a regular form's `saved_order_info` (schema:4720), once. The
+    /// dialog opens on Buy press before the form arrives, so this runs
+    /// either at open (form already cached) or on the first frame after
+    /// the form answer lands.
+    fn prefill_from_form(
+        &mut self,
+        form: &PaymentFormData,
+        window: &mut Window,
+        cx: &mut Context<QuillApp>,
+    ) {
+        if self.prefilled {
+            return;
+        }
+        if let PaymentFormTypeData::Regular(regular) = &form.form_type {
+            self.prefill(&regular.saved_order_info, window, cx);
+            if let Some(first) = regular.saved_credentials.first() {
+                self.credential_choice = PaymentCredentialChoice::Saved(first.id.clone());
+            }
+        }
+        self.prefilled = true;
     }
 
     /// Prefill the order fields from the form's `saved_order_info`
@@ -395,7 +422,7 @@ impl PaymentDialog {
         set(&self.postal_input, &addr.postal_code);
     }
 
-    /// Freeze the dialog inputs into an `orderInfo` (schema:4658).
+    /// Freeze the dialog inputs into an `orderInfo` (schema:4662).
     fn order(&self, cx: &App) -> OrderInfoData {
         let value = |input: &Entity<TextareaState>| input.read(cx).value().to_string();
         OrderInfoData {
@@ -5554,6 +5581,17 @@ impl QuillApp {
             self.open_message_url(&url, cx);
             progressed = true;
         }
+        // Slice P1 fix-up: a failed `getPaymentReceipt` surfaces in the
+        // status bar — the receipt dialog never opens, and `payment_note`
+        // only renders inside the checkout dialog.
+        if let Some(err) = self
+            .live
+            .as_mut()
+            .and_then(|live| live.driver.session.payment_receipt_error.take())
+        {
+            self.status_note = err;
+            progressed = true;
+        }
         self.finish_successful_sends(cx);
         if progressed || send_failed {
             cx.notify();
@@ -8442,18 +8480,16 @@ impl QuillApp {
     /// fields from the form's `saved_order_info` (schema:4720) when present.
     fn open_payment_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let mut dialog = PaymentDialog::new(window, cx);
-        if let Some(form) = self.session().and_then(|s| s.payment_form.clone())
-            && let PaymentFormTypeData::Regular(regular) = &form.form_type
-        {
-            dialog.prefill(&regular.saved_order_info, window, cx);
-            if let Some(first) = regular.saved_credentials.first() {
-                dialog.credential_choice = PaymentCredentialChoice::Saved(first.id.clone());
-            }
+        if let Some(form) = self.session().and_then(|s| s.payment_form.clone()) {
+            dialog.prefill_from_form(&form, window, cx);
         }
         self.payment_dialog = Some(dialog);
     }
 
     /// Slice P1: close the checkout dialog, discarding the form answers.
+    /// The in-flight payment request context is cleared here (and only
+    /// here) — the answer reducers keep it so `validateOrderInfo` and
+    /// `sendPaymentForm` still correlate after the form answer is applied.
     fn close_payment_dialog(&mut self, cx: &mut Context<Self>) {
         self.payment_dialog = None;
         if let Some(live) = self.live.as_mut() {
@@ -8462,6 +8498,7 @@ impl QuillApp {
             live.driver.session.payment_note = None;
             live.driver.session.payment_validated = None;
             live.driver.session.payment_shipping_id = None;
+            live.driver.session.payment_request = None;
         }
         cx.notify();
     }
@@ -8517,6 +8554,12 @@ impl QuillApp {
                         .text_sm()
                         .child("Star subscriptions are not supported in this slice."),
                 );
+            }
+            PaymentFormTypeData::Unknown => {
+                body =
+                    body.child(div().text_sm().child(
+                        "This invoice uses a payment form type this client doesn't support.",
+                    ));
             }
             PaymentFormTypeData::Regular(regular) => {
                 body = self.payment_form_body(
@@ -8645,7 +8688,7 @@ impl QuillApp {
                     })),
             );
         }
-        // Order info — only the fields the invoice needs (schema:4677).
+        // Order info — only the fields the invoice needs (schema:4655).
         let field = |input: &Entity<TextareaState>| div().child(Textarea::new(input).h(px(36.)));
         if invoice.need_name {
             body = body.child(field(&dialog.name_input));
@@ -8856,7 +8899,9 @@ impl QuillApp {
                 format_payment_price(&invoice.currency, total)
             ))
             .primary();
-        body = body.child(if can_pay {
+        body = body.child(if session.payment_sending {
+            pay.label("Processing…").disabled(true)
+        } else if can_pay {
             pay.on_click(cx.listener(|this, _, _, cx| {
                 this.submit_payment(cx);
             }))
@@ -9018,9 +9063,10 @@ impl QuillApp {
         }
         let credentials = match &dialog.credential_choice {
             PaymentCredentialChoice::Saved(id) => input_credentials_saved(id),
-            PaymentCredentialChoice::NewToken => {
-                input_credentials_new(&dialog.token(cx), dialog.allow_save_credentials)
-            }
+            PaymentCredentialChoice::NewToken => input_credentials_new(
+                &dialog.token(cx),
+                dialog.allow_save_credentials && regular.can_save_credentials,
+            ),
         };
         let order_info_id = validated
             .as_ref()
@@ -9029,7 +9075,7 @@ impl QuillApp {
         let shipping_option_id = shipping_id.as_deref().unwrap_or("");
         let sent = self.live.as_mut().map(|live| {
             live.driver.session.payment_note = None;
-            live.driver.submit_payment_form(
+            let sent = live.driver.submit_payment_form(
                 request.chat_id,
                 request.message_id,
                 form.id,
@@ -9037,7 +9083,11 @@ impl QuillApp {
                 shipping_option_id,
                 credentials,
                 0,
-            )
+            );
+            if sent.is_ok() {
+                live.driver.session.payment_sending = true;
+            }
+            sent
         });
         if !matches!(sent, Some(Ok(_))) {
             self.status_note = "could not submit the payment".into();
@@ -36022,6 +36072,16 @@ impl Render for QuillApp {
             live.driver.session.app_active = window.is_window_active();
         }
         self.flush_notifications(window, cx);
+        // Slice P1 fix-up: the checkout dialog opens on Buy press before
+        // the form arrives — prefill the saved order info once, on the
+        // first frame after the form answer lands. (This can't live in
+        // `poll_live`: prefill needs a `&mut Window` for the inputs.)
+        let payment_form = self.session().and_then(|s| s.payment_form.clone());
+        if let (Some(dialog), Some(form)) = (self.payment_dialog.as_mut(), payment_form)
+            && !dialog.prefilled
+        {
+            dialog.prefill_from_form(&form, window, cx);
+        }
         // Phase A1: keep the slow-mode countdown ticking while the open
         // chat is gated (spawns at most one 1s task per open chat).
         self.ensure_slow_mode_tick(cx);
@@ -43278,7 +43338,7 @@ fn inline_keyboard_button(
         }
         // Slice P1: the Buy button fetches the `paymentForm` and opens
         // the checkout dialog (schema:15262). It is only ever attached to
-        // a `messageInvoice` (schema:3797).
+        // a `messageInvoice` (schema:3798).
         InlineKeyboardButtonType::Buy => {
             element.on_click(cx.listener(move |this, _, window, cx| {
                 this.press_buy_button(chat_id, message_id, window, cx);
@@ -43304,19 +43364,6 @@ fn button_tooltip(button: &InlineKeyboardButton) -> &'static str {
         InlineKeyboardButtonType::Disabled => "This button is disabled",
         InlineKeyboardButtonType::Unknown { .. } => "Unsupported button",
     }
-}
-
-/// Slice P1: format a TDLib smallest-unit amount as "USD 19.99".
-// ponytail: TDLib amounts are smallest units; a few currencies use 0 or 3
-// decimals (official clients use locale data) — Quill renders 2 decimals
-// uniformly and documents the ceiling here.
-fn format_payment_price(currency: &str, amount: i64) -> String {
-    format!("{} {:.2}", currency, amount as f64 / 100.0)
-}
-
-/// Slice P1: sum of a `labeledPricePart` list.
-fn price_parts_total(parts: &[LabeledPrice]) -> i64 {
-    parts.iter().map(|part| part.amount).sum()
 }
 
 /// Slice P1: `messageInvoice` card — product title/description, total
