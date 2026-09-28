@@ -38,6 +38,7 @@ use crate::telegram::envelope::{
     ChatNotificationSettings, ChatPermissions, EnvelopePayload, GroupCallVideoInfo, MUTE_FOREVER,
     MessageContent, MessageSender, NotificationSettingsScope, ParsedGroupCallParticipant,
     ReadyParams, RichMessageContent, ScopeNotificationSettings, StoryContentView,
+    UsernameCheckResult,
 };
 use crate::telegram::ffi::{LibraryOrigin, TdJsonError, resolve_tdjson_path};
 use crate::telegram::requests::{
@@ -53,25 +54,26 @@ use crate::telegram::requests::{
     cancel_recovery_email_address_verification, chat_member_status_administrator_json,
     chat_member_status_banned_json, chat_member_status_member_json,
     chat_member_status_restricted_json, check_authentication_code, check_authentication_password,
-    clear_recently_found_chats, click_chat_sponsored_message, close_chat, close_request,
-    close_secret_chat as close_secret_chat_request, close_story, create_call_with_protocol,
-    create_chat_folder, create_chat_invite_link, create_forum_topic, create_new_basic_group_chat,
-    create_new_secret_chat, create_new_supergroup_chat, create_private_chat, create_video_chat,
-    decline_group_call_invitation, delete_chat, delete_chat_folder, delete_chat_history,
+    check_chat_username, clear_recently_found_chats, click_chat_sponsored_message, close_chat,
+    close_request, close_secret_chat as close_secret_chat_request, close_story,
+    create_call_with_protocol, create_chat_folder, create_chat_invite_link, create_forum_topic,
+    create_new_basic_group_chat, create_new_secret_chat, create_new_supergroup_chat,
+    create_private_chat, create_video_chat, decline_group_call_invitation, delete_chat,
+    delete_chat_folder, delete_chat_history,
     delete_chat_reply_markup as delete_chat_reply_markup_request, delete_chat_welcome_message,
-    delete_forum_topic, delete_messages, delete_story, discard_call as discard_call_request,
-    disconnect_all_websites, disconnect_website, download_file as download_file_request,
-    edit_chat_folder, edit_chat_invite_link, edit_chat_welcome_message, edit_forum_topic,
-    edit_message_caption, edit_message_text, end_group_call, end_group_call_recording,
-    end_group_call_screen_sharing, forward_messages, get_active_sessions,
-    get_archive_chat_list_settings, get_authorization_state, get_available_chat_boost_slots,
-    get_basic_group_full_info, get_bot_similar_bots, get_callback_query_answer,
-    get_callback_query_answer_game, get_callback_query_answer_with_password,
-    get_chat_active_stories, get_chat_administrators, get_chat_boost_status, get_chat_event_log,
-    get_chat_folder, get_chat_history, get_chat_invite_links, get_chat_join_requests,
-    get_chat_lists_to_add_chat, get_chat_member, get_chat_scheduled_messages,
-    get_chat_sponsored_messages, get_chat_statistics, get_commands, get_connected_websites,
-    get_contacts, get_forum_topics, get_full_rich_message, get_group_call,
+    delete_forum_topic, delete_messages, delete_profile_photo, delete_story,
+    discard_call as discard_call_request, disconnect_all_websites, disconnect_website,
+    download_file as download_file_request, edit_chat_folder, edit_chat_invite_link,
+    edit_chat_welcome_message, edit_forum_topic, edit_message_caption, edit_message_text,
+    end_group_call, end_group_call_recording, end_group_call_screen_sharing, forward_messages,
+    get_active_sessions, get_archive_chat_list_settings, get_authorization_state,
+    get_available_chat_boost_slots, get_basic_group_full_info, get_bot_similar_bots,
+    get_callback_query_answer, get_callback_query_answer_game,
+    get_callback_query_answer_with_password, get_chat_active_stories, get_chat_administrators,
+    get_chat_boost_status, get_chat_event_log, get_chat_folder, get_chat_history,
+    get_chat_invite_links, get_chat_join_requests, get_chat_lists_to_add_chat, get_chat_member,
+    get_chat_scheduled_messages, get_chat_sponsored_messages, get_chat_statistics, get_commands,
+    get_connected_websites, get_contacts, get_forum_topics, get_full_rich_message, get_group_call,
     get_installed_sticker_sets, get_link_preview, get_login_url, get_login_url_info, get_me,
     get_message_link, get_message_properties, get_message_thread_history, get_password_state,
     get_poll_voters, get_saved_animations, get_saved_notification_sounds,
@@ -85,39 +87,39 @@ use crate::telegram::requests::{
     leave_group_call, load_active_stories, load_chat_welcome_messages, load_chats, load_chats_list,
     load_group_call_participants, open_chat, open_message_content, open_story, pin_chat_message,
     post_story as post_story_request, process_chat_join_request, read_chat_list, recognize_speech,
-    remove_message_reaction, reorder_chat_folders, replace_primary_chat_invite_link,
-    replace_video_chat_rtmp_url, report_chat, report_chat_sponsored_message,
-    report_story as report_story_request, request_qr_code_authentication,
-    resend_authentication_code, resend_messages, resend_recovery_email_address_code,
-    revoke_chat_invite_link, revoke_group_call_invite_link, search_call_messages,
-    search_chat_messages, search_chats, search_messages, search_public_chats,
+    remove_message_reaction, reorder_active_usernames, reorder_chat_folders,
+    replace_primary_chat_invite_link, replace_video_chat_rtmp_url, report_chat,
+    report_chat_sponsored_message, report_story as report_story_request,
+    request_qr_code_authentication, resend_authentication_code, resend_messages,
+    resend_recovery_email_address_code, revoke_chat_invite_link, revoke_group_call_invite_link,
+    search_call_messages, search_chat_messages, search_chats, search_messages, search_public_chats,
     search_recently_found_chats, send_animation,
     send_bot_start_message as send_bot_start_message_request, send_call_debug_information,
     send_call_log, send_call_rating_detail, send_call_signaling_data, send_chat_action,
     send_chat_action_kind, send_document, send_group_call_message, send_message_album, send_photo,
     send_poll, send_rich_message, send_sticker, send_text, send_text_story_reply, send_video,
     send_video_note, send_voice_note, set_archive_chat_list_settings,
-    set_authentication_phone_number, set_chat_draft_message, set_chat_member_status,
+    set_authentication_phone_number, set_bio, set_chat_draft_message, set_chat_member_status,
     set_chat_member_tag, set_chat_message_auto_delete_time, set_chat_notification_settings,
     set_chat_permissions, set_chat_slow_mode_delay, set_group_call_participant_volume_level,
-    set_message_sender_block_list, set_password, set_pinned_chats, set_poll_answer,
-    set_recovery_email_address, set_scope_notification_settings, set_story_reaction,
-    set_supergroup_username, set_user_privacy_setting_rules, set_video_chat_title,
-    start_group_call_recording, start_group_call_screen_sharing, start_scheduled_video_chat,
-    stop_poll as stop_poll_request, supergroup_members_filter_administrators_json,
-    supergroup_members_filter_banned_json, supergroup_members_filter_recent_json,
-    supergroup_members_filter_restricted_json, supergroup_members_filter_search_json,
-    terminate_all_other_sessions, terminate_session, toggle_chat_folder_tags,
-    toggle_chat_is_marked_as_unread, toggle_chat_is_pinned, toggle_forum_topic_closed,
-    toggle_forum_topic_pinned, toggle_general_forum_topic_hidden,
+    set_message_sender_block_list, set_name, set_password, set_pinned_chats, set_poll_answer,
+    set_profile_photo, set_recovery_email_address, set_scope_notification_settings,
+    set_story_reaction, set_supergroup_username, set_user_privacy_setting_rules, set_username,
+    set_video_chat_title, start_group_call_recording, start_group_call_screen_sharing,
+    start_scheduled_video_chat, stop_poll as stop_poll_request,
+    supergroup_members_filter_administrators_json, supergroup_members_filter_banned_json,
+    supergroup_members_filter_recent_json, supergroup_members_filter_restricted_json,
+    supergroup_members_filter_search_json, terminate_all_other_sessions, terminate_session,
+    toggle_chat_folder_tags, toggle_chat_is_marked_as_unread, toggle_chat_is_pinned,
+    toggle_forum_topic_closed, toggle_forum_topic_pinned, toggle_general_forum_topic_hidden,
     toggle_group_call_are_messages_allowed, toggle_group_call_is_my_video_enabled,
     toggle_group_call_is_my_video_paused, toggle_group_call_participant_is_hand_raised,
     toggle_group_call_participant_is_muted, toggle_session_can_accept_calls,
     toggle_session_can_accept_secret_chats, toggle_supergroup_aggressive_anti_spam,
     toggle_supergroup_is_broadcast_group, toggle_supergroup_join_by_request,
-    toggle_supergroup_sign_messages, toggle_video_chat_enabled_start_notification,
-    toggle_video_chat_mute_new_participants, unpin_all_chat_messages, unpin_chat_message,
-    view_messages, view_sponsored_chat,
+    toggle_supergroup_sign_messages, toggle_username_is_active,
+    toggle_video_chat_enabled_start_notification, toggle_video_chat_mute_new_participants,
+    unpin_all_chat_messages, unpin_chat_message, view_messages, view_sponsored_chat,
 };
 use crate::voice::VoiceDraft;
 use std::collections::{HashMap, VecDeque};
@@ -960,6 +962,24 @@ impl<S: JsonSender> ConnectDriver<S> {
                 }),
             _ => None,
         };
+        // A5: capture the `checkChatUsername` verdict before `apply`
+        // takes the pending request. The verdict is stashed with the
+        // in-flight username text so the edit-profile dialog can ignore
+        // stale answers for superseded text.
+        let username_check_answer: Option<(String, UsernameCheckResult)> =
+            match &owned.envelope.payload {
+                EnvelopePayload::CheckChatUsernameResult(result) => owned
+                    .envelope
+                    .extra
+                    .and_then(|id| self.session.requests.purpose(id))
+                    .and_then(|purpose| {
+                        (purpose == RequestPurpose::CheckUsername)
+                            .then(|| self.session.username_check_pending.clone())
+                            .flatten()
+                            .map(|username| (username, *result))
+                    }),
+                _ => None,
+            };
         // MED4: capture the `getWebPageInstantView` answer before `apply`
         // takes the pending request; the UI drains
         // `Session::instant_view` into the IV reader. The URL rides
@@ -1155,6 +1175,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         // M1: stash the `getMessageLink` answer for the UI clipboard drain.
         if let Some(link) = message_link_answer {
             self.session.message_link_result = Some(link);
+        }
+        // A5: stash the `checkChatUsername` verdict for the
+        // edit-profile dialog.
+        if let Some((username, result)) = username_check_answer {
+            self.session.username_check = Some((username, result));
         }
         // MED4: stash the `getWebPageInstantView` answer (success →
         // IV reader; error → browser fallback) for the UI drains.
@@ -9005,6 +9030,133 @@ impl<S: JsonSender> ConnectDriver<S> {
             .session
             .request(RequestPurpose::DeleteChatReplyMarkup, Some(chat_id));
         let json = delete_chat_reply_markup_request(extra, chat_id, message_id);
+        self.send_json_request(extra, &json)
+    }
+
+    /// A5: `setName` (schema 1.8.67, line 14823). Best-effort: the name
+    /// refreshes via `updateUser`; failures surface in
+    /// `Session::profile_edit_error`.
+    pub fn set_name(
+        &mut self,
+        first_name: &str,
+        last_name: &str,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self.session.request(RequestPurpose::SetName, None);
+        let json = set_name(extra, first_name, last_name);
+        self.send_json_request(extra, &json)
+    }
+
+    /// A5: `setBio` (schema 1.8.67, line 14826).
+    pub fn set_bio(&mut self, bio: &str) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self.session.request(RequestPurpose::SetBio, None);
+        let json = set_bio(extra, bio);
+        self.send_json_request(extra, &json)
+    }
+
+    /// A5: `setUsername` (schema 1.8.67, line 14830). Changes the
+    /// editable username; empty string removes it.
+    pub fn set_username(&mut self, username: &str) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self.session.request(RequestPurpose::SetUsername, None);
+        let json = set_username(extra, username);
+        self.send_json_request(extra, &json)
+    }
+
+    /// A5: `checkChatUsername` for the current user's own username (schema
+    /// 1.8.67, line 11677; the private chat with self is the documented
+    /// chat id — TGX `EditUsernameController` sends it with
+    /// `tdlib.selfChatId()`). The verdict lands in
+    /// `Session::username_check`; the in-flight text in
+    /// `Session::username_check_pending` so the dialog can ignore stale
+    /// verdicts.
+    pub fn check_username(&mut self, username: &str) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let Some(me) = self.session.my_user_id else {
+            return Err(ConnectSendError::InvalidRequest);
+        };
+        let extra = self.session.request(RequestPurpose::CheckUsername, None);
+        self.session.username_check_pending = Some(username.to_string());
+        let json = check_chat_username(extra, ChatId(me), username);
+        let sent = self.send_json_request(extra, &json);
+        if sent.is_err() {
+            // Don't leave the dialog showing "Checking…" for a request
+            // that never went out.
+            self.session.username_check_pending = None;
+        }
+        sent
+    }
+
+    /// A5: `reorderActiveUsernames` (schema 1.8.67, line 14838) — the
+    /// full active list in the new order.
+    pub fn reorder_active_usernames(
+        &mut self,
+        usernames: &[String],
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::ReorderActiveUsernames, None);
+        let json = reorder_active_usernames(extra, usernames);
+        self.send_json_request(extra, &json)
+    }
+
+    /// A5: `toggleUsernameIsActive` (schema 1.8.67, line 14835).
+    pub fn toggle_username_is_active(
+        &mut self,
+        username: &str,
+        is_active: bool,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::ToggleUsernameIsActive, None);
+        let json = toggle_username_is_active(extra, username, is_active);
+        self.send_json_request(extra, &json)
+    }
+
+    /// A5: `setProfilePhoto` with `inputChatPhotoStatic` / `inputFileLocal`
+    /// (schema 1.8.67, lines 14803/1042/1039). `is_public` true = the
+    /// public photo, visible even when the main photo is hidden by
+    /// privacy settings.
+    pub fn set_profile_photo(
+        &mut self,
+        photo_path: &str,
+        is_public: bool,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self.session.request(RequestPurpose::SetProfilePhoto, None);
+        let json = set_profile_photo(extra, photo_path, is_public);
+        self.send_json_request(extra, &json)
+    }
+
+    /// A5: `deleteProfilePhoto` (schema 1.8.67, line 14806).
+    pub fn delete_profile_photo(
+        &mut self,
+        profile_photo_id: i64,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::DeleteProfilePhoto, None);
+        let json = delete_profile_photo(extra, profile_photo_id);
         self.send_json_request(extra, &json)
     }
 

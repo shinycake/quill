@@ -54,10 +54,10 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [ ] Import contacts from a file/vCard (schema: importContacts) <!-- parity:auth-contact-import -->
 - [ ] Sync contacts toggle + delete synced contacts from servers (TGX SyncContacts*, SyncContactsDeleteInfo) <!-- parity:auth-contact-sync -->
 - [ ] Block user with confirmation (TGX QBlockUser/BlockUserConfirm; no block request builders in Quill) <!-- parity:auth-block-user -->
-- [ ] Edit name (schema: setName) <!-- parity:auth-edit-name -->
-- [ ] Edit bio (schema: setBio; profile panel is read-only, ui/mod.rs:8150) <!-- parity:auth-edit-bio -->
-- [ ] Username management: set, active-usernames list, reorder, activate/deactivate (schema: setUsername, reorderActiveUsernames, toggleUsernameIsActive) <!-- parity:auth-username -->
-- [ ] Set / remove profile photo (schema: setProfilePhoto, deleteProfilePhoto) <!-- parity:auth-profile-photo -->
+- [x] Edit name: "Edit profile" dialog on the own info panel sends setName (telegram/requests.rs:4213; connect.rs:8910; ui/mod.rs:18963) <!-- parity:auth-edit-name -->
+- [x] Edit bio: "Edit profile" dialog sends setBio; the info panel now also renders the bio from getUserFullInfo (telegram/requests.rs:4224; connect.rs:8924; ui/mod.rs:18963) <!-- parity:auth-edit-bio -->
+- [x] Username management: Check availability via checkChatUsername (private chat with self; all six checkChatUsernameResult verdicts parsed, envelope.rs:2386), set/clear editable username (empty clears per schema :14830), up/down reorder of active usernames, activate/deactivate (editable username can't be deactivated per schema :14835); schema: setUsername, reorderActiveUsernames, toggleUsernameIsActive (telegram/requests.rs:4235; connect.rs:8935; ui/mod.rs:18963) <!-- parity:auth-username -->
+- [x] Set / remove profile photo: setProfilePhoto via inputChatPhotoStatic + inputFileLocal with is_public=false (schema :14803; TGX AvatarPickerManager), remove via deleteProfilePhoto with the retained chatPhoto.id (state.rs:3771) (telegram/requests.rs:4283; connect.rs:9006; ui/mod.rs:18963) <!-- parity:auth-profile-photo -->
 - [ ] Profile accent color (schema: setProfileAccentColor) <!-- parity:auth-profile-accent -->
 
 ### Messaging core

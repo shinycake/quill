@@ -395,6 +395,10 @@ pub enum EnvelopePayload {
     /// Phase C2f: `inviteGroupCallParticipantResult*` (schema 1.8.67,
     /// lines 7216-7227) — the `inviteGroupCallParticipant` answer.
     InviteGroupCallParticipantResult(InviteGroupCallParticipantResult),
+    /// A5: `checkChatUsername` answer (schema 1.8.67, lines 8583–8598).
+    /// Correlated by `@extra` in `ConnectDriver` before `apply` takes the
+    /// pending request (the response carries no chat id).
+    CheckChatUsernameResult(UsernameCheckResult),
     Error(TdError),
     Messages(Vec<ParsedMessage>),
     Message(ParsedMessage),
@@ -735,6 +739,9 @@ pub enum EnvelopePayload {
         /// Preferred size's `photo:file` from `chatPhoto.sizes`
         /// (schema 1.8.67, line 1030); `None` when the user has no photo.
         photo: Option<ParsedFile>,
+        /// A5: `chatPhoto.id` (schema 1.8.67, line 1030) — the
+        /// `profile_photo_id` for `deleteProfilePhoto`.
+        photo_id: Option<i64>,
     },
     /// `updateUserFullInfo` — full info changed (schema 1.8.67, line 10744);
     /// the user id is explicit here.
@@ -743,6 +750,8 @@ pub enum EnvelopePayload {
         bot_info: Option<BotInfo>,
         bio: String,
         photo: Option<ParsedFile>,
+        /// A5: `chatPhoto.id`, as above.
+        photo_id: Option<i64>,
     },
     /// `supergroupFullInfo` — `getSupergroupFullInfo` response (schema
     /// 1.8.67, line 11513). The response carries no supergroup id; it is
@@ -2375,6 +2384,16 @@ pub struct ParsedUser {
     /// First entry of `usernames.active_usernames` (schema 1.8.67, line
     /// 2372 — this schema version has no singular `username` field).
     pub username: String,
+    /// A5: full `usernames.active_usernames` list (schema 1.8.67, line
+    /// 2372); the first entry is the primary username and the order is
+    /// user-reorderable via `reorderActiveUsernames`.
+    pub active_usernames: Vec<String>,
+    /// A5: `usernames.disabled_usernames` — re-activatable via
+    /// `toggleUsernameIsActive`.
+    pub disabled_usernames: Vec<String>,
+    /// A5: `usernames.editable_username` — the username `setUsername`
+    /// changes (schema 1.8.67, line 2372).
+    pub editable_username: String,
     pub phone_number: String,
     pub is_contact: bool,
     pub is_bot: bool,
@@ -6632,6 +6651,25 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
             })
         }
         "ok" => Ok(EnvelopePayload::Ok),
+        // A5: `checkChatUsernameResult*` (schema 1.8.67, lines 8583–8598).
+        "checkChatUsernameResultOk" => Ok(EnvelopePayload::CheckChatUsernameResult(
+            UsernameCheckResult::Available,
+        )),
+        "checkChatUsernameResultUsernameOccupied" => Ok(EnvelopePayload::CheckChatUsernameResult(
+            UsernameCheckResult::Occupied,
+        )),
+        "checkChatUsernameResultUsernameInvalid" => Ok(EnvelopePayload::CheckChatUsernameResult(
+            UsernameCheckResult::Invalid,
+        )),
+        "checkChatUsernameResultUsernamePurchasable" => Ok(
+            EnvelopePayload::CheckChatUsernameResult(UsernameCheckResult::Purchasable),
+        ),
+        "checkChatUsernameResultPublicChatsTooMany" => Ok(
+            EnvelopePayload::CheckChatUsernameResult(UsernameCheckResult::PublicChatsTooMany),
+        ),
+        "checkChatUsernameResultPublicGroupsUnavailable" => Ok(
+            EnvelopePayload::CheckChatUsernameResult(UsernameCheckResult::PublicGroupsUnavailable),
+        ),
         "richMessage" => {
             let (blocks, is_full) = parse_rich_message(&value);
             Ok(EnvelopePayload::RichMessage {
@@ -7283,6 +7321,7 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
             bot_info: parse_bot_info(value.get("bot_info")),
             bio: parse_formatted_text(value.get("bio")),
             photo: parse_user_full_info_photo(&value),
+            photo_id: int53(value.get("photo").and_then(|p| p.get("id"))).ok(),
         }),
         "updateUserFullInfo" => Ok(EnvelopePayload::UpdateUserFullInfo {
             user_id: UserId(int53(value.get("user_id"))?),
@@ -7295,6 +7334,13 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
             photo: value
                 .get("user_full_info")
                 .and_then(parse_user_full_info_photo),
+            photo_id: int53(
+                value
+                    .get("user_full_info")
+                    .and_then(|info| info.get("photo"))
+                    .and_then(|p| p.get("id")),
+            )
+            .ok(),
         }),
         "supergroupFullInfo" => Ok(EnvelopePayload::SupergroupFullInfo {
             description: value
@@ -8028,6 +8074,53 @@ fn parse_user_status(value: Option<&Value>) -> UserStatusKind {
     }
 }
 
+/// A5: full username lists from `usernames` (schema 1.8.67, line 2372).
+/// Null/absent → empty lists and an empty editable username.
+fn parse_username_lists(value: Option<&Value>) -> (Vec<String>, Vec<String>, String) {
+    fn names(value: Option<&Value>, key: &str) -> Vec<String> {
+        value
+            .filter(|v| !v.is_null())
+            .and_then(|u| u.get(key))
+            .and_then(Value::as_array)
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(Value::as_str)
+                    .map(str::to_string)
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+    let editable = value
+        .filter(|v| !v.is_null())
+        .and_then(|u| u.get("editable_username"))
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    (
+        names(value, "active_usernames"),
+        names(value, "disabled_usernames"),
+        editable,
+    )
+}
+
+/// A5: `checkChatUsernameResult*` (schema 1.8.67, lines 8583–8598) — the
+/// availability verdict for the current user's own username, queried via
+/// `checkChatUsername` with the private chat with self (the documented
+/// path per the schema doc at line 11676; TGX `EditUsernameController`
+/// does the same with `tdlib.selfChatId()`). TDLib exposes no
+/// self-username `checkUsername` — a concept-level search of td_api.tl
+/// finds only the chat-scoped `checkChatUsername` and the bot-scoped
+/// `checkBotUsername`, so this is the honest wiring.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UsernameCheckResult {
+    Available,
+    Occupied,
+    Invalid,
+    Purchasable,
+    PublicChatsTooMany,
+    PublicGroupsUnavailable,
+}
+
 /// Parity slice: first entry of `usernames.active_usernames` (schema
 /// 1.8.67, line 2372 — "the first one must be shown as the primary
 /// username"). Null/absent/empty → empty string.
@@ -8057,6 +8150,8 @@ fn parse_user(value: &Value) -> Option<ParsedUser> {
         .unwrap_or("")
         .to_string();
     let username = parse_first_active_username(value.get("usernames"));
+    let (active_usernames, disabled_usernames, editable_username) =
+        parse_username_lists(value.get("usernames"));
     let phone_number = value
         .get("phone_number")
         .and_then(Value::as_str)
@@ -8084,6 +8179,9 @@ fn parse_user(value: &Value) -> Option<ParsedUser> {
         first_name,
         last_name,
         username,
+        active_usernames,
+        disabled_usernames,
+        editable_username,
         phone_number,
         is_contact,
         is_bot,
@@ -11123,6 +11221,7 @@ mod tests {
                 bot_info,
                 bio,
                 photo,
+                photo_id: _,
             } => {
                 let info = bot_info.expect("bot_info");
                 assert_eq!(info.short_description, "A demo bot");
@@ -13093,12 +13192,70 @@ mod channel_envelope_tests {
                 assert_eq!(user.display_name(), "Ada Lovelace");
                 assert_eq!(user.initials(), "AL");
                 assert_eq!(user.username, "adalove");
+                // A5: full username lists parsed from `usernames`.
+                assert_eq!(user.active_usernames, vec!["adalove".to_string()]);
+                assert!(user.disabled_usernames.is_empty());
+                assert_eq!(user.editable_username, "adalove");
                 assert_eq!(user.phone_number, "+15550131");
                 assert!(user.is_contact);
                 assert!(!user.is_bot);
                 assert_eq!(user.status, UserStatusKind::Online);
                 assert!(user.status.is_online());
                 assert_eq!(user.photo_small_file_id, 41);
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    // A5: `checkChatUsernameResult*` (schema 1.8.67, lines 8583–8598)
+    // parse to `UsernameCheckResult`.
+    #[test]
+    fn check_chat_username_results_parsed() {
+        let cases = [
+            ("checkChatUsernameResultOk", UsernameCheckResult::Available),
+            (
+                "checkChatUsernameResultUsernameOccupied",
+                UsernameCheckResult::Occupied,
+            ),
+            (
+                "checkChatUsernameResultUsernameInvalid",
+                UsernameCheckResult::Invalid,
+            ),
+            (
+                "checkChatUsernameResultUsernamePurchasable",
+                UsernameCheckResult::Purchasable,
+            ),
+            (
+                "checkChatUsernameResultPublicChatsTooMany",
+                UsernameCheckResult::PublicChatsTooMany,
+            ),
+            (
+                "checkChatUsernameResultPublicGroupsUnavailable",
+                UsernameCheckResult::PublicGroupsUnavailable,
+            ),
+        ];
+        for (type_name, expected) in cases {
+            let env = parse_envelope(&format!("{{\"@type\":\"{type_name}\"}}")).unwrap();
+            match env.payload {
+                EnvelopePayload::CheckChatUsernameResult(result) => {
+                    assert_eq!(result, expected, "{type_name}");
+                }
+                other => panic!("{type_name}: {other:?}"),
+            }
+        }
+    }
+
+    // A5: `userFullInfo.photo.id` (`chatPhoto.id`, schema 1.8.67 line
+    // 1030) is kept as the `deleteProfilePhoto` target.
+    #[test]
+    fn user_full_info_photo_id_parsed() {
+        let env = parse_envelope(
+            r#"{"@type":"userFullInfo","bio":null,"photo":{"@type":"chatPhoto","id":987,"sizes":[]},"block_list":null,"can_be_called":false,"has_private_calls":false,"has_private_forwards":false,"has_read_receipts":false,"no_upgraded_gift_colors":false}"#,
+        )
+        .unwrap();
+        match env.payload {
+            EnvelopePayload::UserFullInfo { photo_id, .. } => {
+                assert_eq!(photo_id, Some(987));
             }
             other => panic!("{other:?}"),
         }
@@ -13193,6 +13350,7 @@ mod channel_envelope_tests {
                 bio,
                 bot_info,
                 photo,
+                photo_id: _,
             } => {
                 assert_eq!(bio, "CANARY bio text");
                 assert!(bot_info.is_none());
