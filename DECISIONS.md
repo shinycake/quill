@@ -4482,3 +4482,35 @@ greps.
   - `parity:auth-qr-authorize-other` — "Link desktop device" on a logged-in client (`confirmQrCodeAuthentication link:string = Session` :11414) is the reverse flow: Quill would *display its own* QR/session link for another device to scan. Needs session-link UI plus scan handling; separate slice.
   - `parity:auth-email-login`, `parity:auth-registration` — still explicit `UnsupportedHalt`; `resendAuthenticationCode` in `WaitEmailCode` is intentionally not wired (gated to `WaitCode` only).
   - 2FA manage, sessions, password recovery — untouched, still backlog.
+## Slice B1 — BOT KEYBOARDS: INLINE BUTTONS, CUSTOM KEYBOARDS, FORCE-REPLY (2026-09-27)
+
+- **Schema (pinned TDLib 1.8.67, `schema/td_api.tl`, verified verbatim):**
+  - Inline button types: `inlineKeyboardButtonTypeLoginUrl` (:3780), `inlineKeyboardButtonTypeWebApp` (:3783), `inlineKeyboardButtonTypeCallbackWithPassword` (:3789), `inlineKeyboardButtonTypeCallbackGame` (:3792), `inlineKeyboardButtonTypeUser` (:3801). Callback payloads: `callbackQueryPayloadData` (:7737), `callbackQueryPayloadDataWithPassword` (:7740), `callbackQueryPayloadGame` (:7743). `messageGame` (:5234) with game `short_name` (:673).
+  - Custom keyboards: `keyboardButton` types :3714–3760, `keyboardButton` :3768; markups `replyMarkupRemoveKeyboard` (:3835), `replyMarkupForceReply` (:3840), `replyMarkupShowKeyboard` (:3850), `replyMarkupInlineKeyboard` (:3855).
+  - Requests: `getLoginUrlInfo` (:12985), `getLoginUrl` (:12993), `getCallbackQueryAnswer` (:13138), `deleteChatReplyMarkup chat_id:int53 message_id:int53 = Ok` (:13183).
+  - **Negative-claim discipline:** no `sendGame` constructor exists in the pinned schema (concept-level check: `game` in td_api.tl shows only `callbackQueryPayloadGame` + `getCallbackQueryAnswer`; raw telegram_api.tl likewise; TDLib `Requests.cpp` exposes game launch only through the callback-answer path). Games launch with `getCallbackQueryAnswer` + `callbackQueryPayloadGame`, never a dedicated send.
+- **Telegram X evidence (local TGX-Android source, `~/workspace/telegram-x`):**
+  - `TGInlineKeyboard.java:1135` — password buttons use `CallbackQueryPayloadDataWithPassword`.
+  - `:1193–1207` — game buttons read `messageGame.game.shortName` and send the game payload.
+  - `:1209+` — user buttons open the private profile/chat.
+  - `:1239–1258` — login URL buttons resolve via `GetLoginUrlInfo`.
+- **Built:**
+  - Login URL: `getLoginUrlInfo` on press (schema:12985); `loginUrlInfoOpen` opens the URL in the OS browser, `loginUrlInfoRequestConfirmation` shows the TDLib-reported domain for consent and — on consent — `getLoginUrl` (schema:12993) fetches the authorized `httpUrl` (schema:7458), which opens in the OS browser; failures degrade to the raw URL (schema:12993 doc: "the button must be handled as an ordinary URL button"). TGX `TGInlineKeyboard.getLoginCallback` does exactly this consent→`GetLoginUrl` flow; the dialog also notes when the bot requests write access (`request_write_access`, passed through as `allow_write_access`).
+  - Web App: honest browser fallback (no in-app web view); README marks partial.
+  - Password callbacks: modal prompts for the 2-step password, sends `callbackQueryPayloadDataWithPassword`; TDLib error 400 surfaces as "wrong 2-step verification password".
+  - Game buttons: `getCallbackQueryAnswer` with `callbackQueryPayloadGame` carrying the `messageGame` short name; answer URL opens in the browser (games UI beyond launch is out of slice).
+  - User buttons: open (or create) the private chat with the user.
+  - Custom keyboards: rendered above the composer; text buttons send via the normal path; contact/location/poll/user/chat/managed-bot render disabled with honest tooltips; one-time keyboards hide locally on tap and send `deleteChatReplyMarkup`; resize/persistent minimally honored.
+  - Force-reply: incoming `replyMarkupForceReply` arms `pending_force_reply`; the UI drains it into a composer reply-to + focus.
+  - Tests: envelope parse tests (show-keyboard, force-reply/remove, game, login-url-info, `reply_markup_demands_reply`), request-shape tests (password/game/login-url-info/delete-reply-markup), state tests (force-reply arming, wrong-password error, login-url fallback, keyboard show/remove/dismiss rules).
+  - Screenshot fixture `quill --screenshot-demo ready-bot-keyboard`: inline buttons, game message, custom keyboard, force-reply — `docs/screenshots/ready-bot-keyboards.png`.
+- **Key decisions (ponytail):**
+  - No in-app web view was built — the OS browser is the honest fallback for web apps and login URLs, matching the schema's client latitude.
+  - `active_custom_keyboard` is a pure function in `state.rs` (testable under the no-default-features gate); the UI only renders what it returns.
+  - Passwords are not zeroized — the string is dropped after the single TDLib send; speculative zeroization was removed.
+- **Not verifiable without live Telegram:** real `getLoginUrlInfo` round-trips and consent variants; real password-callback acceptance/rejection; real game-launch answers; real `deleteChatReplyMarkup` acceptance.
+- **Known gap (pre-existing, not B1):** `updateChatReplyMarkup` is unhandled — per the schema doc on `replyMarkupRemoveKeyboard` (:3833), server-driven keyboard removal arrives via that update with null markup, not an inline message. The B1 panel clears on an inline `replyMarkupRemoveKeyboard` message and on one-time use; a stale panel can linger until the bot sends a newer message.
+- **Out of this slice (left unchecked with evidence):**
+  - `parity:bots-inline-buy` — payments/buy buttons: invoice flow, payment UI, and receipt handling are a full payments slice, not a keyboard addition. Buttons render disabled with an honest tooltip.
+  - Games UI beyond launch — scoreboards, game messages rendering, and in-app game surfaces; only the TDLib launch flow (callback answer + URL) is built.
+  - Inline mode (`inlineKeyboardButtonTypeSwitchInline` query flows are pre-existing; full inline-result browsing/picking is separate).

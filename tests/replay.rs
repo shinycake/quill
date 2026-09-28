@@ -1990,6 +1990,9 @@ fn replay_inline_keyboard_stored_from_real_json() {
         .and_then(|h| h.messages.get(&301))
         .expect("message 301 stored");
     let keyboard = message.reply_markup.as_ref().expect("keyboard stored");
+    let quill::telegram::envelope::ReplyMarkup::InlineKeyboard(keyboard) = keyboard else {
+        panic!("expected inline keyboard");
+    };
     assert_eq!(keyboard.rows.len(), 3);
     match &keyboard.rows[0][0].kind {
         InlineKeyboardButtonType::Url { url } => {
@@ -2094,13 +2097,15 @@ fn replay_inline_keyboard_mixed_lands_on_history() {
         ],
     );
     use quill::telegram::envelope::{
-        InlineKeyboardButtonStyle, InlineKeyboardButtonType, InlineKeyboardTargetChat,
+        InlineKeyboardButtonStyle, InlineKeyboardButtonType, InlineKeyboardTargetChat, ReplyMarkup,
     };
     let keyboard = session.histories.get(&21).unwrap().messages[&301]
         .reply_markup
         .clone()
         .expect("inline keyboard on history message");
-    assert!(!keyboard.force_reply);
+    let ReplyMarkup::InlineKeyboard(keyboard) = keyboard else {
+        panic!("expected inline keyboard");
+    };
     assert_eq!(keyboard.rows.len(), 2);
     assert_eq!(keyboard.rows[0].len(), 1);
     assert_eq!(keyboard.rows[1].len(), 3);
@@ -2154,12 +2159,16 @@ fn replay_inline_keyboard_hostile_yields_disabled_placeholders() {
             r#"{"@type":"updateNewMessage","message":{"id":302,"chat_id":21,"is_outgoing":false,"reply_markup":{"@type":"replyMarkupInlineKeyboard","rows":[[{"@type":"inlineKeyboardButton","text":"Mystery","style":{"@type":"buttonStyleFuture"},"type":{"@type":"inlineKeyboardButtonTypeQuantum"}}],[{"@type":"inlineKeyboardButton","text":"No type here"}],"not an array",null],"force_reply":true},"content":{"@type":"messageText","text":{"@type":"formattedText","text":"x","entities":[]}}}}"#,
         ],
     );
-    use quill::telegram::envelope::{InlineKeyboardButtonStyle, InlineKeyboardButtonType};
+    use quill::telegram::envelope::{
+        InlineKeyboardButtonStyle, InlineKeyboardButtonType, ReplyMarkup,
+    };
     let keyboard = session.histories.get(&21).unwrap().messages[&302]
         .reply_markup
         .clone()
         .expect("keyboard parsed despite hostile rows");
-    assert!(keyboard.force_reply);
+    let ReplyMarkup::InlineKeyboard(keyboard) = keyboard else {
+        panic!("expected inline keyboard");
+    };
     // The two non-array rows are skipped, so only two rows survive.
     assert_eq!(keyboard.rows.len(), 2);
     let mystery = &keyboard.rows[0][0];
@@ -2198,7 +2207,12 @@ fn replay_non_inline_markup_ignored() {
         ],
     );
     let history = session.histories.get(&21).unwrap();
-    assert!(history.messages[&303].reply_markup.is_none());
+    // B1: custom keyboards are parsed (not ignored) — the UI renders them
+    // above the composer.
+    assert!(matches!(
+        history.messages[&303].reply_markup,
+        Some(quill::telegram::envelope::ReplyMarkup::ShowKeyboard(_))
+    ));
     assert!(history.messages[&304].reply_markup.is_none());
 }
 
@@ -2235,11 +2249,14 @@ fn replay_update_message_edited_replaces_keyboard() {
             r#"{"@type":"updateMessageEdited","chat_id":21,"message_id":301,"edit_date":1700000001,"reply_markup":{"@type":"replyMarkupInlineKeyboard","rows":[[{"@type":"inlineKeyboardButton","text":"New","icon_custom_emoji_id":0,"style":{"@type":"buttonStyleDanger"},"type":{"@type":"inlineKeyboardButtonTypeCallback","data":"AA=="}}]],"force_reply":false}}"#,
         ],
     );
-    use quill::telegram::envelope::InlineKeyboardButtonStyle;
+    use quill::telegram::envelope::{InlineKeyboardButtonStyle, ReplyMarkup};
     let keyboard = session.histories.get(&21).unwrap().messages[&301]
         .reply_markup
         .clone()
         .expect("edited keyboard present");
+    let ReplyMarkup::InlineKeyboard(keyboard) = keyboard else {
+        panic!("expected inline keyboard");
+    };
     assert_eq!(keyboard.rows.len(), 1);
     assert_eq!(keyboard.rows[0].len(), 1);
     assert_eq!(keyboard.rows[0][0].text, "New");

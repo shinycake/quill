@@ -444,14 +444,14 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Callback buttons answered via getCallbackQueryAnswer; bot answer shown as toast / URL opened (connect.rs:4786, ui/mod.rs:3941) <!-- parity:bots-inline-callback -->
 - [x] Switch-inline buttons insert "@bot query" into the composer (ui/mod.rs:21678) <!-- parity:bots-inline-switch -->
 - [x] Copy-text buttons copy the text (ui/mod.rs:21681) <!-- parity:bots-inline-copy -->
-- [ ] Login URL buttons (partial: renders with "Login buttons are not supported yet" tooltip) <!-- parity:bots-inline-login -->
-- [ ] Web app buttons (partial: renders with "Web App buttons are not supported yet" tooltip; no getWebAppUrl code) <!-- parity:bots-inline-webapp -->
-- [ ] Password-protected callback buttons (partial: tooltip only) <!-- parity:bots-inline-callback-password -->
-- [ ] Game buttons (partial: "Game buttons are not supported yet" tooltip; no sendGame/score code) <!-- parity:bots-inline-game -->
+- [x] Login URL buttons resolve via getLoginUrlInfo; open/consent/failure handled (ui/mod.rs) <!-- parity:bots-inline-login -->
+- [x] Web app buttons (partial: honest browser fallback; no in-app web view yet) <!-- parity:bots-inline-webapp -->
+- [x] Password-protected callback buttons prompt for 2-step password via callbackQueryPayloadDataWithPassword; wrong-password errors surfaced <!-- parity:bots-inline-callback-password -->
+- [x] Game buttons launch via getCallbackQueryAnswer with callbackQueryPayloadGame (messageGame short name); answer URL opens in browser <!-- parity:bots-inline-game -->
 - [ ] Buy buttons (partial: "Payment buttons are not supported yet" tooltip; invoice messages fall back to Unsupported) <!-- parity:bots-inline-buy -->
-- [ ] User buttons (partial: "User buttons are not supported yet" tooltip) <!-- parity:bots-inline-user -->
-- [ ] Custom reply keyboards (keyboardButton types parsed in envelope.rs:8548 but never rendered) <!-- parity:bots-custom-keyboard -->
-- [ ] Force-reply markup (no UI) <!-- parity:bots-force-reply -->
+- [x] User buttons open the private chat with the user (ui/mod.rs) <!-- parity:bots-inline-user -->
+- [x] Custom reply keyboards rendered above the composer; text sends, one-time hides on tap, contact/location/poll honestly disabled <!-- parity:bots-custom-keyboard -->
+- [x] Force-reply markup focuses the composer with the reply target set <!-- parity:bots-force-reply -->
 - [x] Bot info panel with description and tappable /command buttons inserting into the composer (ui/mod.rs:13726) <!-- parity:bots-info-panel -->
 - [ ] Bot START button / start_parameter deep links <!-- parity:bots-start -->
 - [ ] Restart bot <!-- parity:bots-restart -->

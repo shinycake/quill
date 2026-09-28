@@ -3836,15 +3836,131 @@ pub fn get_callback_query_answer(
     data: &[u8],
 ) -> String {
     use base64::Engine;
+    get_callback_query_answer_payload(
+        extra,
+        chat_id,
+        message_id,
+        json!({
+            "@type": "callbackQueryPayloadData",
+            "data": base64::engine::general_purpose::STANDARD.encode(data),
+        }),
+    )
+}
+
+/// B1: `getCallbackQueryAnswer` for an
+/// `inlineKeyboardButtonTypeCallbackWithPassword` button press. `payload`
+/// is `callbackQueryPayloadDataWithPassword` (schema 1.8.67, line 7740).
+pub fn get_callback_query_answer_with_password(
+    extra: RequestId,
+    chat_id: ChatId,
+    message_id: MessageId,
+    password: &str,
+    data: &[u8],
+) -> String {
+    use base64::Engine;
+    get_callback_query_answer_payload(
+        extra,
+        chat_id,
+        message_id,
+        json!({
+            "@type": "callbackQueryPayloadDataWithPassword",
+            "password": password,
+            "data": base64::engine::general_purpose::STANDARD.encode(data),
+        }),
+    )
+}
+
+/// B1: `getCallbackQueryAnswer` for an `inlineKeyboardButtonTypeCallbackGame`
+/// button press. `payload` is `callbackQueryPayloadGame` (schema 1.8.67,
+/// line 7743); `game_short_name` comes from the message's `messageGame`
+/// content (schema:5234 / game class schema:673). A `sendGame` constructor
+/// does not exist in this schema — the game launches through this callback
+/// query (TGX `TGInlineKeyboard` does exactly this).
+pub fn get_callback_query_answer_game(
+    extra: RequestId,
+    chat_id: ChatId,
+    message_id: MessageId,
+    game_short_name: &str,
+) -> String {
+    get_callback_query_answer_payload(
+        extra,
+        chat_id,
+        message_id,
+        json!({
+            "@type": "callbackQueryPayloadGame",
+            "game_short_name": game_short_name,
+        }),
+    )
+}
+
+fn get_callback_query_answer_payload(
+    extra: RequestId,
+    chat_id: ChatId,
+    message_id: MessageId,
+    payload: Value,
+) -> String {
     json!({
         "@type": "getCallbackQueryAnswer",
         "@extra": extra.as_extra(),
         "chat_id": chat_id.0,
         "message_id": message_id.0,
-        "payload": {
-            "@type": "callbackQueryPayloadData",
-            "data": base64::engine::general_purpose::STANDARD.encode(data),
-        },
+        "payload": payload,
+    })
+    .to_string()
+}
+
+/// B1: `getLoginUrlInfo` (TDLib 1.8.67, `schema/td_api.tl:12985`) — resolve
+/// an `inlineKeyboardButtonTypeLoginUrl` button (`id`, schema:3780) to the
+/// authorized URL. Response is `loginUrlInfo*`.
+pub fn get_login_url_info(
+    extra: RequestId,
+    chat_id: ChatId,
+    message_id: MessageId,
+    button_id: i64,
+) -> String {
+    json!({
+        "@type": "getLoginUrlInfo",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0,
+        "message_id": message_id.0,
+        "button_id": button_id,
+    })
+    .to_string()
+}
+
+/// B1: `getLoginUrl` (TDLib 1.8.67, `schema/td_api.tl:12993`) — the
+/// authorized URL after the user consented to a
+/// `loginUrlInfoRequestConfirmation`. Response is `httpUrl`.
+pub fn get_login_url(
+    extra: RequestId,
+    chat_id: ChatId,
+    message_id: MessageId,
+    button_id: i64,
+    allow_write_access: bool,
+) -> String {
+    json!({
+        "@type": "getLoginUrl",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0,
+        "message_id": message_id.0,
+        "button_id": button_id,
+        "allow_write_access": allow_write_access,
+    })
+    .to_string()
+}
+
+/// B1: `deleteChatReplyMarkup` (TDLib 1.8.67, `schema/td_api.tl:13183`).
+/// Must be called after a one-time custom keyboard has been used.
+pub fn delete_chat_reply_markup(
+    extra: RequestId,
+    chat_id: ChatId,
+    message_id: MessageId,
+) -> String {
+    json!({
+        "@type": "deleteChatReplyMarkup",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0,
+        "message_id": message_id.0,
     })
     .to_string()
 }
@@ -7724,5 +7840,78 @@ mod channel_requests_tests {
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(v["@type"], "setMessageSenderBlockList");
         assert!(v["block_list"].is_null());
+    }
+
+    #[test]
+    fn b1_callback_query_with_password_shape_matches_1_8_67() {
+        // B1: `getCallbackQueryAnswer` with `callbackQueryPayloadDataWithPassword`
+        // (schema 1.8.67, lines 13138 / 7740); schema `bytes` is base64.
+        let json = get_callback_query_answer_with_password(
+            RequestId(61),
+            ChatId(21),
+            MessageId(301),
+            "s3cr3t",
+            &[1, 2, 3],
+        );
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "getCallbackQueryAnswer");
+        assert_eq!(v["@extra"], "61");
+        assert_eq!(v["chat_id"], 21);
+        assert_eq!(v["message_id"], 301);
+        assert_eq!(
+            v["payload"]["@type"],
+            "callbackQueryPayloadDataWithPassword"
+        );
+        assert_eq!(v["payload"]["password"], "s3cr3t");
+        assert_eq!(v["payload"]["data"], "AQID");
+    }
+
+    #[test]
+    fn b1_callback_query_game_shape_matches_1_8_67() {
+        // B1: `getCallbackQueryAnswer` with `callbackQueryPayloadGame`
+        // (schema 1.8.67, line 7743).
+        let json =
+            get_callback_query_answer_game(RequestId(62), ChatId(21), MessageId(301), "chess");
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "getCallbackQueryAnswer");
+        assert_eq!(v["@extra"], "62");
+        assert_eq!(v["payload"]["@type"], "callbackQueryPayloadGame");
+        assert_eq!(v["payload"]["game_short_name"], "chess");
+    }
+
+    #[test]
+    fn b1_get_login_url_info_shape_matches_1_8_67() {
+        // B1: `getLoginUrlInfo` (schema 1.8.67, line 12985).
+        let json = get_login_url_info(RequestId(63), ChatId(21), MessageId(301), 7);
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "getLoginUrlInfo");
+        assert_eq!(v["@extra"], "63");
+        assert_eq!(v["chat_id"], 21);
+        assert_eq!(v["message_id"], 301);
+        assert_eq!(v["button_id"], 7);
+    }
+
+    #[test]
+    fn b1_get_login_url_shape_matches_1_8_67() {
+        // B1: `getLoginUrl` (schema 1.8.67, line 12993).
+        let json = get_login_url(RequestId(65), ChatId(21), MessageId(301), 7, true);
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "getLoginUrl");
+        assert_eq!(v["@extra"], "65");
+        assert_eq!(v["chat_id"], 21);
+        assert_eq!(v["message_id"], 301);
+        assert_eq!(v["button_id"], 7);
+        assert_eq!(v["allow_write_access"], true);
+    }
+
+    #[test]
+    fn b1_delete_chat_reply_markup_shape_matches_1_8_67() {
+        // B1: `deleteChatReplyMarkup` (schema 1.8.67, line 13183).
+        let json = delete_chat_reply_markup(RequestId(64), ChatId(21), MessageId(306));
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "deleteChatReplyMarkup");
+        assert_eq!(v["@extra"], "64");
+        assert_eq!(v["chat_id"], 21);
+        assert_eq!(v["message_id"], 306);
     }
 }
