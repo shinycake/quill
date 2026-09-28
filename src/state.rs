@@ -28,7 +28,7 @@ use crate::telegram::envelope::{
     PasswordState, Poll, ReplyKeyboard, ReplyMarkup, ReportChatOutcome, ReportOption,
     ReportSponsoredResult, ReportStoryResult, RichMessageContent, ScopeNotificationSettings,
     SecretChatState, SponsoredMessage, StickerFormat, StickerItem, StickerSetInfo, StorageStats,
-    StoryAvailableReactionView, StoryInteractionKind, StoryInteractionView, StoryInteractionsView,
+    StoryAvailableReactionView, StoryInteractionView, StoryInteractionsView,
     StoryListView, TdError, effective_content, reply_markup_demands_reply,
 };
 use crate::telegram::envelope::{CallState, ReadyParams};
