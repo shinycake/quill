@@ -4597,3 +4597,19 @@ start time, real `callStateReady.emojis` from a live call, real
 **Out of this slice:** nothing from the three items was deferred —
 `parity:calls-schedule-notify`, `parity:calls-verify-emoji`, and
 `parity:calls-group-video-pause` are all checked.
+
+## Dev-profile iteration experiment (2026-09-28, build-infra)
+
+`Cargo.toml`: `[profile.dev] debug = "line-tables-only"`,
+`[profile.dev.package."*"] debug = false`, plus `[profile.debugging]
+inherits = "dev" debug = true` as the full-debuginfo escape hatch.
+Release profile untouched.
+
+Measured on this box (touch `src/ui/mod.rs` + `build --features ui`,
+cargo-reported, single measurement — preliminary): warm rebuild 21.07s →
+13.73s (~35% faster). One-time
+cost: profile change invalidates all fingerprints, so the first build
+after the switch recompiles everything (10m42s cargo-reported here).
+Safe because: release profile is byte-identical, dev binaries still get
+line tables (backtraces usable), and `--profile debugging` restores full
+debuginfo when needed.
