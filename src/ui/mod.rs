@@ -1784,6 +1784,10 @@ pub struct QuillApp {
     composer_scheduling: ComposerScheduling,
     /// M1: the schedule picker popup above the composer.
     schedule_popup_open: bool,
+    /// kit Phase 5: the attach menu above the composer input row (the
+    /// paperclip icon button toggles it; the attach options used to be a
+    /// permanent labeled-button row).
+    attach_menu_open: bool,
     /// M1: the scheduled-messages dialog (view/delete).
     scheduled_dialog_open: bool,
     /// M2: the rich editor is open — the composer textarea is interpreted
@@ -2799,12 +2803,6 @@ enum RecordMode {
 }
 
 impl RecordMode {
-    fn label(self) -> &'static str {
-        match self {
-            RecordMode::Audio => "🎤 Voice",
-            RecordMode::Video => "📹 Video",
-        }
-    }
     fn hint(self) -> &'static str {
         match self {
             // TGX strings, desktop-mapped.
@@ -4224,6 +4222,7 @@ impl QuillApp {
             composer_preview_token: 0,
             composer_scheduling: ComposerScheduling::None,
             schedule_popup_open: false,
+            attach_menu_open: false,
             scheduled_dialog_open: false,
             rich_editor_open: false,
             message_menu: None,
@@ -4376,6 +4375,21 @@ impl QuillApp {
             app.composer.update(cx, |input, cx| {
                 input.set_value("sending a photo too", window, cx);
             });
+        }
+        // kit Phase 5: these demos documented the attach-row controls
+        // (group-media toggles, self-destruct timer picker, Clear), which
+        // now live in the attach menu — keep the menu open for the shot.
+        if matches!(
+            demo,
+            Some(
+                ScreenshotDemo::ReadySendMedia
+                    | ScreenshotDemo::ReadyVideoSend
+                    | ScreenshotDemo::ReadyVideoNoteSend
+                    | ScreenshotDemo::ReadyAlbums
+                    | ScreenshotDemo::ReadySelfDestruct
+            )
+        ) {
+            app.attach_menu_open = true;
         }
         if matches!(demo, Some(ScreenshotDemo::ReadySearch)) {
             app.search_input.update(cx, |input, cx| {
@@ -8001,6 +8015,8 @@ impl QuillApp {
         self.flush_leaving_draft(cx);
         // Phase B4: the TTL picker belongs to the previous chat.
         self.ttl_picker_open = false;
+        // kit Phase 5: the attach menu belongs to the previous chat too.
+        self.attach_menu_open = false;
         if self
             .pending_reply
             .as_ref()
@@ -37257,10 +37273,15 @@ impl QuillApp {
                         .when(self.recording_active(), |this| {
                             this.child(self.record_bar(cx))
                         })
-                        .when(show_attach, |box_| {
+                        // kit Phase 5: the attach menu — the attach options
+                        // live behind the paperclip icon button in the
+                        // input row instead of a permanent button row.
+                        .when(show_attach && self.attach_menu_open, |box_| {
                             box_.child(
                                 div()
+                                    .id("composer-attach-menu")
                                     .flex()
+                                    .flex_wrap()
                                     .gap_2()
                                     .items_center()
                                     .child(
@@ -37319,43 +37340,6 @@ impl QuillApp {
                                             .on_click(cx.listener(|this, _, _, cx| {
                                                 this.toggle_gif_panel(cx);
                                             })),
-                                    )
-                                    .child(
-                                        Button::new("open-stickers")
-                                            .label(if self.sticker_panel_open() {
-                                                "Stickers open"
-                                            } else {
-                                                "Stickers"
-                                            })
-                                            .on_click(cx.listener(|this, _, _, cx| {
-                                                this.toggle_sticker_panel(cx);
-                                            })),
-                                    )
-                                    .child(
-                                        // MED2: click records in the current
-                                        // mode; right-click flips audio/video
-                                        // mode (TGX tap-to-switch,
-                                        // desktop-mapped).
-                                        div()
-                                            .id("record-mode-wrap")
-                                            .on_mouse_down(
-                                                MouseButton::Right,
-                                                cx.listener(|this, _, _, cx| {
-                                                    this.toggle_record_mode(cx);
-                                                }),
-                                            )
-                                            .child(
-                                                Button::new("record-voice")
-                                                    .label(if self.recording_active() {
-                                                        "Recording"
-                                                    } else {
-                                                        self.record_mode().label()
-                                                    })
-                                                    .tooltip(self.record_mode().hint())
-                                                    .on_click(cx.listener(|this, _, _, cx| {
-                                                        this.start_recording(cx);
-                                                    })),
-                                            ),
                                     )
                                     .when(!self.pending_attachments.is_empty(), |row| {
                                         row.child(
@@ -37530,7 +37514,120 @@ impl QuillApp {
                         // above/below toggle, n / max counter).
                         .when_some(self.preview_chip(cx), |this, chip| this.child(chip))
                         .when_some(self.caption_bar(cx), |this, bar| this.child(bar))
-                        .child(Textarea::new(&self.composer).h(px(88.)))
+                        // kit Phase 5: the composer input row — attach and
+                        // emoji/sticker pickers, the borderless growing
+                        // kit Textarea (auto_grow(2, 6) on the state sizes
+                        // it; no fixed height, no custom focus ring or
+                        // placeholder machinery), the voice/video record
+                        // button, and the round send button.
+                        .child(
+                            div()
+                                .id("composer-input-row")
+                                .flex()
+                                .items_end()
+                                .gap_2()
+                                .when(show_attach, |row| {
+                                    row.child(
+                                        Button::new("composer-attach")
+                                            .icon(IconName::Paperclip)
+                                            .ghost()
+                                            .tooltip(if self.attach_menu_open {
+                                                "Close attach menu"
+                                            } else {
+                                                "Attach"
+                                            })
+                                            .accessibility_label("Attach")
+                                            .on_click(cx.listener(|this, _, _, cx| {
+                                                this.attach_menu_open = !this.attach_menu_open;
+                                                cx.notify();
+                                            })),
+                                    )
+                                    .child(
+                                        Button::new("composer-emoji")
+                                            .icon(IconName::FaceSlightlySmiling)
+                                            .ghost()
+                                            .tooltip(if self.sticker_panel_open() {
+                                                "Close emoji and stickers"
+                                            } else {
+                                                "Emoji and stickers"
+                                            })
+                                            .accessibility_label("Emoji and stickers")
+                                            .on_click(cx.listener(|this, _, _, cx| {
+                                                this.toggle_sticker_panel(cx);
+                                            })),
+                                    )
+                                })
+                                .child(
+                                    div().flex_1().min_w_0().child(
+                                        Textarea::new(&self.composer)
+                                            .appearance(false)
+                                            .bordered(false)
+                                            .aria_label("Message"),
+                                    ),
+                                )
+                                .when(show_attach, |row| {
+                                    row.child(
+                                        // MED2: click records in the current
+                                        // mode; right-click flips audio/video
+                                        // mode (TGX tap-to-switch,
+                                        // desktop-mapped).
+                                        div()
+                                            .id("record-mode-wrap")
+                                            .on_mouse_down(
+                                                MouseButton::Right,
+                                                cx.listener(|this, _, _, cx| {
+                                                    this.toggle_record_mode(cx);
+                                                }),
+                                            )
+                                            .child(
+                                                Button::new("record-voice")
+                                                    .icon(match self.record_mode() {
+                                                        RecordMode::Audio => IconName::Mic,
+                                                        RecordMode::Video => IconName::Video,
+                                                    })
+                                                    .ghost()
+                                                    .tooltip(self.record_mode().hint())
+                                                    .accessibility_label("Record")
+                                                    .on_click(cx.listener(|this, _, _, cx| {
+                                                        this.start_recording(cx);
+                                                    })),
+                                            ),
+                                    )
+                                })
+                                .child(
+                                    // Right-click opens the schedule picker
+                                    // (desktop parity with the ⏰ toolbar
+                                    // button); the picker itself is
+                                    // unchanged.
+                                    div()
+                                        .id("composer-send-wrap")
+                                        .on_mouse_down(
+                                            MouseButton::Right,
+                                            cx.listener(|this, _, _, cx| {
+                                                this.schedule_popup_open =
+                                                    !this.schedule_popup_open;
+                                                cx.notify();
+                                            }),
+                                        )
+                                        .child(
+                                            Button::new("composer-send")
+                                                .icon(IconName::Send)
+                                                .primary()
+                                                .rounded_full()
+                                                .tooltip("Send · right-click for schedule options")
+                                                .accessibility_label("Send message")
+                                                .on_click(cx.listener(|this, _, window, cx| {
+                                                    let text =
+                                                        this.composer.read(cx).value().to_string();
+                                                    // Same guard as
+                                                    // Enter-to-send.
+                                                    if !text.trim().is_empty() {
+                                                        this.submit_composer(text, window, cx);
+                                                    }
+                                                })),
+                                        ),
+                                ),
+                        )
                         // M2: rich editor block bar + live block preview
                         // under the textarea while the editor is open.
                         .when(self.rich_editor_open, |this| {
