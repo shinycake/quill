@@ -165,6 +165,9 @@ pub const FORUM_TOPICS_LIMIT: i32 = 100;
 pub const TOPIC_HISTORY_PAGE_SIZE: i32 = 50;
 /// Unigram `LoadMessageSliceImpl` page size around the jump target.
 pub const HISTORY_AROUND_LIMIT: i32 = 50;
+/// Slice CL: `getChatHistory.limit` for the chat-list peek preview — a
+/// peek shows the most recent messages, not a scrollable history.
+pub const PREVIEW_HISTORY_LIMIT: i32 = 10;
 
 /// In-flight global search extras (official empty = recents; typed = chats + messages).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -6281,6 +6284,38 @@ impl<S: JsonSender> ConnectDriver<S> {
             message_id,
             MessageId(0),
             50,
+        )) {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(Some(extra))
+    }
+
+    /// Slice CL: `getChatHistory` (schema 1.8.67, line 11829) for the
+    /// chat-list peek preview — the most recent messages of a chat the
+    /// user has not opened. Deduped per chat while one is in flight; the
+    /// `messages` answer lands in `Session::chat_preview_fetch`. Read-only:
+    /// no `openChat`, so nothing is marked read.
+    pub fn fetch_chat_preview_history(
+        &mut self,
+        chat_id: ChatId,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let purpose = RequestPurpose::GetChatPreview;
+        if self.session.requests.has_purpose_for_chat(purpose, chat_id) {
+            return Ok(None);
+        }
+        self.session.chat_preview_fetch = None;
+        let extra = self.session.request(purpose, Some(chat_id));
+        if let Err(err) = self.sender.send_json(&get_chat_history(
+            extra,
+            chat_id,
+            MessageId(0),
+            0,
+            PREVIEW_HISTORY_LIMIT,
+            false,
         )) {
             self.session.requests.take(extra);
             return Err(err);

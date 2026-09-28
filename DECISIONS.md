@@ -4774,3 +4774,28 @@ ntgcalls v3.0.0 prebuilt lib, bindings verified against
   - Relative "last active" only (just now / Nm ago / Nh ago / Nd ago) — no timezone math, the `format_starts_in` precedent.
 - **Not verifiable without live Telegram:** real `getActiveSessions` round-trip, real terminate `ok` → refetch sequencing, real 24h `FRESH_RESET_AUTHORISATION_FORBIDDEN` on terminate, real incomplete-attempt payloads.
 - **Out of this slice (left unchecked with evidence):** `parity:auth-session-websites` — connected websites (`getConnectedWebsites`/`disconnectWebsite`) is a different constructor family; `parity:auth-session-toggles` — per-session `can_accept_secret_chats`/`can_accept_calls` toggles (constructors exist: `toggleSessionCanAcceptSecretChats` (`td_api.tl:15117`) and `toggleSessionCanAcceptCalls` (`td_api.tl:15114`), and `toggle_session_can_accept_secret_chats` is already shipped in `requests.rs:1671`; separate per-row toggle surface, left for A4).
+
+## Slice CL — CHAT LIST: PEEK PREVIEW (2026-09-28)
+
+- **Schema (pinned TDLib 1.8.67, `schema/td_api.tl`, verified verbatim):**
+  - `getChatHistory chat_id:int53 from_message_id:int53 offset:int32 limit:int32 only_local:Bool = Messages` (:11829) — the only history constructor the preview needs. The preview deliberately never calls `openChat` / `viewMessages`, so nothing is marked read.
+  - **Negative-claim discipline:** no "not in schema" claims are made; the single constructor above was read verbatim from the pinned schema.
+- **Reference-client evidence:**
+  - TGX-Android (`~/workspace/telegram-x`, current source): `ChatsController.java` :2241 — long-press on a chat row calls `showChatOptions` (the options menu), not a message preview. TGX's actual peek is `ForceTouchView` (3D-touch/force-press) showing a floating card with recent message history + quick actions — a mobile force gesture with no desktop GPUI primitive.
+  - tdesktop (secondary behavioral target): the chat-preview popup constructs its own `HistoryView::ListWidget`, separate from the normal chat view; the desktop trigger is hovering the chat list.
+  - Quill's adaptation: desktop long-press — 600 ms press-and-hold built from GPUI `on_mouse_down`/`on_mouse_up` + a background timer. Hover was rejected: it fires while the user aims for the right-click row menu, folder tabs, or pin-drag handles, and a hover panel would fight those gestures. Long-press matches the TGX mobile gesture and is unambiguous on desktop.
+- **Built:**
+  - Driver `fetch_chat_preview_history(chat_id)` (`src/connect.rs`): one-shot `getChatHistory(chat_id, from_message_id=0, offset=0, limit=10, only_local=false)`, de-duped per chat while in flight, purpose `RequestPurpose::GetChatPreview`.
+  - Reducer (`src/state.rs`): the `messages` answer lands in `Session::chat_preview_fetch` — it never merges into the open chat's history (the normal `GetHistory` branch drops non-open answers). Errors set `failed` so the panel shows an error, not a spinner.
+  - UI (`src/ui/mod.rs`): `on_mouse_down(Left)` on chat-list rows starts the 600 ms timer (skipped in multi-select mode); `on_mouse_up` / `on_mouse_up_out` cancel it, so a quick release stays a plain click. On expiry the floating panel renders beside the row: chat title + up to 10 read-only sender/body rows using the same one-line `MessageContent::preview()` the chat list shows (media falls back to its type label). Already-loaded messages render immediately; the live fetch fills unopened chats. A full-window catcher closes the preview on click or on the release that ends the long press (its `stop_propagation` keeps the release from clicking through to the rows below); Escape closes it first in `cancel_search`.
+  - Tests: reducer test `cl_chat_preview_cached_for_unopened_chat` — success is retained for a non-open chat, nothing merges into that chat's history, and a failure marks the error line.
+  - Screenshot fixture `quill --screenshot-demo ready-chat-preview`: preview open on "Demo chat B" with injected messages, chat 11 still the open chat — `docs/screenshots/ready-chat-preview.png`.
+- **Key decisions (ponytail):**
+  - No hover trigger (see reference evidence above).
+  - No interactive rows — sender/body text only. The full history renderer was rejected: its per-message controls would violate the read-only preview contract.
+  - No dimmed backdrop: the panel sits beside the row and a release dismisses it; dimming would block reading the list the preview floats over.
+  - The preview never calls `openChat` — unread state is untouched by construction, not by a flag.
+- **Not verifiable without live Telegram:** a real `getChatHistory` round-trip for an unopened chat; the 600 ms hold timing on real hardware.
+- **Out of this slice (left unchecked with evidence):**
+  - Quick actions on the preview (TGX `ForceTouchView` offers mute/pin/etc.) — explicit slice exclusion (no message actions, no composer).
+  - Pointer-leave dismissal: the panel is adjacent to the row, so leaving the row to reach the panel must not kill it; release / click-anywhere / Escape dismiss instead. Revisit only if a hover trigger is ever added.
