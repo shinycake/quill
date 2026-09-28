@@ -1,3 +1,4 @@
+use super::chat_theme::*;
 use gpui_kit::component::message_scroller::{MessageScroller, MessageScrollerState};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
@@ -250,11 +251,11 @@ fn message_bubble_with_quote(
         .py_2()
         .rounded_lg()
         .bg(if row.outgoing {
-            rgb(0x1f6feb)
+            ACCENT_STRONG
         } else {
-            rgb(0x2d333b)
+            BG_BUBBLE_INCOMING
         })
-        .text_color(rgb(0xffffff))
+        .text_color(TEXT_BRIGHT)
         .when(rtl, |this| this.text_right())
         .child(div().text_xs().opacity(0.8).child(row.sender.clone()))
         .when_some(quote, |this, quote| this.child(quote))
@@ -269,7 +270,7 @@ fn message_bubble_with_quote(
                     .w(px(240.))
                     .h(image_h)
                     .rounded_md()
-                    .bg(rgb(0x444c56))
+                    .bg(FILL_MUTED)
                     .flex()
                     .items_center()
                     .justify_center()
