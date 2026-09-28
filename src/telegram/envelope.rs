@@ -8149,9 +8149,9 @@ fn parse_user(value: &Value) -> Option<ParsedUser> {
         .and_then(Value::as_str)
         .unwrap_or("")
         .to_string();
-    let username = parse_first_active_username(value.get("usernames"));
     let (active_usernames, disabled_usernames, editable_username) =
         parse_username_lists(value.get("usernames"));
+    let username = active_usernames.first().cloned().unwrap_or_default();
     let phone_number = value
         .get("phone_number")
         .and_then(Value::as_str)

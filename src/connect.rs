@@ -973,9 +973,10 @@ impl<S: JsonSender> ConnectDriver<S> {
                     .extra
                     .and_then(|id| self.session.requests.purpose(id))
                     .and_then(|purpose| {
-                        (purpose == RequestPurpose::CheckUsername)
-                            .then(|| self.session.username_check_pending.clone())
-                            .flatten()
+                        self.session
+                            .username_check_pending
+                            .clone()
+                            .filter(|_| purpose == RequestPurpose::CheckUsername)
                             .map(|username| (username, *result))
                     }),
                 _ => None,
@@ -9129,19 +9130,15 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     /// A5: `setProfilePhoto` with `inputChatPhotoStatic` / `inputFileLocal`
-    /// (schema 1.8.67, lines 14803/1042/1039). `is_public` true = the
-    /// public photo, visible even when the main photo is hidden by
-    /// privacy settings.
-    pub fn set_profile_photo(
-        &mut self,
-        photo_path: &str,
-        is_public: bool,
-    ) -> Result<RequestId, ConnectSendError> {
+    /// (schema 1.8.67, lines 14803/1042/325). `is_public` is hard-coded
+    /// false: this edits the main photo, not the public one (which stays
+    /// visible even when the main photo is hidden by privacy settings).
+    pub fn set_profile_photo(&mut self, photo_path: &str) -> Result<RequestId, ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
         let extra = self.session.request(RequestPurpose::SetProfilePhoto, None);
-        let json = set_profile_photo(extra, photo_path, is_public);
+        let json = set_profile_photo(extra, photo_path, false);
         self.send_json_request(extra, &json)
     }
 

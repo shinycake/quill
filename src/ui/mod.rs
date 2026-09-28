@@ -19894,8 +19894,8 @@ impl QuillApp {
     }
 
     /// A5: `setProfilePhoto` from a local path (`inputChatPhotoStatic` /
-    /// `inputFileLocal`). Sent as the public photo (TGX default for the
-    /// primary profile photo).
+    /// `inputFileLocal`). Sets the main profile photo (`is_public=false`,
+    /// not the public photo).
     fn submit_profile_photo(&mut self, cx: &mut Context<Self>) {
         let Some(dialog) = &self.edit_profile_dialog else {
             return;
@@ -19914,7 +19914,7 @@ impl QuillApp {
             return;
         };
         live.driver.session.profile_edit_error = None;
-        match live.driver.set_profile_photo(&path, true) {
+        match live.driver.set_profile_photo(&path) {
             Ok(_) => self.status_note = "Photo update requested.".into(),
             Err(err) => self.status_note = format!("set photo failed: {err:?}"),
         }
