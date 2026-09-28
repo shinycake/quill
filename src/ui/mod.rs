@@ -45771,7 +45771,7 @@ fn message_text_block(
     let card = text.link_preview.as_ref().and_then(|preview| {
         preview
             .has_card()
-            .then(|| link_preview_card(row_id, preview, files, downloading, media_roots, cx))
+            .then(|| link_preview_card(row_id, preview, files, downloading, media_roots, font, cx))
     });
     let above = text
         .link_preview
@@ -45799,6 +45799,8 @@ fn link_preview_card(
     files: &HashMap<i32, ParsedFile>,
     downloading: &std::collections::HashSet<i32>,
     media_roots: &[PathBuf],
+    // Settings → Appearance: message font size.
+    font: Pixels,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
     let site_empty = preview.site_name.is_empty();
@@ -45887,6 +45889,10 @@ fn link_preview_card(
         }
         _ => None,
     };
+    // Settings → Appearance: the card copy scales with the message
+    // font size — the title keeps body size, the meta lines stay one
+    // step smaller (12px vs 14px at the default).
+    let small = font * (12.0 / 14.0);
     let mut copy = div()
         .id(("link-preview-copy", row_id))
         .flex()
@@ -45896,25 +45902,30 @@ fn link_preview_card(
     if !site_empty {
         copy = copy.child(
             div()
-                .text_xs()
+                .text_size(small)
                 .font_medium()
                 .text_color(accent())
                 .child(site),
         );
     }
     if !title_empty {
-        copy = copy.child(div().text_sm().font_medium().child(title));
+        copy = copy.child(div().text_size(font).font_medium().child(title));
     }
     if !description_empty {
         copy = copy.child(
             div()
-                .text_xs()
+                .text_size(small)
                 .text_color(text_primary())
                 .child(description),
         );
     }
     if site_empty && title_empty && description_empty && !display.is_empty() {
-        copy = copy.child(div().text_xs().text_color(accent()).child(display));
+        copy = copy.child(
+            div()
+                .text_size(small)
+                .text_color(accent())
+                .child(display),
+        );
     }
     let body = if preview.show_large_media {
         let mut column = div()

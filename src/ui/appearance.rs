@@ -55,8 +55,10 @@ impl QuillApp {
     /// overridden by auto-night while active) and push it into the
     /// gpui-component global Theme. `Theme::change` resets the whole
     /// palette, so the accent override is re-applied after every mode
-    /// change. Only notifies when the (mode, accent) pair actually
-    /// changed — the minute tick calls this and must be free when idle.
+    /// change, and `Theme::sync_base` mirrors the mutated fields (incl.
+    /// accent) into the Base layer. Only notifies when the (mode,
+    /// accent) pair actually changed — the minute tick calls this and
+    /// must be free when idle.
     pub(crate) fn apply_appearance(&mut self, cx: &mut Context<Self>) {
         let dark = match self.appearance.auto_night {
             AutoNight::Off => self.appearance.theme == ThemeChoice::Dark,
@@ -87,13 +89,18 @@ impl QuillApp {
         if accent != 0 {
             Theme::global_mut(cx).colors.accent = Hsla::from(rgb(accent));
         }
+        // The accent mutation touches fields the Base layer mirrors
+        // (scrollbar styles, semantic tokens, text-view defaults) — they
+        // only reach the Base layer once Theme::sync_base runs.
+        Theme::sync_base(cx);
         self.appearance_applied = Some((mode, accent));
         cx.notify();
     }
 
     /// The single funnel every Appearance control uses: mutate, clamp,
-    /// persist, re-apply, re-render. A change can never be
-    /// visible-but-unsaved or saved-but-not-applied.
+    /// persist, re-apply, re-render. If the save fails the change is
+    /// still applied live — the status note reports the failure instead
+    /// of pretending the change was saved.
     fn set_appearance(&mut self, cx: &mut Context<Self>, f: impl FnOnce(&mut AppearancePrefs)) {
         f(&mut self.appearance);
         self.appearance.font_size_px = clamp_font_size(self.appearance.font_size_px);

@@ -301,8 +301,15 @@ impl Default for AppearancePrefs {
 
 /// Load appearance prefs; missing or corrupt files fall back to
 /// defaults (never a hard error — prefs must not block startup).
+/// Out-of-range values from hand-edited JSON are sanitized here, at
+/// the single load path: the font size clamps to 12–20 px and night
+/// times wrap into 0..1440.
 pub fn load_appearance_prefs(paths: &AccountPaths) -> AppearancePrefs {
-    load_json_prefs(paths, "appearance_prefs.json")
+    let mut prefs: AppearancePrefs = load_json_prefs(paths, "appearance_prefs.json");
+    prefs.font_size_px = clamp_font_size(prefs.font_size_px);
+    prefs.night_start_minutes %= 24 * 60;
+    prefs.night_end_minutes %= 24 * 60;
+    prefs
 }
 
 /// Persist appearance prefs; failures are returned to the caller to
@@ -659,5 +666,44 @@ mod tests {
         assert_eq!(clamp_font_size(14), 14);
         assert_eq!(clamp_font_size(20), 20);
         assert_eq!(clamp_font_size(255), FONT_SIZE_MAX);
+    }
+
+    /// Settings → Appearance: the load path sanitizes hand-edited
+    /// `appearance_prefs.json` — this validates that
+    /// `load_appearance_prefs` clamps an out-of-range `font_size_px`
+    /// to 12–20 and wraps night times into 0..1440, while in-range
+    /// values pass through untouched (roundtrip, corrupt-fallback,
+    /// night-case and pure-clamp behavior are covered by the tests
+    /// above).
+    #[test]
+    fn appearance_prefs_load_sanitizes_out_of_range() {
+        let dir =
+            std::env::temp_dir().join(format!("quill-appearance-sanitize-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let paths = AccountPaths::for_root(&dir, &AccountKey::primary());
+        fs::create_dir_all(&paths.root).unwrap();
+
+        // Out-of-range values: font clamps, night times wrap.
+        fs::write(
+            paths.root.join("appearance_prefs.json"),
+            br#"{"font_size_px": 255, "night_start_minutes": 5000, "night_end_minutes": 1500}"#,
+        )
+        .unwrap();
+        let prefs = load_appearance_prefs(&paths);
+        assert_eq!(prefs.font_size_px, FONT_SIZE_MAX);
+        assert_eq!(prefs.night_start_minutes, 5000 % (24 * 60));
+        assert_eq!(prefs.night_end_minutes, 1500 % (24 * 60));
+
+        // In-range values are not touched.
+        fs::write(
+            paths.root.join("appearance_prefs.json"),
+            br#"{"font_size_px": 16, "night_start_minutes": 1380, "night_end_minutes": 420}"#,
+        )
+        .unwrap();
+        let prefs = load_appearance_prefs(&paths);
+        assert_eq!(prefs.font_size_px, 16);
+        assert_eq!(prefs.night_start_minutes, 1380);
+        assert_eq!(prefs.night_end_minutes, 420);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
