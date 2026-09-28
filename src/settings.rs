@@ -195,6 +195,55 @@ pub fn save_media_prefs(paths: &AccountPaths, prefs: &MediaPrefs) -> std::io::Re
     std::fs::write(path, bytes)
 }
 
+fn default_true() -> bool {
+    true
+}
+
+/// Slice A6: local-only contacts preferences, persisted as JSON next to
+/// the account root (`contacts_prefs.json`). Client-side only —
+/// TDLib 1.8.67 has no contact-sync switch (concept-level check of
+/// `schema/td_api.tl`; TGX implements sync client-side in
+/// `TdlibContactManager`):
+/// - `sync_enabled`: when true (default), opening the Contacts tab
+///   refreshes the list via `getContacts`; when false, the tab shows
+///   the last loaded snapshot and never syncs.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ContactPrefs {
+    #[serde(default = "default_true")]
+    pub sync_enabled: bool,
+}
+
+impl Default for ContactPrefs {
+    fn default() -> Self {
+        Self { sync_enabled: true }
+    }
+}
+
+fn contact_prefs_path(paths: &AccountPaths) -> PathBuf {
+    paths.root.join("contacts_prefs.json")
+}
+
+/// Load contacts prefs; missing or corrupt files fall back to defaults
+/// (never a hard error — prefs must not block startup).
+pub fn load_contact_prefs(paths: &AccountPaths) -> ContactPrefs {
+    std::fs::read(contact_prefs_path(paths))
+        .ok()
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+        .unwrap_or_default()
+}
+
+/// Persist contacts prefs; failures are returned to the caller to surface
+/// in the status note.
+pub fn save_contact_prefs(paths: &AccountPaths, prefs: &ContactPrefs) -> std::io::Result<()> {
+    let path = contact_prefs_path(paths);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let bytes = serde_json::to_vec_pretty(prefs)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+    std::fs::write(path, bytes)
+}
+
 #[derive(Debug, Clone)]
 pub struct AccountPaths {
     pub root: PathBuf,
@@ -325,6 +374,33 @@ mod tests {
         assert!(loaded.hq_round_videos);
         assert!(!loaded.data_saver);
         assert_eq!(loaded.auto_download_private, AUTO_DOWNLOAD_DEFAULT);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn contact_prefs_roundtrip_and_missing_file() {
+        // Slice A6: what the sync toggle is ultimately validating — the
+        // stored value survives a load, and it defaults to ON.
+        let dir =
+            std::env::temp_dir().join(format!("quill-contact-prefs-test-{}", std::process::id()));
+        let paths = AccountPaths::for_root(&dir, &AccountKey::primary());
+        assert_eq!(load_contact_prefs(&paths), ContactPrefs::default());
+        assert!(ContactPrefs::default().sync_enabled);
+        let prefs = ContactPrefs {
+            sync_enabled: false,
+        };
+        save_contact_prefs(&paths, &prefs).expect("save works");
+        assert_eq!(load_contact_prefs(&paths), prefs);
+        std::fs::write(
+            dir.join("accounts/primary/contacts_prefs.json"),
+            b"not json",
+        )
+        .unwrap();
+        assert_eq!(load_contact_prefs(&paths), ContactPrefs::default());
+        // A contacts_prefs.json written before the field existed (empty
+        // object) still loads with sync on.
+        std::fs::write(dir.join("accounts/primary/contacts_prefs.json"), b"{}").unwrap();
+        assert!(load_contact_prefs(&paths).sync_enabled);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

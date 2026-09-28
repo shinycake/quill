@@ -711,7 +711,252 @@ pub fn add_contact(
     .to_string()
 }
 
-/// Phase 6: `getSupergroupFullInfo` (TDLib 1.8.67,
+/// Slice A6: `removeContacts` (TDLib 1.8.67, `schema/td_api.tl:14528`):
+/// `removeContacts user_ids:vector<int53> = Ok;` (TGX
+/// `TdlibUi.deleteContact` → `RemoveContacts`).
+pub fn remove_contacts(extra: RequestId, user_ids: &[i64]) -> String {
+    json!({
+        "@type": "removeContacts",
+        "@extra": extra.as_extra(),
+        "user_ids": user_ids,
+    })
+    .to_string()
+}
+
+/// Slice A6: `clearImportedContacts` (TDLib 1.8.67,
+/// `schema/td_api.tl:14539`): `clearImportedContacts = Ok;` — "Clears
+/// all imported contacts, contact list remains unchanged". This is the
+/// server-side half of TGX's "Delete synced contacts"
+/// (`TdlibContactManager.deleteContacts`, `SyncContactsDeleteInfo`).
+pub fn clear_imported_contacts(extra: RequestId) -> String {
+    json!({
+        "@type": "clearImportedContacts",
+        "@extra": extra.as_extra(),
+    })
+    .to_string()
+}
+
+/// Slice A6: one parsed vCard contact — the honest subset of RFC 6350
+/// that maps onto `importedContact` (schema 1.8.67, line 7382):
+/// `importedContact phone_number:string first_name:string
+/// last_name:string note:formattedText = ImportedContact;`
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImportedContact {
+    pub phone_number: String,
+    pub first_name: String,
+    pub last_name: String,
+    pub note: String,
+}
+
+/// Slice A6: cap on one vCard import — one `importContacts` call with an
+/// unbounded contact list is a timeout farm; `parse_vcard` truncates at
+/// this limit and reports the dropped count so the import dialog can say
+/// so honestly. Raise only if TDLib documents a real limit.
+pub const VCARD_IMPORT_LIMIT: usize = 500;
+
+/// Slice A6: parse vCard text (`.vcf`, RFC 6350) into
+/// `ImportedContact`s. Honest mapping — what the schema supports and
+/// nothing else:
+/// - `FN` → first/last name (split on the first space); `N` (family;
+///   given) wins when both are present;
+/// - `TEL` → `phone_number` — one contact per number, preferring
+///   `TYPE=CELL`, then `TYPE=VOICE`, then the first number;
+/// - `NOTE` → `note` (plain text, no entities);
+/// - everything else (`EMAIL`, `ADR`, `ORG`, `URL`, `PHOTO`, `BDAY`,
+///   …) has no `importedContact` field and is dropped.
+///
+/// Returns `(contacts, skipped_without_phone, truncated_by_limit)`.
+pub fn parse_vcard(text: &str) -> (Vec<ImportedContact>, usize, usize) {
+    // Unfold: a line starting with space/tab continues the previous
+    // line (the continuation whitespace is dropped).
+    let mut lines: Vec<String> = Vec::new();
+    for raw in text.lines() {
+        let line = raw.strip_suffix('\r').unwrap_or(raw);
+        if (line.starts_with(' ') || line.starts_with('\t')) && !lines.is_empty() {
+            let prev = lines.len() - 1;
+            lines[prev].push_str(line[1..].trim_start_matches([' ', '\t']));
+        } else {
+            lines.push(line.to_string());
+        }
+    }
+    let mut contacts = Vec::new();
+    let mut skipped = 0usize;
+    let mut card: Vec<(String, Vec<String>, String)> = Vec::new();
+    let mut in_card = false;
+    let flush = |card: &mut Vec<(String, Vec<String>, String)>,
+                 contacts: &mut Vec<ImportedContact>,
+                 skipped: &mut usize| {
+        if !card.is_empty() {
+            let parsed = parse_vcard_block(card);
+            if parsed.is_empty() {
+                *skipped += 1;
+            } else {
+                contacts.extend(parsed);
+            }
+        }
+        card.clear();
+    };
+    for line in &lines {
+        let upper = line.to_ascii_uppercase();
+        if upper == "BEGIN:VCARD" {
+            flush(&mut card, &mut contacts, &mut skipped);
+            in_card = true;
+        } else if upper == "END:VCARD" {
+            flush(&mut card, &mut contacts, &mut skipped);
+            in_card = false;
+        } else if in_card && let Some((name, params, value)) = split_vcard_line(line) {
+            card.push((name, params, value));
+        }
+    }
+    flush(&mut card, &mut contacts, &mut skipped);
+    // Over-limit pastes are truncated here so no caller can silently
+    // drop cards — the dropped count rides back so the dialog reports
+    // it honestly.
+    let truncated = contacts.len().saturating_sub(VCARD_IMPORT_LIMIT);
+    if contacts.len() > VCARD_IMPORT_LIMIT {
+        contacts.truncate(VCARD_IMPORT_LIMIT);
+    }
+    (contacts, skipped, truncated)
+}
+
+/// Split one unfolded vCard content line into
+/// (UPPERCASE-NAME, params, unescaped value).
+fn split_vcard_line(line: &str) -> Option<(String, Vec<String>, String)> {
+    let (head, value) = line.split_once(':')?;
+    let mut parts = head.split(';');
+    let name = parts.next()?.trim().to_ascii_uppercase();
+    if name.is_empty() {
+        return None;
+    }
+    let params: Vec<String> = parts.map(|p| p.trim().to_ascii_uppercase()).collect();
+    Some((name, params, unescape_vcard_value(value.trim())))
+}
+
+fn unescape_vcard_value(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    let mut chars = value.chars();
+    while let Some(c) = chars.next() {
+        if c == '\\'
+            && let Some(next) = chars.next()
+        {
+            match next {
+                'n' | 'N' => out.push('\n'),
+                other => out.push(other),
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
+/// Keep the dialable characters: an optional leading `+` plus digits.
+fn normalize_phone(raw: &str) -> String {
+    let mut out: String = raw
+        .chars()
+        .filter(|c| c.is_ascii_digit() || *c == '+')
+        .collect();
+    // A `+` is only meaningful as the first character.
+    let mut cleaned = String::with_capacity(out.len());
+    for (i, c) in out.chars().enumerate() {
+        if c != '+' || i == 0 {
+            cleaned.push(c);
+        }
+    }
+    out = cleaned;
+    out
+}
+
+fn parse_vcard_block(props: &[(String, Vec<String>, String)]) -> Vec<ImportedContact> {
+    let mut first_name = String::new();
+    let mut last_name = String::new();
+    let mut note = String::new();
+    let mut tels: Vec<(Vec<String>, String)> = Vec::new();
+    for (name, params, value) in props {
+        match name.as_str() {
+            "FN" => {
+                // `N` wins when both are present.
+                if first_name.is_empty() && last_name.is_empty() && !value.is_empty() {
+                    match value.split_once(' ') {
+                        Some((first, rest)) => {
+                            first_name = first.to_string();
+                            last_name = rest.trim().to_string();
+                        }
+                        None => first_name = value.clone(),
+                    }
+                }
+            }
+            "N" => {
+                let mut parts = value.split(';');
+                let family = parts.next().unwrap_or("").trim();
+                let given = parts.next().unwrap_or("").trim();
+                if !given.is_empty() || !family.is_empty() {
+                    first_name = given.to_string();
+                    last_name = family.to_string();
+                }
+            }
+            "NOTE" => note = value.clone(),
+            "TEL" => {
+                let phone = normalize_phone(value);
+                if !phone.is_empty() {
+                    // vCard 2.1 style (`TEL;CELL:…`) and 3.0/4.0 style
+                    // (`TEL;TYPE=CELL:…`); types may be comma-separated.
+                    let mut types: Vec<String> = Vec::new();
+                    for param in params {
+                        let param = param.strip_prefix("TYPE=").unwrap_or(param);
+                        types.extend(param.split(',').map(str::to_string));
+                    }
+                    tels.push((types, phone));
+                }
+            }
+            _ => {}
+        }
+    }
+    if tels.is_empty() {
+        return Vec::new();
+    }
+    // One contact per number; CELL first, then VOICE, then the rest —
+    // mirroring TGX importing every device number.
+    tels.sort_by_key(|(types, _)| {
+        if types.iter().any(|t| t == "CELL") {
+            0
+        } else if types.iter().any(|t| t == "VOICE") {
+            1
+        } else {
+            2
+        }
+    });
+    tels.into_iter()
+        .map(|(_, phone)| ImportedContact {
+            phone_number: phone,
+            first_name: first_name.clone(),
+            last_name: last_name.clone(),
+            note: note.clone(),
+        })
+        .collect()
+}
+
+/// Slice A6: `importContacts` (TDLib 1.8.67, `schema/td_api.tl:14517`):
+/// `importContacts contacts:vector<importedContact> = ImportedContacts;`
+/// The `note` rides an entity-less `formattedText` (same shape as
+/// `addContact`'s, requests.rs:695).
+pub fn import_contacts(extra: RequestId, contacts: &[ImportedContact]) -> String {
+    json!({
+        "@type": "importContacts",
+        "@extra": extra.as_extra(),
+        "contacts": contacts
+            .iter()
+            .map(|c| json!({
+                "@type": "importedContact",
+                "phone_number": c.phone_number,
+                "first_name": c.first_name,
+                "last_name": c.last_name,
+                "note": { "@type": "formattedText", "text": c.note, "entities": [] },
+            }))
+            .collect::<Vec<_>>(),
+    })
+    .to_string()
+}
 /// `schema/td_api.tl:11513`):
 /// `getSupergroupFullInfo supergroup_id:int53 = SupergroupFullInfo;`
 /// Response is `supergroupFullInfo` (carries no id — correlated via the
@@ -6585,6 +6830,123 @@ mod tests {
         assert_eq!(contact["note"]["@type"], "formattedText");
         assert_eq!(contact["note"]["text"], "");
         assert_eq!(v["share_phone_number"], false);
+    }
+
+    #[test]
+    fn a6_remove_contacts_shape_matches_1_8_67() {
+        // Slice A6: `removeContacts user_ids:vector<int53> = Ok;`
+        // (schema 1.8.67, line 14528).
+        let json = remove_contacts(RequestId(61), &[31, 32]);
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "removeContacts");
+        assert_eq!(v["@extra"], "61");
+        assert_eq!(v["user_ids"], serde_json::json!([31, 32]));
+    }
+
+    #[test]
+    fn a6_clear_imported_contacts_shape_matches_1_8_67() {
+        // Slice A6: `clearImportedContacts = Ok;` (schema 1.8.67,
+        // line 14539).
+        let json = clear_imported_contacts(RequestId(62));
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "clearImportedContacts");
+        assert_eq!(v["@extra"], "62");
+    }
+
+    #[test]
+    fn a6_import_contacts_shape_matches_1_8_67() {
+        // Slice A6: `importContacts contacts:vector<importedContact> =
+        // ImportedContacts;` (schema 1.8.67, line 14517) with
+        // `importedContact` (line 7382).
+        let contacts = vec![ImportedContact {
+            phone_number: "+15550131".to_string(),
+            first_name: "CANARY-first".to_string(),
+            last_name: "CANARY-last".to_string(),
+            note: "met at the demo".to_string(),
+        }];
+        let json = import_contacts(RequestId(63), &contacts);
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "importContacts");
+        assert_eq!(v["@extra"], "63");
+        let c = &v["contacts"][0];
+        assert_eq!(c["@type"], "importedContact");
+        assert_eq!(c["phone_number"], "+15550131");
+        assert_eq!(c["first_name"], "CANARY-first");
+        assert_eq!(c["last_name"], "CANARY-last");
+        assert_eq!(c["note"]["@type"], "formattedText");
+        assert_eq!(c["note"]["text"], "met at the demo");
+        assert_eq!(c["note"]["entities"], serde_json::json!([]));
+    }
+
+    #[test]
+    fn a6_parse_vcard_maps_the_honest_subset() {
+        // What the slice ultimately validates: the RFC 6350 fields
+        // that have an `importedContact` home land correctly, and the
+        // rest are dropped without breaking the parse.
+        let text = "BEGIN:VCARD\r\n\
+            VERSION:3.0\r\n\
+            N:Doe;John;;;\r\n\
+            FN:John Doe\r\n\
+            TEL;TYPE=CELL:+1 (555) 013-1\r\n\
+            TEL;TYPE=WORK:+1-555-0142\r\n\
+            EMAIL:john@example.com\r\n\
+            ADR:;;123 Main St;;;;\r\n\
+            NOTE:met at the demo\\, likes ponytail\r\n\
+            END:VCARD\r\n\
+            BEGIN:VCARD\r\n\
+            VERSION:3.0\r\n\
+            FN:Jane\r\n\
+            TEL:+15550155\r\n\
+            END:VCARD\r\n\
+            BEGIN:VCARD\r\n\
+            VERSION:3.0\r\n\
+            FN:No Phone\r\n\
+            END:VCARD\r\n";
+        let (contacts, skipped, _truncated) = parse_vcard(text);
+        // John: two numbers → two contacts, CELL first; Jane: one.
+        assert_eq!(contacts.len(), 3);
+        assert_eq!(contacts[0].phone_number, "+15550131");
+        assert_eq!(contacts[0].first_name, "John");
+        assert_eq!(contacts[0].last_name, "Doe");
+        assert_eq!(contacts[0].note, "met at the demo, likes ponytail");
+        assert_eq!(contacts[1].phone_number, "+15550142");
+        assert_eq!(contacts[1].first_name, "John");
+        assert_eq!(contacts[2].phone_number, "+15550155");
+        assert_eq!(contacts[2].first_name, "Jane");
+        assert_eq!(contacts[2].last_name, "");
+        // The phoneless card is skipped, not imported nameless.
+        assert_eq!(skipped, 1);
+    }
+
+    #[test]
+    fn a6_parse_vcard_handles_folding_and_21_types() {
+        // Folded NOTE line + vCard 2.1 bare `TEL;VOICE` param style.
+        let text = "BEGIN:VCARD\nVERSION:2.1\nN:Smith;Ada;;;\nTEL;VOICE:+15550199\nNOTE:long note that\n continues here\nEND:VCARD\n";
+        let (contacts, skipped, truncated) = parse_vcard(text);
+        assert_eq!(skipped, 0);
+        assert_eq!(truncated, 0);
+        assert_eq!(contacts.len(), 1);
+        assert_eq!(contacts[0].first_name, "Ada");
+        assert_eq!(contacts[0].last_name, "Smith");
+        assert_eq!(contacts[0].phone_number, "+15550199");
+        assert_eq!(contacts[0].note, "long note thatcontinues here");
+    }
+
+    #[test]
+    fn a6_parse_vcard_reports_truncation_at_the_limit() {
+        // What the slice ultimately validates: an over-limit paste loses
+        // cards, and the parser reports exactly how many were dropped so
+        // the dialog can say so honestly instead of failing silently.
+        let mut text = String::new();
+        for i in 0..VCARD_IMPORT_LIMIT + 100 {
+            text.push_str(&format!(
+                "BEGIN:VCARD\r\nFN:Person {i}\r\nTEL:+1555{i:07}\r\nEND:VCARD\r\n"
+            ));
+        }
+        let (contacts, skipped, truncated) = parse_vcard(&text);
+        assert_eq!(contacts.len(), VCARD_IMPORT_LIMIT);
+        assert_eq!(skipped, 0);
+        assert_eq!(truncated, 100);
     }
 
     #[test]

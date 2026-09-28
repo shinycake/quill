@@ -78,7 +78,8 @@ use quill::telegram::envelope::{
 use quill::telegram::requests::SelfDestructSend;
 use quill::telegram::requests::{
     ArchiveChatListSettings, CallPrivacySetting, ChatEventLogFilterSet, PrivacyWho,
-    input_credentials_new, input_credentials_saved, input_story_content,
+    VCARD_IMPORT_LIMIT, input_credentials_new, input_credentials_saved, input_story_content,
+    parse_vcard,
 };
 use quill::text::{TextEntity, styled_runs, utf8_to_utf16_offset};
 use quill::video::VideoNoteCapture;
@@ -1093,6 +1094,24 @@ pub enum GroupConfirmAction {
     BlockUser {
         block: bool,
     },
+    /// Slice A6: user-panel Block/Unblock — the user-scoped
+    /// `setMessageSenderBlockList` twin of `BlockUser` for users reached
+    /// from the Contacts tab, where there is no chat to resolve through
+    /// (`driver.set_user_blocked`). The dialog's `chat_id` is a dummy.
+    BlockContact {
+        user_id: i64,
+        block: bool,
+    },
+    /// Slice A6: user-panel "Delete contact" — `removeContacts`
+    /// (schema 1.8.67, line 14528; TGX `DeleteContactConfirm`). The
+    /// dialog's `chat_id` is a dummy.
+    DeleteContact {
+        user_id: i64,
+    },
+    /// Slice A6: "Delete synced contacts" — `clearImportedContacts` +
+    /// `removeContacts` (TGX `SyncContactsDeleteInfo`). The dialog's
+    /// `chat_id` is a dummy.
+    DeleteSyncedContacts,
     /// Slice CL3: multi-select bulk delete — `deleteChatHistory` with
     /// `remove_from_chat_list: true` for every selected chat. The ids
     /// are read from the live selection at submit time (the dialog
@@ -1135,6 +1154,8 @@ enum G1DialogClose {
     PollVoters,
     /// Slice G2: chat welcome-message editor.
     WelcomeMessage,
+    /// Slice A6: vCard import dialog.
+    ImportContacts,
 }
 
 /// Slice G1: partial-quote dialog (message menu → "Quote reply").
@@ -1309,6 +1330,13 @@ pub struct AddContactDialog {
     phone_input: Entity<TextareaState>,
     first_name_input: Entity<TextareaState>,
     last_name_input: Entity<TextareaState>,
+}
+
+/// Slice A6: vCard import dialog — the user pastes the file's text and
+/// `parse_vcard` (telegram::requests) turns it into `ImportedContact`
+/// cards for `importContacts` (schema 1.8.67, line 14517).
+pub struct ImportContactsDialog {
+    input: Entity<TextareaState>,
 }
 
 impl AddContactDialog {
@@ -2088,6 +2116,9 @@ pub struct QuillApp {
     /// A5: edit-profile dialog (name / bio / username / photo) opened
     /// from the user's own info panel.
     edit_profile_dialog: Option<EditProfileDialog>,
+    /// Slice A6: vCard import dialog opened from the Contacts tab
+    /// settings section.
+    import_contacts_dialog: Option<ImportContactsDialog>,
     /// Parity slice: folder management (manage dialog / editor / delete
     /// confirm / per-chat folder menu).
     folder_manage_open: bool,
@@ -2354,6 +2385,17 @@ pub enum ScreenshotDemo {
     /// for Zed (bio from an injected `userFullInfo`) with the **Add
     /// contact** affordance (Phase 6).
     ReadyContacts,
+    /// Slice A6: contacts management — the **Contacts** tab with the
+    /// settings section (sync toggle on, Import contacts…, Delete
+    /// synced contacts…, notice) and the user info panel open for Ada
+    /// (a contact) showing **Delete contact** + **Block user**
+    /// (injected, no live Telegram).
+    ReadyContactsManage,
+    /// Slice A6: the block-user confirm dialog open for Ada ("Are you
+    /// sure you want to block Ada Lovelace?", red Block button — TGX
+    /// `BlockUserConfirm`) over the contacts fixture (injected, no live
+    /// Telegram).
+    ReadyBlockUser,
     /// Phase 7.1: folder tabs (injected `updateChatFolders` + folder
     /// positions) with the non-default "News" folder selected, so the chat
     /// list shows only that folder's chats.
@@ -3697,6 +3739,24 @@ impl QuillApp {
                     AuthorizationState::Ready,
                 )
             }
+            Some(ScreenshotDemo::ReadyContactsManage) => {
+                demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
+                (
+                    ConnectUiStatus::DemoReadyChats,
+                    None,
+                    "screenshot demo — contacts management".into(),
+                    AuthorizationState::Ready,
+                )
+            }
+            Some(ScreenshotDemo::ReadyBlockUser) => {
+                demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
+                (
+                    ConnectUiStatus::DemoReadyChats,
+                    None,
+                    "screenshot demo — block user confirm".into(),
+                    AuthorizationState::Ready,
+                )
+            }
             Some(ScreenshotDemo::ReadyFolders) => {
                 demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
                 (
@@ -4235,6 +4295,7 @@ impl QuillApp {
             folder_menu_open: false,
             add_contact_dialog: None,
             edit_profile_dialog: None,
+            import_contacts_dialog: None,
         };
         if matches!(demo, Some(ScreenshotDemo::ReadyChatsComposer)) {
             app.composer.update(cx, |input, cx| {
@@ -4557,6 +4618,38 @@ impl QuillApp {
             }
             app.contacts_tab_open = true;
             app.status_note = "screenshot demo — contacts tab + user info panel".into();
+        }
+        // Slice A6: contacts management — the fixture's panel is moved
+        // to Ada (31, a contact) so Delete contact + Block user show,
+        // and a notice proves the settings-section wiring.
+        if matches!(demo, Some(ScreenshotDemo::ReadyContactsManage)) {
+            if let Some(session) = app.demo_session.as_mut() {
+                app.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_contacts(session, &app.demo_sink, &app.demo_seq);
+                session.open_info_panel = Some(InfoPanelTarget::User(31));
+                session.contacts_notice = Some("Imported 2 contacts.".to_string());
+            }
+            app.contacts_tab_open = true;
+            app.status_note = "screenshot demo — contacts management".into();
+        }
+        // Slice A6: block-user confirm dialog open for Ada (31) over the
+        // contacts fixture — TGX `BlockUserConfirm`. Ada's info panel
+        // is open behind the dialog so the demo is consistent.
+        if matches!(demo, Some(ScreenshotDemo::ReadyBlockUser)) {
+            if let Some(session) = app.demo_session.as_mut() {
+                app.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_contacts(session, &app.demo_sink, &app.demo_seq);
+                session.open_info_panel = Some(InfoPanelTarget::User(31));
+            }
+            app.contacts_tab_open = true;
+            app.group_confirm_dialog = Some(GroupConfirmDialog {
+                chat_id: ChatId(0),
+                action: GroupConfirmAction::BlockContact {
+                    user_id: 31,
+                    block: true,
+                },
+            });
+            app.status_note = "screenshot demo — block user confirm".into();
         }
         if matches!(demo, Some(ScreenshotDemo::ReadyFolders)) {
             if let Some(session) = app.demo_session.as_mut() {
@@ -15389,6 +15482,16 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// Slice A6: display name for the user-scoped confirm dialogs
+    /// (`DeleteContact`, `BlockContact`) — falls back to "User {id}"
+    /// like the info panel does.
+    fn contact_display_name(&self, user_id: i64) -> String {
+        self.session()
+            .and_then(|s| s.user(user_id))
+            .map(|u| u.display_name())
+            .unwrap_or_else(|| format!("User {user_id}"))
+    }
+
     fn close_group_confirm(&mut self, cx: &mut Context<Self>) {
         self.group_confirm_dialog = None;
         cx.notify();
@@ -15656,6 +15759,37 @@ impl QuillApp {
                                 },
                             )
                         }),
+                    // Slice A6: user-panel Block/Unblock — the user-scoped
+                    // twin (no chat to resolve through).
+                    GroupConfirmAction::BlockContact { user_id, block } => {
+                        live.driver.set_user_blocked(user_id, block).map(|sent| {
+                            sent_note(
+                                sent,
+                                if block {
+                                    "blocking user…"
+                                } else {
+                                    "unblocking user…"
+                                },
+                            )
+                        })
+                    }
+                    // Slice A6: user-panel "Delete contact" —
+                    // `removeContacts` (schema 1.8.67, line 14528).
+                    GroupConfirmAction::DeleteContact { user_id } => live
+                        .driver
+                        .remove_contact(user_id)
+                        .map(|sent| sent_note(sent, "deleting contact…")),
+                    // Slice A6: "Delete synced contacts" —
+                    // `clearImportedContacts` + `removeContacts`.
+                    GroupConfirmAction::DeleteSyncedContacts => {
+                        live.driver.delete_synced_contacts().map(|sent| {
+                            if sent > 0 {
+                                "deleting synced contacts…".to_string()
+                            } else {
+                                "nothing to delete".to_string()
+                            }
+                        })
+                    }
                     // Slice CL3: multi-select bulk delete — one
                     // `deleteChatHistory(remove_from_chat_list:true)`
                     // per selected chat; the selection clears on
@@ -16896,7 +17030,14 @@ impl QuillApp {
     fn open_contacts_tab(&mut self, cx: &mut Context<Self>) {
         self.contacts_tab_open = true;
         self.calls_tab_open = false;
-        if let Some(live) = self.live.as_mut()
+        // Slice A6: the sync toggle gates the `getContacts` refresh —
+        // with sync off the tab shows the last loaded snapshot.
+        let sync_on = self
+            .session()
+            .map(|s| s.contact_prefs.sync_enabled)
+            .unwrap_or(true);
+        if sync_on
+            && let Some(live) = self.live.as_mut()
             && let Err(err) = live.driver.fetch_contacts()
         {
             self.status_note = format!("contacts request failed: {err:?}");
@@ -17387,6 +17528,250 @@ impl QuillApp {
             }
         }
         list
+    }
+
+    /// Slice A6: the Contacts tab settings section — "Sync contacts"
+    /// toggle, "Import contacts…" (vCard paste → `importContacts`) and
+    /// "Delete synced contacts…" (`clearImportedContacts` +
+    /// `removeContacts`). Mirrors TGX's `SettingsPrivacyController`
+    /// strings ("Sync Contacts", "Delete Synced Contacts"). Lives at the
+    /// foot of the tab (Quill has no settings screen; the Calls tab does
+    /// the same with call settings).
+    fn contacts_settings_section(&self, cx: &mut Context<Self>) -> AnyElement {
+        let sync_on = self
+            .session()
+            .map(|s| s.contact_prefs.sync_enabled)
+            .unwrap_or(true);
+        let notice: Option<String> = self.session().and_then(|s| s.contacts_notice.clone());
+        let mut section = div()
+            .flex()
+            .flex_col()
+            .gap_2()
+            .mt_3()
+            .pt_2()
+            .border_t_1()
+            .border_color(cx.theme().border)
+            .child(
+                div()
+                    .text_xs()
+                    .font_semibold()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("CONTACTS"),
+            )
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .justify_between()
+                            .child(div().text_sm().child("Sync contacts"))
+                            .child(
+                                Button::new("contacts-sync-toggle")
+                                    .label(if sync_on { "On" } else { "Off" })
+                                    .ghost()
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.toggle_contact_sync(cx);
+                                    })),
+                            ),
+                    )
+                    .child(
+                        // Slice A6: honest caption — on desktop there is
+                        // no OS address book to sync; the switch gates
+                        // the Contacts tab's refresh from the servers.
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("Keeps the Contacts tab up to date with the Telegram servers."),
+                    ),
+            )
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap_1()
+                    .child(
+                        Button::new("contacts-import-open")
+                            .label("Import contacts…")
+                            .ghost()
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.open_import_contacts_dialog(window, cx);
+                            })),
+                    )
+                    .child(
+                        Button::new("contacts-delete-synced")
+                            .label("Delete synced contacts…")
+                            .ghost()
+                            .danger()
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.open_group_confirm(
+                                    ChatId(0),
+                                    GroupConfirmAction::DeleteSyncedContacts,
+                                    cx,
+                                );
+                            })),
+                    ),
+            );
+        if let Some(notice) = notice {
+            section = section.child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(notice),
+            );
+        }
+        section.into_any_element()
+    }
+
+    /// Slice A6: flip the local "Sync contacts" switch, persist it to
+    /// `contacts_prefs.json`, and refresh (or freeze) the tab.
+    fn toggle_contact_sync(&mut self, cx: &mut Context<Self>) {
+        let next = !self
+            .session()
+            .map(|s| s.contact_prefs.sync_enabled)
+            .unwrap_or(true);
+        if let Some(live) = self.live.as_mut() {
+            live.driver.session.contact_prefs.sync_enabled = next;
+            if let Err(err) = live.driver.save_contact_prefs() {
+                self.status_note = format!("couldn't save contact prefs: {err}");
+            }
+            if next && live.driver.session.contacts.is_none() {
+                // Re-enable refetches the server list so the tab
+                // converges with TDLib immediately.
+                if let Err(err) = live.driver.fetch_contacts() {
+                    self.status_note = format!("contacts request failed: {err:?}");
+                }
+            }
+        } else if let Some(session) = self.demo_session.as_mut() {
+            // Demo mode — flip the in-memory pref so the toggle visibly
+            // works in screenshots.
+            session.contact_prefs.sync_enabled = next;
+        }
+        cx.notify();
+    }
+
+    /// Slice A6: show the vCard import dialog (paste the file's text;
+    /// TGX reads `.vcf` files and only imports phone-number cards).
+    fn open_import_contacts_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let input = cx.new(|cx| {
+            TextareaState::new(window, cx)
+                .placeholder("Paste vCard (.vcf) text…")
+                .auto_grow(4, 12)
+                .submit_on_enter(false)
+        });
+        self.import_contacts_dialog = Some(ImportContactsDialog { input });
+        cx.notify();
+    }
+
+    /// Slice A6: parse the pasted vCard text and send `importContacts`
+    /// (schema 1.8.67, line 14517); cards without phone numbers are
+    /// skipped and reported, and cards past the `VCARD_IMPORT_LIMIT`
+    /// cap are truncated with the dropped count reported in the status
+    /// note. Keeps the dialog open when nothing usable was pasted so the
+    /// user can fix the text.
+    fn submit_import_contacts_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(dialog) = self.import_contacts_dialog.as_ref() else {
+            return;
+        };
+        let text = dialog.input.read(cx).text().to_string();
+        let (contacts, skipped, truncated) = parse_vcard(&text);
+        if contacts.is_empty() {
+            self.status_note = "No phone-number contacts found in that vCard.".to_string();
+            cx.notify();
+            return;
+        }
+        if let Some(live) = self.live.as_mut() {
+            match live.driver.import_contacts(&contacts) {
+                Ok(Some(_)) => {
+                    self.status_note = if skipped == 0 && truncated == 0 {
+                        "importing contacts…".to_string()
+                    } else {
+                        let mut details = Vec::new();
+                        if skipped > 0 {
+                            details.push(format!("{skipped} skipped without phone"));
+                        }
+                        if truncated > 0 {
+                            details.push(format!(
+                                "{truncated} over the {VCARD_IMPORT_LIMIT}-card limit"
+                            ));
+                        }
+                        format!("importing contacts… ({})", details.join(", "))
+                    };
+                }
+                Ok(None) => {
+                    self.status_note = "request already in flight".to_string();
+                    cx.notify();
+                    return;
+                }
+                Err(err) => {
+                    self.status_note = format!("import failed: {err:?}");
+                    cx.notify();
+                    return;
+                }
+            }
+        }
+        self.import_contacts_dialog = None;
+        cx.notify();
+        let _ = window;
+    }
+
+    /// Slice A6: dismiss the import dialog.
+    fn close_import_contacts_dialog(&mut self, cx: &mut Context<Self>) {
+        self.import_contacts_dialog = None;
+        cx.notify();
+    }
+
+    /// Slice A6: the vCard import dialog overlay — a paste box plus
+    /// Import/Cancel; parse errors stay in `status_note` and keep the
+    /// dialog open so the user can fix the text.
+    fn import_contacts_dialog_overlay(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let dialog = self.import_contacts_dialog.as_ref()?;
+        let body = div()
+            .flex()
+            .flex_col()
+            .gap_2()
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("Paste the contents of a .vcf file. Only cards with a phone number are imported."),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .child(Textarea::new(&dialog.input).h(px(220.))),
+            )
+            .child(
+                div()
+                    .flex()
+                    .justify_end()
+                    .gap_2()
+                    .child(
+                        Button::new("import-contacts-cancel")
+                            .label("Cancel")
+                            .ghost()
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.close_import_contacts_dialog(cx);
+                            })),
+                    )
+                    .child(
+                        Button::new("import-contacts-submit")
+                            .label("Import")
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.submit_import_contacts_dialog(window, cx);
+                            })),
+                    ),
+            )
+            .into_any_element();
+        Some(self.g1_modal(
+            "import-contacts",
+            G1DialogClose::ImportContacts,
+            "Import contacts",
+            body,
+            cx,
+        ))
     }
 
     fn contact_row(&self, row: &ContactRow, cx: &mut Context<Self>) -> impl IntoElement {
@@ -19124,6 +19509,53 @@ impl QuillApp {
                         this.open_edit_profile_dialog(window, cx);
                     })),
             );
+        }
+        // Slice A6: contact management for any other user — "Delete
+        // contact" when they are a contact (`removeContacts`, schema
+        // 1.8.67 line 14528; TGX `DeleteContactConfirm` "Delete %1$s
+        // from contacts?") and Block/Unblock
+        // (`setMessageSenderBlockList`, schema 1.8.67 line 14492; TGX
+        // `BlockUserConfirm` "Are you sure you want to block %1$s?").
+        // The blocked state comes from `userFullInfo.block_list`
+        // (schema 1.8.67, line 2468).
+        if !is_self && user.is_some() {
+            let blocked = info.as_ref().is_some_and(|i| i.blocked);
+            let mut actions = div().flex().flex_wrap().gap_2();
+            if user.as_ref().is_some_and(|u| u.is_contact) {
+                actions = actions.child(
+                    Button::new("info-panel-delete-contact")
+                        .label("Delete contact")
+                        .ghost()
+                        .danger()
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.open_group_confirm(
+                                ChatId(0),
+                                GroupConfirmAction::DeleteContact { user_id },
+                                cx,
+                            );
+                        })),
+                );
+            }
+            actions = actions.child(
+                Button::new("info-panel-block-user")
+                    .label(if blocked {
+                        "Unblock user"
+                    } else {
+                        "Block user"
+                    })
+                    .ghost()
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.open_group_confirm(
+                            ChatId(0),
+                            GroupConfirmAction::BlockContact {
+                                user_id,
+                                block: !blocked,
+                            },
+                            cx,
+                        );
+                    })),
+            );
+            body = body.child(actions);
         }
         // Phase B1: "Start secret chat" from a user profile — E2E chat
         // with a non-bot user (`createNewSecretChat`, schema 1.8.67 line
@@ -30885,6 +31317,7 @@ impl QuillApp {
                         G1DialogClose::CommentThread => this.close_comment_thread_dialog(cx),
                         G1DialogClose::PollVoters => this.close_poll_voters_dialog(cx),
                         G1DialogClose::WelcomeMessage => this.close_welcome_dialog(cx),
+                        G1DialogClose::ImportContacts => this.close_import_contacts_dialog(cx),
                     })),
             )
             .child(
@@ -30905,13 +31338,7 @@ impl QuillApp {
                             .flex()
                             .items_center()
                             .justify_between()
-                            .child(
-                                div()
-                                    .text_sm()
-                                    .font_semibold()
-                                    .text_color(rgb(0xffffff))
-                                    .child(title),
-                            )
+                            .child(div().text_sm().font_semibold().child(title))
                             .child(
                                 Button::new(format!("{id_prefix}-close"))
                                     .label("✕")
@@ -30941,6 +31368,9 @@ impl QuillApp {
                                         }
                                         G1DialogClose::WelcomeMessage => {
                                             this.close_welcome_dialog(cx)
+                                        }
+                                        G1DialogClose::ImportContacts => {
+                                            this.close_import_contacts_dialog(cx)
                                         }
                                     })),
                             ),
@@ -31883,72 +32313,125 @@ impl QuillApp {
             Some(dialog) => dialog,
             None => return div().into_any_element(),
         };
-        let (title, message, confirm_label) = match dialog.action {
+        let (title, message, confirm_label): (String, String, String) = match dialog.action {
             GroupConfirmAction::DeleteChat => (
-                "Delete group",
-                "Delete this group for everyone? This cannot be undone.",
-                "Delete",
+                "Delete group".to_string(),
+                "Delete this group for everyone? This cannot be undone.".to_string(),
+                "Delete".to_string(),
             ),
             GroupConfirmAction::RemoveFromList => (
-                "Delete chat",
-                "Delete this chat and its history from your chat list?",
-                "Delete",
+                "Delete chat".to_string(),
+                "Delete this chat and its history from your chat list?".to_string(),
+                "Delete".to_string(),
             ),
             GroupConfirmAction::ReportChat => (
-                "Report chat",
-                "Report this chat to Telegram moderators as spam?",
-                "Report",
+                "Report chat".to_string(),
+                "Report this chat to Telegram moderators as spam?".to_string(),
+                "Report".to_string(),
             ),
             GroupConfirmAction::BlockUser { block } => {
                 if block {
                     (
-                        "Block user",
-                        "Block this user? They won't be able to send you messages.",
-                        "Block",
+                        "Block user".to_string(),
+                        "Block this user? They won't be able to send you messages.".to_string(),
+                        "Block".to_string(),
                     )
                 } else {
-                    ("Unblock user", "Unblock this user?", "Unblock")
+                    (
+                        "Unblock user".to_string(),
+                        "Unblock this user?".to_string(),
+                        "Unblock".to_string(),
+                    )
                 }
             }
             GroupConfirmAction::RemoveSelectedChats => (
-                "Delete chats",
-                "Delete the selected chats and their history from your chat list?",
-                "Delete",
+                "Delete chats".to_string(),
+                "Delete the selected chats and their history from your chat list?".to_string(),
+                "Delete".to_string(),
             ),
             GroupConfirmAction::LeaveChat => (
-                "Leave chat",
-                "Leave this chat? You can rejoin with an invite link.",
-                "Leave",
+                "Leave chat".to_string(),
+                "Leave this chat? You can rejoin with an invite link.".to_string(),
+                "Leave".to_string(),
             ),
             GroupConfirmAction::BroadcastUpgrade => (
-                "Convert to broadcast group",
+                "Convert to broadcast group".to_string(),
                 "Only admins will be able to post. Non-admin members become \
-                 subscribers. This cannot be undone.",
-                "Convert",
+                 subscribers. This cannot be undone."
+                    .to_string(),
+                "Convert".to_string(),
             ),
             GroupConfirmAction::ClearHistory { revoke } => (
-                "Clear history",
+                "Clear history".to_string(),
                 if revoke {
                     "Delete all messages in this chat for everyone? This cannot be undone."
                 } else {
                     "Delete all messages in this chat for you? This cannot be undone."
-                },
-                "Clear",
+                }
+                .to_string(),
+                "Clear".to_string(),
             ),
             // Slice B2: "Restart bot" — history clear + /start re-send.
             GroupConfirmAction::RestartBot => (
-                "Restart bot",
-                "Clear this bot's chat history and send /start again? This cannot be undone.",
-                "Restart",
+                "Restart bot".to_string(),
+                "Clear this bot's chat history and send /start again? This cannot be undone."
+                    .to_string(),
+                "Restart".to_string(),
             ),
             // Slice A2: TGX `AbortRecoveryEmailConfirm` ("Are you sure
             // you want to abort recovery email setup?").
             GroupConfirmAction::AbortRecoveryEmailSetup => (
-                "Abort recovery email setup",
-                "Are you sure you want to abort recovery email setup? The new address will not be activated.",
-                "Abort",
+                "Abort recovery email setup".to_string(),
+                "Are you sure you want to abort recovery email setup? The new address will not be activated."
+                    .to_string(),
+                "Abort".to_string(),
+            ),
+            // Slice A6: user-panel block — TGX `BlockUserConfirm`
+            // ("Are you sure you want to block %1$s?").
+            GroupConfirmAction::BlockContact { user_id, block } => {
+                let name = self.contact_display_name(user_id);
+                if block {
+                    (
+                        "Block user".to_string(),
+                        format!("Are you sure you want to block {name}?"),
+                        "Block".to_string(),
+                    )
+                } else {
+                    (
+                        "Unblock user".to_string(),
+                        format!("Unblock {name}?"),
+                        "Unblock".to_string(),
+                    )
+                }
+            }
+            // Slice A6: user-panel delete contact — TGX
+            // `DeleteContactConfirm` ("Delete %1$s from contacts?").
+            GroupConfirmAction::DeleteContact { user_id } => {
+                let name = self.contact_display_name(user_id);
+                (
+                    "Delete contact".to_string(),
+                    format!("Delete {name} from contacts?"),
+                    "Delete".to_string(),
+                )
+            }
+            // Slice A6: TGX `SyncContactsDeleteInfo` ("This will remove
+            // your contacts from the Telegram servers. If 'Sync Contacts'
+            // is enabled, contacts will be re-synced.").
+            GroupConfirmAction::DeleteSyncedContacts => (
+                "Delete synced contacts".to_string(),
+                "This will remove your contacts from the Telegram servers. If 'Sync contacts' is enabled, contacts will be re-synced.".to_string(),
+                "Delete".to_string(),
             ),
         };
+        // Slice A6: TGX renders the confirm button red for the
+        // destructive contact actions (OptionColor.RED).
+        let destructive = matches!(
+            dialog.action,
+            GroupConfirmAction::DeleteContact { .. }
+                | GroupConfirmAction::BlockUser { block: true, .. }
+                | GroupConfirmAction::BlockContact { block: true, .. }
+                | GroupConfirmAction::DeleteSyncedContacts
+        );
         let body = div()
             .flex()
             .flex_col()
@@ -31970,13 +32453,14 @@ impl QuillApp {
                     .child(
                         Button::new("g1-confirm-submit")
                             .label(confirm_label)
+                            .when(destructive, |button| button.danger())
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.submit_group_confirm(cx);
                             })),
                     ),
             )
             .into_any_element();
-        self.g1_modal("g1-confirm", G1DialogClose::GroupConfirm, title, body, cx)
+        self.g1_modal("g1-confirm", G1DialogClose::GroupConfirm, &title, body, cx)
     }
 
     /// Slice G1: partial-quote dialog — the input starts as the full
@@ -36549,6 +37033,10 @@ impl Render for QuillApp {
             .when_some(self.edit_profile_dialog_overlay(cx), |this, overlay| {
                 this.child(overlay)
             })
+            // Slice A6: vCard import dialog above everything else.
+            .when_some(self.import_contacts_dialog_overlay(cx), |this, overlay| {
+                this.child(overlay)
+            })
             // Slice G1: group/channel management dialogs (create,
             // members, permissions, username, restrict/ban, confirms,
             // quote reply) above everything else.
@@ -38291,6 +38779,10 @@ impl QuillApp {
             PaneMode::Ready => {
                 if self.contacts_tab_open {
                     list = list.child(self.contacts_list(cx));
+                    // Slice A6: contacts settings live at the foot of the
+                    // Contacts tab (Quill has no settings screen; the
+                    // Calls tab does the same with call settings).
+                    list = list.child(self.contacts_settings_section(cx));
                 } else if self.calls_tab_open {
                     // Phase C2i: Recent-calls tab — server-side call
                     // history + call settings.
