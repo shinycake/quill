@@ -27,8 +27,8 @@ use crate::settings::{
 use crate::state::{
     AdminListFetch, AdminRightsFetch, CHAT_EVENT_LOG_PAGE_SIZE, ChatEventLogFetch,
     ChatSearchJumpNeed, ChatStatisticsFetch, ForwardFlight, InfoPanelTarget, InstantViewPage,
-    InviteLinkFetch, JoinRequestFetch, MemberListFilter, MemberStatusChange, RequestPurpose,
-    RequestRollback, SearchStatus, Session, ShutdownPhase, SupergroupMembersFetch,
+    InviteLinkFetch, JoinRequestFetch, LoginUrlRequest, MemberListFilter, MemberStatusChange,
+    RequestPurpose, RequestRollback, SearchStatus, Session, ShutdownPhase, SupergroupMembersFetch,
     WelcomeMessagesFetch,
 };
 use crate::story_composer::{StoryMediaKind, StoryPrivacy};
@@ -55,43 +55,46 @@ use crate::telegram::requests::{
     create_call_with_protocol, create_chat_folder, create_chat_invite_link, create_forum_topic,
     create_new_basic_group_chat, create_new_secret_chat, create_new_supergroup_chat,
     create_private_chat, create_video_chat, decline_group_call_invitation, delete_chat,
-    delete_chat_folder, delete_chat_history, delete_chat_welcome_message, delete_forum_topic,
+    delete_chat_folder, delete_chat_history,
+    delete_chat_reply_markup as delete_chat_reply_markup_request, delete_chat_welcome_message,
+    delete_forum_topic,
     delete_messages, delete_story, discard_call as discard_call_request,
     download_file as download_file_request, edit_chat_folder, edit_chat_invite_link,
     edit_chat_welcome_message, edit_forum_topic, edit_message_caption, edit_message_text,
     end_group_call, end_group_call_recording, end_group_call_screen_sharing, forward_messages,
     get_archive_chat_list_settings, get_authorization_state, get_available_chat_boost_slots,
-    get_basic_group_full_info, get_callback_query_answer, get_chat_active_stories,
-    get_chat_administrators, get_chat_boost_status, get_chat_event_log, get_chat_folder,
-    get_chat_history, get_chat_invite_links, get_chat_join_requests, get_chat_lists_to_add_chat,
-    get_chat_member, get_chat_scheduled_messages, get_chat_sponsored_messages, get_chat_statistics,
-    get_commands, get_contacts, get_forum_topics, get_full_rich_message, get_group_call,
-    get_installed_sticker_sets, get_me, get_message_link, get_message_properties,
-    get_message_thread_history, get_saved_animations, get_saved_notification_sounds,
-    get_scope_notification_settings, get_secret_chat, get_sticker_set, get_storage_statistics,
-    get_story, get_story_available_reactions, get_supergroup, get_supergroup_full_info,
-    get_supergroup_members, get_user_full_info, get_user_privacy_setting_rules,
-    get_video_chat_invite_link, get_video_chat_rtmp_url, get_web_page_instant_view,
-    input_message_photo, input_message_video, invite_group_call_participant, join_chat,
-    join_group_call, join_video_chat, leave_chat, leave_group_call, load_active_stories,
-    load_chat_welcome_messages, load_chats, load_chats_list, load_group_call_participants,
-    open_chat, open_message_content, open_story, pin_chat_message,
-    post_story as post_story_request, process_chat_join_request, read_chat_list, recognize_speech,
-    remove_message_reaction, reorder_chat_folders, replace_primary_chat_invite_link,
-    replace_video_chat_rtmp_url, report_chat, report_chat_sponsored_message,
+    get_basic_group_full_info, get_callback_query_answer, get_callback_query_answer_game,
+    get_callback_query_answer_with_password, get_chat_active_stories, get_chat_administrators,
+    get_chat_boost_status, get_chat_event_log, get_chat_folder, get_chat_history,
+    get_chat_invite_links, get_chat_join_requests, get_chat_lists_to_add_chat, get_chat_member,
+    get_chat_scheduled_messages, get_chat_sponsored_messages, get_chat_statistics, get_commands,
+    get_contacts, get_forum_topics, get_full_rich_message, get_group_call,
+    get_installed_sticker_sets, get_login_url, get_login_url_info, get_me, get_message_link,
+    get_message_properties, get_message_thread_history, get_saved_animations,
+    get_saved_notification_sounds, get_scope_notification_settings, get_secret_chat,
+    get_sticker_set, get_storage_statistics, get_story, get_story_available_reactions,
+    get_supergroup, get_supergroup_full_info, get_supergroup_members, get_user_full_info,
+    get_user_privacy_setting_rules, get_video_chat_invite_link, get_video_chat_rtmp_url,
+    get_web_page_instant_view, input_message_photo, input_message_video,
+    invite_group_call_participant, join_chat, join_group_call, join_video_chat, leave_chat,
+    leave_group_call, load_active_stories, load_chat_welcome_messages, load_chats, load_chats_list,
+    load_group_call_participants, open_chat, open_message_content, open_story, pin_chat_message,
+    post_story as post_story_request, process_chat_join_request, read_chat_list,
+    recognize_speech, remove_message_reaction,
+    reorder_chat_folders, replace_primary_chat_invite_link, replace_video_chat_rtmp_url,
+    report_chat, report_chat_sponsored_message,
     request_qr_code_authentication, resend_authentication_code, resend_messages,
-    revoke_chat_invite_link, revoke_group_call_invite_link, search_call_messages,
-    search_chat_messages, search_chats, search_messages, search_public_chats,
-    search_recently_found_chats, send_animation, send_call_debug_information, send_call_log,
-    send_call_rating_detail, send_call_signaling_data, send_chat_action, send_chat_action_kind,
-    send_document, send_group_call_message, send_message_album, send_photo, send_poll,
-    send_rich_message, send_sticker, send_text, send_text_story_reply, send_video, send_video_note,
-    send_voice_note, set_archive_chat_list_settings, set_authentication_phone_number,
-    set_chat_draft_message, set_chat_member_status, set_chat_member_tag,
-    set_chat_message_auto_delete_time, set_chat_notification_settings, set_chat_permissions,
-    set_chat_slow_mode_delay, set_group_call_participant_volume_level,
-    set_message_sender_block_list, set_pinned_chats, set_poll_answer,
-    set_scope_notification_settings, set_story_reaction, set_supergroup_username,
+    revoke_group_call_invite_link, search_call_messages, search_chat_messages, search_chats,
+    search_messages, search_public_chats, search_recently_found_chats, send_animation,
+    send_call_debug_information, send_call_log, send_call_rating_detail, send_call_signaling_data,
+    send_chat_action, send_chat_action_kind, send_document, send_group_call_message,
+    send_message_album, send_photo, send_poll, send_rich_message, send_sticker, send_text,
+    send_text_story_reply, send_video, send_video_note, send_voice_note,
+    set_archive_chat_list_settings, set_authentication_phone_number, set_chat_draft_message,
+    set_chat_member_status, set_chat_member_tag, set_chat_message_auto_delete_time,
+    set_chat_notification_settings, set_chat_permissions, set_chat_slow_mode_delay,
+    set_group_call_participant_volume_level, set_message_sender_block_list, set_pinned_chats,
+    set_poll_answer, set_scope_notification_settings, set_story_reaction, set_supergroup_username,
     set_user_privacy_setting_rules, set_video_chat_title, start_group_call_recording,
     start_group_call_screen_sharing, start_scheduled_video_chat,
     supergroup_members_filter_administrators_json, supergroup_members_filter_banned_json,
@@ -6923,6 +6926,21 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// flight; the UI prefers the already-listed self chat when one
     /// exists.
     pub fn create_private_chat_with_self(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
+        let Some(my_id) = self.session.my_user_id else {
+            return Ok(None);
+        };
+        self.create_private_chat_for(my_id)
+    }
+
+    /// B1: `createPrivateChat` with an arbitrary user id (schema 1.8.67,
+    /// line 9588) — the user button on an inline keyboard. The `chat`
+    /// answer opens the chat via the `CreatePrivateChat` pending purpose.
+    /// `Ok(None)` = a creation already in flight; the UI prefers an
+    /// already-listed private chat with the user when one exists.
+    pub fn create_private_chat_for(
+        &mut self,
+        user_id: i64,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
@@ -6930,13 +6948,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         if self.session.requests.has_purpose(purpose) {
             return Ok(None);
         }
-        let Some(my_id) = self.session.my_user_id else {
-            return Ok(None);
-        };
         let extra = self.session.request(purpose, None);
         if let Err(err) = self
             .sender
-            .send_json(&create_private_chat(extra, my_id, false))
+            .send_json(&create_private_chat(extra, user_id, false))
         {
             self.session.requests.take(extra);
             return Err(err);
@@ -8526,6 +8541,122 @@ impl<S: JsonSender> ConnectDriver<S> {
         message_id: MessageId,
         data: &[u8],
     ) -> Result<RequestId, ConnectSendError> {
+        let extra =
+            self.callback_query_extra(chat_id, message_id, RequestPurpose::GetCallbackQueryAnswer)?;
+        let json = get_callback_query_answer(extra, chat_id, message_id, data);
+        self.send_json_request(extra, &json)
+    }
+
+    /// B1: password-protected callback button —
+    /// `callbackQueryPayloadDataWithPassword` (schema 1.8.67, line 7740).
+    /// The caller drops the password right after the call.
+    pub fn send_callback_query_with_password(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        password: &str,
+        data: &[u8],
+    ) -> Result<RequestId, ConnectSendError> {
+        let extra = self.callback_query_extra(
+            chat_id,
+            message_id,
+            RequestPurpose::GetCallbackQueryAnswerWithPassword,
+        )?;
+        let json =
+            get_callback_query_answer_with_password(extra, chat_id, message_id, password, data);
+        self.send_json_request(extra, &json)
+    }
+
+    /// B1: game button — `callbackQueryPayloadGame` with the `game.short_name`
+    /// from the message's `messageGame` content (schema 1.8.67, line 7743).
+    pub fn send_game_callback_query(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        game_short_name: &str,
+    ) -> Result<RequestId, ConnectSendError> {
+        let extra = self.callback_query_extra(
+            chat_id,
+            message_id,
+            RequestPurpose::GetCallbackQueryAnswerGame,
+        )?;
+        let json = get_callback_query_answer_game(extra, chat_id, message_id, game_short_name);
+        self.send_json_request(extra, &json)
+    }
+
+    /// B1: resolve a login-URL button (`getLoginUrlInfo`, schema 1.8.67,
+    /// line 12985). `fallback_url` is the button's raw URL, kept in the
+    /// session so a TDLib error degrades to a plain URL-button press.
+    pub fn send_login_url_info(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        button_id: i64,
+        fallback_url: &str,
+    ) -> Result<RequestId, ConnectSendError> {
+        let extra =
+            self.callback_query_extra(chat_id, message_id, RequestPurpose::GetLoginUrlInfo)?;
+        self.session.login_url_request = Some(LoginUrlRequest {
+            chat_id,
+            message_id,
+            button_id,
+            raw_url: fallback_url.to_string(),
+        });
+        let json = get_login_url_info(extra, chat_id, message_id, button_id);
+        self.send_json_request(extra, &json)
+    }
+
+    /// B1: the authorized URL after the user consented to a
+    /// `loginUrlInfoRequestConfirmation` (`getLoginUrl`, schema 1.8.67,
+    /// line 12993; TGX `TGInlineKeyboard` does exactly this). `fallback_url`
+    /// is the button's raw URL, used when TDLib errors.
+    pub fn send_login_url(
+        &mut self,
+        request: &LoginUrlRequest,
+        allow_write_access: bool,
+    ) -> Result<RequestId, ConnectSendError> {
+        let extra = self.callback_query_extra(
+            request.chat_id,
+            request.message_id,
+            RequestPurpose::GetLoginUrl,
+        )?;
+        self.session.login_url_request = Some(request.clone());
+        let json = get_login_url(
+            extra,
+            request.chat_id,
+            request.message_id,
+            request.button_id,
+            allow_write_access,
+        );
+        self.send_json_request(extra, &json)
+    }
+
+    /// B1: `deleteChatReplyMarkup` after a one-time custom keyboard was used
+    /// (schema 1.8.67, line 13183). Best-effort: the local keyboard hides
+    /// regardless of the answer.
+    pub fn delete_chat_reply_markup(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::DeleteChatReplyMarkup, Some(chat_id));
+        let json = delete_chat_reply_markup_request(extra, chat_id, message_id);
+        self.send_json_request(extra, &json)
+    }
+
+    /// Shared gate for callback-query sends: real (non-pending) messages in
+    /// a supported chat. Returns the reserved `@extra`.
+    fn callback_query_extra(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        purpose: RequestPurpose,
+    ) -> Result<RequestId, ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
@@ -8548,11 +8679,17 @@ impl<S: JsonSender> ConnectDriver<S> {
         if message.pending || message.id.0 <= 0 {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let extra = self
-            .session
-            .request(RequestPurpose::GetCallbackQueryAnswer, Some(chat_id));
-        let json = get_callback_query_answer(extra, chat_id, message_id, data);
-        match self.sender.send_json(&json) {
+        Ok(self.session.request(purpose, Some(chat_id)))
+    }
+
+    /// Send a prebuilt request JSON; roll the reserved `@extra` back when
+    /// the sender refuses it.
+    fn send_json_request(
+        &mut self,
+        extra: RequestId,
+        json: &str,
+    ) -> Result<RequestId, ConnectSendError> {
+        match self.sender.send_json(json) {
             Ok(()) => Ok(extra),
             Err(err) => {
                 self.session.requests.take(extra);

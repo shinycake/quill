@@ -18,16 +18,16 @@ use crate::telegram::envelope::{
     ChatAdministratorEntry, ChatDraft, ChatFolderInfo, ChatFolderSpec, ChatJoinResult, ChatKind,
     ChatList, ChatNotificationSettings, ChatPermissions, ChatPositionUpdate, ChatStatistics,
     ConnectionState, EnvelopePayload, EphemeralMessageContent, ErrorClass, ForumTopic,
-    InlineKeyboard, InviteGroupCallParticipantResult, MessageAutoDelete, MessageContent,
+    InviteGroupCallParticipantResult, LoginUrlInfo, MessageAutoDelete, MessageContent,
     MessageForwardInfo, MessageInteractionInfo, MessageOrigin, MessageReaction, MessageReplyTo,
     MessageSelfDestruct, MessageSender, NotificationSettingsScope, NotificationSound, OptionValue,
     ParsedCall, ParsedChatEvent, ParsedChatInviteLink, ParsedChatJoinRequest, ParsedChatMember,
     ParsedFile, ParsedGroupCall, ParsedGroupCallMessage, ParsedGroupCallParticipant, ParsedMessage,
     ParsedSecretChat, ParsedStory, ParsedUser, ParsedVideoChat, ParsedWelcomeMessage, Poll,
-    ReportChatOutcome, ReportOption, ReportSponsoredResult, RichMessageContent,
-    ScopeNotificationSettings, SecretChatState, SponsoredMessage, StickerFormat, StickerItem,
-    StickerSetInfo, StorageStats, StoryAvailableReactionView, StoryListView, TdError,
-    effective_content,
+    ReplyKeyboard, ReplyMarkup, ReportChatOutcome, ReportOption, ReportSponsoredResult,
+    RichMessageContent, ScopeNotificationSettings, SecretChatState, SponsoredMessage,
+    StickerFormat, StickerItem, StickerSetInfo, StorageStats, StoryAvailableReactionView,
+    StoryListView, TdError, effective_content, reply_markup_demands_reply,
 };
 use crate::telegram::envelope::{CallState, ReadyParams};
 use crate::telegram::requests::{
@@ -238,6 +238,26 @@ pub enum RequestPurpose {
     /// (Phase 3.2). Response is `callbackQueryAnswer`; the answer is shown
     /// via the transient status line (URL answers open in the OS browser).
     GetCallbackQueryAnswer,
+    /// B1: `getCallbackQueryAnswer` with
+    /// `callbackQueryPayloadDataWithPassword` (password-protected button).
+    /// A 400 answer surfaces as "wrong 2-step password" instead of the
+    /// generic callback note.
+    GetCallbackQueryAnswerWithPassword,
+    /// B1: `getCallbackQueryAnswer` with `callbackQueryPayloadGame` (game
+    /// button); the answer URL (if any) opens the game in the OS browser.
+    GetCallbackQueryAnswerGame,
+    /// B1: `getLoginUrlInfo` for a login-URL button press. Response is
+    /// `loginUrlInfo*`; on error the button degrades to a plain URL button
+    /// (schema 1.8.67 doc on `getLoginUrl`).
+    GetLoginUrlInfo,
+    /// B1: `getLoginUrl` after the user consented to a
+    /// `loginUrlInfoRequestConfirmation`. Response is `httpUrl`; on error
+    /// the button degrades to a plain URL button (schema 1.8.67 doc on
+    /// `getLoginUrl`).
+    GetLoginUrl,
+    /// B1: `deleteChatReplyMarkup` after a one-time custom keyboard is used
+    /// (schema 1.8.67, line 13183).
+    DeleteChatReplyMarkup,
     /// `joinChat`. Response is `ChatJoinResult`; own status also arrives via
     /// `updateChatMember`.
     JoinChat,
@@ -912,6 +932,49 @@ pub struct ForwardResult {
     pub from_chat_id: ChatId,
     pub requested: usize,
     pub forwarded_ids: Vec<MessageId>,
+}
+
+/// B1: an incoming message whose markup demands a reply
+/// (`replyMarkupForceReply`, or `force_reply` on an inline / show-keyboard
+/// markup). Drained by the UI into a composer reply-to + focus.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ForceReplyTarget {
+    pub chat_id: ChatId,
+    pub message_id: MessageId,
+}
+
+/// B1: context of an in-flight login-URL button press. Kept while
+/// `getLoginUrlInfo` (and then `getLoginUrl`, after consent) is in flight,
+/// so an error degrades the button to a plain URL-button press (schema
+/// 1.8.67 doc on `getLoginUrl`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LoginUrlRequest {
+    pub chat_id: ChatId,
+    pub message_id: MessageId,
+    pub button_id: i64,
+    /// The button's raw URL — the plain-URL fallback.
+    pub raw_url: String,
+}
+
+/// B1: pick the custom keyboard to show for a chat — the newest message
+/// carrying `replyMarkupShowKeyboard`, invalidated by a newer
+/// `replyMarkupRemoveKeyboard` or by a one-time keyboard already tapped.
+/// Pure logic: unit-tested.
+pub fn active_custom_keyboard(
+    messages: &std::collections::BTreeMap<i64, HistoryMessage>,
+    dismissed: &std::collections::HashSet<(i64, i64)>,
+) -> Option<(ChatId, MessageId, ReplyKeyboard)> {
+    let mut active: Option<(ChatId, MessageId, ReplyKeyboard)> = None;
+    for message in messages.values() {
+        match &message.reply_markup {
+            Some(ReplyMarkup::ShowKeyboard(keyboard)) => {
+                active = Some((message.chat_id, message.id, keyboard.clone()));
+            }
+            Some(ReplyMarkup::RemoveKeyboard) => active = None,
+            _ => {}
+        }
+    }
+    active.filter(|(chat_id, message_id, _)| !dismissed.contains(&(chat_id.0, message_id.0)))
 }
 
 impl ForwardResult {
@@ -1923,9 +1986,11 @@ pub struct HistoryMessage {
     pub is_pinned: bool,
     /// Schema `message.media_album_id`. `0` is not an album.
     pub media_album_id: i64,
-    /// Schema `message.reply_markup` — `replyMarkupInlineKeyboard` only
-    /// (Phase 3.2). Rendered as the button grid under the message.
-    pub reply_markup: Option<InlineKeyboard>,
+    /// Schema `message.reply_markup` — all `replyMarkup*` constructors
+    /// (B1). Rendered as the button grid under the message (inline) or the
+    /// custom keyboard above the composer (showKeyboard).
+    pub reply_markup: Option<ReplyMarkup>,
+    /// Phase B3: schema `message.self_destruct_type` /
     /// Phase B3: schema `message.self_destruct_type` /
     /// `message.self_destruct_in` (TDLib 1.8.67 lines 3146–3147 / 3165).
     /// `None` for ordinary messages. Self-destructed rows leave via
@@ -2073,7 +2138,7 @@ impl HistoryState {
 
     /// Phase 3.2: `updateMessageEdited` replaces the message's inline
     /// keyboard (or removes it when `None`).
-    fn update_reply_markup(&mut self, id: MessageId, reply_markup: Option<InlineKeyboard>) -> bool {
+    fn update_reply_markup(&mut self, id: MessageId, reply_markup: Option<ReplyMarkup>) -> bool {
         if let Some(message) = self.messages.get_mut(&id.0) {
             message.reply_markup = reply_markup;
             true
@@ -2142,7 +2207,7 @@ pub struct SearchMessageHit {
     pub interaction_info: Option<MessageInteractionInfo>,
     pub is_pinned: bool,
     pub media_album_id: i64,
-    pub reply_markup: Option<InlineKeyboard>,
+    pub reply_markup: Option<ReplyMarkup>,
     /// Phase B3: carried through from `ParsedMessage` so search hits can
     /// become history rows without losing the timer badge.
     pub self_destruct: Option<MessageSelfDestruct>,
@@ -3188,6 +3253,20 @@ pub struct Session {
     /// (Phase 3.2). The UI takes it on the next poll and shows the answer in
     /// the status line (URL answers open in the OS browser).
     pub last_callback_answer: Option<CallbackQueryAnswer>,
+    /// B1: last `loginUrlInfo*` / `httpUrl` answer for a login-URL button
+    /// press. The UI takes it on the next poll: `Open` opens the URL in the
+    /// OS browser, `RequestConfirmation` asks for consent, `Failed` opens
+    /// the button's raw URL in the browser.
+    pub last_login_url_info: Option<LoginUrlInfo>,
+    /// B1: the login button's request context, kept while `getLoginUrlInfo`
+    /// (then `getLoginUrl`) is in flight so an error can degrade to a plain
+    /// URL button press.
+    pub login_url_request: Option<LoginUrlRequest>,
+    /// B1: force-reply target set when an incoming message carrying
+    /// force-reply markup (`replyMarkupForceReply`, or `force_reply` on an
+    /// inline / show-keyboard markup) arrives. The UI drains it on the
+    /// next render: composer gets the reply-to and focus.
+    pub pending_force_reply: Option<ForceReplyTarget>,
     /// TDLib `file.id` → latest `file` / `localFile` snapshot.
     pub files: HashMap<i32, ParsedFile>,
     /// `downloadFile` in flight (until completed, undownloadable, idle, or error).
@@ -3818,6 +3897,9 @@ impl Session {
             in_flight_forward: None,
             last_forward: None,
             last_callback_answer: None,
+            last_login_url_info: None,
+            login_url_request: None,
+            pending_force_reply: None,
             files: HashMap::new(),
             downloading: HashSet::new(),
             user_downloads: HashSet::new(),
@@ -5551,7 +5633,23 @@ impl Session {
                         .get(&message.chat_id.0)
                         .and_then(|chat| self.notification_sound_for(chat))
                 });
+                // B1: an incoming message demanding a reply (force-reply
+                // markup) arms the composer's reply-to; the UI drains
+                // `pending_force_reply` on the next render. Computed before
+                // `upsert_message` moves `message`.
+                let force_reply = (!message.is_outgoing
+                    && message
+                        .reply_markup
+                        .as_ref()
+                        .is_some_and(reply_markup_demands_reply))
+                .then_some(ForceReplyTarget {
+                    chat_id: message.chat_id,
+                    message_id: message.id,
+                });
                 self.upsert_message(message, false);
+                if let Some(target) = force_reply {
+                    self.pending_force_reply = Some(target);
+                }
                 if let Some(notification) = notification {
                     self.queue_notification_with_sound(notification, sound);
                 }
@@ -6239,8 +6337,22 @@ impl Session {
             EnvelopePayload::CallbackQueryAnswer(answer) => {
                 // `getCallbackQueryAnswer` response: only answers to our own
                 // inline-button presses are surfaced (matched by `@extra`).
-                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetCallbackQueryAnswer) {
+                if matches!(
+                    pending.map(|p| p.purpose),
+                    Some(
+                        RequestPurpose::GetCallbackQueryAnswer
+                            | RequestPurpose::GetCallbackQueryAnswerWithPassword
+                            | RequestPurpose::GetCallbackQueryAnswerGame
+                    )
+                ) {
                     self.last_callback_answer = Some(answer);
+                }
+            }
+            EnvelopePayload::LoginUrlInfo(info) => {
+                // B1: `getLoginUrlInfo` response to our own login-button
+                // press (matched by `@extra`).
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetLoginUrlInfo) {
+                    self.last_login_url_info = Some(info);
                 }
             }
             EnvelopePayload::UpdateSavedAnimations { .. } => {
@@ -6328,6 +6440,10 @@ impl Session {
                     pending.map(|p| p.purpose)
                 {
                     self.set_group_call_invite_link(group_call_id, url);
+                // B1: `getLoginUrl` returns `httpUrl` too (schema 1.8.67,
+                // line 7458) — the authorized URL after consent.
+                } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetLoginUrl) {
+                    self.last_login_url_info = Some(LoginUrlInfo::Open { url });
                 }
             }
             // M1: `getMessageLink` returns `messageLink`. The driver
@@ -7283,6 +7399,37 @@ impl Session {
                         show_alert: false,
                         url: String::new(),
                     });
+                }
+                // B1: a refused password-protected callback surfaces
+                // honestly — 400 is the wrong-password case, anything else
+                // is the generic bot-timeout note.
+                if pending.map(|p| p.purpose)
+                    == Some(RequestPurpose::GetCallbackQueryAnswerWithPassword)
+                {
+                    let text = if err.code == 400 {
+                        "wrong 2-step verification password"
+                    } else {
+                        "bot did not answer"
+                    };
+                    self.last_callback_answer = Some(CallbackQueryAnswer {
+                        text: text.to_string(),
+                        show_alert: false,
+                        url: String::new(),
+                    });
+                }
+                // B1: a refused `getLoginUrlInfo` / `getLoginUrl` degrades
+                // the login button to an ordinary URL button (schema 1.8.67
+                // doc on `getLoginUrl`).
+                if matches!(
+                    pending.map(|p| p.purpose),
+                    Some(RequestPurpose::GetLoginUrlInfo) | Some(RequestPurpose::GetLoginUrl)
+                ) {
+                    let fallback_url = self
+                        .login_url_request
+                        .take()
+                        .map(|request| request.raw_url)
+                        .unwrap_or_default();
+                    self.last_login_url_info = Some(LoginUrlInfo::Failed { fallback_url });
                 }
                 let download_id = pending
                     .filter(|p| p.purpose == RequestPurpose::DownloadFile)
@@ -16004,5 +16151,195 @@ mod tests {
         );
         assert!(!session.downloading.contains(&12));
         assert!(!session.failed_downloads.contains(&12));
+    }
+
+    #[test]
+    fn b1_force_reply_arms_pending_target() {
+        // B1: an incoming message with `replyMarkupForceReply` arms the
+        // composer's reply-to; outgoing or plain messages do not.
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(1);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateNewMessage","message":{"id":306,"chat_id":21,"is_outgoing":false,"reply_markup":{"@type":"replyMarkupForceReply","input_field_placeholder":""},"content":{"@type":"messageText","text":{"@type":"formattedText","text":"x","entities":[]}}}}"#,
+        );
+        assert_eq!(
+            session.pending_force_reply,
+            Some(ForceReplyTarget {
+                chat_id: ChatId(21),
+                message_id: MessageId(306),
+            })
+        );
+        // Outgoing force-reply does not arm (bots demand replies; we don't).
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateNewMessage","message":{"id":307,"chat_id":21,"is_outgoing":true,"reply_markup":{"@type":"replyMarkupForceReply","input_field_placeholder":""},"content":{"@type":"messageText","text":{"@type":"formattedText","text":"y","entities":[]}}}}"#,
+        );
+        assert_eq!(
+            session.pending_force_reply,
+            Some(ForceReplyTarget {
+                chat_id: ChatId(21),
+                message_id: MessageId(306),
+            })
+        );
+        // A plain incoming message leaves the armed target alone.
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateNewMessage","message":{"id":308,"chat_id":21,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"z","entities":[]}}}}"#,
+        );
+        assert_eq!(
+            session.pending_force_reply,
+            Some(ForceReplyTarget {
+                chat_id: ChatId(21),
+                message_id: MessageId(306),
+            })
+        );
+    }
+
+    #[test]
+    fn b1_password_callback_error_surfaces_wrong_password() {
+        // B1: TDLib error 400 on a `GetCallbackQueryAnswerWithPassword`
+        // request surfaces as "wrong 2-step verification password"; other
+        // errors get the generic bot-timeout note.
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(1);
+        let extra = session.request(
+            RequestPurpose::GetCallbackQueryAnswerWithPassword,
+            Some(ChatId(21)),
+        );
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"error","@extra":"{}","code":400,"message":"PASSWORD_HASH_INVALID"}}"#,
+                extra.0
+            ),
+        );
+        assert_eq!(
+            session
+                .last_callback_answer
+                .as_ref()
+                .map(|answer| answer.text.as_str()),
+            Some("wrong 2-step verification password")
+        );
+        let extra = session.request(
+            RequestPurpose::GetCallbackQueryAnswerWithPassword,
+            Some(ChatId(21)),
+        );
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"error","@extra":"{}","code":502,"message":"Bad Gateway"}}"#,
+                extra.0
+            ),
+        );
+        assert_eq!(
+            session
+                .last_callback_answer
+                .as_ref()
+                .map(|answer| answer.text.as_str()),
+            Some("bot did not answer")
+        );
+    }
+
+    #[test]
+    fn b1_login_url_info_error_degrades_to_url() {
+        // B1: a refused `getLoginUrlInfo` degrades the login button to a
+        // plain URL button press carrying the raw URL (schema 1.8.67 doc
+        // on `getLoginUrl`). Same for a refused `getLoginUrl`.
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(1);
+        let login_request = LoginUrlRequest {
+            chat_id: ChatId(21),
+            message_id: MessageId(301),
+            button_id: 11,
+            raw_url: "https://example.com/login".to_string(),
+        };
+        for purpose in [RequestPurpose::GetLoginUrlInfo, RequestPurpose::GetLoginUrl] {
+            session.login_url_request = Some(login_request.clone());
+            let extra = session.request(purpose, Some(ChatId(21)));
+            apply_json(
+                &mut session,
+                &seq,
+                &sink,
+                &format!(
+                    r#"{{"@type":"error","@extra":"{}","code":400,"message":"BUTTON_ID_INVALID"}}"#,
+                    extra.0
+                ),
+            );
+            assert_eq!(
+                session.last_login_url_info,
+                Some(LoginUrlInfo::Failed {
+                    fallback_url: "https://example.com/login".to_string()
+                })
+            );
+        }
+    }
+
+    #[test]
+    fn b1_get_login_url_http_url_opens() {
+        // B1: a `getLoginUrl` answer (`httpUrl`, schema:7458) with the
+        // `GetLoginUrl` pending purpose lands as `LoginUrlInfo::Open` for
+        // the UI drain.
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(1);
+        let extra = session.request(RequestPurpose::GetLoginUrl, Some(ChatId(21)));
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"httpUrl","@extra":"{}","url":"https://example.com/authed"}}"#,
+                extra.0
+            ),
+        );
+        assert_eq!(
+            session.last_login_url_info,
+            Some(LoginUrlInfo::Open {
+                url: "https://example.com/authed".to_string()
+            })
+        );
+    }
+
+    #[test]
+    fn b1_active_custom_keyboard_rules() {
+        // B1: newest `replyMarkupShowKeyboard` wins; a newer
+        // `replyMarkupRemoveKeyboard` clears; a dismissed one-time
+        // keyboard stays hidden.
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(1);
+        let show = |id: i64| {
+            format!(
+                r#"{{"@type":"updateNewMessage","message":{{"id":{id},"chat_id":21,"is_outgoing":false,"reply_markup":{{"@type":"replyMarkupShowKeyboard","rows":[[{{"@type":"keyboardButton","text":"Yes","type":{{"@type":"keyboardButtonTypeText"}}}}]],"is_persistent":false,"resize_keyboard":false,"one_time":true,"is_personal":false,"force_reply":false,"input_field_placeholder":""}},"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"x","entities":[]}}}}}}}}"#
+            )
+        };
+        let remove = |id: i64| {
+            format!(
+                r#"{{"@type":"updateNewMessage","message":{{"id":{id},"chat_id":21,"is_outgoing":false,"reply_markup":{{"@type":"replyMarkupRemoveKeyboard","is_personal":false}},"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"x","entities":[]}}}}}}}}"#
+            )
+        };
+        apply_json(&mut session, &seq, &sink, &show(401));
+        apply_json(&mut session, &seq, &sink, &show(402));
+        let messages = &session.histories.get(&21).expect("history").messages;
+        let none: HashSet<(i64, i64)> = HashSet::new();
+        // Newest show-keyboard message wins.
+        let active = active_custom_keyboard(messages, &none).expect("keyboard");
+        assert_eq!(active.1, MessageId(402));
+        // A dismissed one-time keyboard stays hidden.
+        let dismissed: HashSet<(i64, i64)> = [(21, 402)].into_iter().collect();
+        assert!(active_custom_keyboard(messages, &dismissed).is_none());
+        // A newer remove-keyboard clears everything.
+        apply_json(&mut session, &seq, &sink, &remove(403));
+        let messages = &session.histories.get(&21).expect("history").messages;
+        assert!(active_custom_keyboard(messages, &none).is_none());
     }
 }

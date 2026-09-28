@@ -255,6 +255,8 @@ impl ComposerEdit {
             | MessageContent::ScreenshotTaken
             // M2: rich messages are edited in the rich editor, not here.
             | MessageContent::RichMessage(_)
+            // B1: games are not editable.
+            | MessageContent::Game { .. }
             | MessageContent::Unsupported { .. } => return None,
         };
         Some(Self {

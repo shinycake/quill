@@ -44,11 +44,12 @@ use quill::settings::{
 };
 use quill::state::{
     ActiveCall, ActiveGroupCall, AdminListFetch, AdminRightsFetch, CallSummary, ChatEventLogFetch,
-    ChatSearchJump, ChatStatisticsFetch, ChatSummary, ContactRow, ForwardResult, HistoryMessage,
-    InfoPanelTarget, InviteLinkFetch, JoinRequestFetch, MemberListFilter, OutboxReceipt,
-    RequestPurpose, SearchStatus, Session, SponsoredReportFlight, StoryPostOutcome, StoryPostState,
-    SupergroupMembersFetch, WelcomeMessagesFetch, effective_preview, event_log_relative_time,
-    outgoing_status_label, unix_ms_now, unread_badge_text,
+    ChatSearchJump, ChatStatisticsFetch, ChatSummary, ContactRow, ForceReplyTarget, ForwardResult,
+    HistoryMessage, InfoPanelTarget, InviteLinkFetch, JoinRequestFetch, LoginUrlRequest,
+    MemberListFilter, OutboxReceipt, RequestPurpose, SearchStatus, Session, SponsoredReportFlight,
+    StoryPostOutcome, StoryPostState,
+    SupergroupMembersFetch, WelcomeMessagesFetch, active_custom_keyboard, effective_preview,
+    event_log_relative_time, outgoing_status_label, unix_ms_now, unread_badge_text,
 };
 use quill::story_composer::{StoryComposer, StoryExpiry, StoryMediaKind, StoryPrivacy};
 use quill::story_viewer::{StoryViewer, StoryViewerItem, StoryViewerKind, collect_story_items};
@@ -58,13 +59,14 @@ use quill::telegram::envelope::{
     ChannelMemberStatus, ChatAdminRights, ChatAdministratorEntry, ChatDraft, ChatEventAction,
     ChatFolderInfo, ChatFolderSpec, ChatKind, ChatList, ChatNotificationSettings, ChatPermissions,
     ChatStatistics, DEFAULT_EMOJI_REACTIONS, ForumTopic, InlineKeyboardButton,
-    InlineKeyboardButtonStyle, InlineKeyboardButtonType, MUTE_FOR_1_HOUR, MUTE_FOR_2_DAYS,
-    MUTE_FOR_8_HOURS, MUTE_FOREVER, MessageContent, MessageInteractionInfo, MessageSchedulingState,
-    MessageSender, NotificationSettingsScope, NotificationSound, ParsedChatEvent, ParsedFile,
-    ParsedGroupCallParticipant, ParsedMessage, ParsedSecretChat, ParsedStory, ParsedWelcomeMessage,
-    PollContent, PollOption, PollType, ScopeNotificationSettings, SecretChatState,
-    SpeechRecognition, SponsoredMessage, StatisticalGraph, StatisticalValue, StorageFileTypeStats,
-    StorageStats, call_entry_label, chat_ttl_service_label, effective_content, format_ttl_setting,
+    InlineKeyboardButtonStyle, InlineKeyboardButtonType, KeyboardButton, KeyboardButtonType,
+    LoginUrlInfo, MUTE_FOR_1_HOUR, MUTE_FOR_2_DAYS, MUTE_FOR_8_HOURS, MUTE_FOREVER, MessageContent,
+    MessageInteractionInfo, MessageSchedulingState, MessageSender, NotificationSettingsScope,
+    NotificationSound, ParsedChatEvent, ParsedFile, ParsedGroupCallParticipant, ParsedMessage,
+    ParsedSecretChat, ParsedStory, ParsedWelcomeMessage, PollContent, PollOption, PollType,
+    ReplyKeyboard, ReplyMarkup, ScopeNotificationSettings, SecretChatState, SpeechRecognition,
+    SponsoredMessage, StatisticalGraph, StatisticalValue, StorageFileTypeStats, StorageStats,
+    call_entry_label, chat_ttl_service_label, effective_content, format_ttl_setting,
     toggle_chosen_emoji_reaction,
 };
 use quill::telegram::requests::SelfDestructSend;
@@ -621,6 +623,113 @@ pub struct MemberDialog {
     add_open: bool,
     add_search: Entity<TextareaState>,
     add_selected: Vec<i64>,
+}
+
+/// B1: password prompt for an `inlineKeyboardButtonTypeCallbackWithPassword`
+/// button press (TDLib 1.8.67, `schema/td_api.tl:3789`). Submits the entered
+/// 2-step password with the button's callback `data` via
+/// `callbackQueryPayloadDataWithPassword` (schema:7740); the `data` is
+/// cleared from memory after the send.
+pub struct CallbackPasswordDialog {
+    chat_id: ChatId,
+    message_id: MessageId,
+    data: Vec<u8>,
+    password_input: Entity<TextareaState>,
+}
+
+impl CallbackPasswordDialog {
+    fn new(
+        window: &mut Window,
+        cx: &mut Context<QuillApp>,
+        chat_id: ChatId,
+        message_id: MessageId,
+        data: Vec<u8>,
+    ) -> Self {
+        let password_input = cx.new(|cx| {
+            TextareaState::new(window, cx)
+                .placeholder("2-step verification password")
+                .auto_grow(1, 1)
+                .submit_on_enter(false)
+        });
+        Self {
+            chat_id,
+            message_id,
+            data,
+            password_input,
+        }
+    }
+}
+
+/// B1: a `loginUrlInfoRequestConfirmation` (schema 1.8.67,
+/// `schema/td_api.tl:12985` / `:3869`) awaiting user consent before the
+/// `getLoginUrl` round-trip.
+pub struct LoginUrlConfirm {
+    domain: String,
+    request_write_access: bool,
+    request: LoginUrlRequest,
+}
+
+/// B1: which dialog a modal backdrop click closes.
+#[derive(Clone, Copy)]
+enum B1DialogClose {
+    CallbackPassword,
+    LoginUrlConfirm,
+}
+
+/// B1: centered modal shell for the bot-keyboard dialogs (mirrors the
+/// `g1_modal` visuals): a backdrop sibling closes on click, the panel
+/// never bubbles into it.
+fn b1_modal(
+    id_prefix: &str,
+    close: B1DialogClose,
+    title: &str,
+    body: AnyElement,
+    cx: &mut Context<QuillApp>,
+) -> AnyElement {
+    let title = title.to_string();
+    div()
+        .id(format!("{id_prefix}-overlay"))
+        .absolute()
+        .top_0()
+        .left_0()
+        .right_0()
+        .bottom_0()
+        .flex()
+        .items_center()
+        .justify_center()
+        .child(
+            div()
+                .id(format!("{id_prefix}-backdrop"))
+                .absolute()
+                .top_0()
+                .left_0()
+                .right_0()
+                .bottom_0()
+                .bg(rgba(0x000000e6))
+                .on_click(cx.listener(move |this, _, _, cx| match close {
+                    B1DialogClose::CallbackPassword => this.close_callback_password_dialog(cx),
+                    B1DialogClose::LoginUrlConfirm => {
+                        this.login_url_confirm = None;
+                        cx.notify();
+                    }
+                })),
+        )
+        .child(
+            div()
+                .id(format!("{id_prefix}-panel"))
+                .flex()
+                .flex_col()
+                .gap_3()
+                .p_5()
+                .rounded_lg()
+                .bg(rgb(0x161b22))
+                .border_1()
+                .border_color(rgb(0x30363d))
+                .w(px(420.))
+                .child(div().text_lg().font_semibold().child(title))
+                .child(body),
+        )
+        .into_any_element()
 }
 
 impl MemberDialog {
@@ -1355,6 +1464,13 @@ pub struct QuillApp {
     create_chat_dialog: Option<CreateChatDialog>,
     /// Slice G1: member-management dialog (tabs + add section).
     member_dialog: Option<MemberDialog>,
+    /// B1: password prompt for `inlineKeyboardButtonTypeCallbackWithPassword`.
+    callback_password_dialog: Option<CallbackPasswordDialog>,
+    /// B1: `loginUrlInfoRequestConfirmation` domain/url awaiting user consent.
+    login_url_confirm: Option<LoginUrlConfirm>,
+    /// B1: one-time custom keyboards the user already tapped
+    /// (`(chat_id, message_id)`), hidden locally after use.
+    dismissed_keyboards: std::collections::HashSet<(i64, i64)>,
     /// Slice G1: default chat permissions editor.
     permissions_dialog: Option<PermissionsDialog>,
     /// Slice G1: public username editor.
@@ -2769,7 +2885,7 @@ impl QuillApp {
                 (
                     ConnectUiStatus::DemoReadyChats,
                     None,
-                    "screenshot demo — bot chat with inline keyboard".into(),
+                    "screenshot demo — B1 bot keyboards: inline buttons, custom keyboard, force reply".into(),
                     AuthorizationState::Ready,
                 )
             }
@@ -3303,6 +3419,9 @@ impl QuillApp {
             admin_dialog: None,
             create_chat_dialog: None,
             member_dialog: None,
+            callback_password_dialog: None,
+            login_url_confirm: None,
+            dismissed_keyboards: std::collections::HashSet::new(),
             permissions_dialog: None,
             username_dialog: None,
             restrict_dialog: None,
@@ -4265,7 +4384,9 @@ impl QuillApp {
                 app.demo_seq.store(session.last_seq, Ordering::SeqCst);
                 apply_ready_bot_keyboard(session, &app.demo_sink, &app.demo_seq);
             }
-            app.status_note = "screenshot demo — bot chat with inline keyboard".into();
+            app.status_note =
+                "screenshot demo — bot keyboards: inline buttons, custom keyboard, force reply"
+                    .into();
         }
         if matches!(demo, Some(ScreenshotDemo::ReadyRichMessage)) {
             if let Some(session) = app.demo_session.as_mut() {
@@ -4506,6 +4627,19 @@ impl QuillApp {
             self.present_callback_answer(answer, cx);
             progressed = true;
         }
+        // B1: `getLoginUrlInfo` / `getLoginUrl` answers to login-URL button
+        // presses. The button's request context (kept in the session while
+        // the request was in flight) backs the confirmation dialog and the
+        // error degrade.
+        let login_url = self.live.as_mut().and_then(|live| {
+            let info = live.driver.session.last_login_url_info.take()?;
+            let request = live.driver.session.login_url_request.take();
+            Some((info, request))
+        });
+        if let Some((info, request)) = login_url {
+            self.present_login_url_info(info, request, cx);
+            progressed = true;
+        }
         self.finish_successful_sends(cx);
         if progressed || send_failed {
             cx.notify();
@@ -4528,6 +4662,20 @@ impl QuillApp {
             .unwrap_or_default();
         for chat_id in clicks {
             self.select_listed_chat(chat_id, window, cx);
+        }
+        // B1: force-reply — an incoming message demanded a reply; drain
+        // from the live or demo session and arm the composer.
+        let force_target = self
+            .live
+            .as_mut()
+            .and_then(|live| live.driver.session.pending_force_reply.take())
+            .or_else(|| {
+                self.demo_session
+                    .as_mut()
+                    .and_then(|session| session.pending_force_reply.take())
+            });
+        if let Some(target) = force_target {
+            self.apply_force_reply(target, window, cx);
         }
         let queued: Vec<QueuedNotification> = self
             .live
@@ -6546,7 +6694,9 @@ impl QuillApp {
                         | MessageContent::Unsupported { .. }
                         // M2: rich messages are not editable through the
                         // legacy text/caption path.
-                        | MessageContent::RichMessage(_) => {}
+                        | MessageContent::RichMessage(_)
+                        // B1: games carry no editable caption.
+                        | MessageContent::Game { .. } => {}
                     }
                 }
             }
@@ -7063,6 +7213,504 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// B1: login-URL button (`inlineKeyboardButtonTypeLoginUrl`, schema
+    /// 1.8.67 line 3780). Resolves the button via `getLoginUrlInfo`
+    /// (schema:12985); the answer drains in `poll_live`. TDLib errors
+    /// degrade the button to a plain URL press (schema:12993 doc on
+    /// `getLoginUrl`); without a live connection we open the raw URL
+    /// straight away.
+    fn press_login_url(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        button_id: i64,
+        url: &str,
+        cx: &mut Context<Self>,
+    ) {
+        let sent = self.live.as_mut().map(|live| {
+            live.driver
+                .send_login_url_info(chat_id, message_id, button_id, url)
+        });
+        match sent {
+            Some(Ok(_)) => {}
+            _ => {
+                // Not connected, or TDLib refused the send: plain URL-button
+                // behavior is the honest fallback.
+                self.open_message_url(url, cx);
+            }
+        }
+    }
+
+    /// B1: act on a `loginUrlInfo*` / `httpUrl` answer drained by
+    /// `poll_live`. `loginUrlInfoOpen` (and the `httpUrl` from `getLoginUrl`)
+    /// opens the authorized URL in the OS browser;
+    /// `loginUrlInfoRequestConfirmation` shows the TDLib-reported domain
+    /// for consent, then fetches the authorized URL via `getLoginUrl`
+    /// (schema 1.8.67, line 12993); a failed resolution opens the button's
+    /// raw URL (schema:12993 doc).
+    fn present_login_url_info(
+        &mut self,
+        info: LoginUrlInfo,
+        request: Option<LoginUrlRequest>,
+        cx: &mut Context<Self>,
+    ) {
+        match info {
+            LoginUrlInfo::Open { url } => self.open_message_url(&url, cx),
+            LoginUrlInfo::RequestConfirmation {
+                domain,
+                request_write_access,
+            } => match request {
+                Some(request) => {
+                    self.login_url_confirm = Some(LoginUrlConfirm {
+                        domain,
+                        request_write_access,
+                        request,
+                    });
+                    cx.notify();
+                }
+                None => self.set_status_note("Login URL unavailable.", cx),
+            },
+            LoginUrlInfo::Failed { fallback_url } => {
+                if fallback_url.is_empty() {
+                    self.set_status_note("Login URL unavailable.", cx);
+                } else {
+                    self.open_message_url(&fallback_url, cx);
+                }
+            }
+        }
+    }
+
+    /// B1: confirm a `loginUrlInfoRequestConfirmation` dialog — the user
+    /// consented, so fetch the authorized URL via `getLoginUrl` (schema
+    /// 1.8.67, line 12993; TGX `TGInlineKeyboard.getLoginCallback` does
+    /// exactly this). Without a live connection the button's raw URL opens
+    /// instead.
+    fn confirm_login_url(&mut self, cx: &mut Context<Self>) {
+        let Some(confirm) = self.login_url_confirm.take() else {
+            cx.notify();
+            return;
+        };
+        let sent = self.live.as_mut().map(|live| {
+            live.driver
+                .send_login_url(&confirm.request, confirm.request_write_access)
+        });
+        if !matches!(sent, Some(Ok(_))) {
+            self.open_message_url(&confirm.request.raw_url, cx);
+        }
+        cx.notify();
+    }
+
+    /// B1: open the password prompt for an
+    /// `inlineKeyboardButtonTypeCallbackWithPassword` button press
+    /// (schema 1.8.67, line 3789).
+    fn open_callback_password_dialog(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        data: Vec<u8>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.callback_password_dialog = Some(CallbackPasswordDialog::new(
+            window, cx, chat_id, message_id, data,
+        ));
+        if let Some(dialog) = &self.callback_password_dialog {
+            dialog
+                .password_input
+                .update(cx, |input, cx| input.focus(window, cx));
+        }
+        cx.notify();
+    }
+
+    /// B1: close the password prompt without submitting.
+    fn close_callback_password_dialog(&mut self, cx: &mut Context<Self>) {
+        self.callback_password_dialog = None;
+        cx.notify();
+    }
+
+    /// B1: submit the password dialog — sends
+    /// `callbackQueryPayloadDataWithPassword` (schema 1.8.67, line 7740).
+    /// The password is dropped after the send; a wrong password surfaces
+    /// as "wrong 2-step verification password" via the error drain in
+    /// `Session::apply_payload` (TDLib error 400).
+    fn submit_callback_password_dialog(&mut self, cx: &mut Context<Self>) {
+        let Some(dialog) = self.callback_password_dialog.take() else {
+            return;
+        };
+        let password = dialog.password_input.read(cx).value().to_string();
+        let sent = self.live.as_mut().map(|live| {
+            live.driver.send_callback_query_with_password(
+                dialog.chat_id,
+                dialog.message_id,
+                &password,
+                &dialog.data,
+            )
+        });
+        // The password is dropped here — the TDLib send above is its only
+        // use; speculative zeroization was removed (DECISIONS.md).
+        drop(password);
+        if !matches!(sent, Some(Ok(_))) {
+            self.set_status_note("Couldn't reach Telegram; try again.", cx);
+        }
+        cx.notify();
+    }
+
+    /// B1: game button (`inlineKeyboardButtonTypeCallbackGame`, schema
+    /// 1.8.67 line 3792). Sends `callbackQueryPayloadGame` carrying the
+    /// message's `messageGame` short name (schema:7743) — the TDLib
+    /// game-launch flow; the answer may carry a URL to open. Games UI is
+    /// out of this slice, so an answer URL opens in the browser.
+    fn press_game_button(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        game_short_name: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(game_short_name) = game_short_name.filter(|name| !name.is_empty()) else {
+            self.set_status_note("Game data missing; can't launch.", cx);
+            return;
+        };
+        let sent = self.live.as_mut().map(|live| {
+            live.driver
+                .send_game_callback_query(chat_id, message_id, &game_short_name)
+        });
+        if !matches!(sent, Some(Ok(_))) {
+            self.set_status_note("Couldn't reach Telegram; try again.", cx);
+        }
+    }
+
+    /// B1: user button (`inlineKeyboardButtonTypeUser`, schema 1.8.67 line
+    /// 3801) — open the private chat with the user. Reuses a listed
+    /// private chat when one exists; otherwise `createPrivateChat` opens
+    /// it via the `CreatePrivateChat` pending purpose.
+    fn open_user_chat(&mut self, user_id: i64, window: &mut Window, cx: &mut Context<Self>) {
+        let listed = self.live.as_ref().and_then(|live| {
+            live.driver
+                .session
+                .chats
+                .values()
+                .filter(|chat| chat.supported())
+                .find(|chat| {
+                    matches!(&chat.kind, ChatKind::Private { user_id: peer } if peer.0 == user_id)
+                })
+                .map(|chat| chat.id)
+        });
+        if let Some(chat_id) = listed {
+            self.select_listed_chat(chat_id, window, cx);
+            return;
+        }
+        let sent = self
+            .live
+            .as_mut()
+            .map(|live| live.driver.create_private_chat_for(user_id));
+        match sent {
+            Some(Ok(Some(_))) => {}
+            _ => self.set_status_note("Couldn't open the user's chat.", cx),
+        }
+    }
+
+    /// B1: the active custom keyboard for the open chat, if any (live or
+    /// demo session).
+    fn open_chat_custom_keyboard(&self) -> Option<(ChatId, MessageId, ReplyKeyboard)> {
+        let session = self.session()?;
+        let chat_id = session.open_chat?;
+        let history = session.histories.get(&chat_id.0)?;
+        active_custom_keyboard(&history.messages, &self.dismissed_keyboards)
+    }
+
+    /// B1: the custom keyboard panel rendered above the composer, or
+    /// `None` when the open chat has no active `replyMarkupShowKeyboard`.
+    /// `resize_keyboard` renders compact; `is_persistent` has no visual
+    /// difference (it only tells TDLib to keep showing the keyboard).
+    fn custom_keyboard_panel(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let (chat_id, message_id, keyboard) = self.open_chat_custom_keyboard()?;
+        let mut grid = div()
+            .id(("custom-keyboard", message_id.0 as u64))
+            .flex()
+            .flex_col()
+            .gap_1()
+            .px_3();
+        if keyboard.resize_keyboard {
+            grid = grid.py_1();
+        } else {
+            grid = grid.py_2();
+        }
+        grid = grid.border_t_1().border_color(rgb(0x30363d));
+        for (row_index, row) in keyboard.rows.iter().enumerate() {
+            if row.is_empty() {
+                continue;
+            }
+            let mut line = div()
+                .id(format!("custom-keyboard-row-{}-{row_index}", message_id.0))
+                .flex()
+                .gap_1();
+            for (button_index, button) in row.iter().enumerate() {
+                line = line.child(
+                    Self::custom_keyboard_button(
+                        chat_id,
+                        message_id,
+                        row_index,
+                        button_index,
+                        button,
+                        keyboard.one_time,
+                        cx,
+                    )
+                    .flex_1(),
+                );
+            }
+            grid = grid.child(line);
+        }
+        Some(grid.into_any_element())
+    }
+
+    /// B1: tap a `keyboardButtonTypeText` button — sends the button's text
+    /// through the normal composer path (same as typing it and pressing
+    /// Enter). A one-time keyboard hides first, locally and via
+    /// `deleteChatReplyMarkup` (schema 1.8.67, line 13183).
+    fn press_custom_keyboard_text(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        text: &str,
+        one_time: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if one_time {
+            self.dismiss_custom_keyboard(chat_id, message_id, cx);
+        }
+        self.submit_composer(text.to_string(), window, cx);
+    }
+
+    /// B1: hide a one-time custom keyboard locally and tell TDLib
+    /// (`deleteChatReplyMarkup`). Best-effort: the local hide stands even
+    /// when offline.
+    fn dismiss_custom_keyboard(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        cx: &mut Context<Self>,
+    ) {
+        self.dismissed_keyboards.insert((chat_id.0, message_id.0));
+        if let Some(live) = self.live.as_mut() {
+            let _ = live.driver.delete_chat_reply_markup(chat_id, message_id);
+        }
+        cx.notify();
+    }
+
+    /// B1: apply a drained force-reply target — set the composer's
+    /// reply-to and focus the composer (TGX behavior for
+    /// `replyMarkupForceReply`). Only when the target chat is open, the
+    /// message still exists, and the user has no reply draft already.
+    fn apply_force_reply(
+        &mut self,
+        target: ForceReplyTarget,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let ready = self
+            .session()
+            .filter(|session| session.open_chat == Some(target.chat_id))
+            .and_then(|session| {
+                session
+                    .histories
+                    .get(&target.chat_id.0)
+                    .and_then(|history| history.messages.get(&target.message_id.0))
+                    .map(effective_preview)
+            });
+        let Some(preview) = ready else {
+            return;
+        };
+        if self.pending_reply.is_some() {
+            return;
+        }
+        self.begin_reply_to(
+            ComposerReplyTo::new(target.chat_id, target.message_id, preview),
+            window,
+            cx,
+        );
+    }
+
+    /// B1: set the status-bar note and refresh.
+    fn set_status_note(&mut self, note: &str, cx: &mut Context<Self>) {
+        self.status_note = note.into();
+        cx.notify();
+    }
+
+    /// B1: dispatch to whichever bot-keyboard dialog is open.
+    fn b1_dialogs_overlay(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        if self.callback_password_dialog.is_some() {
+            return Some(self.callback_password_dialog_overlay(cx));
+        }
+        if self.login_url_confirm.is_some() {
+            return Some(self.login_url_confirm_overlay(cx));
+        }
+        None
+    }
+
+    /// B1: password-prompt modal for `CallbackWithPassword` presses.
+    fn callback_password_dialog_overlay(&self, cx: &mut Context<Self>) -> AnyElement {
+        let dialog = self
+            .callback_password_dialog
+            .as_ref()
+            .expect("b1_dialogs_overlay checked is_some");
+        let body = div()
+            .flex()
+            .flex_col()
+            .gap_3()
+            .child(
+                div()
+                    .text_sm()
+                    .text_color(rgb(0x8b949e))
+                    .child("This button is protected by your two-step verification password."),
+            )
+            .child(Textarea::new(&dialog.password_input).h(px(40.)))
+            .child(
+                div()
+                    .flex()
+                    .justify_end()
+                    .gap_2()
+                    .child(
+                        Button::new("b1-password-cancel")
+                            .label("Cancel")
+                            .ghost()
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.close_callback_password_dialog(cx);
+                            })),
+                    )
+                    .child(
+                        Button::new("b1-password-submit")
+                            .label("Send")
+                            .primary()
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.submit_callback_password_dialog(cx);
+                            })),
+                    ),
+            )
+            .into_any_element();
+        b1_modal(
+            "b1-callback-password",
+            B1DialogClose::CallbackPassword,
+            "Enter 2-step password",
+            body,
+            cx,
+        )
+    }
+
+    /// B1: `loginUrlInfoRequestConfirmation` consent dialog — shows the
+    /// TDLib-reported domain before fetching the authorized URL.
+    fn login_url_confirm_overlay(&self, cx: &mut Context<Self>) -> AnyElement {
+        let confirm = self.login_url_confirm.as_ref();
+        let domain = confirm
+            .map(|confirm| confirm.domain.clone())
+            .unwrap_or_default();
+        let request_write_access = confirm
+            .map(|confirm| confirm.request_write_access)
+            .unwrap_or(false);
+        let mut body =
+            div()
+                .flex()
+                .flex_col()
+                .gap_3()
+                .child(div().text_sm().text_color(rgb(0x8b949e)).child(format!(
+                    "The bot wants to open a login URL for {domain}. Open it in your browser?"
+                )));
+        if request_write_access {
+            body = body.child(
+                div()
+                    .text_sm()
+                    .text_color(rgb(0x8b949e))
+                    .child("The bot also asks for permission to send you messages."),
+            );
+        }
+        let body = body
+            .child(
+                div()
+                    .flex()
+                    .justify_end()
+                    .gap_2()
+                    .child(
+                        Button::new("b1-login-cancel")
+                            .label("Cancel")
+                            .ghost()
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.login_url_confirm = None;
+                                cx.notify();
+                            })),
+                    )
+                    .child(
+                        Button::new("b1-login-open")
+                            .label("Open")
+                            .primary()
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.confirm_login_url(cx);
+                            })),
+                    ),
+            )
+            .into_any_element();
+        b1_modal(
+            "b1-login-url",
+            B1DialogClose::LoginUrlConfirm,
+            "Open login URL?",
+            body,
+            cx,
+        )
+    }
+
+    /// B1: one custom keyboard button. `Text` sends the text; `WebApp` opens
+    /// in the browser (honest fallback — no in-app web view yet); request
+    /// contact/location/poll/user/chat/bot variants stay disabled with
+    /// honest tooltips — Quill has no permission/selection flows for them.
+    fn custom_keyboard_button(
+        chat_id: ChatId,
+        message_id: MessageId,
+        row_index: usize,
+        button_index: usize,
+        button: &KeyboardButton,
+        one_time: bool,
+        cx: &mut Context<QuillApp>,
+    ) -> Button {
+        let element = Button::new(format!(
+            "kbd-btn-{}-{row_index}-{button_index}",
+            message_id.0
+        ))
+        .label(button.text.clone())
+        .tooltip(Self::custom_keyboard_button_tooltip(&button.kind));
+        match &button.kind {
+            KeyboardButtonType::Text => {
+                let text = button.text.clone();
+                element.on_click(cx.listener(move |this, _, window, cx| {
+                    this.press_custom_keyboard_text(
+                        chat_id, message_id, &text, one_time, window, cx,
+                    );
+                }))
+            }
+            KeyboardButtonType::WebApp { url } => {
+                let url = url.clone();
+                element.on_click(cx.listener(move |this, _, _, cx| {
+                    this.open_message_url(&url, cx);
+                }))
+            }
+            _ => element.disabled(true),
+        }
+    }
+
+    /// B1: short hint for unsupported custom keyboard buttons.
+    fn custom_keyboard_button_tooltip(kind: &KeyboardButtonType) -> &'static str {
+        match kind {
+            KeyboardButtonType::Text | KeyboardButtonType::WebApp { .. } => "",
+            KeyboardButtonType::RequestPhoneNumber => {
+                "Sharing your phone number is not supported yet"
+            }
+            KeyboardButtonType::RequestLocation => "Sharing your location is not supported yet",
+            KeyboardButtonType::RequestPoll => "Creating a poll is not supported yet",
+            KeyboardButtonType::RequestUsers => "User selection is not supported yet",
+            KeyboardButtonType::RequestChat => "Chat selection is not supported yet",
+            KeyboardButtonType::RequestManagedBot => "Bot setup is not supported yet",
+            KeyboardButtonType::Unknown { .. } => "Unsupported button",
+        }
+    }
     /// `clickChatSponsoredMessage` for a sponsored row interaction. `is_media_click`
     /// is true when the user opened the row's media; false for the sponsor
     /// button/link. Demo sessions have no live driver, so the click is a no-op.
@@ -29174,6 +29822,11 @@ impl Render for QuillApp {
             .when_some(self.g1_dialogs_overlay(cx), |this, overlay| {
                 this.child(overlay)
             })
+            // B1: bot-keyboard dialogs (2-step password prompt, login-URL
+            // confirmation) above everything else.
+            .when_some(self.b1_dialogs_overlay(cx), |this, overlay| {
+                this.child(overlay)
+            })
             // Parity slice: folder manage / editor / delete-confirm above
             // everything else.
             .when_some(self.folder_overlays(cx), |this, overlay| {
@@ -29574,6 +30227,11 @@ impl QuillApp {
                         })
                         // Phase D3b: admin-management dialog above the composer.
                         .when_some(self.admin_dialog_panel(cx), |this, panel| this.child(panel))
+                        // B1: bot custom keyboard (`replyMarkupShowKeyboard`)
+                        // above the composer.
+                        .when_some(self.custom_keyboard_panel(cx), |this, panel| {
+                            this.child(panel)
+                        })
                         // Phase 3.3: `/` command menu above the composer.
                         .when_some(self.command_menu_dropdown(cx), |this, panel| {
                             this.child(panel)
@@ -33026,30 +33684,40 @@ fn apply_ready_bot_chat(session: &mut Session, sink: &Arc<MemorySink>, seq: &Ato
     }
 }
 
-/// `ReadyBotKeyboard` fixture (Phase 3.2): like `apply_ready_bot_chat`,
-/// but the bot's message carries a `replyMarkupInlineKeyboard` (schema 1.8.67
-/// line 3855): a URL row, a callback + switchInline row, and a copy-text +
-/// unknown-type row (the unknown button renders disabled).
+/// `ReadyBotKeyboard` fixture (Phase 3.2, extended in B1): a bot chat
+/// exercising every B1 keyboard path — inline buttons (url / callback /
+/// password-callback / game / user / web-app / unsupported buy), a
+/// `messageGame` for the game payload, a custom keyboard with one-time
+/// semantics, and a force-reply message that arms the composer.
 fn apply_ready_bot_keyboard(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
     let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
     session.open_chat(ChatId(21));
-    let info_extra = session.request(RequestPurpose::GetUserFullInfo, Some(ChatId(21)));
-    let keyboard_message = r#"{"@type":"updateNewMessage","message":{"id":301,"chat_id":21,"is_outgoing":false,"reply_markup":{"@type":"replyMarkupInlineKeyboard","rows":[[{"@type":"inlineKeyboardButton","text":"Visit site","icon_custom_emoji_id":0,"style":{"@type":"buttonStylePrimary"},"type":{"@type":"inlineKeyboardButtonTypeUrl","url":"https://example.com"}}],[{"@type":"inlineKeyboardButton","text":"Vote","icon_custom_emoji_id":0,"style":{"@type":"buttonStyleSuccess"},"type":{"@type":"inlineKeyboardButtonTypeCallback","data":"AQID"}},{"@type":"inlineKeyboardButton","text":"Search here","icon_custom_emoji_id":0,"style":{"@type":"buttonStyleDefault"},"type":{"@type":"inlineKeyboardButtonTypeSwitchInline","query":"cats","target_chat":{"@type":"targetChatCurrent"}}}],[{"@type":"inlineKeyboardButton","text":"Copy code","icon_custom_emoji_id":0,"style":{"@type":"buttonStyleDefault"},"type":{"@type":"inlineKeyboardButtonTypeCopyText","text":"PROMO-42"}},{"@type":"inlineKeyboardButton","text":"Mystery","icon_custom_emoji_id":0,"style":{"@type":"buttonStyleDefault"},"type":{"@type":"inlineKeyboardButtonTypeQuantum"}}]],"force_reply":false},"content":{"@type":"messageText","text":{"@type":"formattedText","text":"Tap a button below — this message has an inline keyboard.","entities":[]}}}}"#.to_string();
-    let jsons = [
-        r#"{"@type":"updateUser","user":{"id":21,"first_name":"Demo","type":{"@type":"userTypeBot","can_be_edited":false,"can_join_groups":false,"can_read_all_group_messages":false,"has_main_web_app":false,"has_topics":false,"allows_users_to_create_topics":false,"can_manage_bots":false,"is_inline":false,"inline_query_placeholder":"","supports_guest_queries":false,"is_guard":false,"need_location":false,"can_connect_to_business":false,"can_be_added_to_attachment_menu":false,"active_user_count":0}}}"#
-            .to_string(),
-        r#"{"@type":"updateNewChat","chat":{"id":21,"title":"Demo Bot","type":{"@type":"chatTypePrivate","user_id":21},"unread_count":0}}"#
-            .to_string(),
-        r#"{"@type":"updateChatPosition","chat_id":21,"position":{"@type":"chatPosition","list":{"@type":"chatListMain"},"order":"40","is_pinned":false}}"#
-            .to_string(),
-        keyboard_message,
-        format!(
-            r#"{{"@type":"userFullInfo","@extra":"{}","bot_info":{{"@type":"botInfo","short_description":"A demo bot","description":"Demo Bot answers questions and shows how the info panel looks. It understands /start, /help and /ping.","commands":[{{"@type":"botCommand","command":"start","description":"Start the bot","is_ephemeral":false}}]}}}}"#,
-            info_extra.0,
-        ),
+    // The chat must exist before its messages arrive (mirrors
+    // `apply_ready_bot_chat`); without these updates the fixture renders
+    // "No chat selected".
+    let chat_jsons = [
+        r#"{"@type":"updateUser","user":{"id":21,"first_name":"Demo","type":{"@type":"userTypeBot","can_be_edited":false,"can_join_groups":false,"can_read_all_group_messages":false,"has_main_web_app":false,"has_topics":false,"allows_users_to_create_topics":false,"can_manage_bots":false,"is_inline":false,"inline_query_placeholder":"","supports_guest_queries":false,"is_guard":false,"need_location":false,"can_connect_to_business":false,"can_be_added_to_attachment_menu":false,"active_user_count":0}}}"#,
+        r#"{"@type":"updateNewChat","chat":{"id":21,"title":"Demo Bot","type":{"@type":"chatTypePrivate","user_id":21},"unread_count":0}}"#,
+        r#"{"@type":"updateChatPosition","chat_id":21,"position":{"@type":"chatPosition","list":{"@type":"chatListMain"},"order":"40","is_pinned":false}}"#,
     ];
-    for json in jsons {
-        if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
+    for raw in chat_jsons {
+        if let Some(owned) = copy_and_parse(raw, seq, &dyn_sink) {
+            session.apply(owned);
+        }
+    }
+    let bot_rows = r#"{"@type":"updateNewMessage","message":{"id":301,"chat_id":21,"is_outgoing":false,"reply_markup":{"@type":"replyMarkupInlineKeyboard","rows":[[{"@type":"inlineKeyboardButton","text":"Open site","type":{"@type":"inlineKeyboardButtonTypeUrl","url":"https://example.com/"}},{"@type":"inlineKeyboardButton","text":"Vote","type":{"@type":"inlineKeyboardButtonTypeCallback","data":"dm90ZTox"}}],[{"@type":"inlineKeyboardButton","text":"Secret","type":{"@type":"inlineKeyboardButtonTypeCallbackWithPassword","data":"c2VjcmV0OjE="}},{"@type":"inlineKeyboardButton","text":"Play","type":{"@type":"inlineKeyboardButtonTypeCallbackGame"}},{"@type":"inlineKeyboardButton","text":"Bot info","type":{"@type":"inlineKeyboardButtonTypeUser","user_id":7}}],[{"@type":"inlineKeyboardButton","text":"Mini app","type":{"@type":"inlineKeyboardButtonTypeWebApp","url":"https://example.com/app"}},{"@type":"inlineKeyboardButton","text":"Buy","type":{"@type":"inlineKeyboardButtonTypeBuy"}}]]},"content":{"@type":"messageText","text":{"@type":"formattedText","text":"Pick an inline action:","entities":[]}}}}"#;
+    let game_message = r#"{"@type":"updateNewMessage","message":{"id":302,"chat_id":21,"is_outgoing":false,"reply_markup":{"@type":"replyMarkupInlineKeyboard","rows":[[{"@type":"inlineKeyboardButton","text":"Play chess","type":{"@type":"inlineKeyboardButtonTypeCallbackGame"}}]]},"content":{"@type":"messageGame","game":{"@type":"game","id":"901","short_name":"chess","title":"Chess","text":{"@type":"formattedText","text":"Challenge me!","entities":[]},"description":"A classic.","photo":null,"animation":null}}}}"#;
+    let login_message = r#"{"@type":"updateNewMessage","message":{"id":303,"chat_id":21,"is_outgoing":false,"reply_markup":{"@type":"replyMarkupInlineKeyboard","rows":[[{"@type":"inlineKeyboardButton","text":"Log in","type":{"@type":"inlineKeyboardButtonTypeLoginUrl","id":11,"url":"https://example.com/login","forward_text":"Log in to Example","bot_username":"demo_bot","request_write_access":false}}]]},"content":{"@type":"messageText","text":{"@type":"formattedText","text":"Log in to continue:","entities":[]}}}}"#;
+    let keyboard_message = r#"{"@type":"updateNewMessage","message":{"id":304,"chat_id":21,"is_outgoing":false,"reply_markup":{"@type":"replyMarkupShowKeyboard","rows":[[{"@type":"keyboardButton","text":"Yes","type":{"@type":"keyboardButtonTypeText"}},{"@type":"keyboardButton","text":"No","type":{"@type":"keyboardButtonTypeText"}}],[{"@type":"keyboardButton","text":"Share phone","type":{"@type":"keyboardButtonTypeRequestPhoneNumber"}},{"@type":"keyboardButton","text":"Mini app","type":{"@type":"keyboardButtonTypeWebApp","url":"https://example.com/app"}}]],"is_persistent":false,"resize_keyboard":true,"one_time":true,"is_personal":false,"force_reply":false,"input_field_placeholder":"Choose…"},"content":{"@type":"messageText","text":{"@type":"formattedText","text":"Choose one:","entities":[]}}}}"#;
+    let force_reply_message = r#"{"@type":"updateNewMessage","message":{"id":306,"chat_id":21,"is_outgoing":false,"reply_markup":{"@type":"replyMarkupForceReply","input_field_placeholder":""},"content":{"@type":"messageText","text":{"@type":"formattedText","text":"What is your name?","entities":[]}}}}"#;
+    for raw in [
+        bot_rows,
+        game_message,
+        login_message,
+        keyboard_message,
+        force_reply_message,
+    ] {
+        if let Some(owned) = copy_and_parse(raw, seq, &dyn_sink) {
             session.apply(owned);
         }
     }
@@ -35550,11 +36218,23 @@ fn stats_graph_row(
 fn inline_keyboard(message: &HistoryMessage, cx: &mut Context<QuillApp>) -> Option<AnyElement> {
     // M2: an ephemeral payload carries its own `reply_markup`, shown
     // instead of the message's own (bot-built flows, anniversary post).
-    let keyboard = message
+    let markup = message
         .ephemeral
         .as_ref()
         .and_then(|ephemeral| ephemeral.reply_markup.as_ref())
         .or(message.reply_markup.as_ref())?;
+    // B1: only `replyMarkupInlineKeyboard` renders as an inline keyboard;
+    // other markups (custom keyboards, force-reply) are handled separately.
+    let ReplyMarkup::InlineKeyboard(keyboard) = markup else {
+        return None;
+    };
+    // B1: game buttons need the game's short name from the message's
+    // `messageGame` content (schema 1.8.67, line 7743).
+    let game_short_name = if let MessageContent::Game { short_name } = &message.content {
+        Some(short_name.as_str())
+    } else {
+        None
+    };
     let message_id = message.id.0 as u64;
     let mut grid = div()
         .id(("inline-keyboard", message_id))
@@ -35580,6 +36260,7 @@ fn inline_keyboard(message: &HistoryMessage, cx: &mut Context<QuillApp>) -> Opti
                     row_index,
                     button_index,
                     button,
+                    game_short_name,
                     cx,
                 )
                 .flex_1(),
@@ -35590,19 +36271,25 @@ fn inline_keyboard(message: &HistoryMessage, cx: &mut Context<QuillApp>) -> Opti
     any.then(|| grid.into_any_element())
 }
 
-/// Phase 3.2: one inline keyboard button. `Url` opens in the OS browser
-/// (same gate as URLs in message text); `Callback` sends
-/// `getCallbackQueryAnswer`; `SwitchInline` inserts the query into the
-/// current chat's composer; `CopyText` copies to the clipboard. Everything
-/// else (login/WebApp/password/game/buy/user buttons and unknown types)
-/// renders disabled — known-but-unsupported is honest, and a crash is never
-/// an option.
+/// Phase 3.2 (extended in B1): one inline keyboard button. `Url` opens in
+/// the OS browser (same gate as URLs in message text); `LoginUrl` resolves
+/// via `getLoginUrlInfo` (TDLib 1.8.67, schema:12985), degrading to the raw
+/// URL on error; `WebApp` opens in the browser (honest fallback — no
+/// in-app web view yet); `Callback` sends `getCallbackQueryAnswer`;
+/// `CallbackWithPassword` prompts for the 2-step password and sends
+/// `callbackQueryPayloadDataWithPassword` (schema:7740); `CallbackGame`
+/// sends `callbackQueryPayloadGame` with the message's `messageGame`
+/// short name (schema:7743); `User` opens the private chat with the user;
+/// `SwitchInline` inserts the query into the current chat's composer;
+/// `CopyText` copies to the clipboard. `Buy` stays disabled — payments are
+/// a later slice; unknown types never crash.
 fn inline_keyboard_button(
     chat_id: ChatId,
     message_id: MessageId,
     row_index: usize,
     button_index: usize,
     button: &InlineKeyboardButton,
+    game_short_name: Option<&str>,
     cx: &mut Context<QuillApp>,
 ) -> Button {
     let label = if button.text.is_empty() {
@@ -35635,10 +36322,41 @@ fn inline_keyboard_button(
                 this.open_message_url(&url, cx);
             }))
         }
+        InlineKeyboardButtonType::LoginUrl { url, id } => {
+            let url = url.clone();
+            let button_id = *id;
+            element.on_click(cx.listener(move |this, _, _, cx| {
+                this.press_login_url(chat_id, message_id, button_id, &url, cx);
+            }))
+        }
+        InlineKeyboardButtonType::WebApp { url } => {
+            let url = url.clone();
+            element.on_click(cx.listener(move |this, _, _, cx| {
+                this.open_message_url(&url, cx);
+            }))
+        }
         InlineKeyboardButtonType::Callback { data } => {
             let data = data.clone();
             element.on_click(cx.listener(move |this, _, _, cx| {
                 this.press_inline_callback(chat_id, message_id, data.clone(), cx);
+            }))
+        }
+        InlineKeyboardButtonType::CallbackWithPassword { data } => {
+            let data = data.clone();
+            element.on_click(cx.listener(move |this, _, window, cx| {
+                this.open_callback_password_dialog(chat_id, message_id, data.clone(), window, cx);
+            }))
+        }
+        InlineKeyboardButtonType::CallbackGame => {
+            let game_short_name = game_short_name.map(str::to_string);
+            element.on_click(cx.listener(move |this, _, _, cx| {
+                this.press_game_button(chat_id, message_id, game_short_name.clone(), cx);
+            }))
+        }
+        InlineKeyboardButtonType::User { user_id } => {
+            let user_id = *user_id;
+            element.on_click(cx.listener(move |this, _, window, cx| {
+                this.open_user_chat(user_id, window, cx);
             }))
         }
         InlineKeyboardButtonType::SwitchInline { query, .. } => {
@@ -35661,17 +36379,15 @@ fn inline_keyboard_button(
 fn button_tooltip(button: &InlineKeyboardButton) -> &'static str {
     match &button.kind {
         InlineKeyboardButtonType::Url { .. }
+        | InlineKeyboardButtonType::LoginUrl { .. }
+        | InlineKeyboardButtonType::WebApp { .. }
         | InlineKeyboardButtonType::Callback { .. }
+        | InlineKeyboardButtonType::CallbackWithPassword { .. }
+        | InlineKeyboardButtonType::CallbackGame
         | InlineKeyboardButtonType::SwitchInline { .. }
-        | InlineKeyboardButtonType::CopyText { .. } => "",
-        InlineKeyboardButtonType::LoginUrl { .. } => "Login buttons are not supported yet",
-        InlineKeyboardButtonType::WebApp { .. } => "Web App buttons are not supported yet",
-        InlineKeyboardButtonType::CallbackWithPassword { .. } => {
-            "Password-protected buttons are not supported yet"
-        }
-        InlineKeyboardButtonType::CallbackGame => "Game buttons are not supported yet",
-        InlineKeyboardButtonType::Buy => "Payment buttons are not supported yet",
-        InlineKeyboardButtonType::User { .. } => "User buttons are not supported yet",
+        | InlineKeyboardButtonType::CopyText { .. }
+        | InlineKeyboardButtonType::User { .. } => "",
+        InlineKeyboardButtonType::Buy => "Payment buttons are not supported yet (payments slice)",
         InlineKeyboardButtonType::Disabled => "This button is disabled",
         InlineKeyboardButtonType::Unknown { .. } => "Unsupported button",
     }
@@ -36250,6 +36966,7 @@ fn session_history_row(
         MessageContent::Dice(dice) => Some(dice_row(message.id.0 as u64, dice)),
         MessageContent::Text(_)
         | MessageContent::RichMessage(_)
+        | MessageContent::Game { .. }
         | MessageContent::GroupCallInvitation { .. }
         | MessageContent::Call { .. }
         | MessageContent::ChatTtlChanged { .. }
@@ -36805,6 +37522,7 @@ fn rich_block_element(
                                 index,
                                 button_index,
                                 button,
+                                None,
                                 cx,
                             )
                             .flex_1(),
@@ -36926,8 +37644,16 @@ fn rich_block_element(
                 .gap_1();
             for (button_index, button) in buttons.iter().enumerate() {
                 line = line.child(
-                    inline_keyboard_button(chat_id, message_id, index, button_index, button, cx)
-                        .flex_1(),
+                    inline_keyboard_button(
+                        chat_id,
+                        message_id,
+                        index,
+                        button_index,
+                        button,
+                        None,
+                        cx,
+                    )
+                    .flex_1(),
                 );
             }
             Some(line.into_any_element())

@@ -88,7 +88,7 @@ pub enum EnvelopePayload {
         chat_id: ChatId,
         message_id: MessageId,
         edit_date: i32,
-        reply_markup: Option<InlineKeyboard>,
+        reply_markup: Option<ReplyMarkup>,
     },
     /// `updatePoll` (TDLib 1.8.67, `schema/td_api.tl:11179`): vote counts /
     /// chosen marks changed. Carries only the new `poll` — no chat or
@@ -890,6 +890,9 @@ pub enum EnvelopePayload {
     /// `callbackQueryAnswer` — response to `getCallbackQueryAnswer` after an
     /// inline keyboard callback-button press (Phase 3.2).
     CallbackQueryAnswer(CallbackQueryAnswer),
+    /// B1: `loginUrlInfo*` — response to `getLoginUrlInfo` after a
+    /// login-URL button press.
+    LoginUrlInfo(LoginUrlInfo),
     /// `updateChatFolders` (TDLib 1.8.67, `schema/td_api.tl:10606`) — the
     /// full ordered folder list. There is no `getChatFolders` function in
     /// 1.8.67; TDLib pushes this update after authorization and whenever
@@ -2362,6 +2365,9 @@ pub enum InlineKeyboardButtonType {
     },
     LoginUrl {
         url: String,
+        /// B1: `id` (schema/td_api.tl:3780) — the button identifier for
+        /// `getLoginUrlInfo`.
+        id: i64,
     },
     WebApp {
         url: String,
@@ -2405,6 +2411,86 @@ pub struct InlineKeyboardButton {
 pub struct InlineKeyboard {
     pub rows: Vec<Vec<InlineKeyboardButton>>,
     pub force_reply: bool,
+}
+
+/// B1: `message.reply_markup` (TDLib 1.8.67, `schema/td_api.tl:3835-3855`).
+/// The inline variant keeps the Phase 3.2 shape; the other three are the
+/// bot custom-keyboard / force-reply / remove markups.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ReplyMarkup {
+    InlineKeyboard(InlineKeyboard),
+    ShowKeyboard(ReplyKeyboard),
+    ForceReply { placeholder: String },
+    RemoveKeyboard,
+}
+
+/// B1: `replyMarkupShowKeyboard` (TDLib 1.8.67, `schema/td_api.tl:3850`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReplyKeyboard {
+    pub rows: Vec<Vec<KeyboardButton>>,
+    pub is_persistent: bool,
+    pub resize_keyboard: bool,
+    pub one_time: bool,
+    pub is_personal: bool,
+    pub force_reply: bool,
+    pub placeholder: String,
+}
+
+/// B1: `keyboardButton` (TDLib 1.8.67, `schema/td_api.tl:3768`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KeyboardButton {
+    pub text: String,
+    pub kind: KeyboardButtonType,
+}
+
+/// B1: `keyboardButtonType*` (TDLib 1.8.67, `schema/td_api.tl:3714-3760`).
+/// Only `Text` (tap → send the text) and `WebApp` (browser fallback) act;
+/// the request variants stay disabled with honest tooltips.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum KeyboardButtonType {
+    Text,
+    RequestPhoneNumber,
+    RequestLocation,
+    RequestPoll,
+    RequestUsers,
+    RequestChat,
+    RequestManagedBot,
+    WebApp { url: String },
+    Unknown { type_name: String },
+}
+
+/// B1: `LoginUrlInfo` (TDLib 1.8.67, `schema/td_api.tl:3862` /
+/// `:3869`) — the `getLoginUrlInfo` answer for a login-URL button press.
+/// `Failed` is Quill's own synthesis (not a TDLib constructor): on error
+/// the button degrades to an ordinary URL button, per the `getLoginUrl`
+/// schema doc comment.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LoginUrlInfo {
+    Open {
+        url: String,
+    },
+    RequestConfirmation {
+        domain: String,
+        /// B1: the bot asked for permission to message the user
+        /// (schema/td_api.tl:3869) — shown in the consent dialog and passed
+        /// as `allow_write_access` to `getLoginUrl` on consent.
+        request_write_access: bool,
+    },
+    Failed {
+        fallback_url: String,
+    },
+}
+
+/// B1: whether a `replyMarkup*` demands a reply — `replyMarkupForceReply`
+/// outright, or the `force_reply` flag on an inline / show-keyboard markup
+/// (TDLib 1.8.67, `schema/td_api.tl:3850` / `:3855`). Pure logic: unit-tested.
+pub fn reply_markup_demands_reply(markup: &ReplyMarkup) -> bool {
+    match markup {
+        ReplyMarkup::ForceReply { .. } => true,
+        ReplyMarkup::ShowKeyboard(keyboard) => keyboard.force_reply,
+        ReplyMarkup::InlineKeyboard(keyboard) => keyboard.force_reply,
+        ReplyMarkup::RemoveKeyboard => false,
+    }
 }
 
 /// `callbackQueryAnswer` (TDLib 1.8.67, `schema/td_api.tl:7747`): the bot's
@@ -3679,9 +3765,10 @@ pub struct ParsedMessage {
     pub reply_to: Option<MessageReplyTo>,
     pub forward_info: Option<MessageForwardInfo>,
     pub interaction_info: Option<MessageInteractionInfo>,
-    /// Schema `message.reply_markup` (TDLib 1.8.67). Only
-    /// `replyMarkupInlineKeyboard` is kept; other markups are `None`.
-    pub reply_markup: Option<InlineKeyboard>,
+    /// Schema `message.reply_markup` (TDLib 1.8.67). All `replyMarkup*`
+    /// constructors (B1); inline keyboards render as the button grid,
+    /// `ShowKeyboard` as the custom keyboard above the composer.
+    pub reply_markup: Option<ReplyMarkup>,
     /// Phase B3: `message.self_destruct_type` / `message.self_destruct_in`
     /// (TDLib 1.8.67, `schema/td_api.tl:3146`–`:3147` / `:3165`).
     /// `messageSelfDestructTypeTimer` (line 5915) /
@@ -4476,6 +4563,14 @@ pub enum MessageContent {
     /// list (possibly partial when `is_full` is false — the renderer
     /// fetches the rest via `getFullRichMessage`, schema line 11554).
     RichMessage(RichMessageContent),
+    /// B1: `messageGame` (TDLib 1.8.67, `schema/td_api.tl:5234`). Only the
+    /// game's `short_name` (schema:673) is kept — it is the
+    /// `callbackQueryPayloadGame.game_short_name` (schema:7743) for the
+    /// `CallbackGame` button press. The game itself keeps rendering as an
+    /// unsupported placeholder (games UI is out of this slice).
+    Game {
+        short_name: String,
+    },
     Unsupported {
         type_name: String,
     },
@@ -4533,7 +4628,7 @@ impl RichMessageContent {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EphemeralMessageContent {
     pub content: Box<MessageContent>,
-    pub reply_markup: Option<InlineKeyboard>,
+    pub reply_markup: Option<ReplyMarkup>,
 }
 
 /// `formattedText` plus optional `messageText.link_preview` (TDLib 1.8.67).
@@ -5162,6 +5257,9 @@ impl MessageContent {
                 )
             }
             MessageContent::Unsupported { type_name } => format!("({type_name})"),
+            // B1: games keep rendering as unsupported placeholders (games
+            // UI is out of this slice).
+            MessageContent::Game { .. } => "(messageGame)".to_string(),
             // Phase S1: chat-list preview for `messageScreenshotTaken`
             // (TGX ChatContentScreenshot).
             MessageContent::ScreenshotTaken => "Took a screenshot".to_string(),
@@ -6356,6 +6454,20 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
         }
         "callbackQueryAnswer" => Ok(EnvelopePayload::CallbackQueryAnswer(
             parse_callback_query_answer(&value),
+        )),
+        // B1: `getLoginUrlInfo` answers (TDLib 1.8.67, `schema/td_api.tl:3862`
+        // / `:3869`).
+        "loginUrlInfoOpen" => Ok(EnvelopePayload::LoginUrlInfo(LoginUrlInfo::Open {
+            url: json_field_str(&value, "url"),
+        })),
+        "loginUrlInfoRequestConfirmation" => Ok(EnvelopePayload::LoginUrlInfo(
+            LoginUrlInfo::RequestConfirmation {
+                domain: json_field_str(&value, "domain"),
+                request_write_access: value
+                    .get("request_write_access")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
+            },
         )),
         // Parity slice: `createChatFolder` / `editChatFolder` responses
         // (TDLib 1.8.67, `schema/td_api.tl:13358` / `:13361`).
@@ -7559,37 +7671,106 @@ fn parse_user(value: &Value) -> Option<ParsedUser> {
     })
 }
 
-/// `replyMarkupInlineKeyboard` (TDLib 1.8.67 line 3855). `reply_markup`
-/// null/absent and other markup constructors → `None`. Rows and buttons are
-/// parsed tolerantly: malformed rows are skipped, malformed buttons become
-/// disabled `Unknown` placeholders — a hostile keyboard can never crash the
-/// parse.
-fn parse_reply_markup(value: Option<&Value>) -> Option<InlineKeyboard> {
+/// `replyMarkup*` (TDLib 1.8.67 lines 3835–3855). `reply_markup`
+/// null/absent and unknown markup constructors → `None`. Rows and buttons
+/// are parsed tolerantly: malformed rows are skipped, malformed buttons
+/// become disabled `Unknown` placeholders — a hostile keyboard can never
+/// crash the parse.
+fn parse_reply_markup(value: Option<&Value>) -> Option<ReplyMarkup> {
     let value = value.filter(|v| !v.is_null())?;
-    if value.get("@type").and_then(Value::as_str) != Some("replyMarkupInlineKeyboard") {
-        return None;
+    let type_name = value.get("@type").and_then(Value::as_str).unwrap_or("");
+    match type_name {
+        "replyMarkupInlineKeyboard" => {
+            let rows = value
+                .get("rows")
+                .and_then(Value::as_array)
+                .map(|rows| {
+                    rows.iter()
+                        .filter_map(Value::as_array)
+                        .map(|row| {
+                            row.iter()
+                                .map(parse_inline_keyboard_button)
+                                .collect::<Vec<_>>()
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            Some(ReplyMarkup::InlineKeyboard(InlineKeyboard {
+                rows,
+                force_reply: value
+                    .get("force_reply")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
+            }))
+        }
+        "replyMarkupShowKeyboard" => Some(ReplyMarkup::ShowKeyboard(parse_reply_keyboard(value))),
+        "replyMarkupForceReply" => Some(ReplyMarkup::ForceReply {
+            placeholder: json_field_str(value, "input_field_placeholder"),
+        }),
+        "replyMarkupRemoveKeyboard" => Some(ReplyMarkup::RemoveKeyboard),
+        _ => None,
     }
+}
+
+/// B1: `replyMarkupShowKeyboard` body (TDLib 1.8.67, `schema/td_api.tl:3850`).
+fn parse_reply_keyboard(value: &Value) -> ReplyKeyboard {
     let rows = value
         .get("rows")
         .and_then(Value::as_array)
         .map(|rows| {
             rows.iter()
                 .filter_map(Value::as_array)
-                .map(|row| {
-                    row.iter()
-                        .map(parse_inline_keyboard_button)
-                        .collect::<Vec<_>>()
-                })
+                .map(|row| row.iter().map(parse_keyboard_button).collect::<Vec<_>>())
                 .collect()
         })
         .unwrap_or_default();
-    Some(InlineKeyboard {
+    let flag = |name: &str| value.get(name).and_then(Value::as_bool).unwrap_or(false);
+    ReplyKeyboard {
         rows,
-        force_reply: value
-            .get("force_reply")
-            .and_then(Value::as_bool)
-            .unwrap_or(false),
-    })
+        is_persistent: flag("is_persistent"),
+        resize_keyboard: flag("resize_keyboard"),
+        one_time: flag("one_time"),
+        is_personal: flag("is_personal"),
+        force_reply: flag("force_reply"),
+        placeholder: json_field_str(value, "input_field_placeholder"),
+    }
+}
+
+/// B1: `keyboardButton` (TDLib 1.8.67, `schema/td_api.tl:3768`). A missing
+/// `type` degrades to `Unknown` (disabled), never a crash.
+pub(crate) fn parse_keyboard_button(value: &Value) -> KeyboardButton {
+    let text = value
+        .get("text")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    let type_name = value
+        .get("type")
+        .filter(|v| !v.is_null())
+        .and_then(|v| v.get("@type"))
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let kind = match type_name {
+        "keyboardButtonTypeText" => KeyboardButtonType::Text,
+        "keyboardButtonTypeRequestPhoneNumber" => KeyboardButtonType::RequestPhoneNumber,
+        "keyboardButtonTypeRequestLocation" => KeyboardButtonType::RequestLocation,
+        "keyboardButtonTypeRequestPoll" => KeyboardButtonType::RequestPoll,
+        "keyboardButtonTypeRequestUsers" => KeyboardButtonType::RequestUsers,
+        "keyboardButtonTypeRequestChat" => KeyboardButtonType::RequestChat,
+        "keyboardButtonTypeRequestManagedBot" => KeyboardButtonType::RequestManagedBot,
+        "keyboardButtonTypeWebApp" => KeyboardButtonType::WebApp {
+            url: value
+                .get("type")
+                .and_then(|v| v.get("url"))
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string(),
+        },
+        _ => KeyboardButtonType::Unknown {
+            type_name: type_name.to_string(),
+        },
+    };
+    KeyboardButton { text, kind }
 }
 
 pub(crate) fn parse_inline_keyboard_button(value: &Value) -> InlineKeyboardButton {
@@ -7634,6 +7815,7 @@ fn parse_inline_keyboard_button_type(value: Option<&Value>) -> InlineKeyboardBut
         },
         "inlineKeyboardButtonTypeLoginUrl" => InlineKeyboardButtonType::LoginUrl {
             url: json_field_str(value, "url"),
+            id: value.get("id").and_then(Value::as_i64).unwrap_or(0),
         },
         "inlineKeyboardButtonTypeWebApp" => InlineKeyboardButtonType::WebApp {
             url: json_field_str(value, "url"),
@@ -8214,6 +8396,19 @@ fn parse_content(value: Option<&Value>) -> (MessageContent, Vec<ParsedFile>) {
         Some("messageScreenshotTaken") => (MessageContent::ScreenshotTaken, Vec::new()),
         // M2: `messageRichMessage` (schema 1.8.67, line 5143).
         Some("messageRichMessage") => parse_message_rich_message(value),
+        // B1: `messageGame` (schema 1.8.67, line 5234) — keep only
+        // `game.short_name` for the `CallbackGame` press payload.
+        Some("messageGame") => (
+            MessageContent::Game {
+                short_name: value
+                    .get("game")
+                    .and_then(|game| game.get("short_name"))
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string(),
+            },
+            Vec::new(),
+        ),
         // Phase B4: `messageChatSetMessageAutoDeleteTime` (schema 1.8.67,
         // line 5387) — the chat's auto-delete / self-destruct timer was
         // changed. `from_user_id` is not kept (the row is a neutral
@@ -10454,8 +10649,11 @@ mod tests {
         let env = parse_envelope(json).unwrap();
         match env.payload {
             EnvelopePayload::UpdateNewMessage(message) => {
-                let keyboard = message.reply_markup.expect("reply_markup");
-                assert!(!keyboard.force_reply);
+                let ReplyMarkup::InlineKeyboard(keyboard) =
+                    message.reply_markup.expect("reply_markup")
+                else {
+                    panic!("expected inline keyboard");
+                };
                 assert_eq!(keyboard.rows.len(), 2);
                 assert_eq!(keyboard.rows[0].len(), 2);
                 let open = &keyboard.rows[0][0];
@@ -10499,8 +10697,11 @@ mod tests {
         let env = parse_envelope(json).unwrap();
         match env.payload {
             EnvelopePayload::UpdateNewMessage(message) => {
-                let keyboard = message.reply_markup.expect("reply_markup");
-                assert!(keyboard.force_reply);
+                let ReplyMarkup::InlineKeyboard(keyboard) =
+                    message.reply_markup.expect("reply_markup")
+                else {
+                    panic!("expected inline keyboard");
+                };
                 // The `"not an array"` row is skipped; tolerance never crashes.
                 assert_eq!(keyboard.rows.len(), 2);
                 let mystery = &keyboard.rows[0][0];
@@ -10524,7 +10725,11 @@ mod tests {
         .unwrap();
         match env.payload {
             EnvelopePayload::UpdateNewMessage(message) => {
-                assert!(message.reply_markup.is_none());
+                // B1: custom keyboards are parsed now (not ignored).
+                assert!(matches!(
+                    message.reply_markup,
+                    Some(ReplyMarkup::ShowKeyboard(_))
+                ));
             }
             other => panic!("{other:?}"),
         }
@@ -10553,6 +10758,166 @@ mod tests {
                 assert_eq!(answer.text, "Done!");
                 assert!(!answer.show_alert);
                 assert!(answer.url.is_empty());
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn b1_show_keyboard_parsed() {
+        // B1: `replyMarkupShowKeyboard` (schema 1.8.67, line 3850).
+        let env = parse_envelope(
+            r#"{"@type":"updateNewMessage","message":{"id":305,"chat_id":21,"is_outgoing":false,"reply_markup":{"@type":"replyMarkupShowKeyboard","rows":[[{"@type":"keyboardButton","text":"Yes","type":{"@type":"keyboardButtonTypeText"}},{"@type":"keyboardButton","text":"Contact","type":{"@type":"keyboardButtonTypeRequestPhoneNumber"}}]],"is_persistent":true,"resize_keyboard":true,"one_time":true,"is_personal":false,"force_reply":false,"input_field_placeholder":"Pick"},"content":{"@type":"messageText","text":{"@type":"formattedText","text":"x","entities":[]}}}}"#,
+        )
+        .unwrap();
+        match env.payload {
+            EnvelopePayload::UpdateNewMessage(message) => {
+                match message.reply_markup.expect("show keyboard markup") {
+                    ReplyMarkup::ShowKeyboard(keyboard) => {
+                        assert_eq!(keyboard.rows.len(), 1);
+                        assert_eq!(keyboard.rows[0].len(), 2);
+                        assert_eq!(keyboard.rows[0][0].kind, KeyboardButtonType::Text);
+                        assert_eq!(
+                            keyboard.rows[0][1].kind,
+                            KeyboardButtonType::RequestPhoneNumber
+                        );
+                        assert!(keyboard.is_persistent);
+                        assert!(keyboard.resize_keyboard);
+                        assert!(keyboard.one_time);
+                        assert_eq!(keyboard.placeholder, "Pick");
+                    }
+                    other => panic!("{other:?}"),
+                }
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn b1_force_reply_and_remove_keyboard_parsed() {
+        // `replyMarkupForceReply` (schema:3840), `replyMarkupRemoveKeyboard`
+        // (schema:3835).
+        let env = parse_envelope(
+            r#"{"@type":"updateNewMessage","message":{"id":306,"chat_id":21,"is_outgoing":false,"reply_markup":{"@type":"replyMarkupForceReply","input_field_placeholder":"Reply…"},"content":{"@type":"messageText","text":{"@type":"formattedText","text":"x","entities":[]}}}}"#,
+        )
+        .unwrap();
+        match env.payload {
+            EnvelopePayload::UpdateNewMessage(message) => {
+                assert!(matches!(
+                    message.reply_markup,
+                    Some(ReplyMarkup::ForceReply { .. })
+                ));
+            }
+            other => panic!("{other:?}"),
+        }
+        let env = parse_envelope(
+            r#"{"@type":"updateNewMessage","message":{"id":307,"chat_id":21,"is_outgoing":false,"reply_markup":{"@type":"replyMarkupRemoveKeyboard","is_personal":false},"content":{"@type":"messageText","text":{"@type":"formattedText","text":"x","entities":[]}}}}"#,
+        )
+        .unwrap();
+        match env.payload {
+            EnvelopePayload::UpdateNewMessage(message) => {
+                assert!(matches!(
+                    message.reply_markup,
+                    Some(ReplyMarkup::RemoveKeyboard)
+                ));
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn b1_reply_markup_demands_reply_cases() {
+        assert!(reply_markup_demands_reply(&ReplyMarkup::ForceReply {
+            placeholder: String::new()
+        }));
+        assert!(reply_markup_demands_reply(&ReplyMarkup::ShowKeyboard(
+            ReplyKeyboard {
+                rows: vec![],
+                is_persistent: false,
+                resize_keyboard: false,
+                one_time: false,
+                is_personal: false,
+                force_reply: true,
+                placeholder: String::new(),
+            }
+        )));
+        assert!(!reply_markup_demands_reply(&ReplyMarkup::ShowKeyboard(
+            ReplyKeyboard {
+                rows: vec![],
+                is_persistent: false,
+                resize_keyboard: false,
+                one_time: false,
+                is_personal: false,
+                force_reply: false,
+                placeholder: String::new(),
+            }
+        )));
+        assert!(!reply_markup_demands_reply(&ReplyMarkup::InlineKeyboard(
+            InlineKeyboard {
+                rows: vec![],
+                force_reply: false,
+            }
+        )));
+        assert!(!reply_markup_demands_reply(&ReplyMarkup::RemoveKeyboard));
+    }
+
+    #[test]
+    fn b1_login_url_info_parsed() {
+        // `getLoginUrlInfo` answers (schema 1.8.67, line 12985).
+        let env = parse_envelope(
+            r#"{"@type":"loginUrlInfoOpen","@extra":"11","url":"https://example.com/authed"}"#,
+        )
+        .unwrap();
+        match env.payload {
+            EnvelopePayload::LoginUrlInfo(LoginUrlInfo::Open { url }) => {
+                assert_eq!(url, "https://example.com/authed");
+            }
+            other => panic!("{other:?}"),
+        }
+        let env = parse_envelope(
+            r#"{"@type":"loginUrlInfoRequestConfirmation","@extra":"12","domain":"example.com","bot_user_id":21,"request_write_access":true}"#,
+        )
+        .unwrap();
+        match env.payload {
+            EnvelopePayload::LoginUrlInfo(LoginUrlInfo::RequestConfirmation {
+                domain,
+                request_write_access,
+            }) => {
+                assert_eq!(domain, "example.com");
+                assert!(request_write_access);
+            }
+            other => panic!("{other:?}"),
+        }
+        // B1: `getLoginUrl` answers arrive as `httpUrl` (schema:7458) — the
+        // pre-existing `EnvelopePayload::HttpUrl` variant, which
+        // `Session::apply_payload` maps to `LoginUrlInfo::Open` when the
+        // pending purpose is `GetLoginUrl`.
+        let env = parse_envelope(
+            r#"{"@type":"httpUrl","@extra":"13","url":"https://example.com/authed2"}"#,
+        )
+        .unwrap();
+        match env.payload {
+            EnvelopePayload::HttpUrl { url } => {
+                assert_eq!(url, "https://example.com/authed2");
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn b1_message_game_parsed() {
+        // `messageGame` (schema 1.8.67, line 5234): only the short name is
+        // kept — the game launches via `callbackQueryPayloadGame`
+        // (schema:7743), games UI is out of this slice.
+        let env = parse_envelope(
+            r#"{"@type":"updateNewMessage","message":{"id":308,"chat_id":21,"is_outgoing":false,"content":{"@type":"messageGame","game":{"@type":"game","id":"1","short_name":"chess","title":"Chess","description":"d","photo":null,"animation":null},"game_message_id":308,"failed_to_load":false,"not_found":false}}}"#,
+        )
+        .unwrap();
+        match env.payload {
+            EnvelopePayload::UpdateNewMessage(message) => {
+                assert!(
+                    matches!(&message.content, MessageContent::Game { short_name } if short_name == "chess")
+                );
             }
             other => panic!("{other:?}"),
         }
