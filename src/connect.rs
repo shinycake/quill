@@ -18,7 +18,7 @@ use crate::ids::{AccountKey, ChatId, FileId, MessageId, RequestId, TopicId};
 use crate::lifecycle::{RestoreBlocker, plan_restore};
 use crate::notify::NotificationSoundKind;
 use crate::platform::{DatabaseKey, KeyDecision, SecretStore, load_or_create_key};
-use crate::poll::{PollDraft, poll_answer_for_tap};
+use crate::poll::{PollDraft, can_stop_poll, poll_answer_for_tap};
 use crate::rich::RichBlock;
 use crate::settings::{
     AccountPaths, InstantViewMode, default_app_root, load_call_prefs, load_media_prefs,
@@ -76,8 +76,9 @@ use crate::telegram::requests::{
     get_message_link, get_message_properties, get_message_thread_history, get_password_state,
     get_poll_voters, get_saved_animations, get_saved_notification_sounds,
     get_scope_notification_settings, get_secret_chat, get_sticker_set, get_storage_statistics,
-    get_story, get_story_available_reactions, get_story_interactions as get_story_interactions_request,
-    get_supergroup, get_supergroup_full_info, get_supergroup_members, get_user_full_info,
+    get_story, get_story_available_reactions,
+    get_story_interactions as get_story_interactions_request, get_supergroup,
+    get_supergroup_full_info, get_supergroup_members, get_user_full_info,
     get_user_privacy_setting_rules, get_video_chat_invite_link, get_video_chat_rtmp_url,
     get_web_page_instant_view, input_message_photo, input_message_video,
     invite_group_call_participant, join_chat, join_group_call, join_video_chat, leave_chat,
@@ -9950,9 +9951,9 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     /// B4: the next `getPollVoters` page — `offset` is the already-loaded
-    /// count. No-op unless the cache holds a loaded page with more voters
-    /// than currently loaded (server `total_count` is approximate, so the
-    /// honest stop signal is a short page — handled by the UI).
+    /// count. No-op unless the cache holds a loaded page; exhaustion is
+    /// handled in the reducer, which clamps `total_count` on a short
+    /// page so the UI hides "Load more".
     pub fn load_more_poll_voters(
         &mut self,
         chat_id: ChatId,
@@ -10082,18 +10083,20 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !supported {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let is_open_poll = self
+        let can_stop = self
             .session
             .histories
             .get(&chat_id.0)
             .and_then(|history| history.messages.get(&message_id.0))
             .filter(|message| !message.pending && message.id.0 > 0)
             .and_then(|message| match &message.content {
-                MessageContent::Poll(poll) => Some(!poll.poll.is_closed),
+                // F4: defense in depth — the UI menu already gates on
+                // `can_stop_poll`, but the driver checks ownership too.
+                MessageContent::Poll(poll) => Some(can_stop_poll(message.is_outgoing, &poll.poll)),
                 _ => None,
             })
             .unwrap_or(false);
-        if !is_open_poll {
+        if !can_stop {
             return Err(ConnectSendError::InvalidRequest);
         }
         let extra = self

@@ -5491,6 +5491,7 @@ impl Session {
                 }) = pending.map(|p| p.purpose)
                 {
                     let key = (chat_id.0, message_id.0, option_id);
+                    let page_len = voters.len();
                     let merged = if offset == 0 {
                         voters
                     } else {
@@ -5506,6 +5507,16 @@ impl Session {
                             }
                             _ => voters,
                         }
+                    };
+                    // B4: a short page is the honest exhaustion signal —
+                    // `total_count` is approximate per the schema, so on a
+                    // short page (limit is 50, schema line 12941) clamp it
+                    // to what we actually hold; the UI hides "Load more"
+                    // when `voters.len() >= total_count`.
+                    let total_count = if page_len < 50 {
+                        merged.len() as i32
+                    } else {
+                        total_count
                     };
                     self.poll_voters.insert(
                         key,
@@ -10300,15 +10311,24 @@ impl Session {
     /// of rows updated.
     pub fn apply_update_poll(&mut self, poll: Poll) -> usize {
         let mut updated = 0;
-        for history in self.histories.values_mut() {
+        let mut touched = Vec::new();
+        for (chat_id, history) in self.histories.iter_mut() {
             for message in history.messages.values_mut() {
                 if let MessageContent::Poll(poll_content) = &mut message.content
                     && poll_content.poll.id == poll.id
                 {
                     poll_content.poll = poll.clone();
+                    touched.push((*chat_id, message.id.0));
                     updated += 1;
                 }
             }
+        }
+        // N2: an open voter dialog goes stale when the poll updates
+        // (counts/options change) — drop cached pages for touched
+        // messages so the next open refetches.
+        if !touched.is_empty() {
+            self.poll_voters
+                .retain(|(chat_id, message_id, _), _| !touched.contains(&(*chat_id, *message_id)));
         }
         updated
     }

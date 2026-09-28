@@ -4867,6 +4867,13 @@ debuginfo when needed.
   - Voters live in one `PollVotersDialog` on the G1 modal shell with a single `G1DialogClose::PollVoters` variant — no new modal infrastructure.
   - No optimistic poll closure on stop: the server gate (`can_be_edited`) and the real close (`updatePoll`) are authoritative; the demo path flips `is_closed` locally only.
   - The "View voters" affordance is per-poll (not per-option) opening the dialog at option 0 — one button, one dialog, per-option switching inside.
+- **Review fixups (dedicated reviewer, 2026-09-28, verdict: approve-with-fixups — all applied):**
+  - F1: "Load more" could stick forever on an approximate `total_count` after a short final page — now the reducer clamps `total_count` to the actually-held count on a short page (< 50), so the UI's `voters.len() >= total_count` check hides the button.
+  - F2: quiz explanation now auto-shows only after an **incorrect** answer (TGX `TGMessagePoll.java:1085-1086`); the lamp-icon on-demand reveal for correct answers is **not** implemented — documented deviation, README box reworded.
+  - F3: `can_stop_poll` gates on `is_outgoing` because Quill parses only `can_get_link` from `MessageProperties` — the schema-prescribed `can_be_edited` gate would also allow channel/group admins to stop others' polls. Documented known approximation (not a hidden limitation).
+  - F4: `stop_poll` driver now also checks `can_stop_poll` (ownership + open) instead of only `!is_closed` — defense in depth behind the UI menu gate.
+  - F5: `poll_answer_for_tap` returns `None` when `vote_restriction_reason` is set, keeping the demo tap path in sync with the live `send_poll_answer` gate.
+  - N1: stop warning copy uses `\n\n` like TGX `StopPollWarn`/`StopQuizWarn`. N2: `apply_update_poll` invalidates cached voter pages for touched messages.
 - **Not verifiable without live Telegram:** real `getPollVoters` pages, real `stopPoll` → `updatePoll` propagation, real `chatEventPollStopped` in the event log.
 - **Out of this slice (left unchecked with evidence):**
   - `parity:bots-poll-show-voters` — the dedicated "show voters" poll-list surface (per B3's annotation, TGX treats show-voters as inverse anonymity; Quill's in-dialog viewer is the forward path, not this separate surface).

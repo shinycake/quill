@@ -50,6 +50,7 @@ use quill::state::{
     HistoryMessage, InfoPanelTarget, InviteLinkFetch, JoinRequestFetch, LoginUrlRequest,
     MemberListFilter, OutboxReceipt, PollVotersFetch, RequestPurpose, SearchStatus, Session,
     SimilarBotsFetch, SponsoredReportFlight, StoryPostOutcome, StoryPostState, StoryReportStage,
+    SupergroupMembersFetch, WelcomeMessagesFetch, active_custom_keyboard, effective_preview,
     event_log_relative_time, outgoing_status_label, unix_ms_now, unread_badge_text,
 };
 use quill::story_composer::{StoryComposer, StoryExpiry, StoryMediaKind, StoryPrivacy};
@@ -28322,9 +28323,9 @@ impl QuillApp {
             "Stop this poll?"
         };
         let warning = if is_quiz {
-            "If you stop this quiz now, nobody will be able to participate in it anymore.\nThis action cannot be undone."
+            "If you stop this quiz now, nobody will be able to participate in it anymore.\n\nThis action cannot be undone."
         } else {
-            "If you stop this poll now, nobody will be able to vote in it anymore.\nThis action cannot be undone."
+            "If you stop this poll now, nobody will be able to vote in it anymore.\n\nThis action cannot be undone."
         };
         div()
             .id("stop-poll-confirm")
@@ -40534,7 +40535,8 @@ fn poll_body(
         ));
     }
     // B4: quiz explanation (`pollTypeQuiz.explanation`, schema line
-    // 475-476) — shown after the user answers, per the schema doc.
+    // 475-476) — auto-shown on an incorrect answer, per TGX; no lamp
+    // affordance for correct answers yet (documented deviation).
     if let Some(explanation) = quiz_explanation(poll) {
         body = body.child(
             div()
