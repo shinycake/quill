@@ -3985,8 +3985,9 @@ device list renders honestly.
   real `ntg_create_call` offer generation, `ntg_connect` against
   Telegram's answer, `ntg_add_incoming_video` subscription behavior,
   actual frame delivery/ssrc attribution, desktop capture availability
-  on a real display. **No `libntgcalls.so` exists on this VM**, so even
-  the bindings are compile-time only here. Tested instead: SDP SSRC
+  on a real display. The vendored `libntgcalls.so` is present and loads
+  on this VM, so even the bindings are exercised only against the mock
+  here — end-to-end issuance needs real hardware. Tested instead: SDP SSRC
   parsing (pure), video-info parsing, the offer/answer/subscription/
   frame-slot/presentation lifecycle against `MockEngine` (8 new driver
   tests + 2 engine tests + 1 envelope test, all green), and the
@@ -4005,8 +4006,9 @@ device list renders honestly.
   `presentation_active`, so a failed `startGroupCallScreenSharing`
   request or a bad answer can't leave a stray initialized presentation.
   The toggle is gated on an enumerated `MediaDeviceKind::Screen` device
-  ("No screen source available." when absent) — feasibility of real
-  desktop capture is unverifiable on this VM (no `libntgcalls.so`).
+  ("No screen source available." when absent) — end-to-end feasibility
+  of real desktop capture is unverifiable without a real display
+  (the vendored `libntgcalls.so` is present and loads).
 - **Review fixes (second pass, 2026-09-27):**
   1. Participant tile rendered the initials avatar twice (once above the
      video/avatar area, once as the avatar fallback) — the redundant
@@ -5331,13 +5333,15 @@ ntgcalls v3.0.0 prebuilt lib, bindings verified against
   switch, no TDLib traffic — the peer learns it through the tgcalls
   screen video track.
 - **ntgcalls findings (v3.0.0 source, primary):**
-  - `ntgcalls/include/ntgcalls/ntgcalls.hpp` — `set_stream_sources(chat_id,
-    mode, media_description)` is the generic entry point for P2P and group
-    connections alike (first arg is the connection key: user id for P2P).
+  - `ntgcalls/include/ntgcalls/instances/call_interface.hpp:58` —
+    `set_stream_sources(mode, config)` is the generic C++ entry point
+    for P2P and group connections alike (connection keyed by the
+    instance's user/chat id); the C API `ntg_set_stream_sources` is
+    declared in `ntgcalls/include/ntgcalls/ntgcalls.h`.
   - `ntgcalls/include/ntgcalls/media/media_description.hpp:68` —
     `MediaDescription{ microphone, speaker, camera, screen }`; source kind
     `Desktop = 1 << 4` (:19) — matches the hand-written bindings.
-  - `ntgcalls/src/media/stream_manager.cpp:68` — `set_stream_sources`
+  - `ntgcalls/src/media/stream_manager.cpp:69` — `set_stream_sources`
     throws `InvalidParams("Cannot mix camera and screen sources")` when
     both `camera` and `screen` are set in Capture mode: **screen share
     replaces the camera**; stopping = re-issue with `screen` null.
@@ -5384,8 +5388,9 @@ ntgcalls v3.0.0 prebuilt lib, bindings verified against
     `set_call_screen_share_rejected_without_screen_source`).
 - **Not verifiable without live Telegram:** real `ntg_set_stream_sources`
   desktop issuance, peer-side screen-track rendering, desktop-capturer
-  availability on a real display. **No `libntgcalls.so` on this VM** —
-  native paths are compile-time only (same caveat as the group
+  availability on a real display. The vendored `libntgcalls.so` is
+  present and loads on this VM — what can't be exercised here is
+  end-to-end issuance on real hardware (same caveat as the group
   screen-share slice). Tested instead: toggle state machines, driver
   gating/error contracts, and the synthetic screenshot demo.
 - **Honest limitations / out of this slice (box stays UNCHECKED):**

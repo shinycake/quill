@@ -862,7 +862,9 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// mute in `pump_call_engine`). Enabling clears the camera intent
     /// — ntgcalls forbids camera+screen in Capture mode. Rejected
     /// without an enumerated screen source
-    /// (`call_screen_source_available`).
+    /// (`call_screen_source_available`) when *enabling*; stopping
+    /// needs no source (a vanished display must not trap the user in
+    /// "sharing").
     pub fn set_call_screen_share(
         &mut self,
         call_id: i32,
@@ -877,7 +879,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if call.id != call_id {
             return Err(EngineError::NoSuchCall(call_id));
         }
-        if !screen_available {
+        if enabled && !screen_available {
             return Err(EngineError::NoScreenSource);
         }
         if call.transport.is_some()
@@ -19984,8 +19986,9 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// Phase C2i: no enumerated screen source → the toggle is
-    /// rejected and the tracked flag is untouched.
+    /// Phase C2i: no enumerated screen source → *enabling* is
+    /// rejected and the tracked flag is untouched; *stopping* still
+    /// works (a vanished display must not trap the user in "sharing").
     #[test]
     fn set_call_screen_share_rejected_without_screen_source() {
         let (dir, mut driver, handle, sink, seq) = ready_call_driver();
@@ -19997,6 +20000,12 @@ mod tests {
         );
         assert!(!driver.session.active_call.as_ref().unwrap().screen_sharing);
         assert!(handle.p2p_screen_share_changes().is_empty());
+        // Stopping needs no source: simulate a stranded sharing flag
+        // and verify it can still be cleared.
+        driver.session.active_call.as_mut().unwrap().screen_sharing = true;
+        assert!(driver.set_call_screen_share(77, false).is_ok());
+        assert!(!driver.session.active_call.as_ref().unwrap().screen_sharing);
+        assert_eq!(handle.p2p_screen_share_changes(), vec![(77, false)]);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

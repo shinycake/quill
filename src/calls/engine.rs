@@ -266,7 +266,7 @@ pub trait CallEngine {
     /// re-issuing capture sources with the desktop description
     /// (`NTG_MEDIA_SOURCE_DESKTOP`, NULL input = default display).
     /// Enabling clears the camera intent — ntgcalls rejects
-    /// camera+screen in Capture mode (`stream_manager.cpp:68`,
+    /// camera+screen in Capture mode (`stream_manager.cpp:69`,
     /// v3.0.0), so screen share replaces the camera. Disabling leaves
     /// the camera off; the user re-enables it explicitly. A failed
     /// issuance restores the retained config.
@@ -974,8 +974,26 @@ struct CallMediaConfig {
     /// Phase C2i: screen-share send intent for the 1:1 call. When on,
     /// `set_media_sources` issues the desktop capture instead of the
     /// camera — ntgcalls rejects mixing both in Capture mode
-    /// (`stream_manager.cpp:68`, v3.0.0).
+    /// (`stream_manager.cpp:69`, v3.0.0).
     screen_share_on: bool,
+}
+
+/// Phase C2i: retained media config for `connect`. A transport
+/// reconnect re-runs `connect` with the retained params; an
+/// in-flight screen-share intent survives so the engine re-issues
+/// screen-only instead of flipping back to the camera. A fresh
+/// connect has no prior entry, so the flag starts off.
+fn retained_call_media(
+    params: &ConnectParams,
+    previous: Option<&CallMediaConfig>,
+) -> CallMediaConfig {
+    CallMediaConfig {
+        mic: params.mic_input.clone(),
+        speaker: params.speaker_input.clone(),
+        camera_enabled: params.video_enabled,
+        camera: params.camera_input.clone(),
+        screen_share_on: previous.is_some_and(|config| config.screen_share_on),
+    }
 }
 
 /// Phase C2g: retained per-group-call media state for the ntgcalls
@@ -1302,7 +1320,7 @@ impl NtgcallsEngine {
             speaker: null_mut(),
             // Phase C2i: screen share replaces the camera — ntgcalls
             // rejects camera+screen in Capture mode
-            // (`stream_manager.cpp:68`, v3.0.0).
+            // (`stream_manager.cpp:69`, v3.0.0).
             camera: if config.camera_enabled && !config.screen_share_on {
                 &mut camera_video
             } else {
@@ -1527,16 +1545,13 @@ impl CallEngine for NtgcallsEngine {
         // later toggles and device changes re-issue from the same state.
         // On failure, drop the retained config so no stale config lingers
         // until hangup.
-        self.call_media.insert(
-            call_id,
-            CallMediaConfig {
-                mic: params.mic_input.clone(),
-                speaker: params.speaker_input.clone(),
-                camera_enabled: params.video_enabled,
-                camera: params.camera_input.clone(),
-                screen_share_on: false,
-            },
-        );
+        // Phase C2i: `connect` re-runs on transport reconnect with the
+        // retained params — the previous entry's screen-share intent is
+        // preserved (a fresh connect has no prior entry, so the flag
+        // starts off).
+        let previous = self.call_media.get(&call_id);
+        let config = retained_call_media(params, previous);
+        self.call_media.insert(call_id, config);
         let result = self.set_media_sources(call_id);
         if result.is_err() {
             self.call_media.remove(&call_id);
@@ -1617,7 +1632,7 @@ impl CallEngine for NtgcallsEngine {
         config.camera = camera.map(str::to_owned);
         // Phase C2i: the camera replaces screen share — ntgcalls
         // rejects camera+screen in Capture mode
-        // (`stream_manager.cpp:68`, v3.0.0).
+        // (`stream_manager.cpp:69`, v3.0.0).
         if enabled {
             config.screen_share_on = false;
         }
@@ -2899,6 +2914,43 @@ mod tests {
             unavailable.set_screen_share_enabled(77, true),
             Err(EngineError::Unavailable)
         );
+    }
+
+    /// Phase C2i: a mid-call screen-share intent survives a transport
+    /// reconnect — `connect` re-runs with the retained params and the
+    /// engine must re-issue screen-only (not flip back to the camera).
+    #[test]
+    fn retained_call_media_preserves_screen_share_across_reconnect() {
+        let params = ConnectParams {
+            encryption_key: vec![1; 256],
+            is_outgoing: false,
+            servers: Vec::new(),
+            library_versions: vec!["13.0.0".into()],
+            p2p_allowed: true,
+            mic_input: Some("mic-1".into()),
+            speaker_input: Some("speaker-1".into()),
+            video_enabled: true,
+            camera_input: Some("cam-1".into()),
+        };
+        // Fresh connect: no prior entry, share starts off.
+        let fresh = retained_call_media(&params, None);
+        assert!(!fresh.screen_share_on);
+        assert_eq!(fresh.mic.as_deref(), Some("mic-1"));
+        // Mid-call the user starts sharing, then the transport drops
+        // and `connect` re-runs with the same retained params: the
+        // share intent must survive so `set_media_sources` re-issues
+        // screen-only (`camera_enabled && !screen_share_on` stays
+        // false for the camera).
+        let mut sharing = fresh;
+        sharing.screen_share_on = true;
+        sharing.camera_enabled = false;
+        let reconnected = retained_call_media(&params, Some(&sharing));
+        assert!(reconnected.screen_share_on);
+        // Stopping share before the drop must not stick the flag on
+        // either.
+        let mut stopped = sharing;
+        stopped.screen_share_on = false;
+        assert!(!retained_call_media(&params, Some(&stopped)).screen_share_on);
     }
 
     /// Phase C2e: validates the toggle contract the UI will drive.
