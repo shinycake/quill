@@ -30858,13 +30858,6 @@ impl QuillApp {
         );
         for viewer in &state.rows {
             let name = self.story_viewer_actor_name(&viewer.actor);
-            // Avatar fallback: first character of the name, uppercased.
-            let initial: String = name
-                .chars()
-                .next()
-                .map(|c| c.to_uppercase().collect())
-                .filter(|s: &String| !s.is_empty())
-                .unwrap_or_else(|| "?".into());
             // Row suffix: the chosen reaction, or the interaction kind
             // ("viewed" / "forwarded" / "reposted"), plus relative time.
             let detail = format!(
@@ -30877,19 +30870,7 @@ impl QuillApp {
                     .flex()
                     .gap_2()
                     .items_center()
-                    .child(
-                        div()
-                            .flex_shrink_0()
-                            .size(px(28.))
-                            .rounded_full()
-                            .bg(rgb(0x30363d))
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .text_sm()
-                            .text_color(rgb(0xe6edf3))
-                            .child(initial),
-                    )
+                    .child(initials_avatar(&name, 28.))
                     .child(
                         div()
                             .flex()
