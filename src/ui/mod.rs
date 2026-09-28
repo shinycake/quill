@@ -24990,7 +24990,7 @@ impl QuillApp {
                             .text_color(cx.theme().muted_foreground)
                             .child("Current session"),
                     )
-                    .child(self.session_row(current, true, mutating, cx));
+                    .child(self.session_row(current, mutating, cx));
             }
             if !incomplete.is_empty() {
                 body = body
@@ -25007,7 +25007,7 @@ impl QuillApp {
                         ),
                     );
                 for s in incomplete {
-                    body = body.child(self.session_row(s, false, mutating, cx));
+                    body = body.child(self.session_row(s, mutating, cx));
                 }
             }
             if !others.is_empty() {
@@ -25019,7 +25019,7 @@ impl QuillApp {
                         .child("Other sessions"),
                 );
                 for s in others {
-                    body = body.child(self.session_row(s, false, mutating, cx));
+                    body = body.child(self.session_row(s, mutating, cx));
                 }
             }
             let any_other = sessions.iter().any(|s| !s.is_current);
@@ -25171,13 +25171,7 @@ impl QuillApp {
     /// chip), app + version, platform + version, IP + location, last
     /// active; a Terminate button for non-current sessions (TGX
     /// `SettingsSessionsController` row content).
-    fn session_row(
-        &self,
-        s: &ParsedSession,
-        is_current_card: bool,
-        mutating: bool,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
+    fn session_row(&self, s: &ParsedSession, mutating: bool, cx: &mut Context<Self>) -> AnyElement {
         let app_line = format!(
             "{} {}",
             s.application_name.trim(),
@@ -25234,7 +25228,7 @@ impl QuillApp {
                             .items_center()
                             .gap_2()
                             .child(div().text_sm().font_medium().child(title))
-                            .when(is_current_card, |this| {
+                            .when(s.is_current, |this| {
                                 this.child(
                                     div()
                                         .text_xs()

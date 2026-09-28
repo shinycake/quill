@@ -7518,8 +7518,13 @@ impl Session {
                     // clears the in-flight flags and parks the honest,
                     // classified error line on the overlay — never a fake
                     // success, never an optimistic list change.
+                    // A failed stale-refetch also clears `sessions_stale`
+                    // so the next ingest does not retry the fetch and
+                    // flood state worsens; retry is user-driven via the
+                    // Refresh button. The old cache stays visible.
                     Some(RequestPurpose::GetActiveSessions) => {
                         self.sessions_loading = false;
+                        self.sessions_stale = false;
                         self.sessions_error =
                             Some(sessions_error_line("load the sessions list", &err));
                     }
@@ -16925,6 +16930,10 @@ mod tests {
         let (mut session, sink) = session();
         let seq = AtomicU64::new(0);
         session.sessions_loading = true;
+        // A failed stale-refetch (e.g. after a terminate-ok marked the
+        // cache stale) must NOT leave the cache stale — otherwise the
+        // next ingest retries the fetch and flood state worsens.
+        session.sessions_stale = true;
         let extra = session.request(RequestPurpose::GetActiveSessions, None);
         apply_json(
             &mut session,
@@ -16936,6 +16945,9 @@ mod tests {
             ),
         );
         assert!(!session.sessions_loading);
+        // The failed stale-refetch clears staleness: no auto-retry on
+        // the next ingest; the user retries via the Refresh button.
+        assert!(!session.sessions_stale);
         assert_eq!(
             session.sessions_error.as_deref(),
             Some("Could not load the sessions list: too many requests — wait and try again")
