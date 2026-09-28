@@ -14461,6 +14461,7 @@ mod password_state_tests {
     }
 }
 
+#[cfg(test)]
 mod sessions_tests {
     use super::*;
 
