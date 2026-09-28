@@ -466,11 +466,11 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Poll creation dialog: question, add/remove options (2–10), validation errors, anonymous + multiple-answer toggles (ui/mod.rs:14860, poll.rs:112) <!-- parity:bots-poll-create -->
 - [x] Create quiz polls: quiz-mode toggle, mark correct option (radio), quiz explanation (0–200 chars, ≤2 line feeds); sends `inputPollTypeQuiz` (ui/mod.rs, poll.rs, requests.rs) <!-- parity:bots-poll-create-quiz -->
 - [x] Poll description field (shown above the poll title) (ui/mod.rs, requests.rs) <!-- parity:bots-poll-description -->
-- [x] Poll duration setting: auto-close after N hours (1–24, `open_period`) (ui/mod.rs, poll.rs) <!-- parity:bots-poll-duration -->
+- [x] Poll duration setting: auto-close after N hours (1–24 UI ceiling, `open_period`; true max is server `getOption("poll_open_period_max")`) (ui/mod.rs, poll.rs) <!-- parity:bots-poll-duration -->
 - [x] Revoting toggle in creation dialog (`allows_revoting`; forced off in quiz mode) (ui/mod.rs, requests.rs) <!-- parity:bots-poll-revoting -->
 - [x] Shuffle options toggle (`shuffle_options`) (ui/mod.rs, requests.rs) <!-- parity:bots-poll-shuffle -->
 - [ ] Show voters toggle (no such creation field on `inputMessagePoll` — TGX implements it as the inverse of `is_anonymous`, which the dialog already has; voter-list display is `getPollVoters` below) <!-- parity:bots-poll-show-voters -->
-- [x] Country restriction setting: comma-separated ISO codes (`country_codes`) (ui/mod.rs, poll.rs, requests.rs) <!-- parity:bots-poll-countries -->
+- [x] Country restriction setting: comma-separated ISO codes (`country_codes`; count cap is server-enforced `poll_country_count_max`, channel-only) (ui/mod.rs, poll.rs, requests.rs) <!-- parity:bots-poll-countries -->
 - [x] Poll discard-confirmation prompt when closing the dialog with unsent input (ui/mod.rs) <!-- parity:bots-poll-discard -->
 - [x] Voting: single, multiple, retract-when-revoting, quiz answering, closed-poll blocked, optimistic UI with rollback on failure (poll.rs:51, connect.rs:5287) <!-- parity:bots-poll-vote -->
 - [x] Live poll updates applied in place via updatePoll (state.rs:3962) <!-- parity:bots-poll-live-update -->
