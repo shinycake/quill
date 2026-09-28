@@ -17389,62 +17389,18 @@ impl QuillApp {
                 );
             }
         }
-        div()
-            .id("archive-settings-overlay")
-            .absolute()
-            .top_0()
-            .left_0()
-            .right_0()
-            .bottom_0()
-            .flex()
-            .items_center()
-            .justify_center()
-            .child(
-                div()
-                    .id("archive-settings-backdrop")
-                    .absolute()
-                    .top_0()
-                    .left_0()
-                    .right_0()
-                    .bottom_0()
-                    .bg(SCRIM)
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.set_archive_settings_open(false);
-                        cx.notify();
-                    })),
-            )
-            .child(
-                div()
-                    .id("archive-settings-dialog")
-                    .flex()
-                    .flex_col()
-                    .gap_2()
-                    .px_4()
-                    .py_3()
-                    .rounded_lg()
-                    .bg(cx.theme().sidebar)
-                    .border_1()
-                    .border_color(cx.theme().border)
-                    .min_w(px(360.))
-                    .max_w(px(480.))
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .justify_between()
-                            .child(div().font_semibold().child("Archive settings"))
-                            .child(
-                                Button::new("close-archive-settings")
-                                    .label("Close")
-                                    .ghost()
-                                    .on_click(cx.listener(|this, _, _, cx| {
-                                        this.set_archive_settings_open(false);
-                                        cx.notify();
-                                    })),
-                            ),
-                    )
-                    .child(body),
-            )
+        // Phase 2 (kit adoption): dialog chrome from kit `Dialog`.
+        let quill = cx.entity();
+        Dialog::new(cx)
+            .title(div().font_semibold().child("Archive settings"))
+            .child(body)
+            .width(px(420.))
+            .on_close(move |_, _, cx| {
+                quill.update(cx, |this, cx| {
+                    this.set_archive_settings_open(false);
+                    cx.notify();
+                });
+            })
             .into_any_element()
     }
 
@@ -25130,67 +25086,43 @@ impl QuillApp {
                     ),
             );
         }
-        div()
-            .id("folder-manage-overlay")
-            .absolute()
-            .top_0()
-            .left_0()
-            .right_0()
-            .bottom_0()
+        // Phase 2 (kit adoption): dialog chrome from kit `Dialog`.
+        let quill = cx.entity();
+        let body = div()
             .flex()
-            .items_center()
-            .justify_center()
-            .child(self.folder_backdrop(cx, "folder-manage"))
+            .flex_col()
+            .gap_2()
+            .child(list)
             .child(
-                div()
-                    .id("folder-manage-panel")
-                    .flex()
-                    .flex_col()
-                    .gap_2()
-                    .p_4()
-                    .w(px(440.))
-                    .rounded_md()
-                    .border_1()
-                    .border_color(cx.theme().border)
-                    .bg(cx.theme().sidebar)
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .justify_between()
-                            .child(div().text_sm().font_semibold().child("Folders"))
-                            .child(
-                                Button::new("folder-manage-close")
-                                    .label("Close")
-                                    .ghost()
-                                    .on_click(cx.listener(|this, _, _, cx| {
-                                        this.close_folder_manage(cx);
-                                    })),
-                            ),
-                    )
-                    .child(list)
-                    .child(
-                        div().flex().items_center().gap_2().child(
-                            Button::new("folder-tags-toggle")
-                                .label(if tags_enabled {
-                                    "☑ Show folder tags"
-                                } else {
-                                    "☐ Show folder tags"
-                                })
-                                .ghost()
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.toggle_folder_tags_ui(cx);
-                                })),
-                        ),
-                    )
-                    .child(
-                        Button::new("folder-create")
-                            .label("New folder")
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.open_folder_create(window, cx);
-                            })),
-                    ),
+                div().flex().items_center().gap_2().child(
+                    Button::new("folder-tags-toggle")
+                        .label(if tags_enabled {
+                            "☑ Show folder tags"
+                        } else {
+                            "☐ Show folder tags"
+                        })
+                        .ghost()
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.toggle_folder_tags_ui(cx);
+                        })),
+                ),
             )
+            .child(
+                Button::new("folder-create")
+                    .label("New folder")
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.open_folder_create(window, cx);
+                    })),
+            );
+        Dialog::new(cx)
+            .title(div().text_sm().font_semibold().child("Folders"))
+            .child(body)
+            .width(px(440.))
+            .on_close(move |_, _, cx| {
+                quill.update(cx, |this, cx| {
+                    this.close_folder_manage(cx);
+                });
+            })
             .into_any_element()
     }
 
@@ -27900,62 +27832,15 @@ impl QuillApp {
         for scope in NotificationSettingsScope::ALL {
             body = body.child(self.scope_settings_section(cx, scope, &saved_sounds));
         }
-        div()
-            .id("notif-defaults-overlay")
-            .absolute()
-            .top_0()
-            .left_0()
-            .right_0()
-            .bottom_0()
-            .flex()
-            .items_center()
-            .justify_center()
+        // Phase 2 (kit adoption): dialog chrome from kit `Dialog`.
+        let quill = cx.entity();
+        Dialog::new(cx)
+            .title(div().font_semibold().child("Notification defaults"))
             .child(
                 div()
-                    .id("notif-defaults-backdrop")
-                    .absolute()
-                    .top_0()
-                    .left_0()
-                    .right_0()
-                    .bottom_0()
-                    .bg(SCRIM)
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.notification_defaults_open = false;
-                        this.defaults_sound_picker = None;
-                        cx.notify();
-                    })),
-            )
-            .child(
-                div()
-                    .id("notif-defaults-dialog")
                     .flex()
                     .flex_col()
                     .gap_2()
-                    .px_4()
-                    .py_3()
-                    .rounded_lg()
-                    .bg(cx.theme().sidebar)
-                    .border_1()
-                    .border_color(cx.theme().border)
-                    .min_w(px(420.))
-                    .max_w(px(560.))
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .justify_between()
-                            .child(div().font_semibold().child("Notification defaults"))
-                            .child(
-                                Button::new("close-notif-defaults")
-                                    .label("Close")
-                                    .ghost()
-                                    .on_click(cx.listener(|this, _, _, cx| {
-                                        this.notification_defaults_open = false;
-                                        this.defaults_sound_picker = None;
-                                        cx.notify();
-                                    })),
-                            ),
-                    )
                     .child(
                         div()
                             .text_xs()
@@ -27967,6 +27852,14 @@ impl QuillApp {
                     )
                     .child(body),
             )
+            .width(px(480.))
+            .on_close(move |_, _, cx| {
+                quill.update(cx, |this, cx| {
+                    this.notification_defaults_open = false;
+                    this.defaults_sound_picker = None;
+                    cx.notify();
+                });
+            })
             .into_any_element()
     }
 
@@ -28022,75 +27915,32 @@ impl QuillApp {
                 }
             }
         }
-        div()
-            .id("storage-usage-overlay")
-            .absolute()
-            .top_0()
-            .left_0()
-            .right_0()
-            .bottom_0()
-            .flex()
-            .items_center()
-            .justify_center()
+        // Phase 2 (kit adoption): dialog chrome from kit `Dialog`. The
+        // Refresh action moves into the body; close comes from the kit.
+        let quill = cx.entity();
+        let refresh = Button::new("storage-refresh")
+            .label("Refresh")
+            .ghost()
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.refresh_storage_usage(cx);
+            }));
+        Dialog::new(cx)
+            .title(div().font_semibold().child("Storage usage"))
             .child(
                 div()
-                    .id("storage-usage-backdrop")
-                    .absolute()
-                    .top_0()
-                    .left_0()
-                    .right_0()
-                    .bottom_0()
-                    .bg(SCRIM)
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.storage_usage_open = false;
-                        cx.notify();
-                    })),
-            )
-            .child(
-                div()
-                    .id("storage-usage-dialog")
                     .flex()
                     .flex_col()
                     .gap_2()
-                    .px_4()
-                    .py_3()
-                    .rounded_lg()
-                    .bg(cx.theme().sidebar)
-                    .border_1()
-                    .border_color(cx.theme().border)
-                    .min_w(px(360.))
-                    .max_w(px(480.))
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .justify_between()
-                            .child(div().font_semibold().child("Storage usage"))
-                            .child(
-                                div()
-                                    .flex()
-                                    .gap_2()
-                                    .child(
-                                        Button::new("storage-refresh")
-                                            .label("Refresh")
-                                            .ghost()
-                                            .on_click(cx.listener(|this, _, _, cx| {
-                                                this.refresh_storage_usage(cx);
-                                            })),
-                                    )
-                                    .child(
-                                        Button::new("close-storage-usage")
-                                            .label("Close")
-                                            .ghost()
-                                            .on_click(cx.listener(|this, _, _, cx| {
-                                                this.storage_usage_open = false;
-                                                cx.notify();
-                                            })),
-                                    ),
-                            ),
-                    )
+                    .child(div().flex().justify_end().child(refresh))
                     .child(body),
             )
+            .width(px(440.))
+            .on_close(move |_, _, cx| {
+                quill.update(cx, |this, cx| {
+                    this.storage_usage_open = false;
+                    cx.notify();
+                });
+            })
             .into_any_element()
     }
 
@@ -28367,57 +28217,17 @@ impl QuillApp {
             (TwofaView::Disable, _) => self.twofa_disable_body(cx, body),
             (TwofaView::Email, _) => self.twofa_email_body(cx, body),
         };
-        div()
-            .id("twofa-overlay")
-            .absolute()
-            .top_0()
-            .left_0()
-            .right_0()
-            .bottom_0()
-            .flex()
-            .items_center()
-            .justify_center()
-            .child(
-                div()
-                    .id("twofa-backdrop")
-                    .absolute()
-                    .top_0()
-                    .left_0()
-                    .right_0()
-                    .bottom_0()
-                    .bg(SCRIM)
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.close_twofa(window, cx);
-                    })),
-            )
-            .child(
-                div()
-                    .id("twofa-dialog")
-                    .flex()
-                    .flex_col()
-                    .gap_2()
-                    .px_4()
-                    .py_3()
-                    .rounded_lg()
-                    .bg(cx.theme().sidebar)
-                    .border_1()
-                    .border_color(cx.theme().border)
-                    .min_w(px(360.))
-                    .max_w(px(480.))
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .justify_between()
-                            .child(div().font_semibold().child("Two-Step Verification"))
-                            .child(Button::new("close-twofa").label("Close").ghost().on_click(
-                                cx.listener(|this, _, window, cx| {
-                                    this.close_twofa(window, cx);
-                                }),
-                            )),
-                    )
-                    .child(body),
-            )
+        // Phase 2 (kit adoption): dialog chrome from kit `Dialog`.
+        let quill = cx.entity();
+        Dialog::new(cx)
+            .title(div().font_semibold().child("Two-Step Verification"))
+            .child(body)
+            .width(px(420.))
+            .on_close(move |_, window, cx| {
+                quill.update(cx, |this, cx| {
+                    this.close_twofa(window, cx);
+                });
+            })
             .into_any_element()
     }
 
@@ -28883,73 +28693,31 @@ impl QuillApp {
                 ),
             );
         }
-        div()
-            .id("sessions-overlay")
-            .absolute()
-            .top_0()
-            .left_0()
-            .right_0()
-            .bottom_0()
-            .flex()
-            .items_center()
-            .justify_center()
+        // Phase 2 (kit adoption): dialog chrome from kit `Dialog`. The
+        // Refresh action moves into the body; close comes from the kit.
+        let quill = cx.entity();
+        let refresh = Button::new("sessions-refresh")
+            .label("Refresh")
+            .ghost()
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.refresh_sessions(cx);
+            }));
+        Dialog::new(cx)
+            .title(div().font_semibold().child("Active Sessions"))
             .child(
                 div()
-                    .id("sessions-backdrop")
-                    .absolute()
-                    .top_0()
-                    .left_0()
-                    .right_0()
-                    .bottom_0()
-                    .bg(SCRIM)
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.close_sessions(cx);
-                    })),
-            )
-            .child(
-                div()
-                    .id("sessions-dialog")
                     .flex()
                     .flex_col()
                     .gap_2()
-                    .px_4()
-                    .py_3()
-                    .rounded_lg()
-                    .bg(cx.theme().sidebar)
-                    .border_1()
-                    .border_color(cx.theme().border)
-                    .min_w(px(380.))
-                    .max_w(px(520.))
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .justify_between()
-                            .child(div().font_semibold().child("Active Sessions"))
-                            .child(
-                                div()
-                                    .flex()
-                                    .gap_2()
-                                    .child(
-                                        Button::new("sessions-refresh")
-                                            .label("Refresh")
-                                            .ghost()
-                                            .on_click(cx.listener(|this, _, _, cx| {
-                                                this.refresh_sessions(cx);
-                                            })),
-                                    )
-                                    .child(
-                                        Button::new("close-sessions")
-                                            .label("Close")
-                                            .ghost()
-                                            .on_click(cx.listener(|this, _, _, cx| {
-                                                this.close_sessions(cx);
-                                            })),
-                                    ),
-                            ),
-                    )
+                    .child(div().flex().justify_end().child(refresh))
                     .child(body),
             )
+            .width(px(480.))
+            .on_close(move |_, _, cx| {
+                quill.update(cx, |this, cx| {
+                    this.close_sessions(cx);
+                });
+            })
             .into_any_element()
     }
 
@@ -29354,74 +29122,32 @@ impl QuillApp {
                     .child("Tap to disconnect from your Telegram account."),
             );
         }
-        div()
-            .id("websites-overlay")
-            .absolute()
-            .top_0()
-            .left_0()
-            .right_0()
-            .bottom_0()
-            .flex()
-            .items_center()
-            .justify_center()
+        // Phase 2 (kit adoption): dialog chrome from kit `Dialog`. The
+        // Refresh action moves into the body; close comes from the kit.
+        let quill = cx.entity();
+        let refresh = Button::new("websites-refresh")
+            .label("Refresh")
+            .ghost()
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.refresh_websites(cx);
+            }));
+        Dialog::new(cx)
+            // TGX `WebSessionsTitle`, verbatim.
+            .title(div().font_semibold().child("Logged In with Telegram"))
             .child(
                 div()
-                    .id("websites-backdrop")
-                    .absolute()
-                    .top_0()
-                    .left_0()
-                    .right_0()
-                    .bottom_0()
-                    .bg(SCRIM)
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.close_websites(cx);
-                    })),
-            )
-            .child(
-                div()
-                    .id("websites-dialog")
                     .flex()
                     .flex_col()
                     .gap_2()
-                    .px_4()
-                    .py_3()
-                    .rounded_lg()
-                    .bg(cx.theme().sidebar)
-                    .border_1()
-                    .border_color(cx.theme().border)
-                    .min_w(px(380.))
-                    .max_w(px(520.))
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .justify_between()
-                            // TGX `WebSessionsTitle`, verbatim.
-                            .child(div().font_semibold().child("Logged In with Telegram"))
-                            .child(
-                                div()
-                                    .flex()
-                                    .gap_2()
-                                    .child(
-                                        Button::new("websites-refresh")
-                                            .label("Refresh")
-                                            .ghost()
-                                            .on_click(cx.listener(|this, _, _, cx| {
-                                                this.refresh_websites(cx);
-                                            })),
-                                    )
-                                    .child(
-                                        Button::new("close-websites")
-                                            .label("Close")
-                                            .ghost()
-                                            .on_click(cx.listener(|this, _, _, cx| {
-                                                this.close_websites(cx);
-                                            })),
-                                    ),
-                            ),
-                    )
+                    .child(div().flex().justify_end().child(refresh))
                     .child(body),
             )
+            .width(px(460.))
+            .on_close(move |_, _, cx| {
+                quill.update(cx, |this, cx| {
+                    this.close_websites(cx);
+                });
+            })
             .into_any_element()
     }
 
