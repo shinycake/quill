@@ -114,6 +114,13 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Render richMessage PageBlocks in message bubbles (messageRichMessage, getFullRichMessage) <!-- parity:msg-richmessage-render -->
 - [x] In-message buttons: render pageBlockButtonRow + richTextButton, taps fire bot callbacks <!-- parity:msg-richmessage-buttons -->
 - [x] Ephemeral messages: render message.ephemeral_content instead of regular content <!-- parity:msg-ephemeral-render -->
+- [ ] Apply updateMessageEphemeralContent (ephemeral content refreshes over time; initial render covered by parity:msg-ephemeral-render) <!-- parity:msg-ephemeral-updates -->
+- [ ] Compact tables in rich messages <!-- parity:msg-richtext-tables -->
+- [ ] Expandable block quotes (long block quotes collapse with an expand affordance; authoring covered by parity:msg-quote-block) <!-- parity:msg-blockquote-expandable -->
+- [ ] Inline photos/videos in the rich-text composer (partial: inline documents/files/music done — parity:msg-richtext-inline-doc) <!-- parity:msg-richtext-inline-media -->
+- [ ] AI tools in the rich-text composer (composeTextWithAi, composeRichMessageWithAi, createRichMessageWithAi, fixTextWithAi, fixRichMessageWithAi) <!-- parity:msg-richtext-ai-tools -->
+- [ ] Rich-text composer max length (32,768 chars) <!-- parity:msg-richtext-max-length -->
+- [ ] Premium gating of the rich-text editor <!-- parity:msg-richtext-premium-gate -->
 
 ### Chat list
 
@@ -253,6 +260,17 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Welcome messages: joiner-side rendering — welcome content reaches a new joiner as regular `updateNewMessage` messages (server pushes `updateNewEphemeralMessage` with `welcome_template=false`; TDLib converts it to a normal message) and renders through the existing message pipeline; `updateChatWelcomeMessages` is pack sync for admins only (requires `can_send_welcome_messages`; TGX leaves it unhandled) and is never delivered to plain joiners — mechanism verified against TDLib 1.8.67 source, see DECISIONS.md <!-- parity:groups-welcome-view -->
 - [x] Welcome messages: add/edit/delete via addChatWelcomeMessage, editChatWelcomeMessage, deleteChatWelcomeMessage, loadChatWelcomeMessages (gated on `can_send_welcome_messages`; pack refetched after each confirmed mutation) (src/ui/mod.rs, src/connect.rs) <!-- parity:groups-welcome-manage -->
 - [x] Welcome message setup: Welcome-message row in the group/channel info panel opens the pack editor dialog (src/ui/mod.rs) <!-- parity:groups-welcome-setup -->
+- [ ] Communities: create a community (createCommunity exists in TDLib 1.8.67; no Quill UI) <!-- parity:communities-create -->
+- [ ] Communities: browse and manage owned communities (partial: TDLib 1.8.67 exposes createCommunity/loadCommunityFullInfo/setCommunityName; no Quill UI) <!-- parity:communities-hub -->
+- [ ] Communities: toggle community chat visibility (blocked: no TDLib 1.8.67 method to toggle hidden state) <!-- parity:communities-chat-visibility -->
+- [ ] Communities: community chat-list mode (view a community's chats as a filtered chat list) <!-- parity:communities-chatlist-mode -->
+- [ ] Communities: add a chat to a community (blocked: no TDLib 1.8.67 method) <!-- parity:communities-add-chat -->
+- [ ] Communities: admin-rights management (blocked: no TDLib 1.8.67 method) <!-- parity:communities-admin-rights -->
+- [ ] Communities: info panel (partial: loadCommunityFullInfo/setCommunityName exist in TDLib 1.8.67; no Quill UI) <!-- parity:communities-info -->
+- [ ] Communities: "chat added to community" service message <!-- parity:groups-added-to-community -->
+- [ ] Communities: "chat removed from community" service message <!-- parity:groups-removed-from-community -->
+- [ ] Communities: community search filter (searchMessagesChatTypeFilterCommunity) <!-- parity:communities-search-filter -->
+- [ ] Communities: community join service message <!-- parity:communities-join-service-message -->
 
 ### Secret chats
 
@@ -423,6 +441,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [ ] "No GIFs" empty state <!-- parity:gifs-empty-state -->
 - [ ] "Autoplay GIFs" setting <!-- parity:gifs-autoplay-setting -->
 - [ ] GIF loop playback in history (partial: static frame cache only, ui/mod.rs:3015) <!-- parity:gifs-history-playback -->
+- [ ] Apply updateAnimationSearchParameters to GIF search (search still rides the animation_search_bot_username inline-bot path) <!-- parity:gifs-search-parameters -->
 - [ ] Emoji picker in composer with categories (Smileys & People, etc.) and search <!-- parity:emoji-picker -->
 - [ ] Insert emoji at cursor in composer text <!-- parity:emoji-insert -->
 - [ ] Big emoji rendering for emoji-only messages (Big Emoji setting) <!-- parity:emoji-big -->
@@ -450,8 +469,11 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Game buttons launch via getCallbackQueryAnswer with callbackQueryPayloadGame (messageGame short name); answer URL opens in browser <!-- parity:bots-inline-game -->
 - [ ] Buy buttons (partial: "Payment buttons are not supported yet" tooltip; invoice messages fall back to Unsupported) <!-- parity:bots-inline-buy -->
 - [x] User buttons open the private chat with the user (ui/mod.rs) <!-- parity:bots-inline-user -->
+- [ ] Per-button disabled flag on inline buttons (Bot API 10.3 `disabled` field; blocked: not exposed in TDLib 1.8.67 `inlineKeyboardButton` — the `inlineKeyboardButtonTypeDisabled` type is exposed and Quill already renders it disabled) <!-- parity:bots-inline-disabled-buttons -->
 - [x] Custom reply keyboards rendered above the composer; text sends, one-time hides on tap, contact/location/poll honestly disabled <!-- parity:bots-custom-keyboard -->
 - [x] Force-reply markup focuses the composer with the reply target set <!-- parity:bots-force-reply -->
+- [ ] Force-reply keyboards render the reply-keyboard bar (the official clients show the custom-keyboard UI for forceReply markup; Quill covers only composer focus) <!-- parity:bots-force-reply-keyboard -->
+- [ ] Stop button for streaming bot drafts (cancel an in-flight streaming bot reply) <!-- parity:bots-streaming-draft-stop -->
 - [x] Bot info panel with description and tappable /command buttons inserting into the composer (ui/mod.rs:13726) <!-- parity:bots-info-panel -->
 - [x] Bot START button / start_parameter deep links (partial: link parser + armed START state are wired, but Quill registers no t.me/tg: URL scheme so OS deep-link intake is out of this slice): t.me/<bot>?start=<param> parses to (bot, param); START button sends sendBotStartMessage with the parameter (state.rs, ui/mod.rs) <!-- parity:bots-start -->
 - [x] Restart bot: confirm-gated; clears the bot chat history (deleteChatHistory, kept in list) then re-sends sendBotStartMessage with an empty parameter (connect.rs:restart_bot) <!-- parity:bots-restart -->
@@ -461,6 +483,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Bot privacy settings (read-only): privacy-policy URL button, /privacy command fallback, else the schema's telegram.org/privacy-tpa fallback note — no client-side bot privacy setting exists in the schema <!-- parity:bots-privacy -->
 - [x] Similar bots section in the bot profile: getBotSimilarBots, names resolved from the user cache, tap opens the bot chat (state.rs, connect.rs, ui/mod.rs) <!-- parity:bots-similar -->
 - [x] `/` command menu merging chat-specific bot commands and global getCommands (state.rs:3100) <!-- parity:bots-command-menu -->
+- [ ] Ephemeral-command icon in the bot command list (BotCommand.is_ephemeral) <!-- parity:bots-ephemeral-command-icon -->
 - [ ] Inline mode: type @bot in composer, inline query results list, send an inline result (no getInlineQueryResults code in src) <!-- parity:bots-inline-mode -->
 - [ ] Games: send / play, high scores (no game code at all) <!-- parity:bots-games -->
 - [x] Poll creation dialog: question, add/remove options (2–10), validation errors, anonymous + multiple-answer toggles (ui/mod.rs:14860, poll.rs:112) <!-- parity:bots-poll-create -->
