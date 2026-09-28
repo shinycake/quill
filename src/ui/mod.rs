@@ -68,9 +68,9 @@ use quill::telegram::envelope::{
     ParsedGroupCallParticipant, ParsedMessage, ParsedSecretChat, ParsedSession, ParsedStory,
     ParsedWebsite, ParsedWelcomeMessage, PasswordState, PollContent, PollOption, PollType,
     ReplyKeyboard, ReplyMarkup, ScopeNotificationSettings, SecretChatState, SpeechRecognition,
-    SponsoredMessage, StatisticalGraph, StatisticalValue, StorageFileTypeStats, StorageStats, StoryOriginView,
-    UsernameCheckResult, call_entry_label, chat_ttl_service_label, effective_content,
-    format_ttl_setting, toggle_chosen_emoji_reaction,
+    SponsoredMessage, StatisticalGraph, StatisticalValue, StorageFileTypeStats, StorageStats,
+    StoryOriginView, UsernameCheckResult, call_entry_label, chat_ttl_service_label,
+    effective_content, format_ttl_setting, toggle_chosen_emoji_reaction,
 };
 use quill::telegram::requests::SelfDestructSend;
 use quill::telegram::requests::{

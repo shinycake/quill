@@ -65,14 +65,15 @@ use crate::telegram::requests::{
     discard_call as discard_call_request, disconnect_all_websites, disconnect_website,
     download_file as download_file_request, edit_chat_folder, edit_chat_invite_link,
     edit_chat_welcome_message, edit_forum_topic, edit_message_caption, edit_message_text,
-    edit_story as edit_story_request, edit_story_cover as edit_story_cover_request, end_group_call, end_group_call_recording, end_group_call_screen_sharing, forward_messages,
-    get_active_sessions, get_archive_chat_list_settings, get_authorization_state,
-    get_available_chat_boost_slots, get_basic_group_full_info, get_bot_similar_bots,
-    get_callback_query_answer, get_callback_query_answer_game,
-    get_callback_query_answer_with_password, get_chat_active_stories, get_chat_administrators,
-    get_chat_boost_status, get_chat_event_log, get_chat_folder, get_chat_history,
-    get_chat_invite_links, get_chat_join_requests, get_chat_lists_to_add_chat, get_chat_member,
-    get_chat_scheduled_messages, get_chat_sponsored_messages, get_chat_statistics,
+    edit_story as edit_story_request, edit_story_cover as edit_story_cover_request, end_group_call,
+    end_group_call_recording, end_group_call_screen_sharing, forward_messages, get_active_sessions,
+    get_archive_chat_list_settings, get_authorization_state, get_available_chat_boost_slots,
+    get_basic_group_full_info, get_bot_similar_bots, get_callback_query_answer,
+    get_callback_query_answer_game, get_callback_query_answer_with_password,
+    get_chat_active_stories, get_chat_administrators, get_chat_boost_status, get_chat_event_log,
+    get_chat_folder, get_chat_history, get_chat_invite_links, get_chat_join_requests,
+    get_chat_lists_to_add_chat, get_chat_member, get_chat_scheduled_messages,
+    get_chat_sponsored_messages, get_chat_statistics,
     get_chats_to_post_stories as get_chats_to_post_stories_request, get_commands,
     get_connected_websites, get_contacts, get_forum_topics, get_full_rich_message, get_group_call,
     get_installed_sticker_sets, get_link_preview, get_login_url, get_login_url_info, get_me,
@@ -105,14 +106,15 @@ use crate::telegram::requests::{
     set_chat_permissions, set_chat_slow_mode_delay, set_group_call_participant_volume_level,
     set_message_sender_block_list, set_name, set_password, set_pinned_chats, set_poll_answer,
     set_profile_photo, set_recovery_email_address, set_scope_notification_settings,
-    set_story_reaction, set_supergroup_username, set_user_privacy_setting_rules, set_username,
-    set_video_chat_title, start_group_call_recording, start_group_call_screen_sharing,
-    start_scheduled_video_chat, stop_poll as stop_poll_request,
-    supergroup_members_filter_administrators_json, supergroup_members_filter_banned_json,
-    supergroup_members_filter_recent_json, supergroup_members_filter_restricted_json,
-    supergroup_members_filter_search_json, terminate_all_other_sessions, terminate_session,
-    toggle_chat_folder_tags, toggle_chat_is_marked_as_unread, toggle_chat_is_pinned,
-    toggle_forum_topic_closed, toggle_forum_topic_pinned, toggle_general_forum_topic_hidden,
+    set_story_privacy_settings as set_story_privacy_settings_request, set_story_reaction,
+    set_supergroup_username, set_user_privacy_setting_rules, set_username, set_video_chat_title,
+    start_group_call_recording, start_group_call_screen_sharing, start_scheduled_video_chat,
+    stop_poll as stop_poll_request, supergroup_members_filter_administrators_json,
+    supergroup_members_filter_banned_json, supergroup_members_filter_recent_json,
+    supergroup_members_filter_restricted_json, supergroup_members_filter_search_json,
+    terminate_all_other_sessions, terminate_session, toggle_chat_folder_tags,
+    toggle_chat_is_marked_as_unread, toggle_chat_is_pinned, toggle_forum_topic_closed,
+    toggle_forum_topic_pinned, toggle_general_forum_topic_hidden,
     toggle_group_call_are_messages_allowed, toggle_group_call_is_my_video_enabled,
     toggle_group_call_is_my_video_paused, toggle_group_call_participant_is_hand_raised,
     toggle_group_call_participant_is_muted, toggle_session_can_accept_calls,
@@ -17837,8 +17839,6 @@ mod tests {
     }
 
     #[test]
-
-    #[test]
     fn driver_get_story_interactions_gates_and_dedupes() {
         let store = MemorySecretStore::new();
         let (dir, prepared) = prepared_tmp(&store);
@@ -17964,7 +17964,6 @@ mod tests {
         assert_eq!(driver.activate_story_stealth_mode(), Ok(None));
         let _ = std::fs::remove_dir_all(&dir);
     }
-
 
     #[test]
     fn driver_manage_story_gated_on_cached_flags() {
