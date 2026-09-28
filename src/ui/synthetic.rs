@@ -174,25 +174,6 @@ impl Render for SyntheticChat {
     }
 }
 
-pub(crate) fn session_text_bubble(
-    id: u64,
-    sender: impl Into<SharedString>,
-    body: impl Into<SharedString>,
-    outgoing: bool,
-) -> AnyElement {
-    session_bubble(id, sender, body, outgoing, None)
-}
-
-pub(crate) fn session_bubble(
-    id: u64,
-    sender: impl Into<SharedString>,
-    body: impl Into<SharedString>,
-    outgoing: bool,
-    extra: Option<AnyElement>,
-) -> AnyElement {
-    session_bubble_quoted(id, sender, body, outgoing, extra, None)
-}
-
 pub(crate) fn session_bubble_quoted(
     id: u64,
     sender: impl Into<SharedString>,

@@ -81,7 +81,10 @@ fn ui_main(args: &[String]) {
                     },
                     move |window, cx| {
                         let view = cx.new(|cx| ui::QuillApp::new(window, cx, credentials.clone()));
-                        cx.new(|cx| gpui_kit::component::Root::new(view, window, cx))
+                        // kit Phase 2 (redo): shell mounts the kit dialog +
+                        // notification layers that Root does not mount itself.
+                        let shell = cx.new(|_cx| ui::QuillShell::new(view));
+                        cx.new(|cx| gpui_kit::component::Root::new(shell, window, cx))
                     },
                 )
                 .expect("failed to open window");
@@ -384,7 +387,10 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
                     move |window, cx| {
                         let view =
                             cx.new(|cx| ui::QuillApp::new_with_demo(window, cx, None, Some(kind)));
-                        cx.new(|cx| gpui_kit::component::Root::new(view, window, cx))
+                        // kit Phase 2 (redo): shell mounts the kit dialog +
+                        // notification layers that Root does not mount itself.
+                        let shell = cx.new(|_cx| ui::QuillShell::new(view));
+                        cx.new(|cx| gpui_kit::component::Root::new(shell, window, cx))
                     },
                 )
                 .expect("failed to open screenshot demo window");
