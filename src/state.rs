@@ -28,8 +28,8 @@ use crate::telegram::envelope::{
     PasswordState, Poll, ReplyKeyboard, ReplyMarkup, ReportChatOutcome, ReportOption,
     ReportSponsoredResult, ReportStoryResult, RichMessageContent, ScopeNotificationSettings,
     SecretChatState, SponsoredMessage, StickerFormat, StickerItem, StickerSetInfo, StorageStats,
-    StoryAvailableReactionView, StoryInteractionKind, StoryInteractionsView, StoryListView,
-    TdError, effective_content, reply_markup_demands_reply,
+    StoryAvailableReactionView, StoryInteractionKind, StoryInteractionView, StoryInteractionsView,
+    StoryListView, TdError, effective_content, reply_markup_demands_reply,
 };
 use crate::telegram::envelope::{CallState, ReadyParams};
 use crate::telegram::requests::{
@@ -3794,31 +3794,6 @@ pub struct StoryPostState {
     pub outcome: StoryPostOutcome,
 }
 
-/// Phase 9.5: one viewer row — who interacted with an own story and how.
-/// Names resolve in the UI (`Session::users` / `Session::chats`); the
-/// state keeps only ids plus what the page carried.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct StoryViewerRow {
-    pub actor: MessageSender,
-    pub interaction_date: i32,
-    pub reaction_emoji: Option<String>,
-    pub kind: StoryInteractionKind,
-}
-
-impl StoryViewerRow {
-    /// Short row suffix: the chosen reaction, or the interaction kind.
-    pub fn kind_label(&self) -> String {
-        if let Some(emoji) = self.reaction_emoji.as_deref() {
-            return emoji.to_string();
-        }
-        match self.kind {
-            StoryInteractionKind::View => "viewed".into(),
-            StoryInteractionKind::Forward => "forwarded".into(),
-            StoryInteractionKind::Repost => "reposted".into(),
-        }
-    }
-}
-
 /// Phase 9.5: the viewers panel's accumulated `getStoryInteractions`
 /// pages for one story. `next_offset` empty = no more pages.
 #[derive(Debug, Clone, Default)]
@@ -3826,7 +3801,7 @@ pub struct StoryViewersState {
     pub chat_id: i64,
     pub story_id: i32,
     pub total_count: i32,
-    pub rows: Vec<StoryViewerRow>,
+    pub rows: Vec<StoryInteractionView>,
     pub next_offset: String,
     pub loading: bool,
     pub error: Option<String>,
@@ -9179,16 +9154,7 @@ impl Session {
         state.error = None;
         state.total_count = view.total_count;
         state.next_offset = view.next_offset;
-        state.rows.extend(
-            view.interactions
-                .into_iter()
-                .map(|interaction| StoryViewerRow {
-                    actor: interaction.actor,
-                    interaction_date: interaction.interaction_date,
-                    reaction_emoji: interaction.reaction_emoji,
-                    kind: interaction.kind,
-                }),
-        );
+        state.rows.extend(view.interactions);
     }
 
     /// Phase 9.5: mark the viewers fetch as failed; the panel shows the
@@ -9272,6 +9238,19 @@ impl Session {
         };
         if let Some(flow) = self.story_report.as_mut()
             && flow.chat_id == chat_id.0
+            && flow.story_id == story_id
+        {
+            flow.stage = StoryReportStage::Failed(message);
+        }
+    }
+
+    /// Phase 9.5: `reportStory` failed to send at all — the driver took
+    /// the pending request back, so no answer will ever arrive. End the
+    /// flow with the error instead of spinning on `Checking`/`Sending`
+    /// forever.
+    pub fn fail_story_report_send(&mut self, chat_id: i64, story_id: i32, message: String) {
+        if let Some(flow) = self.story_report.as_mut()
+            && flow.chat_id == chat_id
             && flow.story_id == story_id
         {
             flow.stage = StoryReportStage::Failed(message);
@@ -14330,6 +14309,36 @@ mod tests {
         );
     }
 
+    /// Phase 9.5 review: reopening the viewers panel must not duplicate
+    /// rows — `toggle_story_viewers` clears before the fresh page-1
+    /// fetch (`begin_story_viewers` alone keeps rows for the same
+    /// story, so the clear is what prevents [A,B] → [A,B,A,B]).
+    #[test]
+    fn story_viewers_reopen_resets_rows() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        let page = |extra: u64| {
+            format!(
+                r#"{{"@type":"storyInteractions","@extra":"{extra}","total_count":1,"interactions":[{{"actor_id":{{"@type":"messageSenderUser","user_id":777}},"interaction_date":1700000100,"block_list":null,"type":{{"@type":"storyInteractionTypeView","chosen_reaction_type":null}}}}],"next_offset":""}}"#
+            )
+        };
+        // Open the panel: begin + first page.
+        session.begin_story_viewers(11, 5);
+        let extra1 = session.request_for_story(RequestPurpose::GetStoryInteractions, ChatId(11), 5);
+        apply_json(&mut session, &seq, &sink, &page(extra1.0));
+        assert_eq!(session.story_viewers.as_ref().unwrap().rows.len(), 1);
+        // `begin_story_viewers` alone keeps the same story's rows —
+        // which is why the UI clears on re-open.
+        session.begin_story_viewers(11, 5);
+        assert_eq!(session.story_viewers.as_ref().unwrap().rows.len(), 1);
+        // Re-open (clear, then begin + fresh page-1) → no duplication.
+        session.clear_story_viewers();
+        session.begin_story_viewers(11, 5);
+        let extra2 = session.request_for_story(RequestPurpose::GetStoryInteractions, ChatId(11), 5);
+        apply_json(&mut session, &seq, &sink, &page(extra2.0));
+        assert_eq!(session.story_viewers.as_ref().unwrap().rows.len(), 1);
+    }
+
     /// Phase 9.5: the `reportStory` flow — Checking → OptionRequired
     /// arms the picker → TextRequired carries the option id → Ok
     /// reports; errors end the flow honestly.
@@ -14424,6 +14433,27 @@ mod tests {
         assert!(matches!(
             session.story_report.as_ref().unwrap().stage,
             StoryReportStage::Reported
+        ));
+    }
+
+    /// Phase 9.5 review: a `reportStory` send failure ends the flow
+    /// with `Failed` — the driver took the pending request back, so no
+    /// answer will ever arrive to move it off `Checking`/`Sending`.
+    #[test]
+    fn story_report_send_failure_ends_flow() {
+        let (mut session, _sink) = session();
+        session.begin_story_report(12, 6);
+        session.fail_story_report_send(12, 6, "could not report story".into());
+        assert!(matches!(
+            session.story_report.as_ref().unwrap().stage,
+            StoryReportStage::Failed(_)
+        ));
+        // A different story's flow is untouched.
+        session.begin_story_report(12, 7);
+        session.fail_story_report_send(12, 6, "could not report story".into());
+        assert!(matches!(
+            session.story_report.as_ref().unwrap().stage,
+            StoryReportStage::Checking
         ));
     }
 

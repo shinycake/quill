@@ -1777,7 +1777,7 @@ Research snapshot 2026-09-16, pin recheck **2026-09-17**.
     the current user". There is **no `getStoryViewers` constructor** (no
     `getStoryViewer*` / `storyViewer*` method anywhere in the schema;
     the viewers concept surfaces only as `getStoryInteractions` and
-    `getChatStoryInteractions` — the latter is chat-admin-only, :13823).
+    `getChatStoryInteractions` — the latter is chat-admin-only, :13828).
     `story.can_get_interactions` (:6732): "True, if interactions with the
     story can be received through getStoryInteractions".
     `storyInteractions total_count:int32 total_forward_count:int32
@@ -1874,7 +1874,7 @@ Research snapshot 2026-09-16, pin recheck **2026-09-17**.
   demo: the `ReadyStoryPost` fixture plus a `storyInteractions` page
   injected through the real reducer path).
 - **Out of this slice (→ future):** `getChatStoryInteractions`
-  (:13823, chat-admin viewers — needs admin-state plumbing);
+  (:13828, chat-admin viewers — needs admin-state plumbing);
   viewers-list search (`query`), `only_contacts` filter, and
   `prefer_forwards`/`prefer_with_reaction` sort toggles (request
   builder takes them; the UI sends defaults); `getStoryPublicForwards`

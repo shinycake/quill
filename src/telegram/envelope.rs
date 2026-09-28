@@ -5274,17 +5274,6 @@ pub enum ReportStoryResult {
     },
 }
 
-impl ReportStoryResult {
-    /// Short user-facing note (no TDLib text is echoed).
-    pub fn user_message(&self) -> &'static str {
-        match self {
-            ReportStoryResult::Ok => "Story reported",
-            ReportStoryResult::OptionRequired { .. } => "Choose a report reason",
-            ReportStoryResult::TextRequired { .. } => "Add report details",
-        }
-    }
-}
-
 /// Phase 9.5: one `storyInteraction` (TDLib 1.8.67,
 /// `schema/td_api.tl:6805`) — who interacted with an own story, when,
 /// and how. `storyInteractionTypeView` carries an optional chosen
@@ -5298,6 +5287,20 @@ pub struct StoryInteractionView {
     pub interaction_date: i32,
     pub reaction_emoji: Option<String>,
     pub kind: StoryInteractionKind,
+}
+
+impl StoryInteractionView {
+    /// Short row suffix: the chosen reaction, or the interaction kind.
+    pub fn kind_label(&self) -> String {
+        if let Some(emoji) = self.reaction_emoji.as_deref() {
+            return emoji.to_string();
+        }
+        match self.kind {
+            StoryInteractionKind::View => "viewed".into(),
+            StoryInteractionKind::Forward => "forwarded".into(),
+            StoryInteractionKind::Repost => "reposted".into(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

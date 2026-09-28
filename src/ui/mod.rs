@@ -1085,21 +1085,6 @@ fn now_unix_secs() -> i64 {
         .unwrap_or(0)
 }
 
-/// Phase 9.5: "viewed 3h ago" for a story-interaction timestamp —
-/// relative only, no timezone math (matches `format_starts_in`).
-fn format_viewed_ago(interaction_date: i32, now: i64) -> String {
-    let secs = (now - i64::from(interaction_date)).max(0);
-    if secs < 60 {
-        "just now".into()
-    } else if secs < 3600 {
-        format!("{}m ago", secs / 60)
-    } else if secs < 86_400 {
-        format!("{}h ago", secs / 3600)
-    } else {
-        format!("{}d ago", secs / 86_400)
-    }
-}
-
 /// Phase C2h: "in 3h" / "in 2d 4h" countdown for a scheduled video
 /// chat — relative only, no timezone math.
 fn format_starts_in(start_date: i64) -> String {
@@ -11043,6 +11028,12 @@ impl QuillApp {
         self.story_viewers_open = !self.story_viewers_open;
         self.story_report_open = false;
         if self.story_viewers_open {
+            // Phase 9.5 review: reset rows before the fresh page-1
+            // fetch — `begin_story_viewers` keeps rows for the same
+            // story, so reopening would otherwise duplicate them.
+            if let Some(live) = self.live.as_mut() {
+                live.driver.session.clear_story_viewers();
+            }
             self.fetch_story_viewers(&item, "", cx);
         }
         cx.notify();
@@ -11118,8 +11109,35 @@ impl QuillApp {
         self.story_viewers_open = false;
         if self.story_report_open {
             self.send_story_report_step(&item, "", "", cx);
+        } else {
+            self.clear_terminal_story_report();
         }
         cx.notify();
+    }
+
+    /// Phase 9.5: drop a terminal (`Reported`/`Failed`) report flow when
+    /// its panel closes, so reopening starts a fresh `reportStory`
+    /// instead of silently re-sending the initial request. A failed
+    /// flow still retries: reopening begins a new flow and re-sends the
+    /// initial request.
+    fn clear_terminal_story_report(&mut self) {
+        let terminal = self
+            .session()
+            .and_then(|session| session.story_report.as_ref())
+            .is_some_and(|flow| {
+                matches!(
+                    flow.stage,
+                    StoryReportStage::Reported | StoryReportStage::Failed(_)
+                )
+            });
+        if !terminal {
+            return;
+        }
+        if let Some(live) = self.live.as_mut() {
+            live.driver.session.clear_story_report();
+        } else if let Some(session) = self.demo_session.as_mut() {
+            session.clear_story_report();
+        }
     }
 
     fn send_story_report_step(
@@ -11151,7 +11169,17 @@ impl QuillApp {
                     .report_story(item.chat_id, item.story_id, option_id, text)
                 {
                     Ok(_) => "Reporting story…".into(),
-                    Err(_) => "could not report story".into(),
+                    Err(_) => {
+                        // Phase 9.5 review: the driver took the pending
+                        // request back, so no answer will ever arrive —
+                        // end the flow here instead of spinning forever.
+                        live.driver.session.fail_story_report_send(
+                            item.chat_id.0,
+                            item.story_id,
+                            "could not report story".into(),
+                        );
+                        "could not report story".into()
+                    }
                 };
         } else if self.demo_session.is_some() {
             self.status_note = "demo — story reports run with live TDLib".into();
@@ -11261,6 +11289,7 @@ impl QuillApp {
         self.story_reply_open = false;
         self.story_viewers_open = false;
         self.story_report_open = false;
+        self.clear_terminal_story_report();
         cx.notify();
     }
 
@@ -30821,7 +30850,6 @@ impl QuillApp {
     /// the loading / error / empty states.
     fn story_viewers_panel(&self, cx: &mut Context<Self>) -> AnyElement {
         let state = self.session().and_then(|s| s.story_viewers.clone());
-        let now = now_unix_secs();
         let mut panel = div()
             .id("story-viewers-panel")
             .flex()
@@ -30863,7 +30891,7 @@ impl QuillApp {
             let detail = format!(
                 "{} · {}",
                 viewer.kind_label(),
-                format_viewed_ago(viewer.interaction_date, now)
+                event_log_relative_time(viewer.interaction_date)
             );
             panel = panel.child(
                 div()
