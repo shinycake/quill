@@ -9074,7 +9074,7 @@ fn parse_payment_receipt(value: &Value) -> Option<PaymentReceiptData> {
 
 /// Slice P1: sum of a `labeledPricePart` list — the receipt carries no
 /// `total_amount`, only the invoice's price parts (schema:4752).
-pub(crate) fn price_parts_total(parts: &[LabeledPrice]) -> i64 {
+pub fn price_parts_total(parts: &[LabeledPrice]) -> i64 {
     parts.iter().map(|part| part.amount).sum()
 }
 

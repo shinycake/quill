@@ -68,11 +68,10 @@ use quill::telegram::envelope::{
     MessageSender, NotificationSettingsScope, NotificationSound, OrderInfoData, ParsedChatEvent,
     ParsedFile, ParsedGroupCallParticipant, ParsedMessage, ParsedSecretChat, ParsedSession,
     ParsedStory, ParsedWebsite, ParsedWelcomeMessage, PasswordState, PaymentFormData,
-    PaymentFormTypeData, PaymentProviderKind, PaymentReceiptData, PaymentReceivedContent,
-    PaymentSuccessContent, PollContent, PollOption, PollType, ReplyKeyboard, ReplyMarkup,
-    ScopeNotificationSettings, SecretChatState, SpeechRecognition, SponsoredMessage,
-    StatisticalGraph, StatisticalValue, StorageFileTypeStats, StorageStats, UsernameCheckResult,
-    ValidatedOrderInfoData, call_entry_label, chat_ttl_service_label, effective_content,
+    PaymentFormTypeData, PaymentProviderKind, PaymentReceivedContent, PaymentSuccessContent,
+    PollContent, PollOption, PollType, ReplyKeyboard, ReplyMarkup, ScopeNotificationSettings,
+    SecretChatState, SpeechRecognition, SponsoredMessage, StatisticalGraph, StatisticalValue,
+    StorageFileTypeStats, StorageStats, UsernameCheckResult, effective_content,
     format_payment_price, format_ttl_setting, price_parts_total, toggle_chosen_emoji_reaction,
 };
 use quill::telegram::requests::SelfDestructSend;
