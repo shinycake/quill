@@ -42,8 +42,8 @@ use crate::telegram::envelope::{
 use crate::telegram::ffi::{LibraryOrigin, TdJsonError, resolve_tdjson_path};
 use crate::telegram::requests::{
     AnimationSend, ArchiveChatListSettings, CallPrivacySetting, ChatEventLogFilterSet,
-    GroupCallJoinParams, InputGroupCallRef, MessageSenderRef, PollSend, PrivacyWho, SendReply,
-    SetTdlibParameters, StickerSend, VideoNoteSend, VideoNoteThumbnailSend, VideoSend,
+    GroupCallJoinParams, InputGroupCallRef, MessageSenderRef, PollSend, PollTypeSend, PrivacyWho,
+    SendReply, SetTdlibParameters, StickerSend, VideoNoteSend, VideoNoteThumbnailSend, VideoSend,
     VoiceNoteSend, accept_call_with_protocol, add_chat_member, add_chat_members, add_chat_to_list,
     add_chat_to_list_value, add_chat_welcome_message, add_contact, add_message_reaction,
     add_recently_found_chat, ban_group_call_participants, boost_chat,
@@ -9809,8 +9809,9 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// Phase 4.2: create a poll from the composer dialog via `sendMessage` +
     /// `inputMessagePoll` (TDLib 1.8.67). Guards: chats path active, chat can
     /// post (admin-gated channels, same as `send_snapshot`), valid draft
-    /// (`PollDraft::validate`). Quiz polls are created as regular
-    /// (`inputPollTypeRegular`) — quiz creation stays out of this slice.
+    /// (`PollDraft::validate`). Quiz drafts send `inputPollTypeQuiz`
+    /// (schema line 488); quiz mode forces single-answer and no revoting
+    /// (Telegram X `CreatePollController` does the same on quiz toggle).
     pub fn send_poll_draft(
         &mut self,
         chat_id: ChatId,
@@ -9837,25 +9838,42 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         let question = draft.question.trim().to_string();
+        let description = draft.description.trim().to_string();
         let options: Vec<String> = draft
             .usable_options()
             .into_iter()
             .map(str::to_string)
             .collect();
         let option_refs: Vec<&str> = options.iter().map(String::as_str).collect();
+        let country_refs: Vec<&str> = draft.country_codes.iter().map(String::as_str).collect();
         let extra = self
             .session
             .request(RequestPurpose::SendMessage, Some(chat_id));
         // Parity slice 4: sends from a topic view address the open topic.
         let topic_id = self.send_topic(chat_id);
+        // `validate()` above guarantees `quiz_correct` is `Some` in quiz mode.
+        let correct_option_ids: Vec<i32> = vec![draft.quiz_correct.unwrap_or(0) as i32];
         let json = send_poll(
             extra,
             chat_id,
             PollSend {
                 question: &question,
                 options: &option_refs,
+                description: &description,
                 is_anonymous: draft.is_anonymous,
-                allows_multiple_answers: draft.allows_multiple_answers,
+                allows_multiple_answers: draft.allows_multiple_answers && !draft.is_quiz,
+                allows_revoting: draft.allows_revoting && !draft.is_quiz,
+                shuffle_options: draft.shuffle_options,
+                country_codes: &country_refs,
+                poll_type: if draft.is_quiz {
+                    PollTypeSend::Quiz {
+                        correct_option_ids: &correct_option_ids,
+                        explanation: draft.quiz_explanation.trim(),
+                    }
+                } else {
+                    PollTypeSend::Regular
+                },
+                open_period: draft.open_period_secs(),
                 reply_to,
                 topic_id,
             },
@@ -17740,15 +17758,22 @@ mod tests {
         let (dir, mut driver, recorder, sink, dyn_sink, seq) = poll_driver();
         let valid = PollDraft {
             question: "Lunch?".into(),
+            description: "team vote".into(),
             options: vec!["Sushi".into(), "Pizza".into()],
             is_anonymous: true,
             allows_multiple_answers: false,
+            allows_revoting: false,
+            shuffle_options: true,
+            duration_hours: "2".into(),
+            country_codes: vec!["US".into()],
+            ..Default::default()
         };
         let invalid = PollDraft {
             question: "  ".into(),
             options: vec!["Sushi".into(), "Pizza".into()],
             is_anonymous: true,
             allows_multiple_answers: false,
+            ..Default::default()
         };
         // Invalid draft rejected before any request is built.
         assert_invalid(driver.send_poll_draft(ChatId(7), &invalid, None));
@@ -17777,8 +17802,48 @@ mod tests {
         let content = &v["input_message_content"];
         assert_eq!(content["@type"], "inputMessagePoll");
         assert_eq!(content["question"]["text"], "Lunch?");
+        assert_eq!(content["description"]["text"], "team vote");
         assert_eq!(content["options"][0]["text"]["text"], "Sushi");
+        assert_eq!(content["allows_revoting"], false);
+        assert_eq!(content["shuffle_options"], true);
+        assert_eq!(content["country_codes"], serde_json::json!(["US"]));
+        assert_eq!(content["open_period"], 2 * 3600);
         assert_eq!(content["type"]["@type"], "inputPollTypeRegular");
+        assert!(!sink.rendered().contains("CANARY"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn driver_quiz_draft_sends_quiz_type() {
+        use crate::poll::PollDraft;
+
+        let (dir, mut driver, recorder, sink, _dyn_sink, _seq) = poll_driver();
+        let quiz = PollDraft {
+            question: "Capital of France?".into(),
+            options: vec!["Paris".into(), "London".into()],
+            is_quiz: true,
+            quiz_correct: Some(0),
+            quiz_explanation: "think Eiffel".into(),
+            allows_multiple_answers: true, // normalized off for quizzes
+            allows_revoting: true,         // normalized off for quizzes
+            ..Default::default()
+        };
+        assert!(quiz.validate().is_none());
+        driver
+            .send_poll_draft(ChatId(7), &quiz, None)
+            .expect("valid quiz draft sends");
+        let send_json = recorder.snapshot().last().cloned().expect("sendMessage");
+        let v: Value = serde_json::from_str(&send_json).unwrap();
+        let content = &v["input_message_content"];
+        assert_eq!(content["type"]["@type"], "inputPollTypeQuiz");
+        assert_eq!(
+            content["type"]["correct_option_ids"],
+            serde_json::json!([0])
+        );
+        assert_eq!(content["type"]["explanation"]["text"], "think Eiffel");
+        assert!(content["type"]["explanation_media"].is_null());
+        assert_eq!(content["allows_multiple_answers"], false);
+        assert_eq!(content["allows_revoting"], false);
         assert!(!sink.rendered().contains("CANARY"));
         let _ = std::fs::remove_dir_all(&dir);
     }

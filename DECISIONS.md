@@ -4824,3 +4824,32 @@ ntgcalls v3.0.0 prebuilt lib, bindings verified against
 - **Out of this slice (left unchecked with evidence):**
   - Quick actions on the preview (TGX `ForceTouchView` offers mute/pin/etc.) — explicit slice exclusion (no message actions, no composer).
   - Pointer-leave dismissal: the panel is adjacent to the row, so leaving the row to reach the panel must not kill it; release / click-anywhere / Escape dismiss instead. Revisit only if a hover trigger is ever added.
+## Slice B3 — POLL CREATION OPTIONS: QUIZ, DESCRIPTION, DURATION, REVOTING, SHUFFLE, COUNTRIES, DISCARD CONFIRM (2026-09-28)
+
+- **Schema (pinned TDLib 1.8.67, `schema/td_api.tl`, verified verbatim):**
+  - `inputMessagePoll` (:6193): `question options description media is_anonymous allows_multiple_answers allows_revoting members_only country_codes shuffle_options hide_results_until_closes type open_period close_date is_closed`.
+  - `inputPollTypeQuiz` (:488): `correct_option_ids:vector<int32> explanation:formattedText explanation_media:InputPollMedia`; "Increasing list of 0-based identifiers of the correct answer options; must be non-empty"; "explanation … 0-200 characters with at most 2 line feeds".
+  - `inputPollTypeRegular` (:481): `allow_adding_options:Bool`.
+  - `open_period`: "0-getOption(\"poll_open_period_max\"); pass 0 if not specified" (:6190); `close_date` likewise (:6191). Country codes: "two-letter ISO 3166-1 alpha-2 … up to getOption(\"poll_country_count_max\")" (:6188).
+  - **Negative-claim discipline:** there is NO show-voters field on `inputMessagePoll` (concept-level check: `voter` in td_api.tl shows only `recent_voter_ids`/`can_get_voters` on the server-side `poll` object (:711) and `getPollVoters` (:13104); no creation-time flag anywhere). Voter visibility at creation is exactly `is_anonymous`.
+- **Telegram X evidence (local TGX-Android source, `~/workspace/telegram-x`):**
+  - `CreatePollController.java:887` — the "Show voters" setting maps to `isAnonymous = !(showVoters)` on `InputMessagePoll`; it is the inverse of the anonymous toggle, not a separate field.
+  - `:240–242, :571–580` — quiz toggle forces `allows_multiple_answers` off and revoting off; quiz sends `InputPollTypeQuiz(correctOptionIds, explanation, null)` (:876–878); single correct option via per-option checkboxes.
+  - `:442–444` — closing with unsent input shows a discard prompt (`PollDiscardPrompt` / `QuizDiscardPrompt`).
+  - `:322` — duration picker is a `TODO` in TGX (never implemented); `:868–869` — `openPeriod`/`closeDate` left 0.
+  - `:480` — country picker capped at `pollCountryCountMax` (server option).
+- **Built:**
+  - `PollDraft` (`poll.rs`): `description`, `is_quiz`, `quiz_correct` (usable-option index), `quiz_explanation`, `allows_revoting`, `shuffle_options`, `duration_hours` (raw text), `country_codes` (parsed, uppercased). `validate()` adds: quiz requires a correct option, explanation ≤200 chars / ≤2 line feeds, duration 1–24h when set, country codes 2-letter uppercase. `open_period_secs()` converts hours→seconds.
+  - `send_poll` (`telegram/requests.rs`): new `PollTypeSend::{Regular, Quiz}` enum; quiz emits `inputPollTypeQuiz` verbatim per :488 (explanation as `formattedText`, `explanation_media` null); `description` sent as `formattedText` when non-empty else null; `allows_revoting`, `shuffle_options`, `country_codes`, `open_period` now flow through instead of hardcoded.
+  - `send_poll_draft` (`connect.rs`): maps the draft; quiz mode normalizes to single-answer + no revoting (same as TGX); stale "quiz stays out of this slice" comments updated.
+  - Dialog (`ui/mod.rs`): description field above the question; quiz toggle with per-option correct-answer radios and an explanation field; duration + countries text fields; revoting/shuffle toggles; inline "Discard this poll? / Discard / Keep editing" confirmation on Cancel and Esc when the dialog is dirty.
+  - Tests: draft validation (quiz correct-option, explanation limits, duration bounds, country format), request-shape tests pinning `inputPollTypeQuiz` and the full field set against the schema, driver tests for the quiz normalization.
+- **Key decisions (ponytail):**
+  - Duration is a plain "hours" text field (1–24), not a date picker: TGX never built one, and the schema bound is a server option Quill doesn't cache — a `ponytail:` comment in `poll.rs` names the upgrade path (cache `getOption("poll_open_period_max")`).
+  - Country restriction is a comma-separated text field, format-validated only; the count cap stays server-enforced (no invented constant).
+  - Description/explanation go out as plain `formattedText` with empty entities (the question already does); no markup parsing added.
+  - `members_only`, `hide_results_until_closes`, poll media, explanation media untouched (still zero/null).
+- **Not verifiable without live Telegram:** server acceptance of `open_period` values, country-restricted polls (channel-only), quiz sends.
+- **Out of this slice (left unchecked with evidence):**
+  - `parity:bots-poll-show-voters` — no such creation field exists; TGX implements it as the inverse of `is_anonymous` (already have the Anonymous toggle). Voter-list display is `getPollVoters` = `parity:bots-poll-voters` (separate box, still unchecked).
+  - Poll media (`InputPollMedia`), `members_only`, `hide_results_until_closes`, explanation media, voter list, stop poll, quiz-explanation display, vote-restriction reasons, `can_send_polls` gating, stopped service message.

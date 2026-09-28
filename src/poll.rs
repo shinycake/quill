@@ -15,6 +15,19 @@ pub const POLL_QUESTION_MAX_CHARS: usize = 255;
 pub const POLL_OPTIONS_MIN: usize = 2;
 pub const POLL_OPTIONS_MAX: usize = 10;
 
+/// Quiz explanation limits (schema `inputPollTypeQuiz`, `td_api.tl:488`):
+/// "0-200 characters with at most 2 line feeds".
+pub const QUIZ_EXPLANATION_MAX_CHARS: usize = 200;
+pub const QUIZ_EXPLANATION_MAX_LINE_FEEDS: usize = 2;
+
+/// UI ceiling for the poll auto-close duration (hours). The schema's true
+/// bound is server-provided `getOption("poll_open_period_max")`
+/// (`td_api.tl:6190`), which Quill doesn't cache — TDLib enforces the real
+/// cap server-side.
+// ponytail: cache getOption("poll_open_period_max") at runtime and validate
+// against it instead of this fixed ceiling.
+pub const POLL_OPEN_PERIOD_MAX_HOURS: u32 = 24;
+
 /// Fraction of the option's percentage bar, clamped to `[0.0, 1.0]`
 /// (server `vote_percentage` can be stale or out of range).
 pub fn poll_bar_fraction(vote_percentage: i32) -> f32 {
@@ -81,12 +94,25 @@ pub fn poll_answer_for_tap(poll: &Poll, index: usize) -> Option<Vec<i32>> {
 }
 
 /// A composer poll dialog frozen at "Create poll" (validated before send).
+///
+/// `quiz_correct` is the 0-based index into the *usable* (non-empty,
+/// dialog-order) options; the dialog maps its marked row to it when
+/// freezing. `duration_hours` is the raw dialog text (empty = no
+/// auto-close); `country_codes` are the dialog's parsed, uppercased codes.
 #[derive(Debug, Clone, Default)]
 pub struct PollDraft {
     pub question: String,
+    pub description: String,
     pub options: Vec<String>,
     pub is_anonymous: bool,
     pub allows_multiple_answers: bool,
+    pub is_quiz: bool,
+    pub quiz_correct: Option<usize>,
+    pub quiz_explanation: String,
+    pub allows_revoting: bool,
+    pub shuffle_options: bool,
+    pub duration_hours: String,
+    pub country_codes: Vec<String>,
 }
 
 impl PollDraft {
@@ -95,6 +121,7 @@ impl PollDraft {
             options: vec![String::new(), String::new()],
             is_anonymous: true,
             allows_multiple_answers: false,
+            allows_revoting: true,
             ..Default::default()
         }
     }
@@ -106,6 +133,17 @@ impl PollDraft {
             .map(|option| option.trim())
             .filter(|option| !option.is_empty())
             .collect()
+    }
+
+    /// `open_period` in seconds for `inputMessagePoll` (0 = no auto-close).
+    /// Only meaningful when `validate()` is `None`.
+    pub fn open_period_secs(&self) -> i32 {
+        let hours: u32 = self.duration_hours.trim().parse().unwrap_or(0);
+        if (1..=POLL_OPEN_PERIOD_MAX_HOURS).contains(&hours) {
+            (hours * 3600) as i32
+        } else {
+            0
+        }
     }
 
     /// `None` when the draft is valid; otherwise the short user-facing reason.
@@ -124,6 +162,31 @@ impl PollDraft {
         }
         if options.len() > POLL_OPTIONS_MAX {
             return Some("at most 10 options");
+        }
+        if self.is_quiz {
+            match self.quiz_correct {
+                Some(index) if index < options.len() => {}
+                _ => return Some("mark the correct option"),
+            }
+            let explanation_len = self.quiz_explanation.chars().count();
+            if explanation_len > QUIZ_EXPLANATION_MAX_CHARS {
+                return Some("the quiz explanation is too long (200 max)");
+            }
+            let line_feeds = self.quiz_explanation.chars().filter(|&c| c == '\n').count();
+            if line_feeds > QUIZ_EXPLANATION_MAX_LINE_FEEDS {
+                return Some("the quiz explanation has too many line breaks (2 max)");
+            }
+        }
+        if !self.duration_hours.trim().is_empty() {
+            match self.duration_hours.trim().parse::<u32>() {
+                Ok(hours) if (1..=POLL_OPEN_PERIOD_MAX_HOURS).contains(&hours) => {}
+                _ => return Some("duration must be 1–24 hours"),
+            }
+        }
+        for code in &self.country_codes {
+            if code.len() != 2 || !code.bytes().all(|b| b.is_ascii_uppercase()) {
+                return Some("country codes must be 2-letter ISO codes");
+            }
         }
         None
     }
@@ -294,6 +357,87 @@ mod tests {
         draft.question = "pick".to_string();
         draft.options = (0..11).map(|i| format!("opt{i}")).collect();
         assert_eq!(draft.validate(), Some("at most 10 options"));
+    }
+
+    fn quiz_draft() -> PollDraft {
+        PollDraft {
+            question: "capital of France?".to_string(),
+            options: vec!["Paris".to_string(), "London".to_string()],
+            is_quiz: true,
+            quiz_correct: Some(0),
+            allows_revoting: false,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn quiz_draft_requires_correct_option() {
+        let mut draft = quiz_draft();
+        assert_eq!(draft.validate(), None);
+        draft.quiz_correct = None;
+        assert_eq!(draft.validate(), Some("mark the correct option"));
+        // Marked row maps outside the usable options (e.g. the marked row
+        // was emptied after marking).
+        draft.quiz_correct = Some(7);
+        assert_eq!(draft.validate(), Some("mark the correct option"));
+    }
+
+    #[test]
+    fn quiz_explanation_length_and_line_feeds() {
+        let mut draft = quiz_draft();
+        draft.quiz_explanation = "x".repeat(200);
+        assert_eq!(draft.validate(), None);
+        draft.quiz_explanation = "x".repeat(201);
+        assert_eq!(
+            draft.validate(),
+            Some("the quiz explanation is too long (200 max)")
+        );
+        draft.quiz_explanation = "a\nb\nc".to_string();
+        assert_eq!(draft.validate(), None);
+        draft.quiz_explanation = "a\nb\nc\nd".to_string();
+        assert_eq!(
+            draft.validate(),
+            Some("the quiz explanation has too many line breaks (2 max)")
+        );
+    }
+
+    #[test]
+    fn duration_bounds() {
+        let mut draft = quiz_draft();
+        draft.is_quiz = false;
+        draft.quiz_correct = None;
+        assert_eq!(draft.validate(), None);
+        assert_eq!(draft.open_period_secs(), 0);
+        draft.duration_hours = "3".to_string();
+        assert_eq!(draft.validate(), None);
+        assert_eq!(draft.open_period_secs(), 3 * 3600);
+        for bad in ["0", "25", "abc", "1.5", "-2"] {
+            draft.duration_hours = bad.to_string();
+            assert_eq!(
+                draft.validate(),
+                Some("duration must be 1–24 hours"),
+                "input {bad}"
+            );
+        }
+    }
+
+    #[test]
+    fn country_codes_must_be_iso() {
+        let mut draft = quiz_draft();
+        draft.is_quiz = false;
+        draft.quiz_correct = None;
+        draft.country_codes = vec!["US".to_string(), "GB".to_string()];
+        assert_eq!(draft.validate(), None);
+        draft.country_codes = vec!["USA".to_string()];
+        assert_eq!(
+            draft.validate(),
+            Some("country codes must be 2-letter ISO codes")
+        );
+        draft.country_codes = vec!["us".to_string()];
+        assert_eq!(
+            draft.validate(),
+            Some("country codes must be 2-letter ISO codes")
+        );
     }
 
     #[test]

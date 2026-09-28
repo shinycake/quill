@@ -199,51 +199,113 @@ pub enum ConnectUiStatus {
 /// Phase 4.2: poll creation dialog above the composer. Textarea entities are
 /// created when the dialog opens (option rows are dynamic); the dialog
 /// freezes into a validated `PollDraft` on "Create poll".
+/// Slice B3: description, quiz mode (correct-option radio + explanation),
+/// revoting/shuffle toggles, auto-close duration (hours), country
+/// restriction, and a discard-confirmation when closing with unsent input.
 pub struct PollDialog {
+    description_input: Entity<TextareaState>,
     question_input: Entity<TextareaState>,
     option_inputs: Vec<Entity<TextareaState>>,
+    explanation_input: Entity<TextareaState>,
+    duration_input: Entity<TextareaState>,
+    countries_input: Entity<TextareaState>,
     is_anonymous: bool,
     allows_multiple_answers: bool,
+    is_quiz: bool,
+    /// Dialog-row index marked as the quiz's correct option (`None` = unset).
+    quiz_correct_row: Option<usize>,
+    allows_revoting: bool,
+    shuffle_options: bool,
+    confirming_discard: bool,
 }
 
 impl PollDialog {
     fn new(window: &mut Window, cx: &mut Context<QuillApp>) -> Self {
-        let question_input = cx.new(|cx| {
-            TextareaState::new(window, cx)
-                .placeholder("Poll question")
-                .auto_grow(1, 3)
-                .submit_on_enter(false)
-        });
-        let option_inputs = (0..POLL_OPTIONS_MIN)
-            .map(|index| {
-                cx.new(|cx| {
-                    TextareaState::new(window, cx)
-                        .placeholder(format!("Option {}", index + 1))
-                        .auto_grow(1, 2)
-                        .submit_on_enter(false)
-                })
+        let mut textarea =
+            |cx: &mut Context<QuillApp>, placeholder: &str, rows: (usize, usize)| {
+            cx.new(|cx| {
+                TextareaState::new(window, cx)
+                    .placeholder(placeholder)
+                    .auto_grow(rows.0, rows.1)
+                    .submit_on_enter(false)
             })
+        };
+        let question_input = textarea(cx, "Poll question", (1, 3));
+        let description_input = textarea(cx, "Description (optional)", (1, 2));
+        let explanation_input = textarea(cx, "Quiz explanation (optional, 200 max)", (1, 3));
+        let duration_input = textarea(cx, "Close after, hours (optional)", (1, 1));
+        let countries_input = textarea(cx, "Countries, e.g. US, GB (optional)", (1, 1));
+        let option_inputs = (0..POLL_OPTIONS_MIN)
+            .map(|index| textarea(cx, &format!("Option {}", index + 1), (1, 2)))
             .collect();
         Self {
+            description_input,
             question_input,
             option_inputs,
+            explanation_input,
+            duration_input,
+            countries_input,
             is_anonymous: true,
             allows_multiple_answers: false,
+            is_quiz: false,
+            quiz_correct_row: None,
+            allows_revoting: true,
+            shuffle_options: false,
+            confirming_discard: false,
         }
     }
 
     /// Freeze the dialog inputs into a `PollDraft` (validated by the caller).
     fn draft(&self, cx: &App) -> PollDraft {
-        PollDraft {
-            question: self.question_input.read(cx).value().to_string(),
-            options: self
-                .option_inputs
+        let value = |input: &Entity<TextareaState>| input.read(cx).value().to_string();
+        let options: Vec<String> = self.option_inputs.iter().map(&value).collect();
+        // Map the marked row to its index among the usable (non-empty) options.
+        let quiz_correct = self.quiz_correct_row.and_then(|row| {
+            options
                 .iter()
-                .map(|input| input.read(cx).value().to_string())
-                .collect(),
+                .enumerate()
+                .filter(|(_, option)| !option.trim().is_empty())
+                .position(|(index, _)| index == row)
+        });
+        let country_codes = value(&self.countries_input)
+            .split(|c: char| c == ',' || c.is_whitespace())
+            .map(str::trim)
+            .filter(|code| !code.is_empty())
+            .map(|code| code.to_ascii_uppercase())
+            .collect();
+        PollDraft {
+            question: value(&self.question_input),
+            description: value(&self.description_input),
+            options,
             is_anonymous: self.is_anonymous,
             allows_multiple_answers: self.allows_multiple_answers,
+            is_quiz: self.is_quiz,
+            quiz_correct,
+            quiz_explanation: value(&self.explanation_input),
+            allows_revoting: self.allows_revoting,
+            shuffle_options: self.shuffle_options,
+            duration_hours: value(&self.duration_input),
+            country_codes,
         }
+    }
+
+    /// `true` when closing would lose user input (drives the discard prompt).
+    fn is_dirty(&self, cx: &App) -> bool {
+        let value = |input: &Entity<TextareaState>| input.read(cx).value();
+        !self.is_anonymous
+            || self.allows_multiple_answers
+            || self.is_quiz
+            || !self.allows_revoting
+            || self.shuffle_options
+            || !value(&self.question_input).trim().is_empty()
+            || !value(&self.description_input).trim().is_empty()
+            || !value(&self.explanation_input).trim().is_empty()
+            || !value(&self.duration_input).trim().is_empty()
+            || !value(&self.countries_input).trim().is_empty()
+            || self
+                .option_inputs
+                .iter()
+                .any(|input| !value(input).trim().is_empty())
     }
 }
 
@@ -8646,7 +8708,7 @@ impl QuillApp {
             return;
         }
         if self.poll_dialog.is_some() {
-            self.close_poll_dialog(cx);
+            self.request_close_poll_dialog(cx);
             return;
         }
         // MED2: Esc never discards a recording silently. With the confirm
@@ -14626,6 +14688,23 @@ impl QuillApp {
     fn close_poll_dialog(&mut self, cx: &mut Context<Self>) {
         self.poll_dialog = None;
         cx.notify();
+    }
+
+    /// Slice B3: Cancel/Esc on the poll dialog. With unsent input this arms
+    /// the inline discard confirmation instead of closing silently.
+    fn request_close_poll_dialog(&mut self, cx: &mut Context<Self>) {
+        let dirty = self
+            .poll_dialog
+            .as_ref()
+            .is_some_and(|dialog| dialog.is_dirty(cx));
+        if dirty {
+            if let Some(dialog) = self.poll_dialog.as_mut() {
+                dialog.confirming_discard = true;
+            }
+            cx.notify();
+        } else {
+            self.close_poll_dialog(cx);
+        }
     }
 
     // ------------------------------------------------------------------
@@ -22196,6 +22275,16 @@ impl QuillApp {
             return;
         }
         dialog.option_inputs.remove(index);
+        // Keep the marked correct-answer row pointing at the same option.
+        if let Some(marked) = dialog.quiz_correct_row {
+            dialog.quiz_correct_row = if marked == index {
+                None
+            } else if marked > index {
+                Some(marked - 1)
+            } else {
+                Some(marked)
+            };
+        }
         cx.notify();
     }
 
@@ -29305,9 +29394,10 @@ impl QuillApp {
     }
 
     /// Phase 4.2: the poll creation dialog, rendered above the composer.
-    /// Question field, dynamic option rows (2–10), anonymous / multiple-answers
-    /// toggles, Create / Cancel. Quiz correct-option marking stays out of this
-    /// slice (documented in DECISIONS.md).
+    /// Question field, description field, dynamic option rows (2–10),
+    /// quiz mode (correct-option radios + explanation), duration / country
+    /// fields, anonymous / multiple-answers / revoting / shuffle / quiz
+    /// toggles, discard confirmation, Create / Cancel.
     fn poll_dialog_panel(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let dialog = self.poll_dialog.as_ref()?;
         let mut panel = div()
@@ -29320,15 +29410,41 @@ impl QuillApp {
             .border_1()
             .border_color(rgb(0x58a6ff))
             .bg(rgb(0x161b22))
-            .child(div().text_sm().font_semibold().child("New poll"))
+            .child(div().text_sm().font_semibold().child(if dialog.is_quiz {
+                "New quiz"
+            } else {
+                "New poll"
+            }))
+            .child(Textarea::new(&dialog.description_input).h(px(40.)))
             .child(Textarea::new(&dialog.question_input).h(px(64.)));
+        let is_quiz = dialog.is_quiz;
+        let quiz_correct_row = dialog.quiz_correct_row;
         for (index, input) in dialog.option_inputs.iter().enumerate() {
             let mut row = div()
                 .id(("poll-dialog-option", index as u64))
                 .flex()
                 .items_center()
-                .gap_2()
-                .child(div().flex_1().child(Textarea::new(input).h(px(40.))));
+                .gap_2();
+            if is_quiz {
+                let marked = quiz_correct_row == Some(index);
+                row = row.child(
+                    Button::new(format!("poll-quiz-correct-{index}"))
+                        .label(if marked { "◉" } else { "○" })
+                        .ghost()
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            if let Some(dialog) = this.poll_dialog.as_mut() {
+                                dialog.quiz_correct_row = if dialog.quiz_correct_row == Some(index)
+                                {
+                                    None
+                                } else {
+                                    Some(index)
+                                };
+                            }
+                            cx.notify();
+                        })),
+                );
+            }
+            row = row.child(div().flex_1().child(Textarea::new(input).h(px(40.))));
             if dialog.option_inputs.len() > POLL_OPTIONS_MIN {
                 row = row.child(
                     Button::new(format!("poll-remove-option-{index}"))
@@ -29351,62 +29467,149 @@ impl QuillApp {
                     })),
             );
         }
-        let anonymous = dialog.is_anonymous;
-        let multiple = dialog.allows_multiple_answers;
-        panel =
-            panel
-                .child(
+        if is_quiz {
+            panel = panel.child(Textarea::new(&dialog.explanation_input).h(px(64.)));
+        }
+        panel = panel
+            .child(
+                div()
+                    .flex()
+                    .gap_2()
+                    .child(
+                        div()
+                            .flex_1()
+                            .child(Textarea::new(&dialog.duration_input).h(px(40.))),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .child(Textarea::new(&dialog.countries_input).h(px(40.))),
+                    ),
+            )
+            .child(self.poll_toggle_row(cx));
+        if dialog.confirming_discard {
+            panel =
+                panel.child(
                     div()
                         .flex()
+                        .items_center()
                         .gap_2()
+                        .child(div().text_sm().child("Discard this poll?"))
+                        .child(Button::new("poll-discard-yes").label("Discard").on_click(
+                            cx.listener(|this, _, _, cx| {
+                                this.close_poll_dialog(cx);
+                            }),
+                        ))
                         .child(
-                            Button::new("poll-toggle-anonymous")
-                                .label(if anonymous {
-                                    "☑ Anonymous voting"
-                                } else {
-                                    "☐ Anonymous voting"
-                                })
+                            Button::new("poll-discard-no")
+                                .label("Keep editing")
                                 .ghost()
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     if let Some(dialog) = this.poll_dialog.as_mut() {
-                                        dialog.is_anonymous = !dialog.is_anonymous;
-                                    }
-                                    cx.notify();
-                                })),
-                        )
-                        .child(
-                            Button::new("poll-toggle-multiple")
-                                .label(if multiple {
-                                    "☑ Multiple answers"
-                                } else {
-                                    "☐ Multiple answers"
-                                })
-                                .ghost()
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    if let Some(dialog) = this.poll_dialog.as_mut() {
-                                        dialog.allows_multiple_answers =
-                                            !dialog.allows_multiple_answers;
+                                        dialog.confirming_discard = false;
                                     }
                                     cx.notify();
                                 })),
                         ),
-                )
-                .child(
-                    div()
-                        .flex()
-                        .gap_2()
-                        .child(Button::new("poll-create").label("Create poll").on_click(
-                            cx.listener(|this, _, window, cx| {
-                                this.submit_poll_dialog(window, cx);
-                            }),
-                        ))
-                        .child(Button::new("poll-cancel").label("Cancel").ghost().on_click(
-                            cx.listener(|this, _, _, cx| {
-                                this.close_poll_dialog(cx);
-                            }),
-                        )),
                 );
+        }
+        panel =
+            panel.child(
+                div()
+                    .flex()
+                    .gap_2()
+                    .child(
+                        Button::new("poll-create")
+                            .label("Create poll")
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.submit_poll_dialog(window, cx);
+                            })),
+                    )
+                    .child(Button::new("poll-cancel").label("Cancel").ghost().on_click(
+                        cx.listener(|this, _, _, cx| {
+                            this.request_close_poll_dialog(cx);
+                        }),
+                    )),
+            );
         Some(panel.into_any_element())
+    }
+
+    /// Slice B3: the poll dialog's toggle row. Quiz mode forces
+    /// single-answer and no revoting, mirroring Telegram X's
+    /// `CreatePollController` quiz toggle.
+    fn poll_toggle_row(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let (is_quiz, anonymous, multiple, revoting, shuffle) = match &self.poll_dialog {
+            Some(dialog) => (
+                dialog.is_quiz,
+                dialog.is_anonymous,
+                dialog.allows_multiple_answers,
+                dialog.allows_revoting,
+                dialog.shuffle_options,
+            ),
+            None => (false, true, false, true, false),
+        };
+        let button =
+            |id: &'static str, label: &'static str, on: bool, flip: fn(&mut PollDialog)| {
+                Button::new(id)
+                    .label(format!("{} {label}", if on { "☑" } else { "☐" }))
+                    .ghost()
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        if let Some(dialog) = this.poll_dialog.as_mut() {
+                            flip(dialog);
+                        }
+                        cx.notify();
+                    }))
+            };
+        div()
+            .flex()
+            .flex_col()
+            .gap_2()
+            .child(
+                div()
+                    .flex()
+                    .gap_2()
+                    .child(button("poll-toggle-quiz", "Quiz mode", is_quiz, |dialog| {
+                        dialog.is_quiz = !dialog.is_quiz;
+                        if dialog.is_quiz {
+                            dialog.allows_multiple_answers = false;
+                            dialog.allows_revoting = false;
+                        }
+                    }))
+                    .child(button(
+                        "poll-toggle-anonymous",
+                        "Anonymous voting",
+                        anonymous,
+                        |dialog| dialog.is_anonymous = !dialog.is_anonymous,
+                    ))
+                    .child(button(
+                        "poll-toggle-multiple",
+                        "Multiple answers",
+                        multiple,
+                        |dialog| {
+                            // Quizzes are single-answer; the toggle is inert in quiz mode.
+                            if !dialog.is_quiz {
+                                dialog.allows_multiple_answers = !dialog.allows_multiple_answers;
+                            }
+                        },
+                    )),
+            )
+            .child(
+                div()
+                    .flex()
+                    .gap_2()
+                    .child(button(
+                        "poll-toggle-revoting",
+                        "Allow revoting",
+                        revoting,
+                        |dialog| dialog.allows_revoting = !dialog.allows_revoting,
+                    ))
+                    .child(button(
+                        "poll-toggle-shuffle",
+                        "Shuffle options",
+                        shuffle,
+                        |dialog| dialog.shuffle_options = !dialog.shuffle_options,
+                    )),
+            )
     }
 
     fn forward_success_banner(

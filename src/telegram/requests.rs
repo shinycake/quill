@@ -3728,25 +3728,39 @@ pub fn set_poll_answer(
 }
 
 /// Fields for `inputMessagePoll` (TDLib 1.8.67, `schema/td_api.tl:6193`).
-/// Quiz creation stays out of this slice (Phase 4.2) — polls are created as
-/// `inputPollTypeRegular` (schema line 481) even for quiz-flagged drafts.
+/// `description` empty = sent as null; `open_period` 0 = no auto-close.
 pub struct PollSend<'a> {
     pub question: &'a str,
     pub options: &'a [&'a str],
+    pub description: &'a str,
     pub is_anonymous: bool,
     pub allows_multiple_answers: bool,
+    pub allows_revoting: bool,
+    pub shuffle_options: bool,
+    pub country_codes: &'a [&'a str],
+    pub poll_type: PollTypeSend<'a>,
+    pub open_period: i32,
     pub reply_to: Option<SendReply>,
     /// Parity slice 4: forum topic the send is addressed to (`None` = no topic).
     pub topic_id: Option<i32>,
 }
 
-/// `sendMessage` + `inputMessagePoll` / `inputPollOption` / `inputPollTypeRegular`
-/// (TDLib 1.8.67). Options must already be trimmed and non-empty (2–10);
-/// the question 1–255 chars — validated by `PollDraft::validate` before this
-/// is called. `allows_revoting` is true for regular polls (official clients
-/// let the user change their vote); `members_only`, `country_codes`,
-/// `shuffle_options`, `hide_results_until_closes`, `open_period`,
-/// `close_date` all stay at the zero value.
+/// `InputPollType` for `inputMessagePoll` (TDLib 1.8.67).
+pub enum PollTypeSend<'a> {
+    Regular,
+    Quiz {
+        correct_option_ids: &'a [i32],
+        explanation: &'a str,
+    },
+}
+
+/// `sendMessage` + `inputMessagePoll` / `inputPollOption` /
+/// `inputPollTypeRegular` (schema line 481) / `inputPollTypeQuiz`
+/// (schema line 488) (TDLib 1.8.67). Options must already be trimmed and
+/// non-empty (2–10); the question 1–255 chars — validated by
+/// `PollDraft::validate` before this is called. `members_only`,
+/// `hide_results_until_closes`, `close_date` stay at the zero value
+/// (out of the B3 slice); `media`/`explanation_media` are null.
 pub fn send_poll(extra: RequestId, chat_id: ChatId, poll: PollSend<'_>) -> String {
     let options: Vec<Value> = poll
         .options
@@ -3763,6 +3777,26 @@ pub fn send_poll(extra: RequestId, chat_id: ChatId, poll: PollSend<'_>) -> Strin
             })
         })
         .collect();
+    let description = poll.description.trim();
+    let poll_type = match poll.poll_type {
+        PollTypeSend::Regular => json!({
+            "@type": "inputPollTypeRegular",
+            "allow_adding_options": false
+        }),
+        PollTypeSend::Quiz {
+            correct_option_ids,
+            explanation,
+        } => json!({
+            "@type": "inputPollTypeQuiz",
+            "correct_option_ids": correct_option_ids,
+            "explanation": {
+                "@type": "formattedText",
+                "text": explanation,
+                "entities": []
+            },
+            "explanation_media": Value::Null
+        }),
+    };
     json!({
         "@type": "sendMessage",
         "@extra": extra.as_extra(),
@@ -3779,20 +3813,25 @@ pub fn send_poll(extra: RequestId, chat_id: ChatId, poll: PollSend<'_>) -> Strin
                 "entities": []
             },
             "options": options,
-            "description": Value::Null,
+            "description": if description.is_empty() {
+                Value::Null
+            } else {
+                json!({
+                    "@type": "formattedText",
+                    "text": description,
+                    "entities": []
+                })
+            },
             "media": Value::Null,
             "is_anonymous": poll.is_anonymous,
             "allows_multiple_answers": poll.allows_multiple_answers,
-            "allows_revoting": true,
+            "allows_revoting": poll.allows_revoting,
             "members_only": false,
-            "country_codes": [],
-            "shuffle_options": false,
+            "country_codes": poll.country_codes,
+            "shuffle_options": poll.shuffle_options,
             "hide_results_until_closes": false,
-            "type": {
-                "@type": "inputPollTypeRegular",
-                "allow_adding_options": false
-            },
-            "open_period": 0,
+            "type": poll_type,
+            "open_period": poll.open_period,
             "close_date": 0,
             "is_closed": false
         }
@@ -6884,17 +6923,23 @@ mod channel_requests_tests {
     fn send_poll_shape_matches_1_8_67() {
         // `inputMessagePoll` (schema 1.8.67 line 6193) wrapped in
         // `sendMessage`; options are `inputPollOption` (line 462) and the
-        // type is `inputPollTypeRegular` (line 481). Quiz types are not
-        // sent by this slice.
+        // type is `inputPollTypeRegular` (line 481).
         let options = ["Sushi place", "Pizza"];
+        let countries = ["US", "GB"];
         let json = send_poll(
             RequestId(11),
             ChatId(7),
             PollSend {
                 question: "Where should we eat lunch?",
                 options: &options,
+                description: "team lunch",
                 is_anonymous: true,
                 allows_multiple_answers: false,
+                allows_revoting: false,
+                shuffle_options: true,
+                country_codes: &countries,
+                poll_type: PollTypeSend::Regular,
+                open_period: 3 * 3600,
                 reply_to: Some(SendReply::plain(MessageId(101))),
                 topic_id: None,
             },
@@ -6913,16 +6958,61 @@ mod channel_requests_tests {
         assert_eq!(content["options"][0]["text"]["text"], "Sushi place");
         assert!(content["options"][0]["media"].is_null());
         assert_eq!(content["options"][1]["text"]["text"], "Pizza");
-        assert!(content["description"].is_null());
+        assert_eq!(content["description"]["@type"], "formattedText");
+        assert_eq!(content["description"]["text"], "team lunch");
         assert!(content["media"].is_null());
         assert_eq!(content["is_anonymous"], true);
         assert_eq!(content["allows_multiple_answers"], false);
-        assert_eq!(content["allows_revoting"], true);
+        assert_eq!(content["allows_revoting"], false);
+        assert_eq!(content["country_codes"], serde_json::json!(["US", "GB"]));
+        assert_eq!(content["shuffle_options"], true);
         assert_eq!(content["type"]["@type"], "inputPollTypeRegular");
         assert_eq!(content["type"]["allow_adding_options"], false);
-        assert_eq!(content["open_period"], 0);
+        assert_eq!(content["open_period"], 3 * 3600);
         assert_eq!(content["close_date"], 0);
         assert_eq!(content["is_closed"], false);
+    }
+
+    #[test]
+    fn send_poll_quiz_shape_matches_1_8_67() {
+        // `inputPollTypeQuiz` (schema 1.8.67 line 488):
+        // `inputPollTypeQuiz correct_option_ids:vector<int32>
+        // explanation:formattedText explanation_media:InputPollMedia =
+        // InputPollType;` — correct ids are increasing 0-based and
+        // non-empty; explanation 0–200 chars with at most 2 line feeds.
+        let options = ["Paris", "London"];
+        let correct = [0];
+        let json = send_poll(
+            RequestId(12),
+            ChatId(7),
+            PollSend {
+                question: "Capital of France?",
+                options: &options,
+                description: "",
+                is_anonymous: true,
+                allows_multiple_answers: false,
+                allows_revoting: false,
+                shuffle_options: false,
+                country_codes: &[],
+                poll_type: PollTypeSend::Quiz {
+                    correct_option_ids: &correct,
+                    explanation: "Paris is the capital",
+                },
+                open_period: 0,
+                reply_to: None,
+                topic_id: None,
+            },
+        );
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let content = &v["input_message_content"];
+        assert_eq!(content["@type"], "inputMessagePoll");
+        assert!(content["description"].is_null());
+        let quiz = &content["type"];
+        assert_eq!(quiz["@type"], "inputPollTypeQuiz");
+        assert_eq!(quiz["correct_option_ids"], serde_json::json!([0]));
+        assert_eq!(quiz["explanation"]["@type"], "formattedText");
+        assert_eq!(quiz["explanation"]["text"], "Paris is the capital");
+        assert!(quiz["explanation_media"].is_null());
     }
 
     #[test]
