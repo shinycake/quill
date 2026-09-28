@@ -901,17 +901,18 @@ enum B1DialogClose {
 /// `g1_modal` visuals): a backdrop sibling closes on click, the panel
 /// never bubbles into it.
 fn b1_modal(
-    id_prefix: &str,
     close: B1DialogClose,
     title: &str,
     body: AnyElement,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
-    // Phase 2 (kit adoption): dialog chrome (dim, panel, title, backdrop/Esc
-    // dismissal) comes from kit `Dialog`; only the body content is Quill's.
+    // Phase 2 (kit adoption): panel chrome from kit `Dialog`; the SCRIM
+    // backdrop is Quill-owned because the kit's backdrop dismissal only
+    // works via `window.open_dialog` (not direct-render mode).
     let title = title.to_string();
     let quill = cx.entity();
-    Dialog::new(cx)
+    let dialog = Dialog::new(cx)
+        .overlay(false)
         .title(div().text_lg().font_semibold().child(title))
         .child(body)
         .width(px(420.))
@@ -926,6 +927,27 @@ fn b1_modal(
                 B1DialogClose::PaymentReceipt => this.close_payment_receipt(cx),
             });
         })
+        .into_any_element();
+    div()
+        .absolute()
+        .inset_0()
+        .child(
+            div()
+                .id("hotfix-b1-backdrop")
+                .absolute()
+                .inset_0()
+                .bg(SCRIM)
+                .on_click(cx.listener(move |this, _, _, cx| match close {
+                    B1DialogClose::CallbackPassword => this.close_callback_password_dialog(cx),
+                    B1DialogClose::LoginUrlConfirm => {
+                        this.login_url_confirm = None;
+                        cx.notify();
+                    }
+                    B1DialogClose::PaymentForm => this.close_payment_dialog(cx),
+                    B1DialogClose::PaymentReceipt => this.close_payment_receipt(cx),
+                })),
+        )
+        .child(dialog)
         .into_any_element()
 }
 
@@ -8671,7 +8693,6 @@ impl QuillApp {
         }
         let Some(form) = session.payment_form.as_ref() else {
             return Some(b1_modal(
-                "p1-payment",
                 B1DialogClose::PaymentForm,
                 "Checkout",
                 body.into_any_element(),
@@ -8714,7 +8735,6 @@ impl QuillApp {
             }
         }
         Some(b1_modal(
-            "p1-payment",
             B1DialogClose::PaymentForm,
             "Checkout",
             body.into_any_element(),
@@ -9106,7 +9126,6 @@ impl QuillApp {
             );
         }
         Some(b1_modal(
-            "p1-receipt",
             B1DialogClose::PaymentReceipt,
             "Payment receipt",
             body.into_any_element(),
@@ -9587,7 +9606,6 @@ impl QuillApp {
             )
             .into_any_element();
         b1_modal(
-            "b1-callback-password",
             B1DialogClose::CallbackPassword,
             "Enter 2-step password",
             body,
@@ -9646,13 +9664,7 @@ impl QuillApp {
                     ),
             )
             .into_any_element();
-        b1_modal(
-            "b1-login-url",
-            B1DialogClose::LoginUrlConfirm,
-            "Open login URL?",
-            body,
-            cx,
-        )
+        b1_modal(B1DialogClose::LoginUrlConfirm, "Open login URL?", body, cx)
     }
 
     /// B1: one custom keyboard button. `Text` sends the text; `WebApp` opens
@@ -14555,7 +14567,6 @@ impl QuillApp {
     /// B4: the poll voters dialog overlay (`g1_modal` shell).
     fn poll_voters_dialog_overlay(&self, cx: &mut Context<Self>) -> AnyElement {
         self.g1_modal(
-            "poll-voters",
             G1DialogClose::PollVoters,
             "Poll voters",
             self.poll_voters_dialog_body(cx),
@@ -17391,7 +17402,8 @@ impl QuillApp {
         }
         // Phase 2 (kit adoption): dialog chrome from kit `Dialog`.
         let quill = cx.entity();
-        Dialog::new(cx)
+        let dialog = Dialog::new(cx)
+            .overlay(false)
             .title(div().font_semibold().child("Archive settings"))
             .child(body)
             .width(px(420.))
@@ -17401,6 +17413,24 @@ impl QuillApp {
                     cx.notify();
                 });
             })
+            .into_any_element();
+        // Hotfix: Quill-owned SCRIM backdrop (kit overlay inert in
+        // direct-render mode) restores dim + click-outside-to-dismiss.
+        div()
+            .absolute()
+            .inset_0()
+            .child(
+                div()
+                    .id("hotfix-backdrop-1")
+                    .absolute()
+                    .inset_0()
+                    .bg(SCRIM)
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.set_archive_settings_open(false);
+                        cx.notify();
+                    })),
+            )
+            .child(dialog)
             .into_any_element()
     }
 
@@ -17703,13 +17733,7 @@ impl QuillApp {
                     ),
             )
             .into_any_element();
-        Some(self.g1_modal(
-            "import-contacts",
-            G1DialogClose::ImportContacts,
-            "Import contacts",
-            body,
-            cx,
-        ))
+        Some(self.g1_modal(G1DialogClose::ImportContacts, "Import contacts", body, cx))
     }
 
     fn contact_row(&self, row: &ContactRow, cx: &mut Context<Self>) -> impl IntoElement {
@@ -25114,7 +25138,8 @@ impl QuillApp {
                         this.open_folder_create(window, cx);
                     })),
             );
-        Dialog::new(cx)
+        let dialog = Dialog::new(cx)
+            .overlay(false)
             .title(div().text_sm().font_semibold().child("Folders"))
             .child(body)
             .width(px(440.))
@@ -25123,6 +25148,23 @@ impl QuillApp {
                     this.close_folder_manage(cx);
                 });
             })
+            .into_any_element();
+        // Hotfix: Quill-owned SCRIM backdrop (kit overlay inert in
+        // direct-render mode) restores dim + click-outside-to-dismiss.
+        div()
+            .absolute()
+            .inset_0()
+            .child(
+                div()
+                    .id("hotfix-backdrop-2")
+                    .absolute()
+                    .inset_0()
+                    .bg(SCRIM)
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.close_folder_manage(cx);
+                    })),
+            )
+            .child(dialog)
             .into_any_element()
     }
 
@@ -27834,7 +27876,8 @@ impl QuillApp {
         }
         // Phase 2 (kit adoption): dialog chrome from kit `Dialog`.
         let quill = cx.entity();
-        Dialog::new(cx)
+        let dialog = Dialog::new(cx)
+            .overlay(false)
             .title(div().font_semibold().child("Notification defaults"))
             .child(
                 div()
@@ -27860,6 +27903,25 @@ impl QuillApp {
                     cx.notify();
                 });
             })
+            .into_any_element();
+        // Hotfix: Quill-owned SCRIM backdrop (kit overlay inert in
+        // direct-render mode) restores dim + click-outside-to-dismiss.
+        div()
+            .absolute()
+            .inset_0()
+            .child(
+                div()
+                    .id("hotfix-backdrop-3")
+                    .absolute()
+                    .inset_0()
+                    .bg(SCRIM)
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.notification_defaults_open = false;
+                        this.defaults_sound_picker = None;
+                        cx.notify();
+                    })),
+            )
+            .child(dialog)
             .into_any_element()
     }
 
@@ -27924,7 +27986,8 @@ impl QuillApp {
             .on_click(cx.listener(|this, _, _, cx| {
                 this.refresh_storage_usage(cx);
             }));
-        Dialog::new(cx)
+        let dialog = Dialog::new(cx)
+            .overlay(false)
             .title(div().font_semibold().child("Storage usage"))
             .child(
                 div()
@@ -27941,6 +28004,24 @@ impl QuillApp {
                     cx.notify();
                 });
             })
+            .into_any_element();
+        // Hotfix: Quill-owned SCRIM backdrop (kit overlay inert in
+        // direct-render mode) restores dim + click-outside-to-dismiss.
+        div()
+            .absolute()
+            .inset_0()
+            .child(
+                div()
+                    .id("hotfix-backdrop-4")
+                    .absolute()
+                    .inset_0()
+                    .bg(SCRIM)
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.storage_usage_open = false;
+                        cx.notify();
+                    })),
+            )
+            .child(dialog)
             .into_any_element()
     }
 
@@ -28219,7 +28300,8 @@ impl QuillApp {
         };
         // Phase 2 (kit adoption): dialog chrome from kit `Dialog`.
         let quill = cx.entity();
-        Dialog::new(cx)
+        let dialog = Dialog::new(cx)
+            .overlay(false)
             .title(div().font_semibold().child("Two-Step Verification"))
             .child(body)
             .width(px(420.))
@@ -28228,6 +28310,23 @@ impl QuillApp {
                     this.close_twofa(window, cx);
                 });
             })
+            .into_any_element();
+        // Hotfix: Quill-owned SCRIM backdrop (kit overlay inert in
+        // direct-render mode) restores dim + click-outside-to-dismiss.
+        div()
+            .absolute()
+            .inset_0()
+            .child(
+                div()
+                    .id("hotfix-twofa-backdrop")
+                    .absolute()
+                    .inset_0()
+                    .bg(SCRIM)
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.close_twofa(window, cx);
+                    })),
+            )
+            .child(dialog)
             .into_any_element()
     }
 
@@ -28702,7 +28801,8 @@ impl QuillApp {
             .on_click(cx.listener(|this, _, _, cx| {
                 this.refresh_sessions(cx);
             }));
-        Dialog::new(cx)
+        let dialog = Dialog::new(cx)
+            .overlay(false)
             .title(div().font_semibold().child("Active Sessions"))
             .child(
                 div()
@@ -28718,6 +28818,23 @@ impl QuillApp {
                     this.close_sessions(cx);
                 });
             })
+            .into_any_element();
+        // Hotfix: Quill-owned SCRIM backdrop (kit overlay inert in
+        // direct-render mode) restores dim + click-outside-to-dismiss.
+        div()
+            .absolute()
+            .inset_0()
+            .child(
+                div()
+                    .id("hotfix-backdrop-5")
+                    .absolute()
+                    .inset_0()
+                    .bg(SCRIM)
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.close_sessions(cx);
+                    })),
+            )
+            .child(dialog)
             .into_any_element()
     }
 
@@ -29131,7 +29248,8 @@ impl QuillApp {
             .on_click(cx.listener(|this, _, _, cx| {
                 this.refresh_websites(cx);
             }));
-        Dialog::new(cx)
+        let dialog = Dialog::new(cx)
+            .overlay(false)
             // TGX `WebSessionsTitle`, verbatim.
             .title(div().font_semibold().child("Logged In with Telegram"))
             .child(
@@ -29148,6 +29266,23 @@ impl QuillApp {
                     this.close_websites(cx);
                 });
             })
+            .into_any_element();
+        // Hotfix: Quill-owned SCRIM backdrop (kit overlay inert in
+        // direct-render mode) restores dim + click-outside-to-dismiss.
+        div()
+            .absolute()
+            .inset_0()
+            .child(
+                div()
+                    .id("hotfix-backdrop-6")
+                    .absolute()
+                    .inset_0()
+                    .bg(SCRIM)
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.close_websites(cx);
+                    })),
+            )
+            .child(dialog)
             .into_any_element()
     }
 
@@ -30963,16 +31098,18 @@ impl QuillApp {
     /// (backdrop/Esc dismissal, close button); only the body is Quill's.
     fn g1_modal(
         &self,
-        id_prefix: &str,
         close: G1DialogClose,
         title: &str,
         body: AnyElement,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let _ = id_prefix;
+        // Phase 2 hotfix: panel chrome from kit `Dialog` (with its
+        // non-functional overlay disabled); SCRIM backdrop is Quill-owned
+        // to restore dim + click-outside-to-dismiss.
         let title = title.to_string();
         let quill = cx.entity();
-        Dialog::new(cx)
+        let dialog = Dialog::new(cx)
+            .overlay(false)
             .title(div().text_sm().font_semibold().child(title))
             .child(body)
             .width(px(420.))
@@ -30992,6 +31129,32 @@ impl QuillApp {
                     G1DialogClose::ImportContacts => this.close_import_contacts_dialog(cx),
                 });
             })
+            .into_any_element();
+        div()
+            .absolute()
+            .inset_0()
+            .child(
+                div()
+                    .id("hotfix-g1-backdrop")
+                    .absolute()
+                    .inset_0()
+                    .bg(SCRIM)
+                    .on_click(cx.listener(move |this, _, _, cx| match close {
+                        G1DialogClose::CreateChat => this.close_create_chat_dialog(cx),
+                        G1DialogClose::Member => this.close_member_dialog(cx),
+                        G1DialogClose::Permissions => this.close_permissions_dialog(cx),
+                        G1DialogClose::Username => this.close_username_dialog(cx),
+                        G1DialogClose::Restrict => this.close_restrict_dialog(cx),
+                        G1DialogClose::GroupConfirm => this.close_group_confirm(cx),
+                        G1DialogClose::QuoteReply => this.close_quote_reply_dialog(cx),
+                        G1DialogClose::ForumManage => this.close_forum_manage_dialog(cx),
+                        G1DialogClose::CommentThread => this.close_comment_thread_dialog(cx),
+                        G1DialogClose::PollVoters => this.close_poll_voters_dialog(cx),
+                        G1DialogClose::WelcomeMessage => this.close_welcome_dialog(cx),
+                        G1DialogClose::ImportContacts => this.close_import_contacts_dialog(cx),
+                    })),
+            )
+            .child(dialog)
             .into_any_element()
     }
     /// Slice G1: dispatch to whichever group-management dialog is open.
@@ -31188,7 +31351,6 @@ impl QuillApp {
                 ),
         );
         self.g1_modal(
-            "g1-create",
             G1DialogClose::CreateChat,
             kind.title(),
             body.into_any_element(),
@@ -31495,7 +31657,6 @@ impl QuillApp {
             }
         }
         self.g1_modal(
-            "g1-members",
             G1DialogClose::Member,
             if is_basic_group {
                 "Group members"
@@ -31744,13 +31905,7 @@ impl QuillApp {
                     )),
             )
             .into_any_element();
-        self.g1_modal(
-            "g1-permissions",
-            G1DialogClose::Permissions,
-            "Default permissions",
-            body,
-            cx,
-        )
+        self.g1_modal(G1DialogClose::Permissions, "Default permissions", body, cx)
     }
 
     /// Slice G1: public-username editor (`setSupergroupUsername`).
@@ -31805,7 +31960,7 @@ impl QuillApp {
                         )),
                 )
                 .into_any_element();
-        self.g1_modal("g1-username", G1DialogClose::Username, title, body, cx)
+        self.g1_modal(G1DialogClose::Username, title, body, cx)
     }
 
     /// Slice G1: restrict/ban dialog — permission checkboxes (restrict
@@ -31879,7 +32034,6 @@ impl QuillApp {
                     ),
             );
         self.g1_modal(
-            "g1-restrict",
             G1DialogClose::Restrict,
             &format!("{} {name}", if dialog.ban { "Ban" } else { "Restrict" }),
             body.into_any_element(),
@@ -32074,7 +32228,7 @@ impl QuillApp {
                     ),
             )
             .into_any_element();
-        self.g1_modal("g1-confirm", G1DialogClose::GroupConfirm, &title, body, cx)
+        self.g1_modal(G1DialogClose::GroupConfirm, &title, body, cx)
     }
 
     /// Slice G1: partial-quote dialog — the input starts as the full
@@ -32121,13 +32275,7 @@ impl QuillApp {
                     ),
             )
             .into_any_element();
-        self.g1_modal(
-            "g1-quote",
-            G1DialogClose::QuoteReply,
-            "Quote part of message",
-            body,
-            cx,
-        )
+        self.g1_modal(G1DialogClose::QuoteReply, "Quote part of message", body, cx)
     }
 
     /// Slice G2: forum-topic management dialog (`createForumTopic`
@@ -32176,7 +32324,6 @@ impl QuillApp {
         }
         body = body.child(list);
         self.g1_modal(
-            "g2-forum-manage",
             G1DialogClose::ForumManage,
             "Manage topics",
             body.into_any_element(),
@@ -32410,7 +32557,6 @@ impl QuillApp {
             }
         }
         self.g1_modal(
-            "g2-comments",
             G1DialogClose::CommentThread,
             "Comments",
             body.into_any_element(),
@@ -32513,7 +32659,6 @@ impl QuillApp {
             }
         }
         self.g1_modal(
-            "g2-welcome",
             G1DialogClose::WelcomeMessage,
             "Welcome message",
             body.into_any_element(),
