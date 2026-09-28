@@ -4133,6 +4133,9 @@ fn parse_message_scheduling_state(value: Option<&Value>) -> Option<MessageSchedu
 pub struct ParsedMessage {
     pub id: MessageId,
     pub chat_id: ChatId,
+    /// Schema `message.date` (TDLib 1.8.67, line 3165): unix seconds,
+    /// server time. Feeds the in-bubble timestamp; 0 when absent.
+    pub date: i32,
     pub is_outgoing: bool,
     /// Schema `message.is_pinned` (TDLib 1.8.67).
     pub is_pinned: bool,
@@ -9458,6 +9461,7 @@ fn parse_message(value: &Value) -> Result<ParsedMessage, ParseError> {
     Ok(ParsedMessage {
         id: MessageId(int53(value.get("id"))?),
         chat_id: ChatId(int53(value.get("chat_id"))?),
+        date: value.get("date").and_then(Value::as_i64).unwrap_or(0) as i32,
         is_outgoing: value
             .get("is_outgoing")
             .and_then(Value::as_bool)
@@ -14919,6 +14923,17 @@ mod channel_envelope_tests {
         let parsed = parse_message(&serde_json::from_str(json).unwrap()).unwrap();
         assert!(matches!(parsed.content, MessageContent::ScreenshotTaken));
         assert_eq!(parsed.content.preview(), "Took a screenshot");
+    }
+
+    #[test]
+    fn message_date_parsed_and_defaults_to_zero() {
+        // kit Phase 4: schema `message.date` (1.8.67, line 3165).
+        let json = r#"{"id":504,"chat_id":41,"date":1790631720,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"hi","entities":[]}}}"#;
+        let parsed = parse_message(&serde_json::from_str(json).unwrap()).unwrap();
+        assert_eq!(parsed.date, 1790631720);
+        let json = r#"{"id":505,"chat_id":41,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"hi","entities":[]}}}"#;
+        let parsed = parse_message(&serde_json::from_str(json).unwrap()).unwrap();
+        assert_eq!(parsed.date, 0);
     }
 
     #[test]

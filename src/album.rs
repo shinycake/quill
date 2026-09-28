@@ -525,6 +525,7 @@ mod tests {
             id: MessageId(id),
             chat_id: ChatId(1),
             is_outgoing: false,
+            date: 0,
             content: crate::telegram::envelope::MessageContent::Text(TextContent::plain("x")),
             pending: false,
             reply_to: None,

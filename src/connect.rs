@@ -17779,6 +17779,7 @@ mod tests {
         driver.session.scheduled_messages.push(ParsedMessage {
             id: MessageId(70),
             chat_id: ChatId(7),
+            date: 0,
             is_outgoing: true,
             is_pinned: false,
             topic_id: None,

@@ -1,10 +1,11 @@
 #[cfg(feature = "ui")]
 mod ui;
 
-// Phase 1 (kit adoption): embed only the icons the title bar needs, composed
+// Phase 1 (kit adoption): embed only the icons the UI needs, composed
 // with the kit's default set, instead of the full 1800-icon Lucide catalog.
+// (AtSign: the chat-row @ mention badge.)
 #[cfg(feature = "ui")]
-gpui_kit::assets::icon_assets!(QuillIcons, [ChevronsUp, X, TextSearch, RotateCcw]);
+gpui_kit::assets::icon_assets!(QuillIcons, [ChevronsUp, X, TextSearch, RotateCcw, AtSign]);
 
 #[cfg(feature = "ui")]
 #[derive(Clone, Copy, Default)]

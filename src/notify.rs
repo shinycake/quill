@@ -440,6 +440,7 @@ mod tests {
         ParsedMessage {
             id: MessageId(id),
             chat_id: ChatId(chat_id),
+            date: 0,
             is_outgoing: outgoing,
             is_pinned: false,
             media_album_id: 0,
