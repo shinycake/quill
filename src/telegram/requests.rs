@@ -510,6 +510,10 @@ pub fn topic_id_json(topic: &TopicId) -> Value {
 /// lists that topic's messages — this is how per-topic history is fetched
 /// (`getChatHistory` has no `topic_id` parameter, schema line 11829).
 /// First page: `from_message_id` 0 (schema: last message), `offset` 0.
+/// Slice media-shared-gallery: `filter` carries the tab's
+/// `searchMessagesFilter*` constructor (schema/td_api.tl:11864); `None`
+/// keeps the historical null-filter behavior for the existing callers.
+#[allow(clippy::too_many_arguments)] // one arg per schema field, like the other request builders
 pub fn search_chat_messages(
     extra: RequestId,
     chat_id: ChatId,
@@ -518,6 +522,7 @@ pub fn search_chat_messages(
     from_message_id: MessageId,
     offset: i32,
     limit: i32,
+    filter: Option<Value>,
 ) -> String {
     json!({
         "@type": "searchChatMessages",
@@ -529,9 +534,15 @@ pub fn search_chat_messages(
         "from_message_id": from_message_id.0,
         "offset": offset,
         "limit": limit,
-        "filter": Value::Null,
+        "filter": filter.unwrap_or(Value::Null),
     })
     .to_string()
+}
+
+/// `searchMessagesFilter*` JSON for a `searchChatMessages` `filter` slot
+/// (schema/td_api.tl lines 6275-6326 — every constructor takes no fields).
+pub fn search_messages_filter_json(constructor: &str) -> Value {
+    json!({ "@type": constructor })
 }
 
 /// `getForumTopics` (TDLib 1.8.67, `schema/td_api.tl:12701`):
@@ -6895,6 +6906,7 @@ mod tests {
             MessageId(0),
             0,
             50,
+            None,
         );
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(v["@type"], "searchChatMessages");
@@ -6912,6 +6924,54 @@ mod tests {
     }
 
     #[test]
+    fn search_chat_messages_filter_carries_tab_constructor() {
+        // Slice media-shared-gallery: the gallery tabs send the tab's
+        // `searchMessagesFilter*` constructor in `filter`
+        // (schema/td_api.tl:11864).
+        for (tab, constructor) in [
+            (
+                crate::state::SharedMediaTab::Media,
+                "searchMessagesFilterPhotoAndVideo",
+            ),
+            (
+                crate::state::SharedMediaTab::Files,
+                "searchMessagesFilterDocument",
+            ),
+            (
+                crate::state::SharedMediaTab::Music,
+                "searchMessagesFilterAudio",
+            ),
+            (
+                crate::state::SharedMediaTab::Links,
+                "searchMessagesFilterUrl",
+            ),
+            (
+                crate::state::SharedMediaTab::Voice,
+                "searchMessagesFilterVoiceNote",
+            ),
+            (
+                crate::state::SharedMediaTab::Gifs,
+                "searchMessagesFilterAnimation",
+            ),
+        ] {
+            assert_eq!(tab.filter_constructor(), constructor);
+            let json = search_chat_messages(
+                RequestId(27),
+                ChatId(11),
+                &TopicId::None,
+                "",
+                MessageId(0),
+                0,
+                50,
+                Some(search_messages_filter_json(constructor)),
+            );
+            let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+            assert_eq!(v["filter"]["@type"], constructor);
+            assert_eq!(v["query"], "");
+        }
+    }
+
+    #[test]
     fn search_chat_messages_forum_topic_uses_message_topic_forum() {
         let json = search_chat_messages(
             RequestId(26),
@@ -6921,6 +6981,7 @@ mod tests {
             MessageId(0),
             0,
             50,
+            None,
         );
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(v["@type"], "searchChatMessages");
