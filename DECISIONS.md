@@ -4651,3 +4651,79 @@ debuginfo when needed.
   - OS-level deep-link intake (registering `t.me`/`tg:` handling so a real clicked link arms the START button).
   - In-app web view for the menu button (browser fallback is the honest behavior; same as B1).
   - Bot "privacy mode" (Bot API `privacy_mode`) — a bot-side setting with no TDLib client API; correctly not client-configurable.
+
+## Slice calls-remainder-2 (2026-09-28)
+
+**Scope:** the last two unchecked calls-lane items —
+`parity:calls-audio-fx` (echo cancellation / noise suppression
+toggles) and `parity:calls-proxy` ("Use proxy for calls" setting).
+**Both stay unchecked** — neither the TDLib schema nor the native
+call engine exposes the controls; the evidence is documented here
+instead of faking the features.
+
+**Schema investigation (concept-level, pinned TDLib 1.8.67
+`schema/td_api.tl`; raw `telegram_api.tl` is not vendored in this
+repo):**
+- The complete proxy API surface is client-connection scope only:
+  `addProxy` (:16206), `enableProxy` (:16216), `disableProxy`
+  (:16219), `removeProxy` (:16222), `getProxies` (:16225),
+  `pingProxy` (:16229). No call-specific proxy
+  function, constructor, or `CallServer`-level proxy field exists
+  anywhere in the schema.
+- The only "use-for-calls" mention is in the internal-link routing
+  docs at :9276 (`"proxy/add-proxy", "proxy/share-list",
+  "proxy/use-for-calls"`) — a client-side proxy-screen route, not a
+  TDLib function. Call media does **not** inherit the client proxy:
+  nothing in `callProtocol` / `CallServer` / `callStateReady`
+  carries proxy configuration.
+- Audio FX: no TDLib constructor controls echo cancellation, noise
+  suppression, or AGC — these are engine-side, not protocol-side.
+
+**Native engine investigation (`crates/ntgcalls-sys`, pytgcalls
+ntgcalls v3.0.0 prebuilt lib, bindings verified against
+`vendor/ntgcalls/include/ntgcalls.h`):**
+- The full 76-function declared surface contains **zero**
+  echo/noise/AGC functions and **zero** proxy/SOCKS functions
+  (case-insensitive search of `lib.rs` for
+  echo/noise/agc/aec/vad/proxy/socks: no hits).
+- `ntg_audio_description` / `ntg_media_description` carry only
+  device/source descriptors — no audio-FX fields.
+- `ntg_connect_p2p` / `ntg_create_call` / `ntg_init_exchange` take no
+  proxy parameters; Quill passes NULL for `custom_parameters`
+  (`src/calls/engine.rs:1460`) and there is no documented channel to
+  inject audio-FX or proxy config through it.
+
+**Telegram X evidence (`~/workspace/telegram-x`):**
+- `CallConfiguration.java` — the native VoIP stack receives
+  `enableAcousticEchoCanceler`, `enableNoiseSuppressor`,
+  `enableAutomaticGainControl` as **call-creation-time engine
+  config** (`VoIP.java:399-412`, derived as
+  `!preferSystemAcousticEchoCanceler` / `!preferSystemNoiseSuppressor`
+  and adaptive `echoCancellationStrength = isHeadsetPlugged || var ?
+  0 : 1` in `TGCallService.java:267`). These are not user-facing
+  toggles in TGX settings — and Quill's engine exposes no such
+  config path at all.
+- "Use proxy for calls" is **client-side**: `SettingsProxyController`
+  has a `btn_useProxyForCalls` radio toggle; `Settings.java:4515`
+  `getEffectiveCallsProxyId()` returns the enabled proxy id only when
+  both `PROXY_FLAG_ENABLED` and `PROXY_FLAG_USE_FOR_CALLS` are set,
+  and `VoIP.java:365,399` hands the enabled proxy as
+  `@Nullable Socks5Proxy` to the **native** VoIP stack at call start
+  ("Proxy servers may degrade the quality of your calls."
+  `strings.xml:2026-2027`). Because Quill's ntgcalls C API cannot
+  accept a proxy, this client-side plumbing has nothing to hand the
+  proxy to — implementing the toggle alone would be a dead setting.
+  (Quill also has no proxy support at all yet — no `addProxy` /
+  `enableProxy` calls anywhere in `src/` — so the pref would have no
+  backing proxy to reference. Not added: YAGNI.)
+
+**Key decisions (ponytail):**
+- No persisted `CallPrefs` for either item: a toggle that cannot
+  reach the engine is a fake feature, and the task explicitly
+  sanctions "unchecked with evidence" for this case.
+- Both README boxes stay unchecked with their existing partial
+  notes; nothing here regresses the parity percentage.
+- The unblocking condition for both is a future ntgcalls C API
+  revision exposing audio-FX and SOCKS5-proxy configuration; at that
+  point the TGX pattern (call-start config + `CallPrefs` persistence)
+  is the ready-made shape.
