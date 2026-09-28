@@ -1676,9 +1676,10 @@ Research snapshot 2026-09-16, pin recheck **2026-09-17**.
 
 - **Rationale:** Phase 9.3 posted with fixed `active_period` 86400, empty
   areas, and both toggles false. This slice wires the remaining
-  `postStory` composer options: expiry selection, link +
+  user-facing `postStory` composer options: expiry selection, link +
   suggested-reaction story areas, "post to chat page", and "protect
-  content".
+  content". (`album_ids` stays fixed `[]` — story albums are a separate
+  feature, out of this slice.)
 - **Schema (1.8.67, verified in `schema/td_api.tl` — no invented
   constructors/fields):** `postStory chat_id:int53
   content:InputStoryContent areas:inputStoryAreas caption:formattedText

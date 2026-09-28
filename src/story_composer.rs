@@ -241,8 +241,9 @@ impl StoryComposer {
                 "type": { "@type": "inputStoryAreaTypeLink", "url": url }
             }));
         }
-        // One area per emoji; 5 is a UI-level cap — the server enforces
-        // the real `story_suggested_reaction_area_count_max`.
+        // ponytail: UI-level cap of 5 emojis; server enforces the real
+        // `story_suggested_reaction_area_count_max`. Raise the take() bound if
+        // the server max is ever surfaced client-side.
         for (i, emoji) in self.reaction_emojis.split_whitespace().take(5).enumerate() {
             areas.push(json!({
                 "@type": "inputStoryArea",
