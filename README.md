@@ -50,10 +50,10 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [ ] Self-destruct-if-away timer (schema: getAccountTtl/setAccountTtl; TGX DeleteAccountIfAwayFor*) <!-- parity:auth-account-ttl -->
 - [x] Contacts list with empty state (ui/mod.rs:7729 contacts_list; telegram/requests.rs:364 getContacts) <!-- parity:auth-contacts-list -->
 - [x] Add contact via dialog: phone (required), first/last name -> addContact (ui/mod.rs:9469; telegram/requests.rs:379) <!-- parity:auth-contact-add -->
-- [ ] Delete contact (schema: removeContacts; TGX DeleteContactConfirm) <!-- parity:auth-contact-delete -->
-- [ ] Import contacts from a file/vCard (schema: importContacts) <!-- parity:auth-contact-import -->
-- [ ] Sync contacts toggle + delete synced contacts from servers (TGX SyncContacts*, SyncContactsDeleteInfo) <!-- parity:auth-contact-sync -->
-- [ ] Block user with confirmation (TGX QBlockUser/BlockUserConfirm; no block request builders in Quill) <!-- parity:auth-block-user -->
+- [x] Delete contact (schema: removeContacts; TGX DeleteContactConfirm) <!-- parity:auth-contact-delete -->
+- [x] Import contacts from a file/vCard (schema: importContacts) <!-- parity:auth-contact-import -->
+- [x] Sync contacts toggle + delete synced contacts from servers (TGX SyncContacts*, SyncContactsDeleteInfo) <!-- parity:auth-contact-sync -->
+- [x] Block user with confirmation (TGX QBlockUser/BlockUserConfirm; no block request builders in Quill) <!-- parity:auth-block-user -->
 - [x] Edit name: "Edit profile" dialog on the own info panel sends setName (telegram/requests.rs:4213; connect.rs:8910; ui/mod.rs:18963) <!-- parity:auth-edit-name -->
 - [x] Edit bio: "Edit profile" dialog sends setBio; the info panel now also renders the bio from getUserFullInfo (telegram/requests.rs:4224; connect.rs:8924; ui/mod.rs:18963) <!-- parity:auth-edit-bio -->
 - [x] Username management: Check availability via checkChatUsername (private chat with self; all six checkChatUsernameResult verdicts parsed, envelope.rs:2386), set/clear editable username (empty clears per schema :14830), up/down reorder of active usernames, activate/deactivate (editable username can't be deactivated per schema :14835); schema: setUsername, reorderActiveUsernames, toggleUsernameIsActive (telegram/requests.rs:4235; connect.rs:8935; ui/mod.rs:18963) <!-- parity:auth-username -->

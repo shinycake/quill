@@ -376,6 +376,13 @@ pub enum EnvelopePayload {
         message_ids: Vec<i32>,
     },
     Ok,
+    /// Slice A6: `importedContacts` (schema 1.8.67, line 14517) — the
+    /// `importContacts` answer. Only the user ids are kept; the
+    /// reducer treats it like the `ok` of the other contact
+    /// mutations (invalidate + notice).
+    ImportedContacts {
+        user_ids: Vec<i64>,
+    },
     /// Phase C3a: `text` (schema 1.8.67, line 10071) — the
     /// `joinVideoChat` answer (join payload for tgcalls).
     Text {
@@ -742,6 +749,10 @@ pub enum EnvelopePayload {
         /// A5: `chatPhoto.id` (schema 1.8.67, line 1030) — the
         /// `profile_photo_id` for `deleteProfilePhoto`.
         photo_id: Option<i64>,
+        /// Slice A6: `userFullInfo.block_list:BlockList` (schema 1.8.67,
+        /// line 2468) — true when it is `blockListMain` (line 9692),
+        /// parsed with the same `is_block_list_main` as `chat.block_list`.
+        blocked: bool,
     },
     /// `updateUserFullInfo` — full info changed (schema 1.8.67, line 10744);
     /// the user id is explicit here.
@@ -752,6 +763,9 @@ pub enum EnvelopePayload {
         photo: Option<ParsedFile>,
         /// A5: `chatPhoto.id`, as above.
         photo_id: Option<i64>,
+        /// Slice A6: `block_list` (schema 1.8.67, line 2468), same as
+        /// `UserFullInfo::blocked`.
+        blocked: bool,
     },
     /// `supergroupFullInfo` — `getSupergroupFullInfo` response (schema
     /// 1.8.67, line 11513). The response carries no supergroup id; it is
@@ -7041,6 +7055,16 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
         "checkChatUsernameResultPublicGroupsUnavailable" => Ok(
             EnvelopePayload::CheckChatUsernameResult(UsernameCheckResult::PublicGroupsUnavailable),
         ),
+        // Slice A6: `importedContacts` (schema 1.8.67, line 14517) —
+        // the `importContacts` answer (NOT `ok`).
+        "importedContacts" => {
+            let user_ids = value
+                .get("user_ids")
+                .and_then(Value::as_array)
+                .map(|ids| ids.iter().filter_map(Value::as_i64).collect())
+                .unwrap_or_default();
+            Ok(EnvelopePayload::ImportedContacts { user_ids })
+        }
         "richMessage" => {
             let (blocks, is_full) = parse_rich_message(&value);
             Ok(EnvelopePayload::RichMessage {
@@ -7718,6 +7742,7 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
             bio: parse_formatted_text(value.get("bio")),
             photo: parse_user_full_info_photo(&value),
             photo_id: int53(value.get("photo").and_then(|p| p.get("id"))).ok(),
+            blocked: is_block_list_main(value.get("block_list")),
         }),
         "updateUserFullInfo" => Ok(EnvelopePayload::UpdateUserFullInfo {
             user_id: UserId(int53(value.get("user_id"))?),
@@ -7737,6 +7762,11 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
                     .and_then(|p| p.get("id")),
             )
             .ok(),
+            blocked: is_block_list_main(
+                value
+                    .get("user_full_info")
+                    .and_then(|info| info.get("block_list")),
+            ),
         }),
         "supergroupFullInfo" => Ok(EnvelopePayload::SupergroupFullInfo {
             description: value
@@ -11938,6 +11968,7 @@ mod tests {
                 bio,
                 photo,
                 photo_id: _,
+                blocked,
             } => {
                 let info = bot_info.expect("bot_info");
                 assert_eq!(info.short_description, "A demo bot");
@@ -11948,6 +11979,9 @@ mod tests {
                 assert_eq!(info.commands[1].command, "help");
                 assert!(bio.is_empty());
                 assert!(photo.is_none());
+                // Slice A6: the fixture's `block_list` is null → not
+                // blocked.
+                assert!(!blocked);
             }
             other => panic!("{other:?}"),
         }
@@ -11958,6 +11992,20 @@ mod tests {
         .unwrap();
         match env.payload {
             EnvelopePayload::UserFullInfo { bot_info, .. } => assert!(bot_info.is_none()),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn user_full_info_block_list_main_parsed() {
+        // Slice A6: `userFullInfo.block_list:BlockList` (schema 1.8.67,
+        // line 2468) — `blockListMain` (line 9692) means blocked.
+        let env = parse_envelope(
+            r#"{"@type":"userFullInfo","@extra":"11","block_list":{"@type":"blockListMain"},"bot_info":null}"#,
+        )
+        .unwrap();
+        match env.payload {
+            EnvelopePayload::UserFullInfo { blocked, .. } => assert!(blocked),
             other => panic!("{other:?}"),
         }
     }
@@ -14267,10 +14315,12 @@ mod channel_envelope_tests {
                 bot_info,
                 photo,
                 photo_id: _,
+                blocked,
             } => {
                 assert_eq!(bio, "CANARY bio text");
                 assert!(bot_info.is_none());
                 assert!(photo.is_none());
+                assert!(!blocked);
             }
             other => panic!("{other:?}"),
         }

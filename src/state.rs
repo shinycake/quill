@@ -9,7 +9,7 @@ use crate::notify::{self, OsNotification, QueuedNotification};
 use crate::settings::{
     AUTO_DOWNLOAD_FILE, AUTO_DOWNLOAD_GIF, AUTO_DOWNLOAD_MAX_BYTES, AUTO_DOWNLOAD_MUSIC,
     AUTO_DOWNLOAD_PHOTO, AUTO_DOWNLOAD_VIDEO, AUTO_DOWNLOAD_VIDEO_NOTE, AUTO_DOWNLOAD_VOICE,
-    CallPrefs, MediaPrefs,
+    CallPrefs, ContactPrefs, MediaPrefs,
 };
 use crate::telegram::client::OwnedEnvelope;
 use crate::telegram::envelope::{
@@ -386,6 +386,15 @@ pub enum RequestPurpose {
     /// A5: `deleteProfilePhoto` (schema 1.8.67, line 14806). Response is
     /// `ok`; the removal arrives via `updateUserFullInfo`.
     DeleteProfilePhoto,
+    /// Slice A6: `removeContacts`. Response is `ok`; the contacts list is
+    /// invalidated for refetch (same as `AddContact`).
+    RemoveContact,
+    /// Slice A6: `importContacts`. Response is `importedContacts`; the
+    /// contacts list is invalidated for refetch.
+    ImportContacts,
+    /// Slice A6: `clearImportedContacts`. Response is `ok`; the contacts
+    /// list is invalidated for refetch.
+    ClearImportedContacts,
     /// Phase 6: `getSupergroupFullInfo`. Response is `supergroupFullInfo`;
     /// correlated via `PendingRequest::supergroup_id`.
     GetSupergroupFullInfo,
@@ -601,8 +610,13 @@ pub enum RequestPurpose {
     ReportChat,
     /// Slice CL3: `setMessageSenderBlockList` (schema 1.8.67, line
     /// 14492). Response is `ok`; the new state arrives via
-    /// `updateChatBlockList`.
-    SetMessageSenderBlockList,
+    /// `updateChatBlockList`. Slice A6: carries the requested `block`
+    /// value so the `ok` arm can update the cached
+    /// `UserFullInfoData.blocked` authoritatively (the `ok` response
+    /// itself carries no state).
+    SetMessageSenderBlockList {
+        block: bool,
+    },
     /// Slice B2: `sendBotStartMessage` (schema 1.8.67, line 12216) from
     /// the START button / "Restart bot". Response is the sent `message`.
     SendBotStartMessage,
@@ -3883,6 +3897,12 @@ pub struct Session {
     /// persisted via `settings::MediaPrefs`. Loaded at startup like
     /// `call_prefs`; the UI saves on toggle.
     pub media_prefs: MediaPrefs,
+    /// Slice A6: local contacts preferences (sync toggle), persisted
+    /// via `settings::ContactPrefs`. Loaded at startup like
+    /// `call_prefs`; the UI saves on toggle. Client-side only — TDLib
+    /// 1.8.67 has no contact-sync switch (verified concept-level; TGX
+    /// implements sync client-side in `TdlibContactManager`).
+    pub contact_prefs: ContactPrefs,
     /// Phase C3a: the tracked group call / voice chat, if any.
     /// **Signaling only** — TDLib transports no audio/video; the
     /// `joinVideoChat` response payload is stored (`join_payload`) and
@@ -4049,6 +4069,11 @@ pub struct Session {
     /// fetch so the UI can offer a retry.
     pub contacts: Option<Vec<i64>>,
     pub contacts_error: bool,
+    /// Slice A6: outcome line for contacts mutations (`removeContacts`,
+    /// `importContacts`, `clearImportedContacts`) — set on ok and on
+    /// error, cleared by the next mutation; shown in the contacts
+    /// settings section.
+    pub contacts_notice: Option<String>,
     /// Phase 6: cached `getUserFullInfo` bios, keyed by user id. Presence
     /// records "fetched" so the driver never refetches.
     pub user_full_infos: HashMap<i64, UserFullInfoData>,
@@ -4391,6 +4416,9 @@ pub struct UserFullInfoData {
     /// A5: `chatPhoto.id` (schema 1.8.67, line 1030) — the
     /// `profile_photo_id` for `deleteProfilePhoto`.
     pub photo_id: Option<i64>,
+    /// Slice A6: `userFullInfo.block_list` is `blockListMain` — drives
+    /// the Block/Unblock label in the user info panel.
+    pub blocked: bool,
 }
 
 /// Phase 6: cached `supergroupFullInfo` subset (schema 1.8.67, line 2792).
@@ -4751,6 +4779,7 @@ impl Session {
             call_privacy_error: false,
             call_prefs: CallPrefs::default(),
             media_prefs: MediaPrefs::default(),
+            contact_prefs: ContactPrefs::default(),
             active_group_call: None,
             group_call_fetch_queue: Vec::new(),
             open_topic: None,
@@ -4810,6 +4839,7 @@ impl Session {
             users: HashMap::new(),
             contacts: None,
             contacts_error: false,
+            contacts_notice: None,
             user_full_infos: HashMap::new(),
             supergroup_full_infos: HashMap::new(),
             chat_statistics: HashMap::new(),
@@ -7262,6 +7292,7 @@ impl Session {
                 bio,
                 photo,
                 photo_id,
+                blocked,
             } => {
                 // `getUserFullInfo` response: resolve the user id from the
                 // pending request's explicit `user_id` (contacts-panel
@@ -7287,6 +7318,7 @@ impl Session {
                                 bio,
                                 photo_file_id,
                                 photo_id,
+                                blocked,
                             },
                         );
                         if let Some(bot_id) = pending
@@ -7307,6 +7339,7 @@ impl Session {
                 bio,
                 photo,
                 photo_id,
+                blocked,
             } => {
                 self.bot_info.insert(user_id.0, bot_info);
                 let photo_file_id = photo.map(|file| {
@@ -7320,6 +7353,7 @@ impl Session {
                         bio,
                         photo_file_id,
                         photo_id,
+                        blocked,
                     },
                 );
             }
@@ -7851,8 +7885,65 @@ impl Session {
                     self.contacts = None;
                     self.contacts_error = false;
                 }
+                // Slice A6: a contacts mutation landed — never optimistic:
+                // the new list arrives via the `getContacts` refetch the
+                // tab triggers.
+                match pending.map(|p| p.purpose) {
+                    Some(RequestPurpose::RemoveContact) => {
+                        self.contacts = None;
+                        self.contacts_error = false;
+                        self.contacts_notice = Some("Contact deleted.".to_string());
+                        // Slice A6: the server confirmed the deletion —
+                        // drop the contact flag on the cached user too so
+                        // the info panel stops offering "Delete contact"
+                        // before the refetched list arrives.
+                        if let Some(user_id) = pending.and_then(|p| p.user_id)
+                            && let Some(user) = self.users.get_mut(&user_id)
+                        {
+                            user.is_contact = false;
+                        }
+                    }
+                    Some(RequestPurpose::ImportContacts) => {
+                        self.contacts = None;
+                        self.contacts_error = false;
+                        self.contacts_notice = Some("Contacts imported.".to_string());
+                    }
+                    Some(RequestPurpose::ClearImportedContacts) => {
+                        self.contacts = None;
+                        self.contacts_error = false;
+                        self.contacts_notice =
+                            Some("Synced contacts deleted from the servers.".to_string());
+                    }
+                    _ => {}
+                }
+                // Slice A6: a user-scoped `setMessageSenderBlockList`
+                // succeeded — the `ok` carries no state, but the request
+                // we just confirmed does, so the cached
+                // `UserFullInfoData.blocked` is updated authoritatively
+                // (never flipped optimistically). Chat-scoped (CL3)
+                // requests carry no user_id and keep flowing through
+                // `updateChatBlockList`.
+                if let Some(p) = pending
+                    && let RequestPurpose::SetMessageSenderBlockList { block } = p.purpose
+                    && let Some(user_id) = p.user_id
+                    && let Some(info) = self.user_full_infos.get_mut(&user_id)
+                {
+                    info.blocked = block;
+                }
                 if pending.is_some_and(|p| is_auth_submit(p.purpose)) {
                     self.last_auth_error = None;
+                }
+            }
+            // Slice A6: `importedContacts` (schema 1.8.67, line 14517) —
+            // the `importContacts` answer. Same invalidate + notice as
+            // the `ok` of the other contact mutations; the user ids are
+            // not merged into the cache (the tab refetches the
+            // authoritative list).
+            EnvelopePayload::ImportedContacts { .. } => {
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::ImportContacts) {
+                    self.contacts = None;
+                    self.contacts_error = false;
+                    self.contacts_notice = Some("Contacts imported.".to_string());
                 }
             }
             EnvelopePayload::Error(err) => {
@@ -8188,9 +8279,25 @@ impl Session {
                         self.chat_action_error =
                             Some(format!("could not report the chat (error {})", err.code));
                     }
-                    Some(RequestPurpose::SetMessageSenderBlockList) => {
+                    Some(RequestPurpose::SetMessageSenderBlockList { .. }) => {
                         self.chat_action_error = Some(format!(
                             "could not change the block state (error {})",
+                            err.code
+                        ));
+                    }
+                    // Slice A6: contacts mutations — the notice surfaces
+                    // in the contacts settings section.
+                    Some(RequestPurpose::RemoveContact) => {
+                        self.contacts_notice =
+                            Some(format!("could not delete the contact (error {})", err.code));
+                    }
+                    Some(RequestPurpose::ImportContacts) => {
+                        self.contacts_notice =
+                            Some(format!("could not import contacts (error {})", err.code));
+                    }
+                    Some(RequestPurpose::ClearImportedContacts) => {
+                        self.contacts_notice = Some(format!(
+                            "could not delete synced contacts (error {})",
                             err.code
                         ));
                     }
@@ -17673,7 +17780,10 @@ mod tests {
             session.chat_action_error.as_deref(),
             Some("could not report the chat (error 400)")
         );
-        let extra = session.request(RequestPurpose::SetMessageSenderBlockList, Some(ChatId(14)));
+        let extra = session.request(
+            RequestPurpose::SetMessageSenderBlockList { block: true },
+            Some(ChatId(14)),
+        );
         apply_json(
             &mut session,
             &seq,
@@ -17687,6 +17797,90 @@ mod tests {
             session.chat_action_error.as_deref(),
             Some("could not change the block state (error 403)")
         );
+    }
+
+    #[test]
+    fn a6_imported_contacts_response_invalidates_and_notices() {
+        // Slice A6: `importContacts` answers `importedContacts`
+        // (schema 1.8.67, line 14517), NOT `ok` — the reducer still
+        // invalidates the list and records the notice.
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        session.contacts = Some(vec![31]);
+        let extra = session.request(RequestPurpose::ImportContacts, None);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"importedContacts","@extra":"{}","user_ids":[31,32],"importer_count":2}}"#,
+                extra.0
+            ),
+        );
+        assert!(session.contacts.is_none());
+        assert_eq!(
+            session.contacts_notice.as_deref(),
+            Some("Contacts imported.")
+        );
+    }
+
+    #[test]
+    fn a6_remove_contact_ok_clears_cached_is_contact() {
+        // Slice A6: a confirmed `removeContacts` drops the contact flag
+        // on the cached user (in addition to invalidating the list) so
+        // the info panel stops offering "Delete contact".
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateUser","user":{"id":31,"first_name":"Ada","last_name":"Lovelace","phone_number":"+15550101031","status":{"@type":"userStatusRecently"},"is_contact":true,"type":{"@type":"userTypeRegular"}}}"#,
+        );
+        assert!(session.users.get(&31).expect("user").is_contact);
+        session.contacts = Some(vec![31]);
+        let extra = session.request_for_user(RequestPurpose::RemoveContact, 31);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
+        );
+        assert!(session.contacts.is_none());
+        assert!(!session.users.get(&31).expect("user").is_contact);
+        assert_eq!(session.contacts_notice.as_deref(), Some("Contact deleted."));
+    }
+
+    #[test]
+    fn a6_block_ok_updates_cached_blocked() {
+        // Slice A6: a user-scoped `setMessageSenderBlockList` `ok`
+        // carries no state, but the confirmed request does — the cached
+        // `UserFullInfoData.blocked` flips authoritatively (never
+        // optimistically).
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        let extra = session.request_for_user(RequestPurpose::GetUserFullInfo, 31);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"userFullInfo","@extra":"{}","block_list":null,"bio":null,"bot_info":null}}"#,
+                extra.0
+            ),
+        );
+        assert!(!session.user_full_infos.get(&31).expect("info").blocked);
+        let extra = session.request_for_user(
+            RequestPurpose::SetMessageSenderBlockList { block: true },
+            31,
+        );
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
+        );
+        assert!(session.user_full_infos.get(&31).expect("info").blocked);
     }
 
     #[test]

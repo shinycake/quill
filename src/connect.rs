@@ -21,8 +21,8 @@ use crate::platform::{DatabaseKey, KeyDecision, SecretStore, load_or_create_key}
 use crate::poll::{PollDraft, can_stop_poll, poll_answer_for_tap};
 use crate::rich::RichBlock;
 use crate::settings::{
-    AccountPaths, InstantViewMode, default_app_root, load_call_prefs, load_media_prefs,
-    save_call_prefs,
+    AccountPaths, InstantViewMode, default_app_root, load_call_prefs, load_contact_prefs,
+    load_media_prefs, save_call_prefs, save_contact_prefs,
 };
 use crate::state::{
     AdminListFetch, AdminRightsFetch, CHAT_EVENT_LOG_PAGE_SIZE, ChatEventLogFetch,
@@ -44,9 +44,9 @@ use crate::telegram::envelope::{
 use crate::telegram::ffi::{LibraryOrigin, TdJsonError, resolve_tdjson_path};
 use crate::telegram::requests::{
     AnimationSend, ArchiveChatListSettings, CallPrivacySetting, ChatEventLogFilterSet,
-    GroupCallJoinParams, InputGroupCallRef, MessageSenderRef, PollSend, PollTypeSend, PrivacyWho,
-    SendReply, SetTdlibParameters, StickerSend, VideoNoteSend, VideoNoteThumbnailSend, VideoSend,
-    VoiceNoteSend, accept_call_with_protocol,
+    GroupCallJoinParams, ImportedContact, InputGroupCallRef, MessageSenderRef, PollSend,
+    PollTypeSend, PrivacyWho, SendReply, SetTdlibParameters, StickerSend, VideoNoteSend,
+    VideoNoteThumbnailSend, VideoSend, VoiceNoteSend, accept_call_with_protocol,
     activate_story_stealth_mode as activate_story_stealth_mode_request, add_chat_member,
     add_chat_members, add_chat_to_list, add_chat_to_list_value, add_chat_welcome_message,
     add_contact, add_message_reaction, add_recently_found_chat, ban_group_call_participants,
@@ -55,12 +55,12 @@ use crate::telegram::requests::{
     cancel_recovery_email_address_verification, chat_member_status_administrator_json,
     chat_member_status_banned_json, chat_member_status_member_json,
     chat_member_status_restricted_json, check_authentication_code, check_authentication_password,
-    check_chat_username, clear_recently_found_chats, click_chat_sponsored_message, close_chat,
-    close_request, close_secret_chat as close_secret_chat_request, close_story,
-    create_call_with_protocol, create_chat_folder, create_chat_invite_link, create_forum_topic,
-    create_new_basic_group_chat, create_new_secret_chat, create_new_supergroup_chat,
-    create_private_chat, create_video_chat, decline_group_call_invitation, delete_chat,
-    delete_chat_folder, delete_chat_history,
+    check_chat_username, clear_imported_contacts, clear_recently_found_chats,
+    click_chat_sponsored_message, close_chat, close_request,
+    close_secret_chat as close_secret_chat_request, close_story, create_call_with_protocol,
+    create_chat_folder, create_chat_invite_link, create_forum_topic, create_new_basic_group_chat,
+    create_new_secret_chat, create_new_supergroup_chat, create_private_chat, create_video_chat,
+    decline_group_call_invitation, delete_chat, delete_chat_folder, delete_chat_history,
     delete_chat_reply_markup as delete_chat_reply_markup_request, delete_chat_welcome_message,
     delete_forum_topic, delete_messages, delete_profile_photo, delete_story,
     discard_call as discard_call_request, disconnect_all_websites, disconnect_website,
@@ -85,12 +85,12 @@ use crate::telegram::requests::{
     get_story_interactions as get_story_interactions_request, get_supergroup,
     get_supergroup_full_info, get_supergroup_members, get_user_full_info,
     get_user_privacy_setting_rules, get_video_chat_invite_link, get_video_chat_rtmp_url,
-    get_web_page_instant_view, input_message_photo, input_message_video,
+    get_web_page_instant_view, import_contacts, input_message_photo, input_message_video,
     invite_group_call_participant, join_chat, join_group_call, join_video_chat, leave_chat,
     leave_group_call, load_active_stories, load_chat_welcome_messages, load_chats, load_chats_list,
     load_group_call_participants, open_chat, open_message_content, open_story, pin_chat_message,
     post_story as post_story_request, process_chat_join_request, read_chat_list, recognize_speech,
-    remove_message_reaction, reorder_active_usernames, reorder_chat_folders,
+    remove_contacts, remove_message_reaction, reorder_active_usernames, reorder_chat_folders,
     replace_primary_chat_invite_link, replace_video_chat_rtmp_url, report_chat,
     report_chat_sponsored_message, report_story as report_story_request,
     request_qr_code_authentication, resend_authentication_code, resend_messages,
@@ -7437,7 +7437,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if self.session.my_user_id.is_some_and(|me| me == user_id) {
             return Ok(None);
         }
-        let purpose = RequestPurpose::SetMessageSenderBlockList;
+        let purpose = RequestPurpose::SetMessageSenderBlockList { block };
         if self.session.requests.has_purpose_for_chat(purpose, chat_id) {
             return Ok(None);
         }
@@ -7539,6 +7539,118 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(err);
         }
         Ok(Some(extra))
+    }
+
+    /// Slice A6: `removeContacts` (schema 1.8.67, line 14528) for one
+    /// contact — the user-panel "Delete contact" confirm (TGX
+    /// `TdlibUi.deleteContact` → `RemoveContacts`). The reducer
+    /// invalidates the contacts list on `ok`.
+    pub fn remove_contact(&mut self, user_id: i64) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self
+            .session
+            .request_for_user(RequestPurpose::RemoveContact, user_id);
+        if let Err(err) = self.sender.send_json(&remove_contacts(extra, &[user_id])) {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(Some(extra))
+    }
+
+    /// Slice A6: `importContacts` (schema 1.8.67, line 14517) from the
+    /// import dialog's parsed vCard contacts. The reducer invalidates
+    /// the contacts list on `ok`; the `importedContacts` response itself
+    /// carries no per-contact user mapping worth keeping.
+    pub fn import_contacts(
+        &mut self,
+        contacts: &[ImportedContact],
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if contacts.is_empty() {
+            return Ok(None);
+        }
+        let extra = self.session.request(RequestPurpose::ImportContacts, None);
+        if let Err(err) = self.sender.send_json(&import_contacts(extra, contacts)) {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(Some(extra))
+    }
+
+    /// Slice A6: "Delete synced contacts" (TGX
+    /// `TdlibContactManager.deleteContacts`, `SyncContactsDeleteInfo`) —
+    /// `clearImportedContacts` (schema 1.8.67, line 14539) wipes the
+    /// imported set server-side, then `removeContacts` drops the contact
+    /// associations TDLib keeps (schema: `clearImportedContacts` leaves
+    /// "contact list remains unchanged"). Both are sent in order without
+    /// waiting for the first `ok` (TGX issues them the same way); the
+    /// reducer invalidates the contacts list on either `ok`.
+    pub fn delete_synced_contacts(&mut self) -> Result<usize, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let mut sent = 0;
+        let extra = self
+            .session
+            .request(RequestPurpose::ClearImportedContacts, None);
+        if let Err(err) = self.sender.send_json(&clear_imported_contacts(extra)) {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        sent += 1;
+        if let Some(ids) = self.session.contacts.clone()
+            && !ids.is_empty()
+        {
+            let extra = self.session.request(RequestPurpose::RemoveContact, None);
+            if let Err(err) = self.sender.send_json(&remove_contacts(extra, &ids)) {
+                self.session.requests.take(extra);
+                return Err(err);
+            }
+            sent += 1;
+        }
+        Ok(sent)
+    }
+
+    /// Slice A6: user-scoped `setMessageSenderBlockList` (schema 1.8.67,
+    /// line 14492) for the user info panel, where there is no chat to
+    /// resolve through (the chat-scoped twin is
+    /// `set_chat_user_blocked`, CL3). The new state arrives via
+    /// `updateChatBlockList` / `updateUserFullInfo`.
+    pub fn set_user_blocked(
+        &mut self,
+        user_id: i64,
+        block: bool,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if self.session.my_user_id.is_some_and(|me| me == user_id) {
+            return Ok(None);
+        }
+        let purpose = RequestPurpose::SetMessageSenderBlockList { block };
+        if self.session.requests.has_purpose_for_user(purpose, user_id) {
+            return Ok(None);
+        }
+        let extra = self.session.request_for_user(purpose, user_id);
+        if let Err(err) = self
+            .sender
+            .send_json(&set_message_sender_block_list(extra, user_id, block))
+        {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(Some(extra))
+    }
+
+    /// Slice A6: persist the contacts preferences edited from the
+    /// Contacts tab (same account-scoped dir as the other settings
+    /// files).
+    pub fn save_contact_prefs(&mut self) -> std::io::Result<()> {
+        save_contact_prefs(&self.paths, &self.session.contact_prefs)
     }
 
     /// Phase 6: download the small profile photo for the user info panel
@@ -12123,6 +12235,8 @@ pub fn start_live_connect(
     session.call_prefs = load_call_prefs(&prepared.paths);
     // MED1: local media prefs (remember-media-grouping) load the same way.
     session.media_prefs = load_media_prefs(&prepared.paths);
+    // Slice A6: local contacts prefs (sync toggle) load the same way.
+    session.contact_prefs = load_contact_prefs(&prepared.paths);
     let mut driver = ConnectDriver::new(session, sender, credentials, prepared);
     match crate::calls::engine::NtgcallsEngine::load() {
         Ok(engine) => {
@@ -14270,6 +14384,78 @@ mod tests {
             )
             .unwrap();
         assert!(driver.session.contacts.is_none());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a6_remove_contact_sends_and_invalidates() {
+        // Slice A6: `remove_contact` sends `removeContacts([user_id])`
+        // (schema 1.8.67, line 14528); the `ok` answer invalidates the
+        // contacts list and records the notice — never optimistic.
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = Arc::new(RecordingSender::new());
+        let seq = AtomicU64::new(0);
+        let mut driver = ready_driver(&recorder, prepared, &dyn_sink, &seq);
+        driver.session.contacts = Some(vec![31]);
+        let extra = driver
+            .remove_contact(31)
+            .unwrap()
+            .expect("removeContacts sent");
+        let sent = recorder.snapshot();
+        let remove = sent
+            .iter()
+            .find(|j| j.contains(r#""@type":"removeContacts""#))
+            .expect("removeContacts in outbox");
+        assert!(remove.contains(r#""user_ids":[31]"#));
+        driver
+            .ingest(
+                copy_and_parse(
+                    &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        assert!(driver.session.contacts.is_none());
+        assert_eq!(
+            driver.session.contacts_notice.as_deref(),
+            Some("Contact deleted.")
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a6_delete_synced_contacts_clears_then_removes() {
+        // Slice A6: `delete_synced_contacts` sends `clearImportedContacts`
+        // first (the server-side wipe, schema 1.8.67 line 14539), then
+        // `removeContacts` for the cached ids (TGX `deleteContacts`).
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = Arc::new(RecordingSender::new());
+        let seq = AtomicU64::new(0);
+        let mut driver = ready_driver(&recorder, prepared, &dyn_sink, &seq);
+        driver.session.contacts = Some(vec![31, 32]);
+        let sent_count = driver.delete_synced_contacts().unwrap();
+        assert_eq!(sent_count, 2);
+        let sent = recorder.snapshot();
+        let clear_pos = sent
+            .iter()
+            .position(|j| j.contains(r#""@type":"clearImportedContacts""#))
+            .expect("clearImportedContacts in outbox");
+        let remove_pos = sent
+            .iter()
+            .position(|j| j.contains(r#""@type":"removeContacts""#))
+            .expect("removeContacts in outbox");
+        assert!(clear_pos < remove_pos);
+        assert!(sent[remove_pos].contains(r#""user_ids":[31,32]"#));
 
         let _ = std::fs::remove_dir_all(&dir);
     }

@@ -148,6 +148,8 @@ fn parse_screenshot_demo(args: &[String]) -> Option<(ui::ScreenshotDemo, std::pa
                 "ready-forum-topics" => ScreenshotDemo::ReadyForumTopics,
                 "ready-topic-post" => ScreenshotDemo::ReadyTopicPost,
                 "ready-contacts" => ScreenshotDemo::ReadyContacts,
+                "ready-contacts-manage" => ScreenshotDemo::ReadyContactsManage,
+                "ready-block-user" => ScreenshotDemo::ReadyBlockUser,
                 "ready-folders" => ScreenshotDemo::ReadyFolders,
                 "ready-folders-manage" => ScreenshotDemo::ReadyFoldersManage,
                 "ready-chat-avatars" => ScreenshotDemo::ReadyChatAvatars,
@@ -182,7 +184,7 @@ fn parse_screenshot_demo(args: &[String]) -> Option<(ui::ScreenshotDemo, std::pa
                 "ready-username" => ScreenshotDemo::ReadyUsername,
                 _ => {
                     eprintln!(
-                        "unknown screenshot demo '{kind}' (expected need-tdjson|wait-phone|wait-code|wait-password|wait-qr|ready-chats|ready-chats-composer|ready-unread|ready-unread-read|ready-media|ready-downloads|ready-send-media|ready-search|ready-search-in-chat|ready-reply|ready-edit-delete|ready-forward|ready-reactions|ready-pin|ready-mute-archive|ready-chat-list|ready-chat-preview|ready-typing|ready-stickers|ready-voice|ready-link-preview|ready-gifs|ready-video|ready-video-note|ready-video-send|ready-video-note-send|ready-drafts|ready-albums|ready-audio|ready-sponsored|ready-channels|ready-channels-admin|ready-channel-stats|ready-bot-chat|ready-bot-keyboard|ready-bot-command-menu|ready-bot-profile|ready-text-entities|ready-poll|ready-payments|ready-location|ready-dice|ready-media-viewer|ready-video-playback|ready-stories|ready-story-post|ready-story-viewers|ready-story-composer|ready-story-edit|ready-seek-bars|ready-forum-topics|ready-topic-post|ready-contacts|ready-folders|ready-folders-manage|ready-chat-avatars|ready-notification-sound|ready-slow-mode|ready-secret-chat|ready-key-verification|ready-self-destruct|ready-sessions|ready-web-sessions|ready-session-toggles|ready-call|ready-call-video|ready-call-screenshare|ready-call-devices|ready-chat-ttl|ready-group-call|ready-group-call-invite|ready-group-call-invitation|ready-group-call-manage|ready-calls-settings|ready-rich-message|ready-rich-editor|ready-admin-management|ready-admin-log|ready-secret-bot-alert|ready-storage-usage|ready-group-manage|ready-groups2|ready-2fa-manage|ready-recovery-email|ready-group-call-scheduled)"
+                        "unknown screenshot demo '{kind}' (expected need-tdjson|wait-phone|wait-code|wait-password|wait-qr|ready-chats|ready-chats-composer|ready-unread|ready-unread-read|ready-media|ready-downloads|ready-send-media|ready-search|ready-search-in-chat|ready-reply|ready-edit-delete|ready-forward|ready-reactions|ready-pin|ready-mute-archive|ready-chat-list|ready-chat-preview|ready-typing|ready-stickers|ready-voice|ready-link-preview|ready-gifs|ready-video|ready-video-note|ready-video-send|ready-video-note-send|ready-drafts|ready-albums|ready-audio|ready-sponsored|ready-channels|ready-channels-admin|ready-channel-stats|ready-bot-chat|ready-bot-keyboard|ready-bot-command-menu|ready-bot-profile|ready-text-entities|ready-poll|ready-payments|ready-location|ready-dice|ready-media-viewer|ready-video-playback|ready-stories|ready-story-post|ready-story-viewers|ready-story-composer|ready-story-edit|ready-seek-bars|ready-forum-topics|ready-topic-post|ready-contacts|ready-contacts-manage|ready-block-user|ready-folders|ready-folders-manage|ready-chat-avatars|ready-notification-sound|ready-slow-mode|ready-secret-chat|ready-key-verification|ready-self-destruct|ready-sessions|ready-web-sessions|ready-session-toggles|ready-call|ready-call-video|ready-call-screenshare|ready-call-devices|ready-chat-ttl|ready-group-call|ready-group-call-invite|ready-group-call-invitation|ready-group-call-manage|ready-calls-settings|ready-rich-message|ready-rich-editor|ready-admin-management|ready-admin-log|ready-secret-bot-alert|ready-storage-usage|ready-group-manage|ready-groups2|ready-2fa-manage|ready-recovery-email|ready-group-call-scheduled)"
                     );
                     std::process::exit(2);
                 }
@@ -273,6 +275,8 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
         ScreenshotDemo::ReadyForumTopics => ".quill-ready-ready-forum-topics",
         ScreenshotDemo::ReadyTopicPost => ".quill-ready-ready-topic-post",
         ScreenshotDemo::ReadyContacts => ".quill-ready-ready-contacts",
+        ScreenshotDemo::ReadyContactsManage => ".quill-ready-ready-contacts-manage",
+        ScreenshotDemo::ReadyBlockUser => ".quill-ready-ready-block-user",
         ScreenshotDemo::ReadyFolders => ".quill-ready-ready-folders",
         ScreenshotDemo::ReadyFoldersManage => ".quill-ready-ready-folders-manage",
         ScreenshotDemo::ReadyChatAvatars => ".quill-ready-ready-chat-avatars",
