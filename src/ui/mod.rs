@@ -49,9 +49,10 @@ use quill::state::{
     ChatSearchJump, ChatStatisticsFetch, ChatSummary, ContactRow, ForceReplyTarget, ForwardResult,
     HistoryMessage, InfoPanelTarget, InviteLinkFetch, JoinRequestFetch, LoginUrlRequest,
     MemberListFilter, OutboxReceipt, PollVotersFetch, RequestPurpose, SearchStatus, Session,
-    SimilarBotsFetch, SponsoredReportFlight, StoryPostOutcome, StoryPostState, StoryReportStage,
-    SupergroupMembersFetch, WelcomeMessagesFetch, active_custom_keyboard, effective_preview,
-    event_log_relative_time, outgoing_status_label, unix_ms_now, unread_badge_text,
+    SharedMediaTab, SharedMediaTabStatus, SimilarBotsFetch, SponsoredReportFlight,
+    StoryPostOutcome, StoryPostState, StoryReportStage, SupergroupMembersFetch,
+    WelcomeMessagesFetch, active_custom_keyboard, effective_preview, event_log_relative_time,
+    outgoing_status_label, unix_ms_now, unread_badge_text,
 };
 use quill::story_composer::{StoryComposer, StoryExpiry, StoryMediaKind, StoryPrivacy};
 use quill::story_viewer::{StoryViewer, StoryViewerItem, StoryViewerKind, collect_story_items};
@@ -2009,6 +2010,11 @@ pub enum ScreenshotDemo {
     /// Slice CL2: sidebar search with an empty result (injected, no
     /// live Telegram).
     ReadyChatListSearch,
+    /// Slice media-shared-gallery: per-chat shared-media gallery open on
+    /// chat 11 — the Media tab shows its empty state, the Files tab two
+    /// injected documents (injected `foundChatMessages` through the real
+    /// reducer, no live Telegram).
+    ReadySharedMedia,
     /// Peer `chatActionTyping` in the open-chat header and sidebar row.
     ReadyTyping,
     /// Sticker panel + sticker in history (injected, no live Telegram).
@@ -3065,6 +3071,15 @@ impl QuillApp {
                     ConnectUiStatus::DemoReadyChats,
                     None,
                     "screenshot demo — chat list: search empty state".into(),
+                    AuthorizationState::Ready,
+                )
+            }
+            Some(ScreenshotDemo::ReadySharedMedia) => {
+                demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
+                (
+                    ConnectUiStatus::DemoReadyChats,
+                    None,
+                    "screenshot demo — shared media gallery: per-tab empty states".into(),
                     AuthorizationState::Ready,
                 )
             }
@@ -4196,6 +4211,16 @@ impl QuillApp {
                 session.search.status = SearchStatus::Empty;
             }
             app.status_note = "screenshot demo — search empty state".into();
+        }
+        // Slice media-shared-gallery: the gallery open on chat 11 — the
+        // Media tab shows its empty state, the Files tab two injected
+        // documents (through the real `foundChatMessages` reducer).
+        if matches!(demo, Some(ScreenshotDemo::ReadySharedMedia)) {
+            if let Some(session) = app.demo_session.as_mut() {
+                app.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_shared_media(session, &app.demo_sink, &app.demo_seq);
+            }
+            app.status_note = "screenshot demo — shared media gallery empty state".into();
         }
         // Slice CL3: select mode (chats 11 + 12 checked, select bar),
         // the @ mention badge on chat 11, the ♥ reaction badge on chat
@@ -9132,6 +9157,16 @@ impl QuillApp {
         // B4: Escape cancels the stop-poll confirm too.
         if self.pending_stop_poll.is_some() {
             self.cancel_stop_poll(cx);
+            return;
+        }
+        // Slice media-shared-gallery: Escape dismisses the gallery like any
+        // other transient panel; it sits above the chat-search layer (the
+        // row-click jump closes the gallery into a chat search).
+        if self
+            .session()
+            .is_some_and(|session| session.shared_media.open)
+        {
+            self.close_shared_media_ui(cx);
             return;
         }
         if self.chat_search_is_open() {
@@ -17680,6 +17715,254 @@ impl QuillApp {
     }
 
     /// Phase B2: the "Encryption key" section of a secret chat partner's
+    /// Slice media-shared-gallery: per-chat shared-media gallery panel
+    /// beside the conversation (TGX profile → Media / Files / Music / Links /
+    /// Voice / GIFs). Each tab fetches one `searchChatMessages` page with its
+    /// `searchMessagesFilter*` filter; tabs cache their first page. Loading,
+    /// empty, and failed are three distinct per-tab states — the empty state
+    /// never shows while a fetch is in flight.
+    fn shared_media_panel(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let session = self.session()?;
+        if !session.shared_media.open {
+            return None;
+        }
+        let chat_id = session.shared_media.chat_id?;
+        let chat = session.chats.get(&chat_id.0);
+        let title = chat
+            .map(|c| c.title.clone())
+            .unwrap_or_else(|| "Shared media".to_string());
+        let is_channel = chat.is_some_and(|c| {
+            matches!(
+                c.kind,
+                ChatKind::Supergroup {
+                    is_channel: true,
+                    ..
+                }
+            )
+        });
+        let active_tab = session.shared_media.active_tab;
+        let tab = &session.shared_media.tabs[active_tab.index()];
+        let status = tab.status;
+        let total_count = tab.total_count;
+        // `error` stays an owned clone: the panel tree is boxed into
+        // `AnyElement` (requires 'static), so borrowed `&str` children don't
+        // compile here — same for the row labels below.
+        let error = tab.error.clone();
+
+        let mut panel = div()
+            .id("shared-media-panel")
+            .w(px(320.))
+            .h_full()
+            .flex_shrink_0()
+            .border_l_1()
+            .border_color(cx.theme().border)
+            .bg(cx.theme().sidebar)
+            .flex()
+            .flex_col()
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .px_3()
+                    .py_2()
+                    .border_b_1()
+                    .border_color(cx.theme().border)
+                    .child(div().font_semibold().child(title))
+                    .child(
+                        div()
+                            .id("shared-media-close")
+                            .cursor_pointer()
+                            .px_2()
+                            .py_1()
+                            .rounded_md()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("✕")
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.close_shared_media_ui(cx);
+                            })),
+                    ),
+            )
+            .child({
+                let mut bar = div()
+                    .id(("shared-media-tabs", chat_id.0 as u64))
+                    .flex()
+                    .overflow_x_scroll()
+                    .border_b_1()
+                    .border_color(cx.theme().border);
+                for tab_option in SharedMediaTab::ALL {
+                    let is_active = tab_option == active_tab;
+                    let label =
+                        if is_active && total_count > 0 && status == SharedMediaTabStatus::Ready {
+                            format!("{} · {total_count}", tab_option.label())
+                        } else {
+                            tab_option.label().to_string()
+                        };
+                    bar = bar.child(
+                        div()
+                            .id(("shared-media-tab", tab_option.index() as u64))
+                            .cursor_pointer()
+                            .px_3()
+                            .py_2()
+                            .text_sm()
+                            .border_b_2()
+                            .border_color(if is_active {
+                                cx.theme().accent
+                            } else {
+                                cx.theme().border
+                            })
+                            .text_color(if is_active {
+                                cx.theme().foreground
+                            } else {
+                                cx.theme().muted_foreground
+                            })
+                            .when(is_active, |this| this.font_semibold())
+                            .child(label)
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.select_shared_media_tab_ui(tab_option, cx);
+                            })),
+                    );
+                }
+                bar
+            });
+
+        let content: AnyElement = match status {
+            SharedMediaTabStatus::Idle | SharedMediaTabStatus::Loading => div()
+                .flex_1()
+                .flex()
+                .items_center()
+                .justify_center()
+                .px_6()
+                .py_10()
+                .text_sm()
+                .text_color(cx.theme().muted_foreground)
+                .child(format!("Loading {}…", active_tab.label().to_lowercase()))
+                .into_any_element(),
+            SharedMediaTabStatus::Failed => div()
+                .flex_1()
+                .flex()
+                .flex_col()
+                .items_center()
+                .justify_center()
+                .gap_2()
+                .px_6()
+                .py_10()
+                .child(div().text_3xl().child("⚠"))
+                .child(
+                    div()
+                        .font_semibold()
+                        .text_color(cx.theme().foreground)
+                        .child(format!(
+                            "Couldn't load {}.",
+                            active_tab.label().to_lowercase()
+                        )),
+                )
+                .when(!error.is_empty(), |this| {
+                    this.child(
+                        div()
+                            .text_xs()
+                            .text_center()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(error.clone()),
+                    )
+                })
+                .child(
+                    div()
+                        .id("shared-media-retry")
+                        .cursor_pointer()
+                        .px_3()
+                        .py_1()
+                        .rounded_md()
+                        .text_sm()
+                        .text_color(rgb(0x58a6ff))
+                        .child("Retry")
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.retry_shared_media_ui(cx);
+                        })),
+                )
+                .into_any_element(),
+            SharedMediaTabStatus::Empty => {
+                self.shared_media_empty_state(active_tab, is_channel, cx)
+            }
+            SharedMediaTabStatus::Ready => {
+                let mut list = div()
+                    .id(("shared-media-items", active_tab.index() as u64))
+                    .flex_1()
+                    .overflow_y_scroll()
+                    .py_1();
+                for item in tab.items.iter() {
+                    let message_id = item.message_id;
+                    list = list.child(
+                        div()
+                            .id(("shared-media-item", message_id.0 as u64))
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .px_3()
+                            .py_2()
+                            .cursor_pointer()
+                            .hover(|this| this.bg(cx.theme().accent.opacity(0.12)))
+                            .child(div().text_lg().child(item.glyph))
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .text_sm()
+                                    .text_color(cx.theme().foreground)
+                                    .child(item.label.clone()),
+                            )
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.jump_to_shared_media_item_ui(message_id, cx);
+                            })),
+                    );
+                }
+                list.into_any_element()
+            }
+        };
+        panel = panel.child(content);
+        Some(panel.into_any_element())
+    }
+
+    /// Slice media-shared-gallery: the ONE empty-state renderer for all six
+    /// tabs (ponytail: parameterized per tab, not six bespoke panels).
+    /// Glyph + TGX title + TGX description (`SharedMediaTab::empty_title` /
+    /// `empty_hint`), in the app's existing muted-centered empty-state
+    /// style ("No downloads yet." pattern).
+    fn shared_media_empty_state(
+        &self,
+        tab: SharedMediaTab,
+        is_channel: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let mut body = div()
+            .flex_1()
+            .flex()
+            .flex_col()
+            .items_center()
+            .justify_center()
+            .gap_2()
+            .px_6()
+            .py_10()
+            .child(div().text_3xl().child(tab.glyph()))
+            .child(
+                div()
+                    .font_semibold()
+                    .text_color(cx.theme().foreground)
+                    .child(tab.empty_title()),
+            );
+        for line in tab.empty_hint(is_channel).split('\n') {
+            body = body.child(
+                div()
+                    .text_sm()
+                    .text_center()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(line.to_string()),
+            );
+        }
+        body.id(("shared-media-empty", tab.index() as u64))
+            .into_any_element()
+    }
+
     /// info panel — the 12×12 fingerprint grid from `secretChat.key_hash`
     /// (schema 1.8.67 lines 2812–2813: 36 little-endian bytes → 144
     /// two-bit pixels in FFFFFF / D5E6F3 / 2D5775 / 2F99C9) with
@@ -25437,7 +25720,22 @@ impl QuillApp {
                                         this.open_folder_menu(chat_id, cx);
                                     }
                                 })),
-                        ),
+                        )
+                        // Slice media-shared-gallery: the per-chat shared
+                        // media gallery (Media / Files / Music / Links /
+                        // Voice / GIFs tabs). Live only — demo sessions have
+                        // no TDLib to fetch pages from (the screenshot
+                        // fixture seeds `Session::shared_media` directly).
+                        .when(self.live.is_some(), |this| {
+                            this.child(
+                                Button::new("chat-shared-media")
+                                    .label("Media")
+                                    .ghost()
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        this.open_shared_media_ui(cx);
+                                    })),
+                            )
+                        }),
                 )
             })
     }
@@ -34149,6 +34447,97 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// Slice media-shared-gallery: open the gallery for the open chat (live
+    /// fetches the active tab; the demo fixture seeds session state
+    /// directly, so the demo path only opens the panel).
+    fn open_shared_media_ui(&mut self, cx: &mut Context<Self>) {
+        if self.pane_mode() != PaneMode::Ready {
+            return;
+        }
+        let opened = if let Some(live) = self.live.as_mut() {
+            match live.driver.open_shared_media() {
+                Ok(true) => {
+                    self.status_note = "shared media".into();
+                    true
+                }
+                Ok(false) => {
+                    self.status_note = "select a chat to browse its shared media".into();
+                    false
+                }
+                Err(_) => {
+                    self.status_note = "could not open shared media".into();
+                    false
+                }
+            }
+        } else if let Some(session) = self.demo_session.as_mut() {
+            match session.open_chat {
+                Some(chat_id) => {
+                    session.shared_media.open_for(chat_id);
+                    self.status_note = "shared media".into();
+                    true
+                }
+                None => {
+                    self.status_note = "select a chat to browse its shared media".into();
+                    false
+                }
+            }
+        } else {
+            false
+        };
+        if opened {
+            cx.notify();
+        }
+    }
+
+    fn close_shared_media_ui(&mut self, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            live.driver.close_shared_media();
+        } else if let Some(session) = self.demo_session.as_mut() {
+            session.shared_media.close();
+        }
+        self.status_note = "shared media closed".into();
+        cx.notify();
+    }
+
+    /// Slice media-shared-gallery: tab switch — fetches only unfetched tabs
+    /// (live); demo tabs never fetch (fixture-seeded).
+    fn select_shared_media_tab_ui(&mut self, tab: SharedMediaTab, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            if live.driver.select_shared_media_tab(tab).is_err() {
+                self.status_note = "could not load that tab".into();
+            }
+        } else if let Some(session) = self.demo_session.as_mut() {
+            session.shared_media.select_tab(tab);
+        }
+        cx.notify();
+    }
+
+    fn retry_shared_media_ui(&mut self, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            let tab = live.driver.session.shared_media.active_tab;
+            if live.driver.fetch_shared_media(tab).is_err() {
+                self.status_note = "could not retry loading shared media".into();
+            }
+        }
+        cx.notify();
+    }
+
+    /// Slice media-shared-gallery: gallery row click — close the gallery and
+    /// jump to the message (live only; demo rows are inert).
+    fn jump_to_shared_media_item_ui(
+        &mut self,
+        message_id: quill::ids::MessageId,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(live) = self.live.as_mut() {
+            match live.driver.jump_to_shared_media_item(message_id) {
+                Ok(_) => self.status_note = "jumped to message".into(),
+                Err(_) => self.status_note = "could not open that message".into(),
+            }
+        }
+        cx.notify();
+    }
+
     fn sync_chat_search_query(&mut self, query: &str, cx: &mut Context<Self>) {
         if self.pane_mode() != PaneMode::Ready || !self.chat_search_is_open() {
             return;
@@ -35056,7 +35445,9 @@ impl Render for QuillApp {
                     // Phase 6: user / group info panel beside the conversation.
                     .when_some(self.info_panel(cx), |this, panel| this.child(panel))
                     // MED3: downloads manager panel beside the conversation.
-                    .when_some(self.downloads_panel(cx), |this, panel| this.child(panel)),
+                    .when_some(self.downloads_panel(cx), |this, panel| this.child(panel))
+                    // Slice media-shared-gallery: shared-media gallery panel.
+                    .when_some(self.shared_media_panel(cx), |this, panel| this.child(panel)),
             )
             .child(status_bar(
                 &auth,
@@ -39742,6 +40133,63 @@ fn apply_ready_search(session: &mut Session, sink: &Arc<MemorySink>, seq: &Atomi
             session.apply(owned);
         }
     }
+}
+
+/// Slice media-shared-gallery fixture: the gallery open on chat 11 with the
+/// Media tab empty and the Files tab holding two injected documents — all
+/// through the real `foundChatMessages` reducer path, no live Telegram.
+fn apply_ready_shared_media(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let chat_id = ChatId(11);
+    let tab = session.shared_media.open_for(chat_id);
+    assert_eq!(tab, SharedMediaTab::Media);
+    // Media tab: an empty `foundChatMessages` → the Empty state (never a
+    // blank panel, never "empty" while loading).
+    let generation = session.shared_media.begin_fetch(SharedMediaTab::Media);
+    let extra = session.request(
+        RequestPurpose::GetSharedMedia {
+            tab: SharedMediaTab::Media,
+            generation,
+        },
+        Some(chat_id),
+    );
+    let empty = format!(
+        r#"{{"@type":"foundChatMessages","@extra":"{}","total_count":0,"next_from_message_id":0,"messages":[]}}"#,
+        extra.0
+    );
+    if let Some(owned) = copy_and_parse(&empty, seq, &dyn_sink) {
+        session.apply(owned);
+    }
+    assert_eq!(
+        session.shared_media.tabs[SharedMediaTab::Media.index()].status,
+        SharedMediaTabStatus::Empty
+    );
+    // Files tab: two injected documents → the Ready state with rows.
+    let generation = session.shared_media.begin_fetch(SharedMediaTab::Files);
+    let extra = session.request(
+        RequestPurpose::GetSharedMedia {
+            tab: SharedMediaTab::Files,
+            generation,
+        },
+        Some(chat_id),
+    );
+    let files = format!(
+        r#"{{"@type":"foundChatMessages","@extra":"{}","total_count":2,"next_from_message_id":0,"messages":[{{"id":201,"chat_id":11,"is_outgoing":false,"content":{{"@type":"messageDocument","document":{{"@type":"document","file_name":"report.pdf","mime_type":"application/pdf","document":{{"@type":"file","id":901,"size":12345,"expected_size":12345,"local":{{"@type":"localFile","path":"","is_downloading_completed":false,"is_downloading_active":false}},"remote":{{"@type":"remoteFile","id":"x"}}}}}},"caption":{{"@type":"formattedText","text":"Q3 numbers","entities":[]}}}}}},{{"id":202,"chat_id":11,"is_outgoing":true,"content":{{"@type":"messageDocument","document":{{"@type":"document","file_name":"demo-notes.txt","mime_type":"text/plain","document":{{"@type":"file","id":902,"size":24,"expected_size":24,"local":{{"@type":"localFile","path":"","is_downloading_completed":false,"is_downloading_active":false}},"remote":{{"@type":"remoteFile","id":"x"}}}}}},"caption":{{"@type":"formattedText","text":"","entities":[]}}}}}}]}}"#,
+        extra.0
+    );
+    if let Some(owned) = copy_and_parse(&files, seq, &dyn_sink) {
+        session.apply(owned);
+    }
+    assert_eq!(
+        session.shared_media.tabs[SharedMediaTab::Files.index()].status,
+        SharedMediaTabStatus::Ready
+    );
+    assert_eq!(
+        session.shared_media.tabs[SharedMediaTab::Files.index()]
+            .items
+            .len(),
+        2
+    );
 }
 
 fn apply_ready_search_in_chat(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {

@@ -29,7 +29,7 @@ use crate::state::{
     ChatSearchJumpNeed, ChatStatisticsFetch, ComposerLinkPreview, ForwardFlight, InfoPanelTarget,
     InstantViewPage, InviteLinkFetch, JoinRequestFetch, LoginUrlRequest, MemberListFilter,
     MemberStatusChange, PasswordOp, PollVotersFetch, RequestPurpose, RequestRollback, SearchStatus,
-    Session, ShutdownPhase, SupergroupMembersFetch, WelcomeMessagesFetch,
+    Session, SharedMediaTab, ShutdownPhase, SupergroupMembersFetch, WelcomeMessagesFetch,
 };
 use crate::story_composer::{StoryMediaKind, StoryPrivacy};
 use crate::telegram::client::{LiveTdJson, OwnedEnvelope, ReceiveBridge};
@@ -94,8 +94,8 @@ use crate::telegram::requests::{
     report_chat_sponsored_message, report_story as report_story_request,
     request_qr_code_authentication, resend_authentication_code, resend_messages,
     resend_recovery_email_address_code, revoke_chat_invite_link, revoke_group_call_invite_link,
-    search_call_messages, search_chat_messages, search_chats, search_messages, search_public_chats,
-    search_recently_found_chats, send_animation,
+    search_call_messages, search_chat_messages, search_chats, search_messages,
+    search_messages_filter_json, search_public_chats, search_recently_found_chats, send_animation,
     send_bot_start_message as send_bot_start_message_request, send_call_debug_information,
     send_call_log, send_call_rating_detail, send_call_signaling_data, send_chat_action,
     send_chat_action_kind, send_document, send_group_call_message, send_message_album, send_photo,
@@ -170,6 +170,9 @@ pub const SEARCH_DEBOUNCE: Duration = Duration::from_millis(900);
 pub const DRAFT_SAVE_DEBOUNCE: Duration = Duration::from_millis(1_000);
 /// tdesktop `kSearchPerPage` (`api_messages_search.cpp`).
 pub const CHAT_SEARCH_LIMIT: i32 = 50;
+/// Slice media-shared-gallery: `searchChatMessages.limit` for one gallery-tab
+/// page (`<= 100`, schema/td_api.tl:11862).
+pub const SHARED_MEDIA_PAGE_SIZE: i32 = 50;
 /// Unigram `LoadMessageSliceImpl`: `GetChatHistory(chatId, maxId, -25, 50)`.
 pub const HISTORY_AROUND_OFFSET: i32 = -25;
 /// Phase 5.1: `getForumTopics.limit` — first page of the topic list.
@@ -2376,6 +2379,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             from,
             0,
             TOPIC_HISTORY_PAGE_SIZE,
+            None,
         )) {
             Ok(()) => Ok(Some(extra)),
             Err(err) => {
@@ -11562,6 +11566,91 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.session.close_chat_search();
     }
 
+    /// Slice media-shared-gallery: open the gallery for the open chat and
+    /// fetch the active tab's first page. Returns `false` when there is no
+    /// open chat to gallery-ize.
+    pub fn open_shared_media(&mut self) -> Result<bool, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let Some(chat_id) = self.session.open_chat else {
+            return Ok(false);
+        };
+        // Reopening the gallery for the same chat keeps the already-fetched
+        // tabs (`SharedMediaState::open_for`); only a fresh open fetches the
+        // active tab.
+        let reopening =
+            self.session.shared_media.open && self.session.shared_media.chat_id == Some(chat_id);
+        let tab = self.session.shared_media.open_for(chat_id);
+        if !reopening {
+            self.fetch_shared_media(tab)?;
+        }
+        Ok(true)
+    }
+
+    pub fn close_shared_media(&mut self) {
+        self.session.shared_media.close();
+    }
+
+    /// Slice media-shared-gallery: switch tabs; fetch only tabs that were
+    /// never fetched (each tab caches its first page).
+    pub fn select_shared_media_tab(&mut self, tab: SharedMediaTab) -> Result<(), ConnectSendError> {
+        if self.session.shared_media.select_tab(tab) {
+            self.fetch_shared_media(tab)?;
+        }
+        Ok(())
+    }
+
+    /// Slice media-shared-gallery: one `searchChatMessages` page with the
+    /// tab's `searchMessagesFilter*` filter (`schema/td_api.tl:11864`).
+    pub fn fetch_shared_media(&mut self, tab: SharedMediaTab) -> Result<(), ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let Some(chat_id) = self.session.shared_media.chat_id else {
+            return Err(ConnectSendError::InvalidRequest);
+        };
+        let generation = self.session.shared_media.begin_fetch(tab);
+        let extra = self.session.request(
+            RequestPurpose::GetSharedMedia { tab, generation },
+            Some(chat_id),
+        );
+        let filter = search_messages_filter_json(tab.filter_constructor());
+        match self.sender.send_json(&search_chat_messages(
+            extra,
+            chat_id,
+            &TopicId::None,
+            "",
+            MessageId(0),
+            0,
+            SHARED_MEDIA_PAGE_SIZE,
+            Some(filter),
+        )) {
+            Ok(()) => Ok(()),
+            Err(err) => {
+                self.session.requests.take(extra);
+                self.session.shared_media.fail(
+                    chat_id,
+                    tab,
+                    generation,
+                    "Could not send the shared-media request.".to_string(),
+                );
+                Err(err)
+            }
+        }
+    }
+
+    /// Slice media-shared-gallery: gallery row click — close the gallery and
+    /// jump to the message with the same history-around pipeline in-chat
+    /// search jumps use (`jump_to_replied_message` does the same).
+    pub fn jump_to_shared_media_item(
+        &mut self,
+        message_id: MessageId,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        self.session.shared_media.close();
+        self.jump_to_chat_search_message(message_id)
+    }
+
     /// Empty query: clear immediately (tdesktop ComposeSearch skips empty).
     /// Non-empty: debounce `AutoSearchTimeout` (900 ms), then `searchChatMessages`.
     pub fn set_chat_search_query(
@@ -11655,6 +11744,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             MessageId(0),
             0,
             CHAT_SEARCH_LIMIT,
+            None,
         )) {
             Ok(()) => Ok(Some(ChatSearchFlight::Query(extra))),
             Err(err) => {
