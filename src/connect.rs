@@ -1594,6 +1594,13 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .lock()
                 .expect("group video frame slots")
                 .retain(|(slot_call_id, _, _), _| *slot_call_id != before_id);
+            // Slice calls-group-self-tile: the self tile lives in the
+            // shared (call id, is_local) slots — clear it too so a stale
+            // local preview can't render after the call ends.
+            self.video_frame_slots
+                .lock()
+                .expect("call video frame slots")
+                .retain(|(slot_call_id, _), _| *slot_call_id != before_id);
             self.group_camera_state.remove(&before_id);
         }
         let Some(group_call_id) = active_group_call_after else {
@@ -3374,6 +3381,12 @@ impl<S: JsonSender> ConnectDriver<S> {
             .lock()
             .expect("group video frame slots")
             .retain(|(slot_call_id, _, _), _| *slot_call_id != group_call_id);
+        // Slice calls-group-self-tile: the self tile lives in the
+        // shared (call id, is_local) slots — clear it too.
+        self.video_frame_slots
+            .lock()
+            .expect("call video frame slots")
+            .retain(|(slot_call_id, _), _| *slot_call_id != group_call_id);
         self.group_camera_state.remove(&group_call_id);
     }
 
@@ -20990,6 +21003,54 @@ mod tests {
         assert!(driver.latest_group_video_frame(555, 42, true).is_some());
         assert!(driver.latest_group_video_frame(555, 43, false).is_none());
         assert!(driver.latest_video_frame(555, false).is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Slice calls-group-self-tile: a group-local frame (`is_local`,
+    /// no participant — what the engine now delivers for group
+    /// CAPTURE frames) lands in the shared (call id, is_local) slots,
+    /// never in the participant slots.
+    #[test]
+    fn group_local_frame_routes_to_shared_local_slot() {
+        let (dir, driver, _recorder, handle, _sink, _seq) = ready_group_call_driver();
+        handle.emit_video_frame(
+            555,
+            VideoFrame {
+                seq: 0,
+                width: 2,
+                height: 2,
+                rgba: vec![0u8; 16],
+                is_local: true,
+                participant_user_id: None,
+                is_screen: false,
+            },
+        );
+        assert!(driver.latest_video_frame(555, true).is_some());
+        assert!(driver.latest_video_frame(555, false).is_none());
+        assert!(driver.latest_group_video_frame(555, 42, false).is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Slice calls-group-self-tile: leaving the group call clears the
+    /// self-tile slot along with the participant slots.
+    #[test]
+    fn group_call_leave_clears_local_frame_slot() {
+        let (dir, mut driver, _recorder, handle, _sink, _seq) = ready_group_call_driver();
+        handle.emit_video_frame(
+            555,
+            VideoFrame {
+                seq: 0,
+                width: 2,
+                height: 2,
+                rgba: vec![0u8; 16],
+                is_local: true,
+                participant_user_id: None,
+                is_screen: false,
+            },
+        );
+        assert!(driver.latest_video_frame(555, true).is_some());
+        driver.leave_group_call().expect("leave");
+        assert!(driver.latest_video_frame(555, true).is_none());
         let _ = std::fs::remove_dir_all(&dir);
     }
 

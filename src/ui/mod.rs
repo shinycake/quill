@@ -4893,6 +4893,9 @@ impl QuillApp {
                 // the demo tiles (camera for Zed, screen share for Mia).
                 // Injected demo data, not real media.
                 app.demo_group_frames = demo_group_video_frames();
+                // Slice calls-group-self-tile: the self tile renders the
+                // local camera preview (fixture camera is on).
+                app.demo_local_frame = Some(demo_video_frame(true));
             }
             app.status_note =
                 "screenshot demo — group voice chat (injected, no live Telegram)".into();
@@ -4901,6 +4904,9 @@ impl QuillApp {
             if let Some(session) = app.demo_session.as_mut() {
                 app.demo_seq.store(session.last_seq, Ordering::SeqCst);
                 apply_ready_group_call_invite(session, &app.demo_sink, &app.demo_seq);
+                // Slice calls-group-self-tile: fixture camera is on —
+                // the self tile behind the panel renders the preview.
+                app.demo_local_frame = Some(demo_video_frame(true));
             }
             app.group_call_invite_open = true;
             app.status_note =
@@ -22788,7 +22794,13 @@ impl QuillApp {
         if participant.is_speaking {
             badges.push("🔊 speaking".to_string());
         }
-        if participant.is_muted_for_all_users || participant.is_muted_for_current_user {
+        if participant.is_muted_for_all_users
+            || participant.is_muted_for_current_user
+            || (participant.is_current_user && call.is_muted_self)
+        {
+            // Slice calls-group-self-tile: the self tile shows the LOCAL
+            // mute state (`is_muted_self`), which the participant flags
+            // alone don't reliably carry for the current user.
             badges.push("🔇 muted".to_string());
         }
         if participant.is_hand_raised {
@@ -22812,19 +22824,25 @@ impl QuillApp {
         }
         // Phase C2g: live video tile when a frame is retained for this
         // participant (camera, or screen share preferred when sharing);
-        // the avatar placeholder stays for everyone else.
-        let video_or_avatar: AnyElement = match self.group_participant_frame(call.id, participant) {
-            Some((user_id, screen, frame)) => {
-                match self.cached_group_video_image(call.id, user_id, screen, &frame) {
-                    Some(image) => img(ImageSource::from(image))
-                        .w_full()
-                        .h(px(90.))
-                        .object_fit(ObjectFit::Contain)
-                        .into_any_element(),
-                    None => div().child(initials_avatar(&name, 56.)).into_any_element(),
+        // the avatar placeholder stays for everyone else. Slice
+        // calls-group-self-tile: the current user's tile renders the
+        // local camera preview from the driver's group-local slot.
+        let video_or_avatar: AnyElement = if participant.is_current_user {
+            self.group_self_tile_content(call, participant, &name)
+        } else {
+            match self.group_participant_frame(call.id, participant) {
+                Some((user_id, screen, frame)) => {
+                    match self.cached_group_video_image(call.id, user_id, screen, &frame) {
+                        Some(image) => img(ImageSource::from(image))
+                            .w_full()
+                            .h(px(90.))
+                            .object_fit(ObjectFit::Contain)
+                            .into_any_element(),
+                        None => div().child(initials_avatar(&name, 56.)).into_any_element(),
+                    }
                 }
+                None => div().child(initials_avatar(&name, 56.)).into_any_element(),
             }
-            None => div().child(initials_avatar(&name, 56.)).into_any_element(),
         };
         let mut tile = div()
             .w(px(124.))
@@ -22957,6 +22975,57 @@ impl QuillApp {
             );
         }
         tile
+    }
+
+    /// Slice calls-group-self-tile: the current user's tile content in
+    /// the group grid. Camera on + a retained local frame → the live
+    /// local preview (decoded through the same per-participant cache as
+    /// the remote tiles); camera on with no frame yet → "Starting
+    /// camera…"; camera off → the initials avatar, consistent with every
+    /// other tile. Live mode reads the driver's group-local slot (the
+    /// engine delivers group CAPTURE frames as `is_local` with no
+    /// participant); demo mode reuses the 1:1 local fixture frame.
+    fn group_self_tile_content(
+        &mut self,
+        call: &ActiveGroupCall,
+        participant: &ParsedGroupCallParticipant,
+        name: &str,
+    ) -> AnyElement {
+        let frame = if let Some(live) = self.live.as_ref() {
+            live.driver.latest_video_frame(call.id, true)
+        } else {
+            self.demo_local_frame.clone()
+        };
+        let MessageSender::User { user_id } = participant.participant_id else {
+            return div().child(initials_avatar(name, 56.)).into_any_element();
+        };
+        match (call.is_my_video_enabled, frame.as_ref()) {
+            (true, Some(frame)) => {
+                match self.cached_group_video_image(call.id, user_id, false, frame) {
+                    Some(image) => img(ImageSource::from(image))
+                        .w_full()
+                        .h(px(90.))
+                        .object_fit(ObjectFit::Contain)
+                        .into_any_element(),
+                    None => div().child(initials_avatar(name, 56.)).into_any_element(),
+                }
+            }
+            (true, None) => div()
+                .flex()
+                .flex_col()
+                .items_center()
+                .justify_center()
+                .gap_1()
+                .child(div().text_2xl().child("📹"))
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(rgb(0x9a9a9a))
+                        .child("Starting camera…"),
+                )
+                .into_any_element(),
+            (false, _) => div().child(initials_avatar(name, 56.)).into_any_element(),
+        }
     }
 
     fn group_call_card(
@@ -39090,7 +39159,7 @@ fn apply_ready_group_call(session: &mut Session, sink: &Arc<MemorySink>, seq: &A
             r#"{{"@type":"updateChatVideoChat","chat_id":{chat_id},"video_chat":{{"@type":"videoChat","group_call_id":{call_id},"has_participants":true,"default_participant_id":null}}}}"#
         ),
         format!(
-            r#"{{"@type":"updateGroupCall","group_call":{{"@type":"groupCall","id":{call_id},"unique_id":"999","title":"Weekly design sync","invite_link":"","paid_message_star_count":0,"scheduled_start_date":0,"enabled_start_notification":false,"is_active":true,"is_video_chat":true,"is_live_story":false,"is_rtmp_stream":false,"is_joined":true,"need_rejoin":false,"is_owned":true,"can_be_managed":true,"participant_count":4,"has_hidden_listeners":false,"loaded_all_participants":true,"message_sender_id":null,"recent_speakers":[{{"@type":"groupCallRecentSpeaker","participant_id":{{"@type":"messageSenderUser","user_id":41}},"is_speaking":true}}],"is_my_video_enabled":false,"is_my_video_paused":false,"can_enable_video":true,"mute_new_participants":false,"can_toggle_mute_new_participants":true,"can_send_messages":true,"are_messages_allowed":true,"can_toggle_are_messages_allowed":false,"can_delete_messages":false,"record_duration":0,"is_video_recorded":false,"duration":0}}}}"#
+            r#"{{"@type":"updateGroupCall","group_call":{{"@type":"groupCall","id":{call_id},"unique_id":"999","title":"Weekly design sync","invite_link":"","paid_message_star_count":0,"scheduled_start_date":0,"enabled_start_notification":false,"is_active":true,"is_video_chat":true,"is_live_story":false,"is_rtmp_stream":false,"is_joined":true,"need_rejoin":false,"is_owned":true,"can_be_managed":true,"participant_count":4,"has_hidden_listeners":false,"loaded_all_participants":true,"message_sender_id":null,"recent_speakers":[{{"@type":"groupCallRecentSpeaker","participant_id":{{"@type":"messageSenderUser","user_id":41}},"is_speaking":true}}],"is_my_video_enabled":true,"is_my_video_paused":false,"can_enable_video":true,"mute_new_participants":false,"can_toggle_mute_new_participants":true,"can_send_messages":true,"are_messages_allowed":true,"can_toggle_are_messages_allowed":false,"can_delete_messages":false,"record_duration":0,"is_video_recorded":false,"duration":0}}}}"#
         ),
         participant(777, r#","is_current_user":true"#, "a4", "null", "null"),
         participant(
