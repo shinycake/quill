@@ -9810,8 +9810,10 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// `inputMessagePoll` (TDLib 1.8.67). Guards: chats path active, chat can
     /// post (admin-gated channels, same as `send_snapshot`), valid draft
     /// (`PollDraft::validate`). Quiz drafts send `inputPollTypeQuiz`
-    /// (schema line 488); quiz mode forces single-answer and no revoting
-    /// (Telegram X `CreatePollController` does the same on quiz toggle).
+    /// (schema line 488); quiz mode forces no revoting (Telegram X
+    /// `CreatePollController` does the same on quiz toggle) and
+    /// single-answer (Quill's own stricter choice; TGX allows
+    /// multi-correct quizzes).
     pub fn send_poll_draft(
         &mut self,
         chat_id: ChatId,

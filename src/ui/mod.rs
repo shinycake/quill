@@ -221,8 +221,7 @@ pub struct PollDialog {
 
 impl PollDialog {
     fn new(window: &mut Window, cx: &mut Context<QuillApp>) -> Self {
-        let mut textarea =
-            |cx: &mut Context<QuillApp>, placeholder: &str, rows: (usize, usize)| {
+        let mut textarea = |cx: &mut Context<QuillApp>, placeholder: &str, rows: (usize, usize)| {
             cx.new(|cx| {
                 TextareaState::new(window, cx)
                     .placeholder(placeholder)
@@ -29601,7 +29600,12 @@ impl QuillApp {
                         "poll-toggle-revoting",
                         "Allow revoting",
                         revoting,
-                        |dialog| dialog.allows_revoting = !dialog.allows_revoting,
+                        |dialog| {
+                            // Quizzes force revoting off; the toggle is inert in quiz mode.
+                            if !dialog.is_quiz {
+                                dialog.allows_revoting = !dialog.allows_revoting;
+                            }
+                        },
                     ))
                     .child(button(
                         "poll-toggle-shuffle",
