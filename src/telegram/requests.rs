@@ -115,6 +115,87 @@ pub fn request_qr_code_authentication(extra: RequestId) -> String {
     .to_string()
 }
 
+/// Slice A2: `getPasswordState` (TDLib 1.8.67, `schema/td_api.tl:11426`):
+/// "Returns the current state of 2-step verification".
+pub fn get_password_state(extra: RequestId) -> String {
+    json!({
+        "@type": "getPasswordState",
+        "@extra": extra.as_extra(),
+    })
+    .to_string()
+}
+
+/// Slice A2: `setPassword` (TDLib 1.8.67, `schema/td_api.tl:11434`):
+/// `setPassword old_password:string new_password:string new_hint:string
+/// set_recovery_email_address:Bool new_recovery_email_address:string =
+/// PasswordState;`
+/// "Changes the 2-step verification password for the current user. If a
+/// new recovery email address is specified, then the change will not be
+/// applied until the new recovery email address is confirmed".
+/// Empty `new_password` removes the password; `old_password` is empty
+/// when enabling for the first time (TGX `PasswordController` sends null
+/// in MODE_NEW). Callers must not log `old_password`/`new_password`.
+pub fn set_password(
+    extra: RequestId,
+    old_password: &str,
+    new_password: &str,
+    new_hint: &str,
+    new_recovery_email_address: Option<&str>,
+) -> String {
+    json!({
+        "@type": "setPassword",
+        "@extra": extra.as_extra(),
+        "old_password": old_password,
+        "new_password": new_password,
+        "new_hint": new_hint,
+        "set_recovery_email_address": new_recovery_email_address.is_some(),
+        "new_recovery_email_address": new_recovery_email_address.unwrap_or(""),
+    })
+    .to_string()
+}
+
+/// Slice A2: `setRecoveryEmailAddress` (TDLib 1.8.67,
+/// `schema/td_api.tl:11458`): "Changes the 2-step verification recovery
+/// email address of the user. If a new recovery email address is
+/// specified, then the change will not be applied until the new recovery
+/// email address is confirmed." Callers must not log `password`.
+pub fn set_recovery_email_address(
+    extra: RequestId,
+    password: &str,
+    new_recovery_email_address: &str,
+) -> String {
+    json!({
+        "@type": "setRecoveryEmailAddress",
+        "@extra": extra.as_extra(),
+        "password": password,
+        "new_recovery_email_address": new_recovery_email_address,
+    })
+    .to_string()
+}
+
+/// Slice A2: `resendRecoveryEmailAddressCode` (TDLib 1.8.67,
+/// `schema/td_api.tl:11464`): "Resends the 2-step verification recovery
+/// email address verification code". TDLib enforces its own server-side
+/// cooldown (429 on too-early resend), so no local countdown is invented.
+pub fn resend_recovery_email_address_code(extra: RequestId) -> String {
+    json!({
+        "@type": "resendRecoveryEmailAddressCode",
+        "@extra": extra.as_extra(),
+    })
+    .to_string()
+}
+
+/// Slice A2: `cancelRecoveryEmailAddressVerification` (TDLib 1.8.67,
+/// `schema/td_api.tl:11467`): "Cancels verification of the 2-step
+/// verification recovery email address".
+pub fn cancel_recovery_email_address_verification(extra: RequestId) -> String {
+    json!({
+        "@type": "cancelRecoveryEmailAddressVerification",
+        "@extra": extra.as_extra(),
+    })
+    .to_string()
+}
+
 pub fn close_request(extra: RequestId) -> String {
     json!({
         "@type": "close",
@@ -4658,6 +4739,68 @@ pub fn expected_runtime_label() -> String {
 mod tests {
     use super::*;
     use crate::ids::RequestId;
+
+    /// Slice A2: the five 2FA request shapes against the pinned schema
+    /// (1.8.67): `getPasswordState` (:11426), `setPassword` (:11434),
+    /// `setRecoveryEmailAddress` (:11458),
+    /// `resendRecoveryEmailAddressCode` (:11464),
+    /// `cancelRecoveryEmailAddressVerification` (:11467). Passwords and
+    /// emails ride the JSON body, never `@extra` or logs.
+    #[test]
+    fn a2_password_request_shapes_match_1_8_67() {
+        let v: serde_json::Value =
+            serde_json::from_str(&get_password_state(RequestId(71))).unwrap();
+        assert_eq!(v["@type"], "getPasswordState");
+        assert_eq!(v["@extra"], "71");
+
+        // Enable: empty old password, new password + hint + recovery email
+        // in the same call (TGX MODE_NEW sends null old_password).
+        let v: serde_json::Value = serde_json::from_str(&set_password(
+            RequestId(72),
+            "",
+            "s3cret",
+            "hint",
+            Some("me@example.com"),
+        ))
+        .unwrap();
+        assert_eq!(v["@type"], "setPassword");
+        assert_eq!(v["old_password"], "");
+        assert_eq!(v["new_password"], "s3cret");
+        assert_eq!(v["new_hint"], "hint");
+        assert_eq!(v["set_recovery_email_address"], true);
+        assert_eq!(v["new_recovery_email_address"], "me@example.com");
+
+        // Disable: empty new password, no recovery-email change.
+        let v: serde_json::Value =
+            serde_json::from_str(&set_password(RequestId(73), "s3cret", "", "", None)).unwrap();
+        assert_eq!(v["@type"], "setPassword");
+        assert_eq!(v["old_password"], "s3cret");
+        assert_eq!(v["new_password"], "");
+        assert_eq!(v["set_recovery_email_address"], false);
+        assert_eq!(v["new_recovery_email_address"], "");
+
+        let v: serde_json::Value = serde_json::from_str(&set_recovery_email_address(
+            RequestId(74),
+            "s3cret",
+            "new@example.com",
+        ))
+        .unwrap();
+        assert_eq!(v["@type"], "setRecoveryEmailAddress");
+        assert_eq!(v["@extra"], "74");
+        assert_eq!(v["password"], "s3cret");
+        assert_eq!(v["new_recovery_email_address"], "new@example.com");
+
+        let v: serde_json::Value =
+            serde_json::from_str(&resend_recovery_email_address_code(RequestId(75))).unwrap();
+        assert_eq!(v["@type"], "resendRecoveryEmailAddressCode");
+        assert_eq!(v["@extra"], "75");
+
+        let v: serde_json::Value =
+            serde_json::from_str(&cancel_recovery_email_address_verification(RequestId(76)))
+                .unwrap();
+        assert_eq!(v["@type"], "cancelRecoveryEmailAddressVerification");
+        assert_eq!(v["@extra"], "76");
+    }
 
     #[test]
     fn cl2_set_pinned_chats_shape_matches_1_8_67() {
