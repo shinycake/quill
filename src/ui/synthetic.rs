@@ -174,40 +174,73 @@ impl Render for SyntheticChat {
     }
 }
 
+/// kit Phase 4: optional per-message chrome for the shared kit shell.
+/// Bundled so the bubble helpers keep one extra parameter instead of three.
+#[derive(Default)]
+pub(crate) struct MessageChrome {
+    /// Incoming sender name → kit `MessageHeader` (above the bubble).
+    /// `None` renders no header (outgoing messages never had one).
+    pub sender: Option<SharedString>,
+    /// Incoming sender avatar → kit `Message` avatar slot. `None` where the
+    /// sender can't be identified (groups) — never invented.
+    pub avatar: Option<AnyElement>,
+    /// `HH:MM` + delivery checkmarks → kit `MessageFooter` (below the
+    /// bubble, right-aligned). `None` hides the footer.
+    pub footer: Option<AnyElement>,
+}
+
 pub(crate) fn session_bubble_quoted(
     id: u64,
-    sender: impl Into<SharedString>,
+    chrome: MessageChrome,
     body: impl Into<SharedString>,
     outgoing: bool,
     extra: Option<AnyElement>,
     quote: Option<AnyElement>,
 ) -> AnyElement {
     message_bubble_with_quote(
-        row(id, sender, body, SyntheticKind::Text, outgoing),
+        row(
+            id,
+            chrome.sender.clone().unwrap_or_default(),
+            body,
+            SyntheticKind::Text,
+            outgoing,
+        ),
         extra,
         quote,
         None,
+        chrome,
     )
 }
 
 pub(crate) fn session_bubble_rich(
     id: u64,
-    sender: impl Into<SharedString>,
+    chrome: MessageChrome,
     outgoing: bool,
     body: AnyElement,
     extra: Option<AnyElement>,
     quote: Option<AnyElement>,
 ) -> AnyElement {
     message_bubble_with_quote(
-        row(id, sender, "", SyntheticKind::Text, outgoing),
+        row(
+            id,
+            chrome.sender.clone().unwrap_or_default(),
+            "",
+            SyntheticKind::Text,
+            outgoing,
+        ),
         extra,
         quote,
         Some(body),
+        chrome,
     )
 }
 
 fn message_bubble(row: SyntheticRow) -> AnyElement {
-    message_bubble_with_quote(row, None, None, None)
+    let chrome = MessageChrome {
+        sender: Some(row.sender.clone()),
+        ..Default::default()
+    };
+    message_bubble_with_quote(row, None, None, None, chrome)
 }
 
 fn message_bubble_with_quote(
@@ -215,6 +248,7 @@ fn message_bubble_with_quote(
     extra: Option<AnyElement>,
     quote: Option<AnyElement>,
     body_el: Option<AnyElement>,
+    chrome: MessageChrome,
 ) -> AnyElement {
     let image_h = match row.kind {
         SyntheticKind::Image { loaded: false } => px(40.),
@@ -225,12 +259,23 @@ fn message_bubble_with_quote(
     let body = row.body.clone();
     let has_body = !body.is_empty();
     let rich_body = body_el.is_some();
-    let bubble = div()
-        .id(("bubble", row.id))
-        .max_w(px(520.))
-        .px_3()
-        .py_2()
-        .rounded_lg()
+    let MessageChrome {
+        sender,
+        avatar,
+        footer,
+    } = chrome;
+    let alignment = if row.outgoing {
+        component::message::MessageAlignment::End
+    } else {
+        component::message::MessageAlignment::Start
+    };
+    // kit Phase 4: the bubble surface keeps the Phase 0 palette
+    // (`ACCENT_STRONG` / `BG_BUBBLE_INCOMING` on `TEXT_BRIGHT`); the kit
+    // only supplies the shape/chrome, never the colors. Sender and
+    // footer live in the kit `MessageHeader` / `MessageFooter` slots —
+    // the header above the bubble, the footer below it, right-aligned
+    // like the old in-bubble timestamp.
+    let bubble_content = component::bubble::BubbleContent::new()
         .bg(if row.outgoing {
             ACCENT_STRONG
         } else {
@@ -238,7 +283,6 @@ fn message_bubble_with_quote(
         })
         .text_color(TEXT_BRIGHT)
         .when(rtl, |this| this.text_right())
-        .child(div().text_xs().opacity(0.8).child(row.sender.clone()))
         .when_some(quote, |this, quote| this.child(quote))
         .when_some(body_el, |this, body_el| this.child(body_el))
         .when(!rich_body && has_body, |this| {
@@ -265,10 +309,31 @@ fn message_bubble_with_quote(
             )
         })
         .when_some(extra, |this, el| this.child(el));
-    let row_el = div().id(("row", row.id)).w_full().flex().py_1();
-    if row.outgoing {
-        row_el.justify_end().child(bubble).into_any_element()
-    } else {
-        row_el.justify_start().child(bubble).into_any_element()
+    let bubble = component::bubble::Bubble::new()
+        .alignment(alignment)
+        .content(bubble_content);
+    let mut message = component::message::Message::new()
+        .alignment(alignment)
+        .content(component::message::MessageContent::new().bubble(bubble));
+    if let Some(sender) = sender {
+        message = message.header(
+            component::message::MessageHeader::new().child(div().child(sender).into_any_element()),
+        );
     }
+    if let Some(avatar) = avatar {
+        message = message.avatar(avatar);
+    }
+    if let Some(footer) = footer {
+        message = message.footer(
+            component::message::MessageFooter::new()
+                .justify_end()
+                .child(footer),
+        );
+    }
+    div()
+        .id(("row", row.id))
+        .w_full()
+        .py_1()
+        .child(message)
+        .into_any_element()
 }

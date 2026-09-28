@@ -1689,17 +1689,6 @@ pub enum OutboxReceipt {
     Read,
 }
 
-/// Badge label for the chat list. `None` when the chat is fully read.
-pub fn unread_badge_text(count: i32) -> Option<String> {
-    if count <= 0 {
-        None
-    } else if count > 99 {
-        Some("99+".into())
-    } else {
-        Some(count.to_string())
-    }
-}
-
 /// Slice B2: parse a bot deep link of the form
 /// `t.me/<bot_username>?start=<start_parameter>` (with or without the
 /// `https://` scheme) into `(bot_username, start_parameter)` — the two
@@ -1739,6 +1728,21 @@ pub fn outgoing_status_label(pending: bool, receipt: OutboxReceipt) -> &'static 
             OutboxReceipt::Sent | OutboxReceipt::None => "You · sent",
         }
     }
+}
+
+/// kit Phase 4: compact `HH:MM` in-bubble timestamp for a TDLib `date`
+/// (unix seconds). UTC rather than local time: the sandbox/CI clock's
+/// local zone is not the user's, and the existing `format_unix_date_time`
+/// UI helper is UTC too. Returns `None` for `0`/negative (date absent).
+pub fn message_time_hhmm(unix: i32) -> Option<String> {
+    if unix <= 0 {
+        return None;
+    }
+    let mins = unix as i64 / 60;
+    let day_minutes = mins.rem_euclid(24 * 60);
+    let hh = day_minutes / 60;
+    let mm = day_minutes % 60;
+    Some(format!("{hh:02}:{mm:02}"))
 }
 
 #[derive(Debug, Clone)]
@@ -2270,6 +2274,9 @@ pub struct HistoryMessage {
     pub id: MessageId,
     pub chat_id: ChatId,
     pub is_outgoing: bool,
+    /// Schema `message.date` (unix seconds, server time) — feeds the
+    /// in-bubble timestamp. `0` when the source didn't carry one.
+    pub date: i32,
     pub content: MessageContent,
     pub pending: bool,
     pub reply_to: Option<MessageReplyTo>,
@@ -2508,6 +2515,8 @@ pub struct SearchMessageHit {
     pub auto_delete: Option<MessageAutoDelete>,
     /// Phase D2: same carry-through for the author signature line.
     pub author_signature: Option<String>,
+    /// kit Phase 4: same carry-through for the in-bubble timestamp.
+    pub date: i32,
 }
 
 impl SearchMessageHit {
@@ -2527,6 +2536,7 @@ impl SearchMessageHit {
             self_destruct: message.self_destruct,
             auto_delete: message.auto_delete,
             author_signature: message.author_signature.clone(),
+            date: message.date,
         }
     }
 
@@ -2535,6 +2545,7 @@ impl SearchMessageHit {
             id: self.message_id,
             chat_id: self.chat_id,
             is_outgoing: self.is_outgoing,
+            date: self.date,
             content: self.content,
             pending: false,
             reply_to: self.reply_to,
@@ -10962,6 +10973,7 @@ impl Session {
                         reply_markup: message.reply_markup.clone(),
                         self_destruct: message.self_destruct,
                         auto_delete: message.auto_delete,
+                        date: message.date,
                     })
                     .collect()
             })
@@ -11043,6 +11055,7 @@ fn history_message(message: ParsedMessage, pending: bool) -> HistoryMessage {
         id: message.id,
         chat_id: message.chat_id,
         is_outgoing: message.is_outgoing,
+        date: message.date,
         content: message.content,
         pending,
         reply_to: message.reply_to,
@@ -11244,6 +11257,7 @@ mod tests {
         let parsed = ParsedMessage {
             id: MessageId(602),
             chat_id: ChatId(14),
+            date: 0,
             is_outgoing: false,
             is_pinned: false,
             topic_id: None,
@@ -11305,6 +11319,7 @@ mod tests {
         session.scheduled_messages.push(ParsedMessage {
             id: MessageId(70),
             chat_id: ChatId(7),
+            date: 0,
             is_outgoing: true,
             is_pinned: false,
             topic_id: None,
@@ -11380,6 +11395,7 @@ mod tests {
         session.scheduled_messages.push(ParsedMessage {
             id: MessageId(70),
             chat_id: ChatId(7),
+            date: 0,
             is_outgoing: true,
             is_pinned: false,
             topic_id: None,
@@ -12833,13 +12849,11 @@ mod tests {
     }
 
     #[test]
-    fn unread_badge_hides_when_zero_and_caps_at_99() {
-        assert_eq!(unread_badge_text(0), None);
-        assert_eq!(unread_badge_text(-1), None);
-        assert_eq!(unread_badge_text(1).as_deref(), Some("1"));
-        assert_eq!(unread_badge_text(3).as_deref(), Some("3"));
-        assert_eq!(unread_badge_text(99).as_deref(), Some("99"));
-        assert_eq!(unread_badge_text(100).as_deref(), Some("99+"));
+    fn message_time_hhmm_formats_utc_and_rejects_missing() {
+        // 2026-09-28 21:42:00 UTC.
+        assert_eq!(message_time_hhmm(1790631720).as_deref(), Some("21:42"));
+        assert_eq!(message_time_hhmm(0), None);
+        assert_eq!(message_time_hhmm(-5), None);
     }
 
     #[test]
@@ -12870,7 +12884,6 @@ mod tests {
         );
         let chat = session.chats.get(&4).unwrap();
         assert_eq!(chat.unread_count, 0);
-        assert_eq!(unread_badge_text(chat.unread_count), None);
         assert_eq!(chat.last_read_inbox_message_id.0, 13);
         assert_eq!(chat.last_read_outbox_message_id.0, 12);
         assert!(!sink.rendered().contains("CANARY"));
@@ -13682,6 +13695,7 @@ mod tests {
             reply_markup: None,
             self_destruct: None,
             auto_delete: None,
+            date: 0,
         });
         assert_eq!(
             session.begin_chat_search_jump(MessageId(70)),
@@ -13709,6 +13723,7 @@ mod tests {
             reply_markup: None,
             self_destruct: None,
             auto_delete: None,
+            date: 0,
         });
         assert_eq!(
             session.begin_chat_search_jump(MessageId(80)),

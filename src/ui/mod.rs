@@ -4,6 +4,8 @@ mod synthetic;
 pub(crate) use chat_theme::*;
 
 use gpui_kit::assets::IconName;
+use gpui_kit::component::avatar::Avatar;
+use gpui_kit::component::badge::Badge;
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::input::{InputEvent, Textarea, TextareaState};
@@ -65,7 +67,7 @@ use quill::state::{
     SharedMediaTab, SharedMediaTabStatus, SimilarBotsFetch, SponsoredReportFlight,
     StoryPostOutcome, StoryPostState, StoryReportStage, SupergroupMembersFetch,
     WelcomeMessagesFetch, active_custom_keyboard, effective_preview, event_log_relative_time,
-    outgoing_status_label, unix_ms_now, unread_badge_text,
+    message_time_hhmm, unix_ms_now,
 };
 use quill::story_composer::{StoryComposer, StoryExpiry, StoryMediaKind, StoryPrivacy};
 use quill::story_viewer::{StoryViewer, StoryViewerItem, StoryViewerKind, collect_story_items};
@@ -107,7 +109,7 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
-use synthetic::{SyntheticChat, session_bubble_quoted, session_bubble_rich};
+use synthetic::{MessageChrome, SyntheticChat, session_bubble_quoted, session_bubble_rich};
 use zeroize::Zeroize;
 
 actions!(
@@ -1592,7 +1594,18 @@ struct HistoryShared {
 #[derive(Clone)]
 struct HistoryRowInputs {
     message: HistoryMessage,
-    label: String,
+    /// kit Phase 4: incoming sender name for the kit `MessageHeader`;
+    /// `None` for outgoing rows and when the header collapses (same
+    /// direction as the previous row). Replaces the old `"You · sent"`
+    /// label — delivery state now lives in the in-bubble footer.
+    sender: Option<String>,
+    /// kit Phase 4: outbox delivery state for the in-bubble footer
+    /// (`✓` sent, `✓✓` read, `…` while pending).
+    receipt: OutboxReceipt,
+    /// kit Phase 4: `(name, photo)` for the kit `Message` avatar slot.
+    /// `None` where the sender can't be identified (groups) or the row is
+    /// outgoing — never invented.
+    sender_avatar: Option<(String, Option<PathBuf>)>,
     highlighted: bool,
     selected_forward: bool,
     quote_preview: Option<String>,
@@ -1616,9 +1629,12 @@ enum HistoryRow {
     Album {
         album_id: i64,
         messages: Vec<HistoryMessage>,
-        // Precomputed at row-build time ("You · sent" / sender name) —
-        // keeps the large `ChatSummary` out of the variant.
-        label: String,
+        // kit Phase 4: precomputed per-row chrome (sender header /
+        // outbox receipt / avatar) — keeps the large `ChatSummary` out
+        // of the variant.
+        sender: Option<String>,
+        receipt: OutboxReceipt,
+        sender_avatar: Option<(String, Option<PathBuf>)>,
     },
 }
 
@@ -22194,7 +22210,7 @@ impl QuillApp {
             .items_center()
             .gap_3()
             .p_4()
-            .child(chat_avatar(&title, chat_id.0, photo.as_deref(), 96.))
+            .child(chat_avatar(&title, photo.as_deref(), 96.))
             .child(
                 div()
                     .flex()
@@ -22759,7 +22775,7 @@ impl QuillApp {
             .items_center()
             .gap_3()
             .p_4()
-            .child(chat_avatar(&title, chat_id.0, photo.as_deref(), 96.))
+            .child(chat_avatar(&title, photo.as_deref(), 96.))
             .child(
                 div()
                     .flex()
@@ -28788,12 +28804,7 @@ impl QuillApp {
                     .on_click(cx.listener(move |this, _, window, cx| {
                         this.open_supergroup_panel(supergroup_id, window, cx);
                     }))
-                    .child(chat_avatar(
-                        &title_text,
-                        chat_id.0,
-                        ex.photo.as_deref(),
-                        40.,
-                    ))
+                    .child(chat_avatar(&title_text, ex.photo.as_deref(), 40.))
                     .child(
                         div()
                             .flex()
@@ -38125,37 +38136,66 @@ impl QuillApp {
             |message| quill::album::is_album_media(&message.content),
         );
         let mut rows: Vec<HistoryRow> = Vec::with_capacity(groups.len());
+        // kit Phase 4: per-row sender chrome. Outgoing rows never had a
+        // sender header — their delivery state moves into the in-bubble
+        // footer. The sender name collapses for consecutive same-direction
+        // rows. The chat title is the only sender identity plumbed: it
+        // identifies the sender in 1:1/secret chats and channels, so the
+        // avatar slot is filled there and left empty in groups (never
+        // invented).
+        let single_sender = matches!(
+            chat.map(|summary| &summary.kind),
+            Some(ChatKind::Private { .. } | ChatKind::Secret { .. })
+                | Some(ChatKind::Supergroup {
+                    is_channel: true,
+                    ..
+                })
+        );
+        let avatar_photo: Option<PathBuf> = chat
+            .and_then(|summary| session.and_then(|live| live.chat_photo_path(summary.id)))
+            .map(PathBuf::from);
+        let mut prev_outgoing: Option<bool> = None;
+        let mut row_chrome = |message: &HistoryMessage| {
+            let show_sender = prev_outgoing != Some(message.is_outgoing);
+            prev_outgoing = Some(message.is_outgoing);
+            let sender = if !message.is_outgoing && show_sender {
+                Some(sender_name.to_string())
+            } else {
+                None
+            };
+            let receipt = if message.is_outgoing {
+                chat.map(|summary| summary.outbox_receipt(message))
+                    .unwrap_or(OutboxReceipt::Sent)
+            } else {
+                OutboxReceipt::None
+            };
+            let sender_avatar = if !message.is_outgoing && single_sender {
+                Some((sender_name.to_string(), avatar_photo.clone()))
+            } else {
+                None
+            };
+            (sender, receipt, sender_avatar)
+        };
         for group in groups {
             match group {
                 quill::album::HistoryGroup::Album { album_id, messages } => {
                     let album_messages: Vec<HistoryMessage> =
                         messages.iter().map(|message| (*message).clone()).collect();
-                    // Same label rule as single rows: outgoing albums show
-                    // the outbox receipt, incoming ones the sender name.
-                    let label = match album_messages.first() {
-                        Some(first) if first.is_outgoing => {
-                            let receipt = chat
-                                .map(|summary| summary.outbox_receipt(first))
-                                .unwrap_or(OutboxReceipt::Sent);
-                            outgoing_status_label(first.pending, receipt).to_string()
-                        }
-                        _ => sender_name.to_string(),
-                    };
+                    // Same chrome rule as single rows, from the first item.
+                    let (sender, receipt, sender_avatar) = album_messages
+                        .first()
+                        .map(&mut row_chrome)
+                        .unwrap_or((None, OutboxReceipt::None, None));
                     rows.push(HistoryRow::Album {
                         album_id,
                         messages: album_messages,
-                        label,
+                        sender,
+                        receipt,
+                        sender_avatar,
                     })
                 }
                 quill::album::HistoryGroup::Single(message) => {
-                    let label = if message.is_outgoing {
-                        let receipt = chat
-                            .map(|summary| summary.outbox_receipt(message))
-                            .unwrap_or(OutboxReceipt::Sent);
-                        outgoing_status_label(message.pending, receipt).to_string()
-                    } else {
-                        sender_name.to_string()
-                    };
+                    let (sender, receipt, sender_avatar) = row_chrome(message);
                     // Phase 4.6: audio/voice rows get a seek-bar view model.
                     let seek_bar = match &message.content {
                         MessageContent::VoiceNote(note) => {
@@ -38186,7 +38226,9 @@ impl QuillApp {
                     };
                     rows.push(HistoryRow::Single(Box::new(HistoryRowInputs {
                         message: message.clone(),
-                        label,
+                        sender,
+                        receipt,
+                        sender_avatar,
                         highlighted: highlight_id == Some(message.id),
                         selected_forward: self
                             .pending_forward
@@ -38346,7 +38388,9 @@ impl QuillApp {
             HistoryRow::Album {
                 album_id,
                 messages,
-                label,
+                sender,
+                receipt,
+                sender_avatar,
             } => {
                 let refs: Vec<&HistoryMessage> = messages.iter().collect();
                 album_history_row(
@@ -38355,7 +38399,9 @@ impl QuillApp {
                     &shared.files,
                     &shared.downloading,
                     &shared.media_roots,
-                    label.clone(),
+                    sender.clone(),
+                    *receipt,
+                    sender_avatar.clone(),
                     cx,
                 )
             }
@@ -38367,7 +38413,9 @@ impl QuillApp {
                     &shared.downloading,
                     &shared.failed,
                     &shared.media_roots,
-                    inputs.label.clone(),
+                    inputs.sender.clone(),
+                    inputs.receipt,
+                    inputs.sender_avatar.clone(),
                     inputs.quote_preview.clone(),
                     inputs.forward_from.clone(),
                     inputs.selected_forward,
@@ -38475,7 +38523,9 @@ impl QuillApp {
     /// Phase 5.1: strip shown above a topic's history — back to the topic
     /// list plus the topic name (and its unread count).
     fn forum_topic_strip(&self, info: &ForumTopic, cx: &mut Context<Self>) -> impl IntoElement {
-        let badge = unread_badge_text(info.unread_count);
+        // kit Phase 4: the unread count badges the topic name via the
+        // kit `Badge`.
+        let unread = info.unread_count;
         let topic_name = info.name.clone();
         div()
             .id("forum-topic-strip")
@@ -38495,8 +38545,8 @@ impl QuillApp {
                         this.deselect_topic_ui(cx);
                     })),
             )
-            .child(
-                div()
+            .child({
+                let name = div()
                     .flex()
                     .items_center()
                     .gap_2()
@@ -38528,10 +38578,12 @@ impl QuillApp {
                                 .text_color(cx.theme().muted_foreground)
                                 .child("Closed"),
                         )
-                    }),
-            )
-            .when_some(badge, |this, label| {
-                this.child(unread_badge(label, ChatId(info.forum_topic_id as i64)))
+                    });
+                if unread > 0 {
+                    unread_badge(name.into_any_element(), unread, false)
+                } else {
+                    name.into_any_element()
+                }
             })
     }
 
@@ -38573,7 +38625,9 @@ impl QuillApp {
         );
         for topic in topics {
             let topic_id = topic.forum_topic_id;
-            let badge = unread_badge_text(topic.unread_count);
+            // kit Phase 4: the unread count badges the topic name via the
+            // kit `Badge`.
+            let unread = topic.unread_count;
             let name = if topic.name.is_empty() {
                 format!("Topic {}", topic.forum_topic_id)
             } else {
@@ -38597,8 +38651,8 @@ impl QuillApp {
                             .items_center()
                             .justify_between()
                             .gap_2()
-                            .child(
-                                div()
+                            .child({
+                                let name_el = div()
                                     .flex()
                                     .items_center()
                                     .gap_2()
@@ -38631,10 +38685,12 @@ impl QuillApp {
                                                 .text_color(cx.theme().muted_foreground)
                                                 .child("Closed"),
                                         )
-                                    }),
-                            )
-                            .when_some(badge, |this, label| {
-                                this.child(unread_badge(label, ChatId(topic_id as i64)))
+                                    });
+                                if unread > 0 {
+                                    unread_badge(name_el.into_any_element(), unread, false)
+                                } else {
+                                    name_el.into_any_element()
+                                }
                             }),
                     )
                     .when(!preview.is_empty(), |this| {
@@ -42234,19 +42290,19 @@ fn apply_ready_albums(session: &mut Session, sink: &Arc<MemorySink>, seq: &Atomi
     );
     let own_thumb = demo_file_json(76, &demo_thumb_png_path(), true);
     let received_a = format!(
-        r#"{{"@type":"updateNewMessage","message":{{"id":801,"chat_id":11,"is_outgoing":false,"media_album_id":"77001","content":{{"@type":"messagePhoto","photo":{{"@type":"photo","has_stickers":false,"sizes":[{{"@type":"photoSize","type":"m","photo":{wide},"width":640,"height":200,"progressive_sizes":[]}}]}},"caption":{{"@type":"formattedText","text":"","entities":[]}},"has_spoiler":false,"is_secret":false}}}}}}"#
+        r#"{{"@type":"updateNewMessage","message":{{"id":801,"chat_id":11,"is_outgoing":false,"date":1790632320,"media_album_id":"77001","content":{{"@type":"messagePhoto","photo":{{"@type":"photo","has_stickers":false,"sizes":[{{"@type":"photoSize","type":"m","photo":{wide},"width":640,"height":200,"progressive_sizes":[]}}]}},"caption":{{"@type":"formattedText","text":"","entities":[]}},"has_spoiler":false,"is_secret":false}}}}}}"#
     );
     let received_b = format!(
-        r#"{{"@type":"updateNewMessage","message":{{"id":802,"chat_id":11,"is_outgoing":false,"media_album_id":"77001","content":{{"@type":"messagePhoto","photo":{{"@type":"photo","has_stickers":false,"sizes":[{{"@type":"photoSize","type":"m","photo":{left},"width":200,"height":200,"progressive_sizes":[]}}]}},"caption":{{"@type":"formattedText","text":"","entities":[]}},"has_spoiler":false,"is_secret":false}}}}}}"#
+        r#"{{"@type":"updateNewMessage","message":{{"id":802,"chat_id":11,"is_outgoing":false,"date":1790632320,"media_album_id":"77001","content":{{"@type":"messagePhoto","photo":{{"@type":"photo","has_stickers":false,"sizes":[{{"@type":"photoSize","type":"m","photo":{left},"width":200,"height":200,"progressive_sizes":[]}}]}},"caption":{{"@type":"formattedText","text":"","entities":[]}},"has_spoiler":false,"is_secret":false}}}}}}"#
     );
     let received_c = format!(
-        r#"{{"@type":"updateNewMessage","message":{{"id":803,"chat_id":11,"is_outgoing":false,"media_album_id":"77001","content":{{"@type":"messagePhoto","photo":{{"@type":"photo","has_stickers":false,"sizes":[{{"@type":"photoSize","type":"m","photo":{right},"width":200,"height":220,"progressive_sizes":[]}}]}},"caption":{{"@type":"formattedText","text":"From Ada","entities":[]}},"has_spoiler":false,"is_secret":false}}}}}}"#
+        r#"{{"@type":"updateNewMessage","message":{{"id":803,"chat_id":11,"is_outgoing":false,"date":1790632320,"media_album_id":"77001","content":{{"@type":"messagePhoto","photo":{{"@type":"photo","has_stickers":false,"sizes":[{{"@type":"photoSize","type":"m","photo":{right},"width":200,"height":220,"progressive_sizes":[]}}]}},"caption":{{"@type":"formattedText","text":"From Ada","entities":[]}},"has_spoiler":false,"is_secret":false}}}}}}"#
     );
     let sent_photo = format!(
-        r#"{{"@type":"updateNewMessage","message":{{"id":811,"chat_id":11,"is_outgoing":true,"media_album_id":"77002","content":{{"@type":"messagePhoto","photo":{{"@type":"photo","has_stickers":false,"sizes":[{{"@type":"photoSize","type":"m","photo":{own_photo},"width":240,"height":200,"progressive_sizes":[]}}]}},"caption":{{"@type":"formattedText","text":"","entities":[]}},"has_spoiler":false,"is_secret":false}}}}}}"#
+        r#"{{"@type":"updateNewMessage","message":{{"id":811,"chat_id":11,"is_outgoing":true,"date":1790632440,"media_album_id":"77002","content":{{"@type":"messagePhoto","photo":{{"@type":"photo","has_stickers":false,"sizes":[{{"@type":"photoSize","type":"m","photo":{own_photo},"width":240,"height":200,"progressive_sizes":[]}}]}},"caption":{{"@type":"formattedText","text":"","entities":[]}},"has_spoiler":false,"is_secret":false}}}}}}"#
     );
     let sent_video = format!(
-        r#"{{"@type":"updateNewMessage","message":{{"id":812,"chat_id":11,"is_outgoing":true,"media_album_id":"77002","content":{{"@type":"messageVideo","video":{{"@type":"video","duration":1,"width":320,"height":180,"file_name":"demo-clip.mp4","mime_type":"video/mp4","has_stickers":false,"supports_streaming":true,"minithumbnail":null,"thumbnail":{{"@type":"thumbnail","format":{{"@type":"thumbnailFormatJpeg"}},"width":240,"height":140,"file":{own_thumb}}},"video":{own_clip}}},"alternative_videos":[],"storyboards":[],"cover":null,"start_timestamp":0,"caption":{{"@type":"formattedText","text":"Sent album","entities":[]}},"show_caption_above_media":false,"has_spoiler":false,"is_secret":false}}}}}}"#
+        r#"{{"@type":"updateNewMessage","message":{{"id":812,"chat_id":11,"is_outgoing":true,"date":1790632440,"media_album_id":"77002","content":{{"@type":"messageVideo","video":{{"@type":"video","duration":1,"width":320,"height":180,"file_name":"demo-clip.mp4","mime_type":"video/mp4","has_stickers":false,"supports_streaming":true,"minithumbnail":null,"thumbnail":{{"@type":"thumbnail","format":{{"@type":"thumbnailFormatJpeg"}},"width":240,"height":140,"file":{own_thumb}}},"video":{own_clip}}},"alternative_videos":[],"storyboards":[],"cover":null,"start_timestamp":0,"caption":{{"@type":"formattedText","text":"Sent album","entities":[]}},"show_caption_above_media":false,"has_spoiler":false,"is_secret":false}}}}}}"#
     );
     let drop_seed = r#"{"@type":"updateDeleteMessages","chat_id":11,"message_ids":[101,102,103],"is_permanent":true,"from_cache":false}"#;
     for json in [
@@ -42653,17 +42709,17 @@ fn seed_demo_session(sink: Arc<MemorySink>, kind: DemoSeed) -> Session {
             .to_string(),
         r#"{"@type":"updateChatPosition","chat_id":13,"position":{"@type":"chatPosition","list":{"@type":"chatListMain"},"order":"10","is_pinned":false}}"#
             .to_string(),
-        r#"{"@type":"updateChatLastMessage","chat_id":11,"last_message":{"id":101,"chat_id":11,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"Hello from injected JSON.","entities":[]}}},"positions":[{"@type":"chatPosition","list":{"@type":"chatListMain"},"order":"30","is_pinned":true}]}"#
+        r#"{"@type":"updateChatLastMessage","chat_id":11,"last_message":{"id":101,"chat_id":11,"is_outgoing":false,"date":1790631720,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"Hello from injected JSON.","entities":[]}}},"positions":[{"@type":"chatPosition","list":{"@type":"chatListMain"},"order":"30","is_pinned":true}]}"#
             .to_string(),
-        r#"{"@type":"updateChatLastMessage","chat_id":12,"last_message":{"id":40,"chat_id":12,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"Later.","entities":[]}}},"positions":[{"@type":"chatPosition","list":{"@type":"chatListMain"},"order":"20","is_pinned":false}]}"#
+        r#"{"@type":"updateChatLastMessage","chat_id":12,"last_message":{"id":40,"chat_id":12,"is_outgoing":false,"date":1790632080,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"Later.","entities":[]}}},"positions":[{"@type":"chatPosition","list":{"@type":"chatListMain"},"order":"20","is_pinned":false}]}"#
             .to_string(),
-        r#"{"@type":"updateNewMessage","message":{"id":101,"chat_id":11,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"Hello from injected JSON.","entities":[]}}}}"#
+        r#"{"@type":"updateNewMessage","message":{"id":101,"chat_id":11,"is_outgoing":false,"date":1790631720,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"Hello from injected JSON.","entities":[]}}}}"#
             .to_string(),
-        r#"{"@type":"updateNewMessage","message":{"id":102,"chat_id":11,"is_outgoing":true,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"Reply from the session reducer.","entities":[]}}}}"#
+        r#"{"@type":"updateNewMessage","message":{"id":102,"chat_id":11,"is_outgoing":true,"date":1790631840,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"Reply from the session reducer.","entities":[]}}}}"#
             .to_string(),
-        r#"{"@type":"updateNewMessage","message":{"id":103,"chat_id":11,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"Two more waiting.","entities":[]}}}}"#
+        r#"{"@type":"updateNewMessage","message":{"id":103,"chat_id":11,"is_outgoing":false,"date":1790631960,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"Two more waiting.","entities":[]}}}}"#
             .to_string(),
-        r#"{"@type":"updateNewMessage","message":{"id":40,"chat_id":12,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"Later.","entities":[]}}}}"#
+        r#"{"@type":"updateNewMessage","message":{"id":40,"chat_id":12,"is_outgoing":false,"date":1790632080,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"Later.","entities":[]}}}}"#
             .to_string(),
     ];
     for json in jsons {
@@ -42687,7 +42743,7 @@ fn seed_demo_session(sink: Arc<MemorySink>, kind: DemoSeed) -> Session {
         }
         DemoSeed::AfterMarkRead => {
             let follow = [
-                r#"{"@type":"updateNewMessage","message":{"id":104,"chat_id":11,"is_outgoing":true,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"Still waiting on a receipt.","entities":[]}}}}"#,
+                r#"{"@type":"updateNewMessage","message":{"id":104,"chat_id":11,"is_outgoing":true,"date":1790632200,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"Still waiting on a receipt.","entities":[]}}}}"#,
                 r#"{"@type":"updateChatReadInbox","chat_id":11,"last_read_inbox_message_id":103,"unread_count":0}"#,
                 r#"{"@type":"updateChatReadOutbox","chat_id":11,"last_read_outbox_message_id":102}"#,
             ];
@@ -42958,96 +43014,17 @@ fn static_chat_row(
 
 /// Phase 6: circular initials avatar (contact rows, info panels) shown
 /// when no downloaded profile photo is available.
+/// kit Phase 4: kit `Avatar` — initials + theme fallback colors.
 fn initials_avatar(name: &str, size: f32) -> impl IntoElement {
-    let initials: String = name
-        .split_whitespace()
-        .filter_map(|word| word.chars().next())
-        .take(2)
-        .collect();
-    let initials = if initials.is_empty() {
-        "?".to_string()
-    } else {
-        initials
-    };
-    div()
-        .w(px(size))
-        .h(px(size))
-        .rounded_full()
-        .flex_shrink_0()
-        .flex()
-        .items_center()
-        .justify_center()
-        .bg(ACCENT_LIGHT)
-        .text_color(TEXT_BRIGHT)
-        .text_sm()
-        .font_semibold()
-        .child(initials)
+    kit_avatar_element(name, None, px(size))
 }
-
-/// Parity slice: deterministic fallback color for chat avatars, so every
-/// chat type has a stable, recognizable circle before (or without) a
-/// downloaded photo. Telegram's own palette, keyed on the chat id.
-fn chat_avatar_color(chat_id: i64) -> Rgba {
-    const PALETTE: [u32; 8] = [
-        0xe17076, // red
-        0xfaa774, // orange
-        0xa695e7, // violet
-        0x7bc862, // green
-        0x6ec9cb, // teal
-        0x65aadd, // blue
-        0xcc6cbf, // pink
-        0xee7aa2, // rose
-    ];
-    let index = (chat_id.unsigned_abs() % PALETTE.len() as u64) as usize;
-    rgb(PALETTE[index])
-}
-
 /// Parity slice: circular chat avatar — the downloaded `chat.photo.small`
-/// thumbnail when available, otherwise colored initials keyed on the chat
-/// id. Used by chat-list rows, the conversation header, and info panels.
-fn chat_avatar(
-    name: &str,
-    chat_id: i64,
-    photo_path: Option<&std::path::Path>,
-    size: f32,
-) -> impl IntoElement {
-    match photo_path {
-        Some(path) => img(path)
-            .id(("chat-avatar-photo", chat_id as u64))
-            .w(px(size))
-            .h(px(size))
-            .rounded_full()
-            .flex_shrink_0()
-            .object_fit(ObjectFit::Cover)
-            .into_any_element(),
-        None => {
-            let initials: String = name
-                .split_whitespace()
-                .filter_map(|word| word.chars().next())
-                .take(2)
-                .collect();
-            let initials = if initials.is_empty() {
-                "?".to_string()
-            } else {
-                initials
-            };
-            div()
-                .id(("chat-avatar-initials", chat_id as u64))
-                .w(px(size))
-                .h(px(size))
-                .rounded_full()
-                .flex_shrink_0()
-                .flex()
-                .items_center()
-                .justify_center()
-                .bg(chat_avatar_color(chat_id))
-                .text_color(TEXT_BRIGHT)
-                .text_sm()
-                .font_semibold()
-                .child(initials)
-                .into_any_element()
-        }
-    }
+/// thumbnail when available, otherwise the kit's initials + theme
+/// fallback colors. Used by chat-list rows, the conversation header, and
+/// info panels.
+/// kit Phase 4: kit `Avatar`; the old `chat_avatar_color` palette is gone.
+fn chat_avatar(name: &str, photo_path: Option<&std::path::Path>, size: f32) -> impl IntoElement {
+    kit_avatar_element(name, photo_path, px(size))
 }
 
 /// Parity slice: compact subscriber/member counts for the header
@@ -43290,13 +43267,17 @@ fn session_chat_row(
     // Slice CL3: with mentions and a single unread message the main
     // counter hides — the @ badge carries it (TGX `setCounter`:
     // `hasMentions && unreadCount == 1 ? 0 : unreadCount`).
+    // kit Phase 4: the unread indicator is a kit `Badge` overlaying the
+    // avatar — `(count, is_dot)`.
     let has_mentions = chat.unread_mention_count > 0;
-    let badge = if chat.unread_count == 0 && chat.is_marked_as_unread {
-        Some("●".to_string())
+    let unread_indicator = if chat.unread_count == 0 && chat.is_marked_as_unread {
+        Some((0, true))
     } else if has_mentions && chat.unread_count == 1 {
         None
+    } else if chat.unread_count > 0 {
+        Some((chat.unread_count, false))
     } else {
-        unread_badge_text(chat.unread_count)
+        None
     };
     let has_reactions = chat.unread_reaction_count > 0;
     // kit Phase 3: tag chips via the shared helper — the row height
@@ -43376,8 +43357,15 @@ fn session_chat_row(
                 // every chat-list row / chat type.
                 // Slice CL3: the select-mode check circle precedes the
                 // avatar while multi-select is active.
+                // kit Phase 4: the unread badge overlays the avatar.
                 .when(selecting, |this| this.child(select_check(id, checked)))
-                .child(chat_avatar(&title, id.0, photo_path, 40.))
+                .child({
+                    let avatar = chat_avatar(&title, photo_path, 40.).into_any_element();
+                    match unread_indicator {
+                        Some((count, dot)) => unread_badge(avatar, count, dot),
+                        None => avatar,
+                    }
+                })
                 .child(
                     div()
                         .flex()
@@ -43410,22 +43398,20 @@ fn session_chat_row(
                                             |this| this.child(secret_badge(id)),
                                         ),
                                 )
-                                // Slice CL3: TGX draws counter, @ mention
-                                // badge, and ♥ reaction badge
-                                // right-to-left; the flex row renders
-                                // them left-to-right in the same order.
+                                // Slice CL3: TGX draws the @ mention badge and
+                                // ♥ reaction badge right-to-left; the flex
+                                // row renders them left-to-right in the
+                                // same order. kit Phase 4: the unread
+                                // counter now overlays the avatar instead.
                                 .child(
                                     div()
                                         .flex()
                                         .items_center()
                                         .gap_1()
                                         .when(has_reactions, |this| {
-                                            this.child(reaction_badge(id, chat.is_muted()))
+                                            this.child(reaction_badge(chat.is_muted()))
                                         })
-                                        .when(has_mentions, |this| this.child(mention_badge(id)))
-                                        .when_some(badge, |this, label| {
-                                            this.child(unread_badge(label, id))
-                                        }),
+                                        .when(has_mentions, |this| this.child(mention_badge())),
                                 ),
                         )
                         .child(
@@ -43743,60 +43729,41 @@ fn forum_badge(chat_id: ChatId) -> impl IntoElement {
         .child("Topics")
 }
 
-fn unread_badge(label: String, chat_id: ChatId) -> impl IntoElement {
-    div()
-        .id(("unread-badge", chat_id.0 as u64))
-        .h(px(20.))
-        .min_w(px(20.))
-        .px_1()
-        .rounded_md()
-        .flex()
-        .items_center()
-        .justify_center()
-        .bg(ACCENT_STRONG)
-        .text_color(TEXT_BRIGHT)
-        .text_xs()
-        .font_semibold()
-        .child(label)
+/// kit Phase 4: the unread indicator is a kit `Badge` overlaying the given
+/// anchor (the chat avatar in chat rows, the topic name in topic rows) —
+/// the kit's designed badge pattern. A count pill for `count > 0`
+/// (capped at `99+` like the old pill), a dot for marked-as-unread.
+fn unread_badge(anchor: AnyElement, count: i32, dot: bool) -> AnyElement {
+    let badge = if dot {
+        Badge::new().dot()
+    } else {
+        Badge::new().count(count.max(0) as usize).max(99)
+    };
+    badge.color(ACCENT_STRONG).child(anchor).into_any_element()
 }
 
-/// Slice CL3: the @ mention badge (TGX `TGChat.mentionCounter` — a badge-
-/// colored circle with an @ glyph, shown when `unread_mention_count > 0`).
-fn mention_badge(chat_id: ChatId) -> impl IntoElement {
-    div()
-        .id(("mention-badge", chat_id.0 as u64))
-        .h(px(20.))
-        .min_w(px(20.))
-        .px_1()
-        .rounded_full()
-        .flex()
-        .items_center()
-        .justify_center()
-        .bg(ACCENT_STRONG)
-        .text_color(TEXT_BRIGHT)
-        .text_xs()
-        .font_semibold()
-        .child("@")
+/// Slice CL3 / kit Phase 4: the @ mention badge (TGX `TGChat.mentionCounter`
+/// — shown when `unread_mention_count > 0`) as a kit `Badge` (Icon variant)
+/// on a 16px anchor — the badge exactly fills its anchor by construction.
+fn mention_badge() -> impl IntoElement {
+    Badge::new()
+        .icon(Icon::new(IconName::AtSign))
+        .color(ACCENT_STRONG)
+        .child(div().size(px(16.)).into_any_element())
+        .into_any_element()
 }
 
-/// Slice CL3: the ♥ reaction badge (TGX `TGChat.reactionsCounter` —
-/// heart badge, dimmed when the chat is muted, shown when
-/// `unread_reaction_count > 0`).
-fn reaction_badge(chat_id: ChatId, muted: bool) -> impl IntoElement {
-    div()
-        .id(("reaction-badge", chat_id.0 as u64))
-        .h(px(20.))
-        .min_w(px(20.))
-        .px_1()
-        .rounded_full()
-        .flex()
-        .items_center()
-        .justify_center()
-        .bg(if muted { BG_BADGE_MUTED } else { ACCENT_STRONG })
-        .text_color(TEXT_BRIGHT)
-        .text_xs()
-        .font_semibold()
-        .child("♥")
+/// Slice CL3 / kit Phase 4: the ♥ reaction badge (TGX `TGChat.reactionsCounter`
+/// — heart badge, dimmed when the chat is muted, shown when
+/// `unread_reaction_count > 0`) as a kit `Badge` (Icon variant) on a
+/// 16px anchor.
+fn reaction_badge(muted: bool) -> impl IntoElement {
+    let color = if muted { BG_BADGE_MUTED } else { ACCENT_STRONG };
+    Badge::new()
+        .icon(Icon::new(IconName::Heart))
+        .color(color)
+        .child(div().size(px(16.)).into_any_element())
+        .into_any_element()
 }
 
 /// Slice CL3: the select-mode check circle shown on every row while
@@ -43830,9 +43797,12 @@ fn album_history_row(
     files: &HashMap<i32, ParsedFile>,
     downloading: &std::collections::HashSet<i32>,
     media_roots: &[PathBuf],
-    // kit Phase 3: the row label ("You · sent" / sender name) is computed
-    // at row-build time so the virtualized row doesn't carry the chat.
-    label: String,
+    // kit Phase 4: per-row chrome (sender header / outbox receipt /
+    // avatar) computed at row-build time so the virtualized row doesn't
+    // carry the chat.
+    sender: Option<String>,
+    receipt: OutboxReceipt,
+    sender_avatar: Option<(String, Option<PathBuf>)>,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
     let Some(first) = messages.first() else {
@@ -43895,7 +43865,7 @@ fn album_history_row(
         .into_any_element();
     session_bubble_quoted(
         album_id as u64,
-        label,
+        message_chrome(sender, receipt, sender_avatar, first.date, first.pending),
         String::new(),
         first.is_outgoing,
         Some(extra),
@@ -44687,13 +44657,69 @@ fn caption_above_media(content: &MessageContent) -> bool {
     }
 }
 
+/// kit Phase 4: in-bubble footer — `HH:MM` plus the outgoing delivery
+/// state (`…` while pending, `✓` sent, `✓✓` read). Incoming rows show
+/// just the time. `None` when the message carries no date (nothing to
+/// stamp) — the footer hides instead of inventing a time.
+fn message_footer(date: i32, pending: bool, receipt: OutboxReceipt) -> Option<AnyElement> {
+    let time = message_time_hhmm(date)?;
+    let marks = if pending {
+        "…"
+    } else {
+        match receipt {
+            OutboxReceipt::Read => "✓✓",
+            OutboxReceipt::Sent => "✓",
+            OutboxReceipt::None => "",
+        }
+    };
+    let text = if marks.is_empty() {
+        time
+    } else {
+        format!("{time} {marks}")
+    };
+    Some(div().text_xs().opacity(0.7).child(text).into_any_element())
+}
+
+/// kit Phase 4: kit `Avatar` — photo when available, otherwise the kit's
+/// initials + theme fallback colors. Shared by the message avatar slot
+/// and the `initials_avatar` / `chat_avatar` helpers below.
+fn kit_avatar_element(name: &str, photo: Option<&std::path::Path>, size: Pixels) -> AnyElement {
+    let mut avatar = Avatar::new().name(name).with_size(size);
+    if let Some(path) = photo {
+        avatar = avatar.src(path.to_path_buf());
+    }
+    avatar.into_any_element()
+}
+
+/// kit Phase 4: builds the shared kit-shell chrome (sender header /
+/// avatar slot / footer) from row inputs.
+fn message_chrome(
+    sender: Option<String>,
+    receipt: OutboxReceipt,
+    sender_avatar: Option<(String, Option<PathBuf>)>,
+    date: i32,
+    pending: bool,
+) -> MessageChrome {
+    MessageChrome {
+        sender: sender.map(SharedString::from),
+        avatar: sender_avatar
+            .map(|(name, photo)| kit_avatar_element(&name, photo.as_deref(), px(32.))),
+        footer: message_footer(date, pending, receipt),
+    }
+}
+
 fn session_history_row(
     message: &HistoryMessage,
     files: &HashMap<i32, ParsedFile>,
     downloading: &std::collections::HashSet<i32>,
     failed: &std::collections::HashSet<i32>,
     media_roots: &[PathBuf],
-    label: String,
+    // kit Phase 4: per-row chrome (sender header / outbox receipt /
+    // avatar) computed at row-build time so the virtualized row doesn't
+    // carry the chat.
+    sender: Option<String>,
+    receipt: OutboxReceipt,
+    sender_avatar: Option<(String, Option<PathBuf>)>,
     quote_preview: Option<String>,
     forward_from: Option<String>,
     selected_forward: bool,
@@ -44738,7 +44764,10 @@ fn session_history_row(
         let text = if message.is_outgoing {
             "You took a screenshot".to_string()
         } else {
-            format!("{label} took a screenshot")
+            format!(
+                "{} took a screenshot",
+                sender.as_deref().unwrap_or("Someone")
+            )
         };
         return div()
             .id(("screenshot-service-row", message.id.0 as u64))
@@ -45197,6 +45226,17 @@ fn session_history_row(
         MessageContent::Unsupported { type_name } => format!("({type_name})"),
         _ => String::new(),
     };
+    // kit Phase 4: the shared kit-shell chrome, built fresh per divergent
+    // branch below (`MessageChrome` isn't `Clone` — it holds elements).
+    let chrome = || {
+        message_chrome(
+            sender.clone(),
+            receipt,
+            sender_avatar.clone(),
+            message.date,
+            message.pending,
+        )
+    };
     // M2: `messageRichMessage` (schema 1.8.67, line 5143) renders its
     // `pageBlock*` list as a block stack; ephemeral content wins here too.
     let rich_body = match effective_content(&message.content, message.ephemeral.as_ref()) {
@@ -45213,7 +45253,7 @@ fn session_history_row(
     if let Some(rich_body) = rich_body {
         return session_bubble_rich(
             message.id.0 as u64,
-            label,
+            chrome(),
             message.is_outgoing,
             rich_body,
             extra,
@@ -45223,7 +45263,7 @@ fn session_history_row(
     if let Some(text_body) = text_body {
         return session_bubble_rich(
             message.id.0 as u64,
-            label,
+            chrome(),
             message.is_outgoing,
             text_body,
             extra,
@@ -45236,7 +45276,7 @@ fn session_history_row(
     if let Some(caption_el) = caption_above_el {
         return session_bubble_rich(
             message.id.0 as u64,
-            label,
+            chrome(),
             message.is_outgoing,
             caption_el,
             extra,
@@ -45245,7 +45285,7 @@ fn session_history_row(
     }
     session_bubble_quoted(
         message.id.0 as u64,
-        label,
+        chrome(),
         unsupported_body,
         message.is_outgoing,
         extra,

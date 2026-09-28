@@ -459,6 +459,7 @@ mod tests {
             id: MessageId(id),
             chat_id: ChatId(chat),
             is_outgoing: false,
+            date: 0,
             content,
             pending: false,
             reply_to: None,

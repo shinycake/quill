@@ -170,10 +170,8 @@ fn replay_unread_then_mark_read_and_outbox_receipt() {
     );
     let chat = session.ordered_chats()[0];
     assert_eq!(chat.unread_count, 2);
-    assert_eq!(
-        quill::state::unread_badge_text(chat.unread_count).as_deref(),
-        Some("2")
-    );
+    // kit Phase 4: the badge label is the kit `Badge`'s `count` (capped at
+    // 99, hidden at 0) — no Quill-side label logic left to assert.
     session.open_chat(quill::ids::ChatId(7));
     let ids = session.message_ids_to_view(quill::ids::ChatId(7));
     assert_eq!(ids.len(), 2);
@@ -191,7 +189,6 @@ fn replay_unread_then_mark_read_and_outbox_receipt() {
     );
     let chat = session.chats.get(&7).unwrap();
     assert_eq!(chat.unread_count, 0);
-    assert_eq!(quill::state::unread_badge_text(chat.unread_count), None);
     let outgoing = session
         .histories
         .get(&7)
