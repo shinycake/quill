@@ -7560,7 +7560,8 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     /// Slice A6: `importContacts` (schema 1.8.67, line 14517) from the
-    /// import dialog's parsed vCard contacts. The reducer invalidates
+    /// import dialog's parsed vCard contacts. `Ok(None)` = nothing to
+    /// import or an import already in flight. The reducer invalidates
     /// the contacts list on `ok`; the `importedContacts` response itself
     /// carries no per-contact user mapping worth keeping.
     pub fn import_contacts(
@@ -7573,7 +7574,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         if contacts.is_empty() {
             return Ok(None);
         }
-        let extra = self.session.request(RequestPurpose::ImportContacts, None);
+        let purpose = RequestPurpose::ImportContacts;
+        if self.session.requests.has_purpose(purpose) {
+            return Ok(None);
+        }
+        let extra = self.session.request(purpose, None);
         if let Err(err) = self.sender.send_json(&import_contacts(extra, contacts)) {
             self.session.requests.take(extra);
             return Err(err);
@@ -7587,8 +7592,11 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// imported set server-side, then `removeContacts` drops the contact
     /// associations TDLib keeps (schema: `clearImportedContacts` leaves
     /// "contact list remains unchanged"). Both are sent in order without
-    /// waiting for the first `ok` (TGX issues them the same way); the
-    /// reducer invalidates the contacts list on either `ok`.
+    /// waiting for the first `ok` (TGX issues them the same way), with
+    /// TGX's middle empty `changeImportedContacts` step skipped — no
+    /// device address book to sync against, so clear+remove fully
+    /// achieves the delete (see DECISIONS.md slice A6). The reducer
+    /// invalidates the contacts list on either `ok`.
     pub fn delete_synced_contacts(&mut self) -> Result<usize, ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);

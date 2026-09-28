@@ -7892,7 +7892,15 @@ impl Session {
                     Some(RequestPurpose::RemoveContact) => {
                         self.contacts = None;
                         self.contacts_error = false;
-                        self.contacts_notice = Some("Contact deleted.".to_string());
+                        // The delete-synced-contacts batch remove shares
+                        // this purpose but carries no user_id — its notice
+                        // must not read as a single delete (or overwrite
+                        // the synced flow's own notice on arrival order).
+                        self.contacts_notice = Some(if pending.and_then(|p| p.user_id).is_some() {
+                            "Contact deleted.".to_string()
+                        } else {
+                            "Synced contacts deleted from the servers.".to_string()
+                        });
                         // Slice A6: the server confirmed the deletion —
                         // drop the contact flag on the cached user too so
                         // the info panel stops offering "Delete contact"
@@ -8288,8 +8296,13 @@ impl Session {
                     // Slice A6: contacts mutations — the notice surfaces
                     // in the contacts settings section.
                     Some(RequestPurpose::RemoveContact) => {
+                        let what = if pending.and_then(|p| p.user_id).is_some() {
+                            "the contact"
+                        } else {
+                            "synced contacts"
+                        };
                         self.contacts_notice =
-                            Some(format!("could not delete the contact (error {})", err.code));
+                            Some(format!("could not delete {what} (error {})", err.code));
                     }
                     Some(RequestPurpose::ImportContacts) => {
                         self.contacts_notice =
@@ -17813,7 +17826,7 @@ mod tests {
             &seq,
             &sink,
             &format!(
-                r#"{{"@type":"importedContacts","@extra":"{}","user_ids":[31,32],"importer_count":2}}"#,
+                r#"{{"@type":"importedContacts","@extra":"{}","user_ids":[31,32],"importer_count":[2]}}"#,
                 extra.0
             ),
         );

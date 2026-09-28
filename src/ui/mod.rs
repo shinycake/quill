@@ -4633,11 +4633,13 @@ impl QuillApp {
             app.status_note = "screenshot demo — contacts management".into();
         }
         // Slice A6: block-user confirm dialog open for Ada (31) over the
-        // contacts fixture — TGX `BlockUserConfirm`.
+        // contacts fixture — TGX `BlockUserConfirm`. Ada's info panel
+        // is open behind the dialog so the demo is consistent.
         if matches!(demo, Some(ScreenshotDemo::ReadyBlockUser)) {
             if let Some(session) = app.demo_session.as_mut() {
                 app.demo_seq.store(session.last_seq, Ordering::SeqCst);
                 apply_ready_contacts(session, &app.demo_sink, &app.demo_seq);
+                session.open_info_panel = Some(InfoPanelTarget::User(31));
             }
             app.contacts_tab_open = true;
             app.group_confirm_dialog = Some(GroupConfirmDialog {
@@ -17559,16 +17561,30 @@ impl QuillApp {
             .child(
                 div()
                     .flex()
-                    .items_center()
-                    .justify_between()
-                    .child(div().text_sm().child("Sync contacts"))
+                    .flex_col()
                     .child(
-                        Button::new("contacts-sync-toggle")
-                            .label(if sync_on { "On" } else { "Off" })
-                            .ghost()
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.toggle_contact_sync(cx);
-                            })),
+                        div()
+                            .flex()
+                            .items_center()
+                            .justify_between()
+                            .child(div().text_sm().child("Sync contacts"))
+                            .child(
+                                Button::new("contacts-sync-toggle")
+                                    .label(if sync_on { "On" } else { "Off" })
+                                    .ghost()
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.toggle_contact_sync(cx);
+                                    })),
+                            ),
+                    )
+                    .child(
+                        // Slice A6: honest caption — on desktop there is
+                        // no OS address book to sync; the switch gates
+                        // the Contacts tab's refresh from the servers.
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("Keeps the Contacts tab up to date with the Telegram servers."),
                     ),
             )
             .child(
@@ -17651,34 +17667,37 @@ impl QuillApp {
 
     /// Slice A6: parse the pasted vCard text and send `importContacts`
     /// (schema 1.8.67, line 14517); cards without phone numbers are
-    /// skipped and reported, and batches beyond `VCARD_IMPORT_LIMIT`
-    /// are refused up front. Keeps the dialog open when nothing usable
-    /// was pasted so the user can fix the text.
+    /// skipped and reported, and cards past the `VCARD_IMPORT_LIMIT`
+    /// cap are truncated with the dropped count reported in the status
+    /// note. Keeps the dialog open when nothing usable was pasted so the
+    /// user can fix the text.
     fn submit_import_contacts_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(dialog) = self.import_contacts_dialog.as_ref() else {
             return;
         };
         let text = dialog.input.read(cx).text().to_string();
-        let (contacts, skipped) = parse_vcard(&text);
+        let (contacts, skipped, truncated) = parse_vcard(&text);
         if contacts.is_empty() {
             self.status_note = "No phone-number contacts found in that vCard.".to_string();
-            cx.notify();
-            return;
-        }
-        if contacts.len() > VCARD_IMPORT_LIMIT {
-            self.status_note = format!(
-                "Too many contacts — vCard import is limited to {VCARD_IMPORT_LIMIT} cards."
-            );
             cx.notify();
             return;
         }
         if let Some(live) = self.live.as_mut() {
             match live.driver.import_contacts(&contacts) {
                 Ok(Some(_)) => {
-                    self.status_note = if skipped > 0 {
-                        format!("importing contacts… ({skipped} skipped)")
-                    } else {
+                    self.status_note = if skipped == 0 && truncated == 0 {
                         "importing contacts…".to_string()
+                    } else {
+                        let mut details = Vec::new();
+                        if skipped > 0 {
+                            details.push(format!("{skipped} skipped without phone"));
+                        }
+                        if truncated > 0 {
+                            details.push(format!(
+                                "{truncated} over the {VCARD_IMPORT_LIMIT}-card limit"
+                            ));
+                        }
+                        format!("importing contacts… ({})", details.join(", "))
                     };
                 }
                 Ok(None) => {
@@ -32409,6 +32428,7 @@ impl QuillApp {
         let destructive = matches!(
             dialog.action,
             GroupConfirmAction::DeleteContact { .. }
+                | GroupConfirmAction::BlockUser { block: true, .. }
                 | GroupConfirmAction::BlockContact { block: true, .. }
                 | GroupConfirmAction::DeleteSyncedContacts
         );

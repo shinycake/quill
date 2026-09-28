@@ -749,8 +749,9 @@ pub struct ImportedContact {
 }
 
 /// Slice A6: cap on one vCard import — one `importContacts` call with an
-/// unbounded contact list is a timeout farm; the dialog reports the
-/// truncation. Raise only if TDLib documents a real limit.
+/// unbounded contact list is a timeout farm; `parse_vcard` truncates at
+/// this limit and reports the dropped count so the import dialog can say
+/// so honestly. Raise only if TDLib documents a real limit.
 pub const VCARD_IMPORT_LIMIT: usize = 500;
 
 /// Slice A6: parse vCard text (`.vcf`, RFC 6350) into
@@ -764,8 +765,8 @@ pub const VCARD_IMPORT_LIMIT: usize = 500;
 /// - everything else (`EMAIL`, `ADR`, `ORG`, `URL`, `PHOTO`, `BDAY`,
 ///   …) has no `importedContact` field and is dropped.
 ///
-/// Returns `(contacts, skipped_without_phone)`.
-pub fn parse_vcard(text: &str) -> (Vec<ImportedContact>, usize) {
+/// Returns `(contacts, skipped_without_phone, truncated_by_limit)`.
+pub fn parse_vcard(text: &str) -> (Vec<ImportedContact>, usize, usize) {
     // Unfold: a line starting with space/tab continues the previous
     // line (the continuation whitespace is dropped).
     let mut lines: Vec<String> = Vec::new();
@@ -808,10 +809,14 @@ pub fn parse_vcard(text: &str) -> (Vec<ImportedContact>, usize) {
         }
     }
     flush(&mut card, &mut contacts, &mut skipped);
+    // Over-limit pastes are truncated here so no caller can silently
+    // drop cards — the dropped count rides back so the dialog reports
+    // it honestly.
+    let truncated = contacts.len().saturating_sub(VCARD_IMPORT_LIMIT);
     if contacts.len() > VCARD_IMPORT_LIMIT {
         contacts.truncate(VCARD_IMPORT_LIMIT);
     }
-    (contacts, skipped)
+    (contacts, skipped, truncated)
 }
 
 /// Split one unfolded vCard content line into
@@ -6897,7 +6902,7 @@ mod tests {
             VERSION:3.0\r\n\
             FN:No Phone\r\n\
             END:VCARD\r\n";
-        let (contacts, skipped) = parse_vcard(text);
+        let (contacts, skipped, _truncated) = parse_vcard(text);
         // John: two numbers → two contacts, CELL first; Jane: one.
         assert_eq!(contacts.len(), 3);
         assert_eq!(contacts[0].phone_number, "+15550131");
@@ -6917,13 +6922,31 @@ mod tests {
     fn a6_parse_vcard_handles_folding_and_21_types() {
         // Folded NOTE line + vCard 2.1 bare `TEL;VOICE` param style.
         let text = "BEGIN:VCARD\nVERSION:2.1\nN:Smith;Ada;;;\nTEL;VOICE:+15550199\nNOTE:long note that\n continues here\nEND:VCARD\n";
-        let (contacts, skipped) = parse_vcard(text);
+        let (contacts, skipped, truncated) = parse_vcard(text);
         assert_eq!(skipped, 0);
+        assert_eq!(truncated, 0);
         assert_eq!(contacts.len(), 1);
         assert_eq!(contacts[0].first_name, "Ada");
         assert_eq!(contacts[0].last_name, "Smith");
         assert_eq!(contacts[0].phone_number, "+15550199");
         assert_eq!(contacts[0].note, "long note thatcontinues here");
+    }
+
+    #[test]
+    fn a6_parse_vcard_reports_truncation_at_the_limit() {
+        // What the slice ultimately validates: an over-limit paste loses
+        // cards, and the parser reports exactly how many were dropped so
+        // the dialog can say so honestly instead of failing silently.
+        let mut text = String::new();
+        for i in 0..VCARD_IMPORT_LIMIT + 100 {
+            text.push_str(&format!(
+                "BEGIN:VCARD\r\nFN:Person {i}\r\nTEL:+1555{i:07}\r\nEND:VCARD\r\n"
+            ));
+        }
+        let (contacts, skipped, truncated) = parse_vcard(&text);
+        assert_eq!(contacts.len(), VCARD_IMPORT_LIMIT);
+        assert_eq!(skipped, 0);
+        assert_eq!(truncated, 100);
     }
 
     #[test]
