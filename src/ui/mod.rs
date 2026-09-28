@@ -64,8 +64,7 @@ use quill::telegram::envelope::{
     MessageInteractionInfo, MessageSchedulingState, MessageSender, NotificationSettingsScope,
     NotificationSound, ParsedChatEvent, ParsedFile, ParsedGroupCallParticipant, ParsedMessage,
     ParsedSecretChat, ParsedSession, ParsedStory, ParsedWelcomeMessage, PasswordState, PollContent,
-    PollOption,
-    PollType, ReplyKeyboard, ReplyMarkup, ScopeNotificationSettings, SecretChatState,
+    PollOption, PollType, ReplyKeyboard, ReplyMarkup, ScopeNotificationSettings, SecretChatState,
     SpeechRecognition, SponsoredMessage, StatisticalGraph, StatisticalValue, StorageFileTypeStats,
     StorageStats, call_entry_label, chat_ttl_service_label, effective_content, format_ttl_setting,
     toggle_chosen_emoji_reaction,
@@ -4070,6 +4069,7 @@ impl QuillApp {
             }
             app.twofa_open = true;
             app.status_note = "screenshot demo — recovery email pending".into();
+        }
         // Slice A3: Active Sessions fixture — fixture sessions (current
         // device, two other sessions, one incomplete login attempt) with
         // the overlay open (injected, no live Telegram).

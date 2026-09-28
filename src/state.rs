@@ -25,9 +25,8 @@ use crate::telegram::envelope::{
     ParsedFile, ParsedGroupCall, ParsedGroupCallMessage, ParsedGroupCallParticipant, ParsedMessage,
     ParsedSecretChat, ParsedSession, ParsedStory, ParsedUser, ParsedVideoChat,
     ParsedWelcomeMessage, PasswordState, Poll, ReplyKeyboard, ReplyMarkup, ReportChatOutcome,
-    ReportOption,
-    ReportSponsoredResult, RichMessageContent, ScopeNotificationSettings, SecretChatState,
-    SponsoredMessage, StickerFormat, StickerItem, StickerSetInfo, StorageStats,
+    ReportOption, ReportSponsoredResult, RichMessageContent, ScopeNotificationSettings,
+    SecretChatState, SponsoredMessage, StickerFormat, StickerItem, StickerSetInfo, StorageStats,
     StoryAvailableReactionView, StoryListView, TdError, effective_content,
     reply_markup_demands_reply,
 };
