@@ -10027,6 +10027,14 @@ impl Session {
         if self.chat_search.chat_id != Some(chat_id) {
             self.chat_search.close();
         }
+        // Slice media-shared-gallery: switching chats closes the gallery so
+        // its title and rows can't outlive the chat they belong to. `close`
+        // also bumps the generation, dropping in-flight fetches for the old
+        // chat. Same-chat re-select never reaches this method (see
+        // `ConnectDriver::select_chat`), so the gallery survives it.
+        if self.open_chat != Some(chat_id) {
+            self.shared_media.close();
+        }
         self.open_chat = Some(chat_id);
         // Phase 5.1: switching chats leaves the topic view.
         self.open_topic = None;
@@ -18620,5 +18628,22 @@ mod tests {
             assert!(tab.filter_constructor().starts_with("searchMessagesFilter"));
         }
     }
+
+    #[test]
+    fn open_chat_closes_shared_media_gallery() {
+        // Slice media-shared-gallery: gallery open for chat A, switching to
+        // chat B closes it (B1 — otherwise the panel shows A's title beside
+        // B's conversation and row jumps resolve the message id against B);
+        // the same-chat path leaves it open.
+        let (mut session, _sink) = session();
+        session.shared_media.open_for(ChatId(11));
+        assert!(session.shared_media.open);
+        session.open_chat(ChatId(12));
+        assert!(!session.shared_media.open);
+        assert_eq!(session.shared_media.chat_id, None);
+        session.shared_media.open_for(ChatId(12));
+        session.open_chat(ChatId(12));
+        assert!(session.shared_media.open);
+        assert_eq!(session.shared_media.chat_id, Some(ChatId(12)));
     }
 }

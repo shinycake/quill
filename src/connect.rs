@@ -92,8 +92,8 @@ use crate::telegram::requests::{
     report_chat_sponsored_message, report_story as report_story_request,
     request_qr_code_authentication, resend_authentication_code, resend_messages,
     resend_recovery_email_address_code, revoke_chat_invite_link, revoke_group_call_invite_link,
-    search_call_messages, search_chat_messages, search_chats, search_messages, search_public_chats,
-    search_recently_found_chats, send_animation,
+    search_call_messages, search_chat_messages, search_chats, search_messages,
+    search_messages_filter_json, search_public_chats, search_recently_found_chats, send_animation,
     send_bot_start_message as send_bot_start_message_request, send_call_debug_information,
     send_call_log, send_call_rating_detail, send_call_signaling_data, send_chat_action,
     send_chat_action_kind, send_document, send_group_call_message, send_message_album, send_photo,
@@ -11416,8 +11416,15 @@ impl<S: JsonSender> ConnectDriver<S> {
         let Some(chat_id) = self.session.open_chat else {
             return Ok(false);
         };
+        // Reopening the gallery for the same chat keeps the already-fetched
+        // tabs (`SharedMediaState::open_for`); only a fresh open fetches the
+        // active tab.
+        let reopening =
+            self.session.shared_media.open && self.session.shared_media.chat_id == Some(chat_id);
         let tab = self.session.shared_media.open_for(chat_id);
-        self.fetch_shared_media(tab)?;
+        if !reopening {
+            self.fetch_shared_media(tab)?;
+        }
         Ok(true)
     }
 

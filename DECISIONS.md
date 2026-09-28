@@ -5114,7 +5114,7 @@ ntgcalls v3.0.0 prebuilt lib, bindings verified against
   - Tests: `search_chat_messages_filter_carries_tab_constructor` (all six tab→constructor mappings + filter placement in the JSON); fixture asserts Media→Empty / Files→Ready with 2 items through the real apply path.
 - **Key decisions (ponytail):**
   - One shared empty-state renderer, not six panels — TGX does the same (`EmptySmartView.setMode`).
-  - Each tab caches its first page; switching back never refetches. No pagination (the `next_from_message_id` is stored but no "load more" is wired — see below).
+  - Each tab caches its first page; switching back never refetches. No pagination: `next_from_message_id` is destructured and dropped in the `foundChatMessages` apply path (it never reaches `SharedMediaState::accept`), and no "load more" is wired — see below.
   - Gallery rows are glyph + text label rows, not thumbnails — full media grids are a separate slice.
   - `searchChatMessages` (not `getChatHistory`): the only per-chat constructor that takes a media filter.
 - **Out of this slice (left unchecked with evidence):**

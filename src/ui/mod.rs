@@ -9087,6 +9087,16 @@ impl QuillApp {
             self.cancel_stop_poll(cx);
             return;
         }
+        // Slice media-shared-gallery: Escape dismisses the gallery like any
+        // other transient panel; it sits above the chat-search layer (the
+        // row-click jump closes the gallery into a chat search).
+        if self
+            .session()
+            .is_some_and(|session| session.shared_media.open)
+        {
+            self.close_shared_media_ui(cx);
+            return;
+        }
         if self.chat_search_is_open() {
             self.close_chat_search_ui(window, cx);
             return;
@@ -17513,10 +17523,12 @@ impl QuillApp {
             )
         });
         let active_tab = session.shared_media.active_tab;
-        let tab = session.shared_media.tabs[active_tab.index()].clone();
+        let tab = &session.shared_media.tabs[active_tab.index()];
         let status = tab.status;
-        let items = tab.items.clone();
         let total_count = tab.total_count;
+        // `error` stays an owned clone: the panel tree is boxed into
+        // `AnyElement` (requires 'static), so borrowed `&str` children don't
+        // compile here — same for the row labels below.
         let error = tab.error.clone();
 
         let mut panel = div()
@@ -17660,7 +17672,7 @@ impl QuillApp {
                     .flex_1()
                     .overflow_y_scroll()
                     .py_1();
-                for item in items {
+                for item in tab.items.iter() {
                     let message_id = item.message_id;
                     list = list.child(
                         div()
@@ -17679,7 +17691,7 @@ impl QuillApp {
                                     .min_w_0()
                                     .text_sm()
                                     .text_color(cx.theme().foreground)
-                                    .child(item.label),
+                                    .child(item.label.clone()),
                             )
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 this.jump_to_shared_media_item_ui(message_id, cx);
@@ -25501,8 +25513,8 @@ impl QuillApp {
                                 Button::new("chat-shared-media")
                                     .label("Media")
                                     .ghost()
-                                    .on_click(cx.listener(move |this, _, window, cx| {
-                                        this.open_shared_media_ui(window, cx);
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        this.open_shared_media_ui(cx);
                                     })),
                             )
                         }),
@@ -33710,7 +33722,7 @@ impl QuillApp {
     /// Slice media-shared-gallery: open the gallery for the open chat (live
     /// fetches the active tab; the demo fixture seeds session state
     /// directly, so the demo path only opens the panel).
-    fn open_shared_media_ui(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    fn open_shared_media_ui(&mut self, cx: &mut Context<Self>) {
         if self.pane_mode() != PaneMode::Ready {
             return;
         }
@@ -33744,7 +33756,6 @@ impl QuillApp {
         } else {
             false
         };
-        let _ = window;
         if opened {
             cx.notify();
         }
