@@ -65,14 +65,16 @@ use crate::telegram::requests::{
     discard_call as discard_call_request, disconnect_all_websites, disconnect_website,
     download_file as download_file_request, edit_chat_folder, edit_chat_invite_link,
     edit_chat_welcome_message, edit_forum_topic, edit_message_caption, edit_message_text,
-    end_group_call, end_group_call_recording, end_group_call_screen_sharing, forward_messages,
-    get_active_sessions, get_archive_chat_list_settings, get_authorization_state,
-    get_available_chat_boost_slots, get_basic_group_full_info, get_bot_similar_bots,
-    get_callback_query_answer, get_callback_query_answer_game,
-    get_callback_query_answer_with_password, get_chat_active_stories, get_chat_administrators,
-    get_chat_boost_status, get_chat_event_log, get_chat_folder, get_chat_history,
-    get_chat_invite_links, get_chat_join_requests, get_chat_lists_to_add_chat, get_chat_member,
-    get_chat_scheduled_messages, get_chat_sponsored_messages, get_chat_statistics, get_commands,
+    edit_story as edit_story_request, edit_story_cover as edit_story_cover_request, end_group_call,
+    end_group_call_recording, end_group_call_screen_sharing, forward_messages, get_active_sessions,
+    get_archive_chat_list_settings, get_authorization_state, get_available_chat_boost_slots,
+    get_basic_group_full_info, get_bot_similar_bots, get_callback_query_answer,
+    get_callback_query_answer_game, get_callback_query_answer_with_password,
+    get_chat_active_stories, get_chat_administrators, get_chat_boost_status, get_chat_event_log,
+    get_chat_folder, get_chat_history, get_chat_invite_links, get_chat_join_requests,
+    get_chat_lists_to_add_chat, get_chat_member, get_chat_scheduled_messages,
+    get_chat_sponsored_messages, get_chat_statistics,
+    get_chats_to_post_stories as get_chats_to_post_stories_request, get_commands,
     get_connected_websites, get_contacts, get_forum_topics, get_full_rich_message, get_group_call,
     get_installed_sticker_sets, get_link_preview, get_login_url, get_login_url_info, get_me,
     get_message_link, get_message_properties, get_message_thread_history, get_password_state,
@@ -104,14 +106,15 @@ use crate::telegram::requests::{
     set_chat_permissions, set_chat_slow_mode_delay, set_group_call_participant_volume_level,
     set_message_sender_block_list, set_name, set_password, set_pinned_chats, set_poll_answer,
     set_profile_photo, set_recovery_email_address, set_scope_notification_settings,
-    set_story_reaction, set_supergroup_username, set_user_privacy_setting_rules, set_username,
-    set_video_chat_title, start_group_call_recording, start_group_call_screen_sharing,
-    start_scheduled_video_chat, stop_poll as stop_poll_request,
-    supergroup_members_filter_administrators_json, supergroup_members_filter_banned_json,
-    supergroup_members_filter_recent_json, supergroup_members_filter_restricted_json,
-    supergroup_members_filter_search_json, terminate_all_other_sessions, terminate_session,
-    toggle_chat_folder_tags, toggle_chat_is_marked_as_unread, toggle_chat_is_pinned,
-    toggle_forum_topic_closed, toggle_forum_topic_pinned, toggle_general_forum_topic_hidden,
+    set_story_privacy_settings as set_story_privacy_settings_request, set_story_reaction,
+    set_supergroup_username, set_user_privacy_setting_rules, set_username, set_video_chat_title,
+    start_group_call_recording, start_group_call_screen_sharing, start_scheduled_video_chat,
+    stop_poll as stop_poll_request, supergroup_members_filter_administrators_json,
+    supergroup_members_filter_banned_json, supergroup_members_filter_recent_json,
+    supergroup_members_filter_restricted_json, supergroup_members_filter_search_json,
+    terminate_all_other_sessions, terminate_session, toggle_chat_folder_tags,
+    toggle_chat_is_marked_as_unread, toggle_chat_is_pinned, toggle_forum_topic_closed,
+    toggle_forum_topic_pinned, toggle_general_forum_topic_hidden,
     toggle_group_call_are_messages_allowed, toggle_group_call_is_my_video_enabled,
     toggle_group_call_is_my_video_paused, toggle_group_call_participant_is_hand_raised,
     toggle_group_call_participant_is_muted, toggle_session_can_accept_calls,
@@ -8180,25 +8183,28 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     /// Phase 9.3: `canPostStory` eligibility check (TDLib 1.8.67,
-    /// `schema/td_api.tl:13702`) for the Saved Messages chat
-    /// (`Session::my_user_id`). The composer calls this before every post;
-    /// the answer lands in `Session::story_post.eligibility`. Deduped while
-    /// a check is in flight.
-    pub fn check_can_post_story(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
+    /// `schema/td_api.tl:13702`) for the given chat — the user's own
+    /// story chat or an eligible channel / supergroup from
+    /// `getChatsToPostStories`. The composer calls this before every
+    /// post; the answer lands in `Session::story_post.eligibility`.
+    /// Deduped per chat while a check is in flight.
+    pub fn check_can_post_story(
+        &mut self,
+        chat_id: ChatId,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let Some(user_id) = self.session.my_user_id else {
+        if self.session.my_user_id.is_none() {
             return Err(ConnectSendError::InvalidRequest);
         };
         if self
             .session
             .requests
-            .has_purpose(RequestPurpose::CheckCanPostStory)
+            .has_purpose_for_chat(RequestPurpose::CheckCanPostStory, chat_id)
         {
             return Ok(None);
         }
-        let chat_id = ChatId(user_id);
         let extra = self
             .session
             .request(RequestPurpose::CheckCanPostStory, Some(chat_id));
@@ -8215,17 +8221,21 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     /// Phase 9.3: `postStory` (TDLib 1.8.67, `schema/td_api.tl:13715`) —
-    /// posts the composer's photo/video with caption + privacy as the
-    /// current user (Saved Messages chat id). `kind` must be detected
-    /// and the file must exist; `SelectedUsers` needs at least one user.
-    /// Phase 9.4: `active_period` must be one of the schema-legal values
-    /// (21600 / 43200 / 86400 / 172800 — `td_api.tl:13715` comment);
-    /// anything else is rejected before sending. The `story` response
-    /// and `updateStoryPostSucceeded` / `updateStoryPostFailed` drive
+    /// posts the composer's photo/video with caption + privacy on
+    /// `chat_id` — the current user's own story chat, or a channel /
+    /// supergroup from `getChatsToPostStories` (post-as-channel, 9.5).
+    /// `kind` must be detected and the file must exist; `SelectedUsers`
+    /// needs at least one user. Phase 9.4: `active_period` must be one
+    /// of the schema-legal values (21600 / 43200 / 86400 / 172800 —
+    /// `td_api.tl:13715` comment); anything else is rejected before
+    /// sending. Phase 9.5: `from_story` carries a repost source
+    /// (`storyFullId`, `td_api.tl:6766`). The `story` response and
+    /// `updateStoryPostSucceeded` / `updateStoryPostFailed` drive
     /// `Session::story_post.outcome`.
     #[allow(clippy::too_many_arguments)] // mirrors requests::post_story, one arg per schema field
     pub fn post_story(
         &mut self,
+        chat_id: ChatId,
         kind: StoryMediaKind,
         path: &str,
         caption: &str,
@@ -8233,15 +8243,16 @@ impl<S: JsonSender> ConnectDriver<S> {
         user_ids: &[i64],
         areas: serde_json::Value,
         active_period: i32,
+        from_story: Option<(i64, i32)>,
         is_posted_to_chat_page: bool,
         protect_content: bool,
     ) -> Result<RequestId, ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let Some(user_id) = self.session.my_user_id else {
+        if self.session.my_user_id.is_none() {
             return Err(ConnectSendError::InvalidRequest);
-        };
+        }
         if kind == StoryMediaKind::Unknown || !std::path::Path::new(path).is_file() {
             return Err(ConnectSendError::InvalidRequest);
         }
@@ -8251,7 +8262,6 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !matches!(active_period, 21600 | 43200 | 86400 | 172800) {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let chat_id = ChatId(user_id);
         let extra = self
             .session
             .request(RequestPurpose::PostStory, Some(chat_id));
@@ -8264,6 +8274,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             privacy.settings_json(user_ids),
             areas,
             active_period,
+            from_story,
             is_posted_to_chat_page,
             protect_content,
         );
@@ -8271,6 +8282,155 @@ impl<S: JsonSender> ConnectDriver<S> {
             Ok(()) => Ok(extra),
             Err(err) => {
                 self.session.requests.take(extra);
+                Err(err)
+            }
+        }
+    }
+
+    /// Phase 9.5: `getChatsToPostStories` (TDLib 1.8.67,
+    /// `schema/td_api.tl:13698`) — channels/supergroups where the user
+    /// may post stories; stored in `Session::story_post_as_chats`.
+    /// Deduped while a fetch is in flight.
+    pub fn get_chats_to_post_stories(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if self
+            .session
+            .requests
+            .has_purpose(RequestPurpose::GetChatsToPostStories)
+        {
+            return Ok(None);
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::GetChatsToPostStories, None);
+        match self
+            .sender
+            .send_json(&get_chats_to_post_stories_request(extra))
+        {
+            Ok(()) => Ok(Some(extra)),
+            Err(err) => {
+                self.session.requests.take(extra);
+                Err(err)
+            }
+        }
+    }
+
+    /// Phase 9.5: `editStory` (TDLib 1.8.67, `schema/td_api.tl:13732`).
+    /// Gated on the cached story's `can_be_edited`; `None` fields keep
+    /// the current value. Sets `Session::story_manage` pending/error.
+    pub fn edit_story(
+        &mut self,
+        chat_id: ChatId,
+        story_id: i32,
+        content: Option<serde_json::Value>,
+        areas: Option<serde_json::Value>,
+        caption: Option<&str>,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let editable = self
+            .session
+            .stories
+            .get(&(chat_id.0, story_id))
+            .is_some_and(|story| story.can_be_edited);
+        if !editable {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self
+            .session
+            .request_for_story(RequestPurpose::EditStory, chat_id, story_id);
+        self.session.story_manage.pending = true;
+        self.session.story_manage.error = None;
+        match self.sender.send_json(&edit_story_request(
+            extra, chat_id, story_id, content, areas, caption,
+        )) {
+            Ok(()) => Ok(extra),
+            Err(err) => {
+                self.session.requests.take(extra);
+                self.session.story_manage.pending = false;
+                Err(err)
+            }
+        }
+    }
+
+    /// Phase 9.5: `editStoryCover` (TDLib 1.8.67, `schema/td_api.tl:13738`).
+    /// Gated on the cached story's `can_be_edited`.
+    pub fn edit_story_cover(
+        &mut self,
+        chat_id: ChatId,
+        story_id: i32,
+        cover_frame_timestamp: f64,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let editable = self
+            .session
+            .stories
+            .get(&(chat_id.0, story_id))
+            .is_some_and(|story| story.can_be_edited);
+        if !editable {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra =
+            self.session
+                .request_for_story(RequestPurpose::EditStoryCover, chat_id, story_id);
+        self.session.story_manage.pending = true;
+        self.session.story_manage.error = None;
+        match self.sender.send_json(&edit_story_cover_request(
+            extra,
+            chat_id,
+            story_id,
+            cover_frame_timestamp,
+        )) {
+            Ok(()) => Ok(extra),
+            Err(err) => {
+                self.session.requests.take(extra);
+                self.session.story_manage.pending = false;
+                Err(err)
+            }
+        }
+    }
+
+    /// Phase 9.5: `setStoryPrivacySettings` (TDLib 1.8.67,
+    /// `schema/td_api.tl:13743`). Gated on the cached story's
+    /// `can_set_privacy_settings`.
+    pub fn set_story_privacy_settings(
+        &mut self,
+        chat_id: ChatId,
+        story_id: i32,
+        privacy_settings: serde_json::Value,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let settable = self
+            .session
+            .stories
+            .get(&(chat_id.0, story_id))
+            .is_some_and(|story| story.can_set_privacy_settings);
+        if !settable {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self.session.request_for_story(
+            RequestPurpose::SetStoryPrivacySettings,
+            chat_id,
+            story_id,
+        );
+        self.session.story_manage.pending = true;
+        self.session.story_manage.error = None;
+        match self.sender.send_json(&set_story_privacy_settings_request(
+            extra,
+            story_id,
+            privacy_settings,
+        )) {
+            Ok(()) => Ok(extra),
+            Err(err) => {
+                self.session.requests.take(extra);
+                self.session.story_manage.pending = false;
                 Err(err)
             }
         }
@@ -17892,6 +18052,83 @@ mod tests {
         assert_eq!(v["@extra"], extra.0.to_string());
         // A second activation while the first is in flight is a no-op.
         assert_eq!(driver.activate_story_stealth_mode(), Ok(None));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn driver_manage_story_gated_on_cached_flags() {
+        // Phase 9.5: `editStory` / `editStoryCover` need
+        // `can_be_edited`; `setStoryPrivacySettings` needs
+        // `can_set_privacy_settings` — both read from the cached
+        // story, matching the delete_story gate pattern.
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = Arc::new(RecordingSender::new());
+        let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+        let mut driver =
+            ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+        let seq = AtomicU64::new(0);
+        seed_ready_alice(&mut driver, &seq, &dyn_sink);
+
+        seed_story(&mut driver, &seq, &dyn_sink, 7, 5, "storyContentPhoto", "");
+        assert_eq!(
+            driver.edit_story(ChatId(7), 5, None, None, Some("x")),
+            Err(ConnectSendError::InvalidRequest)
+        );
+        assert_eq!(
+            driver.edit_story_cover(ChatId(7), 5, 1.0),
+            Err(ConnectSendError::InvalidRequest)
+        );
+        assert_eq!(
+            driver.set_story_privacy_settings(
+                ChatId(7),
+                5,
+                StoryPrivacy::Everyone.settings_json(&[])
+            ),
+            Err(ConnectSendError::InvalidRequest)
+        );
+
+        seed_story(
+            &mut driver,
+            &seq,
+            &dyn_sink,
+            7,
+            6,
+            "storyContentPhoto",
+            r#""can_be_edited":true,"can_set_privacy_settings":true,"#,
+        );
+        let extra = driver
+            .edit_story(ChatId(7), 6, None, None, Some("new"))
+            .unwrap();
+        let v: Value = serde_json::from_str(recorder.snapshot().last().unwrap()).unwrap();
+        assert_eq!(v["@type"], "editStory");
+        assert_eq!(v["@extra"], extra.0.to_string());
+        assert!(v["content"].is_null());
+        assert!(v["areas"].is_null());
+        assert_eq!(v["caption"]["text"], "new");
+        assert!(driver.session.story_manage.pending);
+
+        let extra = driver.edit_story_cover(ChatId(7), 6, 2.5).unwrap();
+        let v: Value = serde_json::from_str(recorder.snapshot().last().unwrap()).unwrap();
+        assert_eq!(v["@type"], "editStoryCover");
+        assert_eq!(v["@extra"], extra.0.to_string());
+        assert_eq!(v["cover_frame_timestamp"], 2.5);
+        assert!(driver.session.story_manage.pending);
+
+        let extra = driver
+            .set_story_privacy_settings(ChatId(7), 6, StoryPrivacy::Contacts.settings_json(&[]))
+            .unwrap();
+        let v: Value = serde_json::from_str(recorder.snapshot().last().unwrap()).unwrap();
+        assert_eq!(v["@type"], "setStoryPrivacySettings");
+        assert_eq!(v["@extra"], extra.0.to_string());
+        assert_eq!(
+            v["privacy_settings"]["@type"],
+            "storyPrivacySettingsContacts"
+        );
+        assert!(driver.session.story_manage.pending);
+
         let _ = std::fs::remove_dir_all(&dir);
     }
 

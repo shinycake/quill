@@ -70,12 +70,13 @@ use quill::telegram::envelope::{
     ParsedWebsite, ParsedWelcomeMessage, PasswordState, PollContent, PollOption, PollType,
     ReplyKeyboard, ReplyMarkup, ScopeNotificationSettings, SecretChatState, SpeechRecognition,
     SponsoredMessage, StatisticalGraph, StatisticalValue, StorageFileTypeStats, StorageStats,
-    UsernameCheckResult, call_entry_label, chat_ttl_service_label, effective_content,
-    format_ttl_setting, toggle_chosen_emoji_reaction,
+    StoryOriginView, UsernameCheckResult, call_entry_label, chat_ttl_service_label,
+    effective_content, format_ttl_setting, toggle_chosen_emoji_reaction,
 };
 use quill::telegram::requests::SelfDestructSend;
 use quill::telegram::requests::{
     ArchiveChatListSettings, CallPrivacySetting, ChatEventLogFilterSet, PrivacyWho,
+    input_story_content,
 };
 use quill::text::{TextEntity, styled_runs, utf8_to_utf16_offset};
 use quill::video::VideoNoteCapture;
@@ -1455,6 +1456,16 @@ pub const CALL_PROBLEMS: [(&str, &str); 9] = [
     ("callProblemPixelatedVideo", "Pixelated video"),
 ];
 
+/// Phase 9.5: the viewer privacy editor's state — the story plus the
+/// picked level/users. Prefilled from the story's `privacy_settings`.
+#[derive(Debug, Clone)]
+struct StoryPrivacyEdit {
+    chat_id: i64,
+    story_id: i32,
+    privacy: StoryPrivacy,
+    selected_user_ids: Vec<i64>,
+}
+
 pub struct QuillApp {
     chat: Entity<SyntheticChat>,
     composer: Entity<TextareaState>,
@@ -1899,6 +1910,17 @@ pub struct QuillApp {
     /// inputs.
     story_composer_link: Entity<TextareaState>,
     story_composer_reaction: Entity<TextareaState>,
+    /// Phase 9.5: cover-frame editor (viewer) — open on a video story
+    /// with `can_be_edited`; the input takes seconds.
+    story_cover_target: Option<(i64, i32)>,
+    story_cover_input: Entity<TextareaState>,
+    story_cover_sent: bool,
+    /// Phase 9.5: privacy editor (viewer) — open on a story with
+    /// `can_set_privacy_settings`; reuses the 4-way privacy selector
+    /// + contact checkboxes.
+    story_privacy_edit: Option<StoryPrivacyEdit>,
+    story_privacy_user_search: Entity<TextareaState>,
+    story_privacy_sent: bool,
     /// Phase 6: sidebar tab — `true` shows the contacts list instead of
     /// the chat list.
     contacts_tab_open: bool,
@@ -2152,6 +2174,13 @@ pub enum ScreenshotDemo {
     /// response (two viewers, one with a ❤ reaction, one forward) with
     /// the viewers panel open on the own story.
     ReadyStoryViewers,
+    /// Phase 9.5: story edit composer (injected, no live Telegram) —
+    /// the seeded own photo story (id 5, chat 11) carries
+    /// `can_be_edited`, `is_edited`, a `storyRepostInfo` public origin,
+    /// link + suggested-reaction areas, and close-friends privacy; the
+    /// composer opens in edit mode with caption + area inputs prefilled
+    /// and the media path empty (keep current content).
+    ReadyStoryEdit,
     /// MED3 downloads-manager demo (injected, no live Telegram): the
     /// `ReadyMedia` seed plus an actively downloading document (file 24,
     /// 42% through `notes.txt`), a failed document (file 26, "Retry"
@@ -2679,6 +2708,20 @@ impl QuillApp {
         let story_composer_reaction = cx.new(|cx| {
             TextareaState::new(window, cx)
                 .placeholder("❤️ (optional, space-separated)")
+                .auto_grow(1, 1)
+                .submit_on_enter(false)
+        });
+        // Phase 9.5: cover-frame seconds input (viewer cover editor) and
+        // the privacy editor's contact search.
+        let story_cover_input = cx.new(|cx| {
+            TextareaState::new(window, cx)
+                .placeholder("Cover frame time in seconds, e.g. 1.5")
+                .auto_grow(1, 1)
+                .submit_on_enter(false)
+        });
+        let story_privacy_user_search = cx.new(|cx| {
+            TextareaState::new(window, cx)
+                .placeholder("Search contacts")
                 .auto_grow(1, 1)
                 .submit_on_enter(false)
         });
@@ -3442,6 +3485,18 @@ impl QuillApp {
                     AuthorizationState::Ready,
                 )
             }
+            // Phase 9.5: story edit composer (injected, no live
+            // Telegram) — own-story fixture plus the composer in edit
+            // mode.
+            Some(ScreenshotDemo::ReadyStoryEdit) => {
+                demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
+                (
+                    ConnectUiStatus::DemoReadyChats,
+                    None,
+                    "screenshot demo — story edit composer".into(),
+                    AuthorizationState::Ready,
+                )
+            }
             Some(ScreenshotDemo::ReadySeekBars) => {
                 demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
                 (
@@ -3826,6 +3881,12 @@ impl QuillApp {
             story_composer_user_search,
             story_composer_link,
             story_composer_reaction,
+            story_cover_target: None,
+            story_cover_input,
+            story_cover_sent: false,
+            story_privacy_edit: None,
+            story_privacy_user_search,
+            story_privacy_sent: false,
             auth_demo,
             focus_sidebar: cx.focus_handle(),
             connect_status,
@@ -4937,6 +4998,17 @@ impl QuillApp {
                 input.set_value("❤️ 🔥", window, cx);
             });
             app.status_note = "screenshot demo — story posting composer".into();
+        }
+        if matches!(demo, Some(ScreenshotDemo::ReadyStoryEdit)) {
+            // Phase 9.5: seed the editable own-story fixture, then open
+            // the composer in edit mode — caption + area inputs prefill
+            // from the cached story, the path stays empty.
+            if let Some(session) = app.demo_session.as_mut() {
+                app.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_story_edit(session, &app.demo_sink, &app.demo_seq);
+            }
+            app.open_story_edit(11, 5, window, cx);
+            app.status_note = "screenshot demo — story edit composer".into();
         }
         if matches!(demo, Some(ScreenshotDemo::ReadySponsored)) {
             if let Some(session) = app.demo_session.as_mut() {
@@ -11608,12 +11680,18 @@ impl QuillApp {
         self.story_viewers_open = false;
         self.story_report_open = false;
         self.clear_terminal_story_report();
+        // Phase 9.5: drop the cover / privacy editors with the viewer.
+        self.story_cover_target = None;
+        self.story_cover_sent = false;
+        self.story_privacy_edit = None;
+        self.story_privacy_sent = false;
         cx.notify();
     }
 
     /// Phase 9.3: open the story composer (tray "+" tile). Resets the
     /// server-side round-trip state so a reopened composer doesn't show
-    /// the previous post's outcome.
+    /// the previous post's outcome. Phase 9.5: also fetches
+    /// `getChatsToPostStories` for the "post as" picker.
     fn open_story_composer(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.story_composer = StoryComposer::open();
         self.story_composer_path
@@ -11629,6 +11707,71 @@ impl QuillApp {
             .update(cx, |input, cx| input.set_value("", window, cx));
         if let Some(live) = self.live.as_mut() {
             live.driver.session.story_post = StoryPostState::default();
+            // Phase 9.5: eligible "post as" chats (channels/supergroups).
+            let _ = live.driver.get_chats_to_post_stories();
+        }
+        if let Some(session) = self.demo_session.as_mut() {
+            session.story_post = StoryPostState::default();
+        }
+        cx.notify();
+    }
+
+    /// Phase 9.5: open the composer in edit mode for a posted story.
+    /// Caption + area inputs are prefilled from the cached story; the
+    /// media path stays empty (keep current content unless replaced).
+    fn open_story_edit(
+        &mut self,
+        poster_chat_id: i64,
+        story_id: i32,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.story_composer = StoryComposer::open_edit(poster_chat_id, story_id);
+        let (caption, link_url, reactions) = self
+            .session()
+            .and_then(|s| s.stories.get(&(poster_chat_id, story_id)))
+            .map(|story| {
+                (
+                    story.caption.clone(),
+                    story.area_link_url.clone().unwrap_or_default(),
+                    story.area_reaction_emojis.join(" "),
+                )
+            })
+            .unwrap_or_default();
+        self.story_composer_path
+            .update(cx, |input, cx| input.set_value("", window, cx));
+        self.story_composer_caption
+            .update(cx, |input, cx| input.set_value(&caption, window, cx));
+        self.story_composer_link
+            .update(cx, |input, cx| input.set_value(&link_url, window, cx));
+        self.story_composer_reaction
+            .update(cx, |input, cx| input.set_value(&reactions, window, cx));
+        cx.notify();
+    }
+
+    /// Phase 9.5: open the composer in repost mode for a source story.
+    /// The new post carries `postStory.from_story_full_id`.
+    fn open_story_repost(
+        &mut self,
+        poster_chat_id: i64,
+        story_id: i32,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.story_composer = StoryComposer::open_repost(poster_chat_id, story_id);
+        self.story_composer_path
+            .update(cx, |input, cx| input.set_value("", window, cx));
+        self.story_composer_caption
+            .update(cx, |input, cx| input.set_value("", window, cx));
+        self.story_composer_user_search
+            .update(cx, |input, cx| input.set_value("", window, cx));
+        self.story_composer_link
+            .update(cx, |input, cx| input.set_value("", window, cx));
+        self.story_composer_reaction
+            .update(cx, |input, cx| input.set_value("", window, cx));
+        if let Some(live) = self.live.as_mut() {
+            live.driver.session.story_post = StoryPostState::default();
+            let _ = live.driver.get_chats_to_post_stories();
         }
         if let Some(session) = self.demo_session.as_mut() {
             session.story_post = StoryPostState::default();
@@ -11645,12 +11788,14 @@ impl QuillApp {
     /// Phase 9.3: Post pressed — validate the path, then run the
     /// `canPostStory` eligibility check. The render tick converts the
     /// answer into a `postStory` or an ineligible reason
-    /// (`story_composer_after_check`).
+    /// (`story_composer_after_check`). Phase 9.5: in edit mode the
+    /// media path is optional (empty = keep content) and the save goes
+    /// straight to `editStory` — no eligibility check.
     fn story_composer_post(&mut self, cx: &mut Context<Self>) {
         // Phase 9.3: `postStory` already sent, answer not yet landed —
         // the button is disabled while `busy`; this guards a
         // stale-snapshot race from re-running canPostStory→postStory.
-        if self.story_composer.post_sent {
+        if self.story_composer.post_sent || self.story_composer.save_sent {
             return;
         }
         let path = self.story_composer_path.read(cx).value().trim().to_string();
@@ -11665,13 +11810,14 @@ impl QuillApp {
             .value()
             .trim()
             .to_string();
-        let error = if path.is_empty() {
+        let is_edit = self.story_composer.is_edit();
+        let error = if !is_edit && path.is_empty() {
             Some("Enter a photo or video file path")
-        } else if kind == StoryMediaKind::Unknown {
+        } else if !path.is_empty() && kind == StoryMediaKind::Unknown {
             Some("Not a photo or video file — check the extension")
-        } else if !std::path::Path::new(&path).is_file() {
+        } else if !path.is_empty() && !std::path::Path::new(&path).is_file() {
             Some("File not found — check the path")
-        } else if self.story_composer.needs_users() {
+        } else if !is_edit && self.story_composer.needs_users() {
             Some("Pick at least one user for \"Selected users\"")
         } else if let Some(link_error) = self.story_composer.link_url_error() {
             Some(link_error)
@@ -11683,13 +11829,21 @@ impl QuillApp {
             cx.notify();
             return;
         }
+        if is_edit {
+            self.story_composer_save_edit(cx, &path, kind);
+            return;
+        }
+        // Phase 9.5: the check runs on the "post as" chat — own stories
+        // when `as_chat_id` is `None`. Computed before the mutable
+        // `live` borrow below.
+        let target = self.story_composer_target_chat();
         if let Some(live) = self.live.as_mut() {
             self.story_composer.local_error = None;
             self.story_composer.check_sent = true;
             live.driver.session.story_post.check_error = None;
             live.driver.session.story_post.eligibility = None;
             live.driver.session.story_post.outcome = StoryPostOutcome::None;
-            if live.driver.check_can_post_story().is_err() {
+            if live.driver.check_can_post_story(target).is_err() {
                 self.story_composer.check_sent = false;
                 self.story_composer.local_error =
                     Some("Could not check posting eligibility".into());
@@ -11700,8 +11854,58 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// Phase 9.5: the chat the current composer post targets — the
+    /// "post as" channel/supergroup, or the user's own story chat.
+    fn story_composer_target_chat(&self) -> ChatId {
+        let me = self.session().and_then(|s| s.my_user_id).unwrap_or(0);
+        self.story_composer
+            .as_chat_id
+            .map(ChatId)
+            .unwrap_or(ChatId(me))
+    }
+
+    /// Phase 9.5: Save pressed in edit mode — send `editStory` with
+    /// `null` for every unchanged field (media empty = keep; areas
+    /// only change together with new media, per `td_api.tl:13732`).
+    fn story_composer_save_edit(
+        &mut self,
+        cx: &mut Context<Self>,
+        path: &str,
+        kind: StoryMediaKind,
+    ) {
+        let Some((poster_chat_id, story_id)) = self.story_composer.edit_target else {
+            return;
+        };
+        let caption = self.story_composer_caption.read(cx).value().to_string();
+        let content = (!path.is_empty()).then(|| input_story_content(kind, path));
+        // Areas can't be edited unless the content changes — keep them
+        // untouched when the media is kept.
+        let areas = content.as_ref().map(|_| self.story_composer.areas_json());
+        let Some(live) = self.live.as_mut() else {
+            self.story_composer.local_error = Some("demo — editing runs with live TDLib".into());
+            cx.notify();
+            return;
+        };
+        self.story_composer.local_error = None;
+        match live.driver.edit_story(
+            ChatId(poster_chat_id),
+            story_id,
+            content,
+            areas,
+            Some(&caption),
+        ) {
+            Ok(_) => self.story_composer.save_sent = true,
+            Err(_) => {
+                self.story_composer.local_error = Some("Could not send the edit request".into());
+            }
+        }
+        cx.notify();
+    }
+
     /// Phase 9.3: the `canPostStory` answer landed (render tick) — post
     /// when eligible, otherwise surface the reason in the composer.
+    /// Phase 9.5: posts to the "post as" target chat and carries the
+    /// repost source (`from_story_full_id`).
     fn story_composer_after_check(&mut self, cx: &mut Context<Self>) {
         let (eligibility, check_error) = match self.session() {
             Some(session) => (
@@ -11715,48 +11919,57 @@ impl QuillApp {
         } else if let Some(result) = eligibility {
             if !result.can_post() {
                 self.story_composer.local_error = Some(result.user_message());
-            } else if let Some(live) = self.live.as_mut() {
-                let path = self.story_composer_path.read(cx).value().trim().to_string();
-                let caption = self.story_composer_caption.read(cx).value().to_string();
-                let kind = StoryMediaKind::detect(&path);
-                let privacy = self.story_composer.privacy;
-                let user_ids = self.story_composer.selected_user_ids.clone();
-                // Phase 9.4: areas + options are read from composer state
-                // (synced in `story_composer_post`), so what lands in the
-                // `postStory` JSON is exactly what the UI showed.
-                let areas = self.story_composer.areas_json();
-                let active_period = self.story_composer.expiry.seconds();
-                let is_posted_to_chat_page = self.story_composer.post_to_chat_page;
-                let protect_content = self.story_composer.protect_content;
-                match live.driver.post_story(
-                    kind,
-                    &path,
-                    &caption,
-                    privacy,
-                    &user_ids,
-                    areas,
-                    active_period,
-                    is_posted_to_chat_page,
-                    protect_content,
-                ) {
-                    Ok(_) => {
-                        self.story_composer.local_error = None;
-                        // Phase 9.3: request sent, answer not yet landed —
-                        // the Post button stays disabled (busy) until the
-                        // outcome moves, so a second press can't post a
-                        // duplicate story.
-                        self.story_composer.post_sent = true;
-                        // Fresh eligibility for the next post.
-                        live.driver.session.story_post.eligibility = None;
-                    }
-                    Err(_) => {
-                        self.story_composer.local_error =
-                            Some("Could not send the post request".into());
-                    }
-                }
             } else {
-                self.story_composer.local_error =
-                    Some("demo — posting runs with live TDLib".into());
+                // Phase 9.5: the target chat matches the eligibility
+                // check (the picker is disabled while `check_sent`).
+                // Hoisted before the mutable `live` borrow below.
+                let target = self.story_composer_target_chat();
+                let from_story = self.story_composer.repost_source;
+                if let Some(live) = self.live.as_mut() {
+                    let path = self.story_composer_path.read(cx).value().trim().to_string();
+                    let caption = self.story_composer_caption.read(cx).value().to_string();
+                    let kind = StoryMediaKind::detect(&path);
+                    let privacy = self.story_composer.privacy;
+                    let user_ids = self.story_composer.selected_user_ids.clone();
+                    // Phase 9.4: areas + options are read from composer state
+                    // (synced in `story_composer_post`), so what lands in the
+                    // `postStory` JSON is exactly what the UI showed.
+                    let areas = self.story_composer.areas_json();
+                    let active_period = self.story_composer.expiry.seconds();
+                    let is_posted_to_chat_page = self.story_composer.post_to_chat_page;
+                    let protect_content = self.story_composer.protect_content;
+                    match live.driver.post_story(
+                        target,
+                        kind,
+                        &path,
+                        &caption,
+                        privacy,
+                        &user_ids,
+                        areas,
+                        active_period,
+                        from_story,
+                        is_posted_to_chat_page,
+                        protect_content,
+                    ) {
+                        Ok(_) => {
+                            self.story_composer.local_error = None;
+                            // Phase 9.3: request sent, answer not yet landed —
+                            // the Post button stays disabled (busy) until the
+                            // outcome moves, so a second press can't post a
+                            // duplicate story.
+                            self.story_composer.post_sent = true;
+                            // Fresh eligibility for the next post.
+                            live.driver.session.story_post.eligibility = None;
+                        }
+                        Err(_) => {
+                            self.story_composer.local_error =
+                                Some("Could not send the post request".into());
+                        }
+                    }
+                } else {
+                    self.story_composer.local_error =
+                        Some("demo — posting runs with live TDLib".into());
+                }
             }
         }
         cx.notify();
@@ -11769,6 +11982,11 @@ impl QuillApp {
         let composer = &self.story_composer;
         if let Some(error) = &composer.local_error {
             return Some(format!("✗ {error}"));
+        }
+        // Phase 9.5: edit-mode save state — the tick closes the
+        // composer on success or moves the failure into local_error.
+        if composer.is_edit() {
+            return composer.save_sent.then(|| "Saving…".into());
         }
         let post = self.session().map(|session| session.story_post.clone())?;
         match &post.outcome {
@@ -29760,6 +29978,8 @@ impl QuillApp {
             "g1-add" => self.toggle_member_add_user(user_id, cx),
             // Phase 9.3: the story composer's "Selected users" picker.
             "story-composer" => self.toggle_story_composer_user(user_id, cx),
+            // Phase 9.5: the viewer privacy editor's "Selected users" picker.
+            "story-privacy" => self.toggle_story_privacy_user(user_id, cx),
             _ => {}
         }
     }
@@ -32608,6 +32828,28 @@ impl QuillApp {
         Some(parts.join(" · "))
     }
 
+    /// Phase 9.5: "Reposted from …" / "edited" line under the caption
+    /// (`story.repost_info`, `story.is_edited`, `td_api.tl:6742`).
+    fn story_viewer_meta_line(&self) -> Option<String> {
+        let story = self.current_story()?;
+        let mut parts = Vec::new();
+        if let Some(repost) = &story.repost_info {
+            let origin = match &repost.origin {
+                StoryOriginView::PublicStory { chat_id, .. } => self
+                    .session()
+                    .and_then(|s| s.chats.get(chat_id))
+                    .map(|chat| chat.title.clone())
+                    .unwrap_or_else(|| format!("Chat {chat_id}")),
+                StoryOriginView::HiddenUser { poster_name } => poster_name.clone(),
+            };
+            parts.push(format!("Reposted from {origin}"));
+        }
+        if story.is_edited {
+            parts.push("edited".into());
+        }
+        (!parts.is_empty()).then(|| parts.join(" · "))
+    }
+
     /// Phase 9.2: the emoji picker popover fed by `getStoryAvailableReactions`
     /// (`availableReactions`, `schema/td_api.tl:13802`). One tap sets the
     /// reaction via `setStoryReaction` (`schema/td_api.tl:13809`).
@@ -32667,6 +32909,23 @@ impl QuillApp {
             .and_then(|story| story.chosen_reaction_emoji.clone());
         let can_reply = story.as_ref().is_some_and(|story| story.can_be_replied);
         let can_delete = story.as_ref().is_some_and(|story| story.can_be_deleted);
+        // Phase 9.5: posted-story management gates (schema 1.8.67,
+        // `td_api.tl:6742`) — TDLib's flags are authoritative, so these
+        // naturally cover own stories and admin-manageable
+        // channel/group stories.
+        let can_edit = story.as_ref().is_some_and(|story| story.can_be_edited);
+        let can_set_privacy = story
+            .as_ref()
+            .is_some_and(|story| story.can_set_privacy_settings);
+        let can_forward = story.as_ref().is_some_and(|story| story.can_be_forwarded);
+        // Phase 9.5 (review fix-up): one shared `story_manage.pending`
+        // slot — disable the management buttons while a call is in
+        // flight so two ops can't overwrite each other's state.
+        let manage_busy = self.session().is_some_and(|s| s.story_manage.pending);
+        let is_video = self
+            .story_viewer
+            .current()
+            .is_some_and(|item| matches!(item.kind, StoryViewerKind::Video));
         let quick_label = if chosen.as_deref() == Some("❤") {
             "❤️ ✓"
         } else {
@@ -32759,6 +33018,67 @@ impl QuillApp {
                     this.toggle_story_stealth(cx);
                 })),
         );
+        // Phase 9.5: posted-story management — Edit opens the composer
+        // in edit mode, Cover edits the video cover frame, Privacy
+        // opens the privacy editor, Repost opens the composer with
+        // `from_story_full_id` set.
+        if can_edit {
+            row = row.child(
+                Button::new("story-edit")
+                    .label("Edit")
+                    .ghost()
+                    .text_color(rgb(0xffffff))
+                    .disabled(manage_busy)
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        let Some(item) = this.story_viewer.current().cloned() else {
+                            return;
+                        };
+                        this.open_story_edit(item.chat_id.0, item.story_id, window, cx);
+                    })),
+            );
+            if is_video {
+                row = row.child(
+                    Button::new("story-cover")
+                        .label("Cover")
+                        .ghost()
+                        .text_color(rgb(0xffffff))
+                        .disabled(manage_busy)
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            let Some(item) = this.story_viewer.current().cloned() else {
+                                return;
+                            };
+                            this.toggle_story_cover_edit(item.chat_id.0, item.story_id, cx);
+                        })),
+                );
+            }
+        }
+        if can_set_privacy {
+            row = row.child(
+                Button::new("story-privacy")
+                    .label("Privacy")
+                    .ghost()
+                    .text_color(rgb(0xffffff))
+                    .disabled(manage_busy)
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.toggle_story_privacy_edit(window, cx);
+                    })),
+            );
+        }
+        if can_forward {
+            row = row.child(
+                Button::new("story-repost")
+                    .label("Repost")
+                    .ghost()
+                    .text_color(rgb(0xffffff))
+                    .disabled(manage_busy)
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        let Some(item) = this.story_viewer.current().cloned() else {
+                            return;
+                        };
+                        this.open_story_repost(item.chat_id.0, item.story_id, window, cx);
+                    })),
+            );
+        }
         let mut column = div().flex().flex_col().gap_2().items_center().child(row);
         if self.story_reaction_picker_open {
             column = column.child(self.story_reaction_picker(cx));
@@ -32794,6 +33114,17 @@ impl QuillApp {
             .and_then(|session| session.story_stealth_error.clone())
         {
             column = column.child(div().text_sm().text_color(rgb(0xf85149)).child(stealth_err));
+        }
+        // Phase 9.5: cover-frame editor row (video stories) + privacy
+        // editor panel + the management status line (pending / error).
+        if self.story_cover_target.is_some() {
+            column = column.child(self.story_cover_editor(cx));
+        }
+        if self.story_privacy_edit.is_some() {
+            column = column.child(self.story_privacy_panel(cx));
+        }
+        if let Some(status) = self.story_manage_status() {
+            column = column.child(div().text_xs().text_color(rgb(0x8b949e)).child(status));
         }
         column.into_any_element()
     }
@@ -33001,6 +33332,290 @@ impl QuillApp {
         }
         panel.into_any_element()
     }
+    /// Phase 9.5: one-line status for posted-story management —
+    /// pending spinner or the sanitized failure. `None` when idle.
+    fn story_manage_status(&self) -> Option<String> {
+        let manage = self.session()?.story_manage.clone();
+        if manage.pending {
+            Some("Saving…".into())
+        } else {
+            manage.error
+        }
+    }
+
+    /// Phase 9.5: toggle the cover-frame editor for a video story.
+    fn toggle_story_cover_edit(&mut self, chat_id: i64, story_id: i32, cx: &mut Context<Self>) {
+        if self.story_cover_target == Some((chat_id, story_id)) {
+            self.story_cover_target = None;
+        } else {
+            self.story_cover_target = Some((chat_id, story_id));
+            self.story_cover_sent = false;
+        }
+        cx.notify();
+    }
+
+    /// Phase 9.5: the cover-frame editor row — seconds input + Set.
+    fn story_cover_editor(&self, cx: &mut Context<Self>) -> AnyElement {
+        // Review fix-up: shared `story_manage.pending` slot — no second
+        // op while one is in flight.
+        let manage_busy = self.session().is_some_and(|s| s.story_manage.pending);
+        div()
+            .flex()
+            .gap_2()
+            .items_center()
+            .w(px(360.))
+            .child(
+                div()
+                    .flex_1()
+                    .child(Textarea::new(&self.story_cover_input).h(px(32.))),
+            )
+            .child(
+                Button::new("story-cover-set")
+                    .label(if self.story_cover_sent {
+                        "Saving…"
+                    } else {
+                        "Set"
+                    })
+                    .disabled(manage_busy)
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.story_cover_save(cx);
+                    })),
+            )
+            .into_any_element()
+    }
+
+    /// Phase 9.5: parse the seconds input and send `editStoryCover`
+    /// (`td_api.tl:13738`). The driver gates on `can_be_edited`; the
+    /// tick closes the editor on success.
+    fn story_cover_save(&mut self, cx: &mut Context<Self>) {
+        if self.story_cover_sent {
+            return;
+        }
+        let Some((chat_id, story_id)) = self.story_cover_target else {
+            return;
+        };
+        // Demo mode: surface the same notice as `story_composer_save_edit`
+        // — management calls need live TDLib.
+        if self.live.is_none() {
+            if let Some(demo) = self.demo_session.as_mut() {
+                demo.story_manage.error = Some("demo — editing runs with live TDLib".into());
+            }
+            cx.notify();
+            return;
+        }
+        let raw = self.story_cover_input.read(cx).value().trim().to_string();
+        let timestamp: f64 = match raw.parse() {
+            Ok(seconds) if seconds >= 0.0 => seconds,
+            _ => {
+                if let Some(live) = self.live.as_mut() {
+                    live.driver.session.story_manage.error =
+                        Some("Enter the cover time in seconds (0 or more)".into());
+                }
+                cx.notify();
+                return;
+            }
+        };
+        if let Some(live) = self.live.as_mut() {
+            match live
+                .driver
+                .edit_story_cover(ChatId(chat_id), story_id, timestamp)
+            {
+                Ok(_) => self.story_cover_sent = true,
+                Err(_) => {
+                    live.driver.session.story_manage.error =
+                        Some("Could not send the cover request".into());
+                }
+            }
+        }
+        cx.notify();
+    }
+
+    /// Phase 9.5: toggle the privacy editor, prefilled from the story's
+    /// current `privacy_settings` when the schema type is known.
+    fn toggle_story_privacy_edit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.story_privacy_edit.is_some() {
+            self.story_privacy_edit = None;
+            return;
+        }
+        let Some(item) = self.story_viewer.current().cloned() else {
+            return;
+        };
+        let (privacy, selected_user_ids) = self
+            .session()
+            .and_then(|s| s.stories.get(&(item.chat_id.0, item.story_id)))
+            .and_then(|story| story.privacy_settings.as_ref())
+            .and_then(|settings| StoryPrivacy::from_settings_json(settings))
+            .unwrap_or((StoryPrivacy::Everyone, Vec::new()));
+        self.story_privacy_edit = Some(StoryPrivacyEdit {
+            chat_id: item.chat_id.0,
+            story_id: item.story_id,
+            privacy,
+            selected_user_ids,
+        });
+        self.story_privacy_sent = false;
+        self.story_privacy_user_search
+            .update(cx, |input, cx| input.set_value("", window, cx));
+        cx.notify();
+    }
+
+    /// Phase 9.5: toggle a contact in the privacy editor's
+    /// "Selected users" picker.
+    fn toggle_story_privacy_user(&mut self, user_id: i64, cx: &mut Context<Self>) {
+        if let Some(edit) = self.story_privacy_edit.as_mut() {
+            if edit.selected_user_ids.contains(&user_id) {
+                edit.selected_user_ids.retain(|id| *id != user_id);
+            } else {
+                edit.selected_user_ids.push(user_id);
+            }
+        }
+        cx.notify();
+    }
+
+    /// Phase 9.5: the privacy editor panel — the 4-way selector plus
+    /// the contact picker for "Selected users".
+    fn story_privacy_panel(&self, cx: &mut Context<Self>) -> AnyElement {
+        let edit = match self.story_privacy_edit.as_ref() {
+            Some(edit) => edit,
+            None => return div().into_any_element(),
+        };
+        let mut panel = div().flex().flex_col().gap_1().w(px(360.)).child(
+            div()
+                .text_sm()
+                .font_semibold()
+                .text_color(rgb(0xffffff))
+                .child("Who can see this story"),
+        );
+        for option in StoryPrivacy::ALL {
+            let selected = edit.privacy == option;
+            let label = option.label();
+            panel = panel.child(
+                Button::new(format!("story-privacy-{label}"))
+                    .label(if selected {
+                        format!("☑ {label}")
+                    } else {
+                        format!("☐ {label}")
+                    })
+                    .ghost()
+                    .text_color(rgb(0xffffff))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        if let Some(edit) = this.story_privacy_edit.as_mut() {
+                            edit.privacy = option;
+                        }
+                        cx.notify();
+                    })),
+            );
+        }
+        if edit.privacy == StoryPrivacy::SelectedUsers {
+            let query = self.story_privacy_user_search.read(cx).value();
+            let rows = self.g1_contact_rows(&query, cx);
+            let selected = edit.selected_user_ids.clone();
+            let mut list = div()
+                .id("story-privacy-users")
+                .flex()
+                .flex_col()
+                .gap_1()
+                .max_h(px(140.))
+                .overflow_y_scroll();
+            if rows.is_empty() {
+                list = list.child(
+                    div()
+                        .text_sm()
+                        .text_color(rgb(0x8b949e))
+                        .child("No contacts found"),
+                );
+            }
+            for row in rows.iter().take(50) {
+                list = list.child(self.g1_contact_checkbox(
+                    "story-privacy".to_string(),
+                    row,
+                    selected.contains(&row.user_id),
+                    row.user_id,
+                    cx,
+                ));
+            }
+            panel = panel.child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap_1()
+                    .child(Textarea::new(&self.story_privacy_user_search).h(px(32.)))
+                    .child(list),
+            );
+        }
+        let busy = self.story_privacy_sent;
+        // Review fix-up: shared `story_manage.pending` slot — no second
+        // op while one is in flight.
+        let manage_busy = self.session().is_some_and(|s| s.story_manage.pending);
+        panel = panel.child(
+            div()
+                .flex()
+                .gap_2()
+                .child(
+                    Button::new("story-privacy-save")
+                        .label(if busy { "Saving…" } else { "Save" })
+                        .disabled(manage_busy)
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.story_privacy_save(cx);
+                        })),
+                )
+                .child(
+                    Button::new("story-privacy-cancel")
+                        .label("Cancel")
+                        .ghost()
+                        .text_color(rgb(0xffffff))
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.story_privacy_edit = None;
+                            cx.notify();
+                        })),
+                ),
+        );
+        panel.into_any_element()
+    }
+
+    /// Phase 9.5: send `setStoryPrivacySettings` (`td_api.tl:13743`)
+    /// for the edited story. The driver gates on
+    /// `can_set_privacy_settings`; the tick closes the panel on
+    /// success.
+    fn story_privacy_save(&mut self, cx: &mut Context<Self>) {
+        if self.story_privacy_sent {
+            return;
+        }
+        let Some(edit) = self.story_privacy_edit.clone() else {
+            return;
+        };
+        // Demo mode: surface the same notice as `story_composer_save_edit`
+        // — management calls need live TDLib.
+        if self.live.is_none() {
+            if let Some(demo) = self.demo_session.as_mut() {
+                demo.story_manage.error = Some("demo — editing runs with live TDLib".into());
+            }
+            cx.notify();
+            return;
+        }
+        if edit.privacy == StoryPrivacy::SelectedUsers && edit.selected_user_ids.is_empty() {
+            if let Some(live) = self.live.as_mut() {
+                live.driver.session.story_manage.error =
+                    Some("Pick at least one user for \"Selected users\"".into());
+            }
+            cx.notify();
+            return;
+        }
+        let settings = edit.privacy.settings_json(&edit.selected_user_ids);
+        if let Some(live) = self.live.as_mut() {
+            match live.driver.set_story_privacy_settings(
+                ChatId(edit.chat_id),
+                edit.story_id,
+                settings,
+            ) {
+                Ok(_) => self.story_privacy_sent = true,
+                Err(_) => {
+                    live.driver.session.story_manage.error =
+                        Some("Could not send the privacy request".into());
+                }
+            }
+        }
+        cx.notify();
+    }
 
     /// Phase 9.1: fullscreen story overlay, modeled on
     /// `media_viewer_overlay`: poster name + "Story N of M" header, the
@@ -33178,6 +33793,10 @@ impl QuillApp {
                     .when_some(counts, |this, counts| {
                         this.child(div().text_xs().text_color(rgb(0x8b949e)).child(counts))
                     })
+                    // Phase 9.5: "Reposted from …" / "edited" marker.
+                    .when_some(self.story_viewer_meta_line(), |this, meta| {
+                        this.child(div().text_xs().text_color(rgb(0x8b949e)).child(meta))
+                    })
                     .child(self.story_action_row(cx))
                     .child(
                         div()
@@ -33216,6 +33835,21 @@ impl QuillApp {
         let path = self.story_composer_path.read(cx).value().trim().to_string();
         let kind = StoryMediaKind::detect(&path);
         let file_exists = !path.is_empty() && std::path::Path::new(&path).is_file();
+        // Phase 9.5: edit / repost modes reshape the composer — edit
+        // hides privacy + expiry + toggles (`editStory` has no such
+        // fields); the areas are only editable when the media is being
+        // replaced (schema: areas can't change unless content does).
+        let is_edit = self.story_composer.is_edit();
+        let is_repost = self.story_composer.repost_source.is_some();
+        let show_privacy = !is_edit && self.story_composer.as_chat_id.is_none();
+        let areas_editable = !is_edit || !path.is_empty();
+        let title = if is_edit {
+            "Edit story"
+        } else if is_repost {
+            "Repost story"
+        } else {
+            "New story"
+        };
 
         let preview: AnyElement = match (kind, file_exists) {
             (StoryMediaKind::Photo, true) => img(std::path::Path::new(&path))
@@ -33386,9 +34020,74 @@ impl QuillApp {
         let status = self.story_composer_status();
         let busy = self.story_composer.check_sent
             || self.story_composer.post_sent
+            || self.story_composer.save_sent
             || self.session().is_some_and(|session| {
                 matches!(session.story_post.outcome, StoryPostOutcome::Posting { .. })
             });
+
+        // Phase 9.5: "Post as" picker — the user's own stories plus the
+        // channels/supergroups from `getChatsToPostStories`. Disabled
+        // while a check/post is in flight so the eligibility answer
+        // always matches the target chat.
+        let post_as: Option<AnyElement> = (!is_edit).then(|| {
+            let as_chats: Vec<(i64, String)> = self
+                .session()
+                .map(|session| {
+                    session
+                        .story_post_as_chats
+                        .iter()
+                        .map(|id| {
+                            let title = session
+                                .chats
+                                .get(id)
+                                .map(|chat| chat.title.clone())
+                                .unwrap_or_else(|| format!("Chat {id}"));
+                            (*id, title)
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            let mut picker = div().flex().flex_col().gap_1();
+            let selected = self.story_composer.as_chat_id.is_none();
+            picker = picker.child(
+                Button::new("story-composer-as-self")
+                    .label(if selected { "☑ Myself" } else { "☐ Myself" })
+                    .ghost()
+                    .text_color(rgb(0xffffff))
+                    .disabled(busy)
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.story_composer.as_chat_id = None;
+                        this.story_composer.local_error = None;
+                        cx.notify();
+                    })),
+            );
+            for (chat_id, title) in as_chats {
+                let selected = self.story_composer.as_chat_id == Some(chat_id);
+                picker = picker.child(
+                    Button::new(format!("story-composer-as-{chat_id}"))
+                        .label(if selected {
+                            format!("☑ {title}")
+                        } else {
+                            format!("☐ {title}")
+                        })
+                        .ghost()
+                        .text_color(rgb(0xffffff))
+                        .disabled(busy)
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.story_composer.as_chat_id = Some(chat_id);
+                            this.story_composer.local_error = None;
+                            cx.notify();
+                        })),
+                );
+            }
+            div()
+                .flex()
+                .flex_col()
+                .gap_1()
+                .child(div().text_xs().text_color(rgb(0x8b949e)).child("Post as"))
+                .child(picker)
+                .into_any_element()
+        });
 
         div()
             .id("story-composer-overlay")
@@ -33432,12 +34131,7 @@ impl QuillApp {
                             .flex()
                             .items_center()
                             .justify_between()
-                            .child(
-                                div()
-                                    .font_semibold()
-                                    .text_color(rgb(0xffffff))
-                                    .child("New story"),
-                            )
+                            .child(div().font_semibold().text_color(rgb(0xffffff)).child(title))
                             .child(
                                 div()
                                     .id("story-composer-close")
@@ -33469,7 +34163,15 @@ impl QuillApp {
                                         div()
                                             .text_xs()
                                             .text_color(rgb(0x8b949e))
-                                            .child(format!("{} file", kind.label())),
+                                            // Phase 9.5: in edit mode the
+                                            // path is optional — empty
+                                            // keeps the current media.
+                                            .child(if is_edit {
+                                                "Replace media (optional — empty keeps the current)"
+                                                    .to_string()
+                                            } else {
+                                                format!("{} file", kind.label())
+                                            }),
                                     )
                                     .child(Textarea::new(&self.story_composer_path).h(px(40.)))
                                     .child(
@@ -33478,52 +34180,78 @@ impl QuillApp {
                                     .child(Textarea::new(&self.story_composer_caption).h(px(64.))),
                             ),
                     )
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(rgb(0x8b949e))
-                            .child("Who can see it"),
-                    )
-                    .child(privacy)
-                    .when_some(users_picker, |this, picker| this.child(picker))
+                    // Phase 9.5: the "post as" picker (new posts and
+                    // reposts only); privacy is hidden in edit mode and
+                    // for channel/supergroup posts (server-ignored there
+                    // — `postStory`, td_api.tl:13715).
+                    .when_some(post_as, |this, picker| this.child(picker))
+                    .when(show_privacy, |this| {
+                        this.child(
+                            div()
+                                .text_xs()
+                                .text_color(rgb(0x8b949e))
+                                .child("Who can see it"),
+                        )
+                        .child(privacy)
+                    })
+                    .when_some(users_picker.filter(|_| show_privacy), |this, picker| {
+                        this.child(picker)
+                    })
                     // Phase 9.4: expiry, areas (link + suggested-reaction
                     // stickers), and the post-to-chat-page /
-                    // protect-content toggles.
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(rgb(0x8b949e))
-                            .child("Expires after"),
-                    )
-                    .child(expiry)
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(rgb(0x8b949e))
-                            .child("Story stickers"),
-                    )
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(rgb(0x8b949e))
-                            .child("Link sticker URL"),
-                    )
-                    .child(Textarea::new(&self.story_composer_link).h(px(32.)))
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(rgb(0x8b949e))
-                            .child("Reaction stickers (emoji, space-separated)"),
-                    )
-                    .child(Textarea::new(&self.story_composer_reaction).h(px(32.)))
-                    .child(div().text_xs().text_color(rgb(0x8b949e)).child("Options"))
-                    .child(toggles)
+                    // protect-content toggles. Phase 9.5: expiry and the
+                    // toggles have no `editStory` fields — hidden in edit
+                    // mode; areas only apply when the media is replaced.
+                    .when(!is_edit, |this| {
+                        this.child(
+                            div()
+                                .text_xs()
+                                .text_color(rgb(0x8b949e))
+                                .child("Expires after"),
+                        )
+                        .child(expiry)
+                    })
+                    .when(areas_editable, |this| {
+                        this.child(
+                            div()
+                                .text_xs()
+                                .text_color(rgb(0x8b949e))
+                                .child("Story stickers"),
+                        )
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(rgb(0x8b949e))
+                                .child("Link sticker URL"),
+                        )
+                        .child(Textarea::new(&self.story_composer_link).h(px(32.)))
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(rgb(0x8b949e))
+                                .child("Reaction stickers (emoji, space-separated)"),
+                        )
+                        .child(Textarea::new(&self.story_composer_reaction).h(px(32.)))
+                    })
+                    .when(!is_edit, |this| {
+                        this.child(div().text_xs().text_color(rgb(0x8b949e)).child("Options"))
+                            .child(toggles)
+                    })
                     .when_some(status, |this, status| {
                         this.child(div().text_sm().text_color(rgb(0xffffff)).child(status))
                     })
                     .child(
                         Button::new("story-composer-post")
-                            .label(if busy { "Working…" } else { "Post story" })
+                            // Phase 9.5: the button follows the composer mode.
+                            .label(if busy {
+                                "Working…"
+                            } else if is_edit {
+                                "Save story"
+                            } else if is_repost {
+                                "Repost story"
+                            } else {
+                                "Post story"
+                            })
                             .disabled(busy)
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.story_composer_post(cx);
@@ -34539,6 +35267,43 @@ impl Render for QuillApp {
             })
         {
             self.story_composer.post_sent = false;
+        }
+        // Phase 9.5: `editStory` was sent (`save_sent`) — once
+        // `story_manage.pending` clears, success closes the composer
+        // (the edited story arrives via `updateStory`); failure
+        // surfaces `story_manage.error` in the composer.
+        if self.story_composer.save_sent
+            && self
+                .session()
+                .is_some_and(|session| !session.story_manage.pending)
+        {
+            self.story_composer.save_sent = false;
+            let failed = self.session().and_then(|s| s.story_manage.error.clone());
+            match failed {
+                Some(error) => self.story_composer.local_error = Some(error),
+                None => self.close_story_composer(cx),
+            }
+        }
+        // Phase 9.5: the viewer cover editor / privacy editor sent a
+        // management call — once `story_manage.pending` clears, close
+        // the panel on success or leave it open showing the error.
+        if self.story_cover_sent && self.session().is_some_and(|s| !s.story_manage.pending) {
+            self.story_cover_sent = false;
+            if self
+                .session()
+                .is_some_and(|s| s.story_manage.error.is_none())
+            {
+                self.story_cover_target = None;
+            }
+        }
+        if self.story_privacy_sent && self.session().is_some_and(|s| !s.story_manage.pending) {
+            self.story_privacy_sent = false;
+            if self
+                .session()
+                .is_some_and(|s| s.story_manage.error.is_none())
+            {
+                self.story_privacy_edit = None;
+            }
         }
         // Phase 9.2: a story that vanished from the cache while being
         // viewed was deleted (`updateStoryDeleted`) — close the viewer.
@@ -38146,6 +38911,28 @@ fn apply_ready_story_post(session: &mut Session, sink: &Arc<MemorySink>, seq: &A
         r#"{"@type":"availableReactions","top_reactions":[{"@type":"availableReaction","type":{"@type":"reactionTypeEmoji","emoji":"❤"},"needs_premium":false},{"@type":"availableReaction","type":{"@type":"reactionTypeEmoji","emoji":"👍"},"needs_premium":false},{"@type":"availableReaction","type":{"@type":"reactionTypeEmoji","emoji":"🔥"},"needs_premium":false},{"@type":"availableReaction","type":{"@type":"reactionTypeEmoji","emoji":"🎉"},"needs_premium":false},{"@type":"availableReaction","type":{"@type":"reactionTypeEmoji","emoji":"😮"},"needs_premium":false},{"@type":"availableReaction","type":{"@type":"reactionTypeEmoji","emoji":"😢"},"needs_premium":false},{"@type":"availableReaction","type":{"@type":"reactionTypeEmoji","emoji":"😂"},"needs_premium":false},{"@type":"availableReaction","type":{"@type":"reactionTypeEmoji","emoji":"👏"},"needs_premium":false}],"recent_reactions":[],"popular_reactions":[],"allow_custom_emoji":false,"are_tags":false,"unavailability_reason":null}"#.to_string(),
     ];
     for json in jsons {
+        if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
+            session.apply(owned);
+        }
+    }
+}
+
+/// `ReadyStoryEdit` fixture (Phase 9.5): Demo chat A's photo story
+/// (id 5) is an editable own story — `can_be_edited`, `is_edited`, a
+/// `storyRepostInfo` public origin (chat 12, story 6), link +
+/// suggested-reaction areas, and close-friends privacy. The demo opens
+/// the composer in edit mode, which prefills caption + area inputs
+/// from this seed.
+fn apply_ready_story_edit(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let photo_file = demo_file_json(91, &demo_thumb_png_path(), true);
+    let tray = format!(
+        r#"{{"@type":"updateChatActiveStories","active_stories":{{"@type":"chatActiveStories","chat_id":11,"list":{{"@type":"storyListMain"}},"order":"30","can_be_archived":false,"max_read_story_id":4,"stories":[{{"@type":"storyInfo","story_id":5,"date":1700000000,"is_for_close_friends":false,"is_live":false}}]}}}}"#
+    );
+    let story = format!(
+        r#"{{"@type":"story","id":5,"poster_chat_id":11,"date":1700000000,"is_edited":true,"can_be_edited":true,"can_be_deleted":true,"can_be_forwarded":true,"can_set_privacy_settings":true,"repost_info":{{"@type":"storyRepostInfo","origin":{{"@type":"storyOriginPublicStory","chat_id":12,"story_id":6}},"is_content_modified":false}},"privacy_settings":{{"@type":"storyPrivacySettingsCloseFriends"}},"content":{{"@type":"storyContentPhoto","photo":{{"@type":"photo","has_stickers":false,"sizes":[{{"@type":"photoSize","type":"y","photo":{photo_file},"width":960,"height":1280,"progressive_sizes":[]}}]}}}},"areas":[{{"@type":"storyArea","position":{{"@type":"storyAreaPosition","x_percentage":35.0,"y_percentage":80.0,"width_percentage":30.0,"height_percentage":9.0,"rotation_angle":0.0,"corner_radius_percentage":20.0}},"type":{{"@type":"storyAreaTypeLink","url":"https://t.me/quill"}}}},{{"@type":"storyArea","position":{{"@type":"storyAreaPosition","x_percentage":50.0,"y_percentage":50.0,"width_percentage":20.0,"height_percentage":20.0,"rotation_angle":0.0,"corner_radius_percentage":50.0}},"type":{{"@type":"storyAreaTypeSuggestedReaction","reaction_type":{{"@type":"reactionTypeEmoji","emoji":"🔥"}},"total_count":1,"is_dark":false,"is_flipped":false}}}}],"caption":{{"@type":"formattedText","text":"Phase 9.5: edit posted stories — caption, areas, cover and privacy.","entities":[]}}}}"#,
+    );
+    for json in [tray, story] {
         if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
             session.apply(owned);
         }

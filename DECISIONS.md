@@ -5095,6 +5095,158 @@ ntgcalls v3.0.0 prebuilt lib, bindings verified against
   - Animated/sticker profile photos (`inputChatPhotoAnimation`, `inputChatPhotoSticker`), public profile photos (`is_public=true` contexts), photo crop/rotate UI.
   - Bio line-feed enforcement client-side (server-enforced "without line feeds").
   - Profile photo history / "suggested photos" from recent pictures.
+
+
+
+## Phase 9.5 — Manage posted stories (2026-09-28)
+
+- **Rationale:** Phases 9.1–9.4 made stories viewable, reactable, and
+  postable. Posted stories still couldn't be managed: no edit, no cover
+  change for videos, no privacy change, no posting as a channel, and no
+  repost. This slice wires the management constructors against the
+  story's own capability flags (the schema gates edit/privacy on
+  `story.can_be_edited` / `story.can_set_privacy_settings` — see below),
+  so the viewer only offers actions the server will accept.
+- **Schema (1.8.67, verified verbatim in `schema/td_api.tl` — no invented
+  constructors/fields):**
+  - `getChatsToPostStories = Chats;` (line 13698);
+    `canPostStory chat_id:int53 = CanPostStoryResult;` (line 13702).
+  - `postStory chat_id:int53 content:InputStoryContent
+    areas:inputStoryAreas caption:formattedText
+    privacy_settings:StoryPrivacySettings album_ids:vector<int32>
+    active_period:int32 from_story_full_id:storyFullId
+    is_posted_to_chat_page:Bool protect_content:Bool = Story;` (line
+    13715) — the repost mechanism is `from_story_full_id` ("Full
+    identifier of the original story, which content was used to create
+    the story; pass null if the story isn't repost of another story",
+    line 13713; the `storyFullId` type is at line 6766).
+  - `editStory story_poster_chat_id:int53 story_id:int32
+    content:InputStoryContent areas:inputStoryAreas
+    caption:formattedText = Ok;` (line 13732); comments: "Changes
+    content and caption of a story. Can be called only if
+    story.can_be_edited == true" (line 13726); "@content New content of
+    the story; pass null to keep the current content" (line 13729);
+    "@areas New clickable rectangle areas to be shown on the story
+    media; pass null to keep the current areas. Areas can't be edited if
+    story content isn't changed" (line 13730); "@caption New story
+    caption; pass null to keep the current caption" (line 13731).
+  - `editStoryCover story_poster_chat_id:int53 story_id:int32
+    cover_frame_timestamp:double = Ok;` (line 13738); comment: "New
+    timestamp of the frame, which will be used as video thumbnail" (line
+    13737).
+  - `setStoryPrivacySettings story_id:int32
+    privacy_settings:StoryPrivacySettings = Ok;` (line 13743); comment:
+    "Changes privacy settings of a story. The method can be called only
+    for stories posted on behalf of the current user and if
+    story.can_set_privacy_settings == true" (lines 13740–13741).
+  - Story fields (line 6742) — the management gates are parsed from the
+    `story` object itself: `is_edited:Bool`, `can_be_edited:Bool`,
+    `can_be_forwarded:Bool`, `can_set_privacy_settings:Bool`,
+    `repost_info:storyRepostInfo`, `privacy_settings:StoryPrivacySettings`,
+    `areas:vector<storyArea>`, `caption:formattedText` (full line 6742).
+  - `storyRepostInfo origin:StoryOrigin is_content_modified:Bool =
+    StoryRepostInfo;` (line 6705);
+    `storyOriginPublicStory chat_id:int53 story_id:int32 = StoryOrigin;`
+    (line 6696); `storyOriginHiddenUser poster_name:string =
+    StoryOrigin;` (line 6699);
+    `storyInteractionTypeRepost story:story = StoryInteractionType;`
+    (line 6795).
+  - Area types for edit prefill (same as the 9.4 posting surface):
+    `storyArea position:storyAreaPosition type:StoryAreaType = StoryArea;`
+    (line 6566);
+    `storyAreaTypeSuggestedReaction reaction_type:ReactionType
+    total_count:int32 is_dark:Bool is_flipped:Bool = StoryAreaType;`
+    (line 6546); `storyAreaTypeLink url:string = StoryAreaType;` (line
+    6552). Only link + suggested-reaction areas are prefilled/edited —
+    they are the only area types the composer can express with plain
+    text inputs (same restriction as 9.4).
+  - Admin rights (Telegram X reference, `RightStories` /
+    `RightStoriesPost` / `RightStoriesEdit` / `RightStoriesDelete` —
+    chat rights `canPostStories` / `canEditStories` /
+    `canDeleteStories` map to TDLib `chatPermissions`): Quill's
+    existing admin-rights UI already exposes and serializes these three
+    story rights; this slice does not duplicate them. Posting/editing
+    *as* a channel is additionally gated at request time by
+    `canPostStory` for the target chat (line 13702).
+- **Parser (`src/telegram/envelope.rs`).** `ParsedStory` gains
+  `can_be_edited`, `can_set_privacy_settings`, `can_be_forwarded`,
+  `is_edited`, `repost_info: Option<StoryRepostInfoView>`
+  (`StoryOriginView::PublicStory { chat_id, story_id }` /
+  `HiddenUser { poster_name }`), `privacy_settings` (raw JSON block for
+  round-tripping into the composer), `area_link_url` and
+  `area_reaction_emojis` (first supported link/reaction areas only —
+  location/venue/message/weather/gift areas are intentionally ignored).
+  Unit tests: defaults, gates + public origin, hidden-user + unsupported
+  origins, link/reaction prefill.
+- **Composer (`src/story_composer.rs`).** Gains edit/repost/post-as
+  state: `edit_target: Option<(ChatId, i32)>`, `repost_source:
+  Option<(i64, i32)>`, `as_chat_id: Option<ChatId>`, `save_sent: bool`
+  (the edit→privacy two-step). `open_edit` prefills caption/link/
+  reaction from the cached story and leaves the path empty (null content
+  → keep content, per the schema); `open_repost` records the source for
+  `from_story_full_id`; `StoryPrivacy::from_settings_json` round-trips
+  the raw `privacy_settings` block back into the four privacy modes
+  (unknown → Everyone). Unit tests: privacy round-trip, mode shapes.
+- **Requests (`src/telegram/requests.rs`).** New builders
+  `get_chats_to_post_stories`, `edit_story` (null content when the path
+  is empty → keep content; areas sent only when replacement content is
+  supplied, per "Areas can't be edited if story content isn't changed"),
+  `edit_story_cover`, `set_story_privacy_settings`; `post_story` gains
+  optional `from_story_full_id` (repost). Shape tests pin all five.
+- **Reducer (`src/state.rs`).** New `RequestPurpose::{EditStory,
+  EditStoryCover, SetStoryPrivacySettings, GetChatsToPostStories}` and
+  `StoryManageState { pending, error }` with a single management op in
+  flight; `GetChatsToPostStories` fills `Session::story_post_as_chats`.
+  `ok` clears pending; `error` clears pending and surfaces a sanitized
+  failure string (never raw JSON). Reducer test: success/failure
+  transitions + post-as chats.
+- **Driver (`src/connect.rs`).** `check_can_post_story` /
+  `post_story` take the target `ChatId`; new `get_chats_to_post_stories`,
+  `edit_story`, `edit_story_cover`, `set_story_privacy_settings`.
+  Edit/cover/privacy are **gated on the cached authoritative story
+  flags** (`can_be_edited`, `can_set_privacy_settings`) and return
+  `InvalidRequest` when the story is unknown or the flag is false — the
+  UI only shows the buttons when the flags are true, so this is a
+  second line of defense, not the primary gate. Mocked-sender driver
+  test: gating + request output.
+- **UI (`src/ui/mod.rs`).** Viewer gains flag-gated buttons for own
+  manageable stories: **Edit** (`can_be_edited`), **Cover** (video +
+  `can_be_edited`), **Privacy** (`can_set_privacy_settings`), **Repost**
+  (`can_be_forwarded` — forwards via `from_story_full_id`). Edit reuses
+  the posting composer (`edit_target` set; title "Edit story"; path
+  empty with "Leave empty to keep the current media"); the
+  **post-as picker** lists `story_post_as_chats` (from
+  `getChatsToPostStories`, refreshed when the composer opens) and the
+  privacy selector hides for channel/supergroup destinations (TDLib
+  ignores it there). Cover editor is a timestamp (seconds) input for
+  video stories; the privacy editor reuses the four privacy modes +
+  contact picker and round-trips the story's current settings. Pending
+  state and sanitized errors surface in the composer/viewer. Repost
+  opens the composer with the source attached; posting it calls
+  `postStory` with `from_story_full_id`. The viewer also shows the
+  repost origin ("Reposted from …" / hidden-user name) and an
+  "edited" marker. Screenshot proof:
+  `docs/screenshots/ready-story-edit.png` (`quill --screenshot-demo
+  ready-story-edit` — seeded editable own story, composer in edit mode
+  with caption + link + reaction prefilled).
+- **Not verifiable without live Telegram:** real edit/cover/privacy
+  round-trips against server validation (e.g. area edits rejected when
+  content isn't changed — we follow the schema but the server is the
+  arbiter); real `getChatsToPostStories` channel list; real repost
+  rendering on other clients.
+- **Out of this slice (→ future):** story albums (`album_ids` fixed
+  `[]`); archive UI (`storyListArchive`, line 6690 —
+  `getChatArchivedStories`); pinned stories on the chat page
+  (`toggleStoryIsPostedToChatPage` for already-posted stories, line
+  13749; `setChatPinnedStories`); story notification settings (the
+  `chatNotificationSettings` story fields — `mute_stories`,
+  `story_sound_id`, `show_story_poster`, lines 3354–3358); restriction
+  notices (story restriction reasons on content); live stories
+  (`storyInfo.is_live`, line 6772 — posting and viewing); stealth mode
+  (`activateStoryStealthMode`, line 13839, `premiumStoryFeatureStealthMode`,
+  line 8205, `updateStoryStealthMode`, lines 10917–10919); viewers list
+  (`getStoryInteractions`); report story (`reportStory`, line 13835).
+
 ## Slice media-shared-gallery — SHARED-MEDIA GALLERY + PER-TAB EMPTY STATES (2026-09-28)
 
 - **Schema (pinned TDLib 1.8.67, `schema/td_api.tl`, verified verbatim — concept-level across all filter constructors, never a single-name grep):**

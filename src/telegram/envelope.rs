@@ -4429,13 +4429,38 @@ pub struct StoryAvailableReactionView {
     pub needs_premium: bool,
 }
 
+/// Phase 9.5: `storyRepostInfo` — the original story this story was
+/// reposted from (TDLib 1.8.67, `schema/td_api.tl:6705`). `None` when the
+/// story isn't a repost (`repost_info: null`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StoryRepostInfoView {
+    pub origin: StoryOriginView,
+    pub is_content_modified: bool,
+}
+
+/// Phase 9.5: `StoryOrigin` (TDLib 1.8.67, `schema/td_api.tl:6692`) —
+/// where a reposted story came from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StoryOriginView {
+    /// `storyOriginPublicStory` (`td_api.tl:6696`) — a known public story.
+    PublicStory { chat_id: i64, story_id: i32 },
+    /// `storyOriginHiddenUser` (`td_api.tl:6699`) — an unknown poster's name.
+    HiddenUser { poster_name: String },
+}
+
 /// Phase 9.1: `story` — the full story object (TDLib 1.8.67,
 /// `schema/td_api.tl:6742`). Kept: ids, `date`, `content`, `caption`;
 /// Phase 9.2 keeps: `chosen_reaction_type` (the user's own reaction),
 /// `interaction_info` (view/forward/reaction counts), and the
 /// `can_be_deleted` / `can_be_replied` / `can_get_interactions` gates.
-/// Dropped (see DECISIONS.md Phase 9.1): repost info, privacy settings,
-/// clickable areas, album ids, and the other `is_*` / `can_be_*` flags.
+/// Phase 9.5 keeps: `can_be_edited` / `can_set_privacy_settings` /
+/// `can_be_forwarded` (edit / privacy / repost gates — the server folds
+/// admin `can_post_stories` / `can_edit_stories` / `can_delete_stories`
+/// rights into these), `is_edited`, `repost_info`, and the link +
+/// suggested-reaction area texts (edit-surface prefill; other area types
+/// stay out, same call as the 9.4 composer). Dropped: `privacy_settings`
+/// (parsed separately via `StoryPrivacy::from_settings_json` only where
+/// the privacy editor needs it), album ids, and the other `is_*` flags.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParsedStory {
     pub id: i32,
@@ -4460,6 +4485,32 @@ pub struct ParsedStory {
     /// Phase 9.2: `story.can_get_interactions` — the interaction counters are
     /// the user's own.
     pub can_get_interactions: bool,
+    /// Phase 9.5: `story.can_be_edited` — gates the viewer Edit button
+    /// (`editStory`, `schema/td_api.tl:13732`).
+    pub can_be_edited: bool,
+    /// Phase 9.5: `story.can_set_privacy_settings` — gates the viewer
+    /// Privacy editor (`setStoryPrivacySettings`, `td_api.tl:13743`).
+    pub can_set_privacy_settings: bool,
+    /// Phase 9.5: `story.can_be_forwarded` — gates the viewer Repost button
+    /// (`postStory` with `from_story_full_id`, `td_api.tl:13715`; the
+    /// schema comment: "True, if the story can be forwarded as a message
+    /// or reposted as a story").
+    pub can_be_forwarded: bool,
+    /// Phase 9.5: `story.is_edited` — the viewer shows an "edited" marker.
+    pub is_edited: bool,
+    /// Phase 9.5: `story.repost_info` — the viewer shows "Reposted from …".
+    pub repost_info: Option<StoryRepostInfoView>,
+    /// Phase 9.5: raw `privacy_settings` (`StoryPrivacySettings`,
+    /// `td_api.tl:6742`) — the privacy editor parses it back into
+    /// `StoryPrivacy` for the prefill.
+    pub privacy_settings: Option<serde_json::Value>,
+    /// Phase 9.5: first `storyAreaTypeLink` URL (`td_api.tl:6552`) —
+    /// prefills the edit surface's link input.
+    pub area_link_url: Option<String>,
+    /// Phase 9.5: `storyAreaTypeSuggestedReaction` emoji (`td_api.tl:6546`,
+    /// `reactionTypeEmoji` only) — prefills the edit surface's reaction
+    /// input.
+    pub area_reaction_emojis: Vec<String>,
 }
 
 fn parse_story_list(value: Option<&Value>) -> Option<StoryListView> {
@@ -4554,6 +4605,9 @@ fn parse_story(value: &Value) -> Option<(ParsedStory, Vec<ParsedFile>)> {
     let mut files = Vec::new();
     let content = parse_story_content(value.get("content"), &mut files);
     files.retain(|file| file.id.0 != 0);
+    // Phase 9.5: link + suggested-reaction area texts for the edit
+    // surface prefill.
+    let (area_link_url, area_reaction_emojis) = parse_story_area_texts(value.get("areas"));
     Some((
         ParsedStory {
             id,
@@ -4576,9 +4630,99 @@ fn parse_story(value: &Value) -> Option<(ParsedStory, Vec<ParsedFile>)> {
                 .get("can_get_interactions")
                 .and_then(Value::as_bool)
                 .unwrap_or(false),
+            can_be_edited: value
+                .get("can_be_edited")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            can_set_privacy_settings: value
+                .get("can_set_privacy_settings")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            can_be_forwarded: value
+                .get("can_be_forwarded")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            is_edited: value
+                .get("is_edited")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            repost_info: parse_story_repost_info(value.get("repost_info")),
+            privacy_settings: value.get("privacy_settings").cloned(),
+            area_link_url,
+            area_reaction_emojis,
         },
         files,
     ))
+}
+
+/// Phase 9.5: `storyRepostInfo` (`schema/td_api.tl:6705`) — `None` for
+/// null / missing info or an unknown origin type.
+fn parse_story_repost_info(value: Option<&Value>) -> Option<StoryRepostInfoView> {
+    let info = value.filter(|value| !value.is_null())?;
+    let origin = info.get("origin").filter(|origin| !origin.is_null())?;
+    let origin = match origin.get("@type").and_then(Value::as_str) {
+        Some("storyOriginPublicStory") => StoryOriginView::PublicStory {
+            chat_id: int53(origin.get("chat_id")).ok()?,
+            story_id: origin.get("story_id").and_then(Value::as_i64).unwrap_or(0) as i32,
+        },
+        Some("storyOriginHiddenUser") => StoryOriginView::HiddenUser {
+            poster_name: origin
+                .get("poster_name")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string(),
+        },
+        _ => return None,
+    };
+    Some(StoryRepostInfoView {
+        origin,
+        is_content_modified: info
+            .get("is_content_modified")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+    })
+}
+
+/// Phase 9.5: pull the link URL + suggested-reaction emoji out of a
+/// posted story's `areas` (output `storyArea`, `schema/td_api.tl:6566`)
+/// so the edit surface can prefill the composer's text inputs. Other
+/// area types stay out — same call as the 9.4 composer (text inputs can
+/// only express link + reaction areas).
+fn parse_story_area_texts(value: Option<&Value>) -> (Option<String>, Vec<String>) {
+    let mut link_url = None;
+    let mut reaction_emojis = Vec::new();
+    let areas = value.and_then(Value::as_array);
+    for area in areas.into_iter().flatten() {
+        let area_type = area.get("type").filter(|t| !t.is_null());
+        match area_type
+            .and_then(|t| t.get("@type"))
+            .and_then(Value::as_str)
+        {
+            // `storyAreaTypeLink` (td_api.tl:6552) — first one wins.
+            Some("storyAreaTypeLink") if link_url.is_none() => {
+                link_url = area_type
+                    .and_then(|t| t.get("url"))
+                    .and_then(Value::as_str)
+                    .map(str::to_string);
+            }
+            // `storyAreaTypeSuggestedReaction` (td_api.tl:6546) —
+            // emoji reactions only, like the 9.2 chosen-reaction parse.
+            Some("storyAreaTypeSuggestedReaction") => {
+                let emoji = area_type
+                    .and_then(|t| t.get("reaction_type"))
+                    .filter(|t| !t.is_null())
+                    .filter(|t| t.get("@type").and_then(Value::as_str) == Some("reactionTypeEmoji"))
+                    .and_then(|t| t.get("emoji"))
+                    .and_then(Value::as_str)
+                    .filter(|emoji| !emoji.is_empty());
+                if let Some(emoji) = emoji {
+                    reaction_emojis.push(emoji.to_string());
+                }
+            }
+            _ => {}
+        }
+    }
+    (link_url, reaction_emojis)
 }
 
 /// Phase 9.2: `chosen_reaction_type` on a `story` — returns the emoji when
@@ -14369,6 +14513,97 @@ mod channel_envelope_tests {
                 assert!(!story.can_be_deleted);
                 assert!(!story.can_be_replied);
                 assert!(!story.can_get_interactions);
+                // Phase 9.5: new gates default off, repost info absent.
+                assert!(!story.can_be_edited);
+                assert!(!story.can_set_privacy_settings);
+                assert!(!story.can_be_forwarded);
+                assert!(!story.is_edited);
+                assert_eq!(story.repost_info, None);
+                assert_eq!(story.area_link_url, None);
+                assert!(story.area_reaction_emojis.is_empty());
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn story_repost_info_and_manage_gates_parsed() {
+        // Phase 9.5: `repost_info` (storyRepostInfo, td_api.tl:6705) with
+        // a public-story origin (td_api.tl:6696), the edit / privacy /
+        // forward gates, and `is_edited` (td_api.tl:6742).
+        let json = r#"{"@type":"story","id":8,"poster_chat_id":11,"date":1,"is_edited":true,"can_be_edited":true,"can_be_forwarded":true,"can_set_privacy_settings":true,"repost_info":{"@type":"storyRepostInfo","origin":{"@type":"storyOriginPublicStory","chat_id":22,"story_id":3},"is_content_modified":false},"content":{"@type":"storyContentUnsupported"},"caption":{"@type":"formattedText","text":"","entities":[]}}"#;
+        let env = parse_envelope(json).unwrap();
+        match env.payload {
+            EnvelopePayload::Story { story, .. } => {
+                assert!(story.can_be_edited);
+                assert!(story.can_be_forwarded);
+                assert!(story.can_set_privacy_settings);
+                assert!(story.is_edited);
+                let repost = story.repost_info.expect("repost_info");
+                assert_eq!(
+                    repost.origin,
+                    StoryOriginView::PublicStory {
+                        chat_id: 22,
+                        story_id: 3
+                    }
+                );
+                assert!(!repost.is_content_modified);
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn story_repost_hidden_user_origin_parsed() {
+        // `storyOriginHiddenUser` (td_api.tl:6699); unknown origin types
+        // and null repost_info parse to None.
+        let json = |origin: &str| {
+            format!(
+                r#"{{"@type":"story","id":8,"poster_chat_id":11,"date":1,"repost_info":{{"@type":"storyRepostInfo","origin":{origin},"is_content_modified":true}},"content":{{"@type":"storyContentUnsupported"}},"caption":{{"@type":"formattedText","text":"","entities":[]}}}}"#,
+            )
+        };
+        let env = parse_envelope(&json(
+            r#"{"@type":"storyOriginHiddenUser","poster_name":"Mystery Poster"}"#,
+        ))
+        .unwrap();
+        match env.payload {
+            EnvelopePayload::Story { story, .. } => {
+                let repost = story.repost_info.expect("repost_info");
+                assert_eq!(
+                    repost.origin,
+                    StoryOriginView::HiddenUser {
+                        poster_name: "Mystery Poster".into()
+                    }
+                );
+                assert!(repost.is_content_modified);
+            }
+            other => panic!("{other:?}"),
+        }
+        for repost_info in [
+            "null".to_string(),
+            r#"{"@type":"storyRepostInfo","origin":{"@type":"storyOriginNope"},"is_content_modified":false}"#.to_string(),
+        ] {
+            let env = parse_envelope(&json(&repost_info)).unwrap();
+            match env.payload {
+                EnvelopePayload::Story { story, .. } => {
+                    assert_eq!(story.repost_info, None, "repost {repost_info}");
+                }
+                other => panic!("{other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn story_area_link_and_reaction_texts_prefill_edit() {
+        // Phase 9.5: output `storyArea` link (td_api.tl:6552) and
+        // suggested-reaction (td_api.tl:6546) areas surface as the edit
+        // surface's text inputs; other area types are ignored.
+        let json = r#"{"@type":"story","id":8,"poster_chat_id":11,"date":1,"areas":[{"@type":"storyArea","position":{"@type":"storyAreaPosition","x_percentage":1.0,"y_percentage":1.0,"width_percentage":1.0,"height_percentage":1.0,"rotation_angle":0.0,"corner_radius_percentage":0.0},"type":{"@type":"storyAreaTypeLink","url":"https://t.me/quill"}},{"@type":"storyArea","position":{"@type":"storyAreaPosition","x_percentage":1.0,"y_percentage":1.0,"width_percentage":1.0,"height_percentage":1.0,"rotation_angle":0.0,"corner_radius_percentage":0.0},"type":{"@type":"storyAreaTypeSuggestedReaction","reaction_type":{"@type":"reactionTypeEmoji","emoji":"🔥"},"total_count":2,"is_dark":false,"is_flipped":false}},{"@type":"storyArea","position":{"@type":"storyAreaPosition","x_percentage":1.0,"y_percentage":1.0,"width_percentage":1.0,"height_percentage":1.0,"rotation_angle":0.0,"corner_radius_percentage":0.0},"type":{"@type":"storyAreaTypeWeather","temperature":21.0,"emoji":"☀","background_color":0}}],"content":{"@type":"storyContentUnsupported"},"caption":{"@type":"formattedText","text":"","entities":[]}}"#;
+        let env = parse_envelope(json).unwrap();
+        match env.payload {
+            EnvelopePayload::Story { story, .. } => {
+                assert_eq!(story.area_link_url.as_deref(), Some("https://t.me/quill"));
+                assert_eq!(story.area_reaction_emojis, vec!["🔥".to_string()]);
             }
             other => panic!("{other:?}"),
         }
