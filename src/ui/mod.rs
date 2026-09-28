@@ -38156,7 +38156,11 @@ impl QuillApp {
             .map(PathBuf::from);
         let mut prev_outgoing: Option<bool> = None;
         let mut row_chrome = |message: &HistoryMessage| {
-            let show_sender = prev_outgoing != Some(message.is_outgoing);
+            // Service rows (e.g. screenshot notices) must never collapse the
+            // sender: the row chrome renders "{sender} took a screenshot",
+            // and collapsing to None would show "Someone" instead.
+            let show_sender = prev_outgoing != Some(message.is_outgoing)
+                || matches!(message.content, MessageContent::ScreenshotTaken);
             prev_outgoing = Some(message.is_outgoing);
             let sender = if !message.is_outgoing && show_sender {
                 Some(sender_name.to_string())
