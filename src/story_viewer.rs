@@ -17,6 +17,100 @@ use crate::ids::{ChatId, FileId};
 use crate::telegram::envelope::{ChatActiveStoriesView, ParsedStory, StoryContentView};
 use crate::text::TextEntity;
 use crate::voice::format_voice_duration;
+use std::time::{Duration, Instant};
+
+/// Phase 9.6: how long a photo (or live/unsupported placeholder) story stays
+/// on screen before auto-advance. A client-side constant — the TDLib schema
+/// carries no photo duration (`storyContentPhoto photo:photo = StoryContent`,
+/// `schema/td_api.tl:6654`); video stories use their own
+/// `storyVideo duration:double` (`schema/td_api.tl:6633`). Matches Telegram
+/// Desktop: `constexpr auto kPhotoDuration = 5 * crl::time(1000);`
+/// (`media_stories_controller.cpp:72`) and Unigram's `StoryContentPhotoTimer`
+/// (`TimeSpan.FromSeconds(5)`, `StoryContent.xaml.cs:2082`). Telegram Android
+/// uses 10s (`IMAGE_LIVE_TIME = 10_000`, `PeerStoriesView.java:226`) —
+/// Desktop wins as the designated secondary reference for this client.
+pub const STORY_PHOTO_DURATION: Duration = Duration::from_secs(5);
+
+/// Phase 9.6: deterministic playback clock for the viewer's current story.
+/// The wall clock enters only as the `now` argument, so tests drive it
+/// without sleeping. Pausing shifts the start anchor (like Telegram
+/// Desktop's `PhotoPlayback::togglePaused`), freezing elapsed time.
+#[derive(Debug, Clone, Default)]
+pub struct StoryPlayback {
+    started: Option<Instant>,
+    paused_since: Option<Instant>,
+}
+
+impl StoryPlayback {
+    /// Full display duration of one item: the video's own duration, or the
+    /// photo constant. A non-positive video duration falls back to the photo
+    /// constant (corrupt fixture data must not freeze the viewer).
+    pub fn duration(item: &StoryViewerItem) -> Duration {
+        match item.kind {
+            StoryViewerKind::Video => item
+                .duration_secs
+                .filter(|secs| *secs > 0)
+                .map(|secs| Duration::from_secs(secs as u64))
+                .unwrap_or(STORY_PHOTO_DURATION),
+            _ => STORY_PHOTO_DURATION,
+        }
+    }
+
+    /// (Re)start the clock for the current story.
+    pub fn start(&mut self, now: Instant) {
+        self.started = Some(now);
+        self.paused_since = None;
+    }
+
+    pub fn stop(&mut self) {
+        self.started = None;
+        self.paused_since = None;
+    }
+
+    pub fn is_running(&self) -> bool {
+        self.started.is_some()
+    }
+
+    /// Pause or resume. Resuming shifts `started` forward by the paused
+    /// span, so `elapsed`/`finished` stay correct without extra bookkeeping.
+    pub fn set_paused(&mut self, paused: bool, now: Instant) {
+        if paused {
+            if self.paused_since.is_none() && self.started.is_some() {
+                self.paused_since = Some(now);
+            }
+        } else if let Some(paused_since) = self.paused_since.take()
+            && let Some(started) = self.started.as_mut()
+        {
+            *started += now.saturating_duration_since(paused_since);
+        }
+    }
+
+    /// Elapsed display time for `item` at `now`, frozen while paused and
+    /// clamped to the item's duration.
+    pub fn elapsed(&self, item: &StoryViewerItem, now: Instant) -> Duration {
+        let Some(started) = self.started else {
+            return Duration::ZERO;
+        };
+        let end = self.paused_since.unwrap_or(now);
+        end.saturating_duration_since(started)
+            .min(Self::duration(item))
+    }
+
+    /// 0.0–1.0 fill fraction for the current segment.
+    pub fn progress(&self, item: &StoryViewerItem, now: Instant) -> f32 {
+        let duration = Self::duration(item);
+        if duration.is_zero() {
+            return 1.0;
+        }
+        (self.elapsed(item, now).as_secs_f32() / duration.as_secs_f32()).clamp(0.0, 1.0)
+    }
+
+    /// Elapsed long enough to auto-advance (Telegram Desktop's
+    /// `IsStoppedAtEnd`; Telegram Android's `timeProgress == 1f` switch).
+    pub fn finished(&self, item: &StoryViewerItem, now: Instant) -> bool {
+        self.is_running() && self.elapsed(item, now) >= Self::duration(item)
+    }
+}
 
 /// Story media kinds the viewer renders this slice.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -57,6 +151,10 @@ pub struct StoryViewerItem {
     pub caption_entities: Vec<TextEntity>,
     /// Video duration (`0:12`), shown when no visual is local.
     pub duration_label: Option<String>,
+    /// Whole-second `storyVideo.duration` (`schema/td_api.tl:6633`), driving
+    /// playback progress / auto-advance for video stories (Phase 9.6).
+    /// `None` for photos, live, and unsupported stories.
+    pub duration_secs: Option<i32>,
     /// `storyInfo.is_live` — a live story shows a placeholder even if a
     /// `storyVideo` thumbnail were present (no group-call join in 9.1).
     pub is_live: bool,
@@ -158,6 +256,7 @@ fn story_viewer_item(chat_id: ChatId, story: &ParsedStory) -> Option<StoryViewer
                 caption: story.caption.clone(),
                 caption_entities: story.caption_entities.clone(),
                 duration_label: None,
+                duration_secs: None,
                 is_live: false,
             }
         }
@@ -180,6 +279,7 @@ fn story_viewer_item(chat_id: ChatId, story: &ParsedStory) -> Option<StoryViewer
                 caption: story.caption.clone(),
                 caption_entities: story.caption_entities.clone(),
                 duration_label: Some(format_voice_duration(*duration_secs)),
+                duration_secs: Some(*duration_secs),
                 is_live: false,
             }
         }
@@ -192,6 +292,7 @@ fn story_viewer_item(chat_id: ChatId, story: &ParsedStory) -> Option<StoryViewer
             caption: story.caption.clone(),
             caption_entities: story.caption_entities.clone(),
             duration_label: None,
+            duration_secs: None,
             is_live: true,
         },
         StoryContentView::Unsupported => StoryViewerItem {
@@ -203,6 +304,7 @@ fn story_viewer_item(chat_id: ChatId, story: &ParsedStory) -> Option<StoryViewer
             caption: story.caption.clone(),
             caption_entities: story.caption_entities.clone(),
             duration_label: None,
+            duration_secs: None,
             is_live: false,
         },
     };
@@ -309,6 +411,14 @@ mod tests {
     }
 
     fn item(kind: StoryViewerKind, story_id: i32) -> StoryViewerItem {
+        playback_item(kind, story_id, None)
+    }
+
+    fn playback_item(
+        kind: StoryViewerKind,
+        story_id: i32,
+        duration_secs: Option<i32>,
+    ) -> StoryViewerItem {
         StoryViewerItem {
             chat_id: ChatId(7),
             story_id,
@@ -318,6 +428,7 @@ mod tests {
             caption: String::new(),
             caption_entities: Vec::new(),
             duration_label: None,
+            duration_secs,
             is_live: false,
         }
     }
@@ -443,5 +554,102 @@ mod tests {
         assert!(items[0].is_live);
         assert_eq!(items[1].kind, StoryViewerKind::Unsupported);
         assert!(items[0].display_file_ids.is_empty());
+    }
+
+    // Phase 9.6: the pure playback clock — what these validate is the
+    // auto-advance trigger math (durations, progress fraction, pause freeze)
+    // driven by an injected `now`, with no wall-clock sleep.
+
+    #[test]
+    fn photo_duration_is_five_seconds() {
+        let item = playback_item(StoryViewerKind::Photo, 5, None);
+        assert_eq!(StoryPlayback::duration(&item), Duration::from_secs(5));
+    }
+
+    #[test]
+    fn video_uses_its_own_duration() {
+        let item = playback_item(StoryViewerKind::Video, 6, Some(9));
+        assert_eq!(StoryPlayback::duration(&item), Duration::from_secs(9));
+    }
+
+    #[test]
+    fn broken_video_duration_falls_back_to_photo() {
+        for secs in [0, -3] {
+            let item = playback_item(StoryViewerKind::Video, 6, Some(secs));
+            assert_eq!(StoryPlayback::duration(&item), STORY_PHOTO_DURATION);
+        }
+    }
+
+    #[test]
+    fn collect_video_carries_duration_secs() {
+        let stories = cache(vec![video_story(7, 10, Some(50), 51, 12)]);
+        let items = collect_story_items(ChatId(7), &tray(7, &[10]), &stories);
+        assert_eq!(items[0].duration_secs, Some(12));
+        assert_eq!(StoryPlayback::duration(&items[0]), Duration::from_secs(12));
+        let stories = cache(vec![photo_story(7, 11, vec![size(1, 100, 100)], "")]);
+        let items = collect_story_items(ChatId(7), &tray(7, &[11]), &stories);
+        assert_eq!(items[0].duration_secs, None);
+    }
+
+    #[test]
+    fn progress_rises_then_clamps_and_finishes() {
+        let item = playback_item(StoryViewerKind::Photo, 5, None);
+        let now = Instant::now();
+        let mut playback = StoryPlayback::default();
+        playback.start(now);
+        assert_eq!(playback.progress(&item, now), 0.0);
+        let fifth = playback.progress(&item, now + Duration::from_secs(1));
+        assert!((fifth - 0.2).abs() < 0.001, "got {fifth}");
+        assert!(!playback.finished(&item, now + Duration::from_secs(4)));
+        assert!(playback.finished(&item, now + Duration::from_secs(5)));
+        // Past the end the fill stays pinned at 1.0, never over.
+        assert_eq!(playback.progress(&item, now + Duration::from_secs(30)), 1.0);
+        assert!(playback.finished(&item, now + Duration::from_secs(30)));
+    }
+
+    #[test]
+    fn pause_freezes_elapsed_until_resume() {
+        let item = playback_item(StoryViewerKind::Photo, 5, None);
+        let t0 = Instant::now();
+        let mut playback = StoryPlayback::default();
+        playback.start(t0);
+        playback.set_paused(true, t0 + Duration::from_secs(2));
+        // The clock runs on while paused: elapsed must stay frozen at 2s.
+        assert_eq!(
+            playback.elapsed(&item, t0 + Duration::from_secs(100)),
+            Duration::from_secs(2)
+        );
+        assert!(!playback.finished(&item, t0 + Duration::from_secs(100)));
+        // Resuming shifts the anchor: 3s after resume == 5s of display time.
+        playback.set_paused(false, t0 + Duration::from_secs(100));
+        assert!(playback.finished(&item, t0 + Duration::from_secs(103)));
+        assert!(!playback.finished(&item, t0 + Duration::from_secs(102)));
+    }
+
+    #[test]
+    fn restart_resets_the_clock() {
+        let item = playback_item(StoryViewerKind::Photo, 5, None);
+        let t0 = Instant::now();
+        let mut playback = StoryPlayback::default();
+        playback.start(t0);
+        let t1 = t0 + Duration::from_secs(3);
+        playback.start(t1);
+        assert_eq!(playback.elapsed(&item, t1), Duration::ZERO);
+        assert!(!playback.finished(&item, t1 + Duration::from_secs(4)));
+    }
+
+    #[test]
+    fn stop_clears_and_never_finishes() {
+        let item = playback_item(StoryViewerKind::Photo, 5, None);
+        let t0 = Instant::now();
+        let mut playback = StoryPlayback::default();
+        playback.start(t0);
+        playback.stop();
+        assert!(!playback.is_running());
+        assert_eq!(
+            playback.elapsed(&item, t0 + Duration::from_secs(30)),
+            Duration::ZERO
+        );
+        assert!(!playback.finished(&item, t0 + Duration::from_secs(30)));
     }
 }

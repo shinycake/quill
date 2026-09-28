@@ -1885,6 +1885,71 @@ Research snapshot 2026-09-16, pin recheck **2026-09-17**.
   stealth-mode periods display (the raw `storiesStealthMode` periods
   come from `getAllStories`, not yet parsed — the button shows
   active/cooldown only).
+## Phase 9.8 — Story viewer playback: segmented progress bar + auto-advance (2026-09-28)
+
+- **Rationale:** the Phase 9.1 viewer had no progress indication and no
+  auto-advance — every official client shows segmented progress bars per
+  story and advances automatically. This slice adds both, plus
+  pause-on-interaction.
+- **Evidence-first (behavioral references).** Telegram X is the designated
+  primary reference, but the TGX-Android open-source tree
+  (`~/workspace/telegram-x`) contains **no story viewer UI at all** —
+  story support there is data-layer only (`td/client/TdlibOptions.kt`
+  `story*` option fields; nothing under `ui/` renders stories). Fallback
+  to the two secondary references:
+  - Telegram Desktop (`telegramdesktop/tdesktop`, `Telegram/SourceFiles/
+    media/stories/media_stories_controller.cpp`): photo stories display
+    for `constexpr auto kPhotoDuration = 5 * crl::time(1000);` (line 72),
+    progress ticks at 100ms (`kPhotoProgressInterval`, line 70), pause
+    shifts the start anchor (`PhotoPlayback::togglePaused`, lines
+    195-214), and on reaching the end `updatePlayback` does
+    `if (!subjumpFor(1)) { _delegate->storiesClose(); }` (lines 1235-1240)
+    — i.e. advance to next, **close the viewer at the end of the
+    sequence (no loop)**. Video stories follow the player's progress
+    against the video duration.
+  - Unigram (`UnigramDev/Unigram`, `Telegram/Controls/Stories/
+    StoryContent.xaml.cs`): `StoryContentPhotoTimer` uses
+    `_interval = TimeSpan.FromSeconds(5);` (line 2082) with pause
+    preserving the remaining time (`_timer.Interval = _interval -
+    _watch.Elapsed`); `StoryProgress.Update` builds `count` segments —
+    viewed opacity 1, upcoming 0.3, the current segment animating its
+    fill over `duration` seconds (lines 2117-2165).
+  - Telegram Android (`DrKLO/Telegram`, `ui/Stories/PeerStoriesView.java`)
+    disagrees on the photo duration: `IMAGE_LIVE_TIME = 10_000` (line
+    226); progress advances only when `!paused && isActive &&
+    !isUploading && !isEditing && !isFailed` (line 806) and reaching 1.0
+    fires `delegate.shouldSwitchToNext()` (lines 828-840); segments are
+    `a < index` full, `a == index` partial, rest dim (`StoryLinesDrawable.
+    java:111-140`); pause triggers cover any open popup/sheet/keyboard/
+    reaction UI (`StoryViewer.isPaused`, `StoryViewer.java:2270-2293`).
+- **Schema (1.8.67, verified in `schema/td_api.tl`):** `storyVideo
+  duration:double width:int32 height:int32 … = StoryVideo` (line 6633)
+  — video duration is schema-exposed and used for video progress;
+  `storyContentPhoto photo:photo = StoryContent` (line 6654) carries no
+  duration, so photo stories use the client-side 5s constant.
+- **Decisions (ponytail):**
+  - Photo (and live/unsupported placeholder) duration = **5s**, matching
+    Telegram Desktop (designated secondary reference) and Unigram; the
+    Android 10s value is recorded here as the known discrepancy rather
+    than averaged away.
+  - Pure playback clock (`src/story_viewer.rs::StoryPlayback`):
+    `STORY_PHOTO_DURATION`, `duration()` (video → own `duration_secs`,
+    non-positive video durations fall back to 5s), and
+    `start/stop/set_paused/elapsed/progress/finished`. The wall clock
+    enters only as a `now` parameter — deterministic tests, no sleeps.
+  - One 100ms tick task (`ensure_story_tick`, mirrors `ensure_call_tick` /
+    Desktop's 100ms interval), at most one, self-exiting when the viewer
+    closes; manual Prev/Next and (re)open restart the clock.
+  - Pause while the reaction picker or reply row is open
+    (`story_playback_paused`); the S4 viewers panel / report flow hook
+    into the same predicate when they land (they live on their own
+    parity branch — not touched here).
+  - Segmented bar in the viewer overlay (`story_progress_bar`): N
+    segments, viewed full white, current fills with playback progress,
+    upcoming dim — Android/Unigram segment semantics.
+- **Out of this slice (→ future):** live stories (join/play), custom/paid
+  reactions, clickable story areas, story notification settings,
+  restriction notices — carried forward from the slice brief.
 
 ## Parity slice — Forum-topic posting (2026-09-26)
 
