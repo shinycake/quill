@@ -13453,6 +13453,50 @@ mod tests {
     }
 
     #[test]
+    fn story_post_second_answer_without_pending_is_absorbed() {
+        // Phase 9.3 (review fix-up): the double-post window. The UI
+        // `post_sent` guard blocks the second send path, and at the
+        // reducer level a `postStory` answer with no matching pending
+        // `PostStory` request is absorbed as a plain story upsert — it
+        // neither re-enters `Posting` nor creates a second pending
+        // request.
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+
+        // The (single) send: pending `PostStory`, answer → Posting.
+        let extra = session.request(RequestPurpose::PostStory, None);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"story","@extra":"{}","id":8,"poster_chat_id":777,"date":1,"content":{{"@type":"storyContentUnsupported"}},"caption":{{"@type":"formattedText","text":"","entities":[]}}}}"#,
+                extra.0
+            ),
+        );
+        assert_eq!(
+            session.story_post.outcome,
+            StoryPostOutcome::Posting { story_id: 8 }
+        );
+        assert!(!session.requests.has_purpose(RequestPurpose::PostStory));
+
+        // A second `story` answer with no pending `PostStory` request
+        // (the duplicate the guard prevents) is just a story upsert.
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"story","id":8,"poster_chat_id":777,"date":1,"content":{"@type":"storyContentUnsupported"},"caption":{"@type":"formattedText","text":"","entities":[]}}"#,
+        );
+        assert_eq!(
+            session.story_post.outcome,
+            StoryPostOutcome::Posting { story_id: 8 }
+        );
+        assert!(!session.requests.has_purpose(RequestPurpose::PostStory));
+        assert!(session.stories.contains_key(&(777, 8)));
+    }
+
+    #[test]
     fn get_story_response_lands_in_story_cache() {
         let (mut session, sink) = session();
         let seq = AtomicU64::new(0);

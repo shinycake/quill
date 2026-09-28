@@ -321,7 +321,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [ ] Active period / expiry selection (postStory active_period param unused) <!-- parity:stories-post-expiry -->
 - [ ] "Post to chat page" toggle (postStory is_posted_to_chat_page / toggleStoryIsPostedToChatPage unused) <!-- parity:stories-post-to-chat-page -->
 - [ ] "Protect content" (no forwarding) toggle (postStory protect_content param unused) <!-- parity:stories-post-protect -->
-- [x] Honest pending / succeeded / failed states (posting begins when `postStory` is sent; `updateStoryPostSucceeded`/`PostFailed` applied to the composer status line, DECISIONS.md 9.3) <!-- parity:stories-post-status -->
+- [x] Honest pending / succeeded / failed states (`Posting` is set when the `postStory` answer lands; `updateStoryPostSucceeded`/`PostFailed` applied to the composer status line, DECISIONS.md 9.3) <!-- parity:stories-post-status -->
 - [ ] Edit own story content / caption / areas (editStory, td_api.tl:13732, unused) <!-- parity:stories-edit -->
 - [ ] Edit story cover frame (editStoryCover, td_api.tl:13738, unused) <!-- parity:stories-edit-cover -->
 - [ ] Change a posted story's privacy settings (setStoryPrivacySettings, td_api.tl:13743, unused) <!-- parity:stories-post-change-privacy -->

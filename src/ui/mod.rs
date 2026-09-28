@@ -9582,6 +9582,12 @@ impl QuillApp {
     /// answer into a `postStory` or an ineligible reason
     /// (`story_composer_after_check`).
     fn story_composer_post(&mut self, cx: &mut Context<Self>) {
+        // Phase 9.3: `postStory` already sent, answer not yet landed —
+        // the button is disabled while `busy`; this guards a
+        // stale-snapshot race from re-running canPostStory→postStory.
+        if self.story_composer.post_sent {
+            return;
+        }
         let path = self.story_composer_path.read(cx).value().trim().to_string();
         let kind = StoryMediaKind::detect(&path);
         let error = if path.is_empty() {
@@ -9644,6 +9650,11 @@ impl QuillApp {
                 {
                     Ok(_) => {
                         self.story_composer.local_error = None;
+                        // Phase 9.3: request sent, answer not yet landed —
+                        // the Post button stays disabled (busy) until the
+                        // outcome moves, so a second press can't post a
+                        // duplicate story.
+                        self.story_composer.post_sent = true;
                         // Fresh eligibility for the next post.
                         live.driver.session.story_post.eligibility = None;
                     }
@@ -9676,7 +9687,9 @@ impl QuillApp {
             }
             StoryPostOutcome::Failed(message) => Some(format!("✗ {message}")),
             StoryPostOutcome::None => {
-                if composer.check_sent {
+                if composer.post_sent {
+                    Some("Sending…".into())
+                } else if composer.check_sent {
                     Some("Checking eligibility…".into())
                 } else if let Some(error) = &post.check_error {
                     Some(format!("✗ {error}"))
@@ -27714,6 +27727,7 @@ impl QuillApp {
 
         let status = self.story_composer_status();
         let busy = self.story_composer.check_sent
+            || self.story_composer.post_sent
             || self.session().is_some_and(|session| {
                 matches!(session.story_post.outcome, StoryPostOutcome::Posting { .. })
             });
@@ -28728,6 +28742,16 @@ impl Render for QuillApp {
                 self.story_composer.check_sent = false;
                 self.story_composer_after_check(cx);
             }
+        }
+        // Phase 9.3: `postStory` was sent (`post_sent`) — once its
+        // answer moves `story_post.outcome` out of `None` the outcome
+        // owns the busy state again and the flag clears.
+        if self.story_composer.post_sent
+            && self.session().is_some_and(|session| {
+                !matches!(session.story_post.outcome, StoryPostOutcome::None)
+            })
+        {
+            self.story_composer.post_sent = false;
         }
         // Phase 9.2: a story that vanished from the cache while being
         // viewed was deleted (`updateStoryDeleted`) — close the viewer.

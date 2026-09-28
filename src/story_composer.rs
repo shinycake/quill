@@ -37,8 +37,9 @@ impl StoryMediaKind {
             .unwrap_or("")
             .to_ascii_lowercase();
         match ext.as_str() {
-            "jpg" | "jpeg" | "png" | "webp" | "gif" | "heic" | "bmp" => StoryMediaKind::Photo,
-            "mp4" | "mov" | "mkv" | "webm" | "3gp" | "avi" => StoryMediaKind::Video,
+            "jpg" | "jpeg" | "png" | "webp" | "heic" | "bmp" => StoryMediaKind::Photo,
+            // Telegram stories treat GIFs as animation videos.
+            "gif" | "mp4" | "mov" | "mkv" | "webm" | "3gp" | "avi" => StoryMediaKind::Video,
             _ => StoryMediaKind::Unknown,
         }
     }
@@ -116,6 +117,11 @@ pub struct StoryComposer {
     /// `Session::story_post.eligibility` into a post or an ineligible
     /// message once it lands.
     pub check_sent: bool,
+    /// `postStory` was sent and its answer has not landed yet. While
+    /// set the Post button stays disabled (double-press would post a
+    /// duplicate story). The UI tick clears it once
+    /// `Session::story_post.outcome` leaves `None`.
+    pub post_sent: bool,
     /// UI-local validation / flow error (no valid media path yet, no
     /// users selected, demo mode, …). Cleared on open.
     pub local_error: Option<String>,
@@ -155,6 +161,8 @@ mod tests {
     fn media_kind_detection() {
         assert_eq!(StoryMediaKind::detect("/a/b.jpg"), StoryMediaKind::Photo);
         assert_eq!(StoryMediaKind::detect("clip.MP4"), StoryMediaKind::Video);
+        // Telegram stories treat GIFs as animation videos.
+        assert_eq!(StoryMediaKind::detect("anim.gif"), StoryMediaKind::Video);
         assert_eq!(StoryMediaKind::detect("noext"), StoryMediaKind::Unknown);
         assert_eq!(StoryMediaKind::detect("a.txt"), StoryMediaKind::Unknown);
     }

@@ -1597,13 +1597,19 @@ Research snapshot 2026-09-16, pin recheck **2026-09-17**.
   active_period:int32 from_story_full_id:storyFullId
   is_posted_to_chat_page:Bool protect_content:Bool = Story` (line
   13715); `inputFileLocal path:string = InputFile` (line 325);
-  `inputStoryContentPhoto photo:InputFile = InputStoryContent` (line
-  6673); `inputStoryContentVideo video:InputFile = InputStoryContent`
-  (line 6681); `inputStoryAreas areas:vector<InputStoryArea> =
+  `inputStoryContentPhoto photo:InputFile
+  added_sticker_file_ids:vector<int32> = InputStoryContent` (line
+  6673); `inputStoryContentVideo video:InputFile
+  added_sticker_file_ids:vector<int32> duration:double
+  cover_frame_timestamp:double is_animation:Bool = InputStoryContent`
+  (line 6681); `inputStoryAreas areas:vector<inputStoryArea> =
   InputStoryAreas` (line 6619 — sent empty, areas are out of slice);
-  `canPostStoryResultOk story_count:int32`, `canPostStoryResultActiveStoryLimitExceeded`,
-  `canPostStoryResultMonthlyLimitExceeded`,
-  `canPostStoryResultWeeklyLimitExceeded` (lines 8535–8553);
+  `canPostStoryResultOk story_count:int32` (8535),
+  `canPostStoryResultPremiumNeeded` (8538), `canPostStoryResultBoostNeeded`
+  (8541), `canPostStoryResultActiveStoryLimitExceeded` (8544),
+  `canPostStoryResultWeeklyLimitExceeded retry_after:int32` (8547),
+  `canPostStoryResultMonthlyLimitExceeded retry_after:int32` (8550),
+  `canPostStoryResultLiveStoryIsActive story_id:int32` (8553);
   `storyPrivacySettingsEveryone/Contacts/CloseFriends/SelectedUsers`
   (lines 8928–8937 — SelectedUsers carries `user_ids:vector<int53>`);
   `updateStoryPostSucceeded story:story old_story_id:int32 = Update`
@@ -1623,7 +1629,9 @@ Research snapshot 2026-09-16, pin recheck **2026-09-17**.
   `protect_content: false`. Request-shape tests for photo/video,
   caption entities, privacy, and all fixed fields.
 - **Parser (`src/telegram/envelope.rs`).** `CanPostStoryResult` enum for
-  all pinned-schema outcomes (Ok + the three limit variants), parsed
+  all seven pinned-schema outcomes (Ok, PremiumNeeded, BoostNeeded,
+  ActiveStoryLimitExceeded, WeeklyLimitExceeded, MonthlyLimitExceeded,
+  LiveStoryIsActive), parsed
   into `EnvelopePayload::CanPostStoryResult`, with user-facing messages
   per variant. Parser tests cover every variant.
 - **Driver (`src/connect.rs`).** `check_can_post_story()` (posts to
@@ -1649,8 +1657,9 @@ Research snapshot 2026-09-16, pin recheck **2026-09-17**.
   render tick converts the answer into `postStory` (eligible) or a
   reason line (ineligible / check error). The status line shows local
   validation errors, Checking…, Posting…, ✓ Posted, or ✗ failed —
-  honest about the pending state (posting begins when `postStory` is
-  *sent*, not when TDLib answers). Escape closes the composer before
+  honest about the pending state (pending begins when the `postStory`
+  *answer lands*, not when it is sent — the Post button stays disabled
+  in between). Escape closes the composer before
   the story viewer. Screenshot proof:
   `docs/screenshots/ready-story-composer.png` (`ready-story-composer`
   demo — seeded photo path, caption draft, Close friends, seeded
