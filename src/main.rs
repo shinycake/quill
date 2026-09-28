@@ -34,7 +34,7 @@ fn ui_main(args: &[String]) {
 
     let credentials = quill::credentials::load();
     gpui_kit::application()
-        .with_assets(gpui_kit::assets::Assets)
+        .with_assets(gpui_kit::assets::AllAssets)
         .run(move |cx| {
             gpui_kit::init(cx);
             ui::bind_keys(cx);
@@ -332,7 +332,7 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
         .unwrap_or((1200.0, 740.0));
 
     gpui_kit::application()
-        .with_assets(gpui_kit::assets::Assets)
+        .with_assets(gpui_kit::assets::AllAssets)
         .run(move |cx| {
             gpui_kit::init(cx);
             ui::bind_keys(cx);

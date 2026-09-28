@@ -3,6 +3,7 @@ mod synthetic;
 
 pub(crate) use chat_theme::*;
 
+use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
 use gpui_kit::component::input::{InputEvent, Textarea, TextareaState};
 use gpui_kit::component::slider::{Slider, SliderEvent, SliderState, SliderValue};
@@ -1654,6 +1655,10 @@ pub struct QuillApp {
     connect_status: ConnectUiStatus,
     live: Option<LiveConnect>,
     status_note: String,
+    /// Phase 1 (kit adoption): the note text a dismiss timer is already armed
+    /// for. The permanent debug status bar is gone; `status_note` now shows
+    /// as an auto-dismissing toast pill instead.
+    toast_armed_for: String,
     /// Screenshot / synthetic demo: show the matching auth field without a live client.
     demo_auth_inputs: bool,
     /// Screenshot Ready list: same reducers as live, injected JSON only.
@@ -4128,6 +4133,7 @@ impl QuillApp {
             connect_status,
             live,
             status_note,
+            toast_armed_for: String::new(),
             demo_auth_inputs: matches!(
                 demo,
                 Some(
@@ -36722,6 +36728,8 @@ impl Render for QuillApp {
             live.driver.session.app_active = window.is_window_active();
         }
         self.flush_notifications(window, cx);
+        // Phase 1 (kit adoption): arm the status-toast dismiss timer.
+        self.arm_status_toast(cx);
         // Slice P1 fix-up: the checkout dialog opens on Buy press before
         // the form arrives — prefill the saved order info once, on the
         // first frame after the form answer lands. (This can't live in
@@ -36971,12 +36979,7 @@ impl Render for QuillApp {
                     // Slice media-shared-gallery: shared-media gallery panel.
                     .when_some(self.shared_media_panel(cx), |this, panel| this.child(panel)),
             )
-            .child(status_bar(
-                &auth,
-                &self.connect_status,
-                &self.status_note,
-                cx,
-            ))
+            .child(self.status_toast(cx))
             .when(self.media_viewer.is_open(), |this| {
                 this.child(self.media_viewer_overlay(window, cx))
             })
@@ -42684,8 +42687,9 @@ fn title_bar(
                 .flex_none()
                 .child(
                     Button::new("older")
-                        .label("Load older")
+                        .icon(IconName::ChevronsUp)
                         .ghost()
+                        .tooltip("Load older messages")
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.load_older_action(cx);
                         })),
@@ -42693,12 +42697,17 @@ fn title_bar(
                 .when(mode == PaneMode::Ready, |this| {
                     this.child(
                         Button::new("search")
-                            .label(if search_open {
+                            .icon(if search_open {
+                                IconName::X
+                            } else {
+                                IconName::Search
+                            })
+                            .ghost()
+                            .tooltip(if search_open {
                                 "Close search"
                             } else {
                                 "Search"
                             })
-                            .ghost()
                             .on_click(cx.listener(|this, _, window, cx| {
                                 if this.search_is_open() {
                                     this.close_search_ui(window, cx);
@@ -42709,12 +42718,17 @@ fn title_bar(
                     )
                     .child(
                         Button::new("find-in-chat")
-                            .label(if chat_search_open {
-                                "Close find"
+                            .icon(if chat_search_open {
+                                IconName::X
+                            } else {
+                                IconName::TextSearch
+                            })
+                            .ghost()
+                            .tooltip(if chat_search_open {
+                                "Close find in chat"
                             } else {
                                 "Find in chat"
                             })
-                            .ghost()
                             .on_click(cx.listener(|this, _, window, cx| {
                                 if this.chat_search_is_open() {
                                     this.close_chat_search_ui(window, cx);
@@ -42727,8 +42741,9 @@ fn title_bar(
                 .when(show_cycle, |this| {
                     this.child(
                         Button::new("cycle-auth")
-                            .label("Cycle auth")
+                            .icon(IconName::RotateCcw)
                             .ghost()
+                            .tooltip("Cycle auth state")
                             .on_click(cx.listener(|this, _, _, cx| this.cycle_auth(cx))),
                     )
                 }),
@@ -47226,55 +47241,51 @@ fn auth_action_note(auth: &AuthView, connect_status: &ConnectUiStatus) -> impl I
     };
     div().text_xs().child(label)
 }
-
-fn connect_status_label(status: &ConnectUiStatus) -> String {
-    match status {
-        ConnectUiStatus::NeedCredentials => {
-            "set TELEGRAM_API_ID / TELEGRAM_API_HASH (or local .env)".into()
+impl QuillApp {
+    /// Phase 1 (kit adoption): arms a one-shot 5 s dismiss timer the first
+    /// time a new `status_note` renders. The 541 call sites keep writing the
+    /// field directly; only the newest note survives (a newer note cancels
+    /// the older timer via the text comparison).
+    fn arm_status_toast(&mut self, cx: &mut Context<Self>) {
+        if self.status_note.is_empty() || self.toast_armed_for == self.status_note {
+            return;
         }
-        ConnectUiStatus::NeedTdjson => {
-            "credentials loaded · tdjson missing (QUILL_TDJSON_PATH / bundle)".into()
-        }
-        ConnectUiStatus::RestoreBlocked(msg) => format!("credentials loaded · {msg}"),
-        ConnectUiStatus::DemoWaitPhone => {
-            "credentials loaded · WaitPhoneNumber (screenshot demo)".into()
-        }
-        ConnectUiStatus::DemoWaitCode => "credentials loaded · WaitCode (screenshot demo)".into(),
-        ConnectUiStatus::DemoWaitPassword => {
-            "credentials loaded · WaitPassword (screenshot demo)".into()
-        }
-        ConnectUiStatus::DemoWaitQr => {
-            "credentials loaded · WaitOtherDeviceConfirmation (screenshot demo)".into()
-        }
-        ConnectUiStatus::DemoReadyChats => {
-            "injected Ready · chat list + composer (screenshot demo)".into()
-        }
-        ConnectUiStatus::Live => "credentials loaded · TDLib live".into(),
+        self.toast_armed_for = self.status_note.clone();
+        let note = self.status_note.clone();
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(Duration::from_secs(5)).await;
+            let _ = this.update(cx, |this, cx| {
+                if this.status_note == note {
+                    this.status_note.clear();
+                    this.toast_armed_for.clear();
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
     }
-}
 
-fn status_bar(
-    auth: &AuthView,
-    connect_status: &ConnectUiStatus,
-    status_note: &str,
-    cx: &mut Context<QuillApp>,
-) -> impl IntoElement {
-    div()
-        .id("status")
-        .h(px(28.))
-        .px_3()
-        .flex()
-        .items_center()
-        .border_t_1()
-        .border_color(cx.theme().border)
-        .text_xs()
-        .text_color(cx.theme().muted_foreground)
-        .child(format!(
-            "Auth: {} · {} · {} · Keyboard: ⌘K search, ⌘F in chat, Esc cancel forward/delete/edit/reply/search, ⌘1 sidebar, ⌘L composer, ⌘↑ older · VoiceOver: macOS follow-up",
-            auth.title,
-            connect_status_label(connect_status),
-            status_note
-        ))
+    /// Phase 1 (kit adoption): transient toast pill replacing the deleted
+    /// permanent debug status bar. Renders nothing when there is no note,
+    /// so the layout is clean in the steady state.
+    fn status_toast(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        div().when(!self.status_note.is_empty(), |this| {
+            this.child(
+                div().flex().justify_center().py_2().child(
+                    div()
+                        .px_4()
+                        .py_2()
+                        .rounded_full()
+                        .bg(cx.theme().popover)
+                        .border_1()
+                        .border_color(cx.theme().border)
+                        .text_xs()
+                        .text_color(cx.theme().popover_foreground)
+                        .child(self.status_note.clone()),
+                ),
+            )
+        })
+    }
 }
 
 impl Focusable for QuillApp {
