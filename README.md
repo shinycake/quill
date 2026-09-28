@@ -453,13 +453,13 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Custom reply keyboards rendered above the composer; text sends, one-time hides on tap, contact/location/poll honestly disabled <!-- parity:bots-custom-keyboard -->
 - [x] Force-reply markup focuses the composer with the reply target set <!-- parity:bots-force-reply -->
 - [x] Bot info panel with description and tappable /command buttons inserting into the composer (ui/mod.rs:13726) <!-- parity:bots-info-panel -->
-- [ ] Bot START button / start_parameter deep links <!-- parity:bots-start -->
-- [ ] Restart bot <!-- parity:bots-restart -->
-- [ ] Share bot <!-- parity:bots-share -->
-- [ ] Block / unblock bot <!-- parity:bots-block -->
-- [ ] Bot menu button / main web app launch <!-- parity:bots-menu-button -->
-- [ ] Bot privacy settings <!-- parity:bots-privacy -->
-- [ ] Similar bots tab in profile <!-- parity:bots-similar -->
+- [x] Bot START button / start_parameter deep links: t.me/<bot>?start=<param> parses to (bot, param); START button sends sendBotStartMessage with the parameter (state.rs, ui/mod.rs) <!-- parity:bots-start -->
+- [x] Restart bot: confirm-gated; clears the bot chat history (deleteChatHistory, kept in list) then re-sends sendBotStartMessage with an empty parameter (connect.rs:restart_bot) <!-- parity:bots-restart -->
+- [x] Share bot: copies the t.me/<username> link to the clipboard (ui/mod.rs) <!-- parity:bots-share -->
+- [x] Block / unblock bot: setMessageSenderBlockList (CL3 plumbing); label follows updateChatBlockList state (ui/mod.rs) <!-- parity:bots-block -->
+- [x] Bot menu button (partial: honest browser fallback; no in-app web view) — renders botInfo.menu_button in the profile panel, URL opens in OS browser <!-- parity:bots-menu-button -->
+- [x] Bot privacy settings (read-only): privacy-policy URL button, /privacy command fallback, else the schema's telegram.org/privacy-tpa fallback note — no client-side bot privacy setting exists in the schema <!-- parity:bots-privacy -->
+- [x] Similar bots section in the bot profile: getBotSimilarBots, names resolved from the user cache, tap opens the bot chat (state.rs, connect.rs, ui/mod.rs) <!-- parity:bots-similar -->
 - [x] `/` command menu merging chat-specific bot commands and global getCommands (state.rs:3100) <!-- parity:bots-command-menu -->
 - [ ] Inline mode: type @bot in composer, inline query results list, send an inline result (no getInlineQueryResults code in src) <!-- parity:bots-inline-mode -->
 - [ ] Games: send / play, high scores (no game code at all) <!-- parity:bots-games -->

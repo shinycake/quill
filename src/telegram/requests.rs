@@ -2777,6 +2777,39 @@ pub fn set_message_sender_block_list(extra: RequestId, user_id: i64, block: bool
     .to_string()
 }
 
+/// Slice B2: `sendBotStartMessage bot_user_id:int53 chat_id:int53
+/// parameter:string = Message;` (TDLib 1.8.67, `schema/td_api.tl:12216`) —
+/// what the START button and "Restart bot" send. `parameter` is the
+/// `internalLinkTypeBotStart.start_parameter` (line 9399); empty for a
+/// plain restart. Telegram X `Tdlib.sendBotStartMessage`.
+pub fn send_bot_start_message(
+    extra: RequestId,
+    bot_user_id: i64,
+    chat_id: i64,
+    parameter: &str,
+) -> String {
+    json!({
+        "@type": "sendBotStartMessage",
+        "@extra": extra.as_extra(),
+        "bot_user_id": bot_user_id,
+        "chat_id": chat_id,
+        "parameter": parameter,
+    })
+    .to_string()
+}
+
+/// Slice B2: `getBotSimilarBots bot_user_id:int53 = Users;` (TDLib 1.8.67,
+/// `schema/td_api.tl:11640`). Powers the similar-bots section of the bot
+/// profile (Telegram X `SharedChatsController.Mode.SIMILAR_BOTS`).
+pub fn get_bot_similar_bots(extra: RequestId, bot_user_id: i64) -> String {
+    json!({
+        "@type": "getBotSimilarBots",
+        "@extra": extra.as_extra(),
+        "bot_user_id": bot_user_id,
+    })
+    .to_string()
+}
+
 /// `viewSponsoredChat` (TDLib 1.8.67). `unique_id` is the `sponsoredChat`
 /// unique id (from sponsored search results).
 pub fn view_sponsored_chat(extra: RequestId, sponsored_chat_unique_id: i64) -> String {
@@ -7871,6 +7904,26 @@ mod channel_requests_tests {
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(v["@type"], "setMessageSenderBlockList");
         assert!(v["block_list"].is_null());
+    }
+
+    #[test]
+    fn b2_send_bot_start_message_and_get_bot_similar_bots_shapes_match_1_8_67() {
+        // Slice B2: `sendBotStartMessage bot_user_id:int53 chat_id:int53
+        // parameter:string = Message;` (schema 1.8.67, line 12216) and
+        // `getBotSimilarBots bot_user_id:int53 = Users;` (line 11640).
+        let json = send_bot_start_message(RequestId(64), 21, 21, "demo_xyz");
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "sendBotStartMessage");
+        assert_eq!(v["@extra"], "64");
+        assert_eq!(v["bot_user_id"], 21);
+        assert_eq!(v["chat_id"], 21);
+        assert_eq!(v["parameter"], "demo_xyz");
+
+        let json = get_bot_similar_bots(RequestId(65), 21);
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "getBotSimilarBots");
+        assert_eq!(v["@extra"], "65");
+        assert_eq!(v["bot_user_id"], 21);
     }
 
     #[test]

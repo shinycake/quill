@@ -4613,3 +4613,41 @@ after the switch recompiles everything (10m42s cargo-reported here).
 Safe because: release profile is byte-identical, dev binaries still get
 line tables (backtraces usable), and `--profile debugging` restores full
 debuginfo when needed.
+
+## Slice B2 — BOT PROFILE ACTIONS: START, RESTART, SHARE, BLOCK, MENU BUTTON, PRIVACY, SIMILAR BOTS (2026-09-27)
+
+- **Schema (pinned TDLib 1.8.67, `schema/td_api.tl`, verified verbatim):**
+  - Deep links: `internalLinkTypeBotStart bot_username:string start_parameter:string autostart:Bool = InternalLinkType` (:9399) — "Call searchPublicChat with the given bot username, check that the user is a bot, show START button in the chat with the bot, and then call sendBotStartMessage with the given start parameter after the button is pressed".
+  - `sendBotStartMessage bot_user_id:int53 chat_id:int53 parameter:string = Message;` (:12216).
+  - Block/unblock: `setMessageSenderBlockList sender_id:MessageSender block_list:BlockList = Ok;` (:14492) — "pass null to unblock" (reused the CL3 plumbing; no separate toggle constructor exists).
+  - Menu button: `botMenuButton text:string url:string = BotMenuButton;` (:834), surfaced as `botInfo.menu_button` (line 2430); the schema's `webAppOpenParameters` path (:13103) is the in-app web-app launch — we take the honest browser fallback like B1's WebApp button.
+  - Privacy: `botInfo.privacy_policy_url` (:2414) — "The HTTP link to the privacy policy of the bot. If empty, then /privacy command must be used if supported by the bot. If the command isn't supported, then https://telegram.org/privacy-tpa must be opened".
+  - Similar bots: `getBotSimilarBots bot_user_id:int53 = Users;` (:11640).
+  - History clear: `deleteChatHistory chat_id:int53 remove_from_chat_list:Bool revoke:Bool = Ok;` (:11845).
+  - **Negative-claim discipline:** no client-side bot privacy *setting* exists — concept-level search of td_api.tl for bot∩privacy intersections shows only `botInfo.privacy_policy_url` and the bot-owner constructors (`setBotName`, `setBotProfilePhoto`, `setBotInfoDescription`, …:13950–15080, all for bot owners editing their own bot, none a privacy toggle). Telegram X's checkout likewise has no bot-privacy surface. The profile therefore shows privacy read-only: the URL button, else a `/privacy` insert button when the bot lists that command, else the schema's `telegram.org/privacy-tpa` fallback note.
+- **Telegram X evidence (local TGX-Android source, `~/workspace/telegram-x`):**
+  - `MessagesController.java:6024` — `showActionBotButton(argument)` shows the START action button for bot chats; `:2704–2710` — a deep-link `TGBotStart` with `useDeepLinking()` either auto-calls `sendBotStartMessage` or shows the button with the argument; `:6180–6194` — press unblocks the bot first when fully blocked, then `tdlib.sendBotStartMessage(userId, chat.id, botStartArgument)`, then hides the button.
+  - `Tdlib.java:5243–5248` — `blockSender(sender, blockList)` / `unblockSender(sender)` are `SetMessageSenderBlockList(sender, blockList/null)`.
+  - `ProfileController.java:632–635, 738–757` — profile overflow menu: BlockBot/UnblockBot with a confirm dialog; `Tdlib.blockSender(tdlib.sender(chat.id), new TdApi.BlockListMain(), …)`.
+  - `ProfileController.java:4639` — share builds the `t.me/<username>` link (`tdlib.tMeUrl(username)`).
+  - `SharedChatsController.java:112` + `ProfileController.java:5908` — `Mode.SIMILAR_BOTS` backed by `TdApi.GetBotSimilarBots(chatId)`, rendered as a profile tab.
+  - Divergence noted: TGX's "Restart" (`R.string.RestartBot` = "Restart") exists only in the unblock slot for blocked bot chats and does **not** clear history. The B2 profile action instead clears the chat and re-sends /start per the slice contract — documented here so nobody "simplifies" it back to the TGX variant.
+- **Built:**
+  - `BotInfo` gains `menu_button: Option<BotMenuButton>` and `privacy_policy_url: String` (envelope.rs; null/absent → None/"").
+  - Start flow: pure `parse_bot_start_link` (state.rs) parses `t.me/<bot>?start=<param>` (t.me/telegram.me, http/https/bare) into the two `internalLinkTypeBotStart` pieces — unit-tested; `Session::bot_start_params` holds the armed parameter per chat; the panel shows a START button while armed; press → `sendBotStartMessage` via the new `RequestPurpose::SendBotStartMessage`, then the param clears (TGX's `hideActionButton`).
+  - Restart bot: confirm-gated `GroupConfirmAction::RestartBot` → `ConnectDriver::restart_bot` = `deleteChatHistory(revoke:false, kept in list)` + `sendBotStartMessage` with an empty parameter.
+  - Share: copies `https://t.me/<username>` to the clipboard (desktop's copy-link affordance; shown only when the bot has a username).
+  - Block/Unblock: reuses `set_chat_user_blocked` + the CL3 `BlockUser` confirm; the label follows `chat.blocked` (refreshed by `updateChatBlockList`).
+  - Menu button: renders `botInfo.menu_button` in the profile panel; opens the URL in the OS browser (no in-app web view — same honest fallback as B1).
+  - Similar bots: `getBotSimilarBots` (deduped by `Session::similar_bots` + in-flight purpose; the `users` answer keys by the pending request's `user_id`, names resolve via `Session::users`), rendered as a button row that opens each bot's chat via the B1 `open_user_chat` path.
+  - Tests: request-shape tests (sendBotStartMessage / getBotSimilarBots), deep-link parser tests, reducer tests (users→similar_bots keyed by pending user), error-surface tests.
+  - Screenshot fixture `quill --screenshot-demo ready-bot-profile`: armed START button, menu button, privacy-policy link, Restart/Share/Block-Unblock row, loaded similar bots — `docs/screenshots/ready-bot-profile.png`.
+- **Key decisions (ponytail):**
+  - No OS deep-link intake was built — Quill registers no URL scheme, so the deep link arrives only via `parse_bot_start_link` + the armed-param state (the demo/screenshot path exercises it); a real intake is an "Out of this slice" item.
+  - No separate block-confirm strings for bots — the shared CL3 dialog ("Block user? …") is honest and reuses one code path.
+  - Share is copy-to-clipboard, not a share sheet — Linux desktops have no system share sheet; copy-link is the task's named alternative.
+- **Not verifiable without live Telegram:** real `sendBotStartMessage` round-trips (start with parameter, restart sequence), real `getBotSimilarBots` answers, real block-state propagation via `updateChatBlockList`.
+- **Out of this slice (left unchecked with evidence):**
+  - OS-level deep-link intake (registering `t.me`/`tg:` handling so a real clicked link arms the START button).
+  - In-app web view for the menu button (browser fallback is the honest behavior; same as B1).
+  - Bot "privacy mode" (Bot API `privacy_mode`) — a bot-side setting with no TDLib client API; correctly not client-configurable.
