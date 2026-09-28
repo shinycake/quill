@@ -2139,6 +2139,80 @@ Research snapshot 2026-09-16, pin recheck **2026-09-17**.
 - **Out of this slice (→ future):** live stories (join/play), custom/paid
   reactions, clickable story areas, story notification settings,
   restriction notices — carried forward from the slice brief.
+## Phase 9.8 — Clickable story areas (2026-09-28)
+- **Rationale:** Phase 9.1 deliberately dropped `story.areas`; the
+  README box `parity:stories-areas-view` asked for the seven area types
+  as clickable overlays on the viewer.
+- **Schema (1.8.67, `schema/td_api.tl`, verified verbatim by
+  concept-level search — td_api.tl + telegram_api.tl + TDLib source
+  shape, never a single-name grep):**
+  - `storyAreaPosition x_percentage:double y_percentage:double
+    width_percentage:double height_percentage:double
+    rotation_angle:double corner_radius_percentage:double =
+    StoryAreaPosition` (:6530).
+  - `@class StoryAreaType @description Describes type of clickable
+    area on a story media` (:6533):
+    - `storyAreaTypeLocation location:location
+      address:locationAddress = StoryAreaType` (:6536) —
+      "@description An area pointing to a location @location The
+      location @address Address of the location; may be null if
+      unknown".
+    - `storyAreaTypeVenue venue:venue = StoryAreaType` (:6539) —
+      "An area pointing to a venue".
+    - `storyAreaTypeSuggestedReaction
+      reaction_type:ReactionType total_count:int32 is_dark:Bool
+      is_flipped:Bool = StoryAreaType` (:6546) — "An area pointing to
+      a suggested reaction. App needs to show a clickable reaction on
+      the area and call setStoryReaction when the area is clicked".
+    - `storyAreaTypeMessage chat_id:int53 message_id:int53 =
+      StoryAreaType` (:6549) — "An area pointing to a message".
+    - `storyAreaTypeLink url:string = StoryAreaType` (:6552) —
+      "An area pointing to a HTTP or tg:// link".
+    - `storyAreaTypeWeather temperature:double emoji:string
+      background_color:int32 = StoryAreaType` (:6558) — "An area with
+      information about weather" / "@temperature Temperature, in
+      degree Celsius".
+    - `storyAreaTypeUpgradedGift gift_name:string = StoryAreaType`
+      (:6562) — "An area with an upgraded gift" / "@gift_name
+      Unique name of the upgraded gift".
+  - `storyArea position:storyAreaPosition type:StoryAreaType =
+    StoryArea` (:6566); `story … areas:vector<storyArea> … = Story`
+    (:6742). `locationAddress country_code:string state:string
+    city:string street:string = LocationAddress` (:4633).
+  - Negative check (concept-level, not name-grep): there is no
+    client-side "open gift info" constructor — the gift area carries
+    only `gift_name`; no `getUpgradedGift`-style viewer in scope.
+- **Telegram X reference:** this checkout's TGX source
+  (`~/workspace/telegram-x`) implements the story *tray* only
+  (`StoryList.java` / `StoryListener.java`) — no story-area click
+  handling exists there to copy. The tap actions follow the official
+  clients' documented behavior: location/venue areas open the map,
+  link areas open the URL, message areas open the message,
+  suggested-reaction areas call `setStoryReaction`, weather shows
+  its info, gift opens gift info.
+- **Behavior:** `parse_story` keeps `areas` into `ParsedStory.areas`
+  (`StoryAreaView` + `StoryAreaKind`); the viewer renders one chip
+  per area over the 360×640 media box at the `storyAreaPosition`
+  fractions (`rotation_angle` not rendered). Taps reuse existing
+  machinery: location/venue open the OpenStreetMap deep link through
+  `platform::open_external_url` (same as `location_row`/`venue_row`;
+  label = address or title); suggested reaction calls
+  `pick_story_reaction` → `setStoryReaction` (:13809) with the area's
+  emoji; link goes through `open_message_url` (HTTP(S) only —
+  `tg://` has no in-app resolver anywhere in the app yet, so it
+  refuses like any other link); message closes the viewer, opens the
+  chat and jumps via the `begin_chat_search_jump` pipeline (same as
+  reply-to jumps); weather shows "☀️ 21.5°C" as a status note; gift
+  shows "🎁 {gift_name}" as a status note. Custom-emoji/paid
+  suggested reactions are dropped at parse time (same call as
+  Phase 9.2, which drops them everywhere); unknown `@type`s keep an
+  `Unsupported` chip so the tap says so instead of vanishing.
+  Screenshot demo `ready-story-areas` seeds one of every type
+  through the real reducer.
+- **Out of this slice (→ future):** a real gift info view (no gift
+  infrastructure exists anywhere in the app yet); `tg://` deep-link
+  resolution for link areas; `rotation_angle`/`corner_radius`
+  rendering; `InputStoryArea` creation (composer-side, unstarted).
 ## Parity slice — Forum-topic posting (2026-09-26)
 
 - **Rationale:** Phase 5.1 made forum topics read-only (composer hidden

@@ -103,9 +103,9 @@ use quill::telegram::envelope::{
     PaymentFormTypeData, PaymentProviderKind, PaymentReceivedContent, PaymentSuccessContent,
     PollContent, PollOption, PollType, ReplyKeyboard, ReplyMarkup, ScopeNotificationSettings,
     SecretChatState, SpeechRecognition, SponsoredMessage, StatisticalGraph, StatisticalValue,
-    StorageFileTypeStats, StorageStats, StoryOriginView, UsernameCheckResult, call_entry_label,
-    chat_ttl_service_label, effective_content, format_payment_price, format_ttl_setting,
-    price_parts_total, toggle_chosen_emoji_reaction,
+    StorageFileTypeStats, StorageStats, StoryAreaKind, StoryOriginView, UsernameCheckResult,
+    call_entry_label, chat_ttl_service_label, effective_content, format_payment_price,
+    format_ttl_setting, price_parts_total, toggle_chosen_emoji_reaction,
 };
 use quill::telegram::requests::SelfDestructSend;
 use quill::telegram::requests::{
@@ -1520,6 +1520,11 @@ pub enum ScreenshotDemo {
     /// chat-page `stories` (one pinned) and archive `stories` for chat
     /// 11, with the story page overlay open.
     ReadyStoryAlbums,
+    /// Phase 9.8: clickable story areas (injected, no live Telegram) —
+    /// a photo story carrying one of every `storyAreaType` (location,
+    /// venue, suggested reaction, message, link, weather, gift) with
+    /// the viewer open on it.
+    ReadyStoryAreas,
     /// MED3 downloads-manager demo (injected, no live Telegram): the
     /// `ReadyMedia` seed plus an actively downloading document (file 24,
     /// 42% through `notes.txt`), a failed document (file 26, "Retry"
@@ -2768,6 +2773,16 @@ impl QuillApp {
                     ConnectUiStatus::DemoReadyChats,
                     None,
                     "screenshot demo — story edit composer".into(),
+                    AuthorizationState::Ready,
+                )
+            }
+            // Phase 9.8: clickable story areas (injected, no live Telegram).
+            Some(ScreenshotDemo::ReadyStoryAreas) => {
+                demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
+                (
+                    ConnectUiStatus::DemoReadyChats,
+                    None,
+                    "screenshot demo — clickable story areas".into(),
                     AuthorizationState::Ready,
                 )
             }
@@ -4387,6 +4402,13 @@ impl QuillApp {
             }
             app.open_story_page(ChatId(11), window, cx);
             app.status_note = "screenshot demo — story albums / chat page / archive".into();
+        if matches!(demo, Some(ScreenshotDemo::ReadyStoryAreas)) {
+                apply_ready_story_areas(session, &app.demo_sink, &app.demo_seq);
+            // Phase 9.8: viewer opens on the seeded photo story carrying
+            // one of every `storyAreaType` — the fixture injected the real
+            // `story` (with `areas`) through the reducer.
+            app.open_story_viewer(ChatId(11), 5, cx);
+            app.status_note = "screenshot demo — clickable story areas".into();
         }
         if matches!(demo, Some(ScreenshotDemo::ReadyStoryComposer)) {
             // Phase 9.3: the composer opens with a seeded photo path (the
@@ -11516,6 +11538,103 @@ impl QuillApp {
             self.status_note = "demo — story reactions run with live TDLib".into();
         }
         self.story_reaction_picker_open = false;
+        cx.notify();
+    }
+
+    /// Phase 9.8: a story area tap — the action each `StoryAreaType`
+    /// performs (Telegram X reference: tapping the area opens what it
+    /// points to). Reuses the existing viewer actions wherever one
+    /// exists: OSM map for location/venue (same as `location_row` /
+    /// `venue_row`), `setStoryReaction` for suggested reactions (same as
+    /// the picker), the URL opener for links, chat-open + message jump
+    /// for messages. Weather shows its info line; the gift shows its
+    /// name (a full gift info view doesn't exist in the app yet —
+    /// DECISIONS.md Phase 9.8).
+    fn story_area_click(&mut self, kind: &StoryAreaKind, cx: &mut Context<Self>) {
+        match kind {
+            StoryAreaKind::Location { location, address } => {
+                let url = location.open_street_map_url();
+                let label = if address.is_empty() {
+                    format!("📍 {}", location.coords_label())
+                } else {
+                    format!("📍 {address}")
+                };
+                self.status_note = if quill::platform::open_external_url(&url) {
+                    label
+                } else {
+                    "could not open map".into()
+                };
+                cx.notify();
+            }
+            StoryAreaKind::Venue {
+                title,
+                address,
+                location,
+            } => {
+                let url = location.open_street_map_url();
+                let label = if title.is_empty() {
+                    "📍 Venue".to_string()
+                } else if address.is_empty() {
+                    format!("📍 {title}")
+                } else {
+                    format!("📍 {title} — {address}")
+                };
+                self.status_note = if quill::platform::open_external_url(&url) {
+                    label
+                } else {
+                    "could not open map".into()
+                };
+                cx.notify();
+            }
+            StoryAreaKind::SuggestedReaction { emoji, .. } => {
+                self.pick_story_reaction(emoji, cx);
+            }
+            StoryAreaKind::Link { url } => self.open_message_url(url, cx),
+            StoryAreaKind::Message {
+                chat_id,
+                message_id,
+            } => {
+                self.story_area_open_message(ChatId(*chat_id), MessageId(*message_id), cx);
+            }
+            StoryAreaKind::Weather { temperature, emoji } => {
+                self.status_note = format!("{emoji} {temperature:.1}°C");
+                cx.notify();
+            }
+            StoryAreaKind::Gift { gift_name } => {
+                self.status_note = format!("🎁 {gift_name}");
+                cx.notify();
+            }
+            StoryAreaKind::Unsupported { type_name } => {
+                self.status_note = format!("story area {type_name} isn't supported");
+                cx.notify();
+            }
+        }
+    }
+
+    /// Phase 9.8: a `storyAreaTypeMessage` tap — close the viewer, open
+    /// the target chat, and jump to the message (same jump pipeline as
+    /// `jump_to_replied_message`).
+    fn story_area_open_message(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        cx: &mut Context<Self>,
+    ) {
+        self.close_story_viewer(cx);
+        if let Some(live) = self.live.as_mut() {
+            self.status_note = match live
+                .driver
+                .select_chat(chat_id)
+                .and_then(|_| live.driver.jump_to_replied_message(message_id))
+            {
+                Ok(_) => chat_search_jump_note(&live.driver.session),
+                Err(_) => "could not open message".into(),
+            };
+        } else if let Some(session) = self.demo_session.as_mut() {
+            session.open_chat(chat_id);
+            let _ = session.begin_chat_search_jump(message_id);
+            self.status_note = chat_search_jump_note(session);
+        }
         cx.notify();
     }
 
@@ -34771,6 +34890,35 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// Phase 9.8: the chip label for a story area kind — what the official
+    /// clients paint on the area (glyph + one-line summary).
+    fn story_area_label(kind: &StoryAreaKind) -> String {
+        match kind {
+            StoryAreaKind::Location { address, location } if !address.is_empty() => {
+                format!("📍 {address}")
+            }
+            StoryAreaKind::Location { location, .. } => {
+                format!("📍 {}", location.coords_label())
+            }
+            StoryAreaKind::Venue { title, .. } if !title.is_empty() => format!("📍 {title}"),
+            StoryAreaKind::Venue { .. } => "📍".to_string(),
+            StoryAreaKind::SuggestedReaction { emoji, total_count } => {
+                if *total_count > 0 {
+                    format!("{emoji} {total_count}")
+                } else {
+                    emoji.clone()
+                }
+            }
+            StoryAreaKind::Message { .. } => "💬".to_string(),
+            StoryAreaKind::Link { .. } => "🔗".to_string(),
+            StoryAreaKind::Weather { temperature, emoji } => {
+                format!("{emoji} {temperature:.0}°")
+            }
+            StoryAreaKind::Gift { gift_name } => format!("🎁 {gift_name}"),
+            StoryAreaKind::Unsupported { .. } => "·".to_string(),
+        }
+    }
+
     /// Phase 9.1: fullscreen story overlay, modeled on
     /// `media_viewer_overlay`: poster name + "Story N of M" header, the
     /// photo (video shows its thumbnail; live/unsupported show a
@@ -34792,6 +34940,7 @@ impl QuillApp {
                 duration_label: None,
                 duration_secs: None,
                 is_live: false,
+                areas: Vec::new(),
             });
         let (position, total) = self.story_viewer.position().unwrap_or((0, 0));
         let now = Instant::now();
@@ -34871,6 +35020,52 @@ impl QuillApp {
                 .child(div().text_sm().text_color(text_bright()).child(status))
                 .into_any_element()
         };
+        // Phase 9.8: clickable story areas — chips over the 360x640 media
+        // box, positioned by the `storyAreaPosition` fractions
+        // (`schema/td_api.tl:6530`). The media box is the positioning
+        // context (areas are media fractions); `rotation_angle` is not
+        // rendered in this slice.
+        let area_chips: Vec<AnyElement> = item
+            .areas
+            .iter()
+            .enumerate()
+            .map(|(index, area)| {
+                let kind = area.kind.clone();
+                let label = Self::story_area_label(&kind);
+                div()
+                    .id((
+                        "story-area",
+                        (item.story_id as u64).wrapping_mul(1000) + index as u64,
+                    ))
+                    .absolute()
+                    .left(px((area.x * 360.0) as f32))
+                    .top(px((area.y * 640.0) as f32))
+                    .w(px((area.width * 360.0).max(48.0) as f32))
+                    .h(px((area.height * 640.0).max(24.0) as f32))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .cursor_pointer()
+                    .rounded_md()
+                    .bg(rgba(0x00000099))
+                    .border_1()
+                    .border_color(rgba(0xffffff66))
+                    .text_xs()
+                    .text_color(rgb(0xffffff))
+                    .px_2()
+                    .child(label)
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.story_area_click(&kind, cx);
+                    }))
+                    .into_any_element()
+            })
+            .collect();
+        let visual: AnyElement = div()
+            .relative()
+            .w(px(360.))
+            .child(visual)
+            .children(area_chips)
+            .into_any_element();
         let caption: Option<AnyElement> = (!item.caption.is_empty()).then(|| {
             rich_text_line(
                 &item.caption,
@@ -40911,6 +41106,46 @@ fn apply_ready_story_edit(session: &mut Session, sink: &Arc<MemorySink>, seq: &A
     );
     let story = format!(
         r#"{{"@type":"story","id":5,"poster_chat_id":11,"date":1700000000,"is_edited":true,"can_be_edited":true,"can_be_deleted":true,"can_be_forwarded":true,"can_set_privacy_settings":true,"repost_info":{{"@type":"storyRepostInfo","origin":{{"@type":"storyOriginPublicStory","chat_id":12,"story_id":6}},"is_content_modified":false}},"privacy_settings":{{"@type":"storyPrivacySettingsCloseFriends"}},"content":{{"@type":"storyContentPhoto","photo":{{"@type":"photo","has_stickers":false,"sizes":[{{"@type":"photoSize","type":"y","photo":{photo_file},"width":960,"height":1280,"progressive_sizes":[]}}]}}}},"areas":[{{"@type":"storyArea","position":{{"@type":"storyAreaPosition","x_percentage":35.0,"y_percentage":80.0,"width_percentage":30.0,"height_percentage":9.0,"rotation_angle":0.0,"corner_radius_percentage":20.0}},"type":{{"@type":"storyAreaTypeLink","url":"https://t.me/quill"}}}},{{"@type":"storyArea","position":{{"@type":"storyAreaPosition","x_percentage":50.0,"y_percentage":50.0,"width_percentage":20.0,"height_percentage":20.0,"rotation_angle":0.0,"corner_radius_percentage":50.0}},"type":{{"@type":"storyAreaTypeSuggestedReaction","reaction_type":{{"@type":"reactionTypeEmoji","emoji":"🔥"}},"total_count":1,"is_dark":false,"is_flipped":false}}}}],"caption":{{"@type":"formattedText","text":"Phase 9.5: edit posted stories — caption, areas, cover and privacy.","entities":[]}}}}"#,
+    );
+    for json in [tray, story] {
+        if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
+            session.apply(owned);
+        }
+    }
+}
+
+/// `ReadyStoryAreas` fixture: inject a photo story on Demo chat A (id 11)
+/// carrying one of every `storyAreaType` — location, venue, suggested
+/// reaction, message, link, weather, gift — through the real reducer, no
+/// live Telegram. The viewer opens on it; the chips show the area labels
+/// and each tap performs its action.
+fn apply_ready_story_areas(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let photo_file = demo_file_json(91, &demo_thumb_png_path(), true);
+    let caption = |text: &str| -> String {
+        format!(
+            r#"{{"@type":"formattedText","text":{},"entities":[]}}"#,
+            serde_json::to_string(text).unwrap()
+        )
+    };
+    let tray = format!(
+        r#"{{"@type":"updateChatActiveStories","active_stories":{{"@type":"chatActiveStories","chat_id":11,"list":{{"@type":"storyListMain"}},"order":"30","can_be_archived":false,"max_read_story_id":4,"stories":[{{"@type":"storyInfo","story_id":5,"date":1700000000,"is_for_close_friends":false,"is_live":false}}]}}}}"#
+    );
+    let areas = concat!(
+        r#"{"@type":"storyArea","position":{"@type":"storyAreaPosition","x_percentage":0.06,"y_percentage":0.08,"width_percentage":0.5,"height_percentage":0.06,"rotation_angle":0.0,"corner_radius_percentage":0.5},"type":{"@type":"storyAreaTypeLocation","location":{"@type":"location","latitude":37.7955,"longitude":-122.3937,"horizontal_accuracy":0.0},"address":{"@type":"locationAddress","country_code":"US","state":"CA","city":"San Francisco","street":"1 Ferry Building"}}},"#,
+        r#"{"@type":"storyArea","position":{"@type":"storyAreaPosition","x_percentage":0.44,"y_percentage":0.16,"width_percentage":0.5,"height_percentage":0.06,"rotation_angle":0.0,"corner_radius_percentage":0.5},"type":{"@type":"storyAreaTypeVenue","venue":{"@type":"venue","location":{"@type":"location","latitude":37.7955,"longitude":-122.3937,"horizontal_accuracy":0.0},"title":"Ferry Building","address":"1 Ferry Building, San Francisco","provider":"foursquare","id":"4a1a2b3c","type":"Food"}}},"#,
+        r#"{"@type":"storyArea","position":{"@type":"storyAreaPosition","x_percentage":0.06,"y_percentage":0.24,"width_percentage":0.3,"height_percentage":0.05,"rotation_angle":0.0,"corner_radius_percentage":0.5},"type":{"@type":"storyAreaTypeSuggestedReaction","reaction_type":{"@type":"reactionTypeEmoji","emoji":"🔥"},"total_count":12,"is_dark":false,"is_flipped":false}},"#,
+        r#"{"@type":"storyArea","position":{"@type":"storyAreaPosition","x_percentage":0.64,"y_percentage":0.24,"width_percentage":0.3,"height_percentage":0.05,"rotation_angle":0.0,"corner_radius_percentage":0.5},"type":{"@type":"storyAreaTypeMessage","chat_id":11,"message_id":42}},"#,
+        r#"{"@type":"storyArea","position":{"@type":"storyAreaPosition","x_percentage":0.06,"y_percentage":0.32,"width_percentage":0.3,"height_percentage":0.05,"rotation_angle":0.0,"corner_radius_percentage":0.5},"type":{"@type":"storyAreaTypeLink","url":"https://t.me/quill"}},"#,
+        r#"{"@type":"storyArea","position":{"@type":"storyAreaPosition","x_percentage":0.64,"y_percentage":0.32,"width_percentage":0.3,"height_percentage":0.05,"rotation_angle":0.0,"corner_radius_percentage":0.5},"type":{"@type":"storyAreaTypeWeather","temperature":21.5,"emoji":"☀️","background_color":-16777216}},"#,
+        r#"{"@type":"storyArea","position":{"@type":"storyAreaPosition","x_percentage":0.06,"y_percentage":0.40,"width_percentage":0.5,"height_percentage":0.05,"rotation_angle":0.0,"corner_radius_percentage":0.5},"type":{"@type":"storyAreaTypeUpgradedGift","gift_name":"Ion Gem"}}"#,
+    );
+    let story = format!(
+        r#"{{"@type":"story","id":5,"poster_chat_id":11,"date":1700000000,"content":{{"@type":"storyContentPhoto","photo":{{"@type":"photo","has_stickers":false,"sizes":[{{"@type":"photoSize","type":"y","photo":{photo_file},"width":960,"height":1280,"progressive_sizes":[]}}]}}}},"areas":[{areas}],"caption":{}}}"#,
+        caption(
+            "Phase 9.8: every story area type as a clickable chip — \
+             location, venue, suggested reaction, message, link, weather, gift.",
+        ),
     );
     for json in [tray, story] {
         if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {

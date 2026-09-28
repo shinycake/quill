@@ -14,7 +14,9 @@
 //! `src/story_composer.rs` and DECISIONS.md Phase 9.3).
 
 use crate::ids::{ChatId, FileId};
-use crate::telegram::envelope::{ChatActiveStoriesView, ParsedStory, StoryContentView};
+use crate::telegram::envelope::{
+    ChatActiveStoriesView, ParsedStory, StoryAreaView, StoryContentView,
+};
 use crate::text::TextEntity;
 use crate::voice::format_voice_duration;
 use std::time::{Duration, Instant};
@@ -133,7 +135,7 @@ impl StoryViewerKind {
 }
 
 /// One openable story.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct StoryViewerItem {
     pub chat_id: ChatId,
     pub story_id: i32,
@@ -158,6 +160,9 @@ pub struct StoryViewerItem {
     /// `storyInfo.is_live` — a live story shows a placeholder even if a
     /// `storyVideo` thumbnail were present (no group-call join in 9.1).
     pub is_live: bool,
+    /// Phase 9.8: clickable areas (`storyArea`, `schema/td_api.tl:6566`),
+    /// positioned as media-size fractions; the UI hit-tests them.
+    pub areas: Vec<StoryAreaView>,
 }
 
 /// Viewer state: the open chat's story list plus the current position.
@@ -258,6 +263,7 @@ fn story_viewer_item(chat_id: ChatId, story: &ParsedStory) -> Option<StoryViewer
                 duration_label: None,
                 duration_secs: None,
                 is_live: false,
+                areas: story.areas.clone(),
             }
         }
         StoryContentView::Video {
@@ -281,6 +287,7 @@ fn story_viewer_item(chat_id: ChatId, story: &ParsedStory) -> Option<StoryViewer
                 duration_label: Some(format_voice_duration(*duration_secs)),
                 duration_secs: Some(*duration_secs),
                 is_live: false,
+                areas: story.areas.clone(),
             }
         }
         StoryContentView::Live => StoryViewerItem {
@@ -294,6 +301,7 @@ fn story_viewer_item(chat_id: ChatId, story: &ParsedStory) -> Option<StoryViewer
             duration_label: None,
             duration_secs: None,
             is_live: true,
+            areas: story.areas.clone(),
         },
         StoryContentView::Unsupported => StoryViewerItem {
             chat_id,
@@ -306,6 +314,7 @@ fn story_viewer_item(chat_id: ChatId, story: &ParsedStory) -> Option<StoryViewer
             duration_label: None,
             duration_secs: None,
             is_live: false,
+            areas: story.areas.clone(),
         },
     };
     Some(item)
@@ -347,6 +356,7 @@ mod tests {
             area_link_url: None,
             area_reaction_emojis: Vec::new(),
             can_be_added_to_album: false,
+            areas: Vec::new(),
         }
     }
 
@@ -384,6 +394,7 @@ mod tests {
             area_link_url: None,
             area_reaction_emojis: Vec::new(),
             can_be_added_to_album: false,
+            areas: Vec::new(),
         }
     }
 
@@ -432,6 +443,7 @@ mod tests {
             duration_label: None,
             duration_secs,
             is_live: false,
+            areas: Vec::new(),
         }
     }
 
