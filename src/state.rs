@@ -15786,7 +15786,7 @@ mod tests {
             session
                 .histories
                 .get(&12)
-                .map_or(true, |history| history.ordered().is_empty()),
+                .is_none_or(|history| history.ordered().is_empty()),
             "preview must not merge into the chat's history"
         );
         let extra = session.request(RequestPurpose::GetChatPreview, Some(ChatId(12)));
