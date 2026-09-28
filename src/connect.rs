@@ -28,8 +28,8 @@ use crate::state::{
     AdminListFetch, AdminRightsFetch, CHAT_EVENT_LOG_PAGE_SIZE, ChatEventLogFetch,
     ChatSearchJumpNeed, ChatStatisticsFetch, ForwardFlight, InfoPanelTarget, InstantViewPage,
     InviteLinkFetch, JoinRequestFetch, LoginUrlRequest, MemberListFilter, MemberStatusChange,
-    RequestPurpose, RequestRollback, SearchStatus, Session, ShutdownPhase, SupergroupMembersFetch,
-    WelcomeMessagesFetch,
+    PasswordOp, RequestPurpose, RequestRollback, SearchStatus, Session, ShutdownPhase,
+    SupergroupMembersFetch, WelcomeMessagesFetch,
 };
 use crate::story_composer::{StoryMediaKind, StoryPrivacy};
 use crate::telegram::client::{LiveTdJson, OwnedEnvelope, ReceiveBridge};
@@ -48,14 +48,14 @@ use crate::telegram::requests::{
     add_chat_to_list_value, add_chat_welcome_message, add_contact, add_message_reaction,
     add_recently_found_chat, ban_group_call_participants, boost_chat,
     can_post_story as can_post_story_request, cancel_download_file as cancel_download_file_request,
-    chat_member_status_administrator_json, chat_member_status_banned_json,
-    chat_member_status_member_json, chat_member_status_restricted_json, check_authentication_code,
-    check_authentication_password, clear_recently_found_chats, click_chat_sponsored_message,
-    close_chat, close_request, close_secret_chat as close_secret_chat_request, close_story,
-    create_call_with_protocol, create_chat_folder, create_chat_invite_link, create_forum_topic,
-    create_new_basic_group_chat, create_new_secret_chat, create_new_supergroup_chat,
-    create_private_chat, create_video_chat, decline_group_call_invitation, delete_chat,
-    delete_chat_folder, delete_chat_history,
+    cancel_recovery_email_address_verification, chat_member_status_administrator_json,
+    chat_member_status_banned_json, chat_member_status_member_json,
+    chat_member_status_restricted_json, check_authentication_code, check_authentication_password,
+    clear_recently_found_chats, click_chat_sponsored_message, close_chat, close_request,
+    close_secret_chat as close_secret_chat_request, close_story, create_call_with_protocol,
+    create_chat_folder, create_chat_invite_link, create_forum_topic, create_new_basic_group_chat,
+    create_new_secret_chat, create_new_supergroup_chat, create_private_chat, create_video_chat,
+    decline_group_call_invitation, delete_chat, delete_chat_folder, delete_chat_history,
     delete_chat_reply_markup as delete_chat_reply_markup_request, delete_chat_welcome_message,
     delete_forum_topic, delete_messages, delete_story, discard_call as discard_call_request,
     download_file as download_file_request, edit_chat_folder, edit_chat_invite_link,
@@ -70,21 +70,21 @@ use crate::telegram::requests::{
     get_chat_sponsored_messages, get_chat_statistics, get_commands, get_contacts, get_forum_topics,
     get_full_rich_message, get_group_call, get_installed_sticker_sets, get_login_url,
     get_login_url_info, get_me, get_message_link, get_message_properties,
-    get_message_thread_history, get_saved_animations, get_saved_notification_sounds,
-    get_scope_notification_settings, get_secret_chat, get_sticker_set, get_storage_statistics,
-    get_story, get_story_available_reactions, get_supergroup, get_supergroup_full_info,
-    get_supergroup_members, get_user_full_info, get_user_privacy_setting_rules,
-    get_video_chat_invite_link, get_video_chat_rtmp_url, get_web_page_instant_view,
-    input_message_photo, input_message_video, invite_group_call_participant, join_chat,
-    join_group_call, join_video_chat, leave_chat, leave_group_call, load_active_stories,
-    load_chat_welcome_messages, load_chats, load_chats_list, load_group_call_participants,
-    open_chat, open_message_content, open_story, pin_chat_message,
+    get_message_thread_history, get_password_state, get_saved_animations,
+    get_saved_notification_sounds, get_scope_notification_settings, get_secret_chat,
+    get_sticker_set, get_storage_statistics, get_story, get_story_available_reactions,
+    get_supergroup, get_supergroup_full_info, get_supergroup_members, get_user_full_info,
+    get_user_privacy_setting_rules, get_video_chat_invite_link, get_video_chat_rtmp_url,
+    get_web_page_instant_view, input_message_photo, input_message_video,
+    invite_group_call_participant, join_chat, join_group_call, join_video_chat, leave_chat,
+    leave_group_call, load_active_stories, load_chat_welcome_messages, load_chats, load_chats_list,
+    load_group_call_participants, open_chat, open_message_content, open_story, pin_chat_message,
     post_story as post_story_request, process_chat_join_request, read_chat_list, recognize_speech,
     remove_message_reaction, reorder_chat_folders, replace_primary_chat_invite_link,
     replace_video_chat_rtmp_url, report_chat, report_chat_sponsored_message,
     request_qr_code_authentication, resend_authentication_code, resend_messages,
-    revoke_chat_invite_link, revoke_group_call_invite_link, search_call_messages,
-    search_chat_messages, search_chats, search_messages, search_public_chats,
+    resend_recovery_email_address_code, revoke_chat_invite_link, revoke_group_call_invite_link,
+    search_call_messages, search_chat_messages, search_chats, search_messages, search_public_chats,
     search_recently_found_chats, send_animation,
     send_bot_start_message as send_bot_start_message_request, send_call_debug_information,
     send_call_log, send_call_rating_detail, send_call_signaling_data, send_chat_action,
@@ -94,10 +94,10 @@ use crate::telegram::requests::{
     set_authentication_phone_number, set_chat_draft_message, set_chat_member_status,
     set_chat_member_tag, set_chat_message_auto_delete_time, set_chat_notification_settings,
     set_chat_permissions, set_chat_slow_mode_delay, set_group_call_participant_volume_level,
-    set_message_sender_block_list, set_pinned_chats, set_poll_answer,
-    set_scope_notification_settings, set_story_reaction, set_supergroup_username,
-    set_user_privacy_setting_rules, set_video_chat_title, start_group_call_recording,
-    start_group_call_screen_sharing, start_scheduled_video_chat,
+    set_message_sender_block_list, set_password, set_pinned_chats, set_poll_answer,
+    set_recovery_email_address, set_scope_notification_settings, set_story_reaction,
+    set_supergroup_username, set_user_privacy_setting_rules, set_video_chat_title,
+    start_group_call_recording, start_group_call_screen_sharing, start_scheduled_video_chat,
     supergroup_members_filter_administrators_json, supergroup_members_filter_banned_json,
     supergroup_members_filter_recent_json, supergroup_members_filter_restricted_json,
     supergroup_members_filter_search_json, toggle_chat_folder_tags,
@@ -10124,6 +10124,126 @@ impl<S: JsonSender> ConnectDriver<S> {
         Ok(extra)
     }
 
+    /// Slice A2: shared send path for every 2FA management request. All
+    /// five answer `passwordState`; one request is in flight at a time
+    /// so double-clicks can't double-send a password change. Passwords
+    /// are never stored on the session or diagnostics — they ride the
+    /// request JSON only.
+    fn password_op_send(
+        &mut self,
+        op: PasswordOp,
+        build: impl FnOnce(RequestId) -> String,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if self.session.password_state_loading {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        self.session.password_op_error = None;
+        let extra = self
+            .session
+            .request(RequestPurpose::PasswordStateOp { op }, None);
+        self.session.password_state_loading = true;
+        match self.sender.send_json(&build(extra)) {
+            Ok(()) => Ok(extra),
+            Err(err) => {
+                self.session.requests.take(extra);
+                self.session.password_state_loading = false;
+                Err(err)
+            }
+        }
+    }
+
+    /// Slice A2: send `getPasswordState` (schema 1.8.67, line 11426).
+    /// Cached state is reused and an in-flight fetch is never
+    /// duplicated; `password_op_send` enforces the connection gate.
+    /// `Ok(None)` = no request needed.
+    pub fn fetch_password_state(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
+        if self.session.password_state.is_some() || self.session.password_state_loading {
+            return Ok(None);
+        }
+        self.password_op_send(PasswordOp::Fetch, get_password_state)
+            .map(Some)
+    }
+
+    /// Slice A2: send `setPassword` (schema 1.8.67, line 11434) — enable
+    /// (empty `old_password`, the TGX MODE_NEW convention), change, or
+    /// disable (empty `new_password`). `recovery_email` is sent in the
+    /// same call on first-time enable, like TGX's password controller;
+    /// otherwise `None`. Not trimmed: spaces can be significant.
+    pub fn set_two_step_password(
+        &mut self,
+        old_password: &str,
+        new_password: &str,
+        new_hint: &str,
+        recovery_email: Option<&str>,
+    ) -> Result<RequestId, ConnectSendError> {
+        let op = if new_password.is_empty() {
+            PasswordOp::DisablePassword
+        } else {
+            PasswordOp::SetPassword
+        };
+        // Change/disable need the current password. A doomed request is
+        // rejected before it leaves; TDLib validates the rest honestly.
+        if new_password.is_empty() && old_password.is_empty() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        self.password_op_send(op, |extra| {
+            set_password(extra, old_password, new_password, new_hint, recovery_email)
+        })
+    }
+
+    /// Slice A2: send `setRecoveryEmailAddress` (schema 1.8.67, line
+    /// 11458). Requires the current two-step password; the change is
+    /// not applied until the new address is confirmed.
+    pub fn set_recovery_email(
+        &mut self,
+        password: &str,
+        email: &str,
+    ) -> Result<RequestId, ConnectSendError> {
+        if password.is_empty() || email.is_empty() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        self.password_op_send(PasswordOp::SetRecoveryEmail, |extra| {
+            set_recovery_email_address(extra, password, email)
+        })
+    }
+
+    /// Slice A2: send `resendRecoveryEmailAddressCode` (schema 1.8.67,
+    /// line 11464). Only meaningful while an email confirmation is
+    /// pending; TDLib enforces its own server-side cooldown (429 on
+    /// too-early resend), so no local countdown is invented.
+    pub fn resend_recovery_email_code(&mut self) -> Result<RequestId, ConnectSendError> {
+        if !self
+            .session
+            .password_state
+            .as_ref()
+            .is_some_and(|s| s.pending_email_pattern.is_some())
+        {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        self.password_op_send(PasswordOp::ResendCode, resend_recovery_email_address_code)
+    }
+
+    /// Slice A2: send `cancelRecoveryEmailAddressVerification` (schema
+    /// 1.8.67, line 11467). Only meaningful while an email confirmation
+    /// is pending.
+    pub fn cancel_recovery_email_setup(&mut self) -> Result<RequestId, ConnectSendError> {
+        if !self
+            .session
+            .password_state
+            .as_ref()
+            .is_some_and(|s| s.pending_email_pattern.is_some())
+        {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        self.password_op_send(
+            PasswordOp::AbortEmailSetup,
+            cancel_recovery_email_address_verification,
+        )
+    }
+
     /// Send `checkAuthenticationPassword` when auth is WaitPassword.
     /// The password is never stored on the session or diagnostics. Not trimmed
     /// (leading/trailing spaces can be significant).
@@ -11315,6 +11435,226 @@ mod tests {
             if link == "tg://login/?token=unit-test-token"
         ));
         assert!(!sink.rendered().contains("unit-test-token"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Slice A2: the 2FA driver gates sends, dedupes the fetch, shapes
+    /// `setPassword` correctly, and never leaks passwords into
+    /// diagnostics.
+    #[test]
+    fn driver_two_step_password_ops_gate_dedupe_and_shape() {
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = Arc::new(RecordingSender::new());
+        let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+        let mut driver =
+            ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+        let seq = AtomicU64::new(0);
+
+        // Gated before the chats path is active.
+        assert_eq!(
+            driver.fetch_password_state(),
+            Err(ConnectSendError::InvalidRequest)
+        );
+        assert_eq!(
+            driver.set_two_step_password("", "s3cret", "", None),
+            Err(ConnectSendError::InvalidRequest)
+        );
+
+        driver
+            .ingest(
+                copy_and_parse(
+                    r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+
+        // Fetch sends `getPasswordState` once; a second fetch dedupes.
+        let fetch_extra = driver.fetch_password_state().unwrap().unwrap();
+        assert_eq!(driver.fetch_password_state(), Ok(None));
+        let sent = recorder.snapshot();
+        let fetch_json = sent.last().unwrap();
+        assert!(fetch_json.contains("\"getPasswordState\""));
+        assert!(fetch_json.contains(&format!("\"@extra\":\"{}\"", fetch_extra.0)));
+
+        // Doomed requests are rejected before leaving: disable needs the
+        // current password; recovery email needs password + address.
+        assert_eq!(
+            driver.set_two_step_password("", "", "", None),
+            Err(ConnectSendError::InvalidRequest)
+        );
+        assert_eq!(
+            driver.set_recovery_email("", "me@example.com"),
+            Err(ConnectSendError::InvalidRequest)
+        );
+        assert_eq!(
+            driver.set_recovery_email("s3cret", ""),
+            Err(ConnectSendError::InvalidRequest)
+        );
+        // One op in flight: a second send is rejected (no double-send).
+        assert_eq!(
+            driver.set_two_step_password("", "s3cret", "hint", Some("me@example.com")),
+            Err(ConnectSendError::InvalidRequest)
+        );
+
+        // The `passwordState` answer lands on the session, clears loading,
+        // and the password never reaches diagnostics.
+        driver
+            .ingest(
+                copy_and_parse(
+                    &format!(
+                        r#"{{"@type":"passwordState","has_password":false,"password_hint":"","has_recovery_email_address":false,"has_passport_data":false,"recovery_email_address_code_info":null,"login_email_address_pattern":"","pending_reset_date":0,"@extra":"{}"}}"#,
+                        fetch_extra.0
+                    ),
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        assert!(driver.session.password_state.is_some());
+        assert!(!driver.session.password_state_loading);
+
+        // Enable: empty old password, email in the same call.
+        let enable_extra = driver
+            .set_two_step_password("", "s3cret", "hint", Some("me@example.com"))
+            .unwrap();
+        let sent = recorder.snapshot();
+        let enable_json: serde_json::Value = serde_json::from_str(sent.last().unwrap()).unwrap();
+        assert_eq!(enable_json["@type"], "setPassword");
+        assert_eq!(enable_json["old_password"], "");
+        assert_eq!(enable_json["new_password"], "s3cret");
+        assert_eq!(enable_json["new_hint"], "hint");
+        assert_eq!(enable_json["set_recovery_email_address"], true);
+        assert_eq!(enable_json["new_recovery_email_address"], "me@example.com");
+        assert_eq!(
+            enable_json["@extra"],
+            serde_json::Value::String(enable_extra.0.to_string())
+        );
+
+        // Answer the enable: password now set, recovery email confirmed.
+        driver
+            .ingest(
+                copy_and_parse(
+                    &format!(
+                        r#"{{"@type":"passwordState","has_password":true,"password_hint":"hint","has_recovery_email_address":true,"has_passport_data":false,"recovery_email_address_code_info":null,"login_email_address_pattern":"","pending_reset_date":0,"@extra":"{}"}}"#,
+                        enable_extra.0
+                    ),
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        assert!(
+            driver
+                .session
+                .password_state
+                .as_ref()
+                .is_some_and(|s| s.has_password)
+        );
+
+        // Resend/abort are meaningless without a pending confirmation.
+        assert_eq!(
+            driver.resend_recovery_email_code(),
+            Err(ConnectSendError::InvalidRequest)
+        );
+        assert_eq!(
+            driver.cancel_recovery_email_setup(),
+            Err(ConnectSendError::InvalidRequest)
+        );
+
+        // New recovery email → pending confirmation state.
+        let email_extra = driver
+            .set_recovery_email("s3cret", "new@example.com")
+            .unwrap();
+        driver
+            .ingest(
+                copy_and_parse(
+                    &format!(
+                        r#"{{"@type":"passwordState","has_password":true,"password_hint":"hint","has_recovery_email_address":true,"has_passport_data":false,"recovery_email_address_code_info":{{"@type":"emailAddressAuthenticationCodeInfo","email_address_pattern":"n***@example.com","length":6}},"login_email_address_pattern":"","pending_reset_date":0,"@extra":"{}"}}"#,
+                        email_extra.0
+                    ),
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        assert_eq!(
+            driver
+                .session
+                .password_state
+                .as_ref()
+                .and_then(|s| s.pending_email_pattern.clone())
+                .as_deref(),
+            Some("n***@example.com")
+        );
+
+        // Now resend and abort send their requests.
+        let resend_extra = driver.resend_recovery_email_code().unwrap();
+        let sent = recorder.snapshot();
+        assert!(
+            sent.last()
+                .unwrap()
+                .contains("resendRecoveryEmailAddressCode")
+        );
+        // One in flight blocks the abort until the resend answers.
+        assert_eq!(
+            driver.cancel_recovery_email_setup(),
+            Err(ConnectSendError::InvalidRequest)
+        );
+        driver
+            .ingest(
+                copy_and_parse(
+                    &format!(
+                        r#"{{"@type":"passwordState","has_password":true,"password_hint":"hint","has_recovery_email_address":true,"has_passport_data":false,"recovery_email_address_code_info":null,"login_email_address_pattern":"","pending_reset_date":0,"@extra":"{}"}}"#,
+                        resend_extra.0
+                    ),
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        // Pending again → abort sends `cancelRecoveryEmailAddressVerification`.
+        let email_extra2 = driver
+            .set_recovery_email("s3cret", "new@example.com")
+            .unwrap();
+        driver
+            .ingest(
+                copy_and_parse(
+                    &format!(
+                        r#"{{"@type":"passwordState","has_password":true,"password_hint":"hint","has_recovery_email_address":true,"has_passport_data":false,"recovery_email_address_code_info":{{"@type":"emailAddressAuthenticationCodeInfo","email_address_pattern":"n***@example.com","length":6}},"login_email_address_pattern":"","pending_reset_date":0,"@extra":"{}"}}"#,
+                        email_extra2.0
+                    ),
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        driver.cancel_recovery_email_setup().unwrap();
+        let sent = recorder.snapshot();
+        assert!(
+            sent.last()
+                .unwrap()
+                .contains("cancelRecoveryEmailAddressVerification")
+        );
+
+        // Passwords ride request JSON only — never diagnostics.
+        for token in ["s3cret", "me@example.com", "new@example.com"] {
+            assert!(
+                !sink.rendered().contains(token),
+                "secret leaked to diagnostics: {token}"
+            );
+        }
 
         let _ = std::fs::remove_dir_all(&dir);
     }

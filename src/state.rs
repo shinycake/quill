@@ -23,11 +23,12 @@ use crate::telegram::envelope::{
     MessageSelfDestruct, MessageSender, NotificationSettingsScope, NotificationSound, OptionValue,
     ParsedCall, ParsedChatEvent, ParsedChatInviteLink, ParsedChatJoinRequest, ParsedChatMember,
     ParsedFile, ParsedGroupCall, ParsedGroupCallMessage, ParsedGroupCallParticipant, ParsedMessage,
-    ParsedSecretChat, ParsedStory, ParsedUser, ParsedVideoChat, ParsedWelcomeMessage, Poll,
-    ReplyKeyboard, ReplyMarkup, ReportChatOutcome, ReportOption, ReportSponsoredResult,
-    RichMessageContent, ScopeNotificationSettings, SecretChatState, SponsoredMessage,
-    StickerFormat, StickerItem, StickerSetInfo, StorageStats, StoryAvailableReactionView,
-    StoryListView, TdError, effective_content, reply_markup_demands_reply,
+    ParsedSecretChat, ParsedStory, ParsedUser, ParsedVideoChat, ParsedWelcomeMessage,
+    PasswordState, Poll, ReplyKeyboard, ReplyMarkup, ReportChatOutcome, ReportOption,
+    ReportSponsoredResult, RichMessageContent, ScopeNotificationSettings, SecretChatState,
+    SponsoredMessage, StickerFormat, StickerItem, StickerSetInfo, StorageStats,
+    StoryAvailableReactionView, StoryListView, TdError, effective_content,
+    reply_markup_demands_reply,
 };
 use crate::telegram::envelope::{CallState, ReadyParams};
 use crate::telegram::requests::{
@@ -790,9 +791,52 @@ pub enum RequestPurpose {
     /// `SettingsCacheController` / `TGStorageStats` style, including the
     /// "Secret media and files" category for `fileTypeSecret`).
     GetStorageStatistics,
+    /// Slice A2: a 2FA management request (`getPasswordState` /
+    /// `setPassword` / `setRecoveryEmailAddress` /
+    /// `resendRecoveryEmailAddressCode` /
+    /// `cancelRecoveryEmailAddressVerification`). All answer
+    /// `passwordState`, stored in `Session::password_state`; `op`
+    /// classifies the honest error line.
+    PasswordStateOp {
+        op: PasswordOp,
+    },
     Close,
     LogOut,
     Other,
+}
+
+/// Slice A2: which 2FA management request a `PasswordStateOp` purpose
+/// carries. Used for honest per-action error lines and for the driver's
+/// single-in-flight gate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PasswordOp {
+    /// `getPasswordState` — initial / refresh fetch.
+    Fetch,
+    /// `setPassword` with a new password (empty old = first-time enable).
+    SetPassword,
+    /// `setPassword` with an empty new password (disable).
+    DisablePassword,
+    /// `setRecoveryEmailAddress`.
+    SetRecoveryEmail,
+    /// `resendRecoveryEmailAddressCode`.
+    ResendCode,
+    /// `cancelRecoveryEmailAddressVerification`.
+    AbortEmailSetup,
+}
+
+impl PasswordOp {
+    /// Past-tense action label for honest error lines, e.g.
+    /// "Could not change the two-step password (error 400)".
+    fn action_label(self) -> &'static str {
+        match self {
+            PasswordOp::Fetch => "load two-step verification settings",
+            PasswordOp::SetPassword => "change the two-step password",
+            PasswordOp::DisablePassword => "turn off two-step verification",
+            PasswordOp::SetRecoveryEmail => "set the recovery email",
+            PasswordOp::ResendCode => "resend the confirmation code",
+            PasswordOp::AbortEmailSetup => "abort the email setup",
+        }
+    }
 }
 
 /// Slice G1: the pre-request value an optimistic mutation restores when
@@ -876,6 +920,28 @@ fn call_request_error_line(err: &TdError, action: &str) -> String {
     } else {
         format!("{action} (error {})", err.code)
     }
+}
+
+/// Slice A2: honest one-line failure for a 2FA management request. The
+/// classification comes from TDLib's actual numeric error code (400 =
+/// wrong password / invalid input, 429 = flood-wait); the native message
+/// is never stored (it can contain secrets — see `TdError`).
+fn password_op_error_line(op: PasswordOp, err: &TdError) -> String {
+    let detail = match err.class {
+        ErrorClass::Flood => "too many attempts — wait and try again",
+        ErrorClass::Unauthorized => "session is no longer authorized",
+        ErrorClass::Invalid => match op {
+            PasswordOp::SetPassword | PasswordOp::DisablePassword => {
+                "wrong password or invalid input"
+            }
+            PasswordOp::SetRecoveryEmail => "wrong password, or the email was rejected",
+            PasswordOp::ResendCode => "the code can't be resent yet",
+            PasswordOp::AbortEmailSetup => "the pending setup can't be aborted",
+            PasswordOp::Fetch => "try again",
+        },
+        _ => "Telegram rejected the request",
+    };
+    format!("Could not {}: {detail}", op.action_label())
 }
 
 /// Phase 9.3: one-line `TdError` reason for the story composer. Never
@@ -3203,6 +3269,18 @@ pub struct Session {
     pub storage_stats: Option<StorageStats>,
     /// Phase S2: a `getStorageStatistics` round trip is in flight.
     pub storage_stats_loading: bool,
+    /// Slice A2: cached `getPasswordState` / `setPassword` /
+    /// `setRecoveryEmailAddress` answer; drives the two-step
+    /// verification overlay. Replaced only by our own
+    /// `PasswordStateOp` answers — never mutated optimistically.
+    pub password_state: Option<PasswordState>,
+    /// Slice A2: a 2FA management round trip is in flight (fetch or
+    /// mutation); the overlay shows progress and disables submits.
+    pub password_state_loading: bool,
+    /// Slice A2: honest one-line failure of the last 2FA management
+    /// request (TDLib's actual error, classified — never a fake
+    /// success). Cleared on the next attempt and on success.
+    pub password_op_error: Option<String>,
     /// Parity slice: downloaded-file id → notification sound id, for files
     /// fetched as notification sounds.
     pub sound_file_ids: HashMap<i32, i64>,
@@ -3932,6 +4010,9 @@ impl Session {
             scope_settings_loading: HashSet::new(),
             storage_stats: None,
             storage_stats_loading: false,
+            password_state: None,
+            password_state_loading: false,
+            password_op_error: None,
             sound_file_ids: HashMap::new(),
             pending_sound_downloads: HashSet::new(),
             pending_sound_plays: Vec::new(),
@@ -6478,6 +6559,21 @@ impl Session {
                     self.storage_stats_loading = false;
                 }
             }
+            EnvelopePayload::PasswordState { state } => {
+                // Slice A2: `passwordState` answer — only our own
+                // in-flight `PasswordStateOp` writes the cache (matched by
+                // `@extra`). The response is authoritative: it replaces
+                // the cached state and clears any stale error. No
+                // optimistic mutation ever happens client-side.
+                if matches!(
+                    pending.map(|p| p.purpose),
+                    Some(RequestPurpose::PasswordStateOp { .. })
+                ) {
+                    self.password_state = Some(state);
+                    self.password_state_loading = false;
+                    self.password_op_error = None;
+                }
+            }
             EnvelopePayload::ArchiveChatListSettings { settings } => {
                 // Slice CL2: `getArchiveChatListSettings` answer — only
                 // our own in-flight request writes the cache.
@@ -7328,6 +7424,14 @@ impl Session {
                     // yet." instead of spinning forever.
                     Some(RequestPurpose::GetStorageStatistics) => {
                         self.storage_stats_loading = false;
+                    }
+                    // Slice A2: a failed 2FA management request clears the
+                    // in-flight flag and parks the honest, classified
+                    // error line on the overlay — never a fake success,
+                    // never an optimistic state change.
+                    Some(RequestPurpose::PasswordStateOp { op }) => {
+                        self.password_state_loading = false;
+                        self.password_op_error = Some(password_op_error_line(op, &err));
                     }
                     // M1 fix-up: a failed `resendMessages` surfaces in the
                     // status note instead of vanishing into `_ => {}` —
@@ -10913,6 +11017,89 @@ mod tests {
         );
         assert!(session.storage_stats.is_none());
         assert!(!session.storage_stats_loading);
+    }
+
+    /// Slice A2: a `passwordState` answer to our own `PasswordStateOp`
+    /// request replaces the cached state, clears loading, and clears a
+    /// stale error. A stray `passwordState` (no matching purpose) is
+    /// ignored — the overlay never shows unrequested state.
+    #[test]
+    fn password_state_response_replaces_cache_and_clears_error() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        let extra = session.request(
+            RequestPurpose::PasswordStateOp {
+                op: PasswordOp::SetPassword,
+            },
+            None,
+        );
+        session.password_state_loading = true;
+        session.password_op_error = Some("stale".into());
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"passwordState","has_password":true,"password_hint":"street","has_recovery_email_address":true,"has_passport_data":false,"recovery_email_address_code_info":null,"login_email_address_pattern":"","pending_reset_date":0,"@extra":"{}"}}"#,
+                extra.0
+            ),
+        );
+        let state = session.password_state.expect("password state cached");
+        assert!(state.has_password);
+        assert_eq!(state.password_hint, "street");
+        assert!(state.has_recovery_email_address);
+        assert_eq!(state.pending_email_pattern, None);
+        assert!(!session.password_state_loading);
+        assert!(session.password_op_error.is_none());
+    }
+
+    /// Slice A2: a `passwordState` that arrives with no matching pending
+    /// `PasswordStateOp` is ignored — the overlay never shows
+    /// unrequested state.
+    #[test]
+    fn stray_password_state_response_is_ignored() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"passwordState","has_password":true,"password_hint":"","has_recovery_email_address":false,"has_passport_data":false,"recovery_email_address_code_info":null,"login_email_address_pattern":"","pending_reset_date":0}"#,
+        );
+        assert!(session.password_state.is_none());
+        assert!(!session.password_state_loading);
+    }
+
+    /// Slice A2: TDLib errors surface as honest classified lines —
+    /// wrong password (400), flood-wait (429) — and clear the
+    /// in-flight flag. No optimistic state is ever written.
+    #[test]
+    fn password_state_error_surfaces_honest_classified_line() {
+        for (op, code, expect) in [
+            (PasswordOp::SetPassword, 400, "wrong password"),
+            (PasswordOp::DisablePassword, 400, "wrong password"),
+            (PasswordOp::SetRecoveryEmail, 400, "email was rejected"),
+            (PasswordOp::ResendCode, 429, "too many attempts"),
+            (PasswordOp::Fetch, 429, "too many attempts"),
+        ] {
+            let (mut session, sink) = session();
+            let seq = AtomicU64::new(0);
+            let extra = session.request(RequestPurpose::PasswordStateOp { op }, None);
+            session.password_state_loading = true;
+            apply_json(
+                &mut session,
+                &seq,
+                &sink,
+                &format!(
+                    r#"{{"@type":"error","@extra":"{}","code":{code},"message":"SOME_TDLIB_ERROR"}}"#,
+                    extra.0
+                ),
+            );
+            let line = session.password_op_error.expect("error line set");
+            assert!(line.contains(expect), "op {op:?} code {code}: {line}");
+            assert!(!session.password_state_loading);
+            assert!(session.password_state.is_none());
+        }
     }
 
     /// Nit regression: a `getSavedNotificationSounds` refetch evicts

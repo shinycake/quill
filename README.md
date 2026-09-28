@@ -33,8 +33,8 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [ ] New-user registration: first/last name + terms (partial: explicit UnsupportedHalt — "finish registration in an official client", auth.rs:83) <!-- parity:auth-registration -->
 - [ ] Email-based login flow (partial: explicit UnsupportedHalt, auth.rs:72) <!-- parity:auth-email-login -->
 - [ ] Premium-purchase-gated login state (partial: explicit UnsupportedHalt, auth.rs:66) <!-- parity:auth-premium-login -->
-- [ ] Enable / change / disable the two-step password (schema: setPassword) <!-- parity:auth-2fa-manage -->
-- [ ] Set / change recovery email, pending-confirmation state, abort setup (schema: setRecoveryEmailAddress; TGX SetRecoveryEmail, PendingEmailText, AbortPasswordSetup) <!-- parity:auth-recovery-email -->
+- [x] Enable / change / disable the two-step password: "Two-Step Verification" overlay (TGX wording) shows the authoritative getPasswordState; setPassword enable (empty old, optional recovery email in the same call), change, and disable (empty new); no optimistic mutations, one op in flight, passwords zeroized and never logged <!-- parity:auth-2fa-manage -->
+- [x] Set / change recovery email, pending-confirmation state, abort setup: setRecoveryEmailAddress (current password required), pending pattern card (TGX PendingEmailText), resend (resendRecoveryEmailAddressCode, no invented cooldown) and "Abort recovery email setup" (TGX AbortRecoveryEmail verbatim) <!-- parity:auth-recovery-email -->
 - [ ] Password recovery via 6-digit email code (partial: login password screen only hints "recovery email is available in the official client", auth.rs:54) <!-- parity:auth-password-recovery -->
 - [ ] Active Sessions list: device/app/IP/location with current-device marker (schema: getActiveSessions) <!-- parity:auth-sessions-list -->
 - [ ] Incomplete login attempts list with per-attempt terminate (TGX SessionsIncompleteTitle/Info) <!-- parity:auth-sessions-incomplete -->

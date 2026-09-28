@@ -624,6 +624,15 @@ pub enum EnvelopePayload {
         total_size: i64,
         by_file_type: Vec<StorageFileTypeStats>,
     },
+    /// Slice A2: `passwordState` — the `getPasswordState` /
+    /// `setPassword` / `setRecoveryEmailAddress` /
+    /// `resendRecoveryEmailAddressCode` /
+    /// `cancelRecoveryEmailAddressVerification` response (schema
+    /// 1.8.67, line 273). Stored in `Session::password_state` when the
+    /// pending purpose is `PasswordStateOp`.
+    PasswordState {
+        state: PasswordState,
+    },
     /// Slice CL2: `archiveChatListSettings` — `getArchiveChatListSettings`
     /// response (schema 1.8.67, line 3512); stored in
     /// `Session::archive_chat_list_settings` when the pending purpose is
@@ -2693,6 +2702,30 @@ const STORAGE_CATEGORY_ORDER: &[&str] = &[
     "fileTypeProfilePhoto",
     "fileTypeWallpaper",
 ];
+
+/// Slice A2: `passwordState` (TDLib 1.8.67, `schema/td_api.tl:273`):
+/// `passwordState has_password:Bool password_hint:string
+/// has_recovery_email_address:Bool has_passport_data:Bool
+/// recovery_email_address_code_info:emailAddressAuthenticationCodeInfo
+/// login_email_address_pattern:string pending_reset_date:int32 =
+/// PasswordState;`
+/// `recovery_email_address_code_info` is null unless a recovery-email
+/// confirmation is pending (`emailAddressAuthenticationCodeInfo
+/// email_address_pattern:string length:int32 = ...`, schema line 83).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PasswordState {
+    pub has_password: bool,
+    pub password_hint: String,
+    pub has_recovery_email_address: bool,
+    pub has_passport_data: bool,
+    /// Pattern of the pending recovery email (e.g. "i***@example.com"),
+    /// `None` when no confirmation is pending.
+    pub pending_email_pattern: Option<String>,
+    /// Expected confirmation-code length (`length` of the code info).
+    pub pending_email_code_length: i32,
+    pub login_email_address_pattern: String,
+    pub pending_reset_date: i32,
+}
 
 /// Phase S2: storage-usage category labels (TGX copy; `fileTypeSecret`
 /// → `SecretFiles` "Secret media and files",
@@ -6831,6 +6864,54 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
             Ok(EnvelopePayload::StorageStatistics {
                 total_size,
                 by_file_type: totals,
+            })
+        }
+        // Slice A2: `passwordState` — the `getPasswordState` /
+        // `setPassword` / `setRecoveryEmailAddress` /
+        // `resendRecoveryEmailAddressCode` /
+        // `cancelRecoveryEmailAddressVerification` response (schema
+        // 1.8.67, line 273). `recovery_email_address_code_info` is null
+        // unless a recovery-email confirmation is pending (schema line
+        // 83); a non-object there is treated as absent, never an error.
+        "passwordState" => {
+            let bool_field = |name: &str| value.get(name).and_then(Value::as_bool).unwrap_or(false);
+            let str_field = |name: &str| {
+                value
+                    .get(name)
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string()
+            };
+            let (pending_email_pattern, pending_email_code_length) = value
+                .get("recovery_email_address_code_info")
+                .and_then(Value::as_object)
+                .map(|info| {
+                    (
+                        info.get("email_address_pattern")
+                            .and_then(Value::as_str)
+                            .map(str::to_string),
+                        info.get("length")
+                            .and_then(Value::as_i64)
+                            .unwrap_or(0)
+                            .clamp(0, i32::MAX as i64) as i32,
+                    )
+                })
+                .unwrap_or((None, 0));
+            Ok(EnvelopePayload::PasswordState {
+                state: PasswordState {
+                    has_password: bool_field("has_password"),
+                    password_hint: str_field("password_hint"),
+                    has_recovery_email_address: bool_field("has_recovery_email_address"),
+                    has_passport_data: bool_field("has_passport_data"),
+                    pending_email_pattern,
+                    pending_email_code_length,
+                    login_email_address_pattern: str_field("login_email_address_pattern"),
+                    pending_reset_date: value
+                        .get("pending_reset_date")
+                        .and_then(Value::as_i64)
+                        .unwrap_or(0)
+                        .clamp(0, i32::MAX as i64) as i32,
+                },
             })
         }
         "updateSavedNotificationSounds" => Ok(EnvelopePayload::UpdateSavedNotificationSounds {
@@ -14234,6 +14315,69 @@ mod storage_statistics_tests {
                 ("Other", 80, 8),
             ]
         );
+    }
+}
+
+#[cfg(test)]
+mod password_state_tests {
+    use super::*;
+
+    /// Slice A2: `passwordState` with a pending recovery-email
+    /// confirmation (schema 1.8.67, line 273; code info line 83).
+    #[test]
+    fn password_state_parses_pending_email() {
+        let json = r#"{"@type":"passwordState","has_password":true,"password_hint":"street","has_recovery_email_address":false,"has_passport_data":false,"recovery_email_address_code_info":{"@type":"emailAddressAuthenticationCodeInfo","email_address_pattern":"i***@example.com","length":6},"login_email_address_pattern":"","pending_reset_date":0}"#;
+        let env = parse_envelope(json).unwrap();
+        match env.payload {
+            EnvelopePayload::PasswordState { state } => {
+                assert!(state.has_password);
+                assert_eq!(state.password_hint, "street");
+                assert!(!state.has_recovery_email_address);
+                assert_eq!(
+                    state.pending_email_pattern.as_deref(),
+                    Some("i***@example.com")
+                );
+                assert_eq!(state.pending_email_code_length, 6);
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+
+    /// Slice A2: null `recovery_email_address_code_info` (no pending
+    /// confirmation) parses to `None`, never an error.
+    #[test]
+    fn password_state_parses_null_code_info() {
+        let json = r#"{"@type":"passwordState","has_password":false,"password_hint":"","has_recovery_email_address":false,"has_passport_data":false,"recovery_email_address_code_info":null,"login_email_address_pattern":"","pending_reset_date":0}"#;
+        let env = parse_envelope(json).unwrap();
+        match env.payload {
+            EnvelopePayload::PasswordState { state } => {
+                assert!(!state.has_password);
+                assert_eq!(state.pending_email_pattern, None);
+                assert_eq!(state.pending_email_code_length, 0);
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+
+    /// Slice A2: every 2FA constructor this slice relies on must exist
+    /// verbatim in the pinned schema (1.8.67).
+    #[test]
+    fn schema_pins_two_step_constructors() {
+        let schema = include_str!("../../schema/td_api.tl");
+        for line in [
+            "passwordState has_password:Bool password_hint:string has_recovery_email_address:Bool has_passport_data:Bool recovery_email_address_code_info:emailAddressAuthenticationCodeInfo login_email_address_pattern:string pending_reset_date:int32 = PasswordState;",
+            "emailAddressAuthenticationCodeInfo email_address_pattern:string length:int32 = EmailAddressAuthenticationCodeInfo;",
+            "getPasswordState = PasswordState;",
+            "setPassword old_password:string new_password:string new_hint:string set_recovery_email_address:Bool new_recovery_email_address:string = PasswordState;",
+            "setRecoveryEmailAddress password:string new_recovery_email_address:string = PasswordState;",
+            "resendRecoveryEmailAddressCode = PasswordState;",
+            "cancelRecoveryEmailAddressVerification = PasswordState;",
+        ] {
+            assert!(
+                schema.lines().any(|l| l == line),
+                "schema pin missing: {line}"
+            );
+        }
     }
 }
 

@@ -63,10 +63,10 @@ use quill::telegram::envelope::{
     LoginUrlInfo, MUTE_FOR_1_HOUR, MUTE_FOR_2_DAYS, MUTE_FOR_8_HOURS, MUTE_FOREVER, MessageContent,
     MessageInteractionInfo, MessageSchedulingState, MessageSender, NotificationSettingsScope,
     NotificationSound, ParsedChatEvent, ParsedFile, ParsedGroupCallParticipant, ParsedMessage,
-    ParsedSecretChat, ParsedStory, ParsedWelcomeMessage, PollContent, PollOption, PollType,
-    ReplyKeyboard, ReplyMarkup, ScopeNotificationSettings, SecretChatState, SpeechRecognition,
-    SponsoredMessage, StatisticalGraph, StatisticalValue, StorageFileTypeStats, StorageStats,
-    call_entry_label, chat_ttl_service_label, effective_content, format_ttl_setting,
+    ParsedSecretChat, ParsedStory, ParsedWelcomeMessage, PasswordState, PollContent, PollOption,
+    PollType, ReplyKeyboard, ReplyMarkup, ScopeNotificationSettings, SecretChatState,
+    SpeechRecognition, SponsoredMessage, StatisticalGraph, StatisticalValue, StorageFileTypeStats,
+    StorageStats, call_entry_label, chat_ttl_service_label, effective_content, format_ttl_setting,
     toggle_chosen_emoji_reaction,
 };
 use quill::telegram::requests::SelfDestructSend;
@@ -627,6 +627,19 @@ pub struct MemberDialog {
 
 /// B1: password prompt for an `inlineKeyboardButtonTypeCallbackWithPassword`
 /// button press (TDLib 1.8.67, `schema/td_api.tl:3789`). Submits the entered
+/// Slice A2: which form the two-step verification overlay shows.
+/// The status screen is the hub; each form submits one TDLib request
+/// and the status screen renders the authoritative answer.
+#[derive(Clone, Copy, PartialEq, Eq, Default)]
+enum TwofaView {
+    #[default]
+    Status,
+    Enable,
+    Change,
+    Disable,
+    Email,
+}
+
 /// 2-step password with the button's callback `data` via
 /// `callbackQueryPayloadDataWithPassword` (schema:7740); the `data` is
 /// cleared from memory after the send.
@@ -887,6 +900,11 @@ pub enum GroupConfirmAction {
     /// line 12216). Telegram X's "Restart" (the unblock-slot action) only
     /// re-sends; the clear is the profile-action contract here.
     RestartBot,
+    /// Slice A2: abort the pending recovery-email setup
+    /// (`cancelRecoveryEmailAddressVerification`, schema 1.8.67, line
+    /// 11467). TGX confirms via `AbortRecoveryEmailConfirm`; the abort
+    /// carries no chat, so the dialog's chat id is a dummy.
+    AbortRecoveryEmailSetup,
 }
 
 pub struct GroupConfirmDialog {
@@ -1351,6 +1369,20 @@ pub struct QuillApp {
     inline_bot_alert_shown: bool,
     /// Phase S2: storage-usage overlay (TGX Settings → Data and Storage).
     storage_usage_open: bool,
+    /// Slice A2: two-step verification overlay. `twofa_view` picks the
+    /// status screen or one of the forms; the four textareas back the
+    /// enable/change/disable/recovery-email forms. Passwords live in the
+    /// inputs only and are cleared on submit/close — never on the session.
+    twofa_open: bool,
+    twofa_view: TwofaView,
+    twofa_current_password: Entity<TextareaState>,
+    twofa_new_password: Entity<TextareaState>,
+    twofa_hint: Entity<TextareaState>,
+    twofa_email: Entity<TextareaState>,
+    /// Slice A2 fixup: local validation notice for the 2FA forms ("enter
+    /// your current password") — the driver rejects doomed requests
+    /// silently, so the form must speak before sending.
+    twofa_notice: Option<String>,
     /// Slice CL2: chat-list category filter (TGX `ChatFilter` unread /
     /// archive categories, `MainController` pager categories). `All` is
     /// the unfiltered list; `Unread` filters to unread chats;
@@ -1991,6 +2023,13 @@ pub enum ScreenshotDemo {
     /// history (missed / declined / answered) + call settings
     /// (injected, no live Telegram).
     ReadyCallsSettings,
+    /// Slice A2: two-step verification overlay — password set with
+    /// recovery email (injected `passwordState`, no live Telegram).
+    Ready2faManage,
+    /// Slice A2: two-step verification overlay — recovery email pending
+    /// confirmation (injected `passwordState` with
+    /// `recovery_email_address_code_info`, no live Telegram).
+    ReadyRecoveryEmail,
     /// M2: rich message demo (injected, no live Telegram) — the demo bot
     /// chat with an injected `messageRichMessage` (headings, styled
     /// paragraphs, list, collapsible, inline document, table, divider,
@@ -2244,6 +2283,33 @@ impl QuillApp {
                 .placeholder("Two-step password")
                 .auto_grow(1, 1)
                 .submit_on_enter(true)
+        });
+        // Slice A2: two-step verification overlay inputs. Passwords live
+        // here only and are cleared on submit/close — never on the
+        // session.
+        let twofa_current_password = cx.new(|cx| {
+            TextareaState::new(window, cx)
+                .placeholder("Current password")
+                .auto_grow(1, 1)
+                .submit_on_enter(false)
+        });
+        let twofa_new_password = cx.new(|cx| {
+            TextareaState::new(window, cx)
+                .placeholder("New password")
+                .auto_grow(1, 1)
+                .submit_on_enter(false)
+        });
+        let twofa_hint = cx.new(|cx| {
+            TextareaState::new(window, cx)
+                .placeholder("Hint (optional)")
+                .auto_grow(1, 1)
+                .submit_on_enter(false)
+        });
+        let twofa_email = cx.new(|cx| {
+            TextareaState::new(window, cx)
+                .placeholder("Recovery email")
+                .auto_grow(1, 1)
+                .submit_on_enter(false)
         });
         let search_input = cx.new(|cx| {
             TextareaState::new(window, cx)
@@ -3147,6 +3213,26 @@ impl QuillApp {
                     AuthorizationState::Ready,
                 )
             }
+            // Slice A2: two-step verification fixtures (injected, no live
+            // Telegram).
+            Some(ScreenshotDemo::Ready2faManage) => {
+                demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
+                (
+                    ConnectUiStatus::DemoReadyChats,
+                    None,
+                    "screenshot demo — two-step verification (injected, no live Telegram)".into(),
+                    AuthorizationState::Ready,
+                )
+            }
+            Some(ScreenshotDemo::ReadyRecoveryEmail) => {
+                demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
+                (
+                    ConnectUiStatus::DemoReadyChats,
+                    None,
+                    "screenshot demo — recovery email pending (injected, no live Telegram)".into(),
+                    AuthorizationState::Ready,
+                )
+            }
             // Phase B2: key verification UI fixture (injected, no live
             // Telegram).
             Some(ScreenshotDemo::ReadyKeyVerification) => {
@@ -3335,6 +3421,13 @@ impl QuillApp {
             phone_input,
             code_input,
             password_input,
+            twofa_open: false,
+            twofa_view: TwofaView::Status,
+            twofa_current_password,
+            twofa_new_password,
+            twofa_hint,
+            twofa_email,
+            twofa_notice: None,
             search_input,
             chat_search_input,
             forward_search_input,
@@ -3898,6 +3991,28 @@ impl QuillApp {
             }
             app.storage_usage_open = true;
             app.status_note = "screenshot demo — storage usage".into();
+        }
+        // Slice A2: 2FA overlay fixture — password set with recovery
+        // email (injected `passwordState`, no live Telegram).
+        if matches!(demo, Some(ScreenshotDemo::Ready2faManage)) {
+            if let Some(session) = app.demo_session.as_mut() {
+                app.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                session.password_state = Some(demo_password_state_manage());
+                session.password_state_loading = false;
+            }
+            app.twofa_open = true;
+            app.status_note = "screenshot demo — two-step verification".into();
+        }
+        // Slice A2: 2FA overlay fixture — recovery email pending
+        // confirmation (injected `passwordState`, no live Telegram).
+        if matches!(demo, Some(ScreenshotDemo::ReadyRecoveryEmail)) {
+            if let Some(session) = app.demo_session.as_mut() {
+                app.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                session.password_state = Some(demo_password_state_pending());
+                session.password_state_loading = false;
+            }
+            app.twofa_open = true;
+            app.status_note = "screenshot demo — recovery email pending".into();
         }
         // Phase B2: key verification fixture — the Ready secret chat with
         // a real 36-byte key_hash and Zed's info panel open on the
@@ -13072,6 +13187,14 @@ impl QuillApp {
                         self.selected_chats.clear();
                         Ok(format!("deleting {sent} of {total} chats…"))
                     }
+                    // Slice A2: abort the pending recovery-email setup
+                    // (`cancelRecoveryEmailAddressVerification`, schema
+                    // 1.8.67, line 11467). The dialog carries no chat, so
+                    // `dialog.chat_id` is unused here.
+                    GroupConfirmAction::AbortRecoveryEmailSetup => live
+                        .driver
+                        .cancel_recovery_email_setup()
+                        .map(|_| "aborting email setup…".to_string()),
                 };
                 match result {
                     Ok(note) => note,
@@ -24091,6 +24214,548 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// Slice A2: open the two-step verification overlay. Live: guarded
+    /// fetch of the authoritative `passwordState` (cached state reused,
+    /// in-flight fetch deduped). Demo: the fixture is already injected.
+    fn open_twofa(&mut self, cx: &mut Context<Self>) {
+        self.twofa_open = true;
+        self.goto_twofa_view(TwofaView::Status);
+        if let Some(live) = self.live.as_mut() {
+            let _ = live.driver.fetch_password_state();
+        }
+        cx.notify();
+    }
+
+    /// Slice A2: close the overlay and clear every 2FA input — passwords
+    /// must not linger in the form after the dialog is gone.
+    fn close_twofa(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.twofa_open = false;
+        self.goto_twofa_view(TwofaView::Status);
+        for input in [
+            &self.twofa_current_password,
+            &self.twofa_new_password,
+            &self.twofa_hint,
+            &self.twofa_email,
+        ] {
+            input.update(cx, |input, cx| input.set_value("", window, cx));
+        }
+        cx.notify();
+    }
+
+    /// Slice A2: switch the 2FA view; a fresh form starts with no local
+    /// notice line.
+    fn goto_twofa_view(&mut self, view: TwofaView) {
+        self.twofa_view = view;
+        self.twofa_notice = None;
+    }
+
+    /// Slice A2: one `setPassword` round-trip — enable (empty current),
+    /// change, or disable (empty new). A recovery email rides along only
+    /// on the enable form (TGX `PasswordController.java:1990`); on
+    /// change/disable a leftover email would put the request into
+    /// pending-confirmation and silently not apply (schema 1.8.67, line
+    /// 11434). The fields are cleared and the password strings zeroized
+    /// immediately after the send; the status view shows TDLib's
+    /// authoritative answer when it arrives.
+    fn submit_twofa_password(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        include_email: bool,
+    ) {
+        let mut current = self.twofa_current_password.read(cx).value().to_string();
+        let mut new = self.twofa_new_password.read(cx).value().to_string();
+        let hint = self.twofa_hint.read(cx).value().to_string();
+        let email = self.twofa_email.read(cx).value().trim().to_string();
+        // Slice A2 fixup: never fire a doomed request — the driver
+        // rejects it silently and the old code cleared the form first, so
+        // the submit vanished with no feedback.
+        let missing: Option<&str> = if include_email && new.is_empty() {
+            Some("enter a new password")
+        } else if !include_email && current.is_empty() {
+            Some("enter your current password")
+        } else {
+            None
+        };
+        if let Some(note) = missing {
+            self.twofa_notice = Some(note.to_string());
+            current.zeroize();
+            new.zeroize();
+            cx.notify();
+            return;
+        }
+        self.twofa_notice = None;
+        for input in [
+            &self.twofa_current_password,
+            &self.twofa_new_password,
+            &self.twofa_hint,
+            &self.twofa_email,
+        ] {
+            input.update(cx, |input, cx| input.set_value("", window, cx));
+        }
+        if let Some(live) = self.live.as_mut() {
+            let email_opt = if include_email && !email.is_empty() {
+                Some(email.as_str())
+            } else {
+                None
+            };
+            let _ = live
+                .driver
+                .set_two_step_password(&current, &new, &hint, email_opt);
+        }
+        current.zeroize();
+        new.zeroize();
+        self.goto_twofa_view(TwofaView::Status);
+        cx.notify();
+    }
+
+    /// Slice A2: one `setRecoveryEmailAddress` round-trip. Requires the
+    /// current two-step password; the change stays pending until the new
+    /// address is confirmed.
+    fn submit_twofa_email(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let mut current = self.twofa_current_password.read(cx).value().to_string();
+        let email = self.twofa_email.read(cx).value().trim().to_string();
+        // Slice A2 fixup: the driver rejects an empty password or email
+        // silently — say so locally instead of clearing the form.
+        let missing: Option<&str> = if current.is_empty() {
+            Some("enter your current password")
+        } else if email.is_empty() {
+            Some("enter the new recovery email")
+        } else {
+            None
+        };
+        if let Some(note) = missing {
+            self.twofa_notice = Some(note.to_string());
+            current.zeroize();
+            cx.notify();
+            return;
+        }
+        self.twofa_notice = None;
+        for input in [&self.twofa_current_password, &self.twofa_email] {
+            input.update(cx, |input, cx| input.set_value("", window, cx));
+        }
+        if let Some(live) = self.live.as_mut() {
+            let _ = live.driver.set_recovery_email(&current, &email);
+        }
+        current.zeroize();
+        self.goto_twofa_view(TwofaView::Status);
+        cx.notify();
+    }
+
+    /// Slice A2: resend the pending recovery-email confirmation code.
+    /// TDLib enforces its own server-side cooldown — no local countdown
+    /// is invented.
+    fn resend_twofa_code(&mut self, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            let _ = live.driver.resend_recovery_email_code();
+        }
+        cx.notify();
+    }
+
+    /// Slice A2: "Two-Step Verification" overlay (TGX
+    /// `TwoStepVerification`, `PasswordController.java`): status of the
+    /// cached `passwordState`, the enable/change/disable forms, the
+    /// recovery-email form, and the pending-confirmation card with
+    /// resend + abort. Renders the authoritative state only — loading
+    /// and error lines are honest, never optimistic.
+    fn twofa_overlay(&self, cx: &mut Context<Self>) -> AnyElement {
+        let session = self.session();
+        let state = session.as_ref().and_then(|s| s.password_state.clone());
+        let loading = session.is_some_and(|s| s.password_state_loading);
+        let error = session.as_ref().and_then(|s| s.password_op_error.clone());
+        let mut body = div().flex().flex_col().gap_2();
+        if let Some(line) = error {
+            body = body.child(
+                div()
+                    .text_xs()
+                    .text_color(rgb(0xf85149))
+                    .child(format!("Error: {line}")),
+            );
+        }
+        body = match (self.twofa_view, state) {
+            (TwofaView::Status, None) => body.child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(if loading {
+                        "Loading…"
+                    } else {
+                        "No two-step verification data yet."
+                    }),
+            ),
+            (TwofaView::Status, Some(state)) => self.twofa_status_body(cx, body, &state, loading),
+            (TwofaView::Enable, _) => self.twofa_enable_body(cx, body),
+            (TwofaView::Change, _) => self.twofa_change_body(cx, body),
+            (TwofaView::Disable, _) => self.twofa_disable_body(cx, body),
+            (TwofaView::Email, _) => self.twofa_email_body(cx, body),
+        };
+        div()
+            .id("twofa-overlay")
+            .absolute()
+            .top_0()
+            .left_0()
+            .right_0()
+            .bottom_0()
+            .flex()
+            .items_center()
+            .justify_center()
+            .child(
+                div()
+                    .id("twofa-backdrop")
+                    .absolute()
+                    .top_0()
+                    .left_0()
+                    .right_0()
+                    .bottom_0()
+                    .bg(rgba(0x000000e6))
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.close_twofa(window, cx);
+                    })),
+            )
+            .child(
+                div()
+                    .id("twofa-dialog")
+                    .flex()
+                    .flex_col()
+                    .gap_2()
+                    .px_4()
+                    .py_3()
+                    .rounded_lg()
+                    .bg(cx.theme().sidebar)
+                    .border_1()
+                    .border_color(cx.theme().border)
+                    .min_w(px(360.))
+                    .max_w(px(480.))
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .justify_between()
+                            .child(div().font_semibold().child("Two-Step Verification"))
+                            .child(Button::new("close-twofa").label("Close").ghost().on_click(
+                                cx.listener(|this, _, window, cx| {
+                                    this.close_twofa(window, cx);
+                                }),
+                            )),
+                    )
+                    .child(body),
+            )
+            .into_any_element()
+    }
+
+    /// Slice A2: the status screen — current state plus the pending
+    /// confirmation card (TGX `PendingEmailText`) when a recovery email
+    /// is awaiting confirmation.
+    fn twofa_status_body(
+        &self,
+        cx: &mut Context<Self>,
+        mut body: Div,
+        state: &PasswordState,
+        loading: bool,
+    ) -> Div {
+        body = body.child(
+            div()
+                .flex()
+                .items_center()
+                .justify_between()
+                .child(div().font_semibold().text_sm().child("Status"))
+                .child(
+                    div()
+                        .text_sm()
+                        .child(if state.has_password { "On" } else { "Off" }),
+                ),
+        );
+        if state.has_password && !state.password_hint.is_empty() {
+            body = body.child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(format!("Hint: {}", state.password_hint)),
+            );
+        }
+        body = body.child(
+            div()
+                .flex()
+                .items_center()
+                .justify_between()
+                .child(div().font_semibold().text_sm().child("Recovery email"))
+                .child(div().text_sm().child(if state.has_recovery_email_address {
+                    "Set"
+                } else {
+                    "Not set"
+                })),
+        );
+        if let Some(pattern) = &state.pending_email_pattern {
+            body = body
+                .child(div().text_xs().child(format!(
+                    "Your recovery email {pattern} is not yet active and pending confirmation."
+                )))
+                .child(
+                    div()
+                        .flex()
+                        .gap_2()
+                        .child(
+                            Button::new("twofa-resend-code")
+                                .label("Resend code")
+                                .ghost()
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.resend_twofa_code(cx);
+                                })),
+                        )
+                        .child(
+                            // TGX `AbortRecoveryEmail`, verbatim. The abort
+                            // is confirmed like TGX's
+                            // `AbortRecoveryEmailConfirm` — one tap opens
+                            // the shared confirm dialog. No chat is
+                            // involved, so the dialog's chat id is a dummy.
+                            Button::new("twofa-abort-email")
+                                .label("Abort recovery email setup")
+                                .ghost()
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.open_group_confirm(
+                                        ChatId(0),
+                                        GroupConfirmAction::AbortRecoveryEmailSetup,
+                                        cx,
+                                    );
+                                })),
+                        ),
+                );
+        }
+        let mut actions = div().flex().gap_2().flex_wrap();
+        if state.has_password {
+            // TGX `ChangePassword`, verbatim.
+            actions = actions.child(
+                Button::new("twofa-goto-change")
+                    .label("Change Password")
+                    .ghost()
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.goto_twofa_view(TwofaView::Change);
+                        cx.notify();
+                    })),
+            );
+            actions = actions.child(
+                Button::new("twofa-goto-disable")
+                    .label("Turn off")
+                    .ghost()
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.goto_twofa_view(TwofaView::Disable);
+                        cx.notify();
+                    })),
+            );
+            actions = actions.child(
+                Button::new("twofa-goto-email")
+                    // TGX `SetRecoveryEmail` / `ChangeRecoveryEmail`.
+                    .label(if state.has_recovery_email_address {
+                        "Change Recovery Email"
+                    } else {
+                        "Set Recovery Email"
+                    })
+                    .ghost()
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.goto_twofa_view(TwofaView::Email);
+                        cx.notify();
+                    })),
+            );
+        } else {
+            // TGX `SetAdditionalPassword`, verbatim.
+            actions = actions.child(
+                Button::new("twofa-goto-enable")
+                    .label("Set additional password")
+                    .ghost()
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.goto_twofa_view(TwofaView::Enable);
+                        cx.notify();
+                    })),
+            );
+        }
+        if loading {
+            actions = actions.child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("Working…"),
+            );
+        }
+        body.child(actions)
+    }
+
+    /// Slice A2: enable form — new password + hint + optional recovery
+    /// email in one `setPassword` (the TGX `PasswordController`
+    /// MODE_NEW convention).
+    fn twofa_enable_body(&self, cx: &mut Context<Self>, body: Div) -> Div {
+        body.child(
+            div()
+                .font_semibold()
+                .text_sm()
+                .child("Set additional password"),
+        )
+        .child(div().mt_1().font_semibold().text_sm().child("New password"))
+        .child(Textarea::new(&self.twofa_new_password).h(px(40.)))
+        .child(
+            div()
+                .mt_1()
+                .font_semibold()
+                .text_sm()
+                .child("Hint (optional)"),
+        )
+        .child(Textarea::new(&self.twofa_hint).h(px(40.)))
+        .child(
+            div()
+                .mt_1()
+                .font_semibold()
+                .text_sm()
+                .child("Recovery email (optional)"),
+        )
+        .child(Textarea::new(&self.twofa_email).h(px(40.)))
+        .child(
+            div()
+                .text_xs()
+                .text_color(cx.theme().muted_foreground)
+                .child("Sent to TDLib only — never logged"),
+        )
+        .child(self.twofa_form_buttons(cx, TwofaView::Enable, "Set password"))
+    }
+
+    /// Slice A2: change form — current + new password + hint.
+    fn twofa_change_body(&self, cx: &mut Context<Self>, body: Div) -> Div {
+        body.child(div().font_semibold().text_sm().child("Change Password"))
+            .child(
+                div()
+                    .mt_1()
+                    .font_semibold()
+                    .text_sm()
+                    .child("Current password"),
+            )
+            .child(Textarea::new(&self.twofa_current_password).h(px(40.)))
+            .child(div().mt_1().font_semibold().text_sm().child("New password"))
+            .child(Textarea::new(&self.twofa_new_password).h(px(40.)))
+            .child(
+                div()
+                    .mt_1()
+                    .font_semibold()
+                    .text_sm()
+                    .child("Hint (optional)"),
+            )
+            .child(Textarea::new(&self.twofa_hint).h(px(40.)))
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("Sent to TDLib only — never logged"),
+            )
+            .child(self.twofa_form_buttons(cx, TwofaView::Change, "Change password"))
+    }
+
+    /// Slice A2: disable form — current password, `setPassword` with an
+    /// empty new password (schema 1.8.67, line 11434).
+    fn twofa_disable_body(&self, cx: &mut Context<Self>, body: Div) -> Div {
+        body.child(
+            div()
+                .font_semibold()
+                .text_sm()
+                .child("Turn off two-step verification"),
+        )
+        .child(
+            div()
+                .text_xs()
+                .text_color(cx.theme().muted_foreground)
+                .child("You will no longer be asked for an extra password when signing in."),
+        )
+        .child(
+            div()
+                .mt_1()
+                .font_semibold()
+                .text_sm()
+                .child("Current password"),
+        )
+        .child(Textarea::new(&self.twofa_current_password).h(px(40.)))
+        .child(
+            div()
+                .text_xs()
+                .text_color(cx.theme().muted_foreground)
+                .child("Sent to TDLib only — never logged"),
+        )
+        .child(self.twofa_form_buttons(cx, TwofaView::Disable, "Turn off"))
+    }
+
+    /// Slice A2: recovery-email form — current password + new address
+    /// (`setRecoveryEmailAddress`, schema 1.8.67, line 11458).
+    fn twofa_email_body(&self, cx: &mut Context<Self>, body: Div) -> Div {
+        body.child(div().font_semibold().text_sm().child("Recovery email"))
+            .child(
+                div()
+                    .mt_1()
+                    .font_semibold()
+                    .text_sm()
+                    .child("Current password"),
+            )
+            .child(Textarea::new(&self.twofa_current_password).h(px(40.)))
+            .child(
+                div()
+                    .mt_1()
+                    .font_semibold()
+                    .text_sm()
+                    .child("New recovery email"),
+            )
+            .child(Textarea::new(&self.twofa_email).h(px(40.)))
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("The change stays pending until the new address is confirmed."),
+            )
+            .child(self.twofa_form_buttons(cx, TwofaView::Email, "Save"))
+    }
+
+    /// Slice A2: the shared submit/back row for the 2FA forms. Submit
+    /// dispatches to the password or email round-trip; back returns to
+    /// the status screen without sending anything. A local validation
+    /// notice renders above the buttons when a submit was refused.
+    fn twofa_form_buttons(
+        &self,
+        cx: &mut Context<Self>,
+        form: TwofaView,
+        submit_label: &'static str,
+    ) -> Div {
+        let submit_id = match form {
+            TwofaView::Enable => "twofa-submit-enable",
+            TwofaView::Change => "twofa-submit-change",
+            TwofaView::Disable => "twofa-submit-disable",
+            TwofaView::Email => "twofa-submit-email",
+            TwofaView::Status => unreachable!("status view has no submit buttons"),
+        };
+        div()
+            .flex()
+            .flex_col()
+            .gap_2()
+            .when_some(self.twofa_notice.clone(), |this, note| {
+                this.child(div().text_xs().text_color(rgb(0xf85149)).child(note))
+            })
+            .child(
+                div()
+                    .flex()
+                    .gap_2()
+                    .child(Button::new(submit_id).label(submit_label).ghost().on_click(
+                        cx.listener(move |this, _, window, cx| {
+                            if form == TwofaView::Email {
+                                this.submit_twofa_email(window, cx);
+                            } else {
+                                this.submit_twofa_password(window, cx, form == TwofaView::Enable);
+                            }
+                        }),
+                    ))
+                    .child(
+                        Button::new("twofa-back")
+                            .label("Back")
+                            .ghost()
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.goto_twofa_view(TwofaView::Status);
+                                cx.notify();
+                            })),
+                    ),
+            )
+    }
+
     /// Parity slice: one scope's section in the defaults dialog.
     fn scope_settings_section(
         &self,
@@ -26595,6 +27260,13 @@ impl QuillApp {
                 "Restart bot",
                 "Clear this bot's chat history and send /start again? This cannot be undone.",
                 "Restart",
+            ),
+            // Slice A2: TGX `AbortRecoveryEmailConfirm` ("Are you sure
+            // you want to abort recovery email setup?").
+            GroupConfirmAction::AbortRecoveryEmailSetup => (
+                "Abort recovery email setup",
+                "Are you sure you want to abort recovery email setup? The new address will not be activated.",
+                "Abort",
             ),
         };
         let body = div()
@@ -30187,6 +30859,8 @@ impl Render for QuillApp {
             .when(self.storage_usage_open, |this| {
                 this.child(self.storage_usage_overlay(cx))
             })
+            // Slice A2: two-step verification overlay.
+            .when(self.twofa_open, |this| this.child(self.twofa_overlay(cx)))
             // Slice CL2: archive auto-settings overlay.
             .when(
                 self.session().is_some_and(|s| s.archive_settings_open),
@@ -31964,6 +32638,18 @@ impl QuillApp {
                                     let _ = live.driver.maybe_fetch_storage_statistics();
                                 }
                                 cx.notify();
+                            })),
+                    );
+                    // Slice A2: two-step verification overlay entry (TGX
+                    // `TwoStepVerification`). Quill has no settings
+                    // screen, so it sits next to the storage entry; it
+                    // fetches `getPasswordState` on open (guarded: cached
+                    // state reused, in-flight fetch deduped).
+                    list = list.child(
+                        Button::new("twofa")
+                            .label("🔐 Two-step verification")
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.open_twofa(cx);
                             })),
                     );
                     // Phase 9.1/9.3: tdesktop-style active-stories tray above
@@ -39532,6 +40218,38 @@ fn demo_storage_stats() -> StorageStats {
                 count: 640,
             },
         ],
+    }
+}
+
+/// Slice A2: `passwordState` fixture for the `Ready2faManage` screenshot
+/// demo — password set, hint, recovery email set, no pending
+/// confirmation (injected, no live Telegram).
+fn demo_password_state_manage() -> PasswordState {
+    PasswordState {
+        has_password: true,
+        password_hint: "favorite street".to_string(),
+        has_recovery_email_address: true,
+        has_passport_data: false,
+        pending_email_pattern: None,
+        pending_email_code_length: 0,
+        login_email_address_pattern: String::new(),
+        pending_reset_date: 0,
+    }
+}
+
+/// Slice A2: `passwordState` fixture for the `ReadyRecoveryEmail`
+/// screenshot demo — recovery email change pending confirmation
+/// (TGX `PendingEmailText` wording, injected, no live Telegram).
+fn demo_password_state_pending() -> PasswordState {
+    PasswordState {
+        has_password: true,
+        password_hint: String::new(),
+        has_recovery_email_address: true,
+        has_passport_data: false,
+        pending_email_pattern: Some("n***@example.com".to_string()),
+        pending_email_code_length: 6,
+        login_email_address_pattern: String::new(),
+        pending_reset_date: 0,
     }
 }
 
