@@ -360,7 +360,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Remote video frames in video call (peer camera as the main tile; Connecting/paused/off state text from `RemoteVideoState`) <!-- parity:calls-remote-video -->
 - [x] Switch camera during video call (camera on/off toggle drives `set_camera_enabled`; camera picker re-applies the selected device on the active call) <!-- parity:calls-camera-switch -->
 - [x] Camera device selection (Camera picker row with radio selection; "No camera found." when the engine reports none) <!-- parity:calls-camera-select -->
-- [ ] 1:1 call verification emojis (partial: parsed and shown only for group calls) <!-- parity:calls-verify-emoji -->
+- [x] 1:1 call verification emojis (`callStateReady.emojis` shown on the 1:1 call card, same rendering as group calls; code + demo only, live unverified) <!-- parity:calls-verify-emoji -->
 - [ ] Share screen in a call (partial: screen-sharing participants are detected and flagged, ui/mod.rs:10150; 1:1 share UI not started — see group screen-share item below) <!-- parity:calls-screen-share -->
 - [x] Join group voice chat <!-- parity:calls-join --> (group-call-join button ui/mod.rs:10817; join_group_call requests.rs:1101)
 - [x] Leave group voice chat <!-- parity:calls-leave --> ("Leave" button ui/mod.rs:10407; leave_group_call connect.rs:2161)
@@ -378,14 +378,14 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Toggle my video in group video chat (drives the native group camera via `set_group_camera`, not just signaling; live camera unverified) <!-- parity:calls-group-video-toggle --> (toggle_group_call_video ui/mod.rs:10667)
 - [ ] Group video tiles show live video (partial: engine→tile path implemented + mock-tested + demo screenshot; live group call never exercised — no ntgcalls runtime on this VM) <!-- parity:calls-video-tiles -->
 - [ ] Share screen in a group call (partial: startGroupCallScreenSharing/endGroupCallScreenSharing + native presentation handshake implemented; screen-source availability gate added; native screen source unverified — no ntgcalls runtime on this VM) <!-- parity:calls-group-screen-share -->
-- [ ] Group video paused indicator (partial: `is_paused` parsed from video_info, not shown on tiles) <!-- parity:calls-group-video-pause -->
+- [x] Group video paused indicator ("paused" badge on tiles when `video_info.is_paused`; code + demo only, live unverified) <!-- parity:calls-group-video-pause -->
 - [ ] Local camera preview tile in group calls (partial: remote tiles render; local capture frames are dropped at the native callback, so the self tile stays an avatar) <!-- parity:calls-group-video-self -->
 - [x] Auto-rejoin group call after network loss (auto-rejoin on `need_rejoin`, max 3 attempts, manual retry resets) <!-- parity:calls-rejoin -->
 - [x] Record group call (`startGroupCallRecording` video / `endGroupCallRecording`, `can_be_managed`-gated; REC indicator with duration; code + demo only, live recording unverified) <!-- parity:calls-recording -->
 - [x] RTMP stream key for video chat (`getVideoChatRtmpUrl` / `replaceVideoChatRtmpUrl`, fetch admin-gated, regenerate owner-gated; code + demo only, live unverified) <!-- parity:calls-rtmp -->
 - [x] Set / rename video chat title (`setVideoChatTitle`, 1-64 chars, `can_be_managed`-gated; code + demo only, live unverified) <!-- parity:calls-title -->
 - [x] Schedule video chat for later (`createVideoChat` start_date with 10s–8d validation; scheduled card shows start time + admin-only **Start now** (`startScheduledVideoChat`), Join appears once TDLib activates the call; code + demo only, live activation unverified) <!-- parity:calls-schedule -->
-- [ ] Notify me when a scheduled video chat starts (`toggleVideoChatEnabledStartNotification`, scheduled-only; not implemented) <!-- parity:calls-schedule-notify -->
+- [x] Notify me when a scheduled video chat starts (`toggleVideoChatEnabledStartNotification`, scheduled-only, any viewer; new flag arrives via `updateGroupCall`; code + demo only, live round-trip unverified) <!-- parity:calls-schedule-notify -->
 - [x] Video chat invite link (`getVideoChatInviteLink` with Copy, `revokeGroupCallInviteLink`; code + demo only, live unverified) <!-- parity:calls-invite-link -->
 - [x] In-call chat messages for group calls (`sendGroupCallMessage` + live `updateNewGroupCallMessage` feed with composer, gated on `can_send_messages`/`are_messages_allowed`; no history getter exists in the schema, so live feed only; code + demo only, live unverified) <!-- parity:calls-group-messages -->
 

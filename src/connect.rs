@@ -105,8 +105,9 @@ use crate::telegram::requests::{
     toggle_group_call_is_my_video_paused, toggle_group_call_participant_is_hand_raised,
     toggle_group_call_participant_is_muted, toggle_supergroup_aggressive_anti_spam,
     toggle_supergroup_is_broadcast_group, toggle_supergroup_join_by_request,
-    toggle_supergroup_sign_messages, toggle_video_chat_mute_new_participants,
-    unpin_all_chat_messages, unpin_chat_message, view_messages, view_sponsored_chat,
+    toggle_supergroup_sign_messages, toggle_video_chat_enabled_start_notification,
+    toggle_video_chat_mute_new_participants, unpin_all_chat_messages, unpin_chat_message,
+    view_messages, view_sponsored_chat,
 };
 use crate::voice::VoiceDraft;
 use std::collections::{HashMap, VecDeque};
@@ -3811,6 +3812,44 @@ impl<S: JsonSender> ConnectDriver<S> {
         if let Err(err) = self
             .sender
             .send_json(&start_scheduled_video_chat(extra, group_call_id))
+        {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(extra)
+    }
+
+    /// `toggleVideoChatEnabledStartNotification` (schema 1.8.67,
+    /// :14282): "notify me when this scheduled video chat starts".
+    /// Gated on the tracked call still being scheduled — the schema
+    /// marks the constructor for video chats (any viewer can set it;
+    /// no admin right needed). The new flag arrives back as
+    /// `updateGroupCall` (`enabled_start_notification`, :7154), which
+    /// the reducer already stores on the tracked call.
+    pub fn toggle_video_chat_start_notification(&mut self) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let (group_call_id, enabled) = match &self.session.active_group_call {
+            Some(call) if call.scheduled_start_date > 0 => {
+                (call.id, !call.enabled_start_notification)
+            }
+            _ => return Err(ConnectSendError::InvalidRequest),
+        };
+        let extra = self.session.request(
+            RequestPurpose::ToggleVideoChatEnabledStartNotification {
+                group_call_id,
+                enabled,
+            },
+            None,
+        );
+        if let Err(err) = self
+            .sender
+            .send_json(&toggle_video_chat_enabled_start_notification(
+                extra,
+                group_call_id,
+                enabled,
+            ))
         {
             self.session.requests.take(extra);
             return Err(err);
@@ -18221,6 +18260,54 @@ mod tests {
             driver.start_scheduled_video_chat(),
             Err(ConnectSendError::InvalidRequest),
             "already-active call must refuse start-now"
+        );
+
+        // Start-notification toggle:
+        // `toggleVideoChatEnabledStartNotification` (:14282), gated on
+        // a still-scheduled call; the driver flips the tracked
+        // `enabled_start_notification` flag.
+        driver
+            .session
+            .active_group_call
+            .as_mut()
+            .unwrap()
+            .scheduled_start_date = 1_788_000_000;
+        driver
+            .session
+            .active_group_call
+            .as_mut()
+            .unwrap()
+            .enabled_start_notification = false;
+        driver
+            .toggle_video_chat_start_notification()
+            .expect("notify-me sends");
+        assert_eq!(
+            last_sent()["@type"],
+            "toggleVideoChatEnabledStartNotification"
+        );
+        assert_eq!(last_sent()["group_call_id"], 77);
+        assert_eq!(last_sent()["enabled_start_notification"], true);
+        // Same shape with the flag on: the driver turns it off.
+        driver
+            .session
+            .active_group_call
+            .as_mut()
+            .unwrap()
+            .enabled_start_notification = true;
+        driver
+            .toggle_video_chat_start_notification()
+            .expect("un-notify-me sends");
+        assert_eq!(last_sent()["enabled_start_notification"], false);
+        driver
+            .session
+            .active_group_call
+            .as_mut()
+            .unwrap()
+            .scheduled_start_date = 0;
+        assert_eq!(
+            driver.toggle_video_chat_start_notification(),
+            Err(ConnectSendError::InvalidRequest),
+            "already-active call must refuse the notify toggle"
         );
 
         // Invite revocation: `revokeGroupCallInviteLink` (:14398),

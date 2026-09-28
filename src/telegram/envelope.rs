@@ -1284,6 +1284,9 @@ pub struct ReadyParams {
     pub encryption_key: Vec<u8>,
     pub servers: Vec<ParsedRtcServer>,
     pub allow_p2p: bool,
+    /// `callStateReady.emojis` (schema 1.8.67, :7068): the 4-emoji
+    /// E2E fingerprint, shown on the 1:1 call card.
+    pub emojis: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1459,6 +1462,16 @@ fn parse_call(value: Option<&Value>) -> Option<ParsedCall> {
                 .get("allow_p2p")
                 .and_then(Value::as_bool)
                 .unwrap_or(false),
+            emojis: state
+                .get("emojis")
+                .and_then(Value::as_array)
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(Value::as_str)
+                        .map(str::to_string)
+                        .collect()
+                })
+                .unwrap_or_default(),
         });
     Some(ParsedCall {
         id: value.get("id").and_then(Value::as_i64).unwrap_or(0) as i32,
@@ -1503,6 +1516,10 @@ pub struct ParsedGroupCall {
     pub mute_new_participants: bool,
     pub can_toggle_mute_new_participants: bool,
     pub scheduled_start_date: i32,
+    /// `enabled_start_notification` (schema 1.8.67, :7154): the current
+    /// user gets a notification when a scheduled video chat starts —
+    /// toggled via `toggleVideoChatEnabledStartNotification` (:14282).
+    pub enabled_start_notification: bool,
     /// Phase C2h: message permissions (schema 1.8.67, lines
     /// 7147-7150) — gate the in-call chat UI.
     pub can_send_messages: bool,
@@ -1598,6 +1615,10 @@ fn parse_group_call(value: Option<&Value>) -> Option<ParsedGroupCall> {
             .get("scheduled_start_date")
             .and_then(Value::as_i64)
             .unwrap_or(0) as i32,
+        enabled_start_notification: value
+            .get("enabled_start_notification")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
         can_send_messages: value
             .get("can_send_messages")
             .and_then(Value::as_bool)
@@ -14287,6 +14308,7 @@ mod notification_sound_tests {
             "call id:int32 unique_id:int64 user_id:int53 is_outgoing:Bool is_video:Bool state:CallState = Call;",
             "callProtocol udp_p2p:Bool udp_reflector:Bool min_layer:int32 max_layer:int32 library_versions:vector<string> = CallProtocol;",
             "createCall user_id:int53 protocol:callProtocol is_video:Bool = CallId;",
+            "toggleVideoChatEnabledStartNotification group_call_id:int32 enabled_start_notification:Bool = Ok;",
             "acceptCall call_id:int32 protocol:callProtocol = Ok;",
             "sendCallSignalingData call_id:int32 data:bytes = Ok;",
             "discardCall call_id:int32 is_disconnected:Bool invite_link:string duration:int32 is_video:Bool connection_id:int64 = Ok;",
@@ -14422,7 +14444,7 @@ mod notification_sound_tests {
 
     #[test]
     fn call_ready_parses_transport_parameters_and_server_kinds() {
-        let json = r#"{"@type":"updateCall","call":{"@type":"call","id":77,"unique_id":"99","user_id":41,"is_outgoing":true,"is_video":false,"state":{"@type":"callStateReady","protocol":{"@type":"callProtocol","udp_p2p":true,"udp_reflector":true,"min_layer":92,"max_layer":92,"library_versions":["13.0.0"]},"servers":[{"@type":"callServer","id":"7","ip_address":"149.154.167.40","ipv6_address":"2001:b28:f23d:f001::a","port":443,"type":{"@type":"callServerTypeTelegramReflector","peer_tag":"AAEC","is_tcp":true}},{"@type":"callServer","id":"8","ip_address":"203.0.113.1","ipv6_address":"","port":3478,"type":{"@type":"callServerTypeWebrtc","username":"alice","password":"secret","supports_turn":true,"supports_stun":false}}],"config":"{}","encryption_key":"AQIDBA==","emojis":[],"allow_p2p":true,"is_group_call_supported":false,"custom_parameters":"{\"x\":1}"}}}"#;
+        let json = r#"{"@type":"updateCall","call":{"@type":"call","id":77,"unique_id":"99","user_id":41,"is_outgoing":true,"is_video":false,"state":{"@type":"callStateReady","protocol":{"@type":"callProtocol","udp_p2p":true,"udp_reflector":true,"min_layer":92,"max_layer":92,"library_versions":["13.0.0"]},"servers":[{"@type":"callServer","id":"7","ip_address":"149.154.167.40","ipv6_address":"2001:b28:f23d:f001::a","port":443,"type":{"@type":"callServerTypeTelegramReflector","peer_tag":"AAEC","is_tcp":true}},{"@type":"callServer","id":"8","ip_address":"203.0.113.1","ipv6_address":"","port":3478,"type":{"@type":"callServerTypeWebrtc","username":"alice","password":"secret","supports_turn":true,"supports_stun":false}}],"config":"{}","encryption_key":"AQIDBA==","emojis":["🍎","🍌"],"allow_p2p":true,"is_group_call_supported":false,"custom_parameters":"{\"x\":1}"}}}"#;
         let EnvelopePayload::UpdateCall { call } = parse_envelope(json).unwrap().payload else {
             panic!("expected updateCall");
         };
@@ -14436,6 +14458,8 @@ mod notification_sound_tests {
         assert!(ready.servers[1].turn);
         assert!(!ready.servers[1].stun);
         assert_eq!(ready.servers[1].username, "alice");
+        // `callStateReady.emojis` (:7068) — the 1:1 E2E fingerprint.
+        assert_eq!(ready.emojis, vec!["🍎".to_string(), "🍌".to_string()]);
     }
 
     #[test]

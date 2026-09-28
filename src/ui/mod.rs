@@ -1969,6 +1969,13 @@ pub enum ScreenshotDemo {
     /// indicator live, RTMP URL + key fetched, and two in-call chat
     /// messages with the composer.
     ReadyGroupCallManage,
+    /// "Notify me when a scheduled video chat starts" (injected, no
+    /// live Telegram) — a scheduled (not yet started) video chat, so
+    /// the overlay renders the "Scheduled voice chat" card with the
+    /// "Starts in …" line, the admin "Start now" button, and the
+    /// "Notify me when it starts" toggle
+    /// (`toggleVideoChatEnabledStartNotification`, :14282).
+    ReadyGroupCallScheduled,
     /// Phase C2i: Recent-calls tab — server-side `searchCallMessages`
     /// history (missed / declined / answered) + call settings
     /// (injected, no live Telegram).
@@ -3226,6 +3233,15 @@ impl QuillApp {
                     AuthorizationState::Ready,
                 )
             }
+            Some(ScreenshotDemo::ReadyGroupCallScheduled) => {
+                demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
+                (
+                    ConnectUiStatus::DemoReadyChats,
+                    None,
+                    "screenshot demo — scheduled voice chat (injected, no live Telegram)".into(),
+                    AuthorizationState::Ready,
+                )
+            }
             Some(ScreenshotDemo::ReadyCallsSettings) => {
                 demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
                 (
@@ -4037,6 +4053,15 @@ impl QuillApp {
             }
             app.status_note =
                 "screenshot demo — voice chat management: title, invite link, recording, RTMP, chat (injected, no live Telegram)"
+                    .into();
+        }
+        if matches!(demo, Some(ScreenshotDemo::ReadyGroupCallScheduled)) {
+            if let Some(session) = app.demo_session.as_mut() {
+                app.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_group_call_scheduled(session, &app.demo_sink, &app.demo_seq);
+            }
+            app.status_note =
+                "screenshot demo — scheduled voice chat: start time, Start now, notify-me toggle (injected, no live Telegram)"
                     .into();
         }
         // Phase C2i: Recent-calls tab with injected `foundMessages`
@@ -18574,6 +18599,27 @@ impl QuillApp {
         if let Some(clock) = clock {
             card = card.child(div().text_2xl().font_semibold().child(clock));
         }
+        // E2E verification emojis, straight from `callStateReady`
+        // (:7068) — same rendering as the group-call card. Hidden
+        // until TDLib sends the 4-emoji fingerprint.
+        if matches!(call.state, CallState::Ready)
+            && let Some(ready) = &call.ready
+            && !ready.emojis.is_empty()
+        {
+            card = card.child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("End-to-end verification:"),
+                    )
+                    .child(div().text_2xl().child(ready.emojis.join(" "))),
+            );
+        }
         // Honest no-transport note: the call can be "Connected" at the
         // signaling level while carrying no audio or video. Never fake
         // a live call. Every pre-connected card carries it — incoming
@@ -19180,6 +19226,16 @@ impl QuillApp {
         if participant.video_enabled {
             badges.push("📹 video".to_string());
         }
+        // `groupCallParticipantVideoInfo.is_paused` (schema 1.8.67,
+        // :7163): TDLib clears the flag when new frames arrive, so the
+        // badge only needs to read it.
+        if participant
+            .video_info
+            .as_ref()
+            .is_some_and(|info| info.is_paused)
+        {
+            badges.push("⏸ paused".to_string());
+        }
         if participant.screen_sharing_enabled {
             badges.push("🖥 sharing".to_string());
         }
@@ -19439,7 +19495,24 @@ impl QuillApp {
                                     this.start_scheduled_video_chat(cx);
                                 })),
                         )
-                    }),
+                    })
+                    // "Notify me when it starts":
+                    // `toggleVideoChatEnabledStartNotification` (schema
+                    // 1.8.67, :14282). Any viewer can set it — no admin
+                    // right required. The driver sends the flipped flag;
+                    // the new value arrives back as `updateGroupCall`.
+                    .child(
+                        Button::new("group-call-start-notify-toggle")
+                            .label(if call.enabled_start_notification {
+                                "🔔 Notifying — tap to turn off"
+                            } else {
+                                "🔕 Notify me when it starts"
+                            })
+                            .ghost()
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.toggle_video_chat_start_notification(cx);
+                            })),
+                    ),
             );
         } else if !call.is_joined {
             card = card.child(self.group_call_join_prompt(call, cx));
@@ -20774,6 +20847,22 @@ impl QuillApp {
             };
         } else {
             self.status_note = "Start now needs a live connection.".into();
+        }
+        cx.notify();
+    }
+
+    /// `toggleVideoChatEnabledStartNotification` (:14282) — "notify me
+    /// when this scheduled video chat starts". The driver flips the
+    /// tracked `enabled_start_notification` flag; the honest value
+    /// arrives back as `updateGroupCall`.
+    fn toggle_video_chat_start_notification(&mut self, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            self.status_note = match live.driver.toggle_video_chat_start_notification() {
+                Ok(_) => "Updating your start notification…".into(),
+                Err(_) => "Couldn't update the start notification.".into(),
+            };
+        } else {
+            self.status_note = "Notify-me needs a live connection.".into();
         }
         cx.notify();
     }
@@ -32099,6 +32188,43 @@ fn apply_ready_secret_chat(session: &mut Session, sink: &Arc<MemorySink>, seq: &
     session.open_chat(ChatId(chat_id));
 }
 
+/// Scheduled video-chat fixture — the "Design voice" supergroup (id
+/// 51) has a scheduled (not yet started) video chat (id 555, starts
+/// in ~2h), so the overlay renders the "Scheduled voice chat" card:
+/// the "Starts in …" line, the admin "Start now" button, and the
+/// "Notify me when it starts" toggle
+/// (`toggleVideoChatEnabledStartNotification`, schema 1.8.67,
+/// :14282). Injected, no live Telegram, no media.
+fn apply_ready_group_call_scheduled(
+    session: &mut Session,
+    sink: &Arc<MemorySink>,
+    seq: &AtomicU64,
+) {
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let chat_id = 51i64;
+    let call_id = 555i32;
+    let start_date = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64 + 7200)
+        .unwrap_or(1788003600);
+    let jsons = [
+        format!(
+            r#"{{"@type":"updateNewChat","chat":{{"id":{chat_id},"title":"Design voice","type":{{"@type":"chatTypeSupergroup","supergroup_id":{chat_id},"is_channel":false}},"unread_count":0}}}}"#
+        ),
+        format!(
+            r#"{{"@type":"updateChatVideoChat","chat_id":{chat_id},"video_chat":{{"@type":"videoChat","group_call_id":{call_id},"has_participants":false,"default_participant_id":null}}}}"#
+        ),
+        format!(
+            r#"{{"@type":"updateGroupCall","group_call":{{"@type":"groupCall","id":{call_id},"unique_id":"999","title":"Design sync planning","invite_link":"","paid_message_star_count":0,"scheduled_start_date":{start_date},"enabled_start_notification":false,"is_active":false,"is_video_chat":true,"is_live_story":false,"is_rtmp_stream":false,"is_joined":false,"need_rejoin":false,"is_owned":false,"can_be_managed":true,"participant_count":0,"has_hidden_listeners":false,"loaded_all_participants":false,"message_sender_id":null,"recent_speakers":[],"is_my_video_enabled":false,"is_my_video_paused":false,"can_enable_video":true,"mute_new_participants":false,"can_toggle_mute_new_participants":true,"can_send_messages":true,"are_messages_allowed":true,"can_toggle_are_messages_allowed":true,"can_delete_messages":false,"record_duration":0,"is_video_recorded":false,"duration":0}}}}"#
+        ),
+    ];
+    for json in jsons {
+        if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
+            session.apply(owned);
+        }
+    }
+}
+
 /// Phase C2i: synthetic Recent-calls fixture — users + private chats
 /// plus a `foundMessages` payload carrying three `messageCall`
 /// entries (missed / declined / answered video), applied through the
@@ -32263,7 +32389,7 @@ fn apply_ready_call_video(session: &mut Session, sink: &Arc<MemorySink>, seq: &A
         ),
         r#"{"@type":"updateCall","call":{"@type":"call","id":77,"unique_id":"99","user_id":41,"is_outgoing":false,"is_video":true,"state":{"@type":"callStatePending","is_created":true,"is_received":false}}}"#.to_string(),
         r#"{"@type":"updateCall","call":{"@type":"call","id":77,"unique_id":"99","user_id":41,"is_outgoing":false,"is_video":true,"state":{"@type":"callStateExchangingKeys"}}}"#.to_string(),
-        r#"{"@type":"updateCall","call":{"@type":"call","id":77,"unique_id":"99","user_id":41,"is_outgoing":false,"is_video":true,"state":{"@type":"callStateReady","protocol":{"@type":"callProtocol","udp_p2p":false,"udp_reflector":false,"min_layer":65,"max_layer":92,"library_versions":[]},"servers":[],"config":"{}","encryption_key":"","emojis":[],"allow_p2p":false,"is_group_call_supported":false,"custom_parameters":"{}"}}}"#.to_string(),
+        r#"{"@type":"updateCall","call":{"@type":"call","id":77,"unique_id":"99","user_id":41,"is_outgoing":false,"is_video":true,"state":{"@type":"callStateReady","protocol":{"@type":"callProtocol","udp_p2p":false,"udp_reflector":false,"min_layer":65,"max_layer":92,"library_versions":[]},"servers":[],"config":"{}","encryption_key":"","emojis":["🍎","🍌","🍒","🍇"],"allow_p2p":false,"is_group_call_supported":false,"custom_parameters":"{}"}}}"#.to_string(),
     ];
     for json in jsons {
         if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
@@ -32274,8 +32400,9 @@ fn apply_ready_call_video(session: &mut Session, sink: &Arc<MemorySink>, seq: &A
 
 /// Phase C3a: joined group voice-chat fixture — the "Design voice"
 /// supergroup (id 51) has a live voice chat (id 555), joined as the
-/// demo user (777), with Zed speaking, Mia's hand raised, and one
-/// muted participant, plus E2E verification emojis. The overlay
+/// demo user (777), with Zed speaking, Mia's hand raised, Raj muted
+/// with a paused camera (`is_paused` badge), plus E2E verification
+/// emojis. The overlay
 /// renders its participant grid, controls, and the honest no-audio
 /// note. The demo user OWNS the chat (`is_owned: true`) so the
 /// owner-gated Ban buttons render. Injected, no live Telegram, no
@@ -32289,9 +32416,9 @@ fn apply_ready_group_call(session: &mut Session, sink: &Arc<MemorySink>, seq: &A
             r#"{{"@type":"updateUser","user":{{"id":{id},"first_name":"{first}","last_name":"{last}","type":{{"@type":"userTypeRegular"}}}}}}"#
         )
     };
-    let video_info = |endpoint: &str, source_id: u32| {
+    let video_info = |endpoint: &str, source_id: u32, paused: bool| {
         format!(
-            r#"{{"@type":"groupCallParticipantVideoInfo","source_groups":[{{"@type":"groupCallVideoSourceGroup","semantics":"SIM","source_ids":[{source_id}]}}],"endpoint_id":"{endpoint}","is_paused":false}}"#
+            r#"{{"@type":"groupCallParticipantVideoInfo","source_groups":[{{"@type":"groupCallVideoSourceGroup","semantics":"SIM","source_ids":[{source_id}]}}],"endpoint_id":"{endpoint}","is_paused":{paused}}}"#
         )
     };
     let participant = |id: i64, flags: &str, order: &str, video: &str, screen: &str| {
@@ -32318,7 +32445,7 @@ fn apply_ready_group_call(session: &mut Session, sink: &Arc<MemorySink>, seq: &A
             41,
             r#","is_speaking":true"#,
             "a3",
-            &video_info("ep-41", 111),
+            &video_info("ep-41", 111, false),
             "null",
         ),
         participant(
@@ -32326,13 +32453,13 @@ fn apply_ready_group_call(session: &mut Session, sink: &Arc<MemorySink>, seq: &A
             r#","is_hand_raised":true"#,
             "a2",
             "null",
-            &video_info("ep-42-screen", 222),
+            &video_info("ep-42-screen", 222, false),
         ),
         participant(
             43,
             r#","is_muted_for_all_users":true"#,
             "a1",
-            "null",
+            &video_info("ep-43", 333, true),
             "null",
         ),
         format!(
