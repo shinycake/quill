@@ -23,7 +23,7 @@ use crate::telegram::envelope::{
     MessageSelfDestruct, MessageSender, NotificationSettingsScope, NotificationSound, OptionValue,
     ParsedCall, ParsedChatEvent, ParsedChatInviteLink, ParsedChatJoinRequest, ParsedChatMember,
     ParsedFile, ParsedGroupCall, ParsedGroupCallMessage, ParsedGroupCallParticipant, ParsedMessage,
-    ParsedSecretChat, ParsedSession, ParsedStory, ParsedUser, ParsedVideoChat,
+    ParsedSecretChat, ParsedSession, ParsedStory, ParsedUser, ParsedVideoChat, ParsedWebsite,
     ParsedWelcomeMessage, PasswordState, Poll, ReplyKeyboard, ReplyMarkup, ReportChatOutcome,
     ReportOption, ReportSponsoredResult, ReportStoryResult, RichMessageContent,
     ScopeNotificationSettings, SecretChatState, SponsoredMessage, StickerFormat, StickerItem,
@@ -210,6 +210,30 @@ pub enum RequestPurpose {
     /// Slice A3: `terminateAllOtherSessions`. Response is `ok`; the list
     /// is refetched from the authoritative answer (never optimistic).
     TerminateAllOtherSessions,
+    /// Slice A4: `toggleSessionCanAcceptSecretChats`. Response is `ok`;
+    /// the sessions list is refetched from the authoritative answer
+    /// (never optimistic) — same as a terminate.
+    ToggleSessionSecretChats {
+        session_id: i64,
+    },
+    /// Slice A4: `toggleSessionCanAcceptCalls`. Response is `ok`; the
+    /// sessions list is refetched from the authoritative answer (never
+    /// optimistic).
+    ToggleSessionCalls {
+        session_id: i64,
+    },
+    /// Slice A4: `getConnectedWebsites`. Response is
+    /// `connectedWebsites`; the list is replaced from the authoritative
+    /// answer (never optimistic).
+    GetConnectedWebsites,
+    /// Slice A4: `disconnectWebsite`. Response is `ok`; the list is
+    /// refetched from the authoritative answer (never optimistic).
+    DisconnectWebsite {
+        website_id: i64,
+    },
+    /// Slice A4: `disconnectAllWebsites`. Response is `ok`; the list is
+    /// refetched from the authoritative answer (never optimistic).
+    DisconnectAllWebsites,
     /// `addChatToList` (`chatListArchive` or `chatListMain`). Response is `ok`;
     /// list membership via position / added-to-list updates.
     AddChatToList,
@@ -989,7 +1013,7 @@ fn sessions_error_line(action: &str, err: &TdError) -> String {
         ErrorClass::Flood => "too many requests — wait and try again",
         ErrorClass::Unauthorized => "session is no longer authorized",
         ErrorClass::Invalid => "Telegram refused the request",
-        ErrorClass::NotFound => "session no longer exists",
+        ErrorClass::NotFound => "no longer exists",
         ErrorClass::Other => return format!("Could not {action} (error {})", err.code),
     };
     format!("Could not {action}: {detail}")
@@ -3367,6 +3391,23 @@ pub struct Session {
     /// is refetched from the authoritative answer on the next ingest
     /// (the `saved_sounds_stale` pattern); never an optimistic delete.
     pub sessions_stale: bool,
+    /// Slice A4: cached `getConnectedWebsites` answer (TGX
+    /// `SettingsWebsitesController` style); drives the Connected Websites
+    /// overlay.
+    pub connected_websites: Option<Vec<ParsedWebsite>>,
+    /// Slice A4: a `getConnectedWebsites` round trip is in flight.
+    pub connected_websites_loading: bool,
+    /// Slice A4: a `disconnectWebsite` / `disconnectAllWebsites` round trip
+    /// is in flight — disconnect buttons stay disabled meanwhile.
+    pub websites_mutating: bool,
+    /// Slice A4: honest one-line failure of the last websites fetch or
+    /// disconnect (classified from the TDLib error code, never the native
+    /// message). Cleared on the next successful fetch.
+    pub websites_error: Option<String>,
+    /// Slice A4: a disconnect succeeded — the old cache stays visible and
+    /// is refetched from the authoritative answer on the next ingest
+    /// (the `saved_sounds_stale` pattern); never an optimistic delete.
+    pub websites_stale: bool,
     /// Parity slice: downloaded-file id → notification sound id, for files
     /// fetched as notification sounds.
     pub sound_file_ids: HashMap<i32, i64>,
@@ -4202,6 +4243,11 @@ impl Session {
             sessions_mutating: false,
             sessions_error: None,
             sessions_stale: false,
+            connected_websites: None,
+            connected_websites_loading: false,
+            websites_mutating: false,
+            websites_error: None,
+            websites_stale: false,
             sound_file_ids: HashMap::new(),
             pending_sound_downloads: HashSet::new(),
             pending_sound_plays: Vec::new(),
@@ -6822,6 +6868,19 @@ impl Session {
                     self.sessions_stale = false;
                 }
             }
+            EnvelopePayload::ConnectedWebsites { websites } => {
+                // Slice A4: `getConnectedWebsites` answer — only our own
+                // in-flight request writes the cache (matched by `@extra`).
+                // The answer is authoritative: it replaces the list and
+                // clears any stale error. No optimistic mutation ever
+                // happens client-side.
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetConnectedWebsites) {
+                    self.connected_websites = Some(websites);
+                    self.connected_websites_loading = false;
+                    self.websites_error = None;
+                    self.websites_stale = false;
+                }
+            }
             EnvelopePayload::ArchiveChatListSettings { settings } => {
                 // Slice CL2: `getArchiveChatListSettings` answer — only
                 // our own in-flight request writes the cache.
@@ -6936,6 +6995,35 @@ impl Session {
                     self.sessions_stale = true;
                     self.sessions_mutating = false;
                     self.sessions_error = None;
+                }
+                // Slice A4: a `toggleSessionCanAcceptSecretChats` /
+                // `toggleSessionCanAcceptCalls` succeeded — same stale
+                // pattern: the toggled value comes back in the
+                // authoritative refetch, never from an optimistic flip.
+                if matches!(
+                    pending.map(|p| p.purpose),
+                    Some(
+                        RequestPurpose::ToggleSessionSecretChats { .. }
+                            | RequestPurpose::ToggleSessionCalls { .. }
+                    )
+                ) {
+                    self.sessions_stale = true;
+                    self.sessions_mutating = false;
+                    self.sessions_error = None;
+                }
+                // Slice A4: a `disconnectWebsite` /
+                // `disconnectAllWebsites` succeeded — same stale pattern
+                // on the websites list.
+                if matches!(
+                    pending.map(|p| p.purpose),
+                    Some(
+                        RequestPurpose::DisconnectWebsite { .. }
+                            | RequestPurpose::DisconnectAllWebsites
+                    )
+                ) {
+                    self.websites_stale = true;
+                    self.websites_mutating = false;
+                    self.websites_error = None;
                 }
                 // Phase C3a: a successful `leaveGroupCall` /
                 // `endGroupCall` drops the tracked call (the `ok`
@@ -7748,6 +7836,39 @@ impl Session {
                         self.sessions_mutating = false;
                         self.sessions_error =
                             Some(sessions_error_line("terminate the session", &err));
+                    }
+                    // Slice A4: a refused session toggle surfaces an honest
+                    // classified error and leaves the list untouched (the
+                    // toggled value is never applied optimistically).
+                    Some(
+                        RequestPurpose::ToggleSessionSecretChats { .. }
+                        | RequestPurpose::ToggleSessionCalls { .. },
+                    ) => {
+                        self.sessions_mutating = false;
+                        self.sessions_error =
+                            Some(sessions_error_line("change the session setting", &err));
+                    }
+                    // Slice A4: a failed websites fetch or disconnect
+                    // clears the in-flight flags and parks the honest,
+                    // classified error line on the overlay.
+                    // A failed stale-refetch also clears `websites_stale`
+                    // (mirroring A3's sessions arm): otherwise the next
+                    // ingest retries the fetch and flood state worsens;
+                    // retry is user-driven via the Refresh button. The old
+                    // cache stays visible.
+                    Some(RequestPurpose::GetConnectedWebsites) => {
+                        self.connected_websites_loading = false;
+                        self.websites_stale = false;
+                        self.websites_error =
+                            Some(sessions_error_line("load the websites list", &err));
+                    }
+                    Some(
+                        RequestPurpose::DisconnectWebsite { .. }
+                        | RequestPurpose::DisconnectAllWebsites,
+                    ) => {
+                        self.websites_mutating = false;
+                        self.websites_error =
+                            Some(sessions_error_line("disconnect the website", &err));
                     }
                     // M1 fix-up: a failed `resendMessages` surfaces in the
                     // status note instead of vanishing into `_ => {}` —
@@ -17538,6 +17659,8 @@ mod tests {
             id: 22,
             is_current: false,
             is_password_pending: false,
+            can_accept_secret_chats: true,
+            can_accept_calls: true,
             device_model: "iPhone".into(),
             application_name: "Telegram iOS".into(),
             application_version: "12.0".into(),
@@ -17615,6 +17738,215 @@ mod tests {
         assert_eq!(
             session.sessions_error.as_deref(),
             Some("Could not load the sessions list: too many requests — wait and try again")
+        );
+    }
+
+    /// Slice A4: the `getConnectedWebsites` answer replaces the cache
+    /// and clears loading/error — but only for our own in-flight request
+    /// (matched by `@extra`).
+    #[test]
+    fn websites_answer_replaces_cache_for_matching_request() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        let extra = session.request(RequestPurpose::GetConnectedWebsites, None);
+        session.connected_websites_loading = true;
+        session.websites_error = Some("stale".into());
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"connectedWebsites","@extra":"{}","websites":[{{"@type":"connectedWebsite","id":55,"domain_name":"example.com","bot_user_id":77,"browser":"Chrome","platform":"Web","log_in_date":1758900000,"last_active_date":1759000000,"ip_address":"9.9.9.9","location":"Boston, United States"}}]}}"#,
+                extra.0,
+            ),
+        );
+        let websites = session.connected_websites.as_ref().expect("cached");
+        assert_eq!(websites.len(), 1);
+        let site = &websites[0];
+        assert_eq!(site.id, 55);
+        assert_eq!(site.domain_name, "example.com");
+        assert_eq!(site.bot_user_id, 77);
+        assert_eq!(site.browser, "Chrome");
+        assert_eq!(site.platform, "Web");
+        assert_eq!(site.log_in_date, 1758900000);
+        assert_eq!(site.ip_address, "9.9.9.9");
+        assert_eq!(site.location, "Boston, United States");
+        assert!(!session.connected_websites_loading);
+        assert!(session.websites_error.is_none());
+        assert!(!session.websites_stale);
+    }
+
+    /// Slice A4: a stray `connectedWebsites` answer (no matching pending
+    /// purpose) must not clobber the cache.
+    #[test]
+    fn websites_answer_ignored_without_matching_request() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        session.connected_websites = Some(Vec::new());
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"connectedWebsites","websites":[{"@type":"connectedWebsite","id":55,"domain_name":"example.com"}]}"#,
+        );
+        assert_eq!(session.connected_websites.as_ref().unwrap().len(), 0);
+    }
+
+    /// Slice A4: a successful `disconnectWebsite` keeps the old cache
+    /// visible and marks it stale (the driver refetches the authoritative
+    /// answer on the same ingest) — the row is NOT removed
+    /// optimistically.
+    #[test]
+    fn disconnect_website_ok_keeps_cache_and_marks_stale() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        session.connected_websites = Some(vec![ParsedWebsite {
+            id: 55,
+            domain_name: "example.com".into(),
+            bot_user_id: 77,
+            browser: "Chrome".into(),
+            platform: "Web".into(),
+            log_in_date: 1758900000,
+            last_active_date: 1759000000,
+            ip_address: "9.9.9.9".into(),
+            location: "Boston, United States".into(),
+        }]);
+        session.websites_mutating = true;
+        let extra = session.request(RequestPurpose::DisconnectWebsite { website_id: 55 }, None);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
+        );
+        // The old cache stays visible until the authoritative refetch
+        // replaces it — no optimistic deletion.
+        assert_eq!(session.connected_websites.as_ref().unwrap().len(), 1);
+        assert!(session.websites_stale);
+        assert!(!session.websites_mutating);
+        assert!(session.websites_error.is_none());
+    }
+
+    /// Slice A4: a refused `disconnectAllWebsites` surfaces an honest
+    /// classified error and leaves the list untouched.
+    #[test]
+    fn disconnect_all_websites_error_surfaces_honestly() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        session.websites_mutating = true;
+        let extra = session.request(RequestPurpose::DisconnectAllWebsites, None);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"error","@extra":"{}","code":400,"message":"WEBSITE_NOT_FOUND"}}"#,
+                extra.0
+            ),
+        );
+        assert!(!session.websites_mutating);
+        assert_eq!(
+            session.websites_error.as_deref(),
+            Some("Could not disconnect the website: Telegram refused the request")
+        );
+    }
+
+    /// Slice A4: a failed websites fetch clears the spinner and parks the
+    /// error on the overlay — and clears `websites_stale` so the next
+    /// ingest does not auto-retry (mirroring A3's
+    /// `sessions_fetch_error_clears_loading`).
+    #[test]
+    fn websites_fetch_error_clears_loading() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        session.connected_websites_loading = true;
+        // A failed stale-refetch (e.g. after a disconnect-ok marked the
+        // cache stale) must NOT leave the cache stale — otherwise the
+        // next ingest retries the fetch and flood state worsens.
+        session.websites_stale = true;
+        let extra = session.request(RequestPurpose::GetConnectedWebsites, None);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"error","@extra":"{}","code":429,"message":"FLOOD_WAIT_3"}}"#,
+                extra.0
+            ),
+        );
+        assert!(!session.connected_websites_loading);
+        // The failed stale-refetch clears staleness: no auto-retry on
+        // the next ingest; the user retries via the Refresh button.
+        assert!(!session.websites_stale);
+        assert_eq!(
+            session.websites_error.as_deref(),
+            Some("Could not load the websites list: too many requests — wait and try again")
+        );
+    }
+
+    /// Slice A4: a successful `toggleSessionCanAcceptCalls` marks the
+    /// sessions list stale (the toggled value arrives in the
+    /// authoritative refetch) — the row is NOT flipped optimistically.
+    #[test]
+    fn toggle_session_calls_ok_marks_sessions_stale() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        session.sessions = Some(vec![ParsedSession {
+            id: 22,
+            is_current: false,
+            is_password_pending: false,
+            can_accept_secret_chats: true,
+            can_accept_calls: true,
+            device_model: "iPhone".into(),
+            application_name: "Telegram iOS".into(),
+            application_version: "12.0".into(),
+            platform: "iOS".into(),
+            system_version: "18.0".into(),
+            last_active_date: 1758900000,
+            ip_address: "5.6.7.8".into(),
+            location: "Tel Aviv, Israel".into(),
+        }]);
+        session.sessions_mutating = true;
+        let extra = session.request(RequestPurpose::ToggleSessionCalls { session_id: 22 }, None);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
+        );
+        // No optimistic flip: the cached flag is untouched until the
+        // authoritative refetch replaces the list.
+        let sessions = session.sessions.as_ref().unwrap();
+        assert!(sessions[0].can_accept_calls);
+        assert!(session.sessions_stale);
+        assert!(!session.sessions_mutating);
+        assert!(session.sessions_error.is_none());
+    }
+
+    /// Slice A4: a refused secret-chats toggle surfaces an honest
+    /// classified error and leaves the cached flags untouched.
+    #[test]
+    fn toggle_session_secret_chats_error_surfaces_honestly() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        session.sessions_mutating = true;
+        let extra = session.request(
+            RequestPurpose::ToggleSessionSecretChats { session_id: 22 },
+            None,
+        );
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"error","@extra":"{}","code":400,"message":"SESSION_INVALID"}}"#,
+                extra.0
+            ),
+        );
+        assert!(!session.sessions_mutating);
+        assert_eq!(
+            session.sessions_error.as_deref(),
+            Some("Could not change the session setting: Telegram refused the request")
         );
     }
 }

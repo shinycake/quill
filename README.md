@@ -40,8 +40,8 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Incomplete login attempts list with per-attempt terminate (TGX SessionsIncompleteTitle/Info) <!-- parity:auth-sessions-incomplete --> (ui/mod.rs:24263 — is_password_pending section)
 - [x] Terminate one session, with confirmation (schema: terminateSession; TGX TerminateSessionQuestion) <!-- parity:auth-session-terminate-one --> (telegram/requests.rs:67; connect.rs: terminate_session; ui/mod.rs: confirm banner)
 - [x] Terminate all other sessions, with confirmation (schema: terminateAllOtherSessions; TGX AreYouSureSessions) <!-- parity:auth-sessions-terminate-all --> (telegram/requests.rs:79; connect.rs: terminate_all_other_sessions; ui/mod.rs: confirm banner)
-- [ ] Per-session toggles: accept secret chats / accept calls (schema: toggleSessionCanAcceptSecretChats, toggleSessionCanAcceptCalls; TGX SessionAccepts) <!-- parity:auth-session-toggles -->
-- [ ] "Logged in with Telegram" websites list + disconnect all (TGX WebSessionsTitle, TerminateAllWebSessions) <!-- parity:auth-web-sessions -->
+- [x] Per-session toggles: accept secret chats / accept calls (schema: toggleSessionCanAcceptSecretChats, toggleSessionCanAcceptCalls; TGX SessionAccepts) <!-- parity:auth-session-toggles -->
+- [x] "Logged in with Telegram" websites list + disconnect all (TGX WebSessionsTitle, TerminateAllWebSessions) <!-- parity:auth-web-sessions -->
 - [x] Log out (telegram/requests.rs:98; state.rs:6502 invalidates account) <!-- parity:auth-logout -->
 - [ ] Logout warning text: secret chats die, downloaded media erased (TGX SignOutHint2) (partial: logout works, no warning copy) <!-- parity:auth-logout-warning -->
 - [ ] Add another account / switch between accounts: single "accounts/primary" DB layout only, no account UI (settings.rs:39) <!-- parity:auth-multi-account -->

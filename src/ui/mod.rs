@@ -64,10 +64,11 @@ use quill::telegram::envelope::{
     MUTE_FOREVER, MessageContent, MessageInteractionInfo, MessageSchedulingState, MessageSender,
     NotificationSettingsScope, NotificationSound, ParsedChatEvent, ParsedFile,
     ParsedGroupCallParticipant, ParsedMessage, ParsedSecretChat, ParsedSession, ParsedStory,
-    ParsedWelcomeMessage, PasswordState, PollContent, PollOption, PollType, ReplyKeyboard,
-    ReplyMarkup, ScopeNotificationSettings, SecretChatState, SpeechRecognition, SponsoredMessage,
-    StatisticalGraph, StatisticalValue, StorageFileTypeStats, StorageStats, call_entry_label,
-    chat_ttl_service_label, effective_content, format_ttl_setting, toggle_chosen_emoji_reaction,
+    ParsedWebsite, ParsedWelcomeMessage, PasswordState, PollContent, PollOption, PollType,
+    ReplyKeyboard, ReplyMarkup, ScopeNotificationSettings, SecretChatState, SpeechRecognition,
+    SponsoredMessage, StatisticalGraph, StatisticalValue, StorageFileTypeStats, StorageStats,
+    call_entry_label, chat_ttl_service_label, effective_content, format_ttl_setting,
+    toggle_chosen_emoji_reaction,
 };
 use quill::telegram::requests::SelfDestructSend;
 use quill::telegram::requests::{
@@ -1293,6 +1294,18 @@ pub enum SessionsConfirm {
     TerminateAll,
 }
 
+/// Slice A4: which disconnect the websites overlay is confirming (TGX
+/// `TerminateWebSessionQuestion` "Disconnect %1$s?" /
+/// `DisconnectAllWebsitesHint` "Are you sure you want to disconnect all
+/// websites?").
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WebsitesConfirm {
+    /// `disconnectWebsite` for one website.
+    DisconnectOne { website_id: i64 },
+    /// `disconnectAllWebsites`.
+    DisconnectAll,
+}
+
 /// Phase C2i: rating-detail draft for the call-end card. `problems` is
 /// indexed by `CALL_PROBLEMS` (schema 1.8.67, `:7253`-`:7277`).
 pub struct RatingDetail {
@@ -1543,6 +1556,12 @@ pub struct QuillApp {
     /// (TGX `TerminateSessionQuestion` / `TerminateIncompleteSessionQuestion`
     /// / `AreYouSureSessions`).
     sessions_confirm: Option<SessionsConfirm>,
+    /// Slice A4: Connected Websites overlay (TGX `SettingsWebsitesController`
+    /// / `WebSessionsTitle` "Logged In with Telegram").
+    websites_open: bool,
+    /// Slice A4: pending disconnect confirmation on the websites overlay
+    /// (TGX `TerminateWebSessionQuestion` / `DisconnectAllWebsitesHint`).
+    websites_confirm: Option<WebsitesConfirm>,
     /// Slice CL2: chat-list category filter (TGX `ChatFilter` unread /
     /// archive categories, `MainController` pager categories). `All` is
     /// the unfiltered list; `Unread` filters to unread chats;
@@ -2139,6 +2158,10 @@ pub enum ScreenshotDemo {
     /// fixture `getActiveSessions` sessions (current device + two other
     /// sessions + one incomplete login attempt), dialog open.
     ReadySessions,
+    /// Slice A4: Connected Websites overlay (injected, no live Telegram)
+    /// — fixture `getConnectedWebsites` websites, dialog open.
+    ReadyWebSessions,
+    ReadySessionToggles,
     /// Phase B3: self-destructing media (injected, no live Telegram) —
     /// a Ready *private* (1:1 cloud) chat with Zed: an incoming photo
     /// with a live 60s `messageSelfDestructTypeTimer` countdown, an
@@ -3453,6 +3476,30 @@ impl QuillApp {
                     AuthorizationState::Ready,
                 )
             }
+            // Slice A4: Connected Websites fixture (injected, no live
+            // Telegram).
+            Some(ScreenshotDemo::ReadyWebSessions) => {
+                demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
+                (
+                    ConnectUiStatus::DemoReadyChats,
+                    None,
+                    "screenshot demo — connected websites (injected, no live Telegram)".into(),
+                    AuthorizationState::Ready,
+                )
+            }
+            // Slice A4: session acceptance toggles — the sessions overlay
+            // with per-row Secret Chats / Calls direct toggles (injected,
+            // no live Telegram).
+            Some(ScreenshotDemo::ReadySessionToggles) => {
+                demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
+                (
+                    ConnectUiStatus::DemoReadyChats,
+                    None,
+                    "screenshot demo — session acceptance toggles (injected, no live Telegram)"
+                        .into(),
+                    AuthorizationState::Ready,
+                )
+            }
             // Phase B2: key verification UI fixture (injected, no live
             // Telegram).
             Some(ScreenshotDemo::ReadyKeyVerification) => {
@@ -3725,6 +3772,8 @@ impl QuillApp {
             storage_usage_open: false,
             sessions_open: false,
             sessions_confirm: None,
+            websites_open: false,
+            websites_confirm: None,
             chat_filter: ChatListFilter::All,
             new_secret_picker_open: false,
             pending_forward: None,
@@ -4271,6 +4320,32 @@ impl QuillApp {
             }
             app.sessions_open = true;
             app.status_note = "screenshot demo — active sessions".into();
+        }
+        // Slice A4: session acceptance toggles fixture — the same fixture
+        // sessions (varied Secret Chats / Calls flags) with the sessions
+        // overlay open so the per-row direct toggles are visible
+        // (injected, no live Telegram).
+        if matches!(demo, Some(ScreenshotDemo::ReadySessionToggles)) {
+            if let Some(session) = app.demo_session.as_mut() {
+                app.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                session.sessions = Some(demo_sessions());
+                session.sessions_loading = false;
+                session.sessions_error = None;
+            }
+            app.sessions_open = true;
+            app.status_note = "screenshot demo — session acceptance toggles".into();
+        }
+        // Slice A4: Connected Websites fixture — fixture websites with
+        // the overlay open (injected, no live Telegram).
+        if matches!(demo, Some(ScreenshotDemo::ReadyWebSessions)) {
+            if let Some(session) = app.demo_session.as_mut() {
+                app.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                session.connected_websites = Some(demo_websites());
+                session.connected_websites_loading = false;
+                session.websites_error = None;
+            }
+            app.websites_open = true;
+            app.status_note = "screenshot demo — connected websites".into();
         }
         // Phase B2: key verification fixture — the Ready secret chat with
         // a real 36-byte key_hash and Zed's info panel open on the
@@ -25666,6 +25741,36 @@ impl QuillApp {
             )
     }
 
+    /// Slice A4: flip `toggleSessionCanAcceptSecretChats` for one session.
+    /// Direct toggle — TGX's `EditSessionController` shows no
+    /// confirmation — live only. The toggled value arrives in the
+    /// authoritative list refetch; the row is never flipped
+    /// optimistically.
+    fn toggle_session_secret_chats(&mut self, session_id: i64, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            match live
+                .driver
+                .toggle_session_can_accept_secret_chats(session_id)
+            {
+                Ok(_) => self.status_note = "Updating session setting…".into(),
+                Err(_) => self.status_note = "Could not update the session setting.".into(),
+            }
+        }
+        cx.notify();
+    }
+
+    /// Slice A4: flip `toggleSessionCanAcceptCalls` for one session — the
+    /// `toggle_session_secret_chats` twin.
+    fn toggle_session_calls(&mut self, session_id: i64, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            match live.driver.toggle_session_can_accept_calls(session_id) {
+                Ok(_) => self.status_note = "Updating session setting…".into(),
+                Err(_) => self.status_note = "Could not update the session setting.".into(),
+            }
+        }
+        cx.notify();
+    }
+
     /// Slice A3: "Active Sessions" overlay (TGX `SettingsSessionsController`
     /// / `SessionsTitle`): the current-device card, the Incomplete Login
     /// Attempts section (TGX `SessionsIncompleteTitle` /
@@ -25740,7 +25845,7 @@ impl QuillApp {
                             .text_color(cx.theme().muted_foreground)
                             .child("Current session"),
                     )
-                    .child(self.session_row(current, mutating, cx));
+                    .child(self.session_row(current, mutating, true, cx));
             }
             if !incomplete.is_empty() {
                 body = body
@@ -25757,7 +25862,7 @@ impl QuillApp {
                         ),
                     );
                 for s in incomplete {
-                    body = body.child(self.session_row(s, mutating, cx));
+                    body = body.child(self.session_row(s, mutating, false, cx));
                 }
             }
             if !others.is_empty() {
@@ -25769,7 +25874,7 @@ impl QuillApp {
                         .child("Other sessions"),
                 );
                 for s in others {
-                    body = body.child(self.session_row(s, mutating, cx));
+                    body = body.child(self.session_row(s, mutating, true, cx));
                 }
             }
             let any_other = sessions.iter().any(|s| !s.is_current);
@@ -25921,7 +26026,21 @@ impl QuillApp {
     /// chip), app + version, platform + version, IP + location, last
     /// active; a Terminate button for non-current sessions (TGX
     /// `SettingsSessionsController` row content).
-    fn session_row(&self, s: &ParsedSession, mutating: bool, cx: &mut Context<Self>) -> AnyElement {
+    /// Slice A4: `show_toggles` (the current card, plus other
+    /// non-incomplete sessions — like TGX's `EditSessionController`, whose
+    /// `SessionAccepts` section is gated only on `!isPasswordPending`)
+    /// adds the per-session "Secret Chats" / "Calls" accept/reject
+    /// toggles (TGX `SessionSecretChats` / `SessionAcceptsCalls`,
+    /// `SessionAccept` / `SessionReject`). They toggle directly — TGX
+    /// shows no confirmation — and the value refreshes from the
+    /// authoritative TDLib response, never optimistically.
+    fn session_row(
+        &self,
+        s: &ParsedSession,
+        mutating: bool,
+        show_toggles: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let app_line = format!(
             "{} {}",
             s.application_name.trim(),
@@ -25998,10 +26117,55 @@ impl QuillApp {
                             .child(sub.join("\n")),
                     ),
             );
+        // The toggles render on the current card too — TGX's
+        // `EditSessionController` opens for the current session as well
+        // (`SettingsSessionsController` `R.id.btn_currentSession`), and
+        // its `SessionAccepts` section is gated only on
+        // `!isPasswordPending`. The Terminate button stays
+        // non-current-only.
+        let session_id = s.id;
+        let incomplete = s.is_password_pending;
+        let mut actions = div().flex().flex_col().items_end().gap_1();
+        if show_toggles {
+            let secret_label = format!(
+                "Secret Chats: {}",
+                if s.can_accept_secret_chats {
+                    "Accept"
+                } else {
+                    "Reject"
+                }
+            );
+            let calls_label = format!(
+                "Calls: {}",
+                if s.can_accept_calls {
+                    "Accept"
+                } else {
+                    "Reject"
+                }
+            );
+            actions = actions
+                .child(
+                    Button::new(format!("toggle-secret-chats-{session_id}"))
+                        .label(secret_label)
+                        .ghost()
+                        .disabled(mutating)
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.toggle_session_secret_chats(session_id, cx);
+                        })),
+                )
+                .child(
+                    Button::new(format!("toggle-calls-{session_id}"))
+                        .label(calls_label)
+                        .ghost()
+                        .disabled(mutating)
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.toggle_session_calls(session_id, cx);
+                        })),
+                );
+        }
+        // TGX never offers to terminate the current session.
         if !s.is_current {
-            let session_id = s.id;
-            let incomplete = s.is_password_pending;
-            row = row.child(
+            actions = actions.child(
                 Button::new(format!("terminate-session-{session_id}"))
                     .label("Terminate")
                     .danger()
@@ -26011,7 +26175,406 @@ impl QuillApp {
                     })),
             );
         }
+        if show_toggles || !s.is_current {
+            row = row.child(actions);
+        }
         row.into_any_element()
+    }
+
+    /// Slice A4: open the Connected Websites overlay. Live: guarded fetch
+    /// of the authoritative `getConnectedWebsites` answer (cached state
+    /// reused, in-flight fetch deduped). Demo: the fixture is already
+    /// injected.
+    fn open_websites(&mut self, cx: &mut Context<Self>) {
+        self.websites_open = true;
+        self.websites_confirm = None;
+        if let Some(live) = self.live.as_mut() {
+            let _ = live.driver.maybe_fetch_connected_websites();
+        }
+        cx.notify();
+    }
+
+    /// Slice A4: close the overlay and drop any pending disconnect
+    /// confirmation.
+    fn close_websites(&mut self, cx: &mut Context<Self>) {
+        self.websites_open = false;
+        self.websites_confirm = None;
+        cx.notify();
+    }
+
+    /// Slice A4: refresh the list — live drops the cache so the guarded
+    /// fetch refires; demo re-injects the fixture.
+    fn refresh_websites(&mut self, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            live.driver.session.connected_websites = None;
+            live.driver.session.websites_stale = false;
+            let _ = live.driver.maybe_fetch_connected_websites();
+        } else if let Some(session) = self.demo_session.as_mut() {
+            session.connected_websites = Some(demo_websites());
+            session.connected_websites_loading = false;
+            session.websites_error = None;
+        }
+        cx.notify();
+    }
+
+    /// Slice A4: arm the disconnect confirmation for one website (TGX
+    /// `TerminateWebSessionQuestion` "Disconnect %1$s?").
+    fn begin_disconnect_website(&mut self, website_id: i64, cx: &mut Context<Self>) {
+        self.websites_confirm = Some(WebsitesConfirm::DisconnectOne { website_id });
+        cx.notify();
+    }
+
+    /// Slice A4: arm the "disconnect all websites" confirmation (TGX
+    /// `DisconnectAllWebsitesHint` "Are you sure you want to disconnect
+    /// all websites?").
+    fn begin_disconnect_all_websites(&mut self, cx: &mut Context<Self>) {
+        self.websites_confirm = Some(WebsitesConfirm::DisconnectAll);
+        cx.notify();
+    }
+
+    /// Slice A4: drop the pending disconnect confirmation.
+    fn cancel_websites_confirm(&mut self, cx: &mut Context<Self>) {
+        self.websites_confirm = None;
+        cx.notify();
+    }
+
+    /// Slice A4: send the confirmed disconnect. Live only — the demo has
+    /// no TDLib; the list refreshes from the authoritative `ok` answer,
+    /// never optimistically.
+    fn confirm_websites_disconnect(&mut self, cx: &mut Context<Self>) {
+        let confirm = self.websites_confirm.take();
+        if let (Some(live), Some(confirm)) = (self.live.as_mut(), confirm) {
+            let result = match confirm {
+                WebsitesConfirm::DisconnectOne { website_id } => {
+                    live.driver.disconnect_website(website_id).map(|_| ())
+                }
+                WebsitesConfirm::DisconnectAll => live.driver.disconnect_all_websites().map(|_| ()),
+            };
+            self.status_note = match result {
+                Ok(()) => "Disconnecting website…".into(),
+                Err(_) => "Could not disconnect the website.".into(),
+            };
+        }
+        cx.notify();
+    }
+
+    /// Slice A4: "Logged In with Telegram" overlay (TGX
+    /// `SettingsWebsitesController` / `WebSessionsTitle`): the red
+    /// "Disconnect All Websites" action (`TerminateAllWebSessions`), the
+    /// "Connected Websites" section (`OtherWebSessions`) with per-row
+    /// Disconnect (`DisconnectWebsiteAction` / "Disconnect %1$s?"), and
+    /// the empty state (`NoActiveLogins`). Renders the authoritative
+    /// state only — loading and error lines are honest, never
+    /// optimistic.
+    fn websites_overlay(&self, cx: &mut Context<Self>) -> AnyElement {
+        let session = self.session();
+        let has_websites = session
+            .as_ref()
+            .is_some_and(|s| s.connected_websites.is_some());
+        let mut websites = session
+            .as_ref()
+            .and_then(|s| s.connected_websites.clone())
+            .unwrap_or_default();
+        websites.sort_by(|a, b| b.last_active_date.cmp(&a.last_active_date));
+        let loading = session.is_some_and(|s| s.connected_websites_loading);
+        let mutating = session.is_some_and(|s| s.websites_mutating);
+        let stale = session.is_some_and(|s| s.websites_stale);
+        let error = session.as_ref().and_then(|s| s.websites_error.clone());
+
+        let mut body = div().flex().flex_col().gap_2();
+        if let Some(line) = error {
+            body = body.child(
+                div()
+                    .text_xs()
+                    .text_color(rgb(0xf85149))
+                    .child(format!("Error: {line}")),
+            );
+        }
+        if let Some(confirm) = self.websites_confirm {
+            body = body.child(self.websites_confirm_banner(confirm, &websites, mutating, cx));
+        }
+        if websites.is_empty() {
+            body = body.child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(if loading {
+                        "Loading…"
+                    } else if has_websites {
+                        // TGX `NoActiveLogins` (bold header + help), in one
+                        // honest line: the list is genuinely empty. Gated on
+                        // `connected_websites.is_some()` — a failed fetch
+                        // (None) shows only the error line above, never an
+                        // unverified "no logins" claim.
+                        "No active logins — you can log in on websites that support signing in with Telegram."
+                    } else {
+                        "No website data yet."
+                    }),
+            );
+        } else {
+            // A disconnect just landed: the old list stays visible while
+            // the authoritative refetch is in flight (never an optimistic
+            // delete).
+            if stale && loading {
+                body = body.child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child("Refreshing…"),
+                );
+            }
+            body = body
+                .child(
+                    div().flex().justify_end().child(
+                        Button::new("disconnect-all-websites")
+                            .label("Disconnect All Websites")
+                            .danger()
+                            .disabled(mutating)
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.begin_disconnect_all_websites(cx);
+                            })),
+                    ),
+                )
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        // TGX `ClearOtherWebSessionsHelp`, verbatim.
+                        .child("You can log in on websites that support signing in with Telegram."),
+                )
+                .child(
+                    div()
+                        .text_xs()
+                        .font_medium()
+                        .text_color(cx.theme().muted_foreground)
+                        // TGX `OtherWebSessions`, verbatim.
+                        .child("Connected Websites"),
+                );
+            for w in &websites {
+                body = body.child(self.website_row(w, mutating, cx));
+            }
+            // TGX `ConnectedWebsitesDesc`, verbatim.
+            body = body.child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("Tap to disconnect from your Telegram account."),
+            );
+        }
+        div()
+            .id("websites-overlay")
+            .absolute()
+            .top_0()
+            .left_0()
+            .right_0()
+            .bottom_0()
+            .flex()
+            .items_center()
+            .justify_center()
+            .child(
+                div()
+                    .id("websites-backdrop")
+                    .absolute()
+                    .top_0()
+                    .left_0()
+                    .right_0()
+                    .bottom_0()
+                    .bg(rgba(0x000000e6))
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.close_websites(cx);
+                    })),
+            )
+            .child(
+                div()
+                    .id("websites-dialog")
+                    .flex()
+                    .flex_col()
+                    .gap_2()
+                    .px_4()
+                    .py_3()
+                    .rounded_lg()
+                    .bg(cx.theme().sidebar)
+                    .border_1()
+                    .border_color(cx.theme().border)
+                    .min_w(px(380.))
+                    .max_w(px(520.))
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .justify_between()
+                            // TGX `WebSessionsTitle`, verbatim.
+                            .child(div().font_semibold().child("Logged In with Telegram"))
+                            .child(
+                                div()
+                                    .flex()
+                                    .gap_2()
+                                    .child(
+                                        Button::new("websites-refresh")
+                                            .label("Refresh")
+                                            .ghost()
+                                            .on_click(cx.listener(|this, _, _, cx| {
+                                                this.refresh_websites(cx);
+                                            })),
+                                    )
+                                    .child(
+                                        Button::new("close-websites")
+                                            .label("Close")
+                                            .ghost()
+                                            .on_click(cx.listener(|this, _, _, cx| {
+                                                this.close_websites(cx);
+                                            })),
+                                    ),
+                            ),
+                    )
+                    .child(body),
+            )
+            .into_any_element()
+    }
+
+    /// Slice A4: the disconnect confirmation banner (the
+    /// `sessions_confirm_banner` pattern) — TGX
+    /// `TerminateWebSessionQuestion` "Disconnect %1$s?" /
+    /// `DisconnectAllWebsitesHint` "Are you sure you want to disconnect
+    /// all websites?", verbatim. (TGX's optional "Block %1$s" checkbox is
+    /// out of this slice — see DECISIONS.md.)
+    fn websites_confirm_banner(
+        &self,
+        confirm: WebsitesConfirm,
+        websites: &[ParsedWebsite],
+        mutating: bool,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let question = match confirm {
+            WebsitesConfirm::DisconnectOne { website_id } => websites
+                .iter()
+                .find(|w| w.id == website_id)
+                .map(|w| {
+                    if w.domain_name.trim().is_empty() {
+                        "Disconnect this website?".to_string()
+                    } else {
+                        format!("Disconnect {}?", w.domain_name.trim())
+                    }
+                })
+                .unwrap_or_else(|| "Disconnect this website?".to_string()),
+            WebsitesConfirm::DisconnectAll => {
+                "Are you sure you want to disconnect all websites?".to_string()
+            }
+        };
+        div()
+            .id("websites-confirm")
+            .flex()
+            .items_center()
+            .justify_between()
+            .gap_2()
+            .px_3()
+            .py_2()
+            .rounded_md()
+            .border_1()
+            .border_color(rgb(0xf85149))
+            .bg(rgb(0x3d1f1f))
+            .child(
+                div()
+                    .text_sm()
+                    .font_medium()
+                    .text_color(rgb(0xf85149))
+                    .child(question),
+            )
+            .child(
+                div()
+                    .flex()
+                    .gap_2()
+                    .child(
+                        Button::new("websites-confirm-cancel")
+                            .label("Cancel")
+                            .ghost()
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.cancel_websites_confirm(cx);
+                            })),
+                    )
+                    .child(
+                        Button::new("websites-confirm-disconnect")
+                            .label(if mutating { "Working…" } else { "Disconnect" })
+                            .danger()
+                            .disabled(mutating)
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.confirm_websites_disconnect(cx);
+                            })),
+                    ),
+            )
+    }
+
+    /// Slice A4: one website row — domain title, browser · platform,
+    /// logged-in date, IP · location · last active; a Disconnect button
+    /// (TGX `SettingsWebsitesController` row content; the bot username
+    /// subtext needs a users-cache lookup — out of this slice).
+    fn website_row(&self, w: &ParsedWebsite, mutating: bool, cx: &mut Context<Self>) -> AnyElement {
+        let mut sub = Vec::new();
+        if !w.browser.trim().is_empty() {
+            sub.push(w.browser.clone());
+        }
+        if !w.platform.trim().is_empty() {
+            sub.push(w.platform.clone());
+        }
+        let mut meta = Vec::new();
+        if w.log_in_date > 0 {
+            meta.push(format!(
+                "Logged in: {}",
+                format_session_last_active(w.log_in_date)
+            ));
+        }
+        if !w.ip_address.is_empty() {
+            meta.push(w.ip_address.clone());
+        }
+        if !w.location.is_empty() {
+            meta.push(w.location.clone());
+        }
+        meta.push(format!(
+            "Last active: {}",
+            format_session_last_active(w.last_active_date)
+        ));
+        sub.push(meta.join(" · "));
+        let title = if w.domain_name.trim().is_empty() {
+            "Unknown website".to_string()
+        } else {
+            w.domain_name.clone()
+        };
+        let website_id = w.id;
+        div()
+            .id(format!("website-row-{website_id}"))
+            .flex()
+            .items_center()
+            .justify_between()
+            .gap_2()
+            .px_3()
+            .py_2()
+            .rounded_md()
+            .border_1()
+            .border_color(cx.theme().border)
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .min_w_0()
+                    .child(div().text_sm().font_medium().child(title))
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(sub.join("\n")),
+                    ),
+            )
+            .child(
+                // TGX `DisconnectWebsiteAction` "Disconnect Website".
+                Button::new(format!("disconnect-website-{website_id}"))
+                    .label("Disconnect")
+                    .danger()
+                    .disabled(mutating)
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.begin_disconnect_website(website_id, cx);
+                    })),
+            )
+            .into_any_element()
     }
 
     /// Parity slice: one scope's section in the defaults dialog.
@@ -32692,6 +33255,10 @@ impl Render for QuillApp {
             .when(self.sessions_open, |this| {
                 this.child(self.sessions_overlay(cx))
             })
+            // Slice A4: Connected Websites overlay.
+            .when(self.websites_open, |this| {
+                this.child(self.websites_overlay(cx))
+            })
             // Slice CL2: archive auto-settings overlay.
             .when(
                 self.session().is_some_and(|s| s.archive_settings_open),
@@ -34500,6 +35067,17 @@ impl QuillApp {
                             .label("📱 Active sessions")
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.open_sessions(cx);
+                            })),
+                    );
+                    // Slice A4: Connected Websites overlay entry (TGX
+                    // Settings → Privacy → Logged In with Telegram). Sits
+                    // next to the sessions entry; fetches
+                    // `getConnectedWebsites` on open (guarded).
+                    list = list.child(
+                        Button::new("connected-websites")
+                            .label("🌐 Connected websites")
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.open_websites(cx);
                             })),
                     );
                     // Phase 9.1/9.3: tdesktop-style active-stories tray above
@@ -42138,6 +42716,8 @@ fn demo_sessions() -> Vec<ParsedSession> {
             id: 987654321,
             is_current: true,
             is_password_pending: false,
+            can_accept_secret_chats: false,
+            can_accept_calls: true,
             device_model: "ThinkPad X1 Carbon".into(),
             application_name: "Quill".into(),
             application_version: "0.1.0".into(),
@@ -42151,6 +42731,8 @@ fn demo_sessions() -> Vec<ParsedSession> {
             id: 123456789,
             is_current: false,
             is_password_pending: false,
+            can_accept_secret_chats: true,
+            can_accept_calls: false,
             device_model: "iPhone 15 Pro".into(),
             application_name: "Quill".into(),
             application_version: "0.1.0".into(),
@@ -42164,6 +42746,8 @@ fn demo_sessions() -> Vec<ParsedSession> {
             id: 555111222,
             is_current: false,
             is_password_pending: false,
+            can_accept_secret_chats: false,
+            can_accept_calls: true,
             device_model: "Pixel 8".into(),
             application_name: "Quill".into(),
             application_version: "0.0.9".into(),
@@ -42177,6 +42761,8 @@ fn demo_sessions() -> Vec<ParsedSession> {
             id: 999888777,
             is_current: false,
             is_password_pending: true,
+            can_accept_secret_chats: false,
+            can_accept_calls: false,
             device_model: "".into(),
             application_name: "".into(),
             application_version: "".into(),
@@ -42184,6 +42770,51 @@ fn demo_sessions() -> Vec<ParsedSession> {
             system_version: "".into(),
             last_active_date: now - 600,
             ip_address: "203.0.113.99".into(),
+            location: "Unknown".into(),
+        },
+    ]
+}
+
+/// Slice A4: `getConnectedWebsites` fixture for the `ready-web-sessions`
+/// screenshot demo — three connected websites (injected, no live
+/// Telegram).
+fn demo_websites() -> Vec<ParsedWebsite> {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i32)
+        .unwrap_or(0);
+    vec![
+        ParsedWebsite {
+            id: 1000000001,
+            domain_name: "fragment.com".into(),
+            bot_user_id: 999888111,
+            browser: "Chrome".into(),
+            platform: "Web".into(),
+            log_in_date: now - 90 * 86400,
+            last_active_date: now - 1800,
+            ip_address: "203.0.113.42".into(),
+            location: "Austin, United States".into(),
+        },
+        ParsedWebsite {
+            id: 1000000002,
+            domain_name: "t.me".into(),
+            bot_user_id: 777666555,
+            browser: "Safari".into(),
+            platform: "Web".into(),
+            log_in_date: now - 40 * 86400,
+            last_active_date: now - 2 * 86400,
+            ip_address: "198.51.100.7".into(),
+            location: "Dallas, United States".into(),
+        },
+        ParsedWebsite {
+            id: 1000000003,
+            domain_name: "wallet.bot".into(),
+            bot_user_id: 444333222,
+            browser: "Firefox".into(),
+            platform: "Web".into(),
+            log_in_date: now - 10 * 86400,
+            last_active_date: now - 86400,
+            ip_address: "192.0.2.19".into(),
             location: "Unknown".into(),
         },
     ]

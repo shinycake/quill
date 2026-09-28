@@ -85,6 +85,62 @@ pub fn terminate_all_other_sessions(extra: RequestId) -> String {
     .to_string()
 }
 
+/// Slice A4: `toggleSessionCanAcceptCalls session_id:int64
+/// can_accept_calls:Bool = Ok;` (TDLib 1.8.67, `schema/td_api.tl:15114`):
+/// per-session toggle — the session accepts (or rejects) incoming calls.
+/// TGX applies it directly (no confirmation, `EditSessionController`);
+/// the toggled value is reflected from the authoritative `ok`.
+pub fn toggle_session_can_accept_calls(
+    extra: RequestId,
+    session_id: i64,
+    can_accept_calls: bool,
+) -> String {
+    json!({
+        "@type": "toggleSessionCanAcceptCalls",
+        "@extra": extra.as_extra(),
+        "session_id": session_id,
+        "can_accept_calls": can_accept_calls,
+    })
+    .to_string()
+}
+
+/// Slice A4: `getConnectedWebsites = ConnectedWebsites;` (TDLib 1.8.67,
+/// `schema/td_api.tl:15124`): "Returns all website where the current
+/// user used Telegram to log in" (TGX `SettingsWebsitesController` /
+/// `WebSessionsTitle` "Logged In with Telegram").
+pub fn get_connected_websites(extra: RequestId) -> String {
+    json!({
+        "@type": "getConnectedWebsites",
+        "@extra": extra.as_extra(),
+    })
+    .to_string()
+}
+
+/// Slice A4: `disconnectWebsite website_id:int64 = Ok;` (TDLib 1.8.67,
+/// `schema/td_api.tl:15127`): "Disconnects website from the current
+/// user's Telegram account" (TGX `TerminateWebSessionQuestion`
+/// "Disconnect %1$s?").
+pub fn disconnect_website(extra: RequestId, website_id: i64) -> String {
+    json!({
+        "@type": "disconnectWebsite",
+        "@extra": extra.as_extra(),
+        "website_id": website_id,
+    })
+    .to_string()
+}
+
+/// Slice A4: `disconnectAllWebsites = Ok;` (TDLib 1.8.67,
+/// `schema/td_api.tl:15130`): "Disconnects all websites from the current
+/// user's Telegram account" (TGX `DisconnectAllWebsitesHint` "Are you
+/// sure you want to disconnect all websites?").
+pub fn disconnect_all_websites(extra: RequestId) -> String {
+    json!({
+        "@type": "disconnectAllWebsites",
+        "@extra": extra.as_extra(),
+    })
+    .to_string()
+}
+
 /// `setAuthenticationPhoneNumber`. Callers must not log `phone_number`.
 pub fn set_authentication_phone_number(extra: RequestId, phone_number: &str) -> String {
     json!({
@@ -1755,8 +1811,10 @@ pub fn close_secret_chat(extra: RequestId, secret_chat_id: i32) -> String {
 /// `toggleSessionCanAcceptSecretChats session_id:int64 can_accept_secret_chats:Bool = Ok;`
 /// Per-session toggle — the session accepts (or rejects) new secret chats.
 /// TGX surfaces it in the session editor ("Secret Chats" Accept/Reject,
-/// `EditSessionController`); Quill has no sessions screen yet, so this is
-/// request-layer only until one lands.
+/// `EditSessionController`); slice A4 wires it into A3's session rows,
+/// and this request-layer builder sends the raw i64 `session_id` (numeric
+/// in the JSON body — asserted by
+/// `toggle_session_can_accept_secret_chats_shape_matches_1_8_67`).
 pub fn toggle_session_can_accept_secret_chats(
     extra: RequestId,
     session_id: i64,
@@ -1765,7 +1823,7 @@ pub fn toggle_session_can_accept_secret_chats(
     json!({
         "@type": "toggleSessionCanAcceptSecretChats",
         "@extra": extra.as_extra(),
-        "session_id": session_id.to_string(),
+        "session_id": session_id,
         "can_accept_secret_chats": can_accept_secret_chats,
     })
     .to_string()
@@ -5039,6 +5097,41 @@ mod tests {
     }
 
     #[test]
+    fn a4_session_toggle_and_websites_request_shapes_match_1_8_67() {
+        // Slice A4: `toggleSessionCanAcceptCalls session_id:int64
+        // can_accept_calls:Bool = Ok;` (line 15114),
+        // `getConnectedWebsites = ConnectedWebsites;` (line 15124),
+        // `disconnectWebsite website_id:int64 = Ok;` (line 15127),
+        // `disconnectAllWebsites = Ok;` (line 15130).
+        let v: serde_json::Value = serde_json::from_str(&toggle_session_can_accept_calls(
+            RequestId(81),
+            123456789,
+            true,
+        ))
+        .unwrap();
+        assert_eq!(v["@type"], "toggleSessionCanAcceptCalls");
+        assert_eq!(v["@extra"], "81");
+        assert_eq!(v["session_id"], 123456789);
+        assert_eq!(v["can_accept_calls"], true);
+
+        let v: serde_json::Value =
+            serde_json::from_str(&get_connected_websites(RequestId(82))).unwrap();
+        assert_eq!(v["@type"], "getConnectedWebsites");
+        assert_eq!(v["@extra"], "82");
+
+        let v: serde_json::Value =
+            serde_json::from_str(&disconnect_website(RequestId(83), 987654321)).unwrap();
+        assert_eq!(v["@type"], "disconnectWebsite");
+        assert_eq!(v["@extra"], "83");
+        assert_eq!(v["website_id"], 987654321);
+
+        let v: serde_json::Value =
+            serde_json::from_str(&disconnect_all_websites(RequestId(84))).unwrap();
+        assert_eq!(v["@type"], "disconnectAllWebsites");
+        assert_eq!(v["@extra"], "84");
+    }
+
+    #[test]
     fn cl2_create_private_chat_shape_matches_1_8_67() {
         // Slice CL2: `createPrivateChat user_id:int53 force:Bool =
         // Chat;` (schema 1.8.67, line 13312).
@@ -5100,12 +5193,12 @@ mod tests {
     fn toggle_session_can_accept_secret_chats_shape_matches_1_8_67() {
         // Phase S1: `toggleSessionCanAcceptSecretChats session_id:int64
         // can_accept_secret_chats:Bool = Ok` (schema 1.8.67, line 15117);
-        // int64 serializes as a JSON string like other int64 ids here.
+        // int64 serializes as a JSON number, like `terminateSession`.
         let json = toggle_session_can_accept_secret_chats(RequestId(31), 123456789, true);
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(v["@type"], "toggleSessionCanAcceptSecretChats");
         assert_eq!(v["@extra"], "31");
-        assert_eq!(v["session_id"], "123456789");
+        assert_eq!(v["session_id"], 123456789);
         assert_eq!(v["can_accept_secret_chats"], true);
 
         let off = toggle_session_can_accept_secret_chats(RequestId(32), 123456789, false);

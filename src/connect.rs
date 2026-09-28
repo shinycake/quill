@@ -60,16 +60,17 @@ use crate::telegram::requests::{
     decline_group_call_invitation, delete_chat, delete_chat_folder, delete_chat_history,
     delete_chat_reply_markup as delete_chat_reply_markup_request, delete_chat_welcome_message,
     delete_forum_topic, delete_messages, delete_story, discard_call as discard_call_request,
-    download_file as download_file_request, edit_chat_folder, edit_chat_invite_link,
-    edit_chat_welcome_message, edit_forum_topic, edit_message_caption, edit_message_text,
-    end_group_call, end_group_call_recording, end_group_call_screen_sharing, forward_messages,
-    get_active_sessions, get_archive_chat_list_settings, get_authorization_state,
-    get_available_chat_boost_slots, get_basic_group_full_info, get_bot_similar_bots,
-    get_callback_query_answer, get_callback_query_answer_game,
-    get_callback_query_answer_with_password, get_chat_active_stories, get_chat_administrators,
-    get_chat_boost_status, get_chat_event_log, get_chat_folder, get_chat_history,
-    get_chat_invite_links, get_chat_join_requests, get_chat_lists_to_add_chat, get_chat_member,
-    get_chat_scheduled_messages, get_chat_sponsored_messages, get_chat_statistics, get_commands,
+    disconnect_all_websites, disconnect_website, download_file as download_file_request,
+    edit_chat_folder, edit_chat_invite_link, edit_chat_welcome_message, edit_forum_topic,
+    edit_message_caption, edit_message_text, end_group_call, end_group_call_recording,
+    end_group_call_screen_sharing, forward_messages, get_active_sessions,
+    get_archive_chat_list_settings, get_authorization_state, get_available_chat_boost_slots,
+    get_basic_group_full_info, get_bot_similar_bots, get_callback_query_answer,
+    get_callback_query_answer_game, get_callback_query_answer_with_password,
+    get_chat_active_stories, get_chat_administrators, get_chat_boost_status, get_chat_event_log,
+    get_chat_folder, get_chat_history, get_chat_invite_links, get_chat_join_requests,
+    get_chat_lists_to_add_chat, get_chat_member, get_chat_scheduled_messages,
+    get_chat_sponsored_messages, get_chat_statistics, get_commands, get_connected_websites,
     get_contacts, get_forum_topics, get_full_rich_message, get_group_call,
     get_installed_sticker_sets, get_link_preview, get_login_url, get_login_url_info, get_me,
     get_message_link, get_message_properties, get_message_thread_history, get_password_state,
@@ -109,7 +110,8 @@ use crate::telegram::requests::{
     toggle_forum_topic_closed, toggle_forum_topic_pinned, toggle_general_forum_topic_hidden,
     toggle_group_call_are_messages_allowed, toggle_group_call_is_my_video_enabled,
     toggle_group_call_is_my_video_paused, toggle_group_call_participant_is_hand_raised,
-    toggle_group_call_participant_is_muted, toggle_supergroup_aggressive_anti_spam,
+    toggle_group_call_participant_is_muted, toggle_session_can_accept_calls,
+    toggle_session_can_accept_secret_chats, toggle_supergroup_aggressive_anti_spam,
     toggle_supergroup_is_broadcast_group, toggle_supergroup_join_by_request,
     toggle_supergroup_sign_messages, toggle_video_chat_enabled_start_notification,
     toggle_video_chat_mute_new_participants, unpin_all_chat_messages, unpin_chat_message,
@@ -1132,6 +1134,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         // `ok` marks the sessions list stale in the reducer; refetch the
         // authoritative answer on the same ingest.
         let _ = self.refresh_active_sessions_if_stale();
+        // Slice A4: a `disconnectWebsite` / `disconnectAllWebsites` `ok`
+        // marks the websites list stale in the reducer; same pattern.
+        let _ = self.refresh_connected_websites_if_stale();
         if view_after {
             self.maybe_view_open_messages()?;
         }
@@ -10292,6 +10297,191 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
     }
 
+    /// Slice A4: send `toggleSessionCanAcceptSecretChats` (schema 1.8.67,
+    /// line 15117). The toggled value is the negation of the cached
+    /// flag — one mutation at a time; the list is refetched from the
+    /// authoritative `ok` response, never optimistically. A doomed
+    /// request (no such session in the cache) is rejected before it
+    /// leaves; TDLib is the authority for the rest.
+    pub fn toggle_session_can_accept_secret_chats(
+        &mut self,
+        session_id: i64,
+    ) -> Result<RequestId, ConnectSendError> {
+        self.send_session_toggle(session_id, ToggleSessionKind::SecretChats)
+    }
+
+    /// Slice A4: send `toggleSessionCanAcceptCalls` (schema 1.8.67, line
+    /// 15114) — the `toggleSessionCanAcceptSecretChats` twin.
+    pub fn toggle_session_can_accept_calls(
+        &mut self,
+        session_id: i64,
+    ) -> Result<RequestId, ConnectSendError> {
+        self.send_session_toggle(session_id, ToggleSessionKind::Calls)
+    }
+
+    /// Slice A4: shared send path for the two per-session toggles.
+    fn send_session_toggle(
+        &mut self,
+        session_id: i64,
+        kind: ToggleSessionKind,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() || self.session.sessions_mutating {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let flags = self
+            .session
+            .sessions
+            .as_ref()
+            .and_then(|s| s.iter().find(|s| s.id == session_id))
+            .map(|s| (s.can_accept_secret_chats, s.can_accept_calls));
+        let Some((can_accept_secret_chats, can_accept_calls)) = flags else {
+            return Err(ConnectSendError::InvalidRequest);
+        };
+        let (extra, json) = match kind {
+            ToggleSessionKind::SecretChats => {
+                let extra = self.session.request(
+                    RequestPurpose::ToggleSessionSecretChats { session_id },
+                    None,
+                );
+                let value = !can_accept_secret_chats;
+                (
+                    extra,
+                    toggle_session_can_accept_secret_chats(extra, session_id, value),
+                )
+            }
+            ToggleSessionKind::Calls => {
+                let extra = self
+                    .session
+                    .request(RequestPurpose::ToggleSessionCalls { session_id }, None);
+                let value = !can_accept_calls;
+                (
+                    extra,
+                    toggle_session_can_accept_calls(extra, session_id, value),
+                )
+            }
+        };
+        self.session.sessions_error = None;
+        self.session.sessions_mutating = true;
+        match self.sender.send_json(&json) {
+            Ok(()) => Ok(extra),
+            Err(err) => {
+                self.session.requests.take(extra);
+                self.session.sessions_mutating = false;
+                Err(err)
+            }
+        }
+    }
+
+    /// Slice A4: `getConnectedWebsites` (schema 1.8.67, line 15124) —
+    /// guarded-once like `maybe_fetch_active_sessions` (cached state
+    /// reused, in-flight fetch deduped).
+    pub fn maybe_fetch_connected_websites(
+        &mut self,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if (self.session.connected_websites.is_some() && !self.session.websites_stale)
+            || self
+                .session
+                .requests
+                .has_purpose(RequestPurpose::GetConnectedWebsites)
+        {
+            return Ok(None);
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::GetConnectedWebsites, None);
+        self.session.connected_websites_loading = true;
+        self.session.websites_error = None;
+        match self.sender.send_json(&get_connected_websites(extra)) {
+            Ok(()) => Ok(Some(extra)),
+            Err(err) => {
+                self.session.requests.take(extra);
+                self.session.connected_websites_loading = false;
+                Err(err)
+            }
+        }
+    }
+
+    /// Slice A4: refetch the websites list after a disconnect marked it
+    /// stale — the reducer kept the old cache and marked it stale on the
+    /// authoritative `ok` (the `refresh_active_sessions_if_stale`
+    /// pattern).
+    pub fn refresh_connected_websites_if_stale(
+        &mut self,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.session.websites_stale {
+            return Ok(None);
+        }
+        self.maybe_fetch_connected_websites()
+    }
+
+    /// Slice A4: send `disconnectWebsite` (schema 1.8.67, line 15127).
+    /// One mutation at a time; the list is refetched from the
+    /// authoritative `ok` response — never optimistic. A doomed request
+    /// (no such website in the cache) is rejected before it leaves;
+    /// TDLib is the authority for the rest.
+    pub fn disconnect_website(&mut self, website_id: i64) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() || self.session.websites_mutating {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if !self
+            .session
+            .connected_websites
+            .as_ref()
+            .is_some_and(|s| s.iter().any(|s| s.id == website_id))
+        {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        self.session.websites_error = None;
+        let extra = self
+            .session
+            .request(RequestPurpose::DisconnectWebsite { website_id }, None);
+        self.session.websites_mutating = true;
+        match self
+            .sender
+            .send_json(&disconnect_website(extra, website_id))
+        {
+            Ok(()) => Ok(extra),
+            Err(err) => {
+                self.session.requests.take(extra);
+                self.session.websites_mutating = false;
+                Err(err)
+            }
+        }
+    }
+
+    /// Slice A4: send `disconnectAllWebsites` (schema 1.8.67, line
+    /// 15130). One mutation at a time; the list is refetched from the
+    /// authoritative `ok` response — never optimistic.
+    pub fn disconnect_all_websites(&mut self) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() || self.session.websites_mutating {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if !self
+            .session
+            .connected_websites
+            .as_ref()
+            .is_some_and(|s| !s.is_empty())
+        {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        self.session.websites_error = None;
+        let extra = self
+            .session
+            .request(RequestPurpose::DisconnectAllWebsites, None);
+        self.session.websites_mutating = true;
+        match self.sender.send_json(&disconnect_all_websites(extra)) {
+            Ok(()) => Ok(extra),
+            Err(err) => {
+                self.session.requests.take(extra);
+                self.session.websites_mutating = false;
+                Err(err)
+            }
+        }
+    }
+
     /// Parity slice: `getScopeNotificationSettings` for the scopes not yet
     /// loaded and not in flight — once per Ready.
     pub fn maybe_fetch_scope_notification_settings(&mut self) -> Result<(), ConnectSendError> {
@@ -11080,6 +11270,16 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 }
 
+/// Slice A4: which flag a session-row toggle flips (module scope — Rust
+/// forbids enums inside `impl`). `ponytail:` a two-case enum plus one
+/// shared send path beats two near-duplicate driver methods; upgrade
+/// only if more per-session flags land.
+#[derive(Debug, Clone, Copy)]
+enum ToggleSessionKind {
+    SecretChats,
+    Calls,
+}
+
 /// How long Drop / `--connect-smoke` waits for `authorizationStateClosed`.
 pub const CLIENT_CLOSE_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -11226,6 +11426,7 @@ mod tests {
     use crate::telegram::client::copy_and_parse;
     use crate::telegram::envelope::ChannelMemberStatus;
     use crate::telegram::envelope::ParsedSession;
+    use crate::telegram::envelope::ParsedWebsite;
     use serde_json::Value;
     use std::sync::Mutex as StdMutex;
     use std::sync::atomic::AtomicU64;
@@ -21019,6 +21220,8 @@ mod tests {
             id,
             is_current: current,
             is_password_pending: pending,
+            can_accept_secret_chats: false,
+            can_accept_calls: true,
             device_model: format!("Device {id}"),
             application_name: "Quill".into(),
             application_version: "0.1".into(),
@@ -21159,6 +21362,192 @@ mod tests {
         assert_eq!(sessions.len(), 1);
         assert_eq!(sessions[0].id, 11);
         assert!(!driver.session.sessions_stale);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Slice A4: toggle guards — unknown id and concurrent mutations are
+    /// refused before anything is sent; the sent value negates the
+    /// cached flag.
+    #[test]
+    fn session_toggle_guards() {
+        let (dir, mut driver, recorder, _sink, _dyn_sink, _seq) = sessions_driver();
+        driver.session.sessions = Some(vec![
+            session_fixture(11, true, false),
+            session_fixture(22, false, false),
+        ]);
+        // Unknown id: refused, nothing sent.
+        let sent_before = recorder.snapshot().len();
+        assert_invalid(driver.toggle_session_can_accept_secret_chats(99));
+        assert_invalid(driver.toggle_session_can_accept_calls(99));
+        assert_eq!(recorder.snapshot().len(), sent_before);
+        // The fixture rejects secret chats: the toggle sends `true`.
+        // (The builder sends `session_id` as a JSON number, like
+        // `terminateSession`.)
+        driver
+            .toggle_session_can_accept_secret_chats(22)
+            .expect("toggle send");
+        assert!(recorder.snapshot().iter().any(|s| {
+            s.contains("\"@type\":\"toggleSessionCanAcceptSecretChats\"")
+                && s.contains("\"session_id\":22")
+                && s.contains("\"can_accept_secret_chats\":true")
+        }));
+        // A second mutation while in flight is refused.
+        assert_invalid(driver.toggle_session_can_accept_calls(22));
+        assert_invalid(driver.terminate_session(22));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Slice A4: `toggleSessionCanAcceptCalls` → `ok` → the reducer marks
+    /// the sessions list stale → the same ingest refetches
+    /// `getActiveSessions` (the toggled value arrives in the
+    /// authoritative answer, never optimistically).
+    #[test]
+    fn session_toggle_ok_triggers_authoritative_refetch() {
+        let (dir, mut driver, recorder, _sink, dyn_sink, seq) = sessions_driver();
+        driver.session.sessions = Some(vec![
+            session_fixture(11, true, false),
+            session_fixture(22, false, false),
+        ]);
+        let extra = driver
+            .toggle_session_can_accept_calls(22)
+            .expect("toggle send");
+        let sent = recorder.snapshot().len();
+        driver
+            .ingest(
+                copy_and_parse(
+                    &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        // The fixture accepted calls: the toggle sent `false`.
+        assert!(recorder.snapshot()[sent - 1].contains("\"can_accept_calls\":false"));
+        // The same ingest refetched the list; the cached flag is
+        // untouched until the authoritative answer replaces it.
+        let snapshot = recorder.snapshot();
+        assert_eq!(snapshot.len(), sent + 1);
+        assert!(snapshot[sent].contains("\"@type\":\"getActiveSessions\""));
+        assert!(driver.session.sessions.as_ref().unwrap()[1].can_accept_calls);
+        assert!(driver.session.sessions_stale);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Slice A4: websites fetch guards — in-flight fetch deduped, fresh
+    /// cache reused.
+    #[test]
+    fn websites_fetch_guards() {
+        let (dir, mut driver, recorder, _sink, _dyn_sink, _seq) = sessions_driver();
+        let sent_before = recorder.snapshot().len();
+        driver.maybe_fetch_connected_websites().expect("fetch");
+        assert!(
+            recorder
+                .snapshot()
+                .iter()
+                .any(|s| s.contains("\"@type\":\"getConnectedWebsites\""))
+        );
+        // In flight: deduped.
+        let sent_after_first = recorder.snapshot().len();
+        assert!(
+            driver
+                .maybe_fetch_connected_websites()
+                .expect("dedup")
+                .is_none()
+        );
+        assert_eq!(recorder.snapshot().len(), sent_after_first);
+        // Cached: no refetch.
+        driver.session.connected_websites = Some(vec![]);
+        assert!(
+            driver
+                .maybe_fetch_connected_websites()
+                .expect("cached")
+                .is_none()
+        );
+        assert_eq!(recorder.snapshot().len(), sent_after_first);
+        assert!(sent_after_first > sent_before);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Slice A4: disconnect guards — unknown website id and concurrent
+    /// mutations are refused before anything is sent.
+    #[test]
+    fn websites_disconnect_guards() {
+        let (dir, mut driver, recorder, _sink, _dyn_sink, _seq) = sessions_driver();
+        // Disconnect-all with no cache (or an empty one): refused,
+        // nothing sent.
+        let sent_before = recorder.snapshot().len();
+        assert_invalid(driver.disconnect_all_websites());
+        driver.session.connected_websites = Some(vec![]);
+        assert_invalid(driver.disconnect_all_websites());
+        assert_eq!(recorder.snapshot().len(), sent_before);
+        driver.session.connected_websites = Some(vec![ParsedWebsite {
+            id: 55,
+            domain_name: "example.com".into(),
+            bot_user_id: 77,
+            browser: "Chrome".into(),
+            platform: "Web".into(),
+            log_in_date: 1758900000,
+            last_active_date: 1759000000,
+            ip_address: "9.9.9.9".into(),
+            location: "Boston, United States".into(),
+        }]);
+        // Unknown id: refused, nothing sent.
+        let sent_before = recorder.snapshot().len();
+        assert_invalid(driver.disconnect_website(66));
+        assert_eq!(recorder.snapshot().len(), sent_before);
+        // Known id: sent; a second mutation while in flight is refused.
+        driver.disconnect_website(55).expect("disconnect send");
+        assert!(
+            recorder
+                .snapshot()
+                .iter()
+                .any(|s| s.contains("\"@type\":\"disconnectWebsite\"")
+                    && s.contains("\"website_id\":55"))
+        );
+        assert_invalid(driver.disconnect_website(55));
+        assert_invalid(driver.disconnect_all_websites());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Slice A4: `disconnectAllWebsites` → `ok` → the reducer marks the
+    /// websites list stale → the same ingest refetches
+    /// `getConnectedWebsites` → the authoritative answer replaces the
+    /// cache (no optimistic deletion).
+    #[test]
+    fn disconnect_all_websites_ok_triggers_authoritative_refetch() {
+        let (dir, mut driver, recorder, _sink, dyn_sink, seq) = sessions_driver();
+        driver.session.connected_websites = Some(vec![ParsedWebsite {
+            id: 55,
+            domain_name: "example.com".into(),
+            bot_user_id: 77,
+            browser: "Chrome".into(),
+            platform: "Web".into(),
+            log_in_date: 1758900000,
+            last_active_date: 1759000000,
+            ip_address: "9.9.9.9".into(),
+            location: "Boston, United States".into(),
+        }]);
+        let extra = driver.disconnect_all_websites().expect("disconnect send");
+        let sent = recorder.snapshot().len();
+        driver
+            .ingest(
+                copy_and_parse(
+                    &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        // The same ingest refetched the list (no optimistic deletion:
+        // the old cache stays visible, marked stale, until the
+        // authoritative answer replaces it).
+        let snapshot = recorder.snapshot();
+        assert_eq!(snapshot.len(), sent + 1);
+        assert!(snapshot[sent].contains("\"@type\":\"getConnectedWebsites\""));
+        assert_eq!(driver.session.connected_websites.as_ref().unwrap().len(), 1);
+        assert!(driver.session.websites_stale);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
