@@ -153,6 +153,18 @@ pub enum RequestPurpose {
     PinChatMessage,
     /// `setPollAnswer`. Response is `ok`; counts refresh via `updatePoll`.
     SetPollAnswer,
+    /// B4: `getPollVoters` (schema 1.8.67 line 12941). Response is
+    /// `pollVoters`; one page per (chat, message, option) cached in
+    /// `Session::poll_voters`, keyed with `offset` for append-merging.
+    GetPollVoters {
+        chat_id: ChatId,
+        message_id: MessageId,
+        option_id: i32,
+        offset: i32,
+    },
+    /// B4: `stopPoll` (schema 1.8.67 line 12953). Response is `ok`; the
+    /// poll closes via `updatePoll`.
+    StopPoll,
     /// `unpinChatMessage`. Response is `ok`; pin via `updateMessageIsPinned`.
     UnpinChatMessage,
     /// M1: `unpinAllChatMessages`. Response is `ok`; pins clear via
@@ -3717,6 +3729,9 @@ pub struct Session {
     /// promote member picker and the member-management dialog, keyed by
     /// (chat id, filter). One page per filter.
     pub supergroup_members: HashMap<(i64, MemberListFilter), SupergroupMembersFetch>,
+    /// B4: `getPollVoters` fetch state for the poll-voters dialog, keyed
+    /// by (chat id, message id, 0-based option index). One page per key.
+    pub poll_voters: HashMap<(i64, i64, i32), PollVotersFetch>,
     /// Slice G1: `getBasicGroupFullInfo` fetch state (the member list for
     /// basic groups), keyed by chat id. Reuses `SupergroupMembersFetch`
     /// (Loading / Loaded / Failed).
@@ -4052,6 +4067,19 @@ pub enum SupergroupMembersFetch {
     Failed(String),
 }
 
+/// B4: one `getPollVoters` page (schema 1.8.67, line 12941) backing the
+/// poll-voters dialog. Same Loading-guard convention; a failed first page
+/// lands in `Failed`, a failed "load more" keeps the loaded page.
+#[derive(Debug, Clone, PartialEq)]
+pub enum PollVotersFetch {
+    Loading,
+    Loaded {
+        voters: Vec<MessageSender>,
+        total_count: i32,
+    },
+    Failed(String),
+}
+
 /// Phase D3c: `getChatEventLog` page size (schema 1.8.67, line 15252:
 /// "up to 100"). Shared by the driver and the `has_more` heuristic in
 /// `Session::apply` — a short page means the log is exhausted.
@@ -4345,6 +4373,7 @@ impl Session {
             supergroup_member_status: HashMap::new(),
             supergroup_restrict_right: HashMap::new(),
             supergroup_invite_right: HashMap::new(),
+            poll_voters: HashMap::new(),
             supergroup_join_by_request: HashMap::new(),
             supergroup_is_broadcast: HashMap::new(),
             add_members_failed: HashMap::new(),
@@ -5440,6 +5469,48 @@ impl Session {
                         (chat_id.0, filter),
                         SupergroupMembersFetch::Loaded {
                             members,
+                            total_count,
+                        },
+                    );
+                }
+            }
+            // B4: `getPollVoters` answer — a first page (offset 0)
+            // replaces the cached list for this (chat, message, option);
+            // a later page appends, deduped by sender, keeping server
+            // order (the list is per-option; `option_id` is part of the
+            // key so switching options refetches).
+            EnvelopePayload::PollVoters {
+                total_count,
+                voters,
+            } => {
+                if let Some(RequestPurpose::GetPollVoters {
+                    chat_id,
+                    message_id,
+                    option_id,
+                    offset,
+                }) = pending.map(|p| p.purpose)
+                {
+                    let key = (chat_id.0, message_id.0, option_id);
+                    let merged = if offset == 0 {
+                        voters
+                    } else {
+                        match self.poll_voters.get(&key) {
+                            Some(PollVotersFetch::Loaded { voters: old, .. }) => {
+                                let mut merged = old.clone();
+                                for voter in voters {
+                                    if !merged.contains(&voter) {
+                                        merged.push(voter);
+                                    }
+                                }
+                                merged
+                            }
+                            _ => voters,
+                        }
+                    };
+                    self.poll_voters.insert(
+                        key,
+                        PollVotersFetch::Loaded {
+                            voters: merged,
                             total_count,
                         },
                     );
@@ -7765,6 +7836,30 @@ impl Session {
                                 SupergroupMembersFetch::Failed(call_request_error_line(
                                     &err,
                                     "Could not load members",
+                                )),
+                            );
+                        }
+                    }
+                    // B4: a failed `getPollVoters` first page lands in the
+                    // fetch state so the dialog shows an honest error; a
+                    // failed "load more" keeps the loaded page retryable.
+                    Some(RequestPurpose::GetPollVoters {
+                        chat_id,
+                        message_id,
+                        option_id,
+                        offset,
+                    }) => {
+                        if offset == 0
+                            || !matches!(
+                                self.poll_voters.get(&(chat_id.0, message_id.0, option_id)),
+                                Some(PollVotersFetch::Loaded { .. })
+                            )
+                        {
+                            self.poll_voters.insert(
+                                (chat_id.0, message_id.0, option_id),
+                                PollVotersFetch::Failed(call_request_error_line(
+                                    &err,
+                                    "Could not load voters",
                                 )),
                             );
                         }

@@ -792,8 +792,10 @@ Research snapshot 2026-09-16, pin recheck **2026-09-17**.
   the quiz correct option; closed polls show results without a voting
   affordance. Polls are excluded from edit-message support.
 - **Screenshot:** `docs/screenshots/ready-poll.png` — a dedicated
-  "Demo polls" chat with an open voted regular poll and a closed quiz
-  poll (injected JSON through the real reducer), driven by
+  "Demo polls" chat with an open voted regular poll, a closed quiz
+  poll (with the non-empty explanation shown after answering), and a
+  membership-restricted poll with the restriction label (injected JSON
+  through the real reducer), driven by
   `quill --screenshot-demo ready-poll`.
 - **Out of this slice (→ future):** quiz creation with correct-option
   authoring; media polls / scheduled polls; poll editing; quiz
@@ -4834,6 +4836,42 @@ debuginfo when needed.
   - OS-level deep-link intake (registering `t.me`/`tg:` handling so a real clicked link arms the START button).
   - In-app web view for the menu button (browser fallback is the honest behavior; same as B1).
   - Bot "privacy mode" (Bot API `privacy_mode`) — a bot-side setting with no TDLib client API; correctly not client-configurable.
+
+## Slice B4 — POLLS MANAGEMENT: VOTERS, STOP, QUIZ EXPLANATION, RESTRICTIONS, PERMISSIONS, SERVICE MESSAGES (2026-09-28)
+
+- **Schema (pinned TDLib 1.8.67, `schema/td_api.tl`, verified verbatim):**
+  - `getPollVoters chat_id:int53 message_id:int53 option_id:int32 offset:int32 limit:int32 = PollVoters;` (:12941). Doc (:12934): "Returns message senders voted for the specified option in a poll; use poll.can_get_voters to check whether the method can be used." `option_id` is a 0-based option index (like `setPollAnswer`, line 12932); `limit` ≤ 50.
+  - `stopPoll chat_id:int53 message_id:int53 reply_markup:ReplyMarkup = Ok;` (:12953). Doc: "Stops a poll … Use messageProperties.can_be_edited to check whether the poll can be stopped" and "`reply_markup` … pass null if none; for bots only" — the human client always sends null. The poll closes via `updatePoll`; `ok` carries no payload.
+  - `pollVoters total_count:int32 voters:vector<pollVoter> = PollVoters;` (:2854).
+  - `poll` fields (:711): `can_get_voters` ("True, if the current user can get voters in the poll using getPollVoters", :698) and `vote_restriction_reason:PollVoteRestrictionReason` ("The reason describing, why the current user can't vote in the poll; may be null if the user can vote in the poll", :710).
+  - Restriction constructors (:494–:510): `pollVoteRestrictionReasonClosed`, `YetUnsent`, `Scheduled`, `CountryRestricted country_code:string`, `MembershipRequired chat_id:int53`, `Other`.
+  - `pollTypeQuiz … explanation:formattedText …` (:475): "Text that is shown when the user chooses an incorrect answer or taps on the lamp icon; empty for a yet unanswered poll".
+  - `chatPermissions … can_send_polls:Bool …` (:1070) — gates the poll composer entry.
+  - `messageProperties … can_be_edited:Bool …` (:6262) — the server gate for stopping polls.
+  - `chatEventPollStopped message:message = ChatEventAction;` (:7776) — the service/event constructor (no standalone `messagePollStopped` MessageContent constructor exists; concept-level search of td_api.tl for `PollStopped` finds only the event constructor, and TDLib's `ChatEventManager` builds it from stopped-poll log entries).
+- **Telegram X evidence (TGX-Android source):**
+  - `MessageView.java` (~707): Stop Poll/Quiz menu items offered only on open polls with `canBeEdited`.
+  - `MessagesController.java:5587–5595`: destructive confirm then `TdApi.StopPoll`; warning copy says stopping prevents further voting and cannot be undone.
+  - `PollResultsController.java:130`: voter pagination with offset = loaded count, page size 50.
+  - `TGMessageService.java:1740–1751`: separate event-log text for a stopped poll vs a stopped quiz (`EventLogPollStopped` / `EventLogQuizStopped`).
+- **Built:**
+  - `requests.rs`: `get_poll_voters` and `stop_poll` with request-shape tests pinning the verbatim constructors via `include_str!` of the pinned schema.
+  - `envelope.rs`: `Poll.can_get_voters`, `Poll.vote_restriction_reason`, `PollType::Quiz { correct_option_ids, explanation }`, `EnvelopePayload::PollVoters`, `ChatEventAction::PollStopped { is_quiz }` (quiz detected from the embedded poll content).
+  - `state.rs`: `Session::poll_voters` keyed by `(chat_id, message_id, option_id)` with `Loading`/`Loaded`/`Failed`; first page replaces, later pages append and dedupe by sender.
+  - `connect.rs`: `fetch_poll_voters` / `load_more_poll_voters` (50 per page) and `stop_poll`, guarded on chats-path-active, supported chats, real loaded poll messages, `can_get_voters`, and in-flight dedupe.
+  - `poll.rs` (pure logic, unit-tested): `poll_vote_restriction_label`, `quiz_explanation` (shown after answering, per schema doc), `can_stop_poll`, `can_view_poll_voters`, `chat_allows_polls` (absent permissions = unknown = allowed); `Poll::can_vote` now also rejects non-null restriction reasons.
+  - UI: restriction reason rendered on the poll card; quiz explanation appears after answering; per-option "View voters" dialog with paginated voter rows (names resolved from session users/chats, Load more at 50/page); "Stop poll"/"Stop quiz" message-menu item → red confirm banner with the TGX warning copy; demo stop flips the poll closed locally; poll composer entry hidden when `can_send_polls` is false with a "Polls restricted in this chat" notice; event log renders "stopped the poll" / "stopped the quiz".
+  - Tests: pure-logic tests (restriction labels, explanation conditions, stop gating, voter affordance, composer permission), request-shape tests, reducer tests (pollVoters replace/append/dedupe), parse tests (`pollVoters`, `chatEventPollStopped` with quiz/non-quiz content), schema-pin tests.
+  - **Screenshot:** `docs/screenshots/ready-poll.png` refreshed — the demo chat now also shows the quiz with a non-empty explanation (rendered after answering) and a membership-restricted poll with the restriction label, both injected through the real reducer; driven by `quill --screenshot-demo ready-poll`.
+- **Key decisions (ponytail):**
+  - Voters live in one `PollVotersDialog` on the G1 modal shell with a single `G1DialogClose::PollVoters` variant — no new modal infrastructure.
+  - No optimistic poll closure on stop: the server gate (`can_be_edited`) and the real close (`updatePoll`) are authoritative; the demo path flips `is_closed` locally only.
+  - The "View voters" affordance is per-poll (not per-option) opening the dialog at option 0 — one button, one dialog, per-option switching inside.
+- **Not verifiable without live Telegram:** real `getPollVoters` pages, real `stopPoll` → `updatePoll` propagation, real `chatEventPollStopped` in the event log.
+- **Out of this slice (left unchecked with evidence):**
+  - `parity:bots-poll-show-voters` — the dedicated "show voters" poll-list surface (per B3's annotation, TGX treats show-voters as inverse anonymity; Quill's in-dialog viewer is the forward path, not this separate surface).
+  - Poll media (`explanation_media`, `pollMedia*` on messages).
+  - In-app updater (Loop 4 slice, still queued per Idan's 2026-09-27 standing decision — listed here only as the slice's out-of-scope items).
 
 ## Slice calls-remainder-2 (2026-09-28)
 

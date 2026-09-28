@@ -28,8 +28,8 @@ use crate::state::{
     AdminListFetch, AdminRightsFetch, CHAT_EVENT_LOG_PAGE_SIZE, ChatEventLogFetch,
     ChatSearchJumpNeed, ChatStatisticsFetch, ComposerLinkPreview, ForwardFlight, InfoPanelTarget,
     InstantViewPage, InviteLinkFetch, JoinRequestFetch, LoginUrlRequest, MemberListFilter,
-    MemberStatusChange, PasswordOp, RequestPurpose, RequestRollback, SearchStatus, Session,
-    ShutdownPhase, SupergroupMembersFetch, WelcomeMessagesFetch,
+    MemberStatusChange, PasswordOp, PollVotersFetch, RequestPurpose, RequestRollback, SearchStatus,
+    Session, ShutdownPhase, SupergroupMembersFetch, WelcomeMessagesFetch,
 };
 use crate::story_composer::{StoryMediaKind, StoryPrivacy};
 use crate::telegram::client::{LiveTdJson, OwnedEnvelope, ReceiveBridge};
@@ -74,9 +74,9 @@ use crate::telegram::requests::{
     get_contacts, get_forum_topics, get_full_rich_message, get_group_call,
     get_installed_sticker_sets, get_link_preview, get_login_url, get_login_url_info, get_me,
     get_message_link, get_message_properties, get_message_thread_history, get_password_state,
-    get_saved_animations, get_saved_notification_sounds, get_scope_notification_settings,
-    get_secret_chat, get_sticker_set, get_storage_statistics, get_story,
-    get_story_available_reactions, get_story_interactions as get_story_interactions_request,
+    get_poll_voters, get_saved_animations, get_saved_notification_sounds,
+    get_scope_notification_settings, get_secret_chat, get_sticker_set, get_storage_statistics,
+    get_story, get_story_available_reactions, get_story_interactions as get_story_interactions_request,
     get_supergroup, get_supergroup_full_info, get_supergroup_members, get_user_full_info,
     get_user_privacy_setting_rules, get_video_chat_invite_link, get_video_chat_rtmp_url,
     get_web_page_instant_view, input_message_photo, input_message_video,
@@ -103,11 +103,12 @@ use crate::telegram::requests::{
     set_recovery_email_address, set_scope_notification_settings, set_story_reaction,
     set_supergroup_username, set_user_privacy_setting_rules, set_video_chat_title,
     start_group_call_recording, start_group_call_screen_sharing, start_scheduled_video_chat,
-    supergroup_members_filter_administrators_json, supergroup_members_filter_banned_json,
-    supergroup_members_filter_recent_json, supergroup_members_filter_restricted_json,
-    supergroup_members_filter_search_json, terminate_all_other_sessions, terminate_session,
-    toggle_chat_folder_tags, toggle_chat_is_marked_as_unread, toggle_chat_is_pinned,
-    toggle_forum_topic_closed, toggle_forum_topic_pinned, toggle_general_forum_topic_hidden,
+    stop_poll as stop_poll_request, supergroup_members_filter_administrators_json,
+    supergroup_members_filter_banned_json, supergroup_members_filter_recent_json,
+    supergroup_members_filter_restricted_json, supergroup_members_filter_search_json,
+    terminate_all_other_sessions, terminate_session, toggle_chat_folder_tags,
+    toggle_chat_is_marked_as_unread, toggle_chat_is_pinned, toggle_forum_topic_closed,
+    toggle_forum_topic_pinned, toggle_general_forum_topic_hidden,
     toggle_group_call_are_messages_allowed, toggle_group_call_is_my_video_enabled,
     toggle_group_call_is_my_video_paused, toggle_group_call_participant_is_hand_raised,
     toggle_group_call_participant_is_muted, toggle_session_can_accept_calls,
@@ -9929,6 +9930,180 @@ impl<S: JsonSender> ConnectDriver<S> {
                         option.is_chosen = was_chosen;
                     }
                 }
+                Err(err)
+            }
+        }
+    }
+
+    /// B4: one `getPollVoters` page (`schema/td_api.tl:12941`; page size 50,
+    /// the schema max). Guards mirror `send_poll_answer` plus the
+    /// `poll.can_get_voters` gate (schema line 12941). `option_index` is
+    /// the 0-based option index. The answer lands in
+    /// `Session::poll_voters` (first page replaces, later pages append).
+    pub fn fetch_poll_voters(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        option_index: usize,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        self.fetch_poll_voters_page(chat_id, message_id, option_index, 0)
+    }
+
+    /// B4: the next `getPollVoters` page — `offset` is the already-loaded
+    /// count. No-op unless the cache holds a loaded page with more voters
+    /// than currently loaded (server `total_count` is approximate, so the
+    /// honest stop signal is a short page — handled by the UI).
+    pub fn load_more_poll_voters(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        option_index: usize,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        let key = (chat_id.0, message_id.0, option_index as i32);
+        let offset = match self.session.poll_voters.get(&key) {
+            Some(PollVotersFetch::Loaded { voters, .. }) => voters.len() as i32,
+            _ => return Ok(None),
+        };
+        self.fetch_poll_voters_page(chat_id, message_id, option_index, offset)
+    }
+
+    /// B4: page size for `getPollVoters` (schema line 12941: limit ≤ 50).
+    pub const POLL_VOTERS_PAGE_SIZE: i32 = 50;
+
+    fn fetch_poll_voters_page(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        option_index: usize,
+        offset: i32,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let supported = self
+            .session
+            .chats
+            .get(&chat_id.0)
+            .is_some_and(|chat| chat.supported());
+        if !supported {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let poll = self
+            .session
+            .histories
+            .get(&chat_id.0)
+            .and_then(|history| history.messages.get(&message_id.0))
+            .filter(|message| !message.pending && message.id.0 > 0)
+            .and_then(|message| match &message.content {
+                MessageContent::Poll(poll) => Some(poll.poll.clone()),
+                _ => None,
+            })
+            .ok_or(ConnectSendError::InvalidRequest)?;
+        if !poll.can_get_voters || option_index >= poll.options.len() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let key = (chat_id.0, message_id.0, option_index as i32);
+        if matches!(
+            self.session.poll_voters.get(&key),
+            Some(PollVotersFetch::Loading)
+        ) || self.session.requests.has_purpose_for_chat(
+            RequestPurpose::GetPollVoters {
+                chat_id,
+                message_id,
+                option_id: option_index as i32,
+                offset,
+            },
+            chat_id,
+        ) {
+            return Ok(None);
+        }
+        // A "load more" must not clobber the loaded page while it flies.
+        if offset > 0
+            && !matches!(
+                self.session.poll_voters.get(&key),
+                Some(PollVotersFetch::Loaded { .. })
+            )
+        {
+            return Ok(None);
+        }
+        if offset == 0 {
+            self.session
+                .poll_voters
+                .insert(key, PollVotersFetch::Loading);
+        }
+        let extra = self.session.request(
+            RequestPurpose::GetPollVoters {
+                chat_id,
+                message_id,
+                option_id: option_index as i32,
+                offset,
+            },
+            Some(chat_id),
+        );
+        let json = get_poll_voters(
+            extra,
+            chat_id,
+            message_id,
+            option_index as i32,
+            offset,
+            Self::POLL_VOTERS_PAGE_SIZE,
+        );
+        match self.sender.send_json(&json) {
+            Ok(()) => Ok(Some(extra)),
+            Err(err) => {
+                self.session.requests.take(extra);
+                if offset == 0 {
+                    self.session.poll_voters.remove(&key);
+                }
+                Err(err)
+            }
+        }
+    }
+
+    /// B4: stop a poll / quiz via `stopPoll` (schema 1.8.67, line 12953).
+    /// Guards: chats path active, supported chat, the message is a live
+    /// open poll. The UI confirms before calling; `can_be_edited`
+    /// (schema line 12951) is the server gate and the UI only offers it
+    /// on own polls (`poll::can_stop_poll`). Response is `ok`; the poll
+    /// closes via `updatePoll`.
+    pub fn stop_poll(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let supported = self
+            .session
+            .chats
+            .get(&chat_id.0)
+            .is_some_and(|chat| chat.supported());
+        if !supported {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let is_open_poll = self
+            .session
+            .histories
+            .get(&chat_id.0)
+            .and_then(|history| history.messages.get(&message_id.0))
+            .filter(|message| !message.pending && message.id.0 > 0)
+            .and_then(|message| match &message.content {
+                MessageContent::Poll(poll) => Some(!poll.poll.is_closed),
+                _ => None,
+            })
+            .unwrap_or(false);
+        if !is_open_poll {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::StopPoll, Some(chat_id));
+        let json = stop_poll_request(extra, chat_id, message_id);
+        match self.sender.send_json(&json) {
+            Ok(()) => Ok(Some(extra)),
+            Err(err) => {
+                self.session.requests.take(extra);
                 Err(err)
             }
         }
