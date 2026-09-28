@@ -4606,7 +4606,8 @@ inherits = "dev" debug = true` as the full-debuginfo escape hatch.
 Release profile untouched.
 
 Measured on this box (touch `src/ui/mod.rs` + `build --features ui`,
-cargo-reported): warm rebuild 21.07s → 13.73s (~35% faster). One-time
+cargo-reported, single measurement — preliminary): warm rebuild 21.07s →
+13.73s (~35% faster). One-time
 cost: profile change invalidates all fingerprints, so the first build
 after the switch recompiles everything (10m42s cargo-reported here).
 Safe because: release profile is byte-identical, dev binaries still get
