@@ -250,7 +250,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Public username management (`setSupergroupUsername`, owner-only, empty clears) (src/ui/mod.rs) <!-- parity:groups-public-username -->
 - [x] Leave channel / leave group (src/ui/mod.rs) <!-- parity:groups-leave -->
 - [x] Delete group/channel for everyone (`deleteChat`, gated by `can_be_deleted_for_all_users`) with confirmation (src/ui/mod.rs) <!-- parity:groups-delete -->
-- [ ] Welcome messages: render the welcome pack shown only to new joiners (partial: admin-side pack load/add/edit/delete is done — parity:groups-welcome-manage — but joiner-side rendering of `updateChatWelcomeMessages` is not implemented) <!-- parity:groups-welcome-view -->
+- [x] Welcome messages: joiner-side rendering — welcome content reaches a new joiner as regular `updateNewMessage` messages (server pushes `updateNewEphemeralMessage` with `welcome_template=false`; TDLib converts it to a normal message) and renders through the existing message pipeline; `updateChatWelcomeMessages` is pack sync for admins only (requires `can_send_welcome_messages`; TGX leaves it unhandled) and is never delivered to plain joiners — mechanism verified against TDLib 1.8.67 source, see DECISIONS.md <!-- parity:groups-welcome-view -->
 - [x] Welcome messages: add/edit/delete via addChatWelcomeMessage, editChatWelcomeMessage, deleteChatWelcomeMessage, loadChatWelcomeMessages (gated on `can_send_welcome_messages`; pack refetched after each confirmed mutation) (src/ui/mod.rs, src/connect.rs) <!-- parity:groups-welcome-manage -->
 - [x] Welcome message setup: Welcome-message row in the group/channel info panel opens the pack editor dialog (src/ui/mod.rs) <!-- parity:groups-welcome-setup -->
 
