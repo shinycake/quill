@@ -7814,8 +7814,12 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// posts the composer's photo/video with caption + privacy as the
     /// current user (Saved Messages chat id). `kind` must be detected
     /// and the file must exist; `SelectedUsers` needs at least one user.
-    /// The `story` response and `updateStoryPostSucceeded` /
-    /// `updateStoryPostFailed` drive `Session::story_post.outcome`.
+    /// Phase 9.4: `active_period` must be one of the schema-legal values
+    /// (21600 / 43200 / 86400 / 172800 — `td_api.tl:13715` comment);
+    /// anything else is rejected before sending. The `story` response
+    /// and `updateStoryPostSucceeded` / `updateStoryPostFailed` drive
+    /// `Session::story_post.outcome`.
+    #[allow(clippy::too_many_arguments)] // mirrors requests::post_story, one arg per schema field
     pub fn post_story(
         &mut self,
         kind: StoryMediaKind,
@@ -7823,6 +7827,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         caption: &str,
         privacy: StoryPrivacy,
         user_ids: &[i64],
+        areas: serde_json::Value,
+        active_period: i32,
+        is_posted_to_chat_page: bool,
+        protect_content: bool,
     ) -> Result<RequestId, ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
@@ -7836,6 +7844,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         if privacy == StoryPrivacy::SelectedUsers && user_ids.is_empty() {
             return Err(ConnectSendError::InvalidRequest);
         }
+        if !matches!(active_period, 21600 | 43200 | 86400 | 172800) {
+            return Err(ConnectSendError::InvalidRequest);
+        }
         let chat_id = ChatId(user_id);
         let extra = self
             .session
@@ -7847,6 +7858,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             path,
             caption,
             privacy.settings_json(user_ids),
+            areas,
+            active_period,
+            is_posted_to_chat_page,
+            protect_content,
         );
         match self.sender.send_json(&json) {
             Ok(()) => Ok(extra),

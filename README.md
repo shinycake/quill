@@ -317,10 +317,10 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] postStory with caption + privacy selector (td_api.tl:13715; post-succeeded/failed reducer upserts story + queues tray refresh, DECISIONS.md 9.3) <!-- parity:stories-post-call -->
 - [x] Privacy selector: Everyone / Contacts / Close friends / Selected users (`storyPrivacySettings*`, td_api.tl:8928-8937) <!-- parity:stories-post-privacy -->
 - [x] Formatted caption with entities on post <!-- parity:stories-post-caption -->
-- [ ] Add story areas (stickers, links, reactions) on own post <!-- parity:stories-post-areas -->
-- [ ] Active period / expiry selection (postStory active_period param unused) <!-- parity:stories-post-expiry -->
-- [ ] "Post to chat page" toggle (postStory is_posted_to_chat_page / toggleStoryIsPostedToChatPage unused) <!-- parity:stories-post-to-chat-page -->
-- [ ] "Protect content" (no forwarding) toggle (postStory protect_content param unused) <!-- parity:stories-post-protect -->
+- [x] Add story areas (link + suggested-reaction stickers) on own post (`inputStoryAreas`, td_api.tl:6619; composer text inputs, DECISIONS.md 9.4) <!-- parity:stories-post-areas -->
+- [x] Active period / expiry selection (6h / 12h / 24h / 48h per `postStory` active_period comment, td_api.tl:13715) <!-- parity:stories-post-expiry -->
+- [x] "Post to chat page" toggle (`postStory` is_posted_to_chat_page, td_api.tl:13715) <!-- parity:stories-post-to-chat-page -->
+- [x] "Protect content" (no forwarding) toggle (`postStory` protect_content, td_api.tl:13715) <!-- parity:stories-post-protect -->
 - [x] Honest pending / succeeded / failed states (`Posting` is set when the `postStory` answer lands; `updateStoryPostSucceeded`/`PostFailed` applied to the composer status line, DECISIONS.md 9.3) <!-- parity:stories-post-status -->
 - [ ] Edit own story content / caption / areas (editStory, td_api.tl:13732, unused) <!-- parity:stories-edit -->
 - [ ] Edit story cover frame (editStoryCover, td_api.tl:13738, unused) <!-- parity:stories-edit-cover -->

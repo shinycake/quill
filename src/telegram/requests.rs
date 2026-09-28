@@ -4272,17 +4272,22 @@ pub fn input_story_content(kind: StoryMediaKind, path: &str) -> Value {
     }
 }
 
-/// Phase 9.3: `postStory` (TDLib 1.8.67, `schema/td_api.tl:13715`) —
-/// posts a photo/video story as the current user (the Saved Messages chat
-/// id, `Session::my_user_id`). `active_period` is the fixed 24h default
-/// for non-Premium accounts (schema comment on the parameter); areas
-/// stay empty (story areas are out of this slice),
-/// `is_posted_to_chat_page` / `protect_content` are false. The caption
-/// gets the same markup→entities treatment as message captions
-/// (`formatted_caption`); `from_story_full_id` is null (not a repost —
-/// schema comment: "pass null if the story isn't repost of another
-/// story"). Response is a `story`; success/failure lands via
+/// Phase 9.3 / 9.4: `postStory` (TDLib 1.8.67, `schema/td_api.tl:13715`)
+/// — posts a photo/video story as the current user (the Saved Messages
+/// chat id, `Session::my_user_id`). The caption gets the same
+/// markup→entities treatment as message captions (`formatted_caption`);
+/// `from_story_full_id` is null (not a repost — schema comment: "pass
+/// null if the story isn't repost of another story"). Phase 9.4 wires
+/// the previously fixed fields: `areas` (`inputStoryAreas`,
+/// `td_api.tl:6619`, built by `StoryComposer::areas_json`),
+/// `active_period` (one of 21600 / 43200 / 86400 / 172800 per the
+/// parameter comment — validated in `ConnectDriver::post_story`),
+/// `is_posted_to_chat_page` ("Pass true to keep the story accessible
+/// after expiration") and `protect_content` ("Pass true if the content
+/// of the story must be protected from forwarding and screenshotting").
+/// Response is a `story`; success/failure lands via
 /// `updateStoryPostSucceeded` / `updateStoryPostFailed`.
+#[allow(clippy::too_many_arguments)] // one arg per schema field, like the other request builders
 pub fn post_story(
     extra: RequestId,
     chat_id: ChatId,
@@ -4290,20 +4295,24 @@ pub fn post_story(
     path: &str,
     caption: &str,
     privacy_settings: Value,
+    areas: Value,
+    active_period: i32,
+    is_posted_to_chat_page: bool,
+    protect_content: bool,
 ) -> String {
     json!({
         "@type": "postStory",
         "@extra": extra.as_extra(),
         "chat_id": chat_id.0,
         "content": input_story_content(kind, path),
-        "areas": { "@type": "inputStoryAreas", "areas": [] },
+        "areas": areas,
         "caption": formatted_caption(caption, false),
         "privacy_settings": privacy_settings,
         "album_ids": [],
-        "active_period": 86400,
+        "active_period": active_period,
         "from_story_full_id": Value::Null,
-        "is_posted_to_chat_page": false,
-        "protect_content": false
+        "is_posted_to_chat_page": is_posted_to_chat_page,
+        "protect_content": protect_content
     })
     .to_string()
 }
@@ -7579,6 +7588,7 @@ mod channel_requests_tests {
         assert_eq!(v["chat_id"], 777);
 
         let privacy = StoryPrivacy::Contacts.settings_json(&[]);
+        let areas = json!({ "@type": "inputStoryAreas", "areas": [] });
         let json = post_story(
             RequestId(71),
             ChatId(777),
@@ -7586,6 +7596,10 @@ mod channel_requests_tests {
             "/tmp/pic.jpg",
             "hello **bold**",
             privacy,
+            areas.clone(),
+            86400,
+            false,
+            false,
         );
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(v["@type"], "postStory");
@@ -7618,6 +7632,10 @@ mod channel_requests_tests {
             "/tmp/clip.mp4",
             "",
             StoryPrivacy::CloseFriends.settings_json(&[]),
+            json!({ "@type": "inputStoryAreas", "areas": [] }),
+            86400,
+            false,
+            false,
         );
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(v["content"]["@type"], "inputStoryContentVideo");
@@ -7628,6 +7646,48 @@ mod channel_requests_tests {
             v["privacy_settings"]["@type"],
             "storyPrivacySettingsCloseFriends"
         );
+    }
+
+    #[test]
+    fn s2_post_story_options_match_1_8_67() {
+        // Phase 9.4: `postStory` (schema 1.8.67, line 13715) with the
+        // previously fixed fields wired — a link + reaction areas block
+        // (`td_api.tl:6619`), a 48h active period (td_api.tl:13715
+        // comment: legal), and both toggles on.
+        let areas = json!({
+            "@type": "inputStoryAreas",
+            "areas": [{
+                "@type": "inputStoryArea",
+                "position": {
+                    "@type": "storyAreaPosition",
+                    "x_percentage": 35.0, "y_percentage": 80.0,
+                    "width_percentage": 30.0, "height_percentage": 9.0,
+                    "rotation_angle": 0.0, "corner_radius_percentage": 20.0
+                },
+                "type": { "@type": "inputStoryAreaTypeLink", "url": "https://t.me/quill" }
+            }]
+        });
+        let json = post_story(
+            RequestId(73),
+            ChatId(777),
+            StoryMediaKind::Photo,
+            "/tmp/pic.jpg",
+            "",
+            StoryPrivacy::Everyone.settings_json(&[]),
+            areas,
+            172800,
+            true,
+            true,
+        );
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(
+            v["areas"]["areas"][0]["type"]["@type"],
+            "inputStoryAreaTypeLink"
+        );
+        assert_eq!(v["areas"]["areas"][0]["type"]["url"], "https://t.me/quill");
+        assert_eq!(v["active_period"], 172800);
+        assert_eq!(v["is_posted_to_chat_page"], true);
+        assert_eq!(v["protect_content"], true);
     }
 
     #[test]
