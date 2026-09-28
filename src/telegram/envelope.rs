@@ -419,6 +419,13 @@ pub enum EnvelopePayload {
     WebPageInstantView {
         rich: RichMessageContent,
     },
+    /// MED4b: `linkPreview` (TDLib 1.8.67, `schema/td_api.tl:4570`) — the
+    /// `getLinkPreview` answer for the composer prefetch. `None` when the
+    /// payload isn't a well-formed `linkPreview` (defensive; a success
+    /// always carries the object).
+    LinkPreview {
+        preview: Option<LinkPreview>,
+    },
     /// M1 fix-up: `messageProperties` (TDLib 1.8.67,
     /// `schema/td_api.tl:11557`) — the `getMessageProperties` answer.
     /// Only `can_get_link` is kept: `getMessageLink` is "available only
@@ -5098,6 +5105,11 @@ pub struct LinkPreview {
     pub title: String,
     pub description: String,
     pub show_large_media: bool,
+    /// MED4b: `linkPreview.has_large_media` (schema:4570) — whether a
+    /// large-media variant exists at all. TGX gates the large/small
+    /// toggle on this (`LinkPreview.toggleLargeMedia` no-ops without
+    /// it); the composer chip does the same.
+    pub has_large_media: bool,
     pub show_media_above_description: bool,
     pub show_above_text: bool,
     pub instant_view_version: i32,
@@ -6474,6 +6486,15 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
             Ok(EnvelopePayload::WebPageInstantView {
                 rich: RichMessageContent { blocks, is_full },
             })
+        }
+        // MED4b: `getLinkPreview` answer (schema:14792) — the full
+        // `linkPreview` object. Thumbnail `ParsedFile`s are dropped: the
+        // composer chip shows title/description + a media glyph, never
+        // the image (downloading transient preview files is out of
+        // slice — DECISIONS.md).
+        "linkPreview" => {
+            let (preview, _files) = parse_link_preview(Some(&value));
+            Ok(EnvelopePayload::LinkPreview { preview })
         }
         "messageLink" => Ok(EnvelopePayload::MessageLink {
             link: value
@@ -9130,6 +9151,7 @@ fn parse_link_preview(value: Option<&Value>) -> (Option<LinkPreview>, Vec<Parsed
             title: json_field_str(value, "title"),
             description: parse_formatted_text(value.get("description")),
             show_large_media: json_bool(value.get("show_large_media"), false),
+            has_large_media: json_bool(value.get("has_large_media"), false),
             show_media_above_description: json_bool(
                 value.get("show_media_above_description"),
                 false,

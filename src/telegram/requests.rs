@@ -1,5 +1,6 @@
 use crate::composer::{
-    ComposerEntity, ComposerScheduling, FormatKind, SendOptions, parse_format_markup,
+    ComposerEntity, ComposerScheduling, FormatKind, PreviewMediaSize, SendOptions, find_urls,
+    parse_format_markup,
 };
 use crate::ids::{ChatId, FileId, MessageId, RequestId, TopicId};
 use crate::pins::{TDLIB_CMAKE_VERSION, TDLIB_GIT_COMMIT};
@@ -3157,6 +3158,22 @@ pub fn send_text(
             "force_large_media": false,
             "show_above_text": false,
         })
+    } else if options.link_preview_above_text
+        || !matches!(options.link_preview_media, PreviewMediaSize::Auto)
+    {
+        // MED4b: full `linkPreviewOptions` (schema:2237). The force flags
+        // are ignored unless the URL is explicitly specified, so the
+        // detected first URL rides along (TGX sets `options.url` when
+        // forcing — `MessagesController.takeOutputLinkPreviewOptions`).
+        let first_url = find_urls(text).into_iter().next().unwrap_or_default();
+        json!({
+            "@type": "linkPreviewOptions",
+            "is_disabled": false,
+            "url": first_url,
+            "force_small_media": matches!(options.link_preview_media, PreviewMediaSize::ForceSmall),
+            "force_large_media": matches!(options.link_preview_media, PreviewMediaSize::ForceLarge),
+            "show_above_text": options.link_preview_above_text,
+        })
     } else {
         Value::Null
     };
@@ -3221,6 +3238,25 @@ pub fn get_web_page_instant_view(extra: RequestId, url: &str) -> String {
         "@extra": extra.as_extra(),
         "url": url,
         "only_local": false,
+    })
+    .to_string()
+}
+
+/// MED4b: `getLinkPreview` (TDLib 1.8.67, `schema/td_api.tl:14792`) —
+/// "Returns a link preview by the text of a message. Do not call this
+/// function too often. Returns a 404 error if the text has no link
+/// preview". TGX (`LinkPreview.loadLinkPreview`) passes the URL as the
+/// text with null options; Quill does the same and debounces at the UI.
+pub fn get_link_preview(extra: RequestId, url: &str) -> String {
+    json!({
+        "@type": "getLinkPreview",
+        "@extra": extra.as_extra(),
+        "text": {
+            "@type": "formattedText",
+            "text": url,
+            "entities": []
+        },
+        "link_preview_options": Value::Null,
     })
     .to_string()
 }
@@ -7444,6 +7480,88 @@ mod channel_requests_tests {
         let opts = &v["input_message_content"]["link_preview_options"];
         assert_eq!(opts["@type"], "linkPreviewOptions");
         assert_eq!(opts["is_disabled"], true);
+    }
+
+    /// MED4b: `getLinkPreview` shape matches the pinned schema
+    /// (`schema/td_api.tl:14792`).
+    #[test]
+    fn get_link_preview_shape_matches_1_8_67() {
+        let json = get_link_preview(RequestId(61), "https://example.com/story");
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "getLinkPreview");
+        assert_eq!(v["@extra"], "61");
+        assert_eq!(v["text"]["@type"], "formattedText");
+        assert_eq!(v["text"]["text"], "https://example.com/story");
+        assert_eq!(v["link_preview_options"], Value::Null);
+        let schema = include_str!("../../schema/td_api.tl");
+        let line = schema
+            .lines()
+            .find(|l| l.starts_with("getLinkPreview "))
+            .expect("getLinkPreview in schema");
+        assert_eq!(
+            line,
+            "getLinkPreview text:formattedText link_preview_options:linkPreviewOptions = LinkPreview;"
+        );
+    }
+
+    /// MED4b: above-text + force-large ride `inputMessageText`;
+    /// the force flags require the explicit URL (schema:2234-2235).
+    #[test]
+    fn send_text_link_preview_full_options_on_wire() {
+        let json = send_text(
+            RequestId(62),
+            ChatId(11),
+            None,
+            "see https://example.com/story",
+            None,
+            &SendOptions {
+                link_preview_above_text: true,
+                link_preview_media: PreviewMediaSize::ForceLarge,
+                ..SendOptions::default()
+            },
+        );
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let opts = &v["input_message_content"]["link_preview_options"];
+        assert_eq!(opts["@type"], "linkPreviewOptions");
+        assert_eq!(opts["is_disabled"], false);
+        assert_eq!(opts["url"], "https://example.com/story");
+        assert_eq!(opts["force_small_media"], false);
+        assert_eq!(opts["force_large_media"], true);
+        assert_eq!(opts["show_above_text"], true);
+        // Above-text alone (no force) still sends the options object with
+        // the detected URL — equivalent to empty per the schema (first
+        // URL is used), and keeps one code path.
+        let json = send_text(
+            RequestId(63),
+            ChatId(11),
+            None,
+            "see https://example.com/story",
+            None,
+            &SendOptions {
+                link_preview_above_text: true,
+                ..SendOptions::default()
+            },
+        );
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let opts = &v["input_message_content"]["link_preview_options"];
+        assert_eq!(opts["show_above_text"], true);
+        assert_eq!(opts["url"], "https://example.com/story");
+        assert_eq!(opts["force_small_media"], false);
+        assert_eq!(opts["force_large_media"], false);
+        // Defaults keep the old behavior: null options.
+        let json = send_text(
+            RequestId(64),
+            ChatId(11),
+            None,
+            "see https://example.com/story",
+            None,
+            &SendOptions::default(),
+        );
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(
+            v["input_message_content"]["link_preview_options"],
+            Value::Null
+        );
     }
 
     #[test]
