@@ -827,7 +827,7 @@ pub enum PasswordOp {
 impl PasswordOp {
     /// Past-tense action label for honest error lines, e.g.
     /// "Could not change the two-step password (error 400)".
-    pub fn action_label(self) -> &'static str {
+    fn action_label(self) -> &'static str {
         match self {
             PasswordOp::Fetch => "load two-step verification settings",
             PasswordOp::SetPassword => "change the two-step password",

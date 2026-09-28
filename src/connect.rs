@@ -10156,13 +10156,10 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     /// Slice A2: send `getPasswordState` (schema 1.8.67, line 11426).
-    /// Guarded like the storage-stats fetch: cached state is reused and
-    /// an in-flight fetch is never duplicated. `Ok(None)` = no request
-    /// needed.
+    /// Cached state is reused and an in-flight fetch is never
+    /// duplicated; `password_op_send` enforces the connection gate.
+    /// `Ok(None)` = no request needed.
     pub fn fetch_password_state(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
-        if !self.chats_path_active() {
-            return Err(ConnectSendError::InvalidRequest);
-        }
         if self.session.password_state.is_some() || self.session.password_state_loading {
             return Ok(None);
         }
