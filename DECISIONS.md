@@ -1672,6 +1672,95 @@ Research snapshot 2026-09-16, pin recheck **2026-09-17**.
   (`from_story_full_id` fixed null); the archive-list tray; stories in
   the in-app updater (unchanged queue).
 
+## Phase 9.4 — Story composer options (2026-09-28)
+
+- **Rationale:** Phase 9.3 posted with fixed `active_period` 86400, empty
+  areas, and both toggles false. This slice wires the remaining
+  `postStory` composer options: expiry selection, link +
+  suggested-reaction story areas, "post to chat page", and "protect
+  content".
+- **Schema (1.8.67, verified in `schema/td_api.tl` — no invented
+  constructors/fields):** `postStory chat_id:int53
+  content:InputStoryContent areas:inputStoryAreas caption:formattedText
+  privacy_settings:StoryPrivacySettings album_ids:vector<int32>
+  active_period:int32 from_story_full_id:storyFullId
+  is_posted_to_chat_page:Bool protect_content:Bool = Story` (line
+  13715); parameter comments — `@active_period Period after which the
+  story is moved to archive, in seconds; must be one of 6 * 3600,
+  12 * 3600, 86400, or 2 * 86400 for Telegram Premium users, and 86400
+  otherwise`; `@is_posted_to_chat_page Pass true to keep the story
+  accessible after expiration`; `@protect_content Pass true if the
+  content of the story must be protected from forwarding and
+  screenshotting`; `inputStoryAreas areas:vector<inputStoryArea> =
+  InputStoryAreas` (line 6619); `inputStoryArea
+  position:storyAreaPosition type:InputStoryAreaType = InputStoryArea`
+  (line 6610); `storyAreaPosition x_percentage:double
+  y_percentage:double width_percentage:double
+  height_percentage:double rotation_angle:double
+  corner_radius_percentage:double = StoryAreaPosition` (line 6530);
+  `inputStoryAreaTypeLink url:string = InputStoryAreaType` (line 6597 —
+  comment: "An area pointing to a HTTP or tg:// link");
+  `inputStoryAreaTypeSuggestedReaction reaction_type:ReactionType
+  is_dark:Bool is_flipped:Bool = InputStoryAreaType` (line 6588);
+  `reactionTypeEmoji emoji:string = ReactionType` (line 2915).
+  Concept-level area search (case-insensitive scan of the area block,
+  `td_api.tl:6572`–`td_api.tl:6619`) confirms the full posting surface:
+  Location (6572), FoundVenue (6577), PreviousVenue (6582),
+  SuggestedReaction (6588), Message (6593), Link (6597), Weather
+  (6603), UpgradedGift (6606). Server limits are documented at
+  `td_api.tl:6613`–6618 (up to 10 location/venue, up to
+  `story_suggested_reaction_area_count_max` reactions, 1 message, up to
+  `story_link_area_count_max` links **for Premium users**, 3 weather,
+  1 gift).
+- **Composer (`src/story_composer.rs`, pure).** `StoryExpiry` (6h / 12h /
+  24h / 48h → 21600 / 43200 / 86400 / 172800; non-24h options labeled
+  Premium per the schema comment; default 24h), `post_to_chat_page` /
+  `protect_content` bools, `link_url` + `reaction_emojis` strings, and
+  `areas_json()` building the `inputStoryAreas` block: one link area
+  from the URL, one reaction area per space-separated emoji (UI cap 5 —
+  the server enforces the real `story_suggested_reaction_area_count_max`).
+  Only link + reaction types are implemented: they are the only area
+  types expressible with plain text inputs in this path-entry dialog.
+  `link_url_error()` enforces the schema's "HTTP or tg:// URL" prefix
+  (http://, https://, tg://) locally. Areas are fixed sensible
+  placements (`storyAreaPosition` percentages) — the composer has no
+  media canvas for drag placement yet (`ponytail:` comment in code).
+  Areas are baked into the `postStory` request JSON, so they ride the
+  existing post→answer correlation (temp story id →
+  `updateStoryPostSucceeded`/`updateStoryPostFailed`) with no extra
+  state. Unit tests: expiry mapping, area JSON shapes, URL prefix
+  validation.
+- **Requests (`src/telegram/requests.rs`).** `post_story` now takes
+  `areas`, `active_period`, `is_posted_to_chat_page`,
+  `protect_content`; shape tests updated + a new S2 test pins the
+  wired fields.
+- **Driver (`src/connect.rs`).** `post_story` passes the four options
+  through and rejects non-schema `active_period` values
+  (`InvalidRequest` — the schema says "must be one of").
+- **UI (`src/ui/mod.rs`).** Composer overlay gains: "Expires after" (4
+  checkbox buttons), "Link sticker URL" + "Reaction stickers
+  (emoji, space-separated)" textareas (the link field labels itself
+  Premium), and the two toggles under "Options". Post syncs the area
+  inputs into composer state and surfaces a bad link URL as a local
+  error before the `canPostStory` check. Screenshot proof:
+  `docs/screenshots/ready-story-composer.png` re-captured with the
+  options seeded (48h expiry, both toggles on, link + two reactions).
+- **`toggleStoryIsPostedToChatPage` — deferred, not wired.**
+  `toggleStoryIsPostedToChatPage story_poster_chat_id:int53
+  story_id:int32 is_posted_to_chat_page:Bool = Ok` exists (line
+  13749), but it applies to already-posted stories, which lives in the
+  story viewer / posted-story state — not the composer path. The
+  composer covers new posts via `postStory`'s own flag; the viewer
+  toggle waits for posted-story management (a future slice).
+- **Out of this slice (→ future):** location / venue areas (no
+  location/venue picker), message areas (no message picker), weather
+  areas (no live weather data), upgraded-gift areas (no gift
+  inventory); `editStory` (13732), `editStoryCover` (13738),
+  `setStoryPrivacySettings` (13743); `toggleStoryIsPostedToChatPage`
+  for already-posted stories (13749); posting as a channel /
+  supergroup (`getChatsToPostStories` 13698, admin story rights);
+  repost (`from_story_full_id` fixed null).
+
 ## Parity slice — Forum-topic posting (2026-09-26)
 
 - **Rationale:** Phase 5.1 made forum topics read-only (composer hidden

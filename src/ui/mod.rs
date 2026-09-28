@@ -50,7 +50,7 @@ use quill::state::{
     SupergroupMembersFetch, WelcomeMessagesFetch, effective_preview, event_log_relative_time,
     outgoing_status_label, unix_ms_now, unread_badge_text,
 };
-use quill::story_composer::{StoryComposer, StoryMediaKind, StoryPrivacy};
+use quill::story_composer::{StoryComposer, StoryExpiry, StoryMediaKind, StoryPrivacy};
 use quill::story_viewer::{StoryViewer, StoryViewerItem, StoryViewerKind, collect_story_items};
 use quill::telegram::client::copy_and_parse;
 use quill::telegram::envelope::{
@@ -1480,6 +1480,10 @@ pub struct QuillApp {
     story_composer_path: Entity<TextareaState>,
     story_composer_caption: Entity<TextareaState>,
     story_composer_user_search: Entity<TextareaState>,
+    /// Phase 9.4: story areas — link URL + suggested-reaction emoji
+    /// inputs.
+    story_composer_link: Entity<TextareaState>,
+    story_composer_reaction: Entity<TextareaState>,
     /// Phase 6: sidebar tab — `true` shows the contacts list instead of
     /// the chat list.
     contacts_tab_open: bool,
@@ -2149,6 +2153,20 @@ impl QuillApp {
         let story_composer_user_search = cx.new(|cx| {
             TextareaState::new(window, cx)
                 .placeholder("Search contacts")
+                .auto_grow(1, 1)
+                .submit_on_enter(false)
+        });
+        // Phase 9.4: story area inputs — link sticker URL and
+        // suggested-reaction emoji (space-separated).
+        let story_composer_link = cx.new(|cx| {
+            TextareaState::new(window, cx)
+                .placeholder("https://… (optional, Premium)")
+                .auto_grow(1, 1)
+                .submit_on_enter(false)
+        });
+        let story_composer_reaction = cx.new(|cx| {
+            TextareaState::new(window, cx)
+                .placeholder("❤️ (optional, space-separated)")
                 .auto_grow(1, 1)
                 .submit_on_enter(false)
         });
@@ -3173,6 +3191,8 @@ impl QuillApp {
             story_composer_path,
             story_composer_caption,
             story_composer_user_search,
+            story_composer_link,
+            story_composer_reaction,
             auth_demo,
             focus_sidebar: cx.focus_handle(),
             connect_status,
@@ -4122,6 +4142,20 @@ impl QuillApp {
                 input.set_value("Posting my first story **from Quill**!", window, cx);
             });
             app.story_composer.privacy = StoryPrivacy::CloseFriends;
+            // Phase 9.4: seed the new options so the screenshot shows
+            // them — 48h expiry, both toggles on, a link sticker URL and
+            // reaction stickers.
+            app.story_composer.expiry = StoryExpiry::TwoDays;
+            app.story_composer.post_to_chat_page = true;
+            app.story_composer.protect_content = true;
+            app.story_composer.link_url = "https://t.me/quill".into();
+            app.story_composer.reaction_emojis = "❤️ 🔥".into();
+            app.story_composer_link.update(cx, |input, cx| {
+                input.set_value("https://t.me/quill", window, cx);
+            });
+            app.story_composer_reaction.update(cx, |input, cx| {
+                input.set_value("❤️ 🔥", window, cx);
+            });
             app.status_note = "screenshot demo — story posting composer".into();
         }
         if matches!(demo, Some(ScreenshotDemo::ReadySponsored)) {
@@ -9657,6 +9691,11 @@ impl QuillApp {
             .update(cx, |input, cx| input.set_value("", window, cx));
         self.story_composer_user_search
             .update(cx, |input, cx| input.set_value("", window, cx));
+        // Phase 9.4: reset the area inputs too.
+        self.story_composer_link
+            .update(cx, |input, cx| input.set_value("", window, cx));
+        self.story_composer_reaction
+            .update(cx, |input, cx| input.set_value("", window, cx));
         if let Some(live) = self.live.as_mut() {
             live.driver.session.story_post = StoryPostState::default();
         }
@@ -9685,6 +9724,16 @@ impl QuillApp {
         }
         let path = self.story_composer_path.read(cx).value().trim().to_string();
         let kind = StoryMediaKind::detect(&path);
+        // Phase 9.4: sync the area inputs into composer state before
+        // validating — the link URL check runs up front so a typo
+        // surfaces locally instead of failing the post.
+        self.story_composer.link_url = self.story_composer_link.read(cx).value().trim().to_string();
+        self.story_composer.reaction_emojis = self
+            .story_composer_reaction
+            .read(cx)
+            .value()
+            .trim()
+            .to_string();
         let error = if path.is_empty() {
             Some("Enter a photo or video file path")
         } else if kind == StoryMediaKind::Unknown {
@@ -9693,6 +9742,8 @@ impl QuillApp {
             Some("File not found — check the path")
         } else if self.story_composer.needs_users() {
             Some("Pick at least one user for \"Selected users\"")
+        } else if let Some(link_error) = self.story_composer.link_url_error() {
+            Some(link_error)
         } else {
             None
         };
@@ -9739,10 +9790,24 @@ impl QuillApp {
                 let kind = StoryMediaKind::detect(&path);
                 let privacy = self.story_composer.privacy;
                 let user_ids = self.story_composer.selected_user_ids.clone();
-                match live
-                    .driver
-                    .post_story(kind, &path, &caption, privacy, &user_ids)
-                {
+                // Phase 9.4: areas + options are read from composer state
+                // (synced in `story_composer_post`), so what lands in the
+                // `postStory` JSON is exactly what the UI showed.
+                let areas = self.story_composer.areas_json();
+                let active_period = self.story_composer.expiry.seconds();
+                let is_posted_to_chat_page = self.story_composer.post_to_chat_page;
+                let protect_content = self.story_composer.protect_content;
+                match live.driver.post_story(
+                    kind,
+                    &path,
+                    &caption,
+                    privacy,
+                    &user_ids,
+                    areas,
+                    active_period,
+                    is_posted_to_chat_page,
+                    protect_content,
+                ) {
                     Ok(_) => {
                         self.story_composer.local_error = None;
                         // Phase 9.3: request sent, answer not yet landed —
@@ -27820,6 +27885,63 @@ impl QuillApp {
                     .into_any_element()
             });
 
+        let mut expiry = div().flex().flex_col().gap_1();
+        for option in StoryExpiry::ALL {
+            let selected = self.story_composer.expiry == option;
+            let label = option.label();
+            expiry = expiry.child(
+                Button::new(format!("story-composer-expiry-{label}"))
+                    .label(if selected {
+                        format!("☑ {label}")
+                    } else {
+                        format!("☐ {label}")
+                    })
+                    .ghost()
+                    .text_color(rgb(0xffffff))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.story_composer.expiry = option;
+                        this.story_composer.local_error = None;
+                        cx.notify();
+                    })),
+            );
+        }
+
+        let toggles = div()
+            .flex()
+            .flex_col()
+            .gap_1()
+            .child(
+                Button::new("story-composer-post-to-chat-page")
+                    .label(if self.story_composer.post_to_chat_page {
+                        "☑ Post to chat page (keep accessible after expiry)"
+                    } else {
+                        "☐ Post to chat page (keep accessible after expiry)"
+                    })
+                    .ghost()
+                    .text_color(rgb(0xffffff))
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.story_composer.post_to_chat_page =
+                            !this.story_composer.post_to_chat_page;
+                        this.story_composer.local_error = None;
+                        cx.notify();
+                    })),
+            )
+            .child(
+                Button::new("story-composer-protect-content")
+                    .label(if self.story_composer.protect_content {
+                        "☑ Protect content (no forwarding)"
+                    } else {
+                        "☐ Protect content (no forwarding)"
+                    })
+                    .ghost()
+                    .text_color(rgb(0xffffff))
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.story_composer.protect_content = !this.story_composer.protect_content;
+                        this.story_composer.local_error = None;
+                        cx.notify();
+                    })),
+            );
+
         let status = self.story_composer_status();
         let busy = self.story_composer.check_sent
             || self.story_composer.post_sent
@@ -27859,6 +27981,9 @@ impl QuillApp {
                     .p_4()
                     .max_w(px(480.))
                     .max_h_full()
+                    // Phase 9.4: the options section outgrew the window —
+                    // scroll instead of clipping the Post button.
+                    .overflow_y_scroll()
                     .rounded_lg()
                     .bg(rgb(0x161b22))
                     .child(
@@ -27920,6 +28045,38 @@ impl QuillApp {
                     )
                     .child(privacy)
                     .when_some(users_picker, |this, picker| this.child(picker))
+                    // Phase 9.4: expiry, areas (link + suggested-reaction
+                    // stickers), and the post-to-chat-page /
+                    // protect-content toggles.
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(rgb(0x8b949e))
+                            .child("Expires after"),
+                    )
+                    .child(expiry)
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(rgb(0x8b949e))
+                            .child("Story stickers"),
+                    )
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(rgb(0x8b949e))
+                            .child("Link sticker URL"),
+                    )
+                    .child(Textarea::new(&self.story_composer_link).h(px(32.)))
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(rgb(0x8b949e))
+                            .child("Reaction stickers (emoji, space-separated)"),
+                    )
+                    .child(Textarea::new(&self.story_composer_reaction).h(px(32.)))
+                    .child(div().text_xs().text_color(rgb(0x8b949e)).child("Options"))
+                    .child(toggles)
                     .when_some(status, |this, status| {
                         this.child(div().text_sm().text_color(rgb(0xffffff)).child(status))
                     })
