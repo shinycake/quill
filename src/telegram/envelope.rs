@@ -2755,8 +2755,9 @@ pub struct ParsedSession {
 /// (`connectedWebsite id:int64 domain_name:string bot_user_id:int53
 /// browser:string platform:string log_in_date:int32
 /// last_active_date:int32 ip_address:string location:string =
-/// ConnectedWebsite;`, schema 1.8.67, line 9168). Only the fields the
-/// Connected Websites list renders are parsed.
+/// ConnectedWebsite;`, schema 1.8.67, line 9168). All fields are parsed;
+/// resolving `bot_user_id` to a username needs the users cache (backlog,
+/// see DECISIONS.md).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParsedWebsite {
     pub id: i64,
