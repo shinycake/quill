@@ -47,9 +47,9 @@ use quill::state::{
     ChatSearchJump, ChatStatisticsFetch, ChatSummary, ContactRow, ForceReplyTarget, ForwardResult,
     HistoryMessage, InfoPanelTarget, InviteLinkFetch, JoinRequestFetch, LoginUrlRequest,
     MemberListFilter, OutboxReceipt, RequestPurpose, SearchStatus, Session, SponsoredReportFlight,
-    StoryPostOutcome, StoryPostState,
-    SupergroupMembersFetch, WelcomeMessagesFetch, active_custom_keyboard, effective_preview,
-    event_log_relative_time, outgoing_status_label, unix_ms_now, unread_badge_text,
+    StoryPostOutcome, StoryPostState, SupergroupMembersFetch, WelcomeMessagesFetch,
+    active_custom_keyboard, effective_preview, event_log_relative_time, outgoing_status_label,
+    unix_ms_now, unread_badge_text,
 };
 use quill::story_composer::{StoryComposer, StoryExpiry, StoryMediaKind, StoryPrivacy};
 use quill::story_viewer::{StoryViewer, StoryViewerItem, StoryViewerKind, collect_story_items};
