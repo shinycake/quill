@@ -699,6 +699,14 @@ pub enum RequestPurpose {
     StartScheduledVideoChat {
         group_call_id: i32,
     },
+    /// `toggleVideoChatEnabledStartNotification` (schema 1.8.67,
+    /// :14282). Response is `ok`; the new
+    /// `groupCall.enabled_start_notification` arrives as
+    /// `updateGroupCall`.
+    ToggleVideoChatEnabledStartNotification {
+        group_call_id: i32,
+        enabled: bool,
+    },
     /// Phase C2h: `getVideoChatRtmpUrl`. Response is `rtmpUrl`.
     GetVideoChatRtmpUrl {
         chat_id: i64,
@@ -2870,6 +2878,9 @@ pub struct ActiveGroupCall {
     /// Phase C2h: `scheduled_start_date` of a not-yet-started video
     /// chat (0 = live or unknown). Drives the "starts in …" card.
     pub scheduled_start_date: i32,
+    /// `enabled_start_notification` from `updateGroupCall` (schema
+    /// 1.8.67, :7154) — "notify me when this scheduled chat starts".
+    pub enabled_start_notification: bool,
     /// Phase C2h: `rtmpUrl` from `getVideoChatRtmpUrl` /
     /// `replaceVideoChatRtmpUrl`, fetched on demand by an admin.
     pub rtmp_url: Option<String>,
@@ -2924,6 +2935,7 @@ impl ActiveGroupCall {
             screen_share_answer: String::new(),
             invite_link: None,
             scheduled_start_date: 0,
+            enabled_start_notification: false,
             rtmp_url: None,
             rtmp_stream_key: None,
             can_send_messages: false,
@@ -7020,6 +7032,7 @@ impl Session {
                         | RequestPurpose::StartGroupCallRecording { .. }
                         | RequestPurpose::EndGroupCallRecording { .. }
                         | RequestPurpose::StartScheduledVideoChat { .. }
+                        | RequestPurpose::ToggleVideoChatEnabledStartNotification { .. }
                         | RequestPurpose::GetVideoChatRtmpUrl { .. }
                         | RequestPurpose::ReplaceVideoChatRtmpUrl { .. }
                         | RequestPurpose::SendGroupCallMessage { .. }
@@ -8192,6 +8205,7 @@ impl Session {
                 tracked.is_owned = group_call.is_owned;
                 tracked.is_video_chat = group_call.is_video_chat;
                 tracked.scheduled_start_date = group_call.scheduled_start_date;
+                tracked.enabled_start_notification = group_call.enabled_start_notification;
                 return;
             }
             if self
@@ -14988,10 +15002,12 @@ mod tests {
             &mut session,
             &seq,
             &sink,
-            r#"{"@type":"updateGroupCall","group_call":{"@type":"groupCall","id":555,"unique_id":"999","title":"Planned sync","invite_link":"","paid_message_star_count":0,"scheduled_start_date":1788003600,"enabled_start_notification":false,"is_active":false,"is_video_chat":true,"is_live_story":false,"is_rtmp_stream":false,"is_joined":false,"need_rejoin":false,"is_owned":true,"can_be_managed":true,"participant_count":0,"has_hidden_listeners":false,"loaded_all_participants":false,"message_sender_id":null,"recent_speakers":[],"is_my_video_enabled":false,"is_my_video_paused":false,"can_enable_video":true,"mute_new_participants":false,"can_toggle_mute_new_participants":true,"can_send_messages":true,"are_messages_allowed":true,"can_toggle_are_messages_allowed":true,"can_delete_messages":false,"record_duration":0,"is_video_recorded":false,"duration":0}}"#,
+            r#"{"@type":"updateGroupCall","group_call":{"@type":"groupCall","id":555,"unique_id":"999","title":"Planned sync","invite_link":"","paid_message_star_count":0,"scheduled_start_date":1788003600,"enabled_start_notification":true,"is_active":false,"is_video_chat":true,"is_live_story":false,"is_rtmp_stream":false,"is_joined":false,"need_rejoin":false,"is_owned":true,"can_be_managed":true,"participant_count":0,"has_hidden_listeners":false,"loaded_all_participants":false,"message_sender_id":null,"recent_speakers":[],"is_my_video_enabled":false,"is_my_video_paused":false,"can_enable_video":true,"mute_new_participants":false,"can_toggle_mute_new_participants":true,"can_send_messages":true,"are_messages_allowed":true,"can_toggle_are_messages_allowed":true,"can_delete_messages":false,"record_duration":0,"is_video_recorded":false,"duration":0}}"#,
         );
         let call = session.active_group_call.as_ref().expect("tracked");
         assert_eq!(call.scheduled_start_date, 1788003600);
+        // `enabled_start_notification` (:7154) rides the same update.
+        assert!(call.enabled_start_notification);
         assert!(!call.is_joined);
     }
 

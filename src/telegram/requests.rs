@@ -2482,6 +2482,27 @@ pub fn start_scheduled_video_chat(extra: RequestId, group_call_id: i32) -> Strin
     .to_string()
 }
 
+/// `toggleVideoChatEnabledStartNotification` (TDLib 1.8.67,
+/// `schema/td_api.tl:14282`):
+/// `toggleVideoChatEnabledStartNotification group_call_id:int32
+/// enabled_start_notification:Bool = Ok;`
+/// "Toggles whether the current user will receive a notification
+/// when the group call starts; for video chats only". The new flag
+/// arrives back as `updateGroupCall` (`groupCall.enabled_start_notification`, :7154).
+pub fn toggle_video_chat_enabled_start_notification(
+    extra: RequestId,
+    group_call_id: i32,
+    enabled_start_notification: bool,
+) -> String {
+    json!({
+        "@type": "toggleVideoChatEnabledStartNotification",
+        "@extra": extra.as_extra(),
+        "group_call_id": group_call_id,
+        "enabled_start_notification": enabled_start_notification,
+    })
+    .to_string()
+}
+
 /// Phase C2h: `getVideoChatRtmpUrl` (TDLib 1.8.67,
 /// `schema/td_api.tl:14261`):
 /// `getVideoChatRtmpUrl chat_id:int53 = RtmpUrl;`
@@ -7062,6 +7083,16 @@ mod channel_requests_tests {
             serde_json::from_str(&start_scheduled_video_chat(RequestId(24), 555)).unwrap();
         assert_eq!(v["@type"], "startScheduledVideoChat");
         assert_eq!(v["group_call_id"], 555);
+
+        // `toggleVideoChatEnabledStartNotification` (schema 1.8.67,
+        // :14282).
+        let v: serde_json::Value = serde_json::from_str(
+            &toggle_video_chat_enabled_start_notification(RequestId(25), 555, true),
+        )
+        .unwrap();
+        assert_eq!(v["@type"], "toggleVideoChatEnabledStartNotification");
+        assert_eq!(v["group_call_id"], 555);
+        assert_eq!(v["enabled_start_notification"], true);
 
         let v: serde_json::Value =
             serde_json::from_str(&get_video_chat_rtmp_url(RequestId(26), 51)).unwrap();

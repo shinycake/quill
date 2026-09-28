@@ -4514,3 +4514,86 @@ greps.
   - `parity:bots-inline-buy` — payments/buy buttons: invoice flow, payment UI, and receipt handling are a full payments slice, not a keyboard addition. Buttons render disabled with an honest tooltip.
   - Games UI beyond launch — scoreboards, game messages rendering, and in-app game surfaces; only the TDLib launch flow (callback answer + URL) is built.
   - Inline mode (`inlineKeyboardButtonTypeSwitchInline` query flows are pre-existing; full inline-result browsing/picking is separate).
+## Slice calls-remainder-1 (2026-09-27)
+
+**Scope:** three small, unchecked calls-lane items — scheduled-video-chat
+start notification, 1:1 call verification emojis, group video paused
+indicator. Signaling/UI only; no transport changes.
+
+**Schema verification (concept-level, pinned TDLib 1.8.67
+`schema/td_api.tl`):**
+- `toggleVideoChatEnabledStartNotification group_call_id:int32
+  enabled_start_notification:Bool = Ok;` — verbatim at :14282; the
+  `groupCall.enabled_start_notification:Bool` field at :7154 ("True, if
+  the group call is scheduled and the current user will receive a
+  notification when the group call starts; for video chats only").
+  Pinned in `telegram::envelope` tests verbatim (schema pin test).
+- 1:1 call verification emojis: `callStateReady ... emojis:vector<string>
+  ...` at :7068 — the 4-emoji E2E fingerprint rides the `Call.state`
+  itself (no separate update, unlike group calls'
+  `updateGroupCallVerificationState` :10836). Parsed into
+  `ReadyParams.emojis`, already threaded to `ActiveCall.ready`.
+- Group video pause: `groupCallParticipantVideoInfo ...
+  is_paused:Bool` at :7163 ("True, if the video is paused. This flag
+  needs to be ignored, if new video frames are received"). Already
+  parsed into `GroupCallVideoInfo.is_paused`; TDLib clears the flag
+  when new frames arrive, so the tile badge reads it directly.
+
+**TGX evidence:** the checked-out Telegram X tree does not implement
+the scheduled-chat notify toggle or the paused-video tile badge (no
+`EnabledStartNotification` constructor usage; the `isPaused` hits are
+the Tdlib client lifecycle, not video info). Behavior target is
+Telegram Desktop's scheduled voice-chat surface ("Notify me when it
+starts" toggle on the scheduled-chat info) and its group video tiles
+(pause indicator on the tile when the peer's video is paused).
+
+**Built:**
+- `toggle_video_chat_enabled_start_notification` request builder +
+  JSON shape test; `Connect::toggle_video_chat_start_notification`
+  driver method gated on the tracked call still being scheduled
+  (`scheduled_start_date > 0`; any viewer may set it — no admin right
+  per schema); `RequestPurpose::ToggleVideoChatEnabledStartNotification`
+  wired into the group-call error path; the driver sends the flipped
+  flag and the honest value arrives back as `updateGroupCall`, which
+  the reducer already stores (`ParsedGroupCall` /
+  `ActiveGroupCall.enabled_start_notification`).
+- UI: the scheduled-chat card (Phase C2h surface) gains a
+  "🔕 Notify me when it starts" / "🔔 Notifying — tap to turn off"
+  ghost button next to the admin-only "Start now".
+- 1:1 call card: "End-to-end verification:" + the 4 emojis from
+  `callStateReady`, rendered exactly like the group-call card; shown
+  only when the call is Ready and the fingerprint is non-empty.
+- Group video tiles: "⏸ paused" badge alongside the existing
+  speaking/muted/hand-raised/video/sharing badges when
+  `video_info.is_paused`.
+- Screenshot fixtures: `ReadyCallVideo` fixture now injects
+  `callStateReady.emojis`; `ReadyGroupCall` fixture gives Raj a paused
+  camera; new `quill --screenshot-demo ready-group-call-scheduled`
+  demo + `ReadyGroupCallScheduled` variant for the scheduled card
+  (`docs/screenshots/ready-group-call-scheduled.png`).
+- Tests: driver gating tests (scheduled-only, flip on/off,
+  refuses on active call), reducer parse test for
+  `enabled_start_notification`, `ReadyParams.emojis` parse test, JSON
+  shape test. All gates pass: `cargo fmt`, clippy `-D warnings`,
+  `cargo test --no-default-features --locked` (835 + 59), `cargo
+  build --features ui`.
+
+**Key decisions (ponytail):**
+- No separate "notification state" tracking: the toggle sends the
+  flipped tracked flag; TDLib's `updateGroupCall` is the source of
+  truth (same as every other video-chat admin action in C2h).
+- The paused badge reads `video_info.is_paused` only — no frame-age
+  heuristic in the tile (the schema note says TDLib clears the flag
+  when frames arrive; duplicating that client-side is speculative).
+- No 1:1-call info dialog for the emojis: the overlay card shows them
+  inline, matching the group-call rendering one screen over.
+
+**Not verifiable without live Telegram:** the real
+`toggleVideoChatEnabledStartNotification` round-trip (server
+acceptance + `updateGroupCall` echo), the actual push notification at
+start time, real `callStateReady.emojis` from a live call, real
+`is_paused` traffic.
+
+**Out of this slice:** nothing from the three items was deferred —
+`parity:calls-schedule-notify`, `parity:calls-verify-emoji`, and
+`parity:calls-group-video-pause` are all checked.
