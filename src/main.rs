@@ -1,6 +1,33 @@
 #[cfg(feature = "ui")]
 mod ui;
 
+// Phase 1 (kit adoption): embed only the icons the title bar needs, composed
+// with the kit's default set, instead of the full 1800-icon Lucide catalog.
+#[cfg(feature = "ui")]
+gpui_kit::assets::icon_assets!(QuillIcons, [ChevronsUp, X, TextSearch, RotateCcw]);
+
+#[cfg(feature = "ui")]
+#[derive(Clone, Copy, Default)]
+struct QuillAssets;
+
+#[cfg(feature = "ui")]
+impl gpui_kit::gpui::AssetSource for QuillAssets {
+    fn load(&self, path: &str) -> gpui_kit::gpui::Result<Option<std::borrow::Cow<'static, [u8]>>> {
+        // The default bundle errors on unknown paths; fall through to the
+        // scoped icons instead of propagating.
+        match gpui_kit::assets::Assets.load(path) {
+            Ok(Some(data)) => Ok(Some(data)),
+            _ => QuillIcons.load(path),
+        }
+    }
+
+    fn list(&self, path: &str) -> gpui_kit::gpui::Result<Vec<gpui_kit::gpui::SharedString>> {
+        let mut out = gpui_kit::assets::Assets.list(path)?;
+        out.extend(QuillIcons.list(path)?);
+        Ok(out)
+    }
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     if args.iter().skip(1).any(|a| a == "--connect-smoke") {
@@ -34,7 +61,7 @@ fn ui_main(args: &[String]) {
 
     let credentials = quill::credentials::load();
     gpui_kit::application()
-        .with_assets(gpui_kit::assets::Assets)
+        .with_assets(QuillAssets)
         .run(move |cx| {
             gpui_kit::init(cx);
             ui::bind_keys(cx);
@@ -332,7 +359,7 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
         .unwrap_or((1200.0, 740.0));
 
     gpui_kit::application()
-        .with_assets(gpui_kit::assets::Assets)
+        .with_assets(QuillAssets)
         .run(move |cx| {
             gpui_kit::init(cx);
             ui::bind_keys(cx);
