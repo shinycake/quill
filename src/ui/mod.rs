@@ -37547,11 +37547,11 @@ impl QuillApp {
                                             .icon(IconName::FaceSlightlySmiling)
                                             .ghost()
                                             .tooltip(if self.sticker_panel_open() {
-                                                "Close emoji and stickers"
+                                                "Close stickers"
                                             } else {
-                                                "Emoji and stickers"
+                                                "Stickers"
                                             })
-                                            .accessibility_label("Emoji and stickers")
+                                            .accessibility_label("Stickers")
                                             .on_click(cx.listener(|this, _, _, cx| {
                                                 this.toggle_sticker_panel(cx);
                                             })),
