@@ -78,7 +78,8 @@ use crate::telegram::requests::{
     open_chat, open_message_content, open_story, pin_chat_message,
     post_story as post_story_request, process_chat_join_request, read_chat_list, recognize_speech,
     remove_message_reaction, reorder_chat_folders, replace_primary_chat_invite_link,
-    replace_video_chat_rtmp_url, report_chat, report_chat_sponsored_message, resend_messages,
+    replace_video_chat_rtmp_url, report_chat, report_chat_sponsored_message,
+    request_qr_code_authentication, resend_authentication_code, resend_messages,
     revoke_chat_invite_link, revoke_group_call_invite_link, search_call_messages,
     search_chat_messages, search_chats, search_messages, search_public_chats,
     search_recently_found_chats, send_animation, send_call_debug_information, send_call_log,
@@ -9806,6 +9807,37 @@ impl<S: JsonSender> ConnectDriver<S> {
         Ok(extra)
     }
 
+    /// Send `resendAuthenticationCode` (reason: user request) when auth is
+    /// WaitCode. No local cooldown is invented: a too-early resend fails
+    /// server-side (429) and surfaces through `last_auth_error`.
+    pub fn resend_code(&mut self) -> Result<RequestId, ConnectSendError> {
+        if !matches!(self.session.auth, AuthorizationState::WaitCode { .. }) {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        self.session.last_auth_error = None;
+        let extra = self
+            .session
+            .request(RequestPurpose::ResendAuthenticationCode, None);
+        self.sender.send_json(&resend_authentication_code(extra))?;
+        Ok(extra)
+    }
+
+    /// Send `requestQrCodeAuthentication` when auth is WaitPhoneNumber.
+    /// TDLib answers with `updateAuthorizationState` carrying
+    /// `authorizationStateWaitOtherDeviceConfirmation` (with the QR link).
+    pub fn request_qr_login(&mut self) -> Result<RequestId, ConnectSendError> {
+        if !matches!(self.session.auth, AuthorizationState::WaitPhoneNumber) {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        self.session.last_auth_error = None;
+        let extra = self
+            .session
+            .request(RequestPurpose::RequestQrCodeAuthentication, None);
+        self.sender
+            .send_json(&request_qr_code_authentication(extra))?;
+        Ok(extra)
+    }
+
     /// Send `checkAuthenticationPassword` when auth is WaitPassword.
     /// The password is never stored on the session or diagnostics. Not trimmed
     /// (leading/trailing spaces can be significant).
@@ -10925,6 +10957,78 @@ mod tests {
         assert!(pw_json.contains("\"password\":\" unit-pw \""));
         assert!(!sink.rendered().contains("unit-pw"));
         assert!(!sink.rendered().contains("CANARY_HINT"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn driver_resend_code_and_qr_login_only_in_matching_states() {
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = Arc::new(RecordingSender::new());
+        let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+        let mut driver =
+            ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+        let seq = AtomicU64::new(0);
+
+        // Both actions are gated: nothing valid to do in the initial state.
+        assert_eq!(driver.resend_code(), Err(ConnectSendError::InvalidRequest));
+        assert_eq!(
+            driver.request_qr_login(),
+            Err(ConnectSendError::InvalidRequest)
+        );
+
+        let wait_phone = copy_and_parse(
+            r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateWaitPhoneNumber"}}"#,
+            &seq,
+            &dyn_sink,
+        )
+        .unwrap();
+        driver.ingest(wait_phone).unwrap();
+        // Resend needs WaitCode; QR login needs WaitPhoneNumber.
+        assert_eq!(driver.resend_code(), Err(ConnectSendError::InvalidRequest));
+        let qr_extra = driver.request_qr_login().unwrap();
+        let sent = recorder.snapshot();
+        let qr_json = sent.last().unwrap();
+        assert!(qr_json.contains("requestQrCodeAuthentication"));
+        assert!(qr_json.contains("\"other_user_ids\":[]"));
+        assert!(qr_json.contains(&format!("\"@extra\":\"{}\"", qr_extra.0)));
+
+        let wait_code = copy_and_parse(
+            r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateWaitCode","code_info":{"@type":"authenticationCodeInfo","type":{"@type":"authenticationCodeTypeSms","length":5}}}}"#,
+            &seq,
+            &dyn_sink,
+        )
+        .unwrap();
+        driver.ingest(wait_code).unwrap();
+        assert_eq!(
+            driver.request_qr_login(),
+            Err(ConnectSendError::InvalidRequest)
+        );
+        let resend_extra = driver.resend_code().unwrap();
+        let sent = recorder.snapshot();
+        let resend_json = sent.last().unwrap();
+        assert!(resend_json.contains("resendAuthenticationCode"));
+        assert!(resend_json.contains("resendCodeReasonUserRequest"));
+        assert!(resend_json.contains(&format!("\"@extra\":\"{}\"", resend_extra.0)));
+
+        // The QR link from the auth update lands on the session state and is
+        // never written to diagnostics.
+        let wait_qr = copy_and_parse(
+            r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateWaitOtherDeviceConfirmation","link":"tg://login/?token=unit-test-token"}}"#,
+            &seq,
+            &dyn_sink,
+        )
+        .unwrap();
+        driver.ingest(wait_qr).unwrap();
+        assert!(matches!(
+            &driver.session.auth,
+            AuthorizationState::WaitOtherDeviceConfirmation { link }
+            if link == "tg://login/?token=unit-test-token"
+        ));
+        assert!(!sink.rendered().contains("unit-test-token"));
 
         let _ = std::fs::remove_dir_all(&dir);
     }

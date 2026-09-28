@@ -1022,7 +1022,7 @@ pub enum AuthorizationState {
     WaitEmailAddress,
     WaitEmailCode,
     WaitCode { code_length: Option<i32> },
-    WaitOtherDeviceConfirmation,
+    WaitOtherDeviceConfirmation { link: String },
     WaitRegistration,
     WaitPassword { has_recovery_email: bool },
     Ready,
@@ -7122,7 +7122,11 @@ fn parse_auth(value: &Value) -> AuthorizationState {
                 .map(|n| n as i32),
         },
         "authorizationStateWaitOtherDeviceConfirmation" => {
-            AuthorizationState::WaitOtherDeviceConfirmation
+            // The `link` is the QR payload (a tg://login token). It is
+            // carried through to the UI for QR rendering and never logged.
+            AuthorizationState::WaitOtherDeviceConfirmation {
+                link: json_field_str(value, "link"),
+            }
         }
         "authorizationStateWaitRegistration" => AuthorizationState::WaitRegistration,
         "authorizationStateWaitPassword" => AuthorizationState::WaitPassword {

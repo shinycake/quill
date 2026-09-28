@@ -57,7 +57,7 @@ pub fn view_for(state: &AuthorizationState) -> AuthView {
             action: AuthAction::EnterPassword,
             blocking: true,
         },
-        AuthorizationState::WaitOtherDeviceConfirmation => AuthView {
+        AuthorizationState::WaitOtherDeviceConfirmation { .. } => AuthView {
             title: "Confirm on another device",
             body: "Scan the QR code in a logged-in Telegram client. The QR payload is never logged."
                 .into(),
@@ -154,5 +154,15 @@ mod tests {
         assert!(!credentials_ready(Some(12345), Some("YOUR_API_HASH")));
         assert!(!credentials_ready(None, Some("abc")));
         assert!(credentials_ready(Some(1), Some("not-a-sample")));
+    }
+
+    #[test]
+    fn qr_state_maps_to_wait_other_device_view() {
+        let view = view_for(&AuthorizationState::WaitOtherDeviceConfirmation {
+            link: "tg://login/?token=unit-test".into(),
+        });
+        assert_eq!(view.action, AuthAction::WaitOtherDevice);
+        assert!(view.blocking);
+        assert!(view.title.contains("Confirm"));
     }
 }

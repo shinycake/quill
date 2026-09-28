@@ -187,6 +187,8 @@ pub enum ConnectUiStatus {
     DemoWaitCode,
     /// Synthetic WaitPassword surface for screenshot proof (no live TDLib).
     DemoWaitPassword,
+    /// Slice A1: synthetic QR-login surface for screenshot proof (no live TDLib).
+    DemoWaitQr,
     /// Injected Ready + main chat list (no live Telegram).
     DemoReadyChats,
     Live,
@@ -1146,6 +1148,9 @@ pub struct QuillApp {
     /// when the newest frame changes.
     call_remote_image: Option<(u64, Arc<RenderImage>)>,
     call_local_image: Option<(u64, Arc<RenderImage>)>,
+    /// Slice A1: decoded QR-login bitmap cached by link, rebuilt only when
+    /// the link changes. The link itself is never logged.
+    qr_login_cache: Option<(String, Arc<RenderImage>)>,
     /// Phase C2g: group-call video tiles cached by
     /// `(group_call_id, user_id, is_screen)` → `(frame seq, image)`,
     /// rebuilt only when that slot's frame sequence changes.
@@ -1512,6 +1517,9 @@ pub enum ScreenshotDemo {
     WaitPhone,
     WaitCode,
     WaitPassword,
+    /// Slice A1: injected `authorizationStateWaitOtherDeviceConfirmation`
+    /// with a fake link, rendered as a real QR (no live Telegram).
+    WaitQr,
     ReadyChats,
     ReadyChatsComposer,
     ReadyUnread,
@@ -2314,6 +2322,16 @@ impl QuillApp {
                 "screenshot demo — WaitPassword (injected auth, no live Telegram)".into(),
                 AuthorizationState::WaitPassword {
                     has_recovery_email: true,
+                },
+            ),
+            Some(ScreenshotDemo::WaitQr) => (
+                ConnectUiStatus::DemoWaitQr,
+                None,
+                "screenshot demo — WaitOtherDeviceConfirmation (injected auth, no live Telegram)"
+                    .into(),
+                // Fake link for the demo QR; never touches the network.
+                AuthorizationState::WaitOtherDeviceConfirmation {
+                    link: "tg://login/?token=demo_qr_login_token_not_for_network".into(),
                 },
             ),
             Some(ScreenshotDemo::ReadyChats | ScreenshotDemo::ReadyChatsComposer) => {
@@ -3166,6 +3184,7 @@ impl QuillApp {
                     ScreenshotDemo::WaitPhone
                         | ScreenshotDemo::WaitCode
                         | ScreenshotDemo::WaitPassword
+                        | ScreenshotDemo::WaitQr
                 )
             ),
             demo_session,
@@ -3176,6 +3195,7 @@ impl QuillApp {
             demo_selected_camera: None,
             call_remote_image: None,
             call_local_image: None,
+            qr_login_cache: None,
             group_video_images: HashMap::new(),
             demo_group_frames: HashMap::new(),
             demo_seq: AtomicU64::new(0),
@@ -7231,6 +7251,81 @@ impl QuillApp {
             }
         }
         cx.notify();
+    }
+
+    /// Slice A1: resend the login code. TDLib enforces the server-side
+    /// cooldown (429 surfaces via `last_auth_error`); no local countdown.
+    fn resend_code(&mut self, cx: &mut Context<Self>) {
+        let Some(live) = self.live.as_mut() else {
+            return;
+        };
+        if !matches!(
+            live.driver.session.auth,
+            AuthorizationState::WaitCode { .. }
+        ) {
+            return;
+        }
+        match live.driver.resend_code() {
+            Ok(_) => {
+                self.status_note = "code resent — waiting for Telegram".into();
+            }
+            Err(_) => {
+                self.status_note = "could not resend code".into();
+            }
+        }
+        cx.notify();
+    }
+
+    /// Slice A1: start QR-code login. TDLib moves auth to
+    /// `WaitOtherDeviceConfirmation` carrying the QR link.
+    fn request_qr_login(&mut self, cx: &mut Context<Self>) {
+        let Some(live) = self.live.as_mut() else {
+            return;
+        };
+        if !matches!(
+            live.driver.session.auth,
+            AuthorizationState::WaitPhoneNumber
+        ) {
+            return;
+        }
+        match live.driver.request_qr_login() {
+            Ok(_) => {
+                self.status_note = "QR login requested — scan with a logged-in Telegram app".into();
+            }
+            Err(_) => {
+                self.status_note = "could not start QR login".into();
+            }
+        }
+        cx.notify();
+    }
+
+    /// Slice A1: render the QR-login link as a bitmap, cached by link and
+    /// rebuilt only when the link changes. `None` for an empty or
+    /// unencodable link (the caller shows honest fallback text). The link
+    /// is rendered, never logged.
+    fn qr_login_image(&mut self, link: &str) -> Option<Arc<RenderImage>> {
+        if link.is_empty() {
+            return None;
+        }
+        if let Some((cached_link, image)) = &self.qr_login_cache {
+            if cached_link == link {
+                return Some(image.clone());
+            }
+        }
+        let code = qrcode::QrCode::new(link.as_bytes()).ok()?;
+        // Grayscale is unchanged by the R<->B swap `video_render_image`
+        // applies to color frames, so no channel fixup is needed.
+        let luma = code
+            .render::<image::Luma<u8>>()
+            .quiet_zone(true)
+            .module_dimensions(6, 6)
+            .build();
+        let rgba = image::DynamicImage::ImageLuma8(luma).into_rgba8();
+        let rendered = Arc::new(RenderImage::new(SmallVec::from_buf([image::Frame::new(
+            rgba,
+        )])));
+        self.qr_login_cache = Some((link.to_string(), rendered.clone()));
+        Some(rendered)
     }
 
     fn search_is_open(&self) -> bool {
@@ -28680,7 +28775,7 @@ fn live_status_for(auth: &AuthorizationState) -> String {
             "enter your two-step verification password".into()
         }
         AuthorizationState::Ready => "signed in — cloud + secret chats".into(),
-        AuthorizationState::WaitOtherDeviceConfirmation => {
+        AuthorizationState::WaitOtherDeviceConfirmation { .. } => {
             "confirm on another device (QR payload is not logged)".into()
         }
         AuthorizationState::LoggingOut => "signing out".into(),
@@ -28777,6 +28872,7 @@ impl Render for QuillApp {
         let show_phone = inputs_live && matches!(auth.action, AuthAction::EnterPhone);
         let show_code = inputs_live && matches!(auth.action, AuthAction::EnterCode);
         let show_password = inputs_live && matches!(auth.action, AuthAction::EnterPassword);
+        let show_qr = inputs_live && matches!(auth.action, AuthAction::WaitOtherDevice);
         div()
             .flex()
             .flex_col()
@@ -28887,7 +28983,7 @@ impl Render for QuillApp {
                     .flex()
                     .flex_1()
                     .min_h_0()
-                    .child(self.sidebar(&auth, show_phone, show_code, show_password, cx))
+                    .child(self.sidebar(&auth, show_phone, show_code, show_password, show_qr, cx))
                     .child(self.conversation(cx))
                     // Phase 6: user / group info panel beside the conversation.
                     .when_some(self.info_panel(cx), |this, panel| this.child(panel))
@@ -30553,11 +30649,12 @@ impl QuillApp {
     }
 
     fn sidebar(
-        &self,
+        &mut self,
         auth: &AuthView,
         show_phone: bool,
         show_code: bool,
         show_password: bool,
+        show_qr: bool,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let mode = self.pane_mode();
@@ -31044,17 +31141,39 @@ impl QuillApp {
                             this.submit_phone(window, cx);
                         })),
                 )
+                .child(
+                    Button::new("qr-login")
+                        .label("Sign in with QR code")
+                        .ghost()
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.request_qr_login(cx);
+                        })),
+                )
         })
         .when(show_code, |this| {
             this.child(div().mt_2().font_semibold().text_sm().child("Code"))
                 .child(Textarea::new(&self.code_input).h(px(40.)))
                 .child(
-                    Button::new("submit-code")
-                        .label("Submit code")
-                        .ghost()
-                        .on_click(cx.listener(|this, _, window, cx| {
-                            this.submit_code(window, cx);
-                        })),
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap_2()
+                        .child(
+                            Button::new("submit-code")
+                                .label("Submit code")
+                                .ghost()
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.submit_code(window, cx);
+                                })),
+                        )
+                        .child(
+                            Button::new("resend-code")
+                                .label("Resend code")
+                                .ghost()
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.resend_code(cx);
+                                })),
+                        ),
                 )
         })
         .when(show_password, |this| {
@@ -31080,6 +31199,37 @@ impl QuillApp {
                         this.submit_password(window, cx);
                     })),
             )
+        })
+        .when(show_qr, |this| {
+            // Slice A1: the QR payload rides on the auth state (envelope.rs
+            // carries `link` through); rendered here, never logged.
+            let link = match self.current_auth() {
+                AuthorizationState::WaitOtherDeviceConfirmation { link } => link,
+                _ => String::new(),
+            };
+            let qr: AnyElement = match self.qr_login_image(&link) {
+                Some(image) => img(ImageSource::from(image))
+                    .w(px(200.))
+                    .h(px(200.))
+                    .object_fit(ObjectFit::Contain)
+                    .into_any_element(),
+                None => div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("Waiting for the QR payload from Telegram…")
+                    .into_any_element(),
+            };
+            this.child(div().mt_2().font_semibold().text_sm().child("QR code"))
+                .child(div().mt_1().child(qr))
+                .child(
+                    div()
+                        .mt_1()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(
+                            "Scan with a logged-in Telegram app. The QR payload is never logged.",
+                        ),
+                )
         })
     }
 }
@@ -38282,6 +38432,7 @@ fn auth_action_note(auth: &AuthView, connect_status: &ConnectUiStatus) -> impl I
         ConnectUiStatus::DemoWaitPhone => "demo wait-phone",
         ConnectUiStatus::DemoWaitCode => "demo wait-code",
         ConnectUiStatus::DemoWaitPassword => "demo wait-password",
+        ConnectUiStatus::DemoWaitQr => "demo wait-qr",
         ConnectUiStatus::DemoReadyChats => "demo ready-chats",
         ConnectUiStatus::Live => "live TDLib",
     };
@@ -38312,6 +38463,9 @@ fn connect_status_label(status: &ConnectUiStatus) -> String {
         ConnectUiStatus::DemoWaitCode => "credentials loaded · WaitCode (screenshot demo)".into(),
         ConnectUiStatus::DemoWaitPassword => {
             "credentials loaded · WaitPassword (screenshot demo)".into()
+        }
+        ConnectUiStatus::DemoWaitQr => {
+            "credentials loaded · WaitOtherDeviceConfirmation (screenshot demo)".into()
         }
         ConnectUiStatus::DemoReadyChats => {
             "injected Ready · chat list + composer (screenshot demo)".into()

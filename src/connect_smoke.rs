@@ -67,7 +67,7 @@ pub fn classify_smoke_auth(auth: &AuthorizationState) -> Option<SmokeOutcome> {
         AuthorizationState::WaitCode { .. } => Some(SmokeOutcome::OkWaitCode),
         AuthorizationState::WaitPassword { .. } => Some(SmokeOutcome::OkWaitPassword),
         AuthorizationState::Ready => Some(SmokeOutcome::OkReady),
-        AuthorizationState::WaitOtherDeviceConfirmation => Some(SmokeOutcome::OkOtherDevice),
+        AuthorizationState::WaitOtherDeviceConfirmation { .. } => Some(SmokeOutcome::OkOtherDevice),
         AuthorizationState::WaitPremiumPurchase
         | AuthorizationState::WaitEmailAddress
         | AuthorizationState::WaitEmailCode
