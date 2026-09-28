@@ -28,7 +28,8 @@ use crate::state::{
     AdminListFetch, AdminRightsFetch, CHAT_EVENT_LOG_PAGE_SIZE, ChatEventLogFetch,
     ChatSearchJumpNeed, ChatStatisticsFetch, ComposerLinkPreview, ForwardFlight, InfoPanelTarget,
     InstantViewPage, InviteLinkFetch, JoinRequestFetch, LoginUrlRequest, MemberListFilter,
-    MemberStatusChange, PasswordOp, PollVotersFetch, RequestPurpose, RequestRollback, SearchStatus,
+    MemberStatusChange, PasswordOp, PaymentRequest, PollVotersFetch, RequestPurpose, RequestRollback,
+    SearchStatus,
     Session, SharedMediaTab, ShutdownPhase, SupergroupMembersFetch, WelcomeMessagesFetch,
 };
 use crate::story_composer::{StoryMediaKind, StoryPrivacy};
@@ -36,9 +37,9 @@ use crate::telegram::client::{LiveTdJson, OwnedEnvelope, ReceiveBridge};
 use crate::telegram::envelope::{
     AuthorizationState, CallState, ChatAdminRights, ChatDraft, ChatFolderSpec, ChatKind,
     ChatNotificationSettings, ChatPermissions, EnvelopePayload, GroupCallVideoInfo, MUTE_FOREVER,
-    MessageContent, MessageSender, NotificationSettingsScope, ParsedGroupCallParticipant,
-    ReadyParams, RichMessageContent, ScopeNotificationSettings, StoryContentView,
-    UsernameCheckResult,
+    MessageContent, MessageSender, NotificationSettingsScope, OrderInfoData,
+    ParsedGroupCallParticipant, ReadyParams, RichMessageContent, ScopeNotificationSettings,
+    StoryContentView, UsernameCheckResult,
 };
 use crate::telegram::ffi::{LibraryOrigin, TdJsonError, resolve_tdjson_path};
 use crate::telegram::requests::{
@@ -78,9 +79,9 @@ use crate::telegram::requests::{
     get_connected_websites, get_contacts, get_forum_topics, get_full_rich_message, get_group_call,
     get_installed_sticker_sets, get_link_preview, get_login_url, get_login_url_info, get_me,
     get_message_link, get_message_properties, get_message_thread_history, get_password_state,
-    get_poll_voters, get_saved_animations, get_saved_notification_sounds,
-    get_scope_notification_settings, get_secret_chat, get_sticker_set, get_storage_statistics,
-    get_story, get_story_available_reactions,
+    get_payment_form, get_payment_receipt, get_poll_voters, get_saved_animations,
+    get_saved_notification_sounds, get_scope_notification_settings, get_secret_chat,
+    get_sticker_set, get_storage_statistics, get_story, get_story_available_reactions,
     get_story_interactions as get_story_interactions_request, get_supergroup,
     get_supergroup_full_info, get_supergroup_members, get_user_full_info,
     get_user_privacy_setting_rules, get_video_chat_invite_link, get_video_chat_rtmp_url,
@@ -98,7 +99,8 @@ use crate::telegram::requests::{
     search_messages_filter_json, search_public_chats, search_recently_found_chats, send_animation,
     send_bot_start_message as send_bot_start_message_request, send_call_debug_information,
     send_call_log, send_call_rating_detail, send_call_signaling_data, send_chat_action,
-    send_chat_action_kind, send_document, send_group_call_message, send_message_album, send_photo,
+    send_chat_action_kind, send_document, send_group_call_message, send_message_album,
+    send_payment_form as send_payment_form_request, send_photo,
     send_poll, send_rich_message, send_sticker, send_text, send_text_story_reply, send_video,
     send_video_note, send_voice_note, set_archive_chat_list_settings,
     set_authentication_phone_number, set_bio, set_chat_draft_message, set_chat_member_status,
@@ -122,7 +124,8 @@ use crate::telegram::requests::{
     toggle_supergroup_is_broadcast_group, toggle_supergroup_join_by_request,
     toggle_supergroup_sign_messages, toggle_username_is_active,
     toggle_video_chat_enabled_start_notification, toggle_video_chat_mute_new_participants,
-    unpin_all_chat_messages, unpin_chat_message, view_messages, view_sponsored_chat,
+    unpin_all_chat_messages, unpin_chat_message, validate_order_info as validate_order_info_request,
+    view_messages, view_sponsored_chat,
 };
 use crate::voice::VoiceDraft;
 use std::collections::{HashMap, VecDeque};
@@ -9275,6 +9278,145 @@ impl<S: JsonSender> ConnectDriver<S> {
             .request(RequestPurpose::ReorderActiveUsernames, None);
         let json = reorder_active_usernames(extra, usernames);
         self.send_json_request(extra, &json)
+    }
+
+    /// Slice P1: fetch the `paymentForm` for a Buy button press
+    /// (`getPaymentForm`, schema 1.8.67, line 15262). The dialog opens when
+    /// the `paymentForm` answer is applied.
+    pub fn send_payment_form_request(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+    ) -> Result<RequestId, ConnectSendError> {
+        let extra =
+            self.callback_query_extra(chat_id, message_id, RequestPurpose::GetPaymentForm)?;
+        self.session.payment_request = Some(PaymentRequest {
+            chat_id,
+            message_id,
+        });
+        let json = get_payment_form(extra, chat_id, message_id);
+        self.send_json_request(extra, &json)
+    }
+
+    /// Slice P1: `validateOrderInfo` (schema 1.8.67, line 15268) — validate
+    /// the order form and fetch the shipping options.
+    pub fn validate_payment_order_info(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        order: &OrderInfoData,
+        allow_save: bool,
+    ) -> Result<RequestId, ConnectSendError> {
+        let extra =
+            self.callback_query_extra(chat_id, message_id, RequestPurpose::ValidateOrderInfo)?;
+        self.session.payment_request = Some(PaymentRequest {
+            chat_id,
+            message_id,
+        });
+        let json = validate_order_info_request(extra, chat_id, message_id, order, allow_save);
+        self.send_json_request(extra, &json)
+    }
+
+    /// Slice P1: `sendPaymentForm` (schema 1.8.67, line 15277) — submit the
+    /// validated order + credentials from the checkout dialog.
+    #[allow(clippy::too_many_arguments)]
+    pub fn submit_payment_form(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        payment_form_id: i64,
+        order_info_id: &str,
+        shipping_option_id: &str,
+        credentials: serde_json::Value,
+        tip_amount: i64,
+    ) -> Result<RequestId, ConnectSendError> {
+        let extra =
+            self.callback_query_extra(chat_id, message_id, RequestPurpose::SendPaymentForm)?;
+        self.session.payment_request = Some(PaymentRequest {
+            chat_id,
+            message_id,
+        });
+        let json = send_payment_form_request(
+            extra,
+            chat_id,
+            message_id,
+            payment_form_id,
+            order_info_id,
+            shipping_option_id,
+            credentials,
+            tip_amount,
+        );
+        self.send_json_request(extra, &json)
+    }
+
+    /// Slice P1: `getPaymentReceipt` (schema 1.8.67, line 15280) — fetch
+    /// the receipt for a paid invoice (its `receipt_message_id`).
+    pub fn fetch_payment_receipt(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::GetPaymentReceipt, Some(chat_id));
+        self.session.payment_request = Some(PaymentRequest {
+            chat_id,
+            message_id,
+        });
+        let json = get_payment_receipt(extra, chat_id, message_id);
+        self.send_json_request(extra, &json)
+    }
+
+    /// Shared gate for callback-query sends: real (non-pending) messages in
+    /// a supported chat. Returns the reserved `@extra`.
+    fn callback_query_extra(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        purpose: RequestPurpose,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let supported = self
+            .session
+            .chats
+            .get(&chat_id.0)
+            .is_some_and(|chat| chat.supported());
+        if !supported {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let Some(message) = self
+            .session
+            .histories
+            .get(&chat_id.0)
+            .and_then(|history| history.messages.get(&message_id.0))
+        else {
+            return Err(ConnectSendError::InvalidRequest);
+        };
+        if message.pending || message.id.0 <= 0 {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        Ok(self.session.request(purpose, Some(chat_id)))
+    }
+
+    /// Send a prebuilt request JSON; roll the reserved `@extra` back when
+    /// the sender refuses it.
+    fn send_json_request(
+        &mut self,
+        extra: RequestId,
+        json: &str,
+    ) -> Result<RequestId, ConnectSendError> {
+        match self.sender.send_json(json) {
+            Ok(()) => Ok(extra),
+            Err(err) => {
+                self.session.requests.take(extra);
+                Err(err)
+            }
+        }
     }
 
     /// A5: `toggleUsernameIsActive` (schema 1.8.67, line 14835).
