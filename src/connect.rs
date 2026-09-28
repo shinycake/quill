@@ -697,10 +697,17 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// Phase C2g: whether the engine enumerates a screen-capture
     /// source. The presentation handshake needs one; without it the UI
     /// offers no screen-share control ("No screen source available").
-    pub fn group_call_screen_source_available(&self) -> bool {
+    /// Phase C2i: shared by the 1:1 screen-share toggle (same native
+    /// `MediaDeviceKind::Screen` gate, no presentation handshake).
+    pub fn call_screen_source_available(&self) -> bool {
         self.call_devices_cache
             .iter()
             .any(|device| device.kind == MediaDeviceKind::Screen)
+    }
+
+    /// Phase C2g: group-call alias of `call_screen_source_available`.
+    pub fn group_call_screen_source_available(&self) -> bool {
+        self.call_screen_source_available()
     }
 
     /// Phase C2g: whether the native call engine is installed and
@@ -825,6 +832,8 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// called first and its error propagates *without* flipping the
     /// session flag (mirrors `set_call_muted`); without a connected
     /// transport the intent is only stored (it applies on connect).
+    /// Phase C2i: enabling the camera clears the screen-share intent —
+    /// ntgcalls forbids camera+screen in Capture mode.
     pub fn set_call_camera(&mut self, call_id: i32, enabled: bool) -> Result<(), EngineError> {
         let Some(call) = self.session.active_call.as_mut() else {
             return Err(EngineError::NoActiveCall);
@@ -839,6 +848,48 @@ impl<S: JsonSender> ConnectDriver<S> {
             engine.set_camera_enabled(call.id, enabled, self.selected_camera.as_deref())?;
         }
         call.camera_on = enabled;
+        if enabled {
+            call.screen_sharing = false;
+        }
+        Ok(())
+    }
+
+    /// Phase C2i: 1:1 screen-share send toggle through the native
+    /// engine. Same contract as `set_call_camera`: the engine is
+    /// called first and its error propagates *without* flipping the
+    /// session flag; without a connected transport the intent is only
+    /// stored (it applies on connect, mirroring the pre-transport
+    /// mute in `pump_call_engine`). Enabling clears the camera intent
+    /// — ntgcalls forbids camera+screen in Capture mode. Rejected
+    /// without an enumerated screen source
+    /// (`call_screen_source_available`).
+    pub fn set_call_screen_share(
+        &mut self,
+        call_id: i32,
+        enabled: bool,
+    ) -> Result<(), EngineError> {
+        // Gate first: it borrows `&self`, which can't overlap the
+        // mutable call borrow below.
+        let screen_available = self.call_screen_source_available();
+        let Some(call) = self.session.active_call.as_mut() else {
+            return Err(EngineError::NoActiveCall);
+        };
+        if call.id != call_id {
+            return Err(EngineError::NoSuchCall(call_id));
+        }
+        if !screen_available {
+            return Err(EngineError::NoScreenSource);
+        }
+        if call.transport.is_some()
+            && let Some(engine) = self.call_engine.as_deref_mut()
+            && engine.is_available()
+        {
+            engine.set_screen_share_enabled(call.id, enabled)?;
+        }
+        call.screen_sharing = enabled;
+        if enabled {
+            call.camera_on = false;
+        }
         Ok(())
     }
 
@@ -1372,6 +1423,21 @@ impl<S: JsonSender> ConnectDriver<S> {
                     // once it does; failure here is non-fatal (the unmute
                     // path can retry).
                     let _ = engine.set_muted(call_id, true);
+                }
+                // Phase C2i: a screen-share toggle made before the
+                // transport existed applies once it does (mirrors the
+                // pre-transport mute above; non-fatal so the UI toggle
+                // can retry).
+                let pre_sharing = self
+                    .session
+                    .active_call
+                    .as_ref()
+                    .is_some_and(|call| call.screen_sharing);
+                if result.is_ok()
+                    && pre_sharing
+                    && let Some(engine) = self.call_engine.as_deref_mut()
+                {
+                    let _ = engine.set_screen_share_enabled(call_id, true);
                 }
                 if let Some(call) = self.session.active_call.as_mut() {
                     match result {
@@ -19875,6 +19941,65 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// Phase C2i: the UI screen-share toggle reaches the engine with
+    /// the call id and the new state — but only once a transport
+    /// exists; before that the intent is stored cleanly so it can
+    /// apply on connect. Without an enumerated screen source the
+    /// toggle is rejected (`NoScreenSource`) and the flag stays put.
+    #[test]
+    fn set_call_screen_share_gates_engine_on_transport() {
+        let (dir, mut driver, handle, sink, seq) = ready_call_driver();
+        handle.set_devices(vec![MediaDevice {
+            id: "screen-0".into(),
+            name: "Test Screen".into(),
+            kind: MediaDeviceKind::Screen,
+        }]);
+        driver.refresh_call_devices();
+        // No transport yet: intent stored, engine untouched.
+        assert!(driver.set_call_screen_share(77, true).is_ok());
+        assert!(handle.p2p_screen_share_changes().is_empty());
+        assert!(driver.session.active_call.as_ref().unwrap().screen_sharing);
+        // Phase C2i: screen share clears the camera intent (ntgcalls
+        // forbids camera+screen in Capture mode).
+        assert!(!driver.session.active_call.as_ref().unwrap().camera_on);
+        // Transport connected: the pre-transport screen-share intent
+        // applies on connect (pump_call_engine forwards it), then the
+        // toggle drives the engine directly.
+        ingest_call_json(&mut driver, &seq, &sink, READY_CALL_JSON);
+        assert!(driver.set_call_screen_share(77, false).is_ok());
+        assert_eq!(
+            handle.p2p_screen_share_changes(),
+            vec![(77, true), (77, false)]
+        );
+        assert!(!driver.session.active_call.as_ref().unwrap().screen_sharing);
+        // Phase C2i: enabling the camera clears the screen-share
+        // intent symmetrically.
+        assert!(driver.set_call_camera(77, true).is_ok());
+        assert!(driver.session.active_call.as_ref().unwrap().camera_on);
+        assert!(!driver.session.active_call.as_ref().unwrap().screen_sharing);
+        assert_eq!(
+            driver.set_call_screen_share(999, true),
+            Err(crate::calls::engine::EngineError::NoSuchCall(999))
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Phase C2i: no enumerated screen source → the toggle is
+    /// rejected and the tracked flag is untouched.
+    #[test]
+    fn set_call_screen_share_rejected_without_screen_source() {
+        let (dir, mut driver, handle, sink, seq) = ready_call_driver();
+        driver.refresh_call_devices();
+        ingest_call_json(&mut driver, &seq, &sink, READY_CALL_JSON);
+        assert_eq!(
+            driver.set_call_screen_share(77, true),
+            Err(crate::calls::engine::EngineError::NoScreenSource)
+        );
+        assert!(!driver.session.active_call.as_ref().unwrap().screen_sharing);
+        assert!(handle.p2p_screen_share_changes().is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// Phase C2e: picking a camera before the transport exists stores
     /// the selection cleanly without error and without an engine
     /// forward.
@@ -20179,6 +20304,7 @@ mod tests {
             signaling_dropped: 0,
             muted: false,
             camera_on: false,
+            screen_sharing: false,
             remote_video: RemoteVideoState::Inactive,
         });
         assert_eq!(

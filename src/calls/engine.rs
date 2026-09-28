@@ -204,6 +204,10 @@ pub enum EngineError {
     NullInstance,
     #[error("there is no active call")]
     NoActiveCall,
+    /// Phase C2i: the engine enumerated no screen-capture source, so
+    /// screen-share send cannot start.
+    #[error("no screen-capture source available")]
+    NoScreenSource,
 }
 
 /// Phase C2b: 1:1 engine lifecycle and bidirectional signaling.
@@ -257,6 +261,16 @@ pub trait CallEngine {
         enabled: bool,
         camera: Option<&str>,
     ) -> Result<(), EngineError>;
+
+    /// Phase C2i: app -> engine; toggle 1:1 screen-share send by
+    /// re-issuing capture sources with the desktop description
+    /// (`NTG_MEDIA_SOURCE_DESKTOP`, NULL input = default display).
+    /// Enabling clears the camera intent — ntgcalls rejects
+    /// camera+screen in Capture mode (`stream_manager.cpp:68`,
+    /// v3.0.0), so screen share replaces the camera. Disabling leaves
+    /// the camera off; the user re-enables it explicitly. A failed
+    /// issuance restores the retained config.
+    fn set_screen_share_enabled(&mut self, call_id: i32, enabled: bool) -> Result<(), EngineError>;
 
     /// Phase C2g: app -> engine; create the ntgcalls group context keyed
     /// by TDLib chat id and return the WebRTC offer that `joinVideoChat`
@@ -373,6 +387,8 @@ struct MockInner {
     video_hook: Option<VideoFrameCallback>,
     remote_video_hook: Option<RemoteVideoStateCallback>,
     camera_changes: Vec<(i32, bool, Option<String>)>,
+    /// Phase C2i: 1:1 screen-share toggle recording for driver tests.
+    p2p_screen_share_changes: Vec<(i32, bool)>,
     frame_seq: u64,
     connects: Vec<(i32, ConnectParams)>,
     device_selections: Vec<(i32, Option<String>, Option<String>)>,
@@ -549,6 +565,15 @@ impl MockEngine {
             .lock()
             .expect("mock call engine")
             .screen_share_stops
+            .clone()
+    }
+
+    /// Phase C2i: recorded 1:1 screen-share toggles.
+    pub fn p2p_screen_share_changes(&self) -> Vec<(i32, bool)> {
+        self.inner
+            .lock()
+            .expect("mock call engine")
+            .p2p_screen_share_changes
             .clone()
     }
 
@@ -771,6 +796,18 @@ impl CallEngine for MockEngine {
         Ok(())
     }
 
+    fn set_screen_share_enabled(&mut self, call_id: i32, enabled: bool) -> Result<(), EngineError> {
+        let mut inner = self.inner.lock().expect("mock call engine");
+        if !inner.available {
+            return Err(EngineError::Unavailable);
+        }
+        if !inner.calls.contains_key(&call_id) {
+            return Err(EngineError::NoSuchCall(call_id));
+        }
+        inner.p2p_screen_share_changes.push((call_id, enabled));
+        Ok(())
+    }
+
     fn create_group_call(
         &mut self,
         group_call_id: i32,
@@ -934,6 +971,11 @@ struct CallMediaConfig {
     speaker: Option<String>,
     camera_enabled: bool,
     camera: Option<String>,
+    /// Phase C2i: screen-share send intent for the 1:1 call. When on,
+    /// `set_media_sources` issues the desktop capture instead of the
+    /// camera — ntgcalls rejects mixing both in Capture mode
+    /// (`stream_manager.cpp:68`, v3.0.0).
+    screen_share_on: bool,
 }
 
 /// Phase C2g: retained per-group-call media state for the ntgcalls
@@ -1176,6 +1218,22 @@ impl NtgcallsEngine {
         Ok(())
     }
 
+    /// Phase C2i: desktop-capture video description for screen-share
+    /// send (1:1 and group presentation alike). NULL input selects the
+    /// default display; desktop capture itself is ntgcalls' job
+    /// (libwebrtc capturer) — Quill carries no Linux capture code.
+    fn screen_video_description() -> ntg_video_description {
+        ntg_video_description {
+            media_source: NTG_MEDIA_SOURCE_DESKTOP,
+            width: 1920,
+            height: 1080,
+            fps: 15,
+            // NULL input selects the default display.
+            input: null_mut(),
+            keep_open: false,
+        }
+    }
+
     /// Phase C2g: attach desktop capture to the presentation transport
     /// after `ntg_connect(..., is_presentation=true)`. The presentation
     /// carries only the screen track; the main group transport is
@@ -1187,15 +1245,7 @@ impl NtgcallsEngine {
             .cloned()
             .ok_or(EngineError::NoSuchCall(group_call_id))?;
         let instance = self.ensure_instance()?;
-        let mut screen_video = ntg_video_description {
-            media_source: NTG_MEDIA_SOURCE_DESKTOP,
-            width: 1920,
-            height: 1080,
-            fps: 15,
-            // NULL input selects the default display.
-            input: null_mut(),
-            keep_open: false,
-        };
+        let mut screen_video = Self::screen_video_description();
         let capture = ntg_media_description {
             microphone: null_mut(),
             speaker: null_mut(),
@@ -1246,15 +1296,23 @@ impl NtgcallsEngine {
                 .map_or(null_mut(), |value| value.as_ptr().cast_mut()),
             keep_open: false,
         };
+        let mut screen_video = Self::screen_video_description();
         let capture = ntg_media_description {
             microphone: &mut mic_audio,
             speaker: null_mut(),
-            camera: if config.camera_enabled {
+            // Phase C2i: screen share replaces the camera — ntgcalls
+            // rejects camera+screen in Capture mode
+            // (`stream_manager.cpp:68`, v3.0.0).
+            camera: if config.camera_enabled && !config.screen_share_on {
                 &mut camera_video
             } else {
                 null_mut()
             },
-            screen: null_mut(),
+            screen: if config.screen_share_on {
+                &mut screen_video
+            } else {
+                null_mut()
+            },
         };
         // SAFETY: `instance` is live and the descriptions are stack-local for
         // the duration of this synchronous C call.
@@ -1476,6 +1534,7 @@ impl CallEngine for NtgcallsEngine {
                 speaker: params.speaker_input.clone(),
                 camera_enabled: params.video_enabled,
                 camera: params.camera_input.clone(),
+                screen_share_on: false,
             },
         );
         let result = self.set_media_sources(call_id);
@@ -1553,8 +1612,15 @@ impl CallEngine for NtgcallsEngine {
             .ok_or(EngineError::NoSuchCall(call_id))?;
         let previous_enabled = config.camera_enabled;
         let previous_camera = config.camera.clone();
+        let previous_screen_share = config.screen_share_on;
         config.camera_enabled = enabled;
         config.camera = camera.map(str::to_owned);
+        // Phase C2i: the camera replaces screen share — ntgcalls
+        // rejects camera+screen in Capture mode
+        // (`stream_manager.cpp:68`, v3.0.0).
+        if enabled {
+            config.screen_share_on = false;
+        }
         if let Err(err) = self.set_media_sources(call_id) {
             // Phase C2e: restore the retained config so it can't desync
             // from ntgcalls when issuance fails.
@@ -1564,6 +1630,33 @@ impl CallEngine for NtgcallsEngine {
                 .ok_or(EngineError::NoSuchCall(call_id))?;
             config.camera_enabled = previous_enabled;
             config.camera = previous_camera;
+            config.screen_share_on = previous_screen_share;
+            return Err(err);
+        }
+        Ok(())
+    }
+
+    fn set_screen_share_enabled(&mut self, call_id: i32, enabled: bool) -> Result<(), EngineError> {
+        let config = self
+            .call_media
+            .get_mut(&call_id)
+            .ok_or(EngineError::NoSuchCall(call_id))?;
+        let previous_enabled = config.screen_share_on;
+        let previous_camera_enabled = config.camera_enabled;
+        config.screen_share_on = enabled;
+        if enabled {
+            config.camera_enabled = false;
+        }
+        if let Err(err) = self.set_media_sources(call_id) {
+            // Restore the retained config so it can't desync from
+            // ntgcalls when issuance fails (mirrors
+            // `set_camera_enabled`).
+            let config = self
+                .call_media
+                .get_mut(&call_id)
+                .ok_or(EngineError::NoSuchCall(call_id))?;
+            config.screen_share_on = previous_enabled;
+            config.camera_enabled = previous_camera_enabled;
             return Err(err);
         }
         Ok(())
@@ -2781,6 +2874,30 @@ mod tests {
             rgba,
             vec![16, 16, 16, 255, 235, 235, 235, 255],
             "black pixel (right column) lands on top"
+        );
+    }
+
+    /// Phase C2i: validates the 1:1 screen-share toggle contract the
+    /// UI will drive (mirrors `mock_camera_toggle_state_machine`).
+    #[test]
+    fn mock_p2p_screen_share_toggle_state_machine() {
+        let mut engine = MockEngine::new();
+        engine.start_call(77, 41, false).unwrap();
+        engine.set_screen_share_enabled(77, true).unwrap();
+        engine.set_screen_share_enabled(77, false).unwrap();
+        assert_eq!(
+            engine.p2p_screen_share_changes(),
+            vec![(77, true), (77, false)]
+        );
+        assert_eq!(
+            engine.set_screen_share_enabled(99, true),
+            Err(EngineError::NoSuchCall(99))
+        );
+
+        let mut unavailable = MockEngine::unavailable();
+        assert_eq!(
+            unavailable.set_screen_share_enabled(77, true),
+            Err(EngineError::Unavailable)
         );
     }
 

@@ -3332,6 +3332,11 @@ pub struct ActiveCall {
     /// call with it off. The engine picks it up through
     /// `set_camera_enabled`.
     pub camera_on: bool,
+    /// Phase C2i: local screen-share send intent (UI toggle). The
+    /// engine picks it up through `set_screen_share_enabled`; screen
+    /// share replaces the camera (ntgcalls forbids camera+screen in
+    /// Capture mode).
+    pub screen_sharing: bool,
     /// Phase C2e: peer camera state from the engine hook; `Inactive`
     /// until the first state callback arrives.
     pub remote_video: RemoteVideoState,
@@ -6183,6 +6188,7 @@ impl Session {
                         is_video,
                         muted: false,
                         camera_on: is_video,
+                        screen_sharing: false,
                         remote_video: RemoteVideoState::Inactive,
                         state: CallState::Pending {
                             is_created: true,
@@ -9488,6 +9494,7 @@ impl Session {
             signaling_dropped: 0,
             muted: false,
             camera_on: call.is_video,
+            screen_sharing: false,
             remote_video: RemoteVideoState::Inactive,
         });
         self.call_summary = None;

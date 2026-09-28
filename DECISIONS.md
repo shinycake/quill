@@ -5315,3 +5315,102 @@ ntgcalls v3.0.0 prebuilt lib, bindings verified against
   - Payment tips UI (`tip_amount` sent as 0).
   - Embedded provider webview / native card collection.
   - `paid_media` on invoices (falls back to the invoice card; paid-media rendering is a media-slice concern).
+
+## Slice C2i — 1:1 CALL SCREEN-SHARE SEND (2026-09-28)
+
+- **Task:** README `parity:calls-screen-share` — the 1:1 send path. (The item's
+  "receive" parenthetical turned out to be group-only: the native P2P frames
+  callback drops `PLAYBACK+SCREEN` frames — `engine.rs` "Screen sharing is a
+  later slice" — so 1:1 peer-screen rendering is still open; see "Out of
+  this slice".)
+- **Schema (pinned TDLib 1.8.67, `schema/td_api.tl`, concept-level):** no
+  1:1 screen-share constructor exists — `startGroupCallScreenSharing`
+  (:14303) / `endGroupCallScreenSharing` (:14309) are group-call only;
+  `screen` in td_api.tl appears only in `groupCallParticipantVideoInfo`
+  (:7184). 1:1 screen share is purely a tgcalls/ntgcalls stream-source
+  switch, no TDLib traffic — the peer learns it through the tgcalls
+  screen video track.
+- **ntgcalls findings (v3.0.0 source, primary):**
+  - `ntgcalls/include/ntgcalls/ntgcalls.hpp` — `set_stream_sources(chat_id,
+    mode, media_description)` is the generic entry point for P2P and group
+    connections alike (first arg is the connection key: user id for P2P).
+  - `ntgcalls/include/ntgcalls/media/media_description.hpp:68` —
+    `MediaDescription{ microphone, speaker, camera, screen }`; source kind
+    `Desktop = 1 << 4` (:19) — matches the hand-written bindings.
+  - `ntgcalls/src/media/stream_manager.cpp:68` — `set_stream_sources`
+    throws `InvalidParams("Cannot mix camera and screen sources")` when
+    both `camera` and `screen` are set in Capture mode: **screen share
+    replaces the camera**; stopping = re-issue with `screen` null.
+  - Desktop capture is ntgcalls-internal (libwebrtc capturer): Quill
+    carries no Linux/PipeWire capture code — the engine passes the
+    `NTG_MEDIA_SOURCE_DESKTOP` description with NULL input (default
+    display), same as the group presentation path.
+- **Telegram X evidence (`~/workspace/telegram-x`):** TGX has NO 1:1
+  screen-share send — concept-level search (`screenshare`, `screenShare`,
+  `SCREEN_SHARE`, `ScreenSharing`, `DesktopCapture` in `*.java`/`*.kt`
+  and call UI) finds only display-metric `Screen` usages; the 1:1
+  `CallController`/`TgCallsController` have no share-screen path. So no
+  TGX shape to mirror; the design follows ntgcalls semantics and the
+  codebase's own `set_call_camera` toggle contract.
+- **Built:**
+  - Engine (`src/calls/engine.rs`): `CallEngine::set_screen_share_enabled
+    (call_id, enabled)` — re-issues `ntg_set_stream_sources` with the
+    desktop description (`screen_video_description()`, shared with the
+    group presentation: 1920x1080@15, NULL input). Enabling clears
+    `camera_enabled`; `set_camera_enabled` symmetrically clears
+    `screen_share_on` (ntgcalls no-mix rule); failed issuance restores
+    the retained `CallMediaConfig` (mirrors the camera path).
+    `MockEngine` records `p2p_screen_share_changes`; new
+    `EngineError::NoScreenSource`.
+  - Driver (`src/connect.rs`): `set_call_screen_share(call_id, enabled)`
+    — same contract as `set_call_camera` (engine first, error without
+    flipping the flag; intent stored pre-transport and applied on
+    connect); rejected without an enumerated `MediaDeviceKind::Screen`
+    source (`NoScreenSource`). The gate is the existing device cache,
+    generalized as `call_screen_source_available()` with
+    `group_call_screen_source_available()` delegating to it.
+  - State (`src/state.rs`): `ActiveCall.screen_sharing` intent flag.
+  - UI (`src/ui/mod.rs`): "Share screen"/"Stop sharing" button next to
+    the camera toggle (video calls only; "No screen source available"
+    when the engine reports none — mirrors the camera button's honest
+    gating); "Sharing your screen" status line on the call card; local
+    PiP says "Sharing screen" while sharing instead of "Camera off";
+    engine errors surface in the status note without flipping the flag.
+    New screenshot demo `ready-call-screenshare`
+    (`quill --screenshot-demo ready-call-screenshare` →
+    `docs/screenshots/ready-call-screenshare.png`).
+  - Tests: engine mock state machine (`mock_p2p_screen_share_toggle_state_machine`);
+    driver gating (`set_call_screen_share_gates_engine_on_transport`,
+    `set_call_screen_share_rejected_without_screen_source`).
+- **Not verifiable without live Telegram:** real `ntg_set_stream_sources`
+  desktop issuance, peer-side screen-track rendering, desktop-capturer
+  availability on a real display. **No `libntgcalls.so` on this VM** —
+  native paths are compile-time only (same caveat as the group
+  screen-share slice). Tested instead: toggle state machines, driver
+  gating/error contracts, and the synthetic screenshot demo.
+- **Honest limitations / out of this slice (box stays UNCHECKED):**
+  - 1:1 RECEIVE side is not done: the native P2P frames callback drops
+    `PLAYBACK+SCREEN` frames (`engine.rs` "Screen sharing is a later
+    slice"), so a peer's screen share in a 1:1 call is not rendered.
+    The README item's "detected and flagged" parenthetical was
+    group-only; updated to name the 1:1 receive gap explicitly.
+  - Voice-call screen share: the button is gated on `call.is_video`
+    like the camera button — unverified video-track upgrade path for
+    voice calls stays out.
+  - Display/window picker: NULL input = default display only (same as
+    group presentation); a picker is a separate slice.
+- **Follow-up fixes (same day, pre-commit):** driver-level mutual
+  exclusion was missing — `set_call_screen_share(true)` now clears
+  `call.camera_on` and `set_call_camera(true)` symmetrically clears
+  `call.screen_sharing`, so the driver flags can't desync from the
+  engine's no-mix rule (the UI camera button is an action label:
+  "Camera on" while sharing = switch back to camera, which stops the
+  share). The pre-transport intent now genuinely applies on connect:
+  `pump_call_engine` forwards `set_screen_share_enabled(call_id, true)`
+  after a successful `engine.connect` when `call.screen_sharing` is
+  set, mirroring the existing pre-transport mute pattern (non-fatal).
+  Screenshot captured (`docs/screenshots/ready-call-screenshare.png`,
+  table entry added to `docs/screenshots/README.md`); capture needed
+  correct timing only — the demo paints fine on a fresh Xvfb display
+  with the lavapipe ICD (earlier black frames were captures taken
+  after the demo's 5s quit timer).
