@@ -262,7 +262,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Welcome message setup: Welcome-message row in the group/channel info panel opens the pack editor dialog (src/ui/mod.rs) <!-- parity:groups-welcome-setup -->
 - [ ] Communities: create a community (createCommunity exists in TDLib 1.8.67; no Quill UI) <!-- parity:communities-create -->
 - [ ] Communities: browse and manage owned communities (partial: TDLib 1.8.67 exposes createCommunity/loadCommunityFullInfo/setCommunityName; no Quill UI) <!-- parity:communities-hub -->
-- [ ] Communities: toggle community chat visibility (partial/blocked: no TDLib 1.8.67 method to toggle hidden state) <!-- parity:communities-chat-visibility -->
+- [ ] Communities: toggle community chat visibility (blocked: no TDLib 1.8.67 method to toggle hidden state) <!-- parity:communities-chat-visibility -->
 - [ ] Communities: community chat-list mode (view a community's chats as a filtered chat list) <!-- parity:communities-chatlist-mode -->
 - [ ] Communities: add a chat to a community (blocked: no TDLib 1.8.67 method) <!-- parity:communities-add-chat -->
 - [ ] Communities: admin-rights management (blocked: no TDLib 1.8.67 method) <!-- parity:communities-admin-rights -->
@@ -469,7 +469,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Game buttons launch via getCallbackQueryAnswer with callbackQueryPayloadGame (messageGame short name); answer URL opens in browser <!-- parity:bots-inline-game -->
 - [ ] Buy buttons (partial: "Payment buttons are not supported yet" tooltip; invoice messages fall back to Unsupported) <!-- parity:bots-inline-buy -->
 - [x] User buttons open the private chat with the user (ui/mod.rs) <!-- parity:bots-inline-user -->
-- [ ] Disabled inline buttons render their disabled state (blocked: no exposed TDLib 1.8.67 support) <!-- parity:bots-inline-disabled-buttons -->
+- [ ] Per-button disabled flag on inline buttons (Bot API 10.3 `disabled` field; blocked: not exposed in TDLib 1.8.67 `inlineKeyboardButton` — the `inlineKeyboardButtonTypeDisabled` type is exposed and Quill already renders it disabled) <!-- parity:bots-inline-disabled-buttons -->
 - [x] Custom reply keyboards rendered above the composer; text sends, one-time hides on tap, contact/location/poll honestly disabled <!-- parity:bots-custom-keyboard -->
 - [x] Force-reply markup focuses the composer with the reply target set <!-- parity:bots-force-reply -->
 - [ ] Force-reply keyboards render the reply-keyboard bar (the official clients show the custom-keyboard UI for forceReply markup; Quill covers only composer focus) <!-- parity:bots-force-reply-keyboard -->
