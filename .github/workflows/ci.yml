@@ -22,6 +22,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: fmt
         run: cargo fmt --all -- --check
+      - name: file sizes (no dumping grounds)
+        run: bash scripts/check_file_sizes.sh
       - name: clippy (core)
         run: cargo clippy --no-default-features --all-targets --locked -- -D warnings
       - name: tests (core + replay)
