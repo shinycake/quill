@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # check_file_sizes.sh — no dumping grounds.
-# Fails if any src/**/*.rs exceeds the hard cap, or if a waived file grows
+# Fails if any .rs file under src/, crates/, or tests/ exceeds the hard cap, or if a waived file grows
 # past its recorded line count. Waivers only shrink: each split PR lowers
 # (or removes) its entry here.
 set -euo pipefail
@@ -16,6 +16,7 @@ WAIVERS=(
   "src/telegram/envelope.rs:17751"
   "src/telegram/requests.rs:10175"
   "src/calls/engine.rs:3212"
+  "tests/replay.rs:3505"
 )
 
 waiver_for() {
@@ -38,7 +39,7 @@ while IFS= read -r f; do
     echo "FAIL: $f has $lines lines, over hard cap $HARD_CAP (split it into named modules)"
     fail=1
   fi
-done < <(find src -name '*.rs' | sort)
+done < <(find src crates tests -name '*.rs' | sort)
 
 (( fail == 0 )) && echo "file sizes OK"
 exit "$fail"
