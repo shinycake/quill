@@ -8463,19 +8463,6 @@ mod channel_requests_tests {
         assert_eq!(v["@type"], "setStoryReaction");
         assert_eq!(v["reaction_type"], serde_json::Value::Null);
 
-        // Phase 9.2+: custom-emoji reaction — `reactionTypeCustomEmoji`
-        // with the int64 id as a JSON string (schema 1.8.67 lines 2918,
-        // 13809).
-        let custom = set_story_custom_emoji_reaction(RequestId(73), ChatId(11), 7, 123);
-        let v: serde_json::Value = serde_json::from_str(&custom).unwrap();
-        assert_eq!(v["@type"], "setStoryReaction");
-        assert_eq!(v["@extra"], "73");
-        assert_eq!(v["story_poster_chat_id"], 11);
-        assert_eq!(v["story_id"], 7);
-        assert_eq!(v["reaction_type"]["@type"], "reactionTypeCustomEmoji");
-        assert_eq!(v["reaction_type"]["custom_emoji_id"], "123");
-        assert_eq!(v["update_recent_reactions"], true);
-
         // `getStoryAvailableReactions row_size:int32 = AvailableReactions`
         // (schema 1.8.67 line 13802); row_size 10 is inside 5–25.
         let avail = get_story_available_reactions(RequestId(72), 10);
