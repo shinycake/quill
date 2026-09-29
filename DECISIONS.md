@@ -6211,3 +6211,43 @@ ntgcalls v3.0.0 prebuilt lib, bindings verified against
 - **Out of this slice (left unchecked with evidence):**
   - `auth-change-number` UI (blocked on the server-acceptance caveat above).
   - `phoneNumberCodeTypeVerify` / `phoneNumberCodeTypeConfirmOwnership` flows (different code types, different slices).
+
+## Slice C2l — 1:1 CALL SCREEN-SHARE RECEIVE, RENDERING (2026-09-29)
+
+- **Task:** README `parity:calls-screen-share` — the open gap left by
+  C2j: "peer screen-share RENDERING in the call card" (was blocked on
+  the kit Phase 9 `src/ui/mod.rs` freeze; #142 merged, so unblocked).
+- **Schema:** unchanged from C2j (concept-level, pinned 1.8.67) — no
+  1:1 screen-share TDLib constructor; receive is purely the ntgcalls
+  frames callback + remote-source state hook.
+- **Built:**
+  - `src/ui/mod.rs` `call_video_stage`: while the peer's share is live
+    the screen frame takes the main video-stage tile (badge "🖥 Peer's
+    screen", absolute chip) — same preference as the group tiles, which
+    prefer the screen slot when sharing. The camera resumes the tile
+    when the share ends; the local PiP is untouched.
+  - Dedicated `call_screen_image` decode-cache slot via
+    `cached_screen_image` — the screen and camera streams share `seq`
+    numbering (all demo fixtures use seq 0), so reusing
+    `call_remote_image` would cross-render.
+  - `ActiveCall::remote_screen: RemoteVideoState` (state.rs; three
+    construction sites init `Inactive`): the driver's screen-state
+    drain now records the state on the call. The tile renders only
+    while it is not `Inactive` — this closes the race C2j flagged
+    (a late PLAYBACK+SCREEN frame arriving after the Inactive drain
+    would otherwise repopulate the slot with a stale picture).
+    Paused keeps rendering the last frame, matching the camera rule.
+  - Screenshot fixture `ScreenshotDemo::ReadyCallScreenShareReceive`
+    ("ready-call-screenshare-receive"): synthetic 16:9 desktop-pattern
+    screen frame (`demo_screen_frame`, window rects + taskbar strip),
+    peer camera Active behind it, local camera as PiP. main.rs gains
+    the CLI name + output filename.
+- **Not verifiable without live Telegram:** real PLAYBACK+SCREEN
+  frames from a peer's ntgcalls desktop capturer, real
+  remote-source SCREEN state transitions. Tested instead: driver slot
+  isolation/clearing (C2j), state recording + UI gating (code), and
+  the screenshot demo (visual).
+- **Out of this slice:** nothing code-side remains on the 1:1 path —
+  the `parity:calls-screen-share` box is checked with the live-peer
+  caveat, matching the `calls-start-video` precedent ("verified in
+  code + screenshot; real camera/peer still unverified").

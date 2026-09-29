@@ -1638,6 +1638,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         // retained screen frames are dropped so a stale picture can
         // never render; while active the frames themselves carry the
         // picture, so no persistent state is kept.
+        // Phase C2l: the state itself is also recorded on the call —
+        // the UI renders the screen tile only while it is not
+        // `Inactive`, closing the race where a late frame arriving
+        // after the drain would otherwise repopulate the slot.
         loop {
             let update = self
                 .screen_state_outbox
@@ -1647,6 +1651,14 @@ impl<S: JsonSender> ConnectDriver<S> {
             let Some((call_id, state)) = update else {
                 break;
             };
+            if let Some(call) = self
+                .session
+                .active_call
+                .as_mut()
+                .filter(|call| call.id == call_id)
+            {
+                call.remote_screen = state;
+            }
             if state != RemoteVideoState::Inactive {
                 continue;
             }
@@ -21766,6 +21778,33 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// Phase C2l: the pump records the peer's 1:1 screen-share state on
+    /// the call — the UI gates the screen tile on it, closing the race
+    /// where a late frame arriving after Inactive would repopulate a
+    /// stale slot.
+    #[test]
+    fn remote_screen_state_recorded_on_call() {
+        let (dir, mut driver, handle, sink, seq) = ready_call_driver();
+        let pump = r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#;
+        assert_eq!(
+            driver.session.active_call.as_ref().unwrap().remote_screen,
+            RemoteVideoState::Inactive
+        );
+        handle.emit_remote_screen_state(77, RemoteVideoState::Active);
+        ingest_call_json(&mut driver, &seq, &sink, pump);
+        assert_eq!(
+            driver.session.active_call.as_ref().unwrap().remote_screen,
+            RemoteVideoState::Active
+        );
+        handle.emit_remote_screen_state(77, RemoteVideoState::Inactive);
+        ingest_call_json(&mut driver, &seq, &sink, pump);
+        assert_eq!(
+            driver.session.active_call.as_ref().unwrap().remote_screen,
+            RemoteVideoState::Inactive
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// Phase C2e: the UI camera toggle reaches the engine with the
     /// call id, the new state, and the selected camera — but only
     /// once a transport exists; before that the intent is stored
@@ -22162,6 +22201,7 @@ mod tests {
             camera_on: false,
             screen_sharing: false,
             remote_video: RemoteVideoState::Inactive,
+            remote_screen: RemoteVideoState::Inactive,
         });
         assert_eq!(
             driver.accept_group_call_invitation(3, 42),

@@ -552,12 +552,20 @@ pub struct QuillApp {
     /// fixture only — live frames come from the driver, never these.
     demo_remote_frame: Option<quill::calls::engine::VideoFrame>,
     demo_local_frame: Option<quill::calls::engine::VideoFrame>,
+    /// Phase C2l: synthetic demo screen-share frame (peer side) for the
+    /// screenshot fixture only — live frames come from the driver.
+    demo_screen_frame: Option<quill::calls::engine::VideoFrame>,
     /// Phase C2e: demo-mode camera pick (live picks go to the driver).
     demo_selected_camera: Option<String>,
     /// Phase C2e: decoded video tiles cached by frame seq, rebuilt only
     /// when the newest frame changes.
     call_remote_image: Option<(u64, Arc<RenderImage>)>,
     call_local_image: Option<(u64, Arc<RenderImage>)>,
+    /// Phase C2l: decoded peer screen-share tile, same caching rule.
+    /// A dedicated slot — the screen and camera streams share `seq`
+    /// numbering, so reusing `call_remote_image` would cross-render
+    /// (all demo fixtures use seq 0).
+    call_screen_image: Option<(u64, Arc<RenderImage>)>,
     /// Slice A1: decoded QR-login bitmap cached by link, rebuilt only when
     /// the link changes. The link itself is never logged.
     qr_login_cache: Option<(String, Arc<RenderImage>)>,
@@ -1413,6 +1421,11 @@ pub enum ScreenshotDemo {
     /// status. Injected demo state, no live Telegram, no real
     /// capture.
     ReadyCallScreenShare,
+    /// Phase C2l: connected video call while the *peer* shares their
+    /// screen — the overlay renders the screen-share tile as the main
+    /// video-stage tile with the badge, the local camera as the PiP.
+    /// Injected demo state, no live Telegram, no real frames.
+    ReadyCallScreenShareReceive,
     /// Phase C2c: connected voice call with microphone/speaker choices.
     ReadyCallDevices,
     /// Phase C2d: Ready voice call while the audio driver reconnects.
@@ -2954,9 +2967,11 @@ impl QuillApp {
             demo_selected_devices: (None, None),
             demo_remote_frame: None,
             demo_local_frame: None,
+            demo_screen_frame: None,
             demo_selected_camera: None,
             call_remote_image: None,
             call_local_image: None,
+            call_screen_image: None,
             qr_login_cache: None,
             group_video_images: HashMap::new(),
             demo_group_frames: HashMap::new(),
@@ -3760,6 +3775,42 @@ impl QuillApp {
             }
             app.status_note =
                 "screenshot demo — 1:1 call screen-share send (injected, no live Telegram)".into();
+        }
+        // Phase C2l: 1:1 screen-share receive fixture — the peer shares
+        // their screen, so the main video-stage tile renders the
+        // screen frame with the badge; the local camera stays the PiP.
+        if matches!(demo, Some(ScreenshotDemo::ReadyCallScreenShareReceive)) {
+            if let Some(session) = app.demo_session.as_mut() {
+                app.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_call_video(session, &app.demo_sink, &app.demo_seq);
+            }
+            app.demo_call_devices = Some(vec![
+                quill::calls::engine::MediaDevice {
+                    id: "demo-cam".into(),
+                    name: "Demo Camera (synthetic)".into(),
+                    kind: quill::calls::engine::MediaDeviceKind::Camera,
+                },
+                quill::calls::engine::MediaDevice {
+                    id: "demo-screen".into(),
+                    name: "Demo Screen (synthetic)".into(),
+                    kind: quill::calls::engine::MediaDeviceKind::Screen,
+                },
+            ]);
+            app.demo_remote_frame = Some(demo_video_frame(false));
+            app.demo_local_frame = Some(demo_video_frame(true));
+            app.demo_screen_frame = Some(QuillApp::demo_screen_frame());
+            if let Some(call) = app
+                .demo_session
+                .as_mut()
+                .and_then(|session| session.active_call.as_mut())
+            {
+                call.remote_video = quill::calls::engine::RemoteVideoState::Active;
+                call.remote_screen = quill::calls::engine::RemoteVideoState::Active;
+                call.transport = Some(quill::calls::engine::TransportState::Connected);
+            }
+            app.status_note =
+                "screenshot demo — 1:1 peer screen-share receive (injected, no live Telegram)"
+                    .into();
         }
         if matches!(demo, Some(ScreenshotDemo::ReadyCallDevices)) {
             if let Some(session) = app.demo_session.as_mut() {
@@ -9828,6 +9879,28 @@ impl QuillApp {
         }
         let image = Self::video_render_image(frame)?;
         *slot = Some((frame.seq, image.clone()));
+        Some(image)
+    }
+
+    /// Phase C2l: cached decoded tile for the peer's 1:1 screen share —
+    /// same seq-gated caching as `cached_video_image`, but a dedicated
+    /// slot (see `call_screen_image`).
+    fn cached_screen_image(
+        &mut self,
+        frame: &quill::calls::engine::VideoFrame,
+    ) -> Option<Arc<RenderImage>> {
+        if self
+            .call_screen_image
+            .as_ref()
+            .is_some_and(|(seq, _)| *seq == frame.seq)
+        {
+            return self
+                .call_screen_image
+                .as_ref()
+                .map(|(_, image)| image.clone());
+        }
+        let image = Self::video_render_image(frame)?;
+        self.call_screen_image = Some((frame.seq, image.clone()));
         Some(image)
     }
 
@@ -24143,10 +24216,13 @@ impl QuillApp {
 
     /// Phase C2e: the video stage for a connected video call — the peer's
     /// camera as the main tile, the local preview as a 160x120 PiP
-    /// anchored bottom-right. Frames come from the driver (live) or the
-    /// demo fixture (screenshot mode); both tiles degrade to honest
-    /// status text when a feed is missing, and decoded tiles are cached
-    /// by frame seq so re-renders don't re-decode.
+    /// anchored bottom-right. Phase C2l: while the peer shares their
+    /// screen the share takes the main tile (with a badge), same
+    /// preference as the group tiles. Frames come from the driver
+    /// (live) or the demo fixture (screenshot mode); both tiles
+    /// degrade to honest status text when a feed is missing, and
+    /// decoded tiles are cached by frame seq so re-renders don't
+    /// re-decode.
     fn call_video_stage(&mut self, call: &ActiveCall, name: &str) -> Div {
         let (remote_frame, local_frame): (
             Option<quill::calls::engine::VideoFrame>,
@@ -24162,6 +24238,18 @@ impl QuillApp {
                 self.demo_local_frame.clone(),
             )
         };
+        // Phase C2l: the peer's 1:1 screen share. The driver drops the
+        // retained frames when the share goes inactive, and
+        // `remote_screen` closes the late-frame race — the tile shows
+        // only while the share is not inactive.
+        let screen_frame: Option<quill::calls::engine::VideoFrame> =
+            if call.remote_screen == quill::calls::engine::RemoteVideoState::Inactive {
+                None
+            } else if let Some(live) = self.live.as_ref() {
+                live.driver.latest_screen_frame(call.id)
+            } else {
+                self.demo_screen_frame.clone()
+            };
 
         let status_text = |text: &str| {
             div()
@@ -24185,20 +24273,52 @@ impl QuillApp {
                 .object_fit(ObjectFit::Contain)
         };
 
-        let remote: AnyElement = match (call.remote_video, remote_frame.as_ref()) {
-            (quill::calls::engine::RemoteVideoState::Active, Some(frame)) => {
+        let remote: AnyElement = match (
+            screen_frame.as_ref(),
+            call.remote_video,
+            remote_frame.as_ref(),
+        ) {
+            // Phase C2l: the peer's screen share takes the main tile
+            // while the share is live (same preference as the group
+            // tiles); the camera resumes the tile when the share ends.
+            (Some(frame), _, _) => match self.cached_screen_image(frame) {
+                Some(image) => div()
+                    .w_full()
+                    .h_full()
+                    .relative()
+                    .child(video_img(image))
+                    .child(
+                        div()
+                            .absolute()
+                            .top_2()
+                            .left_2()
+                            .rounded_md()
+                            .px_2()
+                            .py_1()
+                            .bg(scrim())
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(text_on_fill())
+                                    .child("🖥 Peer's screen"),
+                            ),
+                    )
+                    .into_any_element(),
+                None => status_text("Couldn't decode the peer's screen").into_any_element(),
+            },
+            (None, quill::calls::engine::RemoteVideoState::Active, Some(frame)) => {
                 match self.cached_video_image(false, frame) {
                     Some(image) => video_img(image).into_any_element(),
                     None => status_text("Couldn't decode the peer's video").into_any_element(),
                 }
             }
-            (quill::calls::engine::RemoteVideoState::Active, None) => {
+            (None, quill::calls::engine::RemoteVideoState::Active, None) => {
                 status_text("Connecting video…").into_any_element()
             }
-            (quill::calls::engine::RemoteVideoState::Paused, _) => {
+            (None, quill::calls::engine::RemoteVideoState::Paused, _) => {
                 status_text("Video paused by peer").into_any_element()
             }
-            (quill::calls::engine::RemoteVideoState::Inactive, _) => div()
+            (None, quill::calls::engine::RemoteVideoState::Inactive, _) => div()
                 .flex()
                 .flex_col()
                 .items_center()
@@ -39718,6 +39838,54 @@ impl QuillApp {
                         ),
                 )
         })
+    }
+
+    /// Phase C2l: synthetic peer screen-share frame for the screenshot
+    /// fixture — a 16:9 "desktop" test pattern (dark gradient, window
+    /// rectangles, a taskbar strip) so the receive tile is visually
+    /// distinct from the camera patterns. NOT a real share: screenshot
+    /// demos only.
+    fn demo_screen_frame() -> quill::calls::engine::VideoFrame {
+        const W: usize = 480;
+        const H: usize = 270;
+        let mut rgba = Vec::with_capacity(W * H * 4);
+        for y in 0..H {
+            for x in 0..W {
+                let fx = x as f32 / (W - 1) as f32;
+                let fy = y as f32 / (H - 1) as f32;
+                // Dark blue-gray desktop gradient.
+                let (mut r, mut g, mut b) = (
+                    (24.0 + 20.0 * fx) as u8,
+                    (32.0 + 28.0 * fy) as u8,
+                    (52.0 + 30.0 * fx) as u8,
+                );
+                // Two window rectangles.
+                let in_win = |x0: usize, y0: usize, x1: usize, y1: usize| {
+                    x >= x0 && x < x1 && y >= y0 && y < y1
+                };
+                if in_win(40, 30, 220, 170) || in_win(250, 50, 440, 200) {
+                    (r, g, b) = (200, 208, 220);
+                }
+                // Window title bars.
+                if in_win(40, 30, 220, 48) || in_win(250, 50, 440, 68) {
+                    (r, g, b) = (70, 110, 180);
+                }
+                // Taskbar strip.
+                if y >= H - 24 {
+                    (r, g, b) = (18, 20, 26);
+                }
+                rgba.extend_from_slice(&[r, g, b, 255]);
+            }
+        }
+        quill::calls::engine::VideoFrame {
+            seq: 0,
+            width: W as u16,
+            height: H as u16,
+            rgba,
+            is_local: false,
+            participant_user_id: None,
+            is_screen: true,
+        }
     }
 }
 

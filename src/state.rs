@@ -3646,6 +3646,12 @@ pub struct ActiveCall {
     /// Phase C2e: peer camera state from the engine hook; `Inactive`
     /// until the first state callback arrives.
     pub remote_video: RemoteVideoState,
+    /// Phase C2l: peer 1:1 screen-share state from the engine's screen
+    /// hook; `Inactive` until the first state callback arrives. The
+    /// screen-share tile renders only while this is not `Inactive`,
+    /// so a late PLAYBACK+SCREEN frame arriving after the drain
+    /// cannot repopulate a stale tile.
+    pub remote_screen: RemoteVideoState,
 }
 
 /// Phase C1: summary of the most recently ended call, driving the
@@ -6748,6 +6754,7 @@ impl Session {
                         camera_on: is_video,
                         screen_sharing: false,
                         remote_video: RemoteVideoState::Inactive,
+                        remote_screen: RemoteVideoState::Inactive,
                         state: CallState::Pending {
                             is_created: true,
                             is_received: false,
@@ -10713,6 +10720,7 @@ impl Session {
             camera_on: call.is_video,
             screen_sharing: false,
             remote_video: RemoteVideoState::Inactive,
+            remote_screen: RemoteVideoState::Inactive,
         });
         self.call_summary = None;
         self.call_error = None;
