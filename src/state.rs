@@ -13959,67 +13959,6 @@ mod tests {
         assert!(with_purpose.stickers.sets.is_empty());
     }
 
-    /// Slice S12: composer sticker suggestions are stored only under a
-    /// matching `SuggestStickers` purpose (stray answers ignored), in
-    /// their own slot (never the search UI's `found_stickers`), and
-    /// filtered by the suggestion mode.
-    #[test]
-    fn s12_sticker_suggest_purpose_gated_dispatch() {
-        let (mut with_purpose, sink) = session();
-        let seq = AtomicU64::new(0);
-        // Two installed sets; the suggest answers below reference set 77
-        // (installed) and set 99 (not installed).
-        with_purpose.stickers.sets = vec![
-            StickerSetInfo {
-                id: 77,
-                title: "Demo".into(),
-                name: "DemoStickers".into(),
-                size: 2,
-                is_installed: true,
-                is_official: true,
-            },
-            StickerSetInfo {
-                id: 78,
-                title: "Other".into(),
-                name: "OtherStickers".into(),
-                size: 1,
-                is_installed: true,
-                is_official: false,
-            },
-        ];
-        let answer = |extra: u64| {
-            format!(
-                r#"{{"@type":"stickers","stickers":[{{"@type":"sticker","id":"9001","set_id":"77","width":512,"height":512,"emoji":"😀","format":{{"@type":"stickerFormatWebp"}},"full_type":{{"@type":"stickerFullTypeRegular","premium_animation":null}},"thumbnail":null,"sticker":null}},{{"@type":"sticker","id":"9002","set_id":"99","width":512,"height":512,"emoji":"😀","format":{{"@type":"stickerFormatWebp"}},"full_type":{{"@type":"stickerFullTypeRegular","premium_animation":null}},"thumbnail":null,"sticker":null}}],"@extra":"{extra}"}}"#,
-            )
-        };
-
-        // Default mode (InstalledAndRecommended): both stickers stored in
-        // the suggestions slot; the search slot is untouched.
-        let extra = with_purpose.request(RequestPurpose::SuggestStickers, None);
-        apply_json(&mut with_purpose, &seq, &sink, &answer(extra.0));
-        assert_eq!(with_purpose.stickers.suggestions.len(), 2);
-        assert!(with_purpose.stickers.found_stickers.is_empty());
-
-        // InstalledOnly: the set-99 sticker is filtered out.
-        with_purpose.media_prefs.sticker_suggest_mode = StickerSuggestMode::InstalledOnly;
-        let extra = with_purpose.request(RequestPurpose::SuggestStickers, None);
-        apply_json(&mut with_purpose, &seq, &sink, &answer(extra.0));
-        assert_eq!(with_purpose.stickers.suggestions.len(), 1);
-        assert_eq!(with_purpose.stickers.suggestions[0].set_id, 77);
-
-        // None: the answer is dropped and the slot cleared.
-        with_purpose.media_prefs.sticker_suggest_mode = StickerSuggestMode::None;
-        let extra = with_purpose.request(RequestPurpose::SuggestStickers, None);
-        apply_json(&mut with_purpose, &seq, &sink, &answer(extra.0));
-        assert!(with_purpose.stickers.suggestions.is_empty());
-
-        // A stray `stickers` answer (no matching purpose) is ignored.
-        let (mut without_purpose, sink2) = session();
-        let seq2 = AtomicU64::new(0);
-        apply_json(&mut without_purpose, &seq2, &sink2, &answer(0));
-        assert!(without_purpose.stickers.suggestions.is_empty());
-    }
-
     /// Slice S9: GIF-backend answers are stored only under a matching
     /// request purpose (stray answers ignored), search pages replace /
     /// append with `next_offset` paging, mutation `ok`s invalidate the

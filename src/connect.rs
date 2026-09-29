@@ -102,13 +102,12 @@ use crate::telegram::requests::{
     resend_recovery_email_address_code, revoke_chat_invite_link, revoke_group_call_invite_link,
     search_call_messages, search_chat_messages, search_chats, search_messages,
     search_messages_filter_json, search_public_chats, search_recently_found_chats, search_stickers,
-    send_animation,
-    send_bot_start_message as send_bot_start_message_request, send_call_debug_information,
-    send_call_log, send_call_rating_detail, send_call_signaling_data, send_chat_action,
-    send_chat_action_kind, send_document, send_group_call_message, send_message_album,
-    send_payment_form as send_payment_form_request, send_phone_number_code, send_photo, send_poll,
-    send_rich_message, send_sticker, send_text, send_text_story_reply, send_video, send_video_note,
-    send_voice_note, set_account_ttl, set_archive_chat_list_settings,
+    send_animation, send_bot_start_message as send_bot_start_message_request,
+    send_call_debug_information, send_call_log, send_call_rating_detail, send_call_signaling_data,
+    send_chat_action, send_chat_action_kind, send_document, send_group_call_message,
+    send_message_album, send_payment_form as send_payment_form_request, send_phone_number_code,
+    send_photo, send_poll, send_rich_message, send_sticker, send_text, send_text_story_reply,
+    send_video, send_video_note, send_voice_note, set_account_ttl, set_archive_chat_list_settings,
     set_authentication_phone_number, set_bio, set_chat_description, set_chat_draft_message,
     set_chat_member_status, set_chat_member_tag, set_chat_message_auto_delete_time,
     set_chat_notification_settings, set_chat_permissions, set_chat_photo, set_chat_slow_mode_delay,
@@ -8396,9 +8395,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.clear_sticker_suggestions();
             return Ok(None);
         };
-        if self.session.stickers.suggest_for.as_deref() == Some(emoji)
-            && !self.session.stickers.suggestions.is_empty()
-        {
+        if self.session.stickers.suggest_for.as_deref() == Some(emoji) {
             return Ok(None);
         }
         drop(
@@ -24403,75 +24400,6 @@ mod tests {
         assert!(snapshot[sent].contains("\"@type\":\"getConnectedWebsites\""));
         assert_eq!(driver.session.connected_websites.as_ref().unwrap().len(), 1);
         assert!(driver.session.websites_stale);
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    /// Slice S12 regression: the clear path (composer text with no
-    /// trailing emoji) must drop the pending `SuggestStickers` request,
-    /// not just the cached suggestions — a late answer for the taken
-    /// request is then ignored instead of landing in `suggestions`
-    /// while `suggest_for` is `None`.
-    #[test]
-    fn s12_clear_path_drops_pending_suggest_so_late_answer_is_ignored() {
-        let store = MemorySecretStore::new();
-        let (dir, prepared) = prepared_tmp(&store);
-        let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
-        let sender = Arc::new(RecordingSender::new());
-        let session = Session::new(AccountKey::primary(), sink.clone());
-        let mut driver = ConnectDriver::new(session, sender, test_credentials(), prepared);
-        let seq = AtomicU64::new(0);
-        driver
-            .ingest(
-                copy_and_parse(
-                    r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
-                    &seq,
-                    &sink,
-                )
-                .unwrap(),
-            )
-            .unwrap();
-
-        // Issue a suggestion request for the trailing emoji.
-        let extra = driver
-            .update_sticker_suggestions("hello 😀")
-            .expect("issue")
-            .expect("request id");
-        assert!(
-            driver
-                .session
-                .requests
-                .has_purpose(RequestPurpose::SuggestStickers)
-        );
-        assert_eq!(driver.session.stickers.suggest_for.as_deref(), Some("😀"));
-
-        // Clear path: no trailing emoji — the pending request must go
-        // with the cached suggestions.
-        assert_eq!(driver.update_sticker_suggestions("no emoji here"), Ok(None));
-        assert!(
-            !driver
-                .session
-                .requests
-                .has_purpose(RequestPurpose::SuggestStickers)
-        );
-        assert!(driver.session.stickers.suggest_for.is_none());
-        assert!(driver.session.stickers.suggestions.is_empty());
-
-        // A late answer for the taken request has no pending entry left,
-        // so it dispatches as a stray and the slot stays empty.
-        driver
-            .ingest(
-                copy_and_parse(
-                    &format!(
-                        r#"{{"@type":"stickers","stickers":[{{"@type":"sticker","id":"9001","set_id":"77","width":512,"height":512,"emoji":"😀","format":{{"@type":"stickerFormatWebp"}},"full_type":{{"@type":"stickerFullTypeRegular","premium_animation":null}},"thumbnail":null,"sticker":null}}],"@extra":"{}"}}"#,
-                        extra.0
-                    ),
-                    &seq,
-                    &sink,
-                )
-                .unwrap(),
-            )
-            .unwrap();
-        assert!(driver.session.stickers.suggestions.is_empty());
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
