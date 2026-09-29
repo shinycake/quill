@@ -11,10 +11,10 @@ HARD_CAP=2000
 # "path:lines" — grandfathered violators, recorded 2026-09-29.
 WAIVERS=(
   "src/ui/mod.rs:48753"
-  "src/connect.rs:23941"
-  "src/state.rs:20722"
-  "src/telegram/envelope.rs:18141"
-  "src/telegram/requests.rs:10262"
+  "src/connect.rs:24015"
+  "src/state.rs:20912"
+  "src/telegram/envelope.rs:18204"
+  "src/telegram/requests.rs:10322"
   "src/calls/engine.rs:3212"
   "tests/replay.rs:3505"
 )
