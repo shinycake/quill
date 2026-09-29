@@ -240,6 +240,7 @@ fn parse_screenshot_demo(args: &[String]) -> Option<(ui::ScreenshotDemo, std::pa
                 "ready-call" => ScreenshotDemo::ReadyCall,
                 "ready-call-video" => ScreenshotDemo::ReadyCallVideo,
                 "ready-call-screenshare" => ScreenshotDemo::ReadyCallScreenShare,
+                "ready-call-screenshare-receive" => ScreenshotDemo::ReadyCallScreenShareReceive,
                 "ready-call-devices" => ScreenshotDemo::ReadyCallDevices,
                 "ready-call-reconnecting" => ScreenshotDemo::ReadyCallReconnecting,
                 "ready-chat-ttl" => ScreenshotDemo::ReadyChatTtl,
@@ -413,6 +414,9 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
         ScreenshotDemo::ReadyCall => ".quill-ready-ready-call",
         ScreenshotDemo::ReadyCallVideo => ".quill-ready-ready-call-video",
         ScreenshotDemo::ReadyCallScreenShare => ".quill-ready-ready-call-screenshare",
+        ScreenshotDemo::ReadyCallScreenShareReceive => {
+            ".quill-ready-ready-call-screenshare-receive"
+        }
         ScreenshotDemo::ReadyCallDevices => ".quill-ready-ready-call-devices",
         ScreenshotDemo::ReadyCallReconnecting => ".quill-ready-ready-call-reconnecting",
         ScreenshotDemo::ReadyChatTtl => ".quill-ready-ready-chat-ttl",
