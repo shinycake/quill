@@ -16,10 +16,10 @@ HARD_CAP=2000
 # elsewhere.
 WAIVERS=(
   "src/ui/mod.rs:48818"
-  "src/connect.rs:24643"
-  "src/state.rs:21516"
-  "src/telegram/envelope.rs:18426"
-  "src/telegram/requests.rs:10434"
+  "src/connect.rs:24754"
+  "src/state.rs:21517"
+  "src/telegram/envelope.rs:18465"
+  "src/telegram/requests.rs:10470"
   # Slice A10 (2026-09-29): type-coherent extensions only — ui/mod.rs +3
   # (`mod auth_recovery` decl, `QuillApp` recovery fields + ctor init,
   # `recovery_mode` reset + wait-password screen arms); connect.rs +44
@@ -42,6 +42,14 @@ WAIVERS=(
   # `Connect` type); state.rs +166 (`PrivacyRuleDetail`/`PrivacyKeyState`
   # types + reducer match arms); envelope.rs +63 (privacy-rule payload
   # parsing arms on the existing `EnvelopePayload` match).
+  # Slice S13 (2026-09-29, rebased post-S3): type-coherent extensions only —
+  # connect.rs +111 (`set_story_custom_emoji_reaction` driver method on the
+  # existing `Connect` type + `driver_story_custom_emoji_reaction_gates`
+  # test in the private `mod tests` harness); state.rs +1
+  # (`chosen_reaction_extra` field init in existing fixture); envelope.rs
+  # +39 / requests.rs +36 (custom-emoji + paid chosen-reaction parse arms
+  # on the existing matches; ~85 lines of public-API-only tests moved to
+  # `tests/story_reactions.rs`).
   "src/calls/engine.rs:3212"
   "tests/replay.rs:3505"
 )

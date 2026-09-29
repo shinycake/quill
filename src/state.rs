@@ -17116,6 +17116,7 @@ mod tests {
                 caption: String::new(),
                 caption_entities: Vec::new(),
                 chosen_reaction_emoji: None,
+                chosen_reaction_extra: None,
                 interaction_info: None,
                 can_be_deleted: false,
                 can_be_replied: false,

@@ -4830,11 +4830,23 @@ pub fn get_chat_scheduled_messages(extra: RequestId, chat_id: ChatId) -> String 
     .to_string()
 }
 
-/// `reactionTypeEmoji` (TDLib 1.8.67). Custom / paid stay out of this slice.
+/// `reactionTypeEmoji` (TDLib 1.8.67). Paid reactions stay out —
+///
+/// `setStoryReaction` can't set them (schema comment, `td_api.tl:13809`).
 pub fn reaction_type_emoji(emoji: &str) -> Value {
     json!({
         "@type": "reactionTypeEmoji",
         "emoji": emoji
+    })
+}
+
+/// Phase 9.2+: `reactionTypeCustomEmoji` (TDLib 1.8.67,
+/// `schema/td_api.tl:2918`) — int64 ids serialize as JSON strings, like
+/// every other int53/int64 field in these builders.
+pub fn reaction_type_custom_emoji(custom_emoji_id: i64) -> Value {
+    json!({
+        "@type": "reactionTypeCustomEmoji",
+        "custom_emoji_id": custom_emoji_id.to_string()
     })
 }
 
@@ -5443,6 +5455,30 @@ pub fn set_story_reaction(
         "story_poster_chat_id": chat_id.0,
         "story_id": story_id,
         "reaction_type": reaction_type,
+        "update_recent_reactions": true
+    })
+    .to_string()
+}
+
+/// Phase 9.2+: `setStoryReaction` with a `reactionTypeCustomEmoji` (TDLib
+/// 1.8.67, `schema/td_api.tl:13809` — "Custom emoji reactions can be used
+/// only by Telegram Premium users"; enforcement is server-side, the picker
+/// gates on `availableReaction.needs_premium`). Separate builder (not a
+/// widened `set_story_reaction`) so the existing emoji/remove call sites —
+/// including the two in the frozen `src/ui/mod.rs` — keep their
+/// `Option<&str>` signatures untouched.
+pub fn set_story_custom_emoji_reaction(
+    extra: RequestId,
+    chat_id: ChatId,
+    story_id: i32,
+    custom_emoji_id: i64,
+) -> String {
+    json!({
+        "@type": "setStoryReaction",
+        "@extra": extra.as_extra(),
+        "story_poster_chat_id": chat_id.0,
+        "story_id": story_id,
+        "reaction_type": reaction_type_custom_emoji(custom_emoji_id),
         "update_recent_reactions": true
     })
     .to_string()
