@@ -1,15 +1,15 @@
 name: ci
 
-
 on:
   push:
     branches: [main, "cursor/**"]
   pull_request:
 
-
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
+
+
 
 
 jobs:
@@ -31,7 +31,6 @@ jobs:
         run: cargo clippy --no-default-features --all-targets --locked -- -D warnings
       - name: tests (core + replay)
         run: cargo test --no-default-features --locked -- --nocapture
-
 
   macos:
     name: macos-compile-smoke
