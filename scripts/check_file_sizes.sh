@@ -15,11 +15,11 @@ HARD_CAP=2000
 # types); the bump is exact and the PR body says why the code can't live
 # elsewhere.
 WAIVERS=(
-  "src/ui/mod.rs:48851"
+  "src/ui/mod.rs:48852"
   "src/connect.rs:24898"
-  "src/state.rs:21622"
-  "src/telegram/envelope.rs:18575"
-  "src/telegram/requests.rs:10470"
+  "src/state.rs:21654"
+  "src/telegram/envelope.rs:18601"
+  "src/telegram/requests.rs:10477"
   # Slice A10 (2026-09-29): type-coherent extensions only — ui/mod.rs +3
   # (`mod auth_recovery` decl, `QuillApp` recovery fields + ctor init,
   # `recovery_mode` reset + wait-password screen arms); connect.rs +44
@@ -62,6 +62,16 @@ WAIVERS=(
   # driver methods on the existing `Connect` type); state.rs +105
   # (`DataStorageState` fields + reducer match arms); envelope.rs +55
   # (storage-statistics payload parsing arms on the existing match).
+  # Slice S15 (2026-09-29, review fixup): type-coherent extensions only —
+  # state.rs +32 (`UpdateInstalledStickerSets` reducer match arm +
+  # `apply_installed_sticker_set_order` method on `Session`);
+  # envelope.rs +26 (`UpdateInstalledStickerSets` enum variant + parse arm
+  # on the existing `parse_payload` match); requests.rs +7
+  # (`send_sticker` options wiring inside the existing function — the slice's
+  # core behavior, cannot live elsewhere); ui/mod.rs +1
+  # (`..SendOptions::default()` in the existing `composer_send_options`
+  # literal — required to cover the new field, text sends keep default
+  # false). All S15 tests moved to `tests/sticker_dynamic_order.rs`.
   "src/calls/engine.rs:3212"
   "tests/replay.rs:3505"
 )

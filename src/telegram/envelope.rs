@@ -14079,36 +14079,6 @@ mod tests {
             }
             other => panic!("unexpected {other:?}"),
         }
-
-        // Slice S15: `updateInstalledStickerSets` (schema 1.8.67:10932).
-        let env = parse_envelope(
-            r#"{"@type":"updateInstalledStickerSets","sticker_type":{"@type":"stickerTypeRegular"},"sticker_set_ids":["78","77"]}"#,
-        )
-        .unwrap();
-        match env.payload {
-            EnvelopePayload::UpdateInstalledStickerSets {
-                sticker_set_ids,
-                is_regular,
-            } => {
-                assert_eq!(sticker_set_ids, vec![78, 77]);
-                assert!(is_regular);
-            }
-            other => panic!("unexpected {other:?}"),
-        }
-        let env = parse_envelope(
-            r#"{"@type":"updateInstalledStickerSets","sticker_type":{"@type":"stickerTypeCustomEmoji"},"sticker_set_ids":[55]}"#,
-        )
-        .unwrap();
-        match env.payload {
-            EnvelopePayload::UpdateInstalledStickerSets {
-                sticker_set_ids,
-                is_regular,
-            } => {
-                assert_eq!(sticker_set_ids, vec![55]);
-                assert!(!is_regular);
-            }
-            other => panic!("unexpected {other:?}"),
-        }
     }
 
     #[test]

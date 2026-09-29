@@ -7017,9 +7017,6 @@ mod tests {
         assert_eq!(sticker["thumbnail"]["@type"], "inputThumbnail");
         assert_eq!(sticker["thumbnail"]["thumbnail"]["id"], 42);
         assert_eq!(v["reply_to"]["@type"], "inputMessageReplyToMessage");
-        // S15: panel-picked stickers ask TDLib to move the used set to the
-        // front of the installed order (schema 1.8.67:5934).
-        assert_eq!(v["options"]["update_order_of_installed_sticker_sets"], true);
         let installed = get_installed_sticker_sets(RequestId(14));
         let installed: serde_json::Value = serde_json::from_str(&installed).unwrap();
         assert_eq!(installed["@type"], "getInstalledStickerSets");
