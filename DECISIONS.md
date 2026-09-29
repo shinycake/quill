@@ -5747,6 +5747,6 @@ ntgcalls v3.0.0 prebuilt lib, bindings verified against
   - Tests: `service_message_chat_added_to_community_parsed`, `service_message_chat_removed_from_community_parsed` (variant + community_id + preview).
 - **Key decisions (ponytail):**
   - Kept only `community_id`; no name lookup, no renderer data structures — the post-Phase-9 renderer resolves the name from existing community state.
-- **Known open item:** two exhaustive `MessageContent` matches in `src/ui/mod.rs` (the not-editable caption arm and the inline-keyboard arm) need the new variants added — `src/ui/mod.rs` is frozen for kit Phase 9, so this lands when it unfreezes (final UI gate at PR time).
+- **Known open item (merge-blocker until Phase 9 unfreezes `src/ui/mod.rs`):** two exhaustive `MessageContent` matches need the new variants — the not-editable caption arm (`src/ui/mod.rs:8053`, add `ChatAddedToCommunity { .. } | ChatRemovedFromCommunity` to the `=> {}` arm) and the `extra_media` arm (`src/ui/mod.rs:45424`, add to the `=> None` arm). Without them `cargo build --features ui` fails with non-exhaustive-patterns; the final UI gate runs at PR time after the freeze lifts.
 - **Out of this slice (left unchecked with evidence):**
   - Row rendering of both service messages (README `parity:groups-added-to-community` / `parity:groups-removed-from-community` stay `[ ]` with the partial note).

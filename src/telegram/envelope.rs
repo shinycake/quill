@@ -15529,6 +15529,18 @@ mod channel_envelope_tests {
     }
 
     #[test]
+    fn service_message_chat_added_to_community_missing_id_defaults_to_zero() {
+        // Slice C2k: a missing `community_id` must not panic — the parse
+        // arm defaults it to 0.
+        let json = r#"{"id":505,"chat_id":41,"is_outgoing":false,"content":{"@type":"messageChatAddedToCommunity"}}"#;
+        let parsed = parse_message(&serde_json::from_str(json).unwrap()).unwrap();
+        assert!(matches!(
+            parsed.content,
+            MessageContent::ChatAddedToCommunity { community_id: 0 }
+        ));
+    }
+
+    #[test]
     fn service_message_chat_removed_from_community_parsed() {
         // Slice C2k: `messageChatRemovedFromCommunity` (schema 1.8.67,
         // line 5363) has no fields.
