@@ -8111,7 +8111,11 @@ impl QuillApp {
                         // editable caption.
                         | MessageContent::Invoice(_)
                         | MessageContent::PaymentSuccessful(_)
-                        | MessageContent::PaymentReceived(_) => {}
+                        | MessageContent::PaymentReceived(_)
+                        // Slice C2k: community service rows carry no
+                        // editable caption.
+                        | MessageContent::ChatAddedToCommunity { .. }
+                        | MessageContent::ChatRemovedFromCommunity => {}
                     }
                 }
             }
@@ -45584,6 +45588,9 @@ fn session_history_row(
         | MessageContent::Call { .. }
         | MessageContent::ChatTtlChanged { .. }
         | MessageContent::ScreenshotTaken
+        // Slice C2k: community service rows render no extra media.
+        | MessageContent::ChatAddedToCommunity { .. }
+        | MessageContent::ChatRemovedFromCommunity
         | MessageContent::Unsupported { .. } => None,
     };
     let keyboard = inline_keyboard(message, cx);
