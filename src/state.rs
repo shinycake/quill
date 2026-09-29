@@ -18,11 +18,12 @@ use crate::telegram::envelope::{
     ChatAdministratorEntry, ChatDraft, ChatFolderInfo, ChatFolderSpec, ChatJoinResult, ChatKind,
     ChatList, ChatNotificationSettings, ChatPermissions, ChatPositionUpdate, ChatStatistics,
     ConnectionState, EnvelopePayload, EphemeralMessageContent, ErrorClass, ForumTopic,
-    InviteGroupCallParticipantResult, LinkPreview, LoginUrlInfo, MessageAutoDelete, MessageContent,
-    MessageForwardInfo, MessageInteractionInfo, MessageOrigin, MessageReaction, MessageReplyTo,
-    MessageSelfDestruct, MessageSender, NotificationSettingsScope, NotificationSound, OptionValue,
-    ParsedCall, ParsedChatEvent, ParsedChatInviteLink, ParsedChatJoinRequest, ParsedChatMember,
-    ParsedFile, ParsedGroupCall, ParsedGroupCallMessage, ParsedGroupCallParticipant, ParsedMessage,
+    InlineQueryResultSummary, InlineQueryResultsButton, InviteGroupCallParticipantResult,
+    LinkPreview, LoginUrlInfo, MessageAutoDelete, MessageContent, MessageForwardInfo,
+    MessageInteractionInfo, MessageOrigin, MessageReaction, MessageReplyTo, MessageSelfDestruct,
+    MessageSender, NotificationSettingsScope, NotificationSound, OptionValue, ParsedCall,
+    ParsedChatEvent, ParsedChatInviteLink, ParsedChatJoinRequest, ParsedChatMember, ParsedFile,
+    ParsedGroupCall, ParsedGroupCallMessage, ParsedGroupCallParticipant, ParsedMessage,
     ParsedSecretChat, ParsedSession, ParsedStory, ParsedUser, ParsedVideoChat, ParsedWebsite,
     ParsedWelcomeMessage, PasswordState, PaymentFormData, PaymentReceiptData, Poll, ReplyKeyboard,
     ReplyMarkup, ReportChatOutcome, ReportOption, ReportSponsoredResult, ReportStoryResult,
@@ -169,6 +170,14 @@ pub enum RequestPurpose {
         message_id: MessageId,
         option_id: i32,
         offset: i32,
+    },
+    /// Bots slice: `getInlineQueryResults` (schema 1.8.67, line 13019).
+    /// Response is `inlineQueryResults`; the single active fetch lives in
+    /// `Session::inline_query` (the composer has one active query).
+    GetInlineQueryResults {
+        chat_id: ChatId,
+        bot_user_id: i64,
+        first_page: bool,
     },
     /// B4: `stopPoll` (schema 1.8.67 line 12953). Response is `ok`; the
     /// poll closes via `updatePoll`.
@@ -1580,6 +1589,23 @@ impl RequestRegistry {
         self.pending.values().any(|p| {
             matches!(p.purpose, RequestPurpose::GetChatEventLog { .. })
                 && p.chat_id == Some(chat_id)
+        })
+    }
+
+    /// Bots slice: whether a `getInlineQueryResults` request is in flight
+    /// for the (chat, bot) pair, whatever the page. `has_purpose_for_chat`
+    /// compares the full purpose (including `first_page`), so it cannot
+    /// dedup across pages.
+    pub fn has_inline_query_in_flight(&self, chat_id: ChatId, bot_user_id: i64) -> bool {
+        self.pending.values().any(|p| {
+            matches!(
+                p.purpose,
+                RequestPurpose::GetInlineQueryResults {
+                    chat_id: c,
+                    bot_user_id: b,
+                    ..
+                } if c == chat_id && b == bot_user_id
+            )
         })
     }
 
@@ -4186,6 +4212,9 @@ pub struct Session {
     /// B4: `getPollVoters` fetch state for the poll-voters dialog, keyed
     /// by (chat id, message id, 0-based option index). One page per key.
     pub poll_voters: HashMap<(i64, i64, i32), PollVotersFetch>,
+    /// Bots slice: the single active `getInlineQueryResults` fetch (the
+    /// composer has one active inline query, so a slot — not a map).
+    pub inline_query: Option<InlineQuerySlot>,
     /// Slice G1: `getBasicGroupFullInfo` fetch state (the member list for
     /// basic groups), keyed by chat id. Reuses `SupergroupMembersFetch`
     /// (Loading / Loaded / Failed).
@@ -4572,6 +4601,33 @@ pub enum PollVotersFetch {
     Failed(String),
 }
 
+/// Bots slice: fetch state for the single active inline query
+/// (`getInlineQueryResults`, schema 1.8.67, line 13019). Mirrors
+/// `PollVotersFetch`: a failed first page lands in `Failed`, a failed
+/// page-next keeps the loaded page.
+#[derive(Debug, Clone, PartialEq)]
+pub enum InlineQueryFetch {
+    Loading,
+    Loaded {
+        inline_query_id: i64,
+        button: Option<InlineQueryResultsButton>,
+        results: Vec<InlineQueryResultSummary>,
+        next_offset: String,
+    },
+    Failed(String),
+}
+
+/// Bots slice: the single active inline-query slot — which (chat, bot)
+/// the results belong to, the query text that produced them, and the
+/// current fetch state.
+#[derive(Debug, Clone, PartialEq)]
+pub struct InlineQuerySlot {
+    pub chat_id: ChatId,
+    pub bot_user_id: i64,
+    pub query: String,
+    pub fetch: InlineQueryFetch,
+}
+
 /// Phase D3c: `getChatEventLog` page size (schema 1.8.67, line 15252:
 /// "up to 100"). Shared by the driver and the `has_more` heuristic in
 /// `Session::apply` — a short page means the log is exhausted.
@@ -4880,6 +4936,7 @@ impl Session {
             supergroup_restrict_right: HashMap::new(),
             supergroup_invite_right: HashMap::new(),
             poll_voters: HashMap::new(),
+            inline_query: None,
             supergroup_join_by_request: HashMap::new(),
             supergroup_is_broadcast: HashMap::new(),
             add_members_failed: HashMap::new(),
@@ -6036,6 +6093,69 @@ impl Session {
                             total_count,
                         },
                     );
+                }
+            }
+            // Bots slice: `inlineQueryResults` — the `getInlineQueryResults`
+            // answer (schema 1.8.67, line 7716). A first page replaces the
+            // slot; a later page appends, deduped by result id, keeping
+            // the new page's id/offset.
+            // ponytail: rapid re-queries can let an older response land on
+            // a newer slot — the response never echoes the query text, so
+            // the slot keys on (chat, bot) only; the UI slice debounces
+            // queries anyway.
+            EnvelopePayload::InlineQueryResults(page) => {
+                if let Some(RequestPurpose::GetInlineQueryResults {
+                    chat_id,
+                    bot_user_id,
+                    first_page,
+                }) = pending.map(|p| p.purpose)
+                {
+                    let slot_ok = match (first_page, self.inline_query.as_ref()) {
+                        (true, Some(slot)) => {
+                            slot.chat_id == chat_id
+                                && slot.bot_user_id == bot_user_id
+                                && matches!(slot.fetch, InlineQueryFetch::Loading)
+                        }
+                        (false, Some(slot)) => {
+                            slot.chat_id == chat_id
+                                && slot.bot_user_id == bot_user_id
+                                && matches!(slot.fetch, InlineQueryFetch::Loaded { .. })
+                        }
+                        _ => false,
+                    };
+                    if slot_ok {
+                        let fetch = match (first_page, &self.inline_query) {
+                            (
+                                false,
+                                Some(InlineQuerySlot {
+                                    fetch: InlineQueryFetch::Loaded { results: old, .. },
+                                    ..
+                                }),
+                            ) => {
+                                let mut results = old.clone();
+                                for result in page.results {
+                                    if !results.iter().any(|r| r.id == result.id) {
+                                        results.push(result);
+                                    }
+                                }
+                                InlineQueryFetch::Loaded {
+                                    inline_query_id: page.inline_query_id,
+                                    button: page.button,
+                                    results,
+                                    next_offset: page.next_offset,
+                                }
+                            }
+                            _ => InlineQueryFetch::Loaded {
+                                inline_query_id: page.inline_query_id,
+                                button: page.button,
+                                results: page.results,
+                                next_offset: page.next_offset,
+                            },
+                        };
+                        if let Some(slot) = self.inline_query.as_mut() {
+                            slot.fetch = fetch;
+                        }
+                    }
                 }
             }
             // Slice G1: `createNewBasicGroupChat` answer
@@ -8625,6 +8745,28 @@ impl Session {
                                     "Could not load voters",
                                 )),
                             );
+                        }
+                    }
+                    // Bots slice: a failed first page lands in the slot so
+                    // the picker shows an honest error; a failed "load
+                    // more" keeps the loaded page retryable.
+                    Some(RequestPurpose::GetInlineQueryResults {
+                        chat_id,
+                        bot_user_id,
+                        first_page,
+                    }) => {
+                        let failed_first_page = first_page
+                            && matches!(
+                                &self.inline_query,
+                                Some(slot)
+                                    if slot.chat_id == chat_id
+                                        && slot.bot_user_id == bot_user_id
+                            );
+                        if failed_first_page && let Some(slot) = self.inline_query.as_mut() {
+                            slot.fetch = InlineQueryFetch::Failed(call_request_error_line(
+                                &err,
+                                "Could not load inline results",
+                            ));
                         }
                     }
                     // Phase D3c: a failed first page lands in the fetch
@@ -11526,6 +11668,208 @@ mod tests {
             .recognize_speech_error
             .expect("recognize speech error surfaced");
         assert!(err.contains("Could not transcribe this message"), "{err}");
+    }
+
+    /// Bots slice: a first `inlineQueryResults` page replaces the slot's
+    /// `Loading` with `Loaded` (pending purpose + matching slot keys).
+    #[test]
+    fn inline_query_first_page_loads_slot() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        session.inline_query = Some(InlineQuerySlot {
+            chat_id: ChatId(1),
+            bot_user_id: 77,
+            query: "@gif cats".to_string(),
+            fetch: InlineQueryFetch::Loading,
+        });
+        let extra = session.request(
+            RequestPurpose::GetInlineQueryResults {
+                chat_id: ChatId(1),
+                bot_user_id: 77,
+                first_page: true,
+            },
+            Some(ChatId(1)),
+        );
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"inlineQueryResults","@extra":"{}","inline_query_id":9001,"button":null,"results":[{{"@type":"inlineQueryResultArticle","id":"a1","title":"An article","description":"Desc"}}],"next_offset":"25"}}"#,
+                extra.0,
+            ),
+        );
+        match &session.inline_query {
+            Some(slot) => match &slot.fetch {
+                InlineQueryFetch::Loaded {
+                    inline_query_id,
+                    button,
+                    results,
+                    next_offset,
+                } => {
+                    assert_eq!(*inline_query_id, 9001);
+                    assert_eq!(*button, None);
+                    assert_eq!(next_offset, "25");
+                    assert_eq!(results.len(), 1);
+                    assert_eq!(results[0].id, "a1");
+                    assert_eq!(results[0].kind, "article");
+                    assert_eq!(results[0].title, "An article");
+                    assert_eq!(results[0].description, "Desc");
+                }
+                other => panic!("unexpected {other:?}"),
+            },
+            None => panic!("inline query slot missing"),
+        }
+    }
+
+    /// Bots slice: a later `inlineQueryResults` page appends to the
+    /// loaded page (deduped by result id) and takes the new offset.
+    #[test]
+    fn inline_query_pagination_appends() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        session.inline_query = Some(InlineQuerySlot {
+            chat_id: ChatId(1),
+            bot_user_id: 77,
+            query: "@gif cats".to_string(),
+            fetch: InlineQueryFetch::Loaded {
+                inline_query_id: 9001,
+                button: None,
+                results: vec![InlineQueryResultSummary {
+                    id: "a1".to_string(),
+                    kind: "article".to_string(),
+                    title: "An article".to_string(),
+                    description: String::new(),
+                }],
+                next_offset: "25".to_string(),
+            },
+        });
+        let extra = session.request(
+            RequestPurpose::GetInlineQueryResults {
+                chat_id: ChatId(1),
+                bot_user_id: 77,
+                first_page: false,
+            },
+            Some(ChatId(1)),
+        );
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"inlineQueryResults","@extra":"{}","inline_query_id":9002,"button":null,"results":[{{"@type":"inlineQueryResultArticle","id":"a1","title":"An article"}},{{"@type":"inlineQueryResultPhoto","id":"p1","title":"A photo"}}],"next_offset":"50"}}"#,
+                extra.0,
+            ),
+        );
+        match &session.inline_query {
+            Some(slot) => match &slot.fetch {
+                InlineQueryFetch::Loaded {
+                    inline_query_id,
+                    results,
+                    next_offset,
+                    ..
+                } => {
+                    assert_eq!(*inline_query_id, 9002);
+                    assert_eq!(next_offset, "50");
+                    let ids: Vec<&str> = results.iter().map(|r| r.id.as_str()).collect();
+                    assert_eq!(ids, vec!["a1", "p1"]);
+                    assert_eq!(results[1].kind, "photo");
+                }
+                other => panic!("unexpected {other:?}"),
+            },
+            None => panic!("inline query slot missing"),
+        }
+    }
+
+    /// Bots slice: a failed first page lands in `Failed` so the picker
+    /// shows an honest error instead of spinning forever.
+    #[test]
+    fn inline_query_first_page_error_fails_slot() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        session.inline_query = Some(InlineQuerySlot {
+            chat_id: ChatId(1),
+            bot_user_id: 77,
+            query: "@gif cats".to_string(),
+            fetch: InlineQueryFetch::Loading,
+        });
+        let extra = session.request(
+            RequestPurpose::GetInlineQueryResults {
+                chat_id: ChatId(1),
+                bot_user_id: 77,
+                first_page: true,
+            },
+            Some(ChatId(1)),
+        );
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"error","@extra":"{}","code":400,"message":"BOT_INLINE_DISABLED"}}"#,
+                extra.0,
+            ),
+        );
+        match &session.inline_query {
+            Some(slot) => match &slot.fetch {
+                InlineQueryFetch::Failed(line) => {
+                    assert!(line.contains("Could not load inline results"), "{line}");
+                }
+                other => panic!("unexpected {other:?}"),
+            },
+            None => panic!("inline query slot missing"),
+        }
+    }
+
+    /// Bots slice: a failed "load more" keeps the loaded page so the
+    /// button stays retryable.
+    #[test]
+    fn inline_query_pagination_error_keeps_loaded_page() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        session.inline_query = Some(InlineQuerySlot {
+            chat_id: ChatId(1),
+            bot_user_id: 77,
+            query: "@gif cats".to_string(),
+            fetch: InlineQueryFetch::Loaded {
+                inline_query_id: 9001,
+                button: None,
+                results: vec![InlineQueryResultSummary {
+                    id: "a1".to_string(),
+                    kind: "article".to_string(),
+                    title: "An article".to_string(),
+                    description: String::new(),
+                }],
+                next_offset: "25".to_string(),
+            },
+        });
+        let extra = session.request(
+            RequestPurpose::GetInlineQueryResults {
+                chat_id: ChatId(1),
+                bot_user_id: 77,
+                first_page: false,
+            },
+            Some(ChatId(1)),
+        );
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"error","@extra":"{}","code":500,"message":"INTERNAL"}}"#,
+                extra.0,
+            ),
+        );
+        match &session.inline_query {
+            Some(slot) => match &slot.fetch {
+                InlineQueryFetch::Loaded { results, .. } => {
+                    assert_eq!(results.len(), 1);
+                    assert_eq!(results[0].id, "a1");
+                }
+                other => panic!("unexpected {other:?}"),
+            },
+            None => panic!("inline query slot missing"),
+        }
     }
 
     #[test]

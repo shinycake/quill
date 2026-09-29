@@ -4066,6 +4066,60 @@ pub fn stop_poll(extra: RequestId, chat_id: ChatId, message_id: MessageId) -> St
     .to_string()
 }
 
+/// `getInlineQueryResults` (TDLib 1.8.67, `schema/td_api.tl:13019`):
+/// `getInlineQueryResults bot_user_id:int53 chat_id:int53
+/// user_location:location query:string offset:string = InlineQueryResults;`
+/// `user_location` is null (schema doc: "pass null if unknown"); `offset`
+/// is "" for the first chunk, the previous answer's `next_offset` after.
+pub fn get_inline_query_results(
+    extra: RequestId,
+    bot_user_id: i64,
+    chat_id: ChatId,
+    query: &str,
+    offset: &str,
+) -> String {
+    json!({
+        "@type": "getInlineQueryResults",
+        "@extra": extra.as_extra(),
+        "bot_user_id": bot_user_id,
+        "chat_id": chat_id.0,
+        "user_location": Value::Null,
+        "query": query,
+        "offset": offset,
+    })
+    .to_string()
+}
+
+/// `sendInlineQueryResultMessage` (TDLib 1.8.67, `schema/td_api.tl:12226`):
+/// `sendInlineQueryResultMessage chat_id:int53 topic_id:MessageTopic
+/// reply_to:InputMessageReplyTo options:messageSendOptions query_id:int64
+/// result_id:string hide_via_bot:Bool = Message;`
+/// Sends the picked inline result as a normal chat message; `options` is
+/// null for the defaults (like `send_document`). `hide_via_bot` may only
+/// be used with the search bots (schema doc), so the UI defaults it off.
+pub fn send_inline_query_result_message(
+    extra: RequestId,
+    chat_id: ChatId,
+    topic_id: Option<i32>,
+    reply_to: Option<SendReply>,
+    query_id: i64,
+    result_id: &str,
+    hide_via_bot: bool,
+) -> String {
+    json!({
+        "@type": "sendInlineQueryResultMessage",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0,
+        "topic_id": message_topic_value(topic_id),
+        "reply_to": send_reply_value(reply_to.as_ref()),
+        "options": Value::Null,
+        "query_id": query_id,
+        "result_id": result_id,
+        "hide_via_bot": hide_via_bot,
+    })
+    .to_string()
+}
+
 /// `setPollAnswer` (TDLib 1.8.67, `schema/td_api.tl:12932`): `option_ids` are
 /// 0-based indexes into the poll's option list (not the `pollOption.id`
 /// strings). Response is `ok`; the new counts arrive via `updatePoll`.
@@ -7909,6 +7963,78 @@ mod channel_requests_tests {
         assert_eq!(v["option_id"], 2);
         assert_eq!(v["offset"], 50);
         assert_eq!(v["limit"], 50);
+    }
+
+    #[test]
+    fn get_inline_query_results_shape_matches_1_8_67() {
+        // Verbatim constructor at schema 1.8.67 line 13019 — the pin
+        // keeps the request shape honest if the schema is ever repinned.
+        let schema = include_str!("../../schema/td_api.tl");
+        assert!(schema.contains(
+            "getInlineQueryResults bot_user_id:int53 chat_id:int53 \
+             user_location:location query:string offset:string = InlineQueryResults;"
+        ));
+        let json = get_inline_query_results(RequestId(9), 77, ChatId(1), "@gif cats", "");
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "getInlineQueryResults");
+        assert_eq!(v["@extra"], "9");
+        assert_eq!(v["bot_user_id"], 77);
+        assert_eq!(v["chat_id"], 1);
+        // Schema doc: "pass null if unknown".
+        assert!(v["user_location"].is_null());
+        assert_eq!(v["query"], "@gif cats");
+        // "" is the first-chunk offset (schema doc on line 13019).
+        assert_eq!(v["offset"], "");
+        // The pagination token passes through untouched.
+        let json = get_inline_query_results(RequestId(10), 77, ChatId(1), "@gif cats", "50");
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@extra"], "10");
+        assert_eq!(v["offset"], "50");
+    }
+
+    #[test]
+    fn send_inline_query_result_message_shape_matches_1_8_67() {
+        // Verbatim constructor at schema 1.8.67 line 12226.
+        let schema = include_str!("../../schema/td_api.tl");
+        assert!(schema.contains(
+            "sendInlineQueryResultMessage chat_id:int53 topic_id:MessageTopic \
+             reply_to:InputMessageReplyTo options:messageSendOptions query_id:int64 \
+             result_id:string hide_via_bot:Bool = Message;"
+        ));
+        let json = send_inline_query_result_message(
+            RequestId(9),
+            ChatId(1),
+            None,
+            None,
+            12345,
+            "res1",
+            false,
+        );
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "sendInlineQueryResultMessage");
+        assert_eq!(v["@extra"], "9");
+        assert_eq!(v["chat_id"], 1);
+        assert!(v["topic_id"].is_null());
+        assert!(v["reply_to"].is_null());
+        // Null options = default message send options, like `send_document`.
+        assert!(v["options"].is_null());
+        assert_eq!(v["query_id"], 12345);
+        assert_eq!(v["result_id"], "res1");
+        assert_eq!(v["hide_via_bot"], false);
+        // The forum-topic variant mirrors `send_document`.
+        let json = send_inline_query_result_message(
+            RequestId(9),
+            ChatId(1),
+            Some(7),
+            None,
+            12345,
+            "res1",
+            true,
+        );
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["topic_id"]["@type"], "messageTopicForum");
+        assert_eq!(v["topic_id"]["forum_topic_id"], 7);
+        assert_eq!(v["hide_via_bot"], true);
     }
 
     #[test]
