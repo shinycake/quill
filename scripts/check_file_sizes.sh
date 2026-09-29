@@ -15,7 +15,7 @@ HARD_CAP=2000
 # types); the bump is exact and the PR body says why the code can't live
 # elsewhere.
 WAIVERS=(
-  "src/ui/mod.rs:49086"
+  "src/ui/mod.rs:49090"
   "src/connect.rs:24898"
   "src/state.rs:21658"
   "src/telegram/envelope.rs:18600"
@@ -81,6 +81,11 @@ WAIVERS=(
   # scenarios; the duplicated `open_community_info` was removed in favor
   # of the shared `open_info_panel_target` — net −15); state.rs +4
   # (21654 → 21658: `InfoPanelTarget::Community` variant).
+  # Slice bots-force-reply-keyboard (2026-09-29, merge-pipeline rebase
+  # post-G10): type-coherent extension only — ui/mod.rs +4 (49086 → 49090:
+  # `mod force_reply` decl + one render-chain link mounting the panel; all
+  # other logic lives in the new named modules `src/force_reply.rs` and
+  # `src/ui/force_reply.rs`).
   "src/calls/engine.rs:3212"
   "tests/replay.rs:3505"
 )

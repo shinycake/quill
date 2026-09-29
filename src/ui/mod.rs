@@ -2,6 +2,7 @@ mod account_lifecycle;
 mod appearance;
 mod auth_recovery;
 mod chat_theme;
+mod force_reply;
 mod privacy;
 mod story_areas;
 mod synthetic;
@@ -4917,7 +4918,7 @@ impl QuillApp {
                     .and_then(|session| session.pending_force_reply.take())
             });
         if let Some(target) = force_target {
-            self.apply_force_reply(target, window, cx);
+            self.drain_force_reply(target, window, cx);
         }
         let queued: Vec<QueuedNotification> = self
             .live
@@ -38133,6 +38134,9 @@ impl QuillApp {
                         .when_some(self.custom_keyboard_panel(cx), |this, panel| {
                             this.child(panel)
                         })
+                        // Force-reply keyboard bar (`replyMarkupForceReply`)
+                        // above the composer.
+                        .when_some(self.force_reply_panel(cx), |this, panel| this.child(panel))
                         // Phase 3.3: `/` command menu above the composer.
                         .when_some(self.command_menu_dropdown(cx), |this, panel| {
                             this.child(panel)
@@ -42269,7 +42273,7 @@ fn apply_ready_bot_keyboard(session: &mut Session, sink: &Arc<MemorySink>, seq: 
     let game_message = r#"{"@type":"updateNewMessage","message":{"id":302,"chat_id":21,"is_outgoing":false,"reply_markup":{"@type":"replyMarkupInlineKeyboard","rows":[[{"@type":"inlineKeyboardButton","text":"Play chess","type":{"@type":"inlineKeyboardButtonTypeCallbackGame"}}]]},"content":{"@type":"messageGame","game":{"@type":"game","id":"901","short_name":"chess","title":"Chess","text":{"@type":"formattedText","text":"Challenge me!","entities":[]},"description":"A classic.","photo":null,"animation":null}}}}"#;
     let login_message = r#"{"@type":"updateNewMessage","message":{"id":303,"chat_id":21,"is_outgoing":false,"reply_markup":{"@type":"replyMarkupInlineKeyboard","rows":[[{"@type":"inlineKeyboardButton","text":"Log in","type":{"@type":"inlineKeyboardButtonTypeLoginUrl","id":11,"url":"https://example.com/login","forward_text":"Log in to Example","bot_username":"demo_bot","request_write_access":false}}]]},"content":{"@type":"messageText","text":{"@type":"formattedText","text":"Log in to continue:","entities":[]}}}}"#;
     let keyboard_message = r#"{"@type":"updateNewMessage","message":{"id":304,"chat_id":21,"is_outgoing":false,"reply_markup":{"@type":"replyMarkupShowKeyboard","rows":[[{"@type":"keyboardButton","text":"Yes","type":{"@type":"keyboardButtonTypeText"}},{"@type":"keyboardButton","text":"No","type":{"@type":"keyboardButtonTypeText"}}],[{"@type":"keyboardButton","text":"Share phone","type":{"@type":"keyboardButtonTypeRequestPhoneNumber"}},{"@type":"keyboardButton","text":"Mini app","type":{"@type":"keyboardButtonTypeWebApp","url":"https://example.com/app"}}]],"is_persistent":false,"resize_keyboard":true,"one_time":true,"is_personal":false,"force_reply":false,"input_field_placeholder":"Choose…"},"content":{"@type":"messageText","text":{"@type":"formattedText","text":"Choose one:","entities":[]}}}}"#;
-    let force_reply_message = r#"{"@type":"updateNewMessage","message":{"id":306,"chat_id":21,"is_outgoing":false,"reply_markup":{"@type":"replyMarkupForceReply","input_field_placeholder":""},"content":{"@type":"messageText","text":{"@type":"formattedText","text":"What is your name?","entities":[]}}}}"#;
+    let force_reply_message = r#"{"@type":"updateNewMessage","message":{"id":306,"chat_id":21,"is_outgoing":false,"reply_markup":{"@type":"replyMarkupForceReply","input_field_placeholder":"Type your name…"},"content":{"@type":"messageText","text":{"@type":"formattedText","text":"What is your name?","entities":[]}}}}"#;
     for raw in [
         bot_rows,
         game_message,
