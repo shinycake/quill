@@ -13,6 +13,7 @@ pub mod data_settings;
 pub mod diagnostics;
 pub mod emoji;
 pub mod folders;
+pub mod force_reply;
 pub mod ids;
 pub mod key_fingerprint;
 pub mod layout;
