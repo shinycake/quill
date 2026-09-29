@@ -325,9 +325,9 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Report story (reportStory multi-step flow: option picker → optional/required text → Reported/Failed; state.rs + connect.rs + ui/mod.rs Phase 9.5) <!-- parity:stories-report -->
 - [x] Stealth mode / hide view from poster (activateStoryStealthMode + updateStoryStealthMode state; viewer action-row button reflects active/cooldown; ui/mod.rs Phase 9.5) <!-- parity:stories-stealth-mode -->
 - [ ] Clickable story areas (location, venue, suggested reaction, message, link, weather, gift) — parser drops areas (telegram/envelope.rs:3328) <!-- parity:stories-areas-view -->
-- [ ] Story albums: view albums, add to album (schema getChatStoryAlbums / createStoryAlbum / ... in 1.8.67, unused) <!-- parity:stories-albums -->
-- [ ] Archive story list (storyListArchive trays remove the row; no archive UI) (DECISIONS.md Phase 9.1 "Out of this slice") <!-- parity:stories-archive -->
-- [ ] Pinned stories on chat page (getChatPostedToChatPageStories, setChatPinnedStories unused) <!-- parity:stories-pinned -->
+- [x] Story albums: story page lists/opens albums; create/rename/delete; add/remove/reorder stories; reorder albums (album covers deferred) <!-- parity:stories-albums -->
+- [x] Archive story list via getChatArchivedStories with load-more pagination (DECISIONS.md Phase 9.1 "Out of this slice") <!-- parity:stories-archive -->
+- [x] Pinned stories on chat page (getChatPostedToChatPageStories + setChatPinnedStories full-list semantics) <!-- parity:stories-pinned -->
 - [ ] Story notification settings (mute stories per chat, story sound, show story poster) — parsed into fields only (telegram/envelope.rs:1859-1860) <!-- parity:stories-notify-settings -->
 - [ ] "Only admins can send stories in this group" and story-restriction notices (TGX strings ChatDisabledStory / ChatRestrictedStory / ChatRestrictedStoryUntil; no Quill handling) <!-- parity:stories-restriction-notice -->
 

@@ -30,7 +30,8 @@ use crate::state::{
     InlineQueryFetch, InlineQuerySlot, InstantViewPage, InviteLinkFetch, JoinRequestFetch,
     LoginUrlRequest, MemberListFilter, MemberStatusChange, PasswordOp, PaymentRequest,
     PollVotersFetch, RequestPurpose, RequestRollback, SearchStatus, Session, SharedMediaTab,
-    ShutdownPhase, SupergroupMembersFetch, WelcomeMessagesFetch,
+    ShutdownPhase, StoryPageOp, StoryPageOpState, SupergroupMembersFetch, WelcomeMessagesFetch,
+    story_page_op_label,
 };
 use crate::story_composer::{StoryMediaKind, StoryPrivacy};
 use crate::telegram::client::{LiveTdJson, OwnedEnvelope, ReceiveBridge};
@@ -49,8 +50,8 @@ use crate::telegram::requests::{
     VideoNoteThumbnailSend, VideoSend, VoiceNoteSend, accept_call_with_protocol,
     activate_story_stealth_mode as activate_story_stealth_mode_request, add_chat_member,
     add_chat_members, add_chat_to_list, add_chat_to_list_value, add_chat_welcome_message,
-    add_contact, add_message_reaction, add_recently_found_chat, ban_group_call_participants,
-    boost_chat, can_post_story as can_post_story_request,
+    add_contact, add_message_reaction, add_recently_found_chat, add_story_album_stories,
+    ban_group_call_participants, boost_chat, can_post_story as can_post_story_request,
     cancel_download_file as cancel_download_file_request,
     cancel_recovery_email_address_verification, chat_member_status_administrator_json,
     chat_member_status_banned_json, chat_member_status_member_json,
@@ -60,10 +61,10 @@ use crate::telegram::requests::{
     close_secret_chat as close_secret_chat_request, close_story, create_call_with_protocol,
     create_chat_folder, create_chat_invite_link, create_community, create_forum_topic,
     create_new_basic_group_chat, create_new_secret_chat, create_new_supergroup_chat,
-    create_private_chat, create_video_chat, decline_group_call_invitation, delete_chat,
-    delete_chat_folder, delete_chat_history,
+    create_private_chat, create_story_album, create_video_chat, decline_group_call_invitation,
+    delete_chat, delete_chat_folder, delete_chat_history,
     delete_chat_reply_markup as delete_chat_reply_markup_request, delete_chat_welcome_message,
-    delete_forum_topic, delete_messages, delete_profile_photo, delete_story,
+    delete_forum_topic, delete_messages, delete_profile_photo, delete_story, delete_story_album,
     discard_call as discard_call_request, disconnect_all_websites, disconnect_website,
     download_file as download_file_request, edit_chat_folder, edit_chat_invite_link,
     edit_chat_welcome_message, edit_forum_topic, edit_message_caption, edit_message_text,
@@ -72,10 +73,11 @@ use crate::telegram::requests::{
     get_archive_chat_list_settings, get_authorization_state, get_available_chat_boost_slots,
     get_basic_group_full_info, get_bot_similar_bots, get_callback_query_answer,
     get_callback_query_answer_game, get_callback_query_answer_with_password,
-    get_chat_active_stories, get_chat_administrators, get_chat_boost_status, get_chat_event_log,
-    get_chat_folder, get_chat_history, get_chat_invite_links, get_chat_join_requests,
-    get_chat_lists_to_add_chat, get_chat_member, get_chat_scheduled_messages,
-    get_chat_sponsored_messages, get_chat_statistics,
+    get_chat_active_stories, get_chat_administrators, get_chat_archived_stories,
+    get_chat_boost_status, get_chat_event_log, get_chat_folder, get_chat_history,
+    get_chat_invite_links, get_chat_join_requests, get_chat_lists_to_add_chat, get_chat_member,
+    get_chat_posted_to_chat_page_stories, get_chat_scheduled_messages, get_chat_sponsored_messages,
+    get_chat_statistics, get_chat_story_albums,
     get_chats_to_post_stories as get_chats_to_post_stories_request, get_commands,
     get_connected_websites, get_contacts, get_forum_topics, get_full_rich_message, get_group_call,
     get_inline_query_results, get_installed_sticker_sets, get_link_preview, get_login_url,
@@ -83,7 +85,7 @@ use crate::telegram::requests::{
     get_message_thread_history, get_password_state, get_payment_form, get_payment_receipt,
     get_poll_voters, get_saved_animations, get_saved_notification_sounds,
     get_scope_notification_settings, get_secret_chat, get_sticker_set, get_storage_statistics,
-    get_story, get_story_available_reactions,
+    get_story, get_story_album_stories, get_story_available_reactions,
     get_story_interactions as get_story_interactions_request, get_supergroup,
     get_supergroup_full_info, get_supergroup_members, get_user_full_info,
     get_user_privacy_setting_rules, get_video_chat_invite_link, get_video_chat_rtmp_url,
@@ -93,7 +95,8 @@ use crate::telegram::requests::{
     load_community_full_info, load_group_call_participants, open_chat, open_message_content,
     open_story, pin_chat_message, post_story as post_story_request, process_chat_join_request,
     read_chat_list, recognize_speech, remove_contacts, remove_message_reaction,
-    reorder_active_usernames, reorder_chat_folders, replace_primary_chat_invite_link,
+    remove_story_album_stories, reorder_active_usernames, reorder_chat_folders,
+    reorder_story_album_stories, reorder_story_albums, replace_primary_chat_invite_link,
     replace_video_chat_rtmp_url, report_chat, report_chat_sponsored_message,
     report_story as report_story_request, request_qr_code_authentication,
     resend_authentication_code, resend_messages, resend_recovery_email_address_code,
@@ -108,10 +111,10 @@ use crate::telegram::requests::{
     set_archive_chat_list_settings, set_authentication_phone_number, set_bio, set_chat_description,
     set_chat_draft_message, set_chat_member_status, set_chat_member_tag,
     set_chat_message_auto_delete_time, set_chat_notification_settings, set_chat_permissions,
-    set_chat_photo, set_chat_slow_mode_delay, set_chat_title, set_community_name,
-    set_group_call_participant_volume_level, set_message_sender_block_list, set_name, set_password,
-    set_pinned_chats, set_poll_answer, set_profile_photo, set_recovery_email_address,
-    set_scope_notification_settings,
+    set_chat_photo, set_chat_pinned_stories, set_chat_slow_mode_delay, set_chat_title,
+    set_community_name, set_group_call_participant_volume_level, set_message_sender_block_list,
+    set_name, set_password, set_pinned_chats, set_poll_answer, set_profile_photo,
+    set_recovery_email_address, set_scope_notification_settings, set_story_album_name,
     set_story_privacy_settings as set_story_privacy_settings_request, set_story_reaction,
     set_supergroup_username, set_user_privacy_setting_rules, set_username, set_video_chat_title,
     start_group_call_recording, start_group_call_screen_sharing, start_scheduled_video_chat,
@@ -8575,6 +8578,325 @@ impl<S: JsonSender> ConnectDriver<S> {
                 Err(err)
             }
         }
+    }
+
+    /// Phase 9.7: send a story-page request; on transport failure take the
+    /// pending request back and mark the page op failed (the UI surfaces
+    /// it; the driver never silently swallows it).
+    fn send_story_page(
+        &mut self,
+        purpose: RequestPurpose,
+        extra: RequestId,
+        json: &str,
+    ) -> Result<RequestId, ConnectSendError> {
+        match self.sender.send_json(json) {
+            Ok(()) => Ok(extra),
+            Err(err) => {
+                self.session.requests.take(extra);
+                self.session.story_page_op = Some(StoryPageOp {
+                    label: story_page_op_label(purpose),
+                    state: StoryPageOpState::Failed("could not send".to_string()),
+                });
+                Err(err)
+            }
+        }
+    }
+
+    /// Phase 9.7: the chat must exist for story-page requests.
+    fn story_page_chat(&self, chat_id: ChatId) -> bool {
+        self.chats_path_active() && self.session.chats.contains_key(&chat_id.0)
+    }
+
+    /// Phase 9.7: `getChatStoryAlbums` (schema 1.8.67, line 13850).
+    /// Deduped while a fetch is in flight; the answer replaces the chat's
+    /// album list.
+    pub fn get_chat_story_albums(
+        &mut self,
+        chat_id: ChatId,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.story_page_chat(chat_id) {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if self
+            .session
+            .requests
+            .has_purpose_for_chat(RequestPurpose::GetChatStoryAlbums, chat_id)
+        {
+            return Ok(None);
+        }
+        let purpose = RequestPurpose::GetChatStoryAlbums;
+        let extra = self.session.request(purpose, Some(chat_id));
+        self.session
+            .begin_story_page_check(story_page_op_label(purpose));
+        let json = get_chat_story_albums(extra, chat_id);
+        self.send_story_page(purpose, extra, &json).map(Some)
+    }
+
+    /// Phase 9.7: `getStoryAlbumStories` (schema 1.8.67, line 13857).
+    /// `offset` 0 starts from the first album story; the reducer
+    /// accumulates pages.
+    pub fn get_story_album_stories(
+        &mut self,
+        chat_id: ChatId,
+        story_album_id: i32,
+        offset: i32,
+        limit: i32,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.story_page_chat(chat_id) || offset < 0 || limit <= 0 {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if self.session.requests.has_purpose_for_story_album(
+            RequestPurpose::GetStoryAlbumStories,
+            chat_id,
+            story_album_id,
+        ) {
+            return Ok(None);
+        }
+        let purpose = RequestPurpose::GetStoryAlbumStories;
+        let extra =
+            self.session
+                .request_for_story_album(purpose, chat_id, None, Some(story_album_id));
+        self.session
+            .begin_story_page_check(story_page_op_label(purpose));
+        let json = get_story_album_stories(extra, chat_id, story_album_id, offset, limit);
+        self.send_story_page(purpose, extra, &json).map(Some)
+    }
+
+    /// Phase 9.7: `createStoryAlbum` (schema 1.8.67, line 13863). The name
+    /// is 1-12 characters per the schema comment; the answer is the new
+    /// `storyAlbum`.
+    pub fn create_story_album(
+        &mut self,
+        story_poster_chat_id: ChatId,
+        name: &str,
+        story_ids: &[i32],
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.story_page_chat(story_poster_chat_id) {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let name_len = name.chars().count();
+        if !(1..=12).contains(&name_len) {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let purpose = RequestPurpose::CreateStoryAlbum;
+        let extra = self.session.request(purpose, Some(story_poster_chat_id));
+        self.session
+            .begin_story_page_op(story_page_op_label(purpose));
+        let json = create_story_album(extra, story_poster_chat_id, name, story_ids);
+        self.send_story_page(purpose, extra, &json)
+    }
+
+    /// Phase 9.7: `reorderStoryAlbums` (schema 1.8.67, line 13868). The
+    /// sent order rides on `PendingRequest::story_ids`; the `ok` answer
+    /// applies it to the cached list.
+    pub fn reorder_story_albums(
+        &mut self,
+        chat_id: ChatId,
+        story_album_ids: &[i32],
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.story_page_chat(chat_id) {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let purpose = RequestPurpose::ReorderStoryAlbums;
+        let extra = self.session.request_for_story_album(
+            purpose,
+            chat_id,
+            Some(story_album_ids.to_vec()),
+            None,
+        );
+        self.session
+            .begin_story_page_op(story_page_op_label(purpose));
+        let json = reorder_story_albums(extra, chat_id, story_album_ids);
+        self.send_story_page(purpose, extra, &json)
+    }
+
+    /// Phase 9.7: `deleteStoryAlbum` (schema 1.8.67, line 13873). The
+    /// album id rides on `PendingRequest::story_album_id`; the `ok`
+    /// answer drops the album from the cached list.
+    pub fn delete_story_album(
+        &mut self,
+        chat_id: ChatId,
+        story_album_id: i32,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.story_page_chat(chat_id) {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let purpose = RequestPurpose::DeleteStoryAlbum;
+        let extra =
+            self.session
+                .request_for_story_album(purpose, chat_id, None, Some(story_album_id));
+        self.session
+            .begin_story_page_op(story_page_op_label(purpose));
+        let json = delete_story_album(extra, chat_id, story_album_id);
+        self.send_story_page(purpose, extra, &json)
+    }
+
+    /// Phase 9.7: `setStoryAlbumName` (schema 1.8.67, line 13879). The
+    /// name is 1-12 characters per the schema comment; the answer is the
+    /// changed `storyAlbum`.
+    pub fn set_story_album_name(
+        &mut self,
+        chat_id: ChatId,
+        story_album_id: i32,
+        name: &str,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.story_page_chat(chat_id) {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let name_len = name.chars().count();
+        if !(1..=12).contains(&name_len) {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let purpose = RequestPurpose::SetStoryAlbumName;
+        let extra = self.session.request(purpose, Some(chat_id));
+        self.session
+            .begin_story_page_op(story_page_op_label(purpose));
+        let json = set_story_album_name(extra, chat_id, story_album_id, name);
+        self.send_story_page(purpose, extra, &json)
+    }
+
+    /// Phase 9.7: `addStoryAlbumStories` (schema 1.8.67, line 13887).
+    /// At least one story id (schema: "1-getOption(...) identifiers").
+    /// Stories are added to the beginning; the answer is the changed
+    /// `storyAlbum`.
+    pub fn add_story_album_stories(
+        &mut self,
+        chat_id: ChatId,
+        story_album_id: i32,
+        story_ids: &[i32],
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.story_page_chat(chat_id) || story_ids.is_empty() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let purpose = RequestPurpose::AddStoryAlbumStories;
+        let extra = self.session.request(purpose, Some(chat_id));
+        self.session
+            .begin_story_page_op(story_page_op_label(purpose));
+        let json = add_story_album_stories(extra, chat_id, story_album_id, story_ids);
+        self.send_story_page(purpose, extra, &json)
+    }
+
+    /// Phase 9.7: `removeStoryAlbumStories` (schema 1.8.67, line 13894).
+    /// The answer is the changed `storyAlbum`.
+    pub fn remove_story_album_stories(
+        &mut self,
+        chat_id: ChatId,
+        story_album_id: i32,
+        story_ids: &[i32],
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.story_page_chat(chat_id) || story_ids.is_empty() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let purpose = RequestPurpose::RemoveStoryAlbumStories;
+        let extra = self.session.request(purpose, Some(chat_id));
+        self.session
+            .begin_story_page_op(story_page_op_label(purpose));
+        let json = remove_story_album_stories(extra, chat_id, story_album_id, story_ids);
+        self.send_story_page(purpose, extra, &json)
+    }
+
+    /// Phase 9.7: `reorderStoryAlbumStories` (schema 1.8.67, line 13901).
+    /// The listed stories move to the beginning of the album; the answer
+    /// is the changed `storyAlbum`.
+    pub fn reorder_story_album_stories(
+        &mut self,
+        chat_id: ChatId,
+        story_album_id: i32,
+        story_ids: &[i32],
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.story_page_chat(chat_id) || story_ids.is_empty() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let purpose = RequestPurpose::ReorderStoryAlbumStories;
+        let extra = self.session.request(purpose, Some(chat_id));
+        self.session
+            .begin_story_page_op(story_page_op_label(purpose));
+        let json = reorder_story_album_stories(extra, chat_id, story_album_id, story_ids);
+        self.send_story_page(purpose, extra, &json)
+    }
+
+    /// Phase 9.7: `getChatArchivedStories` (schema 1.8.67, line 13784).
+    /// `from_story_id` 0 starts from the newest; the reducer accumulates
+    /// pages and tracks the smallest loaded id as the next cursor.
+    pub fn get_chat_archived_stories(
+        &mut self,
+        chat_id: ChatId,
+        from_story_id: i32,
+        limit: i32,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.story_page_chat(chat_id) || from_story_id < 0 || limit <= 0 {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if self
+            .session
+            .requests
+            .has_purpose_for_chat(RequestPurpose::GetChatArchivedStories, chat_id)
+        {
+            return Ok(None);
+        }
+        let purpose = RequestPurpose::GetChatArchivedStories;
+        let extra = self.session.request(purpose, Some(chat_id));
+        self.session
+            .begin_story_page_check(story_page_op_label(purpose));
+        let json = get_chat_archived_stories(extra, chat_id, from_story_id, limit);
+        self.send_story_page(purpose, extra, &json).map(Some)
+    }
+
+    /// Phase 9.7: `getChatPostedToChatPageStories` (schema 1.8.67, line
+    /// 13776). The first page (`from_story_id == 0`) also carries
+    /// `pinned_story_ids`; the reducer accumulates pages.
+    pub fn get_chat_posted_to_chat_page_stories(
+        &mut self,
+        chat_id: ChatId,
+        from_story_id: i32,
+        limit: i32,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.story_page_chat(chat_id) || from_story_id < 0 || limit <= 0 {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if self
+            .session
+            .requests
+            .has_purpose_for_chat(RequestPurpose::GetChatPostedToChatPageStories, chat_id)
+        {
+            return Ok(None);
+        }
+        let purpose = RequestPurpose::GetChatPostedToChatPageStories;
+        let extra = self.session.request(purpose, Some(chat_id));
+        self.session
+            .begin_story_page_check(story_page_op_label(purpose));
+        let json = get_chat_posted_to_chat_page_stories(extra, chat_id, from_story_id, limit);
+        let sent = self.send_story_page(purpose, extra, &json).map(Some);
+        // Phase 9.7: a fresh first page restarts the list — the server only
+        // sends `pinned_story_ids` on the first page (schema 1.8.67, line
+        // 6747), so stale pins must not survive a refetch. Restart only once
+        // the request actually left: a transport failure must not wipe the
+        // already-loaded list.
+        if sent.is_ok() && from_story_id == 0 {
+            self.session.chat_page_stories.remove(&chat_id.0);
+        }
+        sent
+    }
+
+    /// Phase 9.7: `setChatPinnedStories` (schema 1.8.67, line 13789).
+    /// The full new pinned list (not a delta); the sent ids ride on
+    /// `PendingRequest::story_ids` so the `ok` answer applies them.
+    pub fn set_chat_pinned_stories(
+        &mut self,
+        chat_id: ChatId,
+        story_ids: &[i32],
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.story_page_chat(chat_id) {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let purpose = RequestPurpose::SetChatPinnedStories;
+        let extra =
+            self.session
+                .request_for_story_album(purpose, chat_id, Some(story_ids.to_vec()), None);
+        self.session
+            .begin_story_page_op(story_page_op_label(purpose));
+        let json = set_chat_pinned_stories(extra, chat_id, story_ids);
+        self.send_story_page(purpose, extra, &json)
     }
 
     /// Phase 9.2: reply to a story — `sendMessage` to the poster chat with

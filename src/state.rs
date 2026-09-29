@@ -26,9 +26,9 @@ use crate::telegram::envelope::{
     ParsedChatEvent, ParsedChatInviteLink, ParsedChatJoinRequest, ParsedChatMember,
     ParsedCommunity, ParsedCommunityFullInfo, ParsedFile, ParsedGroupCall, ParsedGroupCallMessage,
     ParsedGroupCallParticipant, ParsedMessage, ParsedSecretChat, ParsedSession, ParsedStory,
-    ParsedUser, ParsedVideoChat, ParsedWebsite, ParsedWelcomeMessage, PasswordState,
-    PaymentFormData, PaymentReceiptData, Poll, ReplyKeyboard, ReplyMarkup, ReportChatOutcome,
-    ReportOption, ReportSponsoredResult, ReportStoryResult, RichMessageContent,
+    ParsedStoryAlbum, ParsedUser, ParsedVideoChat, ParsedWebsite, ParsedWelcomeMessage,
+    PasswordState, PaymentFormData, PaymentReceiptData, Poll, ReplyKeyboard, ReplyMarkup,
+    ReportChatOutcome, ReportOption, ReportSponsoredResult, ReportStoryResult, RichMessageContent,
     ScopeNotificationSettings, SecretChatState, SponsoredMessage, StickerFormat, StickerItem,
     StickerSetInfo, StorageStats, StoryAvailableReactionView, StoryInteractionView,
     StoryInteractionsView, StoryListView, TdError, UsernameCheckResult, ValidatedOrderInfoData,
@@ -799,6 +799,44 @@ pub enum RequestPurpose {
     /// Phase 9.5: `getChatsToPostStories`. Response is `chats`;
     /// stored in `Session::story_post_as_chats`.
     GetChatsToPostStories,
+    /// Phase 9.7: `getChatStoryAlbums`. Response is `storyAlbums`;
+    /// replaces `Session::story_albums[chat_id]`.
+    GetChatStoryAlbums,
+    /// Phase 9.7: `getStoryAlbumStories`. Response is `stories`;
+    /// accumulated into `Session::story_album_stories[(chat_id, album_id)]`.
+    GetStoryAlbumStories,
+    /// Phase 9.7: `createStoryAlbum`. Response is the new `storyAlbum`;
+    /// upserted into `Session::story_albums[chat_id]`.
+    CreateStoryAlbum,
+    /// Phase 9.7: `reorderStoryAlbums`. Response is `ok`; the sent order
+    /// is applied to `Session::story_albums[chat_id]` (correlated via
+    /// `PendingRequest::story_ids`, which carries album ids here).
+    ReorderStoryAlbums,
+    /// Phase 9.7: `deleteStoryAlbum`. Response is `ok`; the album is
+    /// dropped from `Session::story_albums[chat_id]` (album id rides on
+    /// `PendingRequest::story_album_id`).
+    DeleteStoryAlbum,
+    /// Phase 9.7: `setStoryAlbumName`. Response is the changed
+    /// `storyAlbum`; upserted into `Session::story_albums[chat_id]`.
+    SetStoryAlbumName,
+    /// Phase 9.7: `addStoryAlbumStories` / `removeStoryAlbumStories` /
+    /// `reorderStoryAlbumStories`. Response is the changed `storyAlbum`;
+    /// upserted; the album's story id list is refreshed from the next
+    /// `getStoryAlbumStories` page.
+    AddStoryAlbumStories,
+    RemoveStoryAlbumStories,
+    ReorderStoryAlbumStories,
+    /// Phase 9.7: `getChatArchivedStories`. Response is `stories`;
+    /// accumulated into `Session::archived_stories[chat_id]`.
+    GetChatArchivedStories,
+    /// Phase 9.7: `getChatPostedToChatPageStories`. Response is `stories`
+    /// (with `pinned_story_ids` on the first page); replaces
+    /// `Session::chat_page_stories[chat_id]`.
+    GetChatPostedToChatPageStories,
+    /// Phase 9.7: `setChatPinnedStories`. Response is `ok`; the sent
+    /// story ids (correlated via `PendingRequest::story_ids`) replace
+    /// the chat's `pinned_story_ids`.
+    SetChatPinnedStories,
     /// Parity slice: `createChatFolder`. Response is `chatFolderInfo`;
     /// upserted into `Session::chat_folders` (`updateChatFolders` stays the
     /// source of truth).
@@ -1441,6 +1479,13 @@ pub struct PendingRequest {
     /// Phase 9.1: `story_id` for `GetStory` requests so in-flight
     /// per-story dedupe distinguishes stories of the same chat.
     pub story_id: Option<i32>,
+    /// Phase 9.7: `story_ids` for `SetChatPinnedStories` (the sent pinned
+    /// story ids) and `ReorderStoryAlbums` (the sent album id order) so
+    /// the id-less `ok` response applies to the right list.
+    pub story_ids: Option<Vec<i32>>,
+    /// Phase 9.7: `story_album_id` for `DeleteStoryAlbum` so the `ok`
+    /// response drops the right album from `Session::story_albums`.
+    pub story_album_id: Option<i32>,
     /// Parity slice: `folder_id` for folder-scoped requests
     /// (`GetChatFolder`, `EditChatFolder`, `DeleteChatFolder`,
     /// `LoadFolderChats`) so responses correlate to the folder.
@@ -1506,6 +1551,8 @@ impl RequestRegistry {
                 supergroup_id: None,
                 community_id: None,
                 story_id: None,
+                story_ids: None,
+                story_album_id: None,
                 folder_id: None,
                 scope: None,
                 secret_chat_id: None,
@@ -1539,6 +1586,8 @@ impl RequestRegistry {
                 supergroup_id: None,
                 community_id: None,
                 story_id: None,
+                story_ids: None,
+                story_album_id: None,
                 folder_id: None,
                 scope: None,
                 secret_chat_id: None,
@@ -1573,6 +1622,8 @@ impl RequestRegistry {
                 supergroup_id: None,
                 community_id: None,
                 story_id: None,
+                story_ids: None,
+                story_album_id: None,
                 folder_id: None,
                 scope: None,
                 secret_chat_id: None,
@@ -1607,6 +1658,8 @@ impl RequestRegistry {
                 supergroup_id: None,
                 community_id: None,
                 story_id: None,
+                story_ids: None,
+                story_album_id: None,
                 folder_id: None,
                 scope: None,
                 secret_chat_id: None,
@@ -1639,6 +1692,8 @@ impl RequestRegistry {
                 supergroup_id: None,
                 community_id: None,
                 story_id: None,
+                story_ids: None,
+                story_album_id: None,
                 folder_id: None,
                 scope: None,
                 secret_chat_id: None,
@@ -1782,6 +1837,20 @@ impl RequestRegistry {
         })
     }
 
+    /// Phase 9.7: an in-flight request for a purpose/chat/album triple
+    /// (`GetStoryAlbumStories` per album).
+    pub fn has_purpose_for_story_album(
+        &self,
+        purpose: RequestPurpose,
+        chat_id: ChatId,
+        story_album_id: i32,
+    ) -> bool {
+        self.pending.values().any(|p| {
+            p.purpose == purpose
+                && p.chat_id == Some(chat_id)
+                && p.story_album_id == Some(story_album_id)
+        })
+    }
     /// Parity slice: an in-flight request for a purpose/folder pair
     /// (`GetChatFolder` / `LoadFolderChats` / folder mutations).
     pub fn has_purpose_for_folder(&self, purpose: RequestPurpose, folder_id: i32) -> bool {
@@ -4474,6 +4543,26 @@ pub struct Session {
     /// Phase 9.5: posted-story management round-trip state (edit /
     /// cover / privacy) rendered as one status line.
     pub story_manage: StoryManageState,
+    /// Phase 9.7: `getChatStoryAlbums` results per chat (`storyAlbum` rows;
+    /// covers dropped in the parser — name-only list).
+    pub story_albums: HashMap<i64, Vec<ParsedStoryAlbum>>,
+    /// Phase 9.7: `(chat_id, album_id)` → story ids of an opened album
+    /// (`getStoryAlbumStories` pages accumulate; stories live in
+    /// `Session::stories`).
+    pub story_album_stories: HashMap<(i64, i32), Vec<i32>>,
+    /// Phase 9.7: `getChatPostedToChatPageStories` results per chat —
+    /// story ids, `pinned_story_ids` (first page only), and the server
+    /// total for the "Load more" gate.
+    pub chat_page_stories: HashMap<i64, ChatPageStories>,
+    /// Phase 9.7: `getChatArchivedStories` pages per chat (accumulated;
+    /// `next_from_story_id` is the smallest loaded id, `None` until the
+    /// first page lands).
+    pub archived_stories: HashMap<i64, ArchivedStories>,
+    /// Phase 9.7: honest status of the latest album/pin mutation on the
+    /// story page (`Sending` at send time, `Succeeded` / `Failed` when
+    /// the TDLib answer lands). The story page renders it as its status
+    /// line.
+    pub story_page_op: Option<StoryPageOp>,
     /// Phase 9.1: `loadActiveStories(storyListMain)` was issued. A retry is
     /// allowed (the flag is reset) if the attempt failed.
     pub stories_active_loaded: bool,
@@ -4584,6 +4673,50 @@ impl StoryStealthMode {
 pub struct StoryManageState {
     pub pending: bool,
     pub error: Option<String>,
+}
+
+/// Phase 9.7: one chat's `getChatPostedToChatPageStories` state — the
+/// loaded story ids (paginated, accumulated), the pinned story ids (from
+/// the first page's `pinned_story_ids`, or from a `setChatPinnedStories`
+/// `ok`), and the server-side total.
+#[derive(Debug, Clone, Default)]
+pub struct ChatPageStories {
+    pub story_ids: Vec<i32>,
+    pub pinned_story_ids: Vec<i32>,
+    pub total_count: i32,
+}
+
+/// Phase 9.7: one chat's `getChatArchivedStories` state — accumulated
+/// story ids, the server total, and the cursor for the next page (the
+/// smallest loaded story id; `None` before the first page).
+#[derive(Debug, Clone, Default)]
+pub struct ArchivedStories {
+    pub story_ids: Vec<i32>,
+    pub total_count: i32,
+    pub next_from_story_id: Option<i32>,
+}
+
+/// Phase 9.7: honest album/pin mutation states on the story page.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StoryPageOpState {
+    /// A read is in flight (`getChatStoryAlbums`,
+    /// `getStoryAlbumStories`, `getChatArchivedStories`,
+    /// `getChatPostedToChatPageStories`).
+    Checking,
+    /// A mutation is in flight (create/reorder/delete/rename album,
+    /// add/remove/reorder album stories, set pinned stories).
+    Sending,
+    Succeeded,
+    Failed(String),
+}
+
+/// Phase 9.7: the latest story-page mutation (`createStoryAlbum`,
+/// `setChatPinnedStories`, …) — `label` names the operation, `state` the
+/// honest TDLib round-trip state.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StoryPageOp {
+    pub label: String,
+    pub state: StoryPageOpState,
 }
 
 /// Phase 6: which info panel is open in the side panel.
@@ -5122,6 +5255,11 @@ impl Session {
             profile_edit_error: None,
             story_post_as_chats: Vec::new(),
             story_manage: StoryManageState::default(),
+            story_albums: HashMap::new(),
+            story_album_stories: HashMap::new(),
+            chat_page_stories: HashMap::new(),
+            archived_stories: HashMap::new(),
+            story_page_op: None,
             diagnostics,
         }
     }
@@ -6849,6 +6987,121 @@ impl Session {
                 }
                 self.stories.insert((story.poster_chat_id, story.id), story);
             }
+            EnvelopePayload::StoryAlbums { albums } => {
+                // Phase 9.7: `getChatStoryAlbums` — honored only for the
+                // matching purpose (a stray `storyAlbums` never flips the
+                // UI); replaces the chat's album list.
+                if pending.is_some_and(|p| p.purpose == RequestPurpose::GetChatStoryAlbums)
+                    && let Some(chat_id) = pending.and_then(|p| p.chat_id)
+                {
+                    self.story_albums.insert(chat_id.0, albums);
+                    self.clear_story_page_op(RequestPurpose::GetChatStoryAlbums);
+                }
+            }
+            EnvelopePayload::StoryAlbum { album } => {
+                // Phase 9.7: `createStoryAlbum` / `setStoryAlbumName` /
+                // `addStoryAlbumStories` / `removeStoryAlbumStories` /
+                // `reorderStoryAlbumStories` — each returns the changed
+                // album; upsert it into the chat's list and mark the op
+                // succeeded. Album-story mutations also invalidate the
+                // opened album's cached id list so the next open refetches.
+                if let Some(purpose) = pending.map(|p| p.purpose)
+                    && matches!(
+                        purpose,
+                        RequestPurpose::CreateStoryAlbum
+                            | RequestPurpose::SetStoryAlbumName
+                            | RequestPurpose::AddStoryAlbumStories
+                            | RequestPurpose::RemoveStoryAlbumStories
+                            | RequestPurpose::ReorderStoryAlbumStories
+                    )
+                    && let Some(chat_id) = pending.and_then(|p| p.chat_id)
+                {
+                    let albums = self.story_albums.entry(chat_id.0).or_default();
+                    if let Some(existing) = albums.iter_mut().find(|a| a.id == album.id) {
+                        *existing = album.clone();
+                    } else {
+                        albums.push(album.clone());
+                    }
+                    if !matches!(purpose, RequestPurpose::SetStoryAlbumName) {
+                        self.story_album_stories.remove(&(chat_id.0, album.id));
+                    }
+                    self.succeed_story_page_op(purpose);
+                }
+            }
+            EnvelopePayload::Stories {
+                total_count,
+                stories,
+                pinned_story_ids,
+            } => {
+                // Phase 9.7: `getStoryAlbumStories` /
+                // `getChatArchivedStories` /
+                // `getChatPostedToChatPageStories` — stories are cached in
+                // `Session::stories` (like `getStory`); the id lists
+                // accumulate per purpose.
+                for (story, files) in &stories {
+                    self.remember_files(files);
+                    self.stories
+                        .insert((story.poster_chat_id, story.id), story.clone());
+                }
+                let ids: Vec<i32> = stories.iter().map(|(story, _)| story.id).collect();
+                match pending.map(|p| p.purpose) {
+                    Some(RequestPurpose::GetStoryAlbumStories) => {
+                        if let Some(chat_id) = pending.and_then(|p| p.chat_id)
+                            && let Some(album_id) = pending.and_then(|p| p.story_album_id)
+                        {
+                            let list = self
+                                .story_album_stories
+                                .entry((chat_id.0, album_id))
+                                .or_default();
+                            // Phase 9.7: preserve server order (the
+                            // album's own order) — append new ids,
+                            // dedupe, never re-sort.
+                            for id in ids {
+                                if !list.contains(&id) {
+                                    list.push(id);
+                                }
+                            }
+                            self.clear_story_page_op(RequestPurpose::GetStoryAlbumStories);
+                        }
+                    }
+                    Some(RequestPurpose::GetChatArchivedStories) => {
+                        if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
+                            let entry = self.archived_stories.entry(chat_id.0).or_default();
+                            // Phase 9.7: TDLib returns archive stories newest
+                            // first (decreasing id); preserve server order
+                            // across pages — append new ids, dedupe.
+                            for id in ids.iter().copied() {
+                                if !entry.story_ids.contains(&id) {
+                                    entry.story_ids.push(id);
+                                }
+                            }
+                            entry.total_count = total_count;
+                            entry.next_from_story_id = entry.story_ids.iter().copied().min();
+                            self.clear_story_page_op(RequestPurpose::GetChatArchivedStories);
+                        }
+                    }
+                    Some(RequestPurpose::GetChatPostedToChatPageStories) => {
+                        if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
+                            let entry = self.chat_page_stories.entry(chat_id.0).or_default();
+                            // Phase 9.7: preserve server order (newest
+                            // first) across pages — append new ids, dedupe.
+                            for id in ids.iter().copied() {
+                                if !entry.story_ids.contains(&id) {
+                                    entry.story_ids.push(id);
+                                }
+                            }
+                            entry.total_count = total_count;
+                            if !pinned_story_ids.is_empty() {
+                                entry.pinned_story_ids = pinned_story_ids;
+                            }
+                            self.clear_story_page_op(
+                                RequestPurpose::GetChatPostedToChatPageStories,
+                            );
+                        }
+                    }
+                    _ => {}
+                }
+            }
             EnvelopePayload::CanPostStoryResult { result } => {
                 // Phase 9.3: `canPostStory` answer — honored only for the
                 // composer's own check (purpose-gated, so a stray result
@@ -8182,6 +8435,60 @@ impl Session {
                     ) => {
                         self.story_manage.pending = false;
                     }
+                    // Phase 9.7: `reorderStoryAlbums` confirmed — apply
+                    // the sent album order (correlated via
+                    // `PendingRequest::story_ids`); albums missing from
+                    // the order keep their relative order at the end.
+                    Some(RequestPurpose::ReorderStoryAlbums) => {
+                        if let Some(chat_id) = pending.and_then(|p| p.chat_id)
+                            && let Some(order) = pending.and_then(|p| p.story_ids.clone())
+                            && let Some(albums) = self.story_albums.get_mut(&chat_id.0)
+                        {
+                            let mut reordered = Vec::with_capacity(albums.len());
+                            for id in &order {
+                                if let Some(pos) = albums.iter().position(|a| a.id == *id) {
+                                    reordered.push(albums[pos].clone());
+                                }
+                            }
+                            for album in albums.drain(..) {
+                                if !reordered.iter().any(|a| a.id == album.id) {
+                                    reordered.push(album);
+                                }
+                            }
+                            *albums = reordered;
+                        }
+                        self.succeed_story_page_op(RequestPurpose::ReorderStoryAlbums);
+                    }
+                    // Phase 9.7: `deleteStoryAlbum` confirmed — drop the
+                    // album (correlated via
+                    // `PendingRequest::story_album_id`) and its cached
+                    // story ids.
+                    Some(RequestPurpose::DeleteStoryAlbum) => {
+                        if let Some(chat_id) = pending.and_then(|p| p.chat_id)
+                            && let Some(album_id) = pending.and_then(|p| p.story_album_id)
+                        {
+                            if let Some(albums) = self.story_albums.get_mut(&chat_id.0) {
+                                albums.retain(|a| a.id != album_id);
+                            }
+                            self.story_album_stories.remove(&(chat_id.0, album_id));
+                        }
+                        self.succeed_story_page_op(RequestPurpose::DeleteStoryAlbum);
+                    }
+                    // Phase 9.7: `setChatPinnedStories` confirmed — the
+                    // sent story ids (correlated via
+                    // `PendingRequest::story_ids`) are the new pinned
+                    // list.
+                    Some(RequestPurpose::SetChatPinnedStories) => {
+                        if let Some(chat_id) = pending.and_then(|p| p.chat_id)
+                            && let Some(ids) = pending.and_then(|p| p.story_ids.clone())
+                        {
+                            self.chat_page_stories
+                                .entry(chat_id.0)
+                                .or_default()
+                                .pinned_story_ids = ids;
+                        }
+                        self.succeed_story_page_op(RequestPurpose::SetChatPinnedStories);
+                    }
                     _ => {}
                 }
                 // Phase C2i: `sendCallLog` confirmed — the log upload for
@@ -8478,6 +8785,24 @@ impl Session {
                         {
                             self.histories.entry(chat_id.0).or_default();
                         }
+                    }
+                    // Phase 9.7: a story-page mutation error — the page's
+                    // status line shows it instead of spinning forever.
+                    Some(
+                        purpose @ (RequestPurpose::GetChatStoryAlbums
+                        | RequestPurpose::GetStoryAlbumStories
+                        | RequestPurpose::CreateStoryAlbum
+                        | RequestPurpose::ReorderStoryAlbums
+                        | RequestPurpose::DeleteStoryAlbum
+                        | RequestPurpose::SetStoryAlbumName
+                        | RequestPurpose::AddStoryAlbumStories
+                        | RequestPurpose::RemoveStoryAlbumStories
+                        | RequestPurpose::ReorderStoryAlbumStories
+                        | RequestPurpose::GetChatArchivedStories
+                        | RequestPurpose::GetChatPostedToChatPageStories
+                        | RequestPurpose::SetChatPinnedStories),
+                    ) => {
+                        self.fail_story_page_op(purpose, error_reason(&err).to_string());
                     }
                     _ => {}
                 }
@@ -9577,6 +9902,64 @@ impl Session {
             self.story_tray.insert(entry.chat_id, entry);
         } else {
             self.story_tray.remove(&entry.chat_id);
+        }
+    }
+
+    /// Phase 9.7: start tracking a story-page mutation (`Sending`).
+    pub fn begin_story_page_op(&mut self, label: impl Into<String>) {
+        self.story_page_op = Some(StoryPageOp {
+            label: label.into(),
+            state: StoryPageOpState::Sending,
+        });
+    }
+
+    /// Phase 9.7: start tracking a story-page read (`Checking`).
+    pub fn begin_story_page_check(&mut self, label: impl Into<String>) {
+        self.story_page_op = Some(StoryPageOp {
+            label: label.into(),
+            state: StoryPageOpState::Checking,
+        });
+    }
+
+    /// Phase 9.7: mark the story-page op `Succeeded` when its answer
+    /// lands — only if the op was sent for this purpose (the driver sets
+    /// the label from the same purpose).
+    fn succeed_story_page_op(&mut self, purpose: RequestPurpose) {
+        if self
+            .story_page_op
+            .as_ref()
+            .is_some_and(|op| op.label == story_page_op_label(purpose))
+        {
+            self.story_page_op = Some(StoryPageOp {
+                label: story_page_op_label(purpose),
+                state: StoryPageOpState::Succeeded,
+            });
+        }
+    }
+
+    /// Phase 9.7: mark the story-page op `Failed` on a TDLib error.
+    fn fail_story_page_op(&mut self, purpose: RequestPurpose, reason: String) {
+        if self
+            .story_page_op
+            .as_ref()
+            .is_some_and(|op| op.label == story_page_op_label(purpose))
+        {
+            self.story_page_op = Some(StoryPageOp {
+                label: story_page_op_label(purpose),
+                state: StoryPageOpState::Failed(reason),
+            });
+        }
+    }
+
+    /// Phase 9.7: clear the story-page op once its load answer landed (the
+    /// loaded list itself is the honest state — no status line needed).
+    fn clear_story_page_op(&mut self, purpose: RequestPurpose) {
+        if self
+            .story_page_op
+            .as_ref()
+            .is_some_and(|op| op.label == story_page_op_label(purpose))
+        {
+            self.story_page_op = None;
         }
     }
 
@@ -11289,6 +11672,26 @@ impl Session {
         id
     }
 
+    /// Phase 9.7: like `request`, but stamps the sent id lists for album
+    /// requests whose `ok` response carries no payload —
+    /// `PendingRequest::story_ids` for `SetChatPinnedStories` (the new
+    /// pinned list) and `ReorderStoryAlbums` (the new album order), and
+    /// `PendingRequest::story_album_id` for `DeleteStoryAlbum`.
+    pub fn request_for_story_album(
+        &mut self,
+        purpose: RequestPurpose,
+        chat_id: ChatId,
+        story_ids: Option<Vec<i32>>,
+        story_album_id: Option<i32>,
+    ) -> RequestId {
+        let id = self.request(purpose, Some(chat_id));
+        if let Some(pending) = self.requests.pending.get_mut(&id.0) {
+            pending.story_ids = story_ids;
+            pending.story_album_id = story_album_id;
+        }
+        id
+    }
+
     /// Phase B1: like `request`, but stamps the secret chat id for
     /// `GetSecretChat` / `CloseSecretChat` correlation
     /// (`PendingRequest::secret_chat_id`) — the `secretChat` response and
@@ -11574,6 +11977,43 @@ impl Session {
         self.account_generation.bump();
         self.shutdown = ShutdownPhase::CloseRequested;
     }
+}
+
+/// Phase 9.7: the status-line label for a story-page request purpose —
+/// shared by the driver's `begin_story_page_op` and the reducer's
+/// succeed/fail/clear so both sides name the same op.
+pub fn story_page_op_label(purpose: RequestPurpose) -> String {
+    match purpose {
+        RequestPurpose::GetChatStoryAlbums => "loading albums".to_string(),
+        RequestPurpose::GetStoryAlbumStories => "loading album stories".to_string(),
+        RequestPurpose::CreateStoryAlbum => "creating album".to_string(),
+        RequestPurpose::ReorderStoryAlbums => "reordering albums".to_string(),
+        RequestPurpose::DeleteStoryAlbum => "deleting album".to_string(),
+        RequestPurpose::SetStoryAlbumName => "renaming album".to_string(),
+        RequestPurpose::AddStoryAlbumStories => "adding stories to album".to_string(),
+        RequestPurpose::RemoveStoryAlbumStories => "removing stories from album".to_string(),
+        RequestPurpose::ReorderStoryAlbumStories => "reordering album stories".to_string(),
+        RequestPurpose::GetChatArchivedStories => "loading archived stories".to_string(),
+        RequestPurpose::GetChatPostedToChatPageStories => "loading chat page stories".to_string(),
+        RequestPurpose::SetChatPinnedStories => "pinning stories".to_string(),
+        _ => "story request".to_string(),
+    }
+}
+
+/// Phase 9.7: parse a comma/whitespace-separated story-id list from a
+/// text input (the story page's "add stories" / "new album" inputs).
+/// Non-numeric tokens are dropped; ids dedupe, order kept.
+pub fn parse_story_id_list(text: &str) -> Vec<i32> {
+    let mut ids = Vec::new();
+    for token in text.split(|c: char| c == ',' || c.is_whitespace()) {
+        if let Ok(id) = token.parse::<i32>()
+            && id > 0
+            && !ids.contains(&id)
+        {
+            ids.push(id);
+        }
+    }
+    ids
 }
 
 fn history_message(message: ParsedMessage, pending: bool) -> HistoryMessage {
@@ -16277,6 +16717,7 @@ mod tests {
                 privacy_settings: None,
                 area_link_url: None,
                 area_reaction_emojis: Vec::new(),
+                can_be_added_to_album: false,
             },
         );
         apply_json(
@@ -20354,5 +20795,204 @@ mod tests {
         assert_eq!(receipt.total_amount, 1999);
         assert_eq!(receipt.credentials_title, "Visa •• 4242");
         assert!(session.payment_receipt_open);
+    }
+
+    #[test]
+    fn story_page_albums_replace_and_stray_ignored() {
+        // Phase 9.7: a `storyAlbums` answer with the matching
+        // `GetChatStoryAlbums` purpose replaces the chat's album list; a
+        // stray `storyAlbums` (no pending request) never flips the UI.
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(1);
+        let albums = |extra: &str| {
+            format!(
+                r#"{{"@type":"storyAlbums","@extra":"{extra}","albums":[{{"@type":"storyAlbum","id":1,"name":"Travel"}},{{"@type":"storyAlbum","id":2,"name":"Food"}}]}}"#
+            )
+        };
+        apply_json(&mut session, &seq, &sink, &albums("no-such-extra"));
+        assert!(!session.story_albums.contains_key(&11));
+        let extra = session.request(RequestPurpose::GetChatStoryAlbums, Some(ChatId(11)));
+        apply_json(&mut session, &seq, &sink, &albums(&extra.0.to_string()));
+        let names: Vec<&str> = session.story_albums[&11]
+            .iter()
+            .map(|a| a.name.as_str())
+            .collect();
+        assert_eq!(names, ["Travel", "Food"]);
+        assert!(session.story_page_op.is_none());
+    }
+
+    #[test]
+    fn story_page_album_stories_accumulate_and_dedupe() {
+        // Phase 9.7: `getStoryAlbumStories` pages accumulate per album and
+        // dedupe; the loading op clears when a page lands.
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(1);
+        let stories = |extra: &str, ids: &[i32]| {
+            let list: Vec<String> = ids
+                .iter()
+                .map(|id| format!(r#"{{"@type":"story","id":{id},"poster_chat_id":11}}"#))
+                .collect();
+            format!(
+                r#"{{"@type":"stories","@extra":"{extra}","total_count":3,"stories":[{}]}}"#,
+                list.join(",")
+            )
+        };
+        let fetch = |session: &mut Session, ids: &[i32]| {
+            let extra = session.request_for_story_album(
+                RequestPurpose::GetStoryAlbumStories,
+                ChatId(11),
+                None,
+                Some(7),
+            );
+            session
+                .begin_story_page_check(story_page_op_label(RequestPurpose::GetStoryAlbumStories));
+            (extra, ids.to_vec())
+        };
+        let (extra, _) = fetch(&mut session, &[301, 302]);
+        assert!(matches!(
+            session.story_page_op.as_ref().map(|op| &op.state),
+            Some(StoryPageOpState::Checking)
+        ));
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &stories(&extra.0.to_string(), &[301, 302]),
+        );
+        let (extra, _) = fetch(&mut session, &[302, 303]);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &stories(&extra.0.to_string(), &[302, 303]),
+        );
+        assert_eq!(session.story_album_stories[&(11, 7)], vec![301, 302, 303]);
+        assert!(session.story_page_op.is_none());
+    }
+
+    #[test]
+    fn story_page_chat_page_pinned_first_page_only() {
+        // Phase 9.7: the first chat-page payload sets `pinned_story_ids`
+        // (schema 1.8.67:6747 — populated only by the first page); a later
+        // page without pins preserves them and appends ids.
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(1);
+        let page = |extra: &str, pinned: Option<&str>, ids: &[i32]| {
+            let list: Vec<String> = ids
+                .iter()
+                .map(|id| format!(r#"{{"@type":"story","id":{id},"poster_chat_id":11}}"#))
+                .collect();
+            let pins = pinned
+                .map(|p| format!(r#""pinned_story_ids":[{p}],"#))
+                .unwrap_or_default();
+            format!(
+                r#"{{"@type":"stories","@extra":"{extra}","total_count":3,{pins}"stories":[{}]}}"#,
+                list.join(",")
+            )
+        };
+        let extra = session.request(
+            RequestPurpose::GetChatPostedToChatPageStories,
+            Some(ChatId(11)),
+        );
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &page(&extra.0.to_string(), Some("301"), &[301, 302]),
+        );
+        let extra = session.request(
+            RequestPurpose::GetChatPostedToChatPageStories,
+            Some(ChatId(11)),
+        );
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &page(&extra.0.to_string(), None, &[303]),
+        );
+        let state = &session.chat_page_stories[&11];
+        assert_eq!(state.pinned_story_ids, vec![301]);
+        assert_eq!(state.story_ids, vec![301, 302, 303]);
+    }
+
+    #[test]
+    fn story_page_archive_next_cursor() {
+        // Phase 9.7: the archive accumulates ids in server order (newest
+        // first) and the next page starts from the smallest loaded id
+        // (`from_story_id` returns stories below it).
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(1);
+        let extra = session.request(RequestPurpose::GetChatArchivedStories, Some(ChatId(11)));
+        session.begin_story_page_check(story_page_op_label(RequestPurpose::GetChatArchivedStories));
+        assert!(matches!(
+            session.story_page_op.as_ref().map(|op| &op.state),
+            Some(StoryPageOpState::Checking)
+        ));
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"stories","@extra":"{}","total_count":5,"stories":[{{"@type":"story","id":202,"poster_chat_id":11}},{{"@type":"story","id":201,"poster_chat_id":11}}]}}"#,
+                extra.0
+            ),
+        );
+        let archived = &session.archived_stories[&11];
+        assert_eq!(archived.story_ids, vec![202, 201]);
+        assert_eq!(archived.next_from_story_id, Some(201));
+        assert!(session.story_page_op.is_none());
+    }
+
+    #[test]
+    fn story_page_mutation_op_lifecycle() {
+        // Phase 9.7: a mutation shows Sending while in flight, Succeeded on
+        // the `storyAlbum` answer, Failed on a TDLib error.
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(1);
+        let extra = session.request(RequestPurpose::CreateStoryAlbum, Some(ChatId(11)));
+        session.begin_story_page_op(story_page_op_label(RequestPurpose::CreateStoryAlbum));
+        assert!(matches!(
+            session.story_page_op.as_ref().map(|op| &op.state),
+            Some(StoryPageOpState::Sending)
+        ));
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"storyAlbum","@extra":"{}","id":9,"name":"New"}}"#,
+                extra.0
+            ),
+        );
+        assert!(matches!(
+            session.story_page_op.as_ref().map(|op| &op.state),
+            Some(StoryPageOpState::Succeeded)
+        ));
+        assert_eq!(session.story_albums[&11][0].name, "New");
+        let extra = session.request(RequestPurpose::DeleteStoryAlbum, Some(ChatId(11)));
+        session.begin_story_page_op(story_page_op_label(RequestPurpose::DeleteStoryAlbum));
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"error","@extra":"{}","code":400,"message":"ALBUM_NOT_FOUND"}}"#,
+                extra.0
+            ),
+        );
+        assert!(matches!(
+            session.story_page_op.as_ref().map(|op| &op.state),
+            Some(StoryPageOpState::Failed(_))
+        ));
+    }
+
+    #[test]
+    fn parse_story_id_list_cases() {
+        // Phase 9.7: the story-page id inputs — commas/whitespace split,
+        // junk dropped, order kept, deduped.
+        assert_eq!(parse_story_id_list("301, 302,303"), vec![301, 302, 303]);
+        assert_eq!(parse_story_id_list("  7\n8\t9 "), vec![7, 8, 9]);
+        assert_eq!(parse_story_id_list("1,abc,2,,0,-3,1"), vec![1, 2]);
+        assert!(parse_story_id_list("").is_empty());
     }
 }
