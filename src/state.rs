@@ -16718,6 +16718,7 @@ mod tests {
                 area_link_url: None,
                 area_reaction_emojis: Vec::new(),
                 can_be_added_to_album: false,
+                areas: Vec::new(),
             },
         );
         apply_json(

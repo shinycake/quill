@@ -1,4 +1,6 @@
 use super::envelope_emoji::{EmojiCategory, EmojiKeyword, EmojiStatusItem};
+use super::story_areas::parse_story_areas;
+pub use super::story_areas::{StoryAreaKind, StoryAreaView};
 use crate::ids::{ChatId, FileId, MessageId, RequestId, UserId};
 use crate::rich::{RichBlock, parse_rich_message};
 use crate::telegram::envelope_story::{ParsedStoryAlbum, parse_story_album};
@@ -4916,7 +4918,9 @@ pub enum StoryOriginView {
 /// stay out, same call as the 9.4 composer). Dropped: `privacy_settings`
 /// (parsed separately via `StoryPrivacy::from_settings_json` only where
 /// the privacy editor needs it), album ids, and the other `is_*` flags.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// Phase 9.8 keeps: `areas` (clickable areas). `Eq` is not derived
+/// because `StoryAreaKind::Weather` carries a `double` temperature.
+#[derive(Debug, Clone, PartialEq)]
 pub struct ParsedStory {
     pub id: i32,
     pub poster_chat_id: i64,
@@ -4971,8 +4975,10 @@ pub struct ParsedStory {
     /// schema `td_api.tl:6724` comment: "True, if the story can be added
     /// to an album using createStoryAlbum and addStoryAlbumStories").
     pub can_be_added_to_album: bool,
+    /// Phase 9.8: `story.areas` — clickable areas (`storyArea`,
+    /// `schema/td_api.tl:6566`).
+    pub areas: Vec<StoryAreaView>,
 }
-
 fn parse_story_list(value: Option<&Value>) -> Option<StoryListView> {
     match value
         .and_then(|value| value.get("@type"))
@@ -5114,6 +5120,7 @@ fn parse_story(value: &Value) -> Option<(ParsedStory, Vec<ParsedFile>)> {
                 .get("can_be_added_to_album")
                 .and_then(Value::as_bool)
                 .unwrap_or(false),
+            areas: parse_story_areas(value.get("areas")),
         },
         files,
     ))
@@ -5188,7 +5195,6 @@ fn parse_story_area_texts(value: Option<&Value>) -> (Option<String>, Vec<String>
     }
     (link_url, reaction_emojis)
 }
-
 /// Phase 9.2: `chosen_reaction_type` on a `story` — returns the emoji when
 /// the user's chosen reaction is a `reactionTypeEmoji`, else `None` (no
 /// reaction, custom emoji, or paid reaction).
@@ -5681,7 +5687,7 @@ impl GeoLocation {
 /// NaN, infinities, or out-of-range degrees — means corrupt data, and the
 /// location is dropped entirely (the message renders as `Unsupported`)
 /// rather than pinned to a clamped pole or fed to a map link.
-fn geo_location(value: Option<&Value>) -> Option<GeoLocation> {
+pub(crate) fn geo_location(value: Option<&Value>) -> Option<GeoLocation> {
     let value = value?;
     let latitude = value.get("latitude").and_then(Value::as_f64)?;
     let longitude = value.get("longitude").and_then(Value::as_f64)?;
@@ -16601,7 +16607,6 @@ mod channel_envelope_tests {
             other => panic!("{other:?}"),
         }
     }
-
     #[test]
     fn get_story_video_parses_thumb_and_duration() {
         // `storyVideo` (schema 1.8.67 line 6633): `duration` is a double,

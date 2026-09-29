@@ -1,4 +1,5 @@
 mod chat_theme;
+mod story_areas;
 mod synthetic;
 
 pub(crate) use chat_theme::*;
@@ -103,9 +104,9 @@ use quill::telegram::envelope::{
     PaymentFormTypeData, PaymentProviderKind, PaymentReceivedContent, PaymentSuccessContent,
     PollContent, PollOption, PollType, ReplyKeyboard, ReplyMarkup, ScopeNotificationSettings,
     SecretChatState, SpeechRecognition, SponsoredMessage, StatisticalGraph, StatisticalValue,
-    StorageFileTypeStats, StorageStats, StoryOriginView, UsernameCheckResult, call_entry_label,
-    chat_ttl_service_label, effective_content, format_payment_price, format_ttl_setting,
-    price_parts_total, toggle_chosen_emoji_reaction,
+    StorageFileTypeStats, StorageStats, StoryAreaKind, StoryOriginView, UsernameCheckResult,
+    call_entry_label, chat_ttl_service_label, effective_content, format_payment_price,
+    format_ttl_setting, price_parts_total, toggle_chosen_emoji_reaction,
 };
 use quill::telegram::requests::SelfDestructSend;
 use quill::telegram::requests::{
@@ -1520,6 +1521,11 @@ pub enum ScreenshotDemo {
     /// chat-page `stories` (one pinned) and archive `stories` for chat
     /// 11, with the story page overlay open.
     ReadyStoryAlbums,
+    /// Phase 9.8: clickable story areas (injected, no live Telegram) —
+    /// a photo story carrying one of every `storyAreaType` (location,
+    /// venue, suggested reaction, message, link, weather, gift) with
+    /// the viewer open on it.
+    ReadyStoryAreas,
     /// MED3 downloads-manager demo (injected, no live Telegram): the
     /// `ReadyMedia` seed plus an actively downloading document (file 24,
     /// 42% through `notes.txt`), a failed document (file 26, "Retry"
@@ -2768,6 +2774,16 @@ impl QuillApp {
                     ConnectUiStatus::DemoReadyChats,
                     None,
                     "screenshot demo — story edit composer".into(),
+                    AuthorizationState::Ready,
+                )
+            }
+            // Phase 9.8: clickable story areas (injected, no live Telegram).
+            Some(ScreenshotDemo::ReadyStoryAreas) => {
+                demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
+                (
+                    ConnectUiStatus::DemoReadyChats,
+                    None,
+                    "screenshot demo — clickable story areas".into(),
                     AuthorizationState::Ready,
                 )
             }
@@ -4387,6 +4403,17 @@ impl QuillApp {
             }
             app.open_story_page(ChatId(11), window, cx);
             app.status_note = "screenshot demo — story albums / chat page / archive".into();
+        }
+        if matches!(demo, Some(ScreenshotDemo::ReadyStoryAreas)) {
+            if let Some(session) = app.demo_session.as_mut() {
+                app.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                story_areas::apply_ready_story_areas(session, &app.demo_sink, &app.demo_seq);
+            }
+            // Phase 9.8: viewer opens on the seeded photo story carrying
+            // one of every `storyAreaType` — the fixture injected the real
+            // `story` (with `areas`) through the reducer.
+            app.open_story_viewer(ChatId(11), 5, cx);
+            app.status_note = "screenshot demo — clickable story areas".into();
         }
         if matches!(demo, Some(ScreenshotDemo::ReadyStoryComposer)) {
             // Phase 9.3: the composer opens with a seeded photo path (the
@@ -11516,6 +11543,99 @@ impl QuillApp {
             self.status_note = "demo — story reactions run with live TDLib".into();
         }
         self.story_reaction_picker_open = false;
+        cx.notify();
+    }
+
+    /// Phase 9.8: a story area tap — the action each `StoryAreaType`
+    /// performs. The tap actions follow the official clients' documented
+    /// behavior: Telegram X implements the story tray only, so no
+    /// area-click handling exists there to copy (DECISIONS.md Phase
+    /// 9.8). Reuses the existing viewer actions wherever one exists:
+    /// OSM map for location/venue (same as `location_row` /
+    /// `venue_row`), `setStoryReaction` for suggested reactions (same as
+    /// the picker), the URL opener for links, chat-open + message jump
+    /// for messages. Weather shows its info line; the gift shows its
+    /// name (a full gift info view doesn't exist in the app yet —
+    /// DECISIONS.md Phase 9.8).
+    fn story_area_click(&mut self, kind: &StoryAreaKind, cx: &mut Context<Self>) {
+        match kind {
+            StoryAreaKind::Location { location, address } => {
+                let url = location.open_street_map_url();
+                let label = Self::story_area_pin_label(&[address, &location.coords_label()]);
+                self.status_note = if quill::platform::open_external_url(&url) {
+                    label
+                } else {
+                    "could not open map".into()
+                };
+                cx.notify();
+            }
+            StoryAreaKind::Venue {
+                title,
+                address,
+                location,
+            } => {
+                let url = location.open_street_map_url();
+                let mut label = Self::story_area_pin_label(&[title, "Venue"]);
+                if !title.is_empty() && !address.is_empty() {
+                    label.push_str(" — ");
+                    label.push_str(address);
+                }
+                self.status_note = if quill::platform::open_external_url(&url) {
+                    label
+                } else {
+                    "could not open map".into()
+                };
+                cx.notify();
+            }
+            StoryAreaKind::SuggestedReaction { emoji, .. } => {
+                self.pick_story_reaction(emoji, cx);
+            }
+            StoryAreaKind::Link { url } => self.open_message_url(url, cx),
+            StoryAreaKind::Message {
+                chat_id,
+                message_id,
+            } => {
+                self.story_area_open_message(ChatId(*chat_id), MessageId(*message_id), cx);
+            }
+            StoryAreaKind::Weather { temperature, emoji } => {
+                self.status_note = format!("{emoji} {temperature:.1}°C");
+                cx.notify();
+            }
+            StoryAreaKind::Gift { gift_name } => {
+                self.status_note = format!("🎁 {gift_name}");
+                cx.notify();
+            }
+            StoryAreaKind::Unsupported { type_name } => {
+                self.status_note = format!("story area {type_name} isn't supported");
+                cx.notify();
+            }
+        }
+    }
+
+    /// Phase 9.8: a `storyAreaTypeMessage` tap — close the viewer, open
+    /// the target chat, and jump to the message (same jump pipeline as
+    /// `jump_to_replied_message`).
+    fn story_area_open_message(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        cx: &mut Context<Self>,
+    ) {
+        self.close_story_viewer(cx);
+        if let Some(live) = self.live.as_mut() {
+            self.status_note = match live
+                .driver
+                .select_chat(chat_id)
+                .and_then(|_| live.driver.jump_to_replied_message(message_id))
+            {
+                Ok(_) => chat_search_jump_note(&live.driver.session),
+                Err(_) => "could not open message".into(),
+            };
+        } else if let Some(session) = self.demo_session.as_mut() {
+            session.open_chat(chat_id);
+            let _ = session.begin_chat_search_jump(message_id);
+            self.status_note = chat_search_jump_note(session);
+        }
         cx.notify();
     }
 
@@ -34771,6 +34891,48 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// Phase 9.8: shared map-pin label for location/venue areas — "📍"
+    /// plus the first non-empty of the given parts (bare "📍" when all
+    /// are empty). Used by both the chip labels and the tap status
+    /// notes.
+    fn story_area_pin_label(parts: &[&str]) -> String {
+        let detail = parts
+            .iter()
+            .copied()
+            .find(|part| !part.is_empty())
+            .unwrap_or("");
+        if detail.is_empty() {
+            "📍".to_string()
+        } else {
+            format!("📍 {detail}")
+        }
+    }
+
+    /// Phase 9.8: the chip label for a story area kind — what the official
+    /// clients paint on the area (glyph + one-line summary).
+    fn story_area_label(kind: &StoryAreaKind) -> String {
+        match kind {
+            StoryAreaKind::Location { address, location } => {
+                Self::story_area_pin_label(&[address, &location.coords_label()])
+            }
+            StoryAreaKind::Venue { title, .. } => Self::story_area_pin_label(&[title]),
+            StoryAreaKind::SuggestedReaction { emoji, total_count } => {
+                if *total_count > 0 {
+                    format!("{emoji} {total_count}")
+                } else {
+                    emoji.clone()
+                }
+            }
+            StoryAreaKind::Message { .. } => "💬".to_string(),
+            StoryAreaKind::Link { .. } => "🔗".to_string(),
+            StoryAreaKind::Weather { temperature, emoji } => {
+                format!("{emoji} {temperature:.0}°")
+            }
+            StoryAreaKind::Gift { gift_name } => format!("🎁 {gift_name}"),
+            StoryAreaKind::Unsupported { .. } => "·".to_string(),
+        }
+    }
+
     /// Phase 9.1: fullscreen story overlay, modeled on
     /// `media_viewer_overlay`: poster name + "Story N of M" header, the
     /// photo (video shows its thumbnail; live/unsupported show a
@@ -34792,6 +34954,7 @@ impl QuillApp {
                 duration_label: None,
                 duration_secs: None,
                 is_live: false,
+                areas: Vec::new(),
             });
         let (position, total) = self.story_viewer.position().unwrap_or((0, 0));
         let now = Instant::now();
@@ -34871,6 +35034,59 @@ impl QuillApp {
                 .child(div().text_sm().text_color(text_bright()).child(status))
                 .into_any_element()
         };
+        // Phase 9.8: clickable story areas — chips over the 360x640 media
+        // box, centered on the `storyAreaPosition` x/y fractions
+        // (`schema/td_api.tl:6530`; x/y are the rectangle's CENTER). The
+        // media box is the positioning context (areas are media fractions)
+        // and clips overflowing chips; `rotation_angle` is not rendered in
+        // this slice.
+        let area_chips: Vec<AnyElement> = item
+            .areas
+            .iter()
+            .enumerate()
+            .map(|(index, area)| {
+                let kind = area.kind.clone();
+                let label = Self::story_area_label(&kind);
+                // `storyAreaPosition` x/y are the rectangle's CENTER
+                // (`schema/td_api.tl:6530`): the chip's top-left is the
+                // center minus half the chip size.
+                let chip_w = (area.width * 360.0).max(48.0) as f32;
+                let chip_h = (area.height * 640.0).max(24.0) as f32;
+                div()
+                    .id((
+                        "story-area",
+                        (item.story_id as u64).wrapping_mul(1000) + index as u64,
+                    ))
+                    .absolute()
+                    .left(px(area.x as f32 * 360.0 - chip_w / 2.0))
+                    .top(px(area.y as f32 * 640.0 - chip_h / 2.0))
+                    .w(px(chip_w))
+                    .h(px(chip_h))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .cursor_pointer()
+                    .rounded_md()
+                    .bg(rgba(0x00000099))
+                    .border_1()
+                    .border_color(rgba(0xffffff66))
+                    .text_xs()
+                    .text_color(rgb(0xffffff))
+                    .px_2()
+                    .child(label)
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.story_area_click(&kind, cx);
+                    }))
+                    .into_any_element()
+            })
+            .collect();
+        let visual: AnyElement = div()
+            .relative()
+            .w(px(360.))
+            .overflow_hidden()
+            .child(visual)
+            .children(area_chips)
+            .into_any_element();
         let caption: Option<AnyElement> = (!item.caption.is_empty()).then(|| {
             rich_text_line(
                 &item.caption,
