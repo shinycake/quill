@@ -9,7 +9,7 @@ use crate::telegram::envelope_emoji::{EmojiCategory, EmojiKeyword, EmojiStatusIt
 #[derive(Debug, Clone, Default)]
 pub struct EmojiPanel {
     /// Slice S10: installed emoji sets (`getInstalledStickerSets` with
-    /// `stickerTypeEmoji`) — the "Emoji Sets" settings list.
+    /// `stickerTypeCustomEmoji`) — the "Emoji Sets" settings list.
     pub installed_sets: Vec<StickerSetInfo>,
     /// Slice S10: archived emoji sets (`getArchivedStickerSets`, paged).
     pub archived_sets: Vec<StickerSetInfo>,
@@ -65,7 +65,7 @@ impl Session {
     }
 
     /// Slice S10: an emoji-set mutation (`changeStickerSet` /
-    /// `reorderInstalledStickerSets` with `stickerTypeEmoji`) succeeded —
+    /// `reorderInstalledStickerSets` with `stickerTypeCustomEmoji`) succeeded —
     /// drop the installed-emoji-sets cache so the settings screen
     /// refetches the authoritative list.
     pub fn invalidate_installed_emoji_sets(&mut self) {
@@ -335,7 +335,7 @@ mod tests {
         // sticker panel's slots.
         let set_json = |id: i64, title: &str| {
             format!(
-                r#"{{"@type":"stickerSetInfo","id":"{id}","title":"{title}","name":"{title}Sets","thumbnail":null,"thumbnail_outline":null,"is_owned":false,"is_installed":true,"is_archived":false,"is_official":true,"sticker_type":{{"@type":"stickerTypeEmoji"}},"needs_repainting":false,"is_allowed_as_chat_emoji_status":false,"is_viewed":false,"size":3,"covers":[]}}"#
+                r#"{{"@type":"stickerSetInfo","id":"{id}","title":"{title}","name":"{title}Sets","thumbnail":null,"thumbnail_outline":null,"is_owned":false,"is_installed":true,"is_archived":false,"is_official":true,"sticker_type":{{"@type":"stickerTypeCustomEmoji"}},"needs_repainting":false,"is_allowed_as_chat_emoji_status":false,"is_viewed":false,"size":3,"covers":[]}}"#
             )
         };
         let extra = with_purpose.request(RequestPurpose::GetInstalledEmojiSets, None);
