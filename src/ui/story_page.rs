@@ -4,6 +4,7 @@
 //! `QuillApp` methods, and the render wiring.
 
 use super::QuillApp;
+use gpui_kit::AppContext;
 use gpui_kit::component::input::TextareaState;
 use gpui_kit::gpui::{Context, Entity, Window};
 use quill::diagnostics::{DiagnosticSink, MemorySink};

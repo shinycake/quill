@@ -81,7 +81,7 @@ use quill::state::{
     SharedMediaTab, SharedMediaTabStatus, SimilarBotsFetch, SponsoredReportFlight,
     StoryPostOutcome, StoryPostState, StoryReportStage, SupergroupMembersFetch,
     WelcomeMessagesFetch, active_custom_keyboard, effective_preview, event_log_relative_time,
-    message_time_hhmm, outgoing_status_label, unix_ms_now, unread_badge_text,
+    message_time_hhmm, unix_ms_now,
 };
 use quill::story_composer::{StoryComposer, StoryExpiry, StoryMediaKind, StoryPrivacy};
 use quill::story_page::{StoryPageOpState, parse_story_id_list};
