@@ -270,18 +270,24 @@ fn message_bubble_with_quote(
         component::message::MessageAlignment::Start
     };
     // kit Phase 4: the bubble surface keeps the Phase 0 palette
-    // (`ACCENT_STRONG` / `BG_BUBBLE_INCOMING` on `TEXT_BRIGHT`); the kit
-    // only supplies the shape/chrome, never the colors. Sender and
+    // (`accent_strong()` / `bg_bubble_incoming()`); the kit only supplies
+    // the shape/chrome, never the colors. Phase 8: outgoing bubbles are a
+    // solid fill so their text stays white in both modes; incoming bubbles
+    // use the mode-aware text token. Sender and
     // footer live in the kit `MessageHeader` / `MessageFooter` slots —
     // the header above the bubble, the footer below it, right-aligned
     // like the old in-bubble timestamp.
     let bubble_content = component::bubble::BubbleContent::new()
         .bg(if row.outgoing {
-            ACCENT_STRONG
+            accent_strong()
         } else {
-            BG_BUBBLE_INCOMING
+            bg_bubble_incoming()
         })
-        .text_color(TEXT_BRIGHT)
+        .text_color(if row.outgoing {
+            text_on_fill()
+        } else {
+            text_bright()
+        })
         .when(rtl, |this| this.text_right())
         .when_some(quote, |this, quote| this.child(quote))
         .when_some(body_el, |this, body_el| this.child(body_el))
@@ -295,7 +301,7 @@ fn message_bubble_with_quote(
                     .w(px(240.))
                     .h(image_h)
                     .rounded_md()
-                    .bg(FILL_MUTED)
+                    .bg(fill_muted())
                     .flex()
                     .items_center()
                     .justify_center()
