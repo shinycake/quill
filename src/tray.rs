@@ -3,9 +3,12 @@
 //! The icon is drawn programmatically as 64x64 RGBA (no asset files): a blue
 //! rounded square with a white paper-plane glyph, plus a red pill badge with
 //! the unread count (capped at "99+") whenever any chat is unread. The badge
-//! sums every chat's `unread_count` (muted and archived included — the OS
-//! badge semantics of the official clients); the sum saturates instead of
-//! overflowing.
+//! sums every chat's `unread_count` except effectively muted chats (a chat's
+//! own mute, or the scope default's when the chat keeps `use_default_mute_for`
+//! — via `Session::effective_muted`, the same gate the notification toast
+//! uses). Excluding muted is Telegram Desktop's default (its Notifications
+//! setting "Include muted chats in unread count" is opt-in); archived chats
+//! are included. The sum saturates instead of overflowing.
 //!
 //! The OS tray itself is managed behind `#[cfg(feature = "ui")]` with the
 //! `tray-icon` crate. [`sync_tray`] is called from a 1s timer in `main.rs`;
@@ -19,11 +22,13 @@ use crate::state::Session;
 pub const ICON_SIZE: u32 = 64;
 
 /// Total unread messages across all chats. Negative per-chat counts (shouldn't
-/// happen) are ignored; the sum saturates.
+/// happen) are ignored; effectively muted chats are excluded (Telegram
+/// Desktop's default badge semantics); the sum saturates.
 pub fn total_unread(session: &Session) -> u32 {
     session
         .chats
         .values()
+        .filter(|chat| !session.effective_muted(chat))
         .map(|chat| chat.unread_count.max(0) as u32)
         .fold(0u32, u32::saturating_add)
 }
@@ -71,10 +76,13 @@ fn draw_badge(px: &mut Pixels, unread: u32) {
     let text_w = text.len() as u32 * ADVANCE - 3;
     let pill_w = text_w + 16;
     let pill_h = 30;
-    // Top-right, clamped inside the icon.
-    let cx = 47u32.min(ICON_SIZE - pill_w / 2);
+    // Top-right, clamped so the pill's right edge never leaves the icon.
+    let cx: u32 = 47;
+    let x0 = cx
+        .saturating_sub(pill_w / 2)
+        .min(ICON_SIZE.saturating_sub(pill_w));
     let cy: u32 = 17;
-    let (x0, y0) = (cx.saturating_sub(pill_w / 2), cy.saturating_sub(pill_h / 2));
+    let y0 = cy.saturating_sub(pill_h / 2);
     px.rounded_rect(x0, y0, pill_w, pill_h, pill_h / 2, [0xFF, 0x3B, 0x30, 0xFF]);
     let gx = x0 + (pill_w - text_w) / 2;
     let gy = y0 + (pill_h - 5 * SCALE) / 2;
@@ -292,10 +300,25 @@ mod tests {
         session
     }
 
+    fn muted_chat(id: i64, unread_count: i32) -> ChatSummary {
+        let mut c = chat(id, unread_count);
+        c.notification_settings = c.notification_settings.with_mute_for(i32::MAX);
+        c
+    }
+
     #[test]
     fn total_unread_sums_and_ignores_negative() {
         let session = session_with(&[3, 0, 7, -5]);
         assert_eq!(total_unread(&session), 10);
+    }
+
+    #[test]
+    fn total_unread_excludes_muted_chats() {
+        // Muted chats don't count (Telegram Desktop's default badge semantics).
+        let mut session = Session::new(AccountKey("tray-test-muted".into()), Arc::new(MemorySink::new()));
+        session.chats.insert(0, chat(0, 5));
+        session.chats.insert(1, muted_chat(1, 9));
+        assert_eq!(total_unread(&session), 5);
     }
 
     #[test]
