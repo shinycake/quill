@@ -42,6 +42,7 @@ use crate::telegram::envelope::{
 };
 use crate::telegram::envelope::{CallState, ReadyParams};
 use crate::telegram::envelope_story::ParsedStoryAlbum;
+use crate::telegram::profile_accent::ProfileAccentColor;
 use crate::telegram::requests::{
     ArchiveChatListSettings, CallPrivacySetting, ChatEventLogFilterSet, PrivacyWho,
 };
@@ -496,6 +497,10 @@ pub enum RequestPurpose {
     /// A5: `deleteProfilePhoto` (schema 1.8.67, line 14806). Response is
     /// `ok`; the removal arrives via `updateUserFullInfo`.
     DeleteProfilePhoto,
+    /// Slice A12: `setProfileAccentColor` (schema 1.8.67, line 14820).
+    /// Response is `ok`; the new color arrives via `updateUser` on our
+    /// own user (`profile_accent_color_id`).
+    SetProfileAccentColor,
     /// Slice A6: `removeContacts`. Response is `ok`; the contacts list is
     /// invalidated for refetch (same as `AddContact`).
     RemoveContact,
@@ -4561,6 +4566,13 @@ pub struct Session {
     /// Phase 6: user directory from `updateUser`, keyed by user id. Feeds
     /// the contacts list and the user info panel.
     pub users: HashMap<i64, ParsedUser>,
+    /// Slice A12: accent palette from `updateProfileAccentColors`
+    /// (schema 1.8.67, line 10963) — full `profileAccentColor` entries
+    /// for swatch rendering.
+    pub profile_accent_colors: Vec<ProfileAccentColor>,
+    /// Slice A12: ids `setProfileAccentColor` accepts, in server order —
+    /// the edit-profile accent picker rows.
+    pub available_accent_color_ids: Vec<i32>,
     /// Phase 6: `getContacts` result — user ids, in server order. `None`
     /// until the first `users` response; `contacts_error` records a failed
     /// fetch so the UI can offer a retry.
@@ -5433,6 +5445,8 @@ impl Session {
             archive_settings_open: false,
             archive_collapsed: false,
             users: HashMap::new(),
+            profile_accent_colors: Vec::new(),
+            available_accent_color_ids: Vec::new(),
             contacts: None,
             contacts_error: false,
             contacts_notice: None,
@@ -6308,6 +6322,16 @@ impl Session {
                 if let Some(user) = self.users.get_mut(&user_id.0) {
                     user.status = status;
                 }
+            }
+            EnvelopePayload::UpdateProfileAccentColors {
+                colors,
+                available_ids,
+            } => {
+                // Slice A12: palette + settable ids for the edit-profile
+                // accent picker. Replaces wholesale — the update is the
+                // full server state.
+                self.profile_accent_colors = colors;
+                self.available_accent_color_ids = available_ids;
             }
             EnvelopePayload::Users { user_ids } => {
                 // Phase 6: `getContacts` answer — only answers to our own
@@ -9286,7 +9310,8 @@ impl Session {
                         | RequestPurpose::ReorderActiveUsernames
                         | RequestPurpose::ToggleUsernameIsActive
                         | RequestPurpose::SetProfilePhoto
-                        | RequestPurpose::DeleteProfilePhoto,
+                        | RequestPurpose::DeleteProfilePhoto
+                        | RequestPurpose::SetProfileAccentColor,
                     ) => {
                         self.profile_edit_error =
                             Some(format!("Profile update failed: {}", error_reason(&err)));
@@ -16766,6 +16791,62 @@ mod tests {
         let user = session.user(31).unwrap();
         assert!(!user.status.is_online());
         assert_eq!(user.status.display(), "last seen within a week");
+    }
+
+    // Slice A12: `updateProfileAccentColors` stores the palette and the
+    // settable accent ids wholesale (the update is the full server state);
+    // a later update replaces the previous one.
+    #[test]
+    fn update_profile_accent_colors_stores_palette_and_ids() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateProfileAccentColors","colors":[{"@type":"profileAccentColor","id":3,"light_theme_colors":{"@type":"profileAccentColors","palette_colors":[43776,65280],"background_colors":[],"story_colors":[]},"dark_theme_colors":{"@type":"profileAccentColors","palette_colors":[262144],"background_colors":[],"story_colors":[]}}],"available_accent_color_ids":[1,3,5]}"#,
+        );
+        assert_eq!(session.available_accent_color_ids, vec![1, 3, 5]);
+        assert_eq!(session.profile_accent_colors.len(), 1);
+        assert_eq!(session.profile_accent_colors[0].id, 3);
+        assert_eq!(session.profile_accent_colors[0].swatch_rgb(), 0xAB00);
+        // Replacement, not merge.
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateProfileAccentColors","colors":[],"available_accent_color_ids":[7]}"#,
+        );
+        assert_eq!(session.available_accent_color_ids, vec![7]);
+        assert!(session.profile_accent_colors.is_empty());
+    }
+
+    // Slice A12: `updateUser` carries `profile_accent_color_id` (schema
+    // 1.8.67, line 2386) and `profile_background_custom_emoji_id` (line
+    // 2403) into the cached user; both default when absent.
+    #[test]
+    fn update_user_carries_profile_accent_fields() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateUser","user":{"id":31,"first_name":"Ada","type":{"@type":"userTypeRegular"},"profile_accent_color_id":3,"profile_background_custom_emoji_id":536870912}}"#,
+        );
+        let user = session.user(31).unwrap();
+        assert_eq!(user.profile_accent_color_id, 3);
+        assert_eq!(user.profile_background_custom_emoji_id, 536_870_912);
+
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateUser","user":{"id":32,"first_name":"Bea","type":{"@type":"userTypeRegular"}}}"#,
+        );
+        let user = session.user(32).unwrap();
+        assert_eq!(user.profile_accent_color_id, -1);
+        assert_eq!(user.profile_background_custom_emoji_id, 0);
     }
 
     // Phase 6: `getContacts` → `users` lands the id list only when it

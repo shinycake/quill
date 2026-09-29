@@ -5135,6 +5135,28 @@ pub fn delete_profile_photo(extra: RequestId, profile_photo_id: i64) -> String {
     .to_string()
 }
 
+/// Slice A12: `setProfileAccentColor profile_accent_color_id:int32
+/// profile_background_custom_emoji_id:int64 = Ok;` (TDLib 1.8.67,
+/// `schema/td_api.tl:14820`): "Changes the profile accent color and
+/// background custom emoji for the current user". The `available_accent_color_ids`
+/// from `updateProfileAccentColors` (schema:10963) are the settable ids;
+/// pass -1 for no accent color. The caller preserves the current
+/// `profile_background_custom_emoji_id` (Quill has no background-emoji
+/// picker — a separate unchecked concern).
+pub fn set_profile_accent_color(
+    extra: RequestId,
+    profile_accent_color_id: i32,
+    profile_background_custom_emoji_id: i64,
+) -> String {
+    json!({
+        "@type": "setProfileAccentColor",
+        "@extra": extra.as_extra(),
+        "profile_accent_color_id": profile_accent_color_id,
+        "profile_background_custom_emoji_id": profile_background_custom_emoji_id,
+    })
+    .to_string()
+}
+
 /// `pinChatMessage` (TDLib 1.8.67). Official Pin: notify when the chat allows
 /// it (`disable_notification` false); pin for everyone (`only_for_self` false).
 /// Schema: notifications are always disabled in channels and private chats.
@@ -6279,6 +6301,24 @@ mod tests {
         assert_eq!(v["@extra"], "76");
         assert_eq!(v["ttl"]["@type"], "accountTtl");
         assert_eq!(v["ttl"]["days"], 90);
+    }
+
+    #[test]
+    fn a12_set_profile_accent_color_request_shape_matches_1_8_67() {
+        // Slice A12: `setProfileAccentColor profile_accent_color_id:int32
+        // profile_background_custom_emoji_id:int64 = Ok;` (line 14820).
+        let v: serde_json::Value =
+            serde_json::from_str(&set_profile_accent_color(RequestId(77), 3, 0)).unwrap();
+        assert_eq!(v["@type"], "setProfileAccentColor");
+        assert_eq!(v["@extra"], "77");
+        assert_eq!(v["profile_accent_color_id"], 3);
+        assert_eq!(v["profile_background_custom_emoji_id"], 0);
+
+        let v: serde_json::Value =
+            serde_json::from_str(&set_profile_accent_color(RequestId(78), -1, 536_870_912))
+                .unwrap();
+        assert_eq!(v["profile_accent_color_id"], -1);
+        assert_eq!(v["profile_background_custom_emoji_id"], 536_870_912);
     }
 
     #[test]

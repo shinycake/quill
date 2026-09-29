@@ -7,12 +7,17 @@ use super::super::*;
 /// (`setProfilePhoto` / `deleteProfilePhoto`). Photo upload is a path
 /// entry like the story composer (no native file-picker infrastructure
 /// yet).
+///
+/// A12: `accent_selection` — the accent color picked in the dialog
+/// (`setProfileAccentColor`); -1 = none. Initialized from the user's
+/// current `profile_accent_color_id`.
 pub struct EditProfileDialog {
     pub(crate) first_name_input: Entity<TextareaState>,
     pub(crate) last_name_input: Entity<TextareaState>,
     pub(crate) bio_input: Entity<TextareaState>,
     pub(crate) username_input: Entity<TextareaState>,
     pub(crate) photo_path_input: Entity<TextareaState>,
+    pub(crate) accent_selection: i32,
 }
 
 impl EditProfileDialog {
@@ -23,6 +28,7 @@ impl EditProfileDialog {
         last_name: &str,
         bio: &str,
         username: &str,
+        accent_selection: i32,
     ) -> Self {
         pub(crate) fn field(
             window: &mut Window,
@@ -45,6 +51,7 @@ impl EditProfileDialog {
             bio_input: field(window, cx, "Bio", bio),
             username_input: field(window, cx, "username", username),
             photo_path_input: field(window, cx, "/path/to/photo.jpg", ""),
+            accent_selection,
         }
     }
 

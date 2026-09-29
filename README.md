@@ -58,7 +58,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Edit bio: "Edit profile" dialog sends setBio; the info panel now also renders the bio from getUserFullInfo (telegram/requests.rs:4224; connect.rs:8924; ui/mod.rs:18963) <!-- parity:auth-edit-bio -->
 - [x] Username management: Check availability via checkChatUsername (private chat with self; all six checkChatUsernameResult verdicts parsed, envelope.rs:2386), set/clear editable username (empty clears per schema :14830), up/down reorder of active usernames, activate/deactivate (editable username can't be deactivated per schema :14835); schema: setUsername, reorderActiveUsernames, toggleUsernameIsActive (telegram/requests.rs:4235; connect.rs:8935; ui/mod.rs:18963) <!-- parity:auth-username -->
 - [x] Set / remove profile photo: setProfilePhoto via inputChatPhotoStatic + inputFileLocal with is_public hard-coded false for the main (non-public) photo (schema :14803; TGX AvatarPickerManager), remove via deleteProfilePhoto with the retained chatPhoto.id (state.rs:3771) (telegram/requests.rs:4283; connect.rs:9006; ui/mod.rs:18963) <!-- parity:auth-profile-photo -->
-- [ ] Profile accent color (schema: setProfileAccentColor) <!-- parity:auth-profile-accent -->
+- [x] Profile accent color (schema: setProfileAccentColor) <!-- parity:auth-profile-accent -->
 
 ### Messaging core
 

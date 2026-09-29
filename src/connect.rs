@@ -118,7 +118,8 @@ use crate::telegram::requests::{
     set_chat_notification_settings, set_chat_permissions, set_chat_photo, set_chat_slow_mode_delay,
     set_chat_title, set_community_name, set_group_call_participant_volume_level,
     set_message_sender_block_list, set_name, set_password, set_pinned_chats, set_poll_answer,
-    set_profile_photo, set_recovery_email_address, set_scope_notification_settings,
+    set_profile_accent_color, set_profile_photo, set_recovery_email_address,
+    set_scope_notification_settings,
     set_story_custom_emoji_reaction as set_story_custom_emoji_reaction_request,
     set_story_privacy_settings as set_story_privacy_settings_request, set_story_reaction,
     set_supergroup_username, set_user_privacy_setting_rules, set_username, set_video_chat_title,
@@ -10719,6 +10720,29 @@ impl<S: JsonSender> ConnectDriver<S> {
             .session
             .request(RequestPurpose::DeleteProfilePhoto, None);
         let json = delete_profile_photo(extra, profile_photo_id);
+        self.send_json_request(extra, &json)
+    }
+
+    /// Slice A12: `setProfileAccentColor` (schema 1.8.67, line 14820).
+    /// The current `profile_background_custom_emoji_id` is preserved —
+    /// Quill has no background-emoji picker (separate unchecked concern).
+    pub fn set_profile_accent_color(
+        &mut self,
+        profile_accent_color_id: i32,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let background_emoji_id = self
+            .session
+            .my_user_id
+            .and_then(|me| self.session.user(me))
+            .map(|u| u.profile_background_custom_emoji_id)
+            .unwrap_or(0);
+        let extra = self
+            .session
+            .request(RequestPurpose::SetProfileAccentColor, None);
+        let json = set_profile_accent_color(extra, profile_accent_color_id, background_emoji_id);
         self.send_json_request(extra, &json)
     }
 
