@@ -14329,40 +14329,6 @@ mod tests {
     }
 
     #[test]
-    fn update_message_ephemeral_content_is_typed() {
-        // `parity:msg-ephemeral-updates`: what the parser is ultimately
-        // validating — the synthetic `updateMessageEphemeralContent`
-        // lands on the typed payload with chat/message ids and the new
-        // `ephemeralMessageContent` (schema 1.8.67, `td_api.tl:10424`).
-        let env = parse_envelope(
-            r#"{"@type":"updateMessageEphemeralContent","chat_id":11,"message_id":102,"ephemeral_content":{"@type":"ephemeralMessageContent","content":{"@type":"messageText","text":{"@type":"formattedText","text":"CANARY_EPHEMERAL","entities":[]}},"reply_markup":null}}"#,
-        )
-        .unwrap();
-        match env.payload {
-            EnvelopePayload::UpdateMessageEphemeralContent {
-                chat_id,
-                message_id,
-                ephemeral,
-            } => {
-                assert_eq!(chat_id.0, 11);
-                assert_eq!(message_id.0, 102);
-                assert_eq!(
-                    ephemeral.content.as_ref(),
-                    &MessageContent::Text("CANARY_EPHEMERAL".into())
-                );
-                assert!(ephemeral.reply_markup.is_none());
-            }
-            other => panic!("{other:?}"),
-        }
-        let schema = include_str!("../../schema/td_api.tl");
-        assert!(
-            schema
-                .lines()
-                .any(|l| l.starts_with("updateMessageEphemeralContent "))
-        );
-    }
-
-    #[test]
     fn message_forward_info_and_messages_are_typed() {
         let env = parse_envelope(
             r#"{"@type":"updateNewMessage","message":{"id":105,"chat_id":11,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"fwd body","entities":[]}},"forward_info":{"@type":"messageForwardInfo","origin":{"@type":"messageOriginHiddenUser","sender_name":"Ada Lovelace"},"date":1700000000,"source":null,"public_service_announcement_type":""}}}"#,

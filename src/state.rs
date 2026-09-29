@@ -12870,59 +12870,6 @@ mod tests {
     }
 
     #[test]
-    fn update_message_ephemeral_content_refreshes_stored_content_and_preview() {
-        // `parity:msg-ephemeral-updates`: what the reducer is ultimately
-        // validating — a synthetic `updateMessageEphemeralContent`
-        // replaces the stored ephemeral content in place and the
-        // chat-list preview shows the refreshed ephemeral text (the row
-        // re-renders via `effective_content`, ephemeral wins).
-        let (mut session, sink) = session();
-        let seq = AtomicU64::new(0);
-        apply_json(
-            &mut session,
-            &seq,
-            &sink,
-            r#"{"@type":"updateNewChat","chat":{"id":7,"title":"c","type":{"@type":"chatTypePrivate","user_id":7},"unread_count":0}}"#,
-        );
-        apply_json(
-            &mut session,
-            &seq,
-            &sink,
-            r#"{"@type":"updateNewMessage","message":{"id":44,"chat_id":7,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"public","entities":[]}}}}"#,
-        );
-        apply_json(
-            &mut session,
-            &seq,
-            &sink,
-            r#"{"@type":"updateChatLastMessage","chat_id":7,"last_message":{"id":44,"chat_id":7,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"public","entities":[]}}},"positions":[{"@type":"chatPosition","list":{"@type":"chatListMain"},"order":"8","is_pinned":false}]}"#,
-        );
-        assert_eq!(session.chats.get(&7).unwrap().last_preview, "public");
-        apply_json(
-            &mut session,
-            &seq,
-            &sink,
-            r#"{"@type":"updateMessageEphemeralContent","chat_id":7,"message_id":44,"ephemeral_content":{"@type":"ephemeralMessageContent","content":{"@type":"messageText","text":{"@type":"formattedText","text":"secret v2","entities":[]}},"reply_markup":null}}"#,
-        );
-        let message = session
-            .histories
-            .get(&7)
-            .unwrap()
-            .messages
-            .get(&44)
-            .unwrap();
-        assert_eq!(
-            message
-                .ephemeral
-                .as_ref()
-                .expect("ephemeral set")
-                .content
-                .as_ref(),
-            &MessageContent::Text("secret v2".into())
-        );
-        assert_eq!(session.chats.get(&7).unwrap().last_preview, "secret v2");
-    }
-
-    #[test]
     fn send_success_replaces_pending_id() {
         let (mut session, sink) = session();
         let seq = AtomicU64::new(0);

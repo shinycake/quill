@@ -17,8 +17,8 @@ HARD_CAP=2000
 WAIVERS=(
   "src/ui/mod.rs:49101"
   "src/connect.rs:24898"
-  "src/state.rs:21830"
-  "src/telegram/envelope.rs:18660"
+  "src/state.rs:21800"
+  "src/telegram/envelope.rs:18640"
   "src/telegram/requests.rs:10477"
   # Slice S17 (2026-09-29, merge-pipeline rebase post-#177): type-coherent
   # extensions only — ui/mod.rs +11 (49090 → 49101: peer-activity label
@@ -105,6 +105,12 @@ WAIVERS=(
   # test in the existing `mod tests`); envelope.rs +49 (18604 → 18653:
   # `UpdateMessageEphemeralContent` enum variant + parse arm on the
   # existing `parse_payload` match + one test in the existing test module).
+  # Slice ephemeral-updates (2026-09-29): type-coherent extensions only —
+  # state.rs +47 (`update_ephemeral` method on the existing `HistoryState`
+  # type + `UpdateMessageEphemeralContent` reducer match arm);
+  # envelope.rs +15 (`UpdateMessageEphemeralContent` enum variant + parse
+  # arm on the existing `parse_payload` match). Slice tests live in
+  # `tests/ephemeral_updates.rs`, never in the waived files.
   # (Waiver deltas are post-fmt exact line counts.)
   "src/calls/engine.rs:3212"
   "tests/replay.rs:3505"
