@@ -658,6 +658,20 @@ pub enum EnvelopePayload {
         stickers: Vec<StickerItem>,
         files: Vec<ParsedFile>,
     },
+    /// Slice S8: `trendingStickerSets` — `getTrendingStickerSets`.
+    /// `is_premium` flags the premium-only row (tdesktop renders it
+    /// separately).
+    TrendingStickerSets {
+        total_count: i32,
+        sets: Vec<StickerSetInfo>,
+        is_premium: bool,
+    },
+    /// Slice S8: `stickers` — `searchStickers` / `getFavoriteStickers` /
+    /// `getRecentStickers`. Files on each sticker are in `files`.
+    Stickers {
+        stickers: Vec<StickerItem>,
+        files: Vec<ParsedFile>,
+    },
     /// `animations` — `getSavedAnimations`.
     Animations {
         animations: Vec<AnimationItem>,
@@ -7533,6 +7547,8 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
         "file" => Ok(EnvelopePayload::File(parse_file(Some(&value))?)),
         "stickerSets" => Ok(parse_sticker_sets(&value)),
         "stickerSet" => Ok(parse_sticker_set(&value)),
+        "trendingStickerSets" => Ok(parse_trending_sticker_sets(&value)),
+        "stickers" => Ok(parse_stickers(&value)),
         "animations" => Ok(parse_animations(&value)),
         "sponsoredMessages" => Ok(parse_sponsored_messages(&value)?),
         "reportSponsoredResultOk" => Ok(EnvelopePayload::ReportSponsoredResult(
@@ -11389,6 +11405,43 @@ fn parse_sticker_set(value: &Value) -> EnvelopePayload {
     }
 }
 
+/// Slice S8: `trendingStickerSets` — same `stickerSetInfo` rows as
+/// `stickerSets`, plus the premium-row flag.
+fn parse_trending_sticker_sets(value: &Value) -> EnvelopePayload {
+    let sets = value
+        .get("sets")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(parse_sticker_set_info)
+        .collect();
+    EnvelopePayload::TrendingStickerSets {
+        total_count: int53_or_zero(value.get("total_count")) as i32,
+        sets,
+        is_premium: value
+            .get("is_premium")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+    }
+}
+
+/// Slice S8: `stickers` — bare `vector<sticker>` (search / favorites /
+/// recent). Same per-entry parse as `stickerSet.stickers`.
+fn parse_stickers(value: &Value) -> EnvelopePayload {
+    let mut stickers = Vec::new();
+    let mut files = Vec::new();
+    if let Some(entries) = value.get("stickers").and_then(Value::as_array) {
+        for entry in entries {
+            let (item, item_files) = parse_sticker_value(Some(entry));
+            if let Some(item) = item {
+                stickers.push(item);
+            }
+            files.extend(item_files);
+        }
+    }
+    EnvelopePayload::Stickers { stickers, files }
+}
+
 /// Phase 6: preferred profile-photo file from a `userFullInfo` (or the
 /// nested `user_full_info` of an `updateUserFullInfo`) object's
 /// `photo:chatPhoto` (schema 1.8.67, lines 1030 and 2468). Reuses
@@ -13262,6 +13315,47 @@ mod tests {
                 assert_eq!(stickers[0].format, StickerFormat::Tgs);
                 assert_eq!(stickers[0].file_id, FileId(41));
                 assert!(stickers[0].thumb_file_id.is_none());
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn s8_trending_sticker_sets_and_stickers_parse_1_8_67() {
+        // `trendingStickerSets` (schema 1.8.67, line 6477): the same
+        // `stickerSetInfo` rows as `stickerSets`, plus `is_premium`.
+        let trending = parse_envelope(
+            r#"{"@type":"trendingStickerSets","total_count":2,"is_premium":true,"sets":[{"@type":"stickerSetInfo","id":"77","title":"Demo","name":"DemoStickers","thumbnail":null,"thumbnail_outline":null,"is_owned":false,"is_installed":false,"is_archived":false,"is_official":true,"sticker_type":{"@type":"stickerTypeRegular"},"needs_repainting":false,"is_allowed_as_chat_emoji_status":false,"is_viewed":false,"size":2,"covers":[]}]}"#,
+        )
+        .unwrap();
+        match trending.payload {
+            EnvelopePayload::TrendingStickerSets {
+                total_count,
+                sets,
+                is_premium,
+            } => {
+                assert_eq!(total_count, 2);
+                assert!(is_premium);
+                assert_eq!(sets[0].id, 77);
+                assert!(!sets[0].is_installed);
+            }
+            other => panic!("{other:?}"),
+        }
+
+        // `stickers` (schema 1.8.67, line 6432): a bare `vector<sticker>`
+        // as returned by `searchStickers` / `getFavoriteStickers` /
+        // `getRecentStickers`.
+        let file = local_file_json(41, "/tmp/s.webp", true, true);
+        let found = parse_envelope(&format!(
+            r#"{{"@type":"stickers","stickers":[{{"@type":"sticker","id":"9001","set_id":"77","width":512,"height":512,"emoji":"😀","format":{{"@type":"stickerFormatTgs"}},"full_type":{{"@type":"stickerFullTypeRegular","premium_animation":null}},"thumbnail":null,"sticker":{file}}}]}}"#
+        ))
+        .unwrap();
+        match found.payload {
+            EnvelopePayload::Stickers { stickers, files } => {
+                assert_eq!(stickers.len(), 1);
+                assert_eq!(stickers[0].file_id, FileId(41));
+                assert_eq!(stickers[0].emoji, "😀");
+                assert_eq!(files.len(), 1);
             }
             other => panic!("{other:?}"),
         }

@@ -5535,3 +5535,23 @@ ntgcalls v3.0.0 prebuilt lib, bindings verified against
   the slot (no generation fencing). Benign today (no consumer); the
   rendering slice should decide whether to re-check share state on frame
   arrival.
+
+## Slice S8 — STICKER-SET BACKEND: TRENDING / SEARCH / FAVORITES / RECENT / INSTALL / ARCHIVE / REORDER (2026-09-29)
+
+- **Rationale:** the sticker drawer's installed-sets path (`getInstalledStickerSets` + `getStickerSet`) shipped earlier, but every other sticker-set operation was a README gap with zero TDLib wiring. Kit Phase 9 owns all UI surfaces right now, so this slice ships the complete backend (request builders, response parsing, state + reducers, purpose-gated dispatch) with zero UI touches; the drawer tabs consume it the moment Phase 9 merges.
+- **Schema (1.8.67, verified verbatim in `schema/td_api.tl` — no invented constructors/fields):**
+  - `getTrendingStickerSets sticker_type:StickerType offset:int32 limit:int32 = TrendingStickerSets;` (line 14669); `viewTrendingStickerSets sticker_set_ids:vector<int64> = Ok;` (line 14695).
+  - `searchStickerSets sticker_type:StickerType query:string = StickerSets;` (line 14689); `searchStickers sticker_type:StickerType emojis:string query:string input_language_codes:vector<string> offset:int32 limit:int32 = Stickers;` (line 14648).
+  - `getFavoriteStickers = Stickers;` (line 14716); `addFavoriteSticker sticker:InputFile = Ok;` (line 14721); `removeFavoriteSticker sticker:InputFile = Ok;` (line 14724).
+  - `getRecentStickers is_attached:Bool = Stickers;` (line 14701); `clearRecentStickers is_attached:Bool = Ok;` (line 14713).
+  - `changeStickerSet set_id:int64 is_installed:Bool is_archived:Bool = Ok;` (line 14692); `reorderInstalledStickerSets sticker_type:StickerType sticker_set_ids:vector<int64> = Ok;` (line 14698).
+  - Responses: `trendingStickerSets total_count:int32 sets:vector<stickerSetInfo> is_premium:Bool = TrendingStickerSets;` (line 6477); `stickers stickers:vector<sticker> = Stickers;` (line 6432).
+- **What was built:**
+  - `src/telegram/requests.rs`: eleven builders mirroring the existing `get_installed_sticker_sets` shape (regular `stickerTypeRegular` hardcoded like the installed-sets path; `searchStickers` passes empty `input_language_codes` = server default; int64 `set_id` as JSON string like `get_sticker_set`; int64 vectors as arrays like `set_pinned_chats`).
+  - `src/telegram/envelope.rs`: `TrendingStickerSets` and `Stickers` payloads; `parse_trending_sticker_sets` / `parse_stickers` reusing `parse_sticker_set_info` / `parse_sticker_value`; dispatch on `"trendingStickerSets"` / `"stickers"`.
+  - `src/state.rs`: eleven `RequestPurpose` variants; six new `StickerPanel` fields (`trending`, `trending_is_premium`, `favorites`, `recent`, `found_sets`, `found_stickers`); five accept-reducers + `invalidate_installed_sticker_sets`; dispatch arms purpose-gated (search reuses the `StickerSets` payload under `SearchStickerSets`, never touching the installed-sets slot); mutation `ok`s clear the affected cache (favorites / recent / installed sets) instead of optimistic flips.
+  - Tests: request-shape test (all eleven, schema line refs), envelope parse test (`trendingStickerSets` + `stickers`), purpose-gated dispatch test (stray answers ignored, mutation oks invalidate).
+- **Out of this slice:**
+  - All drawer/tab UI (trending tab, search UI, favorites tab, recent tab, install/archive affordances, drag-reorder, empty states, install counts) — kit Phase 9 owns UI surfaces; tabs land as a follow-up slice the moment it merges.
+  - `connect.rs` driver methods — UI slices call `session.request(purpose, None)` + builder directly (the `ui/mod.rs:42586` pattern); no speculative driver API added.
+  - `updateTrendingStickerSets` / `updateFavoriteStickers` / `updateRecentStickers` live-update handling — no existing sticker-set update handling to extend; refetch-on-open covers it.
