@@ -4291,11 +4291,11 @@ pub struct Session {
     /// Slice S3: per-key rule state for the Privacy screen
     /// (`userPrivacySettingShowStatus`, `ShowPhoneNumber`,
     /// `ShowProfilePhoto`, `ShowLinkInForwardedMessages`,
-    /// `AllowChatInvites`; schema 1.8.67, :8981-:9004). Present only
+    /// `AllowChatInvites`; schema 1.8.67, :8981-:9003). Present only
     /// after a fetch was attempted — absent means never requested.
     pub privacy: HashMap<PrivacySettingKey, PrivacyKeyState>,
     /// Slice S3: `readDatePrivacySettings.show_read_date` (schema 1.8.67,
-    /// :9022) — `None` while never fetched.
+    /// :9026) — `None` while never fetched.
     pub read_date_show: Option<bool>,
     /// A read-date get/set round-trip is in flight.
     pub read_date_loading: bool,

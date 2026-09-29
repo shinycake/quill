@@ -2612,26 +2612,6 @@ impl PrivacyWho {
             PrivacyWho::Nobody => "Nobody",
         }
     }
-
-    /// Slice S3 (privacy screen): full rule list for a base choice plus
-    /// exception user lists, in TDLib match order (schema 1.8.67, :8975 —
-    /// "The first matched rule defines the privacy setting") and TGX
-    /// canonical order (`PrivacySettings.toggleUser`: "Placing
-    /// ruleRestrictUsers before any ruleAllowUsers"): the restrict-users
-    /// exception first, the allow-users exception, then the base rule.
-    /// Mirrors TGX `PrivacySettings.toggleGlobal`, which keeps exception
-    /// rules in place and appends the new base rule.
-    pub fn rules_with_exceptions(self, always: &[i64], never: &[i64]) -> Vec<Value> {
-        let mut rules = Vec::new();
-        if !never.is_empty() {
-            rules.push(json!({"@type": "userPrivacySettingRuleRestrictUsers", "user_ids": never}));
-        }
-        if !always.is_empty() {
-            rules.push(json!({"@type": "userPrivacySettingRuleAllowUsers", "user_ids": always}));
-        }
-        rules.extend(self.rules());
-        rules
-    }
 }
 
 /// Phase C2i: `getUserPrivacySettingRules` (TDLib 1.8.67,

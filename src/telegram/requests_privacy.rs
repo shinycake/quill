@@ -10,7 +10,7 @@ use crate::ids::RequestId;
 use serde_json::{Value, json};
 
 /// Slice S3 (privacy screen): the `UserPrivacySetting` constructors the
-/// Privacy screen edits (schema 1.8.67, :8981-:9004). Call settings keep
+/// Privacy screen edits (schema 1.8.67, :8981-:9003). Call settings keep
 /// the pre-existing `CallPrivacySetting` / `call_privacy_*` plumbing
 /// (Phase C2i) — the screen reads those fields directly instead of
 /// re-plumbing them.
@@ -24,16 +24,8 @@ pub enum PrivacySettingKey {
 }
 
 impl PrivacySettingKey {
-    pub const ALL: [PrivacySettingKey; 5] = [
-        PrivacySettingKey::ShowStatus,
-        PrivacySettingKey::ShowPhoneNumber,
-        PrivacySettingKey::ShowProfilePhoto,
-        PrivacySettingKey::ShowLinkInForwardedMessages,
-        PrivacySettingKey::AllowChatInvites,
-    ];
-
     /// Verbatim `UserPrivacySetting` constructor names (schema 1.8.67,
-    /// :8982 / :8991 / :8985 / :8988 / :9004).
+    /// :8982 / :8991 / :8985 / :8988 / :9003).
     pub fn td_type(self) -> &'static str {
         match self {
             PrivacySettingKey::ShowStatus => "userPrivacySettingShowStatus",
@@ -90,7 +82,7 @@ pub fn get_privacy_rules(extra: RequestId, setting_type: &str) -> String {
 /// Slice S3: `setUserPrivacySettingRules` (schema 1.8.67, :15617 —
 /// "Changes user privacy settings") for any rule setting. `rules` is
 /// the full `userPrivacySettingRules` list (see
-/// `PrivacyWho::rules_with_exceptions`).
+/// `PrivacyRuleDetail::recompose`).
 pub fn set_privacy_rules(extra: RequestId, setting_type: &str, rules: Vec<Value>) -> String {
     json!({
         "@type": "setUserPrivacySettingRules",
@@ -112,7 +104,7 @@ pub fn get_read_date_privacy_settings(extra: RequestId) -> String {
 }
 
 /// Slice S3: `setReadDatePrivacySettings` (schema 1.8.67, :15623).
-/// `readDatePrivacySettings show_read_date:Bool` (:9022).
+/// `readDatePrivacySettings show_read_date:Bool` (:9026).
 pub fn set_read_date_privacy_settings(extra: RequestId, show_read_date: bool) -> String {
     json!({
         "@type": "setReadDatePrivacySettings",
@@ -140,6 +132,7 @@ pub fn get_blocked_message_senders(extra: RequestId, offset: i32, limit: i32) ->
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::privacy::PrivacyRuleDetail;
     use crate::telegram::requests::PrivacyWho;
     use crate::telegram::requests::set_message_sender_block_list;
 
@@ -159,7 +152,13 @@ mod tests {
         // Exceptions compose in TDLib match order (:8975) and the TGX
         // canonical order (`PrivacySettings.toggleUser`: restrict-users
         // before allow-users): never first, always second, base last.
-        let rules = PrivacyWho::Contacts.rules_with_exceptions(&[7], &[9]);
+        let rules = PrivacyRuleDetail {
+            who: Some(PrivacyWho::Contacts),
+            always: vec![7],
+            never: vec![9],
+            ..Default::default()
+        }
+        .recompose();
         let v: serde_json::Value = serde_json::from_str(&set_privacy_rules(
             RequestId(2),
             "userPrivacySettingShowStatus",

@@ -6334,8 +6334,8 @@ ntgcalls v3.0.0 prebuilt lib, bindings verified against
 
 - **Schema (pinned TDLib 1.8.67, `schema/td_api.tl`, verified verbatim):**
   - Rules: `userPrivacySettingRuleAllowAll` (:8943), `AllowContacts` (:8946), `AllowUsers user_ids` (:8955), `RestrictAll` (:8961), `RestrictUsers user_ids` (:8970); ordered first-match semantics for `userPrivacySettingRules` (:8975–:8976 — "The first matched rule defines the privacy setting").
-  - Settings: `userPrivacySettingShowStatus` (:8982), `ShowProfilePhoto` (:8985), `ShowLinkInForwardedMessages` (:8988), `ShowPhoneNumber` (:8991), `AllowChatInvites` (:9004); `AllowCalls` and `AllowPeerToPeerCalls` follow in the same section.
-  - Read dates: `readDatePrivacySettings show_read_date:Bool` (:9022); `setReadDatePrivacySettings` (:15623); `getReadDatePrivacySettings` (:15626).
+  - Settings: `userPrivacySettingShowStatus` (:8982), `ShowProfilePhoto` (:8985), `ShowLinkInForwardedMessages` (:8988), `ShowPhoneNumber` (:8991), `AllowChatInvites` (:9003); `AllowCalls` and `AllowPeerToPeerCalls` follow in the same section.
+  - Read dates: `readDatePrivacySettings show_read_date:Bool` (:9026); `setReadDatePrivacySettings` (:15623); `getReadDatePrivacySettings` (:15626).
   - Calls: `setUserPrivacySettingRules` (:15617); `getUserPrivacySettingRules` (:15620); `updateUserPrivacySettingRules` (:10871).
   - Blocking: `blockListMain` (:9692); `setMessageSenderBlockList` (:14492); `getBlockedMessageSenders` (:14505). No `blockUser`/`unblockUser` constructors exist in the pinned schema — blocking is `setMessageSenderBlockList`, and unblocking passes a null block list (matches TGX `Tdlib.unblockSender`).
 - **Reference-client evidence (TGX first):**
