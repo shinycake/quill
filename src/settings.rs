@@ -280,10 +280,6 @@ fn default_font_size() -> u8 {
     FONT_SIZE_DEFAULT
 }
 
-fn default_true() -> bool {
-    true
-}
-
 impl Default for AppearancePrefs {
     fn default() -> Self {
         Self {
@@ -589,6 +585,8 @@ mod tests {
                 ".gitignore must contain exact entry: {entry}"
             );
         }
+    }
+
     /// Settings → Appearance: prefs survive a save/load roundtrip and a
     /// missing file falls back to defaults (never an error).
     #[test]

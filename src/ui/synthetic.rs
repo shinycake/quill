@@ -209,7 +209,8 @@ pub(crate) struct MessageChrome {
     pub avatar: Option<AnyElement>,
     /// `HH:MM` + delivery checkmarks → kit `MessageFooter` (below the
     /// bubble, right-aligned). `None` hides the footer.
-    pub footer: Option<AnyElement>,}
+    pub footer: Option<AnyElement>,
+}
 
 pub(crate) fn session_bubble_quoted(
     id: u64,
@@ -232,7 +233,8 @@ pub(crate) fn session_bubble_quoted(
         quote,
         None,
         chrome,
-        look,    )
+        look,
+    )
 }
 
 pub(crate) fn session_bubble_rich(
@@ -256,7 +258,8 @@ pub(crate) fn session_bubble_rich(
         quote,
         Some(body),
         chrome,
-        look,    )
+        look,
+    )
 }
 
 fn message_bubble(row: SyntheticRow) -> AnyElement {
@@ -264,7 +267,8 @@ fn message_bubble(row: SyntheticRow) -> AnyElement {
         sender: Some(row.sender.clone()),
         ..Default::default()
     };
-    message_bubble_with_quote(row, None, None, None, chrome, BubbleLook::demo())}
+    message_bubble_with_quote(row, None, None, None, chrome, BubbleLook::demo())
+}
 
 fn message_bubble_with_quote(
     row: SyntheticRow,
@@ -272,7 +276,8 @@ fn message_bubble_with_quote(
     quote: Option<AnyElement>,
     body_el: Option<AnyElement>,
     chrome: MessageChrome,
-    look: BubbleLook,) -> AnyElement {
+    look: BubbleLook,
+) -> AnyElement {
     let image_h = match row.kind {
         SyntheticKind::Image { loaded: false } => px(40.),
         SyntheticKind::Image { loaded: true } => px(96.),

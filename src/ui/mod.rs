@@ -141,7 +141,9 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
-use synthetic::{BubbleLook, MessageChrome, SyntheticChat, session_bubble_quoted, session_bubble_rich};
+use synthetic::{
+    BubbleLook, MessageChrome, SyntheticChat, session_bubble_quoted, session_bubble_rich,
+};
 use zeroize::Zeroize;
 
 actions!(
@@ -45920,12 +45922,7 @@ fn link_preview_card(
         );
     }
     if site_empty && title_empty && description_empty && !display.is_empty() {
-        copy = copy.child(
-            div()
-                .text_size(small)
-                .text_color(accent())
-                .child(display),
-        );
+        copy = copy.child(div().text_size(small).text_color(accent()).child(display));
     }
     let body = if preview.show_large_media {
         let mut column = div()
