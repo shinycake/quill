@@ -7,12 +7,16 @@ use gpui_kit::assets::IconName;
 use gpui_kit::component::avatar::Avatar;
 use gpui_kit::component::badge::Badge;
 use gpui_kit::component::button::*;
+use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::input::{InputEvent, Textarea, TextareaState};
 use gpui_kit::component::message_scroller::{MessageScroller, MessageScrollerState};
 use gpui_kit::component::notification::Notification;
+use gpui_kit::component::radio::{Radio, RadioGroup};
 use gpui_kit::component::slider::{Slider, SliderEvent, SliderState, SliderValue};
+use gpui_kit::component::switch::Switch;
 use gpui_kit::component::tab::{Tab, TabBar};
+use gpui_kit::component::table::{Table, TableBody, TableCell, TableRow};
 use gpui_kit::component::*;
 // kit Phase 3: the geometry `Size` (row sizes for the kit `VirtualList`),
 // aliased because the `gpui_kit::*` glob also brings the component `Size`
@@ -8747,16 +8751,13 @@ impl QuillApp {
         if needs_order {
             let checked = dialog.allow_save_order;
             body = body.child(
-                Button::new("p1-payment-save-order")
-                    .label(if checked {
-                        "☑ Remember order info"
-                    } else {
-                        "☐ Remember order info"
-                    })
-                    .ghost()
-                    .on_click(cx.listener(|this, _, _, cx| {
+                // Phase 6: kit Checkbox (was: ghost button with ☑/☐ label).
+                Checkbox::new("p1-payment-save-order")
+                    .checked(checked)
+                    .label("Remember order info")
+                    .on_click(cx.listener(|this, &on, _, cx| {
                         if let Some(dialog) = this.payment_dialog.as_mut() {
-                            dialog.allow_save_order = !dialog.allow_save_order;
+                            dialog.allow_save_order = on;
                         }
                         cx.notify();
                     })),
@@ -8773,74 +8774,91 @@ impl QuillApp {
         if let Some(validated) = &session.payment_validated
             && !validated.shipping_options.is_empty()
         {
-            let mut shipping = div()
-                .flex()
-                .flex_col()
-                .gap_1()
-                .child(div().text_xs().font_semibold().child("Shipping"));
-            for option in &validated.shipping_options {
-                let selected = session.payment_shipping_id.as_deref() == Some(option.id.as_str());
-                let id = option.id.clone();
-                shipping = shipping.child(
-                    Button::new(format!("p1-payment-shipping-{id}"))
-                        .label(format!(
-                            "{} {} — {}",
-                            if selected { "◉" } else { "○" },
-                            option.title,
-                            format_payment_price(
-                                &invoice.currency,
-                                price_parts_total(&option.price_parts)
-                            )
-                        ))
-                        .ghost()
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            if let Some(live) = this.live.as_mut() {
-                                live.driver.session.payment_shipping_id = Some(id.clone());
-                            }
-                            cx.notify();
-                        })),
-                );
-            }
-            body = body.child(shipping);
+            // Phase 6: kit RadioGroup (was: buttons with a ◉/○ prefix).
+            // Controlled: the chosen index writes the value.
+            let shipping_ids: Vec<String> = validated
+                .shipping_options
+                .iter()
+                .map(|option| option.id.clone())
+                .collect();
+            let shipping_selected = validated.shipping_options.iter().position(|option| {
+                session.payment_shipping_id.as_deref() == Some(option.id.as_str())
+            });
+            body = body.child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap_1()
+                    .child(div().text_xs().font_semibold().child("Shipping"))
+                    .child(
+                        RadioGroup::vertical("p1-payment-shipping")
+                            .selected_index(shipping_selected)
+                            .children(validated.shipping_options.iter().map(|option| {
+                                Radio::new(format!("p1-payment-shipping-{}", option.id)).label(
+                                    format!(
+                                        "{} — {}",
+                                        option.title,
+                                        format_payment_price(
+                                            &invoice.currency,
+                                            price_parts_total(&option.price_parts)
+                                        )
+                                    ),
+                                )
+                            }))
+                            .on_click(cx.listener(move |this, &ix: &usize, _, cx| {
+                                if let Some(live) = this.live.as_mut() {
+                                    live.driver.session.payment_shipping_id =
+                                        Some(shipping_ids[ix].clone());
+                                }
+                                cx.notify();
+                            })),
+                    ),
+            );
         }
         // Credentials: saved credentials or a fresh provider token.
+        // Phase 6: one kit RadioGroup for the whole credential choice
+        // (was: buttons with a ◉/○ prefix). Controlled: the chosen index
+        // writes the value.
+        let cred_ids: Vec<Option<String>> = saved_credentials
+            .iter()
+            .map(|cred| Some(cred.id.clone()))
+            .chain(std::iter::once(None))
+            .collect();
+        let cred_selected = cred_ids.iter().position(|id| match id {
+            Some(id) => dialog.credential_choice == PaymentCredentialChoice::Saved(id.clone()),
+            None => dialog.credential_choice == PaymentCredentialChoice::NewToken,
+        });
         let mut creds = div()
             .flex()
             .flex_col()
             .gap_1()
-            .child(div().text_xs().font_semibold().child("Payment method"));
-        for cred in saved_credentials {
-            let selected =
-                dialog.credential_choice == PaymentCredentialChoice::Saved(cred.id.clone());
-            let id = cred.id.clone();
-            let title = cred.title.clone();
-            creds = creds.child(
-                Button::new(format!("p1-payment-cred-{id}"))
-                    .label(format!("{} {title}", if selected { "◉" } else { "○" }))
-                    .ghost()
-                    .on_click(cx.listener(move |this, _, _, cx| {
+            .child(div().text_xs().font_semibold().child("Payment method"))
+            .child(
+                RadioGroup::vertical("p1-payment-cred")
+                    .selected_index(cred_selected)
+                    .children(
+                        saved_credentials
+                            .iter()
+                            .map(|cred| {
+                                Radio::new(format!("p1-payment-cred-{}", cred.id))
+                                    .label(cred.title.clone())
+                            })
+                            .chain(std::iter::once(
+                                Radio::new("p1-payment-cred-new")
+                                    .label("New card (provider token)"),
+                            )),
+                    )
+                    .on_click(cx.listener(move |this, &ix: &usize, _, cx| {
                         if let Some(dialog) = this.payment_dialog.as_mut() {
-                            dialog.credential_choice = PaymentCredentialChoice::Saved(id.clone());
+                            dialog.credential_choice = match &cred_ids[ix] {
+                                Some(id) => PaymentCredentialChoice::Saved(id.clone()),
+                                None => PaymentCredentialChoice::NewToken,
+                            };
                         }
                         cx.notify();
                     })),
             );
-        }
         let use_token = dialog.credential_choice == PaymentCredentialChoice::NewToken;
-        creds = creds.child(
-            Button::new("p1-payment-cred-new")
-                .label(format!(
-                    "{} New card (provider token)",
-                    if use_token { "◉" } else { "○" }
-                ))
-                .ghost()
-                .on_click(cx.listener(|this, _, _, cx| {
-                    if let Some(dialog) = this.payment_dialog.as_mut() {
-                        dialog.credential_choice = PaymentCredentialChoice::NewToken;
-                    }
-                    cx.notify();
-                })),
-        );
         if use_token {
             creds = creds.child(div().child(Textarea::new(&dialog.token_input).h(px(36.))));
             if can_save_credentials {
@@ -8851,15 +8869,13 @@ impl QuillApp {
                     ""
                 };
                 creds = creds.child(
-                    Button::new("p1-payment-save-creds")
-                        .label(format!(
-                            "{} Save card{caption}",
-                            if checked { "☑" } else { "☐" }
-                        ))
-                        .ghost()
-                        .on_click(cx.listener(|this, _, _, cx| {
+                    // Phase 6: kit Checkbox (was: ghost button with ☑/☐ label).
+                    Checkbox::new("p1-payment-save-creds")
+                        .checked(checked)
+                        .label(format!("Save card{caption}"))
+                        .on_click(cx.listener(|this, &on, _, cx| {
                             if let Some(dialog) = this.payment_dialog.as_mut() {
-                                dialog.allow_save_credentials = !dialog.allow_save_credentials;
+                                dialog.allow_save_credentials = on;
                             }
                             cx.notify();
                         })),
@@ -8876,12 +8892,13 @@ impl QuillApp {
                     .items_center()
                     .gap_2()
                     .child(
-                        Button::new("p1-payment-terms")
-                            .label(if checked { "☑" } else { "☐" })
-                            .ghost()
-                            .on_click(cx.listener(|this, _, _, cx| {
+                        // Phase 6: kit Checkbox (was: ghost button with ☑/☐ label).
+                        Checkbox::new("p1-payment-terms")
+                            .checked(checked)
+                            .accessibility_label("I accept the terms of service")
+                            .on_click(cx.listener(|this, &on, _, cx| {
                                 if let Some(dialog) = this.payment_dialog.as_mut() {
-                                    dialog.terms_accepted = !dialog.terms_accepted;
+                                    dialog.terms_accepted = on;
                                 }
                                 cx.notify();
                             })),
@@ -10223,20 +10240,6 @@ impl QuillApp {
             self.status_note = "demo: call settings are not saved".into();
         }
         cx.notify();
-    }
-
-    fn toggle_call_pref_confirm(&mut self, cx: &mut Context<Self>) {
-        self.set_call_pref(
-            |prefs| prefs.confirm_before_calling = !prefs.confirm_before_calling,
-            cx,
-        );
-    }
-
-    fn toggle_call_pref_less_data(&mut self, cx: &mut Context<Self>) {
-        self.set_call_pref(
-            |prefs| prefs.less_data_for_calls = !prefs.less_data_for_calls,
-            cx,
-        );
     }
 
     fn toggle_call_mute(&mut self, cx: &mut Context<Self>) {
@@ -13128,12 +13131,11 @@ impl QuillApp {
         cx.notify();
     }
 
-    fn toggle_hq_round_videos(&mut self, cx: &mut Context<Self>) {
-        let next = !self
-            .session()
-            .is_some_and(|session| session.media_prefs.hq_round_videos);
-        self.set_media_pref(|prefs| prefs.hq_round_videos = next, cx);
-        self.status_note = if next {
+    /// Phase 6: write the requested HQ value (was: flip), keeping the
+    /// status-note feedback the toggle gave.
+    fn set_hq_round_videos(&mut self, on: bool, cx: &mut Context<Self>) {
+        self.set_media_pref(|prefs| prefs.hq_round_videos = on, cx);
+        self.status_note = if on {
             "HQ round videos on — 480px captures".into()
         } else {
             "HQ round videos off — 280px captures".into()
@@ -16944,22 +16946,21 @@ impl QuillApp {
     /// Slice CL2: flip one archive auto-setting — optimistic local flip
     /// plus `setArchiveChatListSettings`; a refusal restores the old
     /// values (driver rollback).
-    fn toggle_archive_setting(&mut self, index: usize, cx: &mut Context<Self>) {
+    /// kit Phase 6: write the requested value (was: flip the bit).
+    fn set_archive_setting(&mut self, index: usize, on: bool, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             let Some(mut settings) = live.driver.session.archive_chat_list_settings else {
                 self.status_note = "archive settings still loading…".into();
                 cx.notify();
                 return;
             };
-            let enabled = archive_setting_get(&settings, index);
-            archive_setting_set(&mut settings, index, !enabled);
+            archive_setting_set(&mut settings, index, on);
             if let Err(err) = live.driver.set_archive_chat_list_settings(settings) {
                 self.status_note = format!("archive setting failed: {err:?}");
             }
         } else if let Some(session) = self.demo_session.as_mut() {
             if let Some(mut settings) = session.archive_chat_list_settings {
-                let enabled = archive_setting_get(&settings, index);
-                archive_setting_set(&mut settings, index, !enabled);
+                archive_setting_set(&mut settings, index, on);
                 session.archive_chat_list_settings = Some(settings);
             }
         }
@@ -17869,12 +17870,7 @@ impl QuillApp {
                 .unwrap_or(0);
             let leave_label = if leave_count > 0 {
                 format!(
-                    "{} Also leave {leave_count} suggested chat{}",
-                    if confirm.leave_with_folder {
-                        "☑"
-                    } else {
-                        "☐"
-                    },
+                    "Also leave {leave_count} suggested chat{}",
                     if leave_count == 1 { "" } else { "s" },
                 )
             } else {
@@ -17891,12 +17887,13 @@ impl QuillApp {
                         .child("Chats stay in your main list unless you leave them."),
                 )
                 .child(
-                    Button::new("folder-delete-leave-toggle")
+                    // Phase 6: kit Checkbox (was: ghost button with ☑/☐ label).
+                    Checkbox::new("folder-delete-leave-toggle")
+                        .checked(confirm.leave_with_folder)
                         .label(leave_label)
-                        .ghost()
-                        .on_click(cx.listener(|this, _, window, cx| {
+                        .on_click(cx.listener(|this, &on, window, cx| {
                             if let Some(confirm) = this.folder_delete_confirm.as_mut() {
-                                confirm.leave_with_folder = !confirm.leave_with_folder;
+                                confirm.leave_with_folder = on;
                             }
                             cx.notify();
                             this.close_kit_dialog_if_done(DialogKind::FolderDelete, window, cx);
@@ -18073,15 +18070,14 @@ impl QuillApp {
                 .child(list)
                 .child(
                     div().flex().items_center().gap_2().child(
-                        Button::new("folder-tags-toggle")
-                            .label(if tags_enabled {
-                                "☑ Show folder tags"
-                            } else {
-                                "☐ Show folder tags"
-                            })
-                            .ghost()
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.toggle_folder_tags_ui(cx);
+                        // Phase 6: kit Checkbox (was: ghost button with ☑/☐ label).
+                        Checkbox::new("folder-tags-toggle")
+                            .checked(tags_enabled)
+                            .label("Show folder tags")
+                            .on_click(cx.listener(move |this, &on, window, cx| {
+                                if on != tags_enabled {
+                                    this.toggle_folder_tags_ui(cx);
+                                }
                                 this.close_kit_dialog_if_done(DialogKind::FolderManage, window, cx);
                             })),
                     ),
@@ -18257,6 +18253,13 @@ impl QuillApp {
 
     /// kit Phase 2 (redo): storage usage hosted in a kit `Dialog` via
     /// `window.open_dialog`. Esc / backdrop / ✕ clear state via `on_close`.
+    /// Phase 6: put arbitrary content in a static kit [`TableCell`]. The
+    /// cell's inherent `.child()` only accepts kit table parts (it shadows
+    /// [`ParentElement::child`]), so content goes through the trait method.
+    fn table_cell(content: impl IntoElement) -> TableCell {
+        ParentElement::child(TableCell::new(), content)
+    }
+
     fn build_storage_usage_dialog(
         app: &Entity<QuillApp>,
         shell: &Entity<QuillShell>,
@@ -18287,33 +18290,41 @@ impl QuillApp {
                     );
                 }
                 Some(stats) => {
-                    body = body.child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .justify_between()
-                            .child(div().font_semibold().text_sm().child("Total"))
-                            .child(div().text_sm().child(format_bytes(stats.total_size))),
+                    // Phase 6: a static kit Table (was: hand-rolled
+                    // justify-between rows).
+                    let mut table_body = TableBody::new().child(
+                        TableRow::new()
+                            .child(Self::table_cell(
+                                div().font_semibold().text_sm().child("Total"),
+                            ))
+                            .child(
+                                Self::table_cell(
+                                    div().text_sm().child(format_bytes(stats.total_size)),
+                                )
+                                .text_right(),
+                            ),
                     );
                     for (label, size, count) in
                         quill::telegram::envelope::storage_category_rows(&stats)
                     {
-                        body = body.child(
-                            div()
-                                .id(format!("storage-row-{label}"))
-                                .flex()
-                                .items_center()
-                                .justify_between()
-                                .gap_2()
-                                .child(div().text_sm().child(label))
+                        table_body = table_body.child(
+                            TableRow::new()
+                                .child(Self::table_cell(div().text_sm().child(label)))
                                 .child(
-                                    div()
-                                        .text_xs()
-                                        .text_color(cx.theme().muted_foreground)
-                                        .child(format!("{count} files · {}", format_bytes(size))),
+                                    Self::table_cell(
+                                        div()
+                                            .text_xs()
+                                            .text_color(cx.theme().muted_foreground)
+                                            .child(format!(
+                                                "{count} files · {}",
+                                                format_bytes(size)
+                                            )),
+                                    )
+                                    .text_right(),
                                 ),
                         );
                     }
+                    body = body.child(Table::new().child(table_body));
                 }
             }
             let footer = div()
@@ -18502,6 +18513,8 @@ impl QuillApp {
                             .child("Refreshing…"),
                     );
                 }
+                // Phase 6: each session group is a one-column kit Table
+                // hosting the rich session rows (was: bare rows).
                 if let Some(current) = current {
                     body = body
                         .child(
@@ -18511,7 +18524,11 @@ impl QuillApp {
                                 .text_color(cx.theme().muted_foreground)
                                 .child("Current session"),
                         )
-                        .child(this.session_row(current, mutating, true, cx));
+                        .child(Table::new().child(TableBody::new().child(
+                            TableRow::new().child(Self::table_cell(
+                                this.session_row(current, mutating, true, cx),
+                            )),
+                        )));
                 }
                 if !incomplete.is_empty() {
                     body = body
@@ -18527,9 +18544,15 @@ impl QuillApp {
                                 "The devices above have no access to your messages. The code was entered correctly, but no correct password was given.",
                             ),
                         );
+                    let mut incomplete_body = TableBody::new();
                     for s in incomplete {
-                        body = body.child(this.session_row(s, mutating, false, cx));
+                        incomplete_body = incomplete_body.child(
+                            TableRow::new().child(Self::table_cell(
+                                this.session_row(s, mutating, false, cx),
+                            )),
+                        );
                     }
+                    body = body.child(Table::new().child(incomplete_body));
                 }
                 if !others.is_empty() {
                     body = body.child(
@@ -18539,9 +18562,15 @@ impl QuillApp {
                             .text_color(cx.theme().muted_foreground)
                             .child("Other sessions"),
                     );
+                    let mut others_body = TableBody::new();
                     for s in others {
-                        body = body.child(this.session_row(s, mutating, true, cx));
+                        others_body = others_body.child(
+                            TableRow::new().child(Self::table_cell(
+                                this.session_row(s, mutating, true, cx),
+                            )),
+                        );
                     }
+                    body = body.child(Table::new().child(others_body));
                 }
                 let any_other = sessions.iter().any(|s| !s.is_current);
                 body = body.child(
@@ -18678,9 +18707,16 @@ impl QuillApp {
                             .text_color(cx.theme().muted_foreground)
                             .child("Connected Websites"),
                     );
+                // Phase 6: a one-column kit Table hosting the rich
+                // website rows (was: bare rows).
+                let mut websites_body = TableBody::new();
                 for w in &websites {
-                    body = body.child(this.website_row(w, mutating, cx));
+                    websites_body = websites_body.child(
+                        TableRow::new()
+                            .child(Self::table_cell(this.website_row(w, mutating, cx))),
+                    );
                 }
+                body = body.child(Table::new().child(websites_body));
                 body = body.child(
                     div()
                         .text_xs()
@@ -20017,15 +20053,12 @@ impl QuillApp {
                             .gap_1()
                             .child(div().text_xs().font_semibold().child(*title))
                             .child(
-                                Button::new(format!("archive-setting-{index}"))
-                                    .label(if enabled {
-                                        format!("☑ {label}")
-                                    } else {
-                                        format!("☐ {label}")
-                                    })
-                                    .ghost()
-                                    .on_click(cx.listener(move |this, _, window, cx| {
-                                        this.toggle_archive_setting(index, cx);
+                                // Phase 6: kit Checkbox (was: ghost button with ☑/☐ label).
+                                Checkbox::new(format!("archive-setting-{index}"))
+                                    .checked(enabled)
+                                    .label(*label)
+                                    .on_click(cx.listener(move |this, &on, window, cx| {
+                                        this.set_archive_setting(index, on, cx);
                                         this.close_kit_dialog_if_done(
                                             DialogKind::ArchiveSettings,
                                             window,
@@ -20169,19 +20202,12 @@ impl QuillApp {
                     .flex()
                     .flex_col()
                     .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .justify_between()
-                            .child(div().text_sm().child("Sync contacts"))
-                            .child(
-                                Button::new("contacts-sync-toggle")
-                                    .label(if sync_on { "On" } else { "Off" })
-                                    .ghost()
-                                    .on_click(cx.listener(|this, _, _, cx| {
-                                        this.toggle_contact_sync(cx);
-                                    })),
-                            ),
+                        Switch::new("contacts-sync-toggle")
+                            .checked(sync_on)
+                            .label("Sync contacts")
+                            .on_click(cx.listener(|this, &on, _, cx| {
+                                this.set_contact_sync(on, cx);
+                            })),
                     )
                     .child(
                         // Slice A6: honest caption — on desktop there is
@@ -20231,13 +20257,11 @@ impl QuillApp {
         section.into_any_element()
     }
 
-    /// Slice A6: flip the local "Sync contacts" switch, persist it to
-    /// `contacts_prefs.json`, and refresh (or freeze) the tab.
-    fn toggle_contact_sync(&mut self, cx: &mut Context<Self>) {
-        let next = !self
-            .session()
-            .map(|s| s.contact_prefs.sync_enabled)
-            .unwrap_or(true);
+    /// Slice A6: set the local "Sync contacts" switch to the requested
+    /// value, persist it to `contacts_prefs.json`, and refresh (or
+    /// freeze) the tab.
+    fn set_contact_sync(&mut self, on: bool, cx: &mut Context<Self>) {
+        let next = on;
         if let Some(live) = self.live.as_mut() {
             live.driver.session.contact_prefs.sync_enabled = next;
             if let Err(err) = live.driver.save_contact_prefs() {
@@ -20638,6 +20662,8 @@ impl QuillApp {
     /// Phase C2i: call settings — confirm-before-calling (real +
     /// persisted), who-can-call-me and P2P (real TDLib privacy), and
     /// the honest "saved, not yet applied" less-data toggle.
+    /// Phase 6: call prefs are kit `Switch`es, privacy who-groups are
+    /// kit `RadioGroup`s (was: hand-rolled ●/○ rows). Behavior unchanged.
     fn call_settings_section(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let prefs = self
             .session()
@@ -20653,45 +20679,78 @@ impl QuillApp {
         let privacy_failed = self
             .session()
             .is_some_and(|session| session.call_privacy_error);
-        let radio_row = |id: &'static str,
-                         label: &'static str,
-                         current: Option<PrivacyWho>,
-                         set: CallPrivacySetting,
-                         who: PrivacyWho| {
-            let selected = current == Some(who);
+        // Phase 6: one kit RadioGroup per privacy setting. Controlled:
+        // the chosen index writes the value and the owner re-renders.
+        let privacy_group =
+            |id: &'static str, current: Option<PrivacyWho>, set: CallPrivacySetting| {
+                const WHOS: [PrivacyWho; 3] = [
+                    PrivacyWho::Everybody,
+                    PrivacyWho::Contacts,
+                    PrivacyWho::Nobody,
+                ];
+                const LABELS: [&str; 3] = ["Everybody", "My Contacts", "Nobody"];
+                let selected = current.and_then(|w| WHOS.iter().position(|x| *x == w));
+                RadioGroup::vertical(id)
+                    .selected_index(selected)
+                    .children(
+                        WHOS.iter()
+                            .zip(LABELS.iter())
+                            .map(|(who, label)| Radio::new(format!("{id}-{who:?}")).label(*label)),
+                    )
+                    .on_click(cx.listener(move |this, &ix, _, cx| {
+                        let who = WHOS[ix];
+                        if let Some(live) = this.live.as_mut()
+                            && let Err(err) = live.driver.set_call_privacy(set, who)
+                        {
+                            this.status_note = format!("privacy update failed: {err:?}");
+                        } else if let Some(demo) = this.demo_session.as_mut() {
+                            // Demo: show the chosen value immediately (no
+                            // live TDLib to confirm it).
+                            match set {
+                                CallPrivacySetting::AllowCalls => {
+                                    demo.call_privacy_allow_calls = Some(who)
+                                }
+                                CallPrivacySetting::PeerToPeer => demo.call_privacy_p2p = Some(who),
+                            }
+                        }
+                        cx.notify();
+                    }))
+            };
+        // Phase 6: a kit Switch row with the title/caption beside it
+        // (was: a clickable row with a ●/○ bullet).
+        let pref_row = |id: &'static str,
+                        on: bool,
+                        title: &'static str,
+                        caption: &'static str,
+                        set: fn(&mut CallPrefs, bool)| {
             div()
                 .id(id)
-                .cursor_pointer()
                 .flex()
                 .items_center()
                 .gap_2()
                 .px_2()
                 .py_1()
                 .rounded_md()
-                .bg(if selected {
-                    cx.theme().accent.opacity(0.15)
-                } else {
-                    cx.theme().background
-                })
-                .child(div().text_xs().child(if selected { "●" } else { "○" }))
-                .child(div().text_sm().child(label))
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    if let Some(live) = this.live.as_mut()
-                        && let Err(err) = live.driver.set_call_privacy(set, who)
-                    {
-                        this.status_note = format!("privacy update failed: {err:?}");
-                    } else if let Some(demo) = this.demo_session.as_mut() {
-                        // Demo: show the chosen value immediately (no
-                        // live TDLib to confirm it).
-                        match set {
-                            CallPrivacySetting::AllowCalls => {
-                                demo.call_privacy_allow_calls = Some(who)
-                            }
-                            CallPrivacySetting::PeerToPeer => demo.call_privacy_p2p = Some(who),
-                        }
-                    }
-                    cx.notify();
-                }))
+                .child(
+                    Switch::new(format!("{id}-switch"))
+                        .checked(on)
+                        .accessibility_label(title)
+                        .on_click(cx.listener(move |this, &on, _, cx| {
+                            this.set_call_pref(|prefs| set(prefs, on), cx);
+                        })),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .child(div().text_sm().child(title))
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(cx.theme().muted_foreground)
+                                .child(caption),
+                        ),
+                )
         };
         div()
             .flex()
@@ -20705,60 +20764,20 @@ impl QuillApp {
                     .px_1()
                     .child("Call settings"),
             )
-            .child(
-                div()
-                    .id("call-pref-confirm")
-                    .cursor_pointer()
-                    .flex()
-                    .items_center()
-                    .gap_2()
-                    .px_2()
-                    .py_1()
-                    .rounded_md()
-                    .child(div().text_xs().child(if prefs.confirm_before_calling {
-                        "●"
-                    } else {
-                        "○"
-                    }))
-                    .child(
-                        div().text_sm().child("Confirm before calling").child(
-                            div()
-                                .text_xs()
-                                .text_color(cx.theme().muted_foreground)
-                                .child("Ask before placing a call"),
-                        ),
-                    )
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.toggle_call_pref_confirm(cx);
-                    })),
-            )
-            .child(
-                div()
-                    .id("call-pref-less-data")
-                    .cursor_pointer()
-                    .flex()
-                    .items_center()
-                    .gap_2()
-                    .px_2()
-                    .py_1()
-                    .rounded_md()
-                    .child(div().text_xs().child(if prefs.less_data_for_calls {
-                        "●"
-                    } else {
-                        "○"
-                    }))
-                    .child(
-                        div().text_sm().child("Use less data for calls").child(
-                            div()
-                                .text_xs()
-                                .text_color(cx.theme().muted_foreground)
-                                .child("Saved here — the call engine doesn’t support it yet"),
-                        ),
-                    )
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.toggle_call_pref_less_data(cx);
-                    })),
-            )
+            .child(pref_row(
+                "call-pref-confirm",
+                prefs.confirm_before_calling,
+                "Confirm before calling",
+                "Ask before placing a call",
+                |prefs, on| prefs.confirm_before_calling = on,
+            ))
+            .child(pref_row(
+                "call-pref-less-data",
+                prefs.less_data_for_calls,
+                "Use less data for calls",
+                "Saved here — the call engine doesn’t support it yet",
+                |prefs, on| prefs.less_data_for_calls = on,
+            ))
             .child(
                 div()
                     .text_xs()
@@ -20782,32 +20801,12 @@ impl QuillApp {
                     .child("Loading privacy settings…")
                     .into_any_element()
             } else {
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap_0()
-                    .child(radio_row(
-                        "call-privacy-allow-everybody",
-                        "Everybody",
-                        allow_calls,
-                        CallPrivacySetting::AllowCalls,
-                        PrivacyWho::Everybody,
-                    ))
-                    .child(radio_row(
-                        "call-privacy-allow-contacts",
-                        "My Contacts",
-                        allow_calls,
-                        CallPrivacySetting::AllowCalls,
-                        PrivacyWho::Contacts,
-                    ))
-                    .child(radio_row(
-                        "call-privacy-allow-nobody",
-                        "Nobody",
-                        allow_calls,
-                        CallPrivacySetting::AllowCalls,
-                        PrivacyWho::Nobody,
-                    ))
-                    .into_any_element()
+                privacy_group(
+                    "call-privacy-allow",
+                    allow_calls,
+                    CallPrivacySetting::AllowCalls,
+                )
+                .into_any_element()
             })
             .child(
                 div()
@@ -20832,31 +20831,7 @@ impl QuillApp {
                     .child("Loading privacy settings…")
                     .into_any_element()
             } else {
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap_0()
-                    .child(radio_row(
-                        "call-privacy-p2p-everybody",
-                        "Everybody",
-                        p2p,
-                        CallPrivacySetting::PeerToPeer,
-                        PrivacyWho::Everybody,
-                    ))
-                    .child(radio_row(
-                        "call-privacy-p2p-contacts",
-                        "My Contacts",
-                        p2p,
-                        CallPrivacySetting::PeerToPeer,
-                        PrivacyWho::Contacts,
-                    ))
-                    .child(radio_row(
-                        "call-privacy-p2p-nobody",
-                        "Nobody",
-                        p2p,
-                        CallPrivacySetting::PeerToPeer,
-                        PrivacyWho::Nobody,
-                    ))
+                privacy_group("call-privacy-p2p", p2p, CallPrivacySetting::PeerToPeer)
                     .into_any_element()
             })
     }
@@ -20873,11 +20848,13 @@ impl QuillApp {
             .session()
             .map(|session| session.media_prefs.instant_view_mode)
             .unwrap_or(quill::settings::InstantViewMode::Telegram);
-        let iv_label = match iv_mode {
-            quill::settings::InstantViewMode::Off => "Off",
-            quill::settings::InstantViewMode::Telegram => "Telegram links",
-            quill::settings::InstantViewMode::All => "All links",
-        };
+        // Phase 6: single-choice group (was: "tap to cycle" row).
+        let iv_modes = [
+            ("Off", quill::settings::InstantViewMode::Off),
+            ("Telegram links", quill::settings::InstantViewMode::Telegram),
+            ("All links", quill::settings::InstantViewMode::All),
+        ];
+        let iv_selected = iv_modes.iter().position(|(_, mode)| *mode == iv_mode);
         div()
             .flex()
             .flex_col()
@@ -20891,64 +20868,57 @@ impl QuillApp {
                     .child("Media settings"),
             )
             .child(
+                // Phase 6: kit Switch (was: clickable row with a ●/○ bullet).
                 div()
                     .id("media-pref-hq-round")
-                    .cursor_pointer()
                     .flex()
                     .items_center()
                     .gap_2()
                     .px_2()
                     .py_1()
                     .rounded_md()
-                    .child(div().text_xs().child(if hq { "●" } else { "○" }))
                     .child(
-                        div().text_sm().child("Record HQ round videos").child(
-                            div()
-                                .text_xs()
-                                .text_color(cx.theme().muted_foreground)
-                                .child("Capture round video notes at 480px instead of 280px"),
-                        ),
+                        Switch::new("media-pref-hq-round-switch")
+                            .checked(hq)
+                            .accessibility_label("Record HQ round videos")
+                            .on_click(cx.listener(|this, &on, _, cx| {
+                                this.set_hq_round_videos(on, cx);
+                            })),
                     )
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.toggle_hq_round_videos(cx);
-                    })),
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .child(div().text_sm().child("Record HQ round videos"))
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child("Capture round video notes at 480px instead of 280px"),
+                            ),
+                    ),
             )
             .child(
                 div()
                     .id("media-pref-instant-view")
-                    .cursor_pointer()
                     .flex()
-                    .items_center()
-                    .gap_2()
+                    .flex_col()
+                    .gap_1()
                     .px_2()
                     .py_1()
                     .rounded_md()
                     .child(div().text_sm().font_medium().child("Instant View"))
                     .child(
-                        div()
-                            .text_xs()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(format!("{iv_label} — tap to cycle")),
-                    )
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        // MED4: cycle Off → Telegram links → All links.
-                        this.set_media_pref(
-                            |prefs| {
-                                prefs.instant_view_mode = match prefs.instant_view_mode {
-                                    quill::settings::InstantViewMode::Off => {
-                                        quill::settings::InstantViewMode::Telegram
-                                    }
-                                    quill::settings::InstantViewMode::Telegram => {
-                                        quill::settings::InstantViewMode::All
-                                    }
-                                    quill::settings::InstantViewMode::All => {
-                                        quill::settings::InstantViewMode::Off
-                                    }
-                                };
-                            },
-                            cx,
-                        );
-                    })),
+                        RadioGroup::vertical("media-pref-instant-view-group")
+                            .selected_index(iv_selected)
+                            .children(iv_modes.iter().map(|(label, _)| {
+                                Radio::new(format!("instant-view-{label}")).label(*label)
+                            }))
+                            .on_click(cx.listener(move |this, &ix: &usize, _, cx| {
+                                let mode = iv_modes[ix].1;
+                                this.set_media_pref(|prefs| prefs.instant_view_mode = mode, cx);
+                            })),
+                    ),
             )
             // MED3: auto-download settings below the media prefs.
             .child(self.auto_download_settings_section(cx))
@@ -20978,9 +20948,9 @@ impl QuillApp {
                     .child("Auto-download"),
             )
             .child(
+                // Phase 6: kit Switch (was: clickable row with a ●/○ bullet).
                 div()
                     .id("media-pref-data-saver")
-                    .cursor_pointer()
                     .flex()
                     .items_center()
                     .gap_2()
@@ -20988,21 +20958,25 @@ impl QuillApp {
                     .py_1()
                     .rounded_md()
                     .child(
-                        div()
-                            .text_xs()
-                            .child(if prefs.data_saver { "●" } else { "○" }),
+                        Switch::new("media-pref-data-saver-switch")
+                            .checked(prefs.data_saver)
+                            .accessibility_label("Data saver")
+                            .on_click(cx.listener(|this, &on, _, cx| {
+                                this.set_media_pref(|prefs| prefs.data_saver = on, cx);
+                            })),
                     )
                     .child(
-                        div().text_sm().child("Data saver").child(
-                            div()
-                                .text_xs()
-                                .text_color(cx.theme().muted_foreground)
-                                .child("Pause all automatic media downloads"),
-                        ),
-                    )
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.set_media_pref(|prefs| prefs.data_saver = !prefs.data_saver, cx);
-                    })),
+                        div()
+                            .flex()
+                            .flex_col()
+                            .child(div().text_sm().child("Data saver"))
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child("Pause all automatic media downloads"),
+                            ),
+                    ),
             );
         const ROWS: [(&str, u8); 7] = [
             ("Photos", AUTO_DOWNLOAD_PHOTO),
@@ -21035,30 +21009,39 @@ impl QuillApp {
         for (row_idx, (label, flag)) in ROWS.iter().enumerate() {
             let mut row = div().flex().items_center().gap_2();
             row = row.child(div().w(px(110.)).text_sm().child(*label));
-            for (kind_idx, (_, bits)) in kinds.iter().enumerate() {
+            for (kind_idx, (kind, bits)) in kinds.iter().enumerate() {
                 let on = bits & flag != 0;
                 let flag = *flag;
+                // Phase 6: kit Checkbox (was: clickable ●/○ cells).
+                // Controlled: the requested value sets/clears the bit.
                 row = row.child(
                     div()
                         .id(format!("auto-dl-{row_idx}-{kind_idx}"))
                         .flex_1()
-                        .text_center()
-                        .cursor_pointer()
-                        .text_sm()
-                        .child(if on { "●" } else { "○" })
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.set_media_pref(
-                                move |prefs| {
-                                    let bits = match kind_idx {
-                                        0 => &mut prefs.auto_download_private,
-                                        1 => &mut prefs.auto_download_groups,
-                                        _ => &mut prefs.auto_download_channels,
-                                    };
-                                    *bits ^= flag;
-                                },
-                                cx,
-                            );
-                        })),
+                        .flex()
+                        .justify_center()
+                        .child(
+                            Checkbox::new(format!("auto-dl-check-{row_idx}-{kind_idx}"))
+                                .checked(on)
+                                .accessibility_label(format!("{label} in {kind} chats"))
+                                .on_click(cx.listener(move |this, &on, _, cx| {
+                                    this.set_media_pref(
+                                        move |prefs| {
+                                            let bits = match kind_idx {
+                                                0 => &mut prefs.auto_download_private,
+                                                1 => &mut prefs.auto_download_groups,
+                                                _ => &mut prefs.auto_download_channels,
+                                            };
+                                            if on {
+                                                *bits |= flag;
+                                            } else {
+                                                *bits &= !flag;
+                                            }
+                                        },
+                                        cx,
+                                    );
+                                })),
+                        ),
                 );
             }
             grid = grid.child(row);
@@ -25086,22 +25069,26 @@ impl QuillApp {
                 ] {
                     pickers =
                         pickers.child(div().text_xs().font_semibold().child(label.to_string()));
-                    for device in devices.iter().filter(|device| device.kind == kind) {
-                        let device_id = device.id.clone();
-                        let chosen = Some(device.id.as_str()) == selected;
-                        pickers = pickers.child(
-                            Button::new(format!("call-device-{}-{}", label, device.id))
-                                .label(format!(
-                                    "{} {}",
-                                    if chosen { "●" } else { "○" },
-                                    device.name
-                                ))
-                                .ghost()
-                                .on_click(cx.listener(move |this, _, _, cx| {
-                                    this.select_call_device(kind, &device_id, cx);
-                                })),
-                        );
-                    }
+                    // Phase 6: kit RadioGroup (was: buttons with a ●/○
+                    // prefix). Controlled: the chosen index writes the value.
+                    let choices: Vec<(String, String)> = devices
+                        .iter()
+                        .filter(|device| device.kind == kind)
+                        .map(|device| (device.id.clone(), device.name.clone()))
+                        .collect();
+                    let active = choices
+                        .iter()
+                        .position(|(id, _)| Some(id.as_str()) == selected);
+                    pickers = pickers.child(
+                        RadioGroup::vertical(format!("call-device-{label}"))
+                            .selected_index(active)
+                            .children(choices.iter().map(|(id, name)| {
+                                Radio::new(format!("call-device-{label}-{id}")).label(name.clone())
+                            }))
+                            .on_click(cx.listener(move |this, &ix: &usize, _, cx| {
+                                this.select_call_device(kind, &choices[ix].0, cx);
+                            })),
+                    );
                 }
                 // Phase C2e: camera picker, video calls only. When the
                 // engine reported other devices but no camera, the row
@@ -25114,36 +25101,40 @@ impl QuillApp {
                     };
                     pickers =
                         pickers.child(div().text_xs().font_semibold().child("Camera".to_string()));
-                    let mut any_camera = false;
-                    for device in devices.iter().filter(|device| {
-                        device.kind == quill::calls::engine::MediaDeviceKind::Camera
-                    }) {
-                        any_camera = true;
-                        let device_id = device.id.clone();
-                        let chosen = Some(device.id.as_str()) == camera_selected;
-                        pickers = pickers.child(
-                            Button::new(format!("call-device-Camera-{}", device.id))
-                                .label(format!(
-                                    "{} {}",
-                                    if chosen { "●" } else { "○" },
-                                    device.name
-                                ))
-                                .ghost()
-                                .on_click(cx.listener(move |this, _, _, cx| {
-                                    this.select_call_device(
-                                        quill::calls::engine::MediaDeviceKind::Camera,
-                                        &device_id,
-                                        cx,
-                                    );
-                                })),
-                        );
-                    }
-                    if !any_camera {
+                    // Phase 6: kit RadioGroup (was: buttons with a ●/○
+                    // prefix). Controlled: the chosen index writes the value.
+                    let camera_choices: Vec<(String, String)> = devices
+                        .iter()
+                        .filter(|device| {
+                            device.kind == quill::calls::engine::MediaDeviceKind::Camera
+                        })
+                        .map(|device| (device.id.clone(), device.name.clone()))
+                        .collect();
+                    if camera_choices.is_empty() {
                         pickers = pickers.child(
                             div()
                                 .text_xs()
                                 .text_color(cx.theme().muted_foreground)
                                 .child("No camera found."),
+                        );
+                    } else {
+                        let camera_active = camera_choices
+                            .iter()
+                            .position(|(id, _)| Some(id.as_str()) == camera_selected);
+                        pickers = pickers.child(
+                            RadioGroup::vertical("call-device-Camera")
+                                .selected_index(camera_active)
+                                .children(camera_choices.iter().map(|(id, name)| {
+                                    Radio::new(format!("call-device-Camera-{id}"))
+                                        .label(name.clone())
+                                }))
+                                .on_click(cx.listener(move |this, &ix: &usize, _, cx| {
+                                    this.select_call_device(
+                                        quill::calls::engine::MediaDeviceKind::Camera,
+                                        &camera_choices[ix].0,
+                                        cx,
+                                    );
+                                })),
                         );
                     }
                 }
@@ -25426,15 +25417,14 @@ impl QuillApp {
         for (index, (_, description)) in CALL_PROBLEMS.iter().enumerate() {
             let selected = detail.problems[index];
             chips = chips.child(
-                Button::new(format!("call-problem-{index}"))
-                    .label(format!(
-                        "{} {}",
-                        if selected { "☑" } else { "☐" },
-                        description
-                    ))
-                    .ghost()
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.toggle_rating_problem(index, cx);
+                // Phase 6: kit Checkbox (was: ghost button with ☑/☐ label).
+                Checkbox::new(format!("call-problem-{index}"))
+                    .checked(selected)
+                    .label(*description)
+                    .on_click(cx.listener(move |this, &on, _, cx| {
+                        if on != selected {
+                            this.toggle_rating_problem(index, cx);
+                        }
                     })),
             );
         }
@@ -27400,31 +27390,28 @@ impl QuillApp {
                 .child("Include types:"),
         );
         for (label, checked, key) in include_filters {
-            let mark = if checked { "☑" } else { "☐" };
+            // Phase 6: kit Checkbox (was: ghost button with ☑/☐ label).
             filters_row = filters_row.child(
-                Button::new(format!("folder-filter-{key}"))
-                    .label(format!("{mark} {label}"))
-                    .ghost()
-                    .on_click(cx.listener(move |this, _, _, cx| {
+                Checkbox::new(format!("folder-filter-{key}"))
+                    .checked(checked)
+                    .label(label)
+                    .on_click(cx.listener(move |this, &on, _, cx| {
                         if let Some(dialog) = this.folder_editor.as_mut() {
                             match key {
                                 "include-contacts" => {
-                                    dialog.editor.include_contacts =
-                                        !dialog.editor.include_contacts;
+                                    dialog.editor.include_contacts = on;
                                 }
                                 "include-non-contacts" => {
-                                    dialog.editor.include_non_contacts =
-                                        !dialog.editor.include_non_contacts;
+                                    dialog.editor.include_non_contacts = on;
                                 }
                                 "include-groups" => {
-                                    dialog.editor.include_groups = !dialog.editor.include_groups;
+                                    dialog.editor.include_groups = on;
                                 }
                                 "include-channels" => {
-                                    dialog.editor.include_channels =
-                                        !dialog.editor.include_channels;
+                                    dialog.editor.include_channels = on;
                                 }
                                 _ => {
-                                    dialog.editor.include_bots = !dialog.editor.include_bots;
+                                    dialog.editor.include_bots = on;
                                 }
                             }
                         }
@@ -27476,25 +27463,32 @@ impl QuillApp {
                             .flex()
                             .gap_1()
                             .child(
-                                Button::new(("folder-include-chat", chat_id as u64))
-                                    .label(if included { "☑ In" } else { "☐ In" })
-                                    .ghost()
-                                    .on_click(cx.listener(move |this, _, _, cx| {
-                                        if let Some(dialog) = this.folder_editor.as_mut() {
-                                            dialog.editor.toggle_included(chat_id);
+                                // Phase 6: kit Checkbox (was: ghost button with ☑/☐ label).
+                                // toggle_* flip membership, so fire only when the
+                                // requested value differs from the rendered one.
+                                Checkbox::new(("folder-include-chat", chat_id as u64))
+                                    .checked(included)
+                                    .label("In")
+                                    .on_click(cx.listener(move |this, &on, _, cx| {
+                                        if on != included {
+                                            if let Some(dialog) = this.folder_editor.as_mut() {
+                                                dialog.editor.toggle_included(chat_id);
+                                            }
+                                            cx.notify();
                                         }
-                                        cx.notify();
                                     })),
                             )
                             .child(
-                                Button::new(("folder-exclude-chat", chat_id as u64))
-                                    .label(if excluded { "☑ Out" } else { "☐ Out" })
-                                    .ghost()
-                                    .on_click(cx.listener(move |this, _, _, cx| {
-                                        if let Some(dialog) = this.folder_editor.as_mut() {
-                                            dialog.editor.toggle_excluded(chat_id);
+                                Checkbox::new(("folder-exclude-chat", chat_id as u64))
+                                    .checked(excluded)
+                                    .label("Out")
+                                    .on_click(cx.listener(move |this, &on, _, cx| {
+                                        if on != excluded {
+                                            if let Some(dialog) = this.folder_editor.as_mut() {
+                                                dialog.editor.toggle_excluded(chat_id);
+                                            }
+                                            cx.notify();
                                         }
-                                        cx.notify();
                                     })),
                             ),
                     ),
@@ -27519,23 +27513,22 @@ impl QuillApp {
                 .child("Exclude:"),
         );
         for (label, checked, key) in exclude_flags {
-            let mark = if checked { "☑" } else { "☐" };
+            // Phase 6: kit Checkbox (was: ghost button with ☑/☐ label).
             exclude_row = exclude_row.child(
-                Button::new(format!("folder-exclude-flag-{key}"))
-                    .label(format!("{mark} {label}"))
-                    .ghost()
-                    .on_click(cx.listener(move |this, _, _, cx| {
+                Checkbox::new(format!("folder-exclude-flag-{key}"))
+                    .checked(checked)
+                    .label(label)
+                    .on_click(cx.listener(move |this, &on, _, cx| {
                         if let Some(dialog) = this.folder_editor.as_mut() {
                             match key {
                                 "exclude-muted" => {
-                                    dialog.editor.exclude_muted = !dialog.editor.exclude_muted;
+                                    dialog.editor.exclude_muted = on;
                                 }
                                 "exclude-read" => {
-                                    dialog.editor.exclude_read = !dialog.editor.exclude_read;
+                                    dialog.editor.exclude_read = on;
                                 }
                                 _ => {
-                                    dialog.editor.exclude_archived =
-                                        !dialog.editor.exclude_archived;
+                                    dialog.editor.exclude_archived = on;
                                 }
                             }
                         }
@@ -29256,12 +29249,13 @@ impl QuillApp {
                             .child("Show message preview in notifications"),
                     )
                     .child(
-                        Button::new("notif-preview-toggle")
-                            .label(if preview_on { "On" } else { "Off" })
-                            .ghost()
-                            .on_click(cx.listener(move |this, _, _, cx| {
+                        // Phase 6: kit Switch (was: On/Off ghost button).
+                        Switch::new("notif-preview-toggle")
+                            .checked(preview_on)
+                            .accessibility_label("Show message preview in notifications")
+                            .on_click(cx.listener(move |this, &on, _, cx| {
                                 if let Some(chat_id) = open_chat {
-                                    this.apply_chat_preview(chat_id, !preview_on, cx);
+                                    this.apply_chat_preview(chat_id, on, cx);
                                 }
                             })),
                     ),
@@ -29365,26 +29359,24 @@ impl QuillApp {
         } else {
             &[("Off", 0), ("1d", 86400), ("1w", 604800), ("30d", 2592000)]
         };
-        let mut preset_row = div().id("ttl-presets").flex().flex_wrap().gap_1();
-        for (label, secs) in presets {
-            let secs = *secs;
-            let active =
-                open_chat_summary.is_some_and(|chat| chat.message_auto_delete_time == secs);
-            preset_row = preset_row.child(
-                Button::new(format!("ttl-set-{secs}"))
-                    .label(if active {
-                        format!("● {label}")
-                    } else {
-                        (*label).to_string()
-                    })
-                    .ghost()
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        if let Some(chat_id) = open_chat {
-                            this.apply_chat_ttl(chat_id, secs, cx);
-                        }
-                    })),
-            );
-        }
+        // Phase 6: kit RadioGroup (was: buttons with a ● prefix on the
+        // active preset). Controlled: the chosen index writes the value.
+        let active_ix = presets.iter().position(|(_, secs)| {
+            open_chat_summary.is_some_and(|chat| chat.message_auto_delete_time == *secs)
+        });
+        let preset_row = RadioGroup::horizontal("ttl-presets")
+            .selected_index(active_ix)
+            .children(
+                presets
+                    .iter()
+                    .map(|(label, _)| Radio::new(format!("ttl-set-{label}")).label(*label)),
+            )
+            .on_click(cx.listener(move |this, &ix: &usize, _, cx| {
+                let secs = presets[ix].1;
+                if let Some(chat_id) = open_chat {
+                    this.apply_chat_ttl(chat_id, secs, cx);
+                }
+            }));
         div()
             .id("ttl-picker")
             .flex()
@@ -29621,19 +29613,25 @@ impl QuillApp {
             .cursor_pointer()
             .hover(|style| style.bg(cx.theme().accent.opacity(0.08)))
             .child(
+                // Phase 6: kit Radio as the selection indicator (was: a "✓ "
+                // prefix on the title). The whole row stays the click
+                // target, exactly as before — the radio is display-only.
                 div()
                     .flex()
-                    .flex_col()
-                    .child(div().text_sm().child(format!(
-                        "{}{}",
-                        if selected { "✓ " } else { "" },
-                        title
-                    )))
+                    .items_center()
+                    .gap_2()
+                    .child(Radio::new(format!("{row_id}-radio")).checked(selected))
                     .child(
                         div()
-                            .text_xs()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(subtitle.to_string()),
+                            .flex()
+                            .flex_col()
+                            .child(div().text_sm().child(title.to_string()))
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(subtitle.to_string()),
+                            ),
                     ),
             );
         if let Some(sound_id) = preview_sound_id {
@@ -30559,40 +30557,34 @@ impl QuillApp {
         let session_id = s.id;
         let incomplete = s.is_password_pending;
         let mut actions = div().flex().flex_col().items_end().gap_1();
+        // Phase 6: kit Switches (were: "Accept/Reject" ghost buttons).
+        // The flip handlers are unchanged (TGX toggles directly, the value
+        // refreshes from the authoritative response); the switch only
+        // forwards when the requested value differs from the rendered one.
         if show_toggles {
-            let secret_label = format!(
-                "Secret Chats: {}",
-                if s.can_accept_secret_chats {
-                    "Accept"
-                } else {
-                    "Reject"
-                }
-            );
-            let calls_label = format!(
-                "Calls: {}",
-                if s.can_accept_calls {
-                    "Accept"
-                } else {
-                    "Reject"
-                }
-            );
+            let secret_on = s.can_accept_secret_chats;
+            let calls_on = s.can_accept_calls;
             actions = actions
                 .child(
-                    Button::new(format!("toggle-secret-chats-{session_id}"))
-                        .label(secret_label)
-                        .ghost()
+                    Switch::new(format!("toggle-secret-chats-{session_id}"))
+                        .label("Secret Chats")
+                        .checked(secret_on)
                         .disabled(mutating)
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.toggle_session_secret_chats(session_id, cx);
+                        .on_click(cx.listener(move |this, &on, _, cx| {
+                            if on != secret_on {
+                                this.toggle_session_secret_chats(session_id, cx);
+                            }
                         })),
                 )
                 .child(
-                    Button::new(format!("toggle-calls-{session_id}"))
-                        .label(calls_label)
-                        .ghost()
+                    Switch::new(format!("toggle-calls-{session_id}"))
+                        .label("Calls")
+                        .checked(calls_on)
                         .disabled(mutating)
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.toggle_session_calls(session_id, cx);
+                        .on_click(cx.listener(move |this, &on, _, cx| {
+                            if on != calls_on {
+                                this.toggle_session_calls(session_id, cx);
+                            }
                         })),
                 );
         }
@@ -30926,17 +30918,12 @@ impl QuillApp {
                             .child("Show message preview"),
                     )
                     .child(
-                        Button::new(format!("scope-preview-{:?}", scope))
-                            .label(if settings.show_preview { "On" } else { "Off" })
-                            .ghost()
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                let current = this
-                                    .session()
-                                    .and_then(|s| {
-                                        s.scope_notification_settings.get(&scope).cloned()
-                                    })
-                                    .unwrap_or_default();
-                                this.apply_scope_preview(scope, !current.show_preview, cx);
+                        // Phase 6: kit Switch (was: On/Off ghost button).
+                        Switch::new(format!("scope-preview-{scope:?}"))
+                            .checked(settings.show_preview)
+                            .accessibility_label("Show message preview")
+                            .on_click(cx.listener(move |this, &on, _, cx| {
+                                this.apply_scope_preview(scope, on, cx);
                             })),
                     ),
             )
@@ -32461,16 +32448,14 @@ impl QuillApp {
             .child(Textarea::new(&dialog.expiration_days_input).h(px(40.)))
             .child(Textarea::new(&dialog.member_limit_input).h(px(40.)))
             .child(
-                Button::new("invite-link-dialog-toggle-join-request")
-                    .label(if creates_join_request {
-                        "☑ Approval required to join"
-                    } else {
-                        "☐ Approval required to join"
-                    })
-                    .ghost()
-                    .on_click(cx.listener(|this, _, _, cx| {
+                // Phase 6: kit Checkbox (was: ghost button with a ☑/☐
+                // label). Controlled: writes the requested value.
+                Checkbox::new("invite-link-dialog-toggle-join-request")
+                    .label("Approval required to join")
+                    .checked(creates_join_request)
+                    .on_click(cx.listener(|this, &on, _, cx| {
                         if let Some(dialog) = this.invite_link_dialog.as_mut() {
-                            dialog.creates_join_request = !dialog.creates_join_request;
+                            dialog.creates_join_request = on;
                         }
                         cx.notify();
                     })),
@@ -32529,16 +32514,16 @@ impl QuillApp {
             .items_center()
             .gap_2()
             .child(
-                Button::new(format!("{id_prefix}-toggle-{user_id}"))
-                    .label(if selected {
-                        format!("☑ {name}")
-                    } else {
-                        format!("☐ {name}")
-                    })
-                    .ghost()
-                    .text_color(TEXT_BRIGHT)
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.toggle_g1_contact_pick(&id_prefix, user_id, cx);
+                // Phase 6: kit Checkbox (was: ghost button with ☑/☐ label).
+                // The staged picks flip, so fire only when the requested
+                // value differs from the rendered one.
+                Checkbox::new(format!("{id_prefix}-toggle-{user_id}"))
+                    .checked(selected)
+                    .label(name)
+                    .on_click(cx.listener(move |this, &on, _, cx| {
+                        if on != selected {
+                            this.toggle_g1_contact_pick(&id_prefix, user_id, cx);
+                        }
                     })),
             )
             .into_any_element()
@@ -32781,16 +32766,14 @@ impl QuillApp {
             let enabled = chat_permission_get(permissions, index);
             row = row.child(
                 div().flex_1().child(
-                    Button::new(format!("g1-permission-{index}"))
-                        .label(if enabled {
-                            format!("☑ {label}")
-                        } else {
-                            format!("☐ {label}")
-                        })
-                        .ghost()
-                        .text_color(TEXT_BRIGHT)
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.toggle_permission(index, cx);
+                    // Phase 6: kit Checkbox (was: ghost button with ☑/☐ label).
+                    Checkbox::new(format!("g1-permission-{index}"))
+                        .checked(enabled)
+                        .label(*label)
+                        .on_click(cx.listener(move |this, &on, _, cx| {
+                            if on != enabled {
+                                this.toggle_permission(index, cx);
+                            }
                         })),
                 ),
             );
@@ -32815,16 +32798,14 @@ impl QuillApp {
             let enabled = chat_permission_get(permissions, index);
             row = row.child(
                 div().flex_1().child(
-                    Button::new(format!("g1-restrict-permission-{index}"))
-                        .label(if enabled {
-                            format!("☑ {label}")
-                        } else {
-                            format!("☐ {label}")
-                        })
-                        .ghost()
-                        .text_color(TEXT_BRIGHT)
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.toggle_restrict_permission(index, cx);
+                    // Phase 6: kit Checkbox (was: ghost button with ☑/☐ label).
+                    Checkbox::new(format!("g1-restrict-permission-{index}"))
+                        .checked(enabled)
+                        .label(*label)
+                        .on_click(cx.listener(move |this, &on, _, cx| {
+                            if on != enabled {
+                                this.toggle_restrict_permission(index, cx);
+                            }
                         })),
                 ),
             );
@@ -33099,16 +33080,14 @@ impl QuillApp {
             let prefix = id_prefix.to_string();
             row = row.child(
                 div().flex_1().child(
-                    Button::new(format!("{prefix}-{index}"))
-                        .label(if enabled {
-                            format!("☑ {label}")
-                        } else {
-                            format!("☐ {label}")
-                        })
-                        .ghost()
-                        .text_color(TEXT_BRIGHT)
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.toggle_admin_right(prefix.as_str(), index, cx);
+                    // Phase 6: kit Checkbox (was: ghost button with ☑/☐ label).
+                    Checkbox::new(format!("{prefix}-{index}"))
+                        .checked(enabled)
+                        .label(*label)
+                        .on_click(cx.listener(move |this, &on, _, cx| {
+                            if on != enabled {
+                                this.toggle_admin_right(prefix.as_str(), index, cx);
+                            }
                         })),
                 ),
             );
@@ -33271,9 +33250,9 @@ impl QuillApp {
                 );
             }
             Some(SupergroupMembersFetch::Loaded { members, .. }) => {
-                let mut rows = div().flex().flex_col().gap_1();
-                let mut shown = 0;
-                for user_id in members
+                // Phase 6: kit RadioGroup (was: buttons with a ●/○ prefix).
+                // Controlled: the chosen index writes the value.
+                let candidates: Vec<(i64, String)> = members
                     .iter()
                     .filter_map(|member| match member.member_id {
                         MessageSender::User { user_id } => Some(user_id),
@@ -33281,23 +33260,35 @@ impl QuillApp {
                     })
                     .filter(|user_id| !admin_ids.contains(user_id))
                     .take(30)
-                {
-                    let name = self
-                        .session()
-                        .and_then(|session| session.user(user_id))
-                        .map(|user| user.display_name())
-                        .unwrap_or_else(|| format!("User {user_id}"));
-                    let selected = selected_user == Some(user_id);
-                    rows = rows.child(
-                        Button::new(format!("admin-promote-member-{user_id}"))
-                            .label(if selected {
-                                format!("● {name}")
-                            } else {
-                                format!("○ {name}")
-                            })
-                            .ghost()
-                            .text_color(TEXT_BRIGHT)
-                            .on_click(cx.listener(move |this, _, _, cx| {
+                    .map(|user_id| {
+                        let name = self
+                            .session()
+                            .and_then(|session| session.user(user_id))
+                            .map(|user| user.display_name())
+                            .unwrap_or_else(|| format!("User {user_id}"));
+                        (user_id, name)
+                    })
+                    .collect();
+                if candidates.is_empty() {
+                    panel = panel.child(
+                        div()
+                            .text_sm()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("No members found."),
+                    );
+                } else {
+                    let selected_ix = candidates
+                        .iter()
+                        .position(|(user_id, _)| selected_user == Some(*user_id));
+                    panel = panel.child(
+                        RadioGroup::vertical("admin-promote-member")
+                            .selected_index(selected_ix)
+                            .children(candidates.iter().map(|(user_id, name)| {
+                                Radio::new(format!("admin-promote-member-{user_id}"))
+                                    .label(name.clone())
+                            }))
+                            .on_click(cx.listener(move |this, &ix: &usize, _, cx| {
+                                let user_id = candidates[ix].0;
                                 if let Some(dialog) = this.admin_dialog.as_mut()
                                     && let AdminDialogKind::Promote { selected_user, .. } =
                                         &mut dialog.kind
@@ -33307,17 +33298,7 @@ impl QuillApp {
                                 cx.notify();
                             })),
                     );
-                    shown += 1;
                 }
-                if shown == 0 {
-                    rows = rows.child(
-                        div()
-                            .text_sm()
-                            .text_color(cx.theme().muted_foreground)
-                            .child("No members found."),
-                    );
-                }
-                panel = panel.child(rows);
             }
         }
         let summary = admin_rights_summary(rights);
@@ -33527,17 +33508,18 @@ impl QuillApp {
             if is_quiz {
                 let marked = quiz_correct_row == Some(index);
                 row = row.child(
-                    Button::new(format!("poll-quiz-correct-{index}"))
-                        .label(if marked { "◉" } else { "○" })
-                        .ghost()
-                        .on_click(cx.listener(move |this, _, _, cx| {
+                    // Phase 6: kit Checkbox, not Radio — a quiz correct answer
+                    // is toggleable (clicking the marked option clears it),
+                    // and kit Radio cannot deselect itself.
+                    Checkbox::new(format!("poll-quiz-correct-{index}"))
+                        .checked(marked)
+                        .accessibility_label(format!(
+                            "Mark option {} as the correct answer",
+                            index + 1
+                        ))
+                        .on_click(cx.listener(move |this, &on, _, cx| {
                             if let Some(dialog) = this.poll_dialog.as_mut() {
-                                dialog.quiz_correct_row = if dialog.quiz_correct_row == Some(index)
-                                {
-                                    None
-                                } else {
-                                    Some(index)
-                                };
+                                dialog.quiz_correct_row = if on { Some(index) } else { None };
                             }
                             cx.notify();
                         })),
@@ -33647,14 +33629,16 @@ impl QuillApp {
             ),
             None => (false, true, false, true, false),
         };
-        let button =
-            |id: &'static str, label: &'static str, on: bool, flip: fn(&mut PollDialog)| {
-                Button::new(id)
-                    .label(format!("{} {label}", if on { "☑" } else { "☐" }))
-                    .ghost()
-                    .on_click(cx.listener(move |this, _, _, cx| {
+        // Phase 6: kit Checkbox (was: ghost buttons with ☑/☐ labels).
+        // Controlled: the requested value is written, not flipped.
+        let checkbox =
+            |id: &'static str, label: &'static str, on: bool, set: fn(&mut PollDialog, bool)| {
+                Checkbox::new(id)
+                    .checked(on)
+                    .label(label)
+                    .on_click(cx.listener(move |this, &on, _, cx| {
                         if let Some(dialog) = this.poll_dialog.as_mut() {
-                            flip(dialog);
+                            set(dialog, on);
                         }
                         cx.notify();
                     }))
@@ -33667,27 +33651,32 @@ impl QuillApp {
                 div()
                     .flex()
                     .gap_2()
-                    .child(button("poll-toggle-quiz", "Quiz mode", is_quiz, |dialog| {
-                        dialog.is_quiz = !dialog.is_quiz;
-                        if dialog.is_quiz {
-                            dialog.allows_multiple_answers = false;
-                            dialog.allows_revoting = false;
-                        }
-                    }))
-                    .child(button(
+                    .child(checkbox(
+                        "poll-toggle-quiz",
+                        "Quiz mode",
+                        is_quiz,
+                        |dialog, on| {
+                            dialog.is_quiz = on;
+                            if on {
+                                dialog.allows_multiple_answers = false;
+                                dialog.allows_revoting = false;
+                            }
+                        },
+                    ))
+                    .child(checkbox(
                         "poll-toggle-anonymous",
                         "Anonymous voting",
                         anonymous,
-                        |dialog| dialog.is_anonymous = !dialog.is_anonymous,
+                        |dialog, on| dialog.is_anonymous = on,
                     ))
-                    .child(button(
+                    .child(checkbox(
                         "poll-toggle-multiple",
                         "Multiple answers",
                         multiple,
-                        |dialog| {
+                        |dialog, on| {
                             // Quizzes are single-answer; the toggle is inert in quiz mode.
                             if !dialog.is_quiz {
-                                dialog.allows_multiple_answers = !dialog.allows_multiple_answers;
+                                dialog.allows_multiple_answers = on;
                             }
                         },
                     )),
@@ -33696,22 +33685,22 @@ impl QuillApp {
                 div()
                     .flex()
                     .gap_2()
-                    .child(button(
+                    .child(checkbox(
                         "poll-toggle-revoting",
                         "Allow revoting",
                         revoting,
-                        |dialog| {
+                        |dialog, on| {
                             // Quizzes force revoting off; the toggle is inert in quiz mode.
                             if !dialog.is_quiz {
-                                dialog.allows_revoting = !dialog.allows_revoting;
+                                dialog.allows_revoting = on;
                             }
                         },
                     ))
-                    .child(button(
+                    .child(checkbox(
                         "poll-toggle-shuffle",
                         "Shuffle options",
                         shuffle,
-                        |dialog| dialog.shuffle_options = !dialog.shuffle_options,
+                        |dialog, on| dialog.shuffle_options = on,
                     )),
             )
     }
@@ -35081,26 +35070,24 @@ impl QuillApp {
                 .text_color(TEXT_BRIGHT)
                 .child("Who can see this story"),
         );
-        for option in StoryPrivacy::ALL {
-            let selected = edit.privacy == option;
-            let label = option.label();
-            panel = panel.child(
-                Button::new(format!("story-privacy-{label}"))
-                    .label(if selected {
-                        format!("☑ {label}")
-                    } else {
-                        format!("☐ {label}")
-                    })
-                    .ghost()
-                    .text_color(TEXT_BRIGHT)
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        if let Some(edit) = this.story_privacy_edit.as_mut() {
-                            edit.privacy = option;
-                        }
-                        cx.notify();
-                    })),
-            );
-        }
+        // Phase 6: kit RadioGroup (was: buttons with a ☑/☐ prefix).
+        // Controlled: the chosen index writes the value.
+        let privacy_selected = StoryPrivacy::ALL
+            .iter()
+            .position(|option| edit.privacy == *option);
+        panel = panel.child(
+            RadioGroup::vertical("story-privacy")
+                .selected_index(privacy_selected)
+                .children(StoryPrivacy::ALL.iter().map(|option| {
+                    Radio::new(format!("story-privacy-{}", option.label())).label(option.label())
+                }))
+                .on_click(cx.listener(move |this, &ix, _, cx| {
+                    if let Some(edit) = this.story_privacy_edit.as_mut() {
+                        edit.privacy = StoryPrivacy::ALL[ix];
+                    }
+                    cx.notify();
+                })),
+        );
         if edit.privacy == StoryPrivacy::SelectedUsers {
             let query = self.story_privacy_user_search.read(cx).value();
             let rows = self.g1_contact_rows(&query, cx);
@@ -35497,26 +35484,24 @@ impl QuillApp {
                 .into_any_element(),
         };
 
-        let mut privacy = div().flex().flex_col().gap_1();
-        for option in StoryPrivacy::ALL {
-            let selected = self.story_composer.privacy == option;
-            let label = option.label();
-            privacy = privacy.child(
-                Button::new(format!("story-composer-privacy-{label}"))
-                    .label(if selected {
-                        format!("☑ {label}")
-                    } else {
-                        format!("☐ {label}")
-                    })
-                    .ghost()
-                    .text_color(TEXT_BRIGHT)
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.story_composer.privacy = option;
-                        this.story_composer.local_error = None;
-                        cx.notify();
-                    })),
-            );
-        }
+        // Phase 6: kit RadioGroup (was: buttons with a ☑/☐ prefix).
+        // Controlled: the chosen index writes the value.
+        let composer_privacy_selected = StoryPrivacy::ALL
+            .iter()
+            .position(|option| self.story_composer.privacy == *option);
+        let privacy = div().flex().flex_col().gap_1().child(
+            RadioGroup::vertical("story-composer-privacy")
+                .selected_index(composer_privacy_selected)
+                .children(StoryPrivacy::ALL.iter().map(|option| {
+                    Radio::new(format!("story-composer-privacy-{}", option.label()))
+                        .label(option.label())
+                }))
+                .on_click(cx.listener(move |this, &ix, _, cx| {
+                    this.story_composer.privacy = StoryPrivacy::ALL[ix];
+                    this.story_composer.local_error = None;
+                    cx.notify();
+                })),
+        );
 
         let users_picker: Option<AnyElement> =
             (self.story_composer.privacy == StoryPrivacy::SelectedUsers).then(|| {
@@ -35556,58 +35541,48 @@ impl QuillApp {
                     .into_any_element()
             });
 
-        let mut expiry = div().flex().flex_col().gap_1();
-        for option in StoryExpiry::ALL {
-            let selected = self.story_composer.expiry == option;
-            let label = option.label();
-            expiry = expiry.child(
-                Button::new(format!("story-composer-expiry-{label}"))
-                    .label(if selected {
-                        format!("☑ {label}")
-                    } else {
-                        format!("☐ {label}")
-                    })
-                    .ghost()
-                    .text_color(TEXT_BRIGHT)
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.story_composer.expiry = option;
-                        this.story_composer.local_error = None;
-                        cx.notify();
-                    })),
-            );
-        }
+        // Phase 6: kit RadioGroup (was: buttons with a ☑/☐ prefix).
+        // Controlled: the chosen index writes the value.
+        let composer_expiry_selected = StoryExpiry::ALL
+            .iter()
+            .position(|option| self.story_composer.expiry == *option);
+        let expiry = div().flex().flex_col().gap_1().child(
+            RadioGroup::horizontal("story-composer-expiry")
+                .selected_index(composer_expiry_selected)
+                .children(StoryExpiry::ALL.iter().map(|option| {
+                    Radio::new(format!("story-composer-expiry-{}", option.label()))
+                        .label(option.label())
+                }))
+                .on_click(cx.listener(move |this, &ix, _, cx| {
+                    this.story_composer.expiry = StoryExpiry::ALL[ix];
+                    this.story_composer.local_error = None;
+                    cx.notify();
+                })),
+        );
 
         let toggles = div()
             .flex()
             .flex_col()
             .gap_1()
             .child(
-                Button::new("story-composer-post-to-chat-page")
-                    .label(if self.story_composer.post_to_chat_page {
-                        "☑ Post to chat page (keep accessible after expiry)"
-                    } else {
-                        "☐ Post to chat page (keep accessible after expiry)"
-                    })
-                    .ghost()
-                    .text_color(TEXT_BRIGHT)
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.story_composer.post_to_chat_page =
-                            !this.story_composer.post_to_chat_page;
+                // Phase 6: kit Checkboxes (were: ghost buttons with ☑/☐
+                // labels). Controlled: write the requested value, keep
+                // clearing local_error on change.
+                Checkbox::new("story-composer-post-to-chat-page")
+                    .label("Post to chat page (keep accessible after expiry)")
+                    .checked(self.story_composer.post_to_chat_page)
+                    .on_click(cx.listener(|this, &on, _, cx| {
+                        this.story_composer.post_to_chat_page = on;
                         this.story_composer.local_error = None;
                         cx.notify();
                     })),
             )
             .child(
-                Button::new("story-composer-protect-content")
-                    .label(if self.story_composer.protect_content {
-                        "☑ Protect content (no forwarding)"
-                    } else {
-                        "☐ Protect content (no forwarding)"
-                    })
-                    .ghost()
-                    .text_color(TEXT_BRIGHT)
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.story_composer.protect_content = !this.story_composer.protect_content;
+                Checkbox::new("story-composer-protect-content")
+                    .label("Protect content (no forwarding)")
+                    .checked(self.story_composer.protect_content)
+                    .on_click(cx.listener(|this, &on, _, cx| {
+                        this.story_composer.protect_content = on;
                         this.story_composer.local_error = None;
                         cx.notify();
                     })),
@@ -35643,39 +35618,35 @@ impl QuillApp {
                         .collect()
                 })
                 .unwrap_or_default();
-            let mut picker = div().flex().flex_col().gap_1();
-            let selected = self.story_composer.as_chat_id.is_none();
-            picker = picker.child(
-                Button::new("story-composer-as-self")
-                    .label(if selected { "☑ Myself" } else { "☐ Myself" })
-                    .ghost()
-                    .text_color(TEXT_BRIGHT)
-                    .disabled(busy)
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.story_composer.as_chat_id = None;
-                        this.story_composer.local_error = None;
-                        cx.notify();
-                    })),
-            );
-            for (chat_id, title) in as_chats {
-                let selected = self.story_composer.as_chat_id == Some(chat_id);
-                picker = picker.child(
-                    Button::new(format!("story-composer-as-{chat_id}"))
-                        .label(if selected {
-                            format!("☑ {title}")
-                        } else {
-                            format!("☐ {title}")
-                        })
-                        .ghost()
-                        .text_color(TEXT_BRIGHT)
-                        .disabled(busy)
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.story_composer.as_chat_id = Some(chat_id);
-                            this.story_composer.local_error = None;
-                            cx.notify();
-                        })),
-                );
-            }
+            // Phase 6: kit RadioGroup (was: buttons with a ☑/☐ prefix).
+            // Controlled: the chosen index writes the value. Index 0 is
+            // "Myself", the rest are the eligible chats.
+            let as_selected: Option<usize> = match self.story_composer.as_chat_id {
+                None => Some(0),
+                Some(chat_id) => as_chats
+                    .iter()
+                    .position(|(id, _)| *id == chat_id)
+                    .map(|ix| ix + 1),
+            };
+            let picker = RadioGroup::vertical("story-composer-as")
+                .selected_index(as_selected)
+                .disabled(busy)
+                .children(
+                    std::iter::once(Radio::new("story-composer-as-self").label("Myself")).chain(
+                        as_chats.iter().map(|(chat_id, title)| {
+                            Radio::new(format!("story-composer-as-{chat_id}")).label(title.clone())
+                        }),
+                    ),
+                )
+                .on_click(cx.listener(move |this, &ix: &usize, _, cx| {
+                    this.story_composer.as_chat_id = if ix == 0 {
+                        None
+                    } else {
+                        Some(as_chats[ix - 1].0)
+                    };
+                    this.story_composer.local_error = None;
+                    cx.notify();
+                }));
             div()
                 .flex()
                 .flex_col()
@@ -35941,17 +35912,18 @@ impl QuillApp {
                     .items_center()
                     .gap_2()
                     .child(
-                        Button::new("forward-send-copy")
-                            .label(if draft.as_ref().is_some_and(|d| d.send_copy) {
-                                "☑ Hide sender name"
-                            } else {
-                                "☐ Hide sender name"
-                            })
-                            .ghost()
-                            .on_click(cx.listener(|this, _, _, cx| {
+                        // Phase 6: kit Checkboxes (were: ghost buttons with
+                        // ☑/☐ labels). Controlled: write the requested value;
+                        // the send_copy=false side effect is preserved, and
+                        // remove_caption still disables itself without
+                        // send_copy.
+                        Checkbox::new("forward-send-copy")
+                            .label("Hide sender name")
+                            .checked(draft.as_ref().is_some_and(|d| d.send_copy))
+                            .on_click(cx.listener(|this, &on, _, cx| {
                                 if let Some(draft) = this.pending_forward.as_mut() {
-                                    draft.send_copy = !draft.send_copy;
-                                    if !draft.send_copy {
+                                    draft.send_copy = on;
+                                    if !on {
                                         draft.remove_caption = false;
                                     }
                                 }
@@ -35959,18 +35931,15 @@ impl QuillApp {
                             })),
                     )
                     .child(
-                        Button::new("forward-remove-caption")
-                            .label(if draft.as_ref().is_some_and(|d| d.remove_caption) {
-                                "☑ Remove caption"
-                            } else {
-                                "☐ Remove caption"
-                            })
-                            .ghost()
-                            .on_click(cx.listener(|this, _, _, cx| {
+                        Checkbox::new("forward-remove-caption")
+                            .label("Remove caption")
+                            .checked(draft.as_ref().is_some_and(|d| d.remove_caption))
+                            .disabled(!draft.as_ref().is_some_and(|d| d.send_copy))
+                            .on_click(cx.listener(|this, &on, _, cx| {
                                 if let Some(draft) = this.pending_forward.as_mut()
                                     && draft.send_copy
                                 {
-                                    draft.remove_caption = !draft.remove_caption;
+                                    draft.remove_caption = on;
                                 }
                                 cx.notify();
                             })),
