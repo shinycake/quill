@@ -779,6 +779,16 @@ pub enum EnvelopePayload {
     AccountTtl {
         days: i32,
     },
+    /// Slice A8: `authenticationCodeInfo` — the `sendPhoneNumberCode` /
+    /// `resendPhoneNumberCode` answer (schema 1.8.67, line 78). Stored in
+    /// `Session::change_number_phone` / `change_number_timeout` when the
+    /// pending purpose is `SendPhoneNumberCode` / `ResendPhoneNumberCode`.
+    /// The `type` / `next_type` variants are not kept: this slice is
+    /// backend-only and the UI half will parse them when it ships.
+    AuthenticationCodeInfo {
+        phone_number: String,
+        timeout: i32,
+    },
     /// Slice A4: `connectedWebsites` — `getConnectedWebsites` response
     /// (schema 1.8.67, lines 9171/15124). Stored in
     /// `Session::connected_websites` when the pending purpose is
@@ -8026,6 +8036,27 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
                         .unwrap_or(0)
                         .clamp(0, i32::MAX as i64) as i32,
                 },
+            })
+        }
+        // Slice A8: `authenticationCodeInfo` — the
+        // `sendPhoneNumberCode` / `resendPhoneNumberCode` answer (schema
+        // 1.8.67, line 78). A missing `phone_number` / `timeout` degrades
+        // to empty / 0 rather than failing the parse; the reducer only
+        // trusts it when it answers our own in-flight request.
+        "authenticationCodeInfo" => {
+            let phone_number = value
+                .get("phone_number")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string();
+            let timeout = value
+                .get("timeout")
+                .and_then(Value::as_i64)
+                .unwrap_or(0)
+                .clamp(0, i32::MAX as i64) as i32;
+            Ok(EnvelopePayload::AuthenticationCodeInfo {
+                phone_number,
+                timeout,
             })
         }
         // Slice A7: `accountTtl` — the `getAccountTtl` answer (schema
@@ -16818,8 +16849,61 @@ mod password_state_tests {
 }
 
 #[cfg(test)]
-mod account_ttl_tests {
+mod account_change_tests {
     use super::*;
+
+    /// Slice A8: `authenticationCodeInfo` answer (schema 1.8.67, line 78).
+    #[test]
+    fn authentication_code_info_parses_phone_and_timeout() {
+        let json = r#"{"@type":"authenticationCodeInfo","phone_number":"+15550199","type":{"@type":"authenticationCodeTypeSms","length":5},"next_type":null,"timeout":60}"#;
+        let env = parse_envelope(json).unwrap();
+        match env.payload {
+            EnvelopePayload::AuthenticationCodeInfo {
+                phone_number,
+                timeout,
+            } => {
+                assert_eq!(phone_number, "+15550199");
+                assert_eq!(timeout, 60);
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+
+    /// Slice A8: missing fields degrade, never a parse error.
+    #[test]
+    fn authentication_code_info_missing_fields_degrade() {
+        let env = parse_envelope(r#"{"@type":"authenticationCodeInfo"}"#).unwrap();
+        match env.payload {
+            EnvelopePayload::AuthenticationCodeInfo {
+                phone_number,
+                timeout,
+            } => {
+                assert_eq!(phone_number, "");
+                assert_eq!(timeout, 0);
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+
+    /// Slice A8: every change-number constructor this slice relies on must
+    /// exist verbatim in the pinned schema (1.8.67).
+    #[test]
+    fn schema_pins_change_number_constructors() {
+        let schema = include_str!("../../schema/td_api.tl");
+        for line in [
+            "phoneNumberCodeTypeChange = PhoneNumberCodeType;",
+            "sendPhoneNumberCode phone_number:string settings:phoneNumberAuthenticationSettings type:PhoneNumberCodeType = AuthenticationCodeInfo;",
+            "resendPhoneNumberCode reason:ResendCodeReason = AuthenticationCodeInfo;",
+            "checkPhoneNumberCode code:string = Ok;",
+            "authenticationCodeInfo phone_number:string type:AuthenticationCodeType next_type:AuthenticationCodeType timeout:int32 = AuthenticationCodeInfo;",
+            "resendCodeReasonUserRequest = ResendCodeReason;",
+        ] {
+            assert!(
+                schema.lines().any(|l| l == line),
+                "schema pin missing: {line}"
+            );
+        }
+    }
 
     /// Slice A7: `accountTtl` answer (schema 1.8.67, line 9053).
     #[test]
