@@ -5,8 +5,12 @@
 //! there is no TDLib setting for any of it.
 
 use super::QuillApp;
+use super::chat_theme::set_theme_mode;
 use super::synthetic::BubbleLook;
+use super::{DialogKind, QuillShell};
 use gpui_kit::component::button::{Button, ButtonVariants};
+use gpui_kit::component::dialog::Dialog;
+use gpui_kit::component::radio::{Radio, RadioGroup};
 use gpui_kit::component::theme::{ActiveTheme, Theme, ThemeMode};
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
@@ -16,6 +20,8 @@ use quill::settings::{
     AccountPaths, AppearancePrefs, AutoNight, ThemeChoice, clamp_font_size, load_appearance_prefs,
     local_minutes_since_midnight, night_active, safe_app_root, save_appearance_prefs,
 };
+use std::cell::RefCell;
+use std::rc::Rc;
 
 /// Accent presets (0xRRGGBB); the "Default" chip keeps the theme accent.
 const ACCENT_PRESETS: &[(u32, &str)] = &[
@@ -89,7 +95,7 @@ impl QuillApp {
         if self.appearance_applied == Some((mode, accent)) {
             return;
         }
-        Theme::change(mode, None, cx);
+        set_theme_mode(mode, None, cx);
         if accent != 0 {
             Theme::global_mut(cx).colors.accent = Hsla::from(rgb(accent));
         }
@@ -105,7 +111,11 @@ impl QuillApp {
     /// persist, re-apply, re-render. If the save fails the change is
     /// still applied live — the status note reports the failure instead
     /// of pretending the change was saved.
-    fn set_appearance(&mut self, cx: &mut Context<Self>, f: impl FnOnce(&mut AppearancePrefs)) {
+    pub(crate) fn set_appearance(
+        &mut self,
+        cx: &mut Context<Self>,
+        f: impl FnOnce(&mut AppearancePrefs),
+    ) {
         f(&mut self.appearance);
         self.appearance.font_size_px = clamp_font_size(self.appearance.font_size_px);
         if let Err(err) = save_appearance_prefs(&Self::appearance_paths(), &self.appearance) {
@@ -124,7 +134,7 @@ impl QuillApp {
             } else {
                 a.night_end_minutes
             } as i16;
-            let next = cur.wrapping_add(delta).rem_euclid(24 * 60) as u16;
+            let next = (cur + delta).rem_euclid(24 * 60) as u16;
             if is_start {
                 a.night_start_minutes = next;
             } else {
@@ -163,79 +173,67 @@ impl QuillApp {
         }
     }
 
-    /// The Appearance dialog (TGX Settings → Appearance / tdesktop
-    /// Settings → Appearance). Every control applies live through
-    /// `set_appearance`. Shell mirrors `notification_defaults_overlay`.
-    pub(crate) fn appearance_overlay(&self, cx: &mut Context<Self>) -> AnyElement {
-        let theme = cx.theme();
-        div()
-            .id("appearance-overlay")
-            .absolute()
-            .top_0()
-            .left_0()
-            .right_0()
-            .bottom_0()
-            .flex()
-            .items_center()
-            .justify_center()
-            .child(
+    /// kit Phase 2 (redo) pattern: the Appearance dialog hosted in a kit
+    /// `Dialog` via `window.open_dialog` (see `QuillShell::sync_kit_dialogs`).
+    /// Esc / backdrop / ✕ clear state via `on_close`. Every control applies
+    /// live through `set_appearance`, so there is no OK/apply step — the
+    /// footer is a single Close button.
+    pub(crate) fn build_appearance_dialog(
+        app: &Entity<QuillApp>,
+        shell: &Entity<QuillShell>,
+        dialog: Dialog,
+        cx: &mut App,
+    ) -> Dialog {
+        let on_close =
+            QuillShell::on_close_kind(app, shell, DialogKind::Appearance, |this, _, cx| {
+                this.appearance_open = false;
+                cx.notify();
+            });
+        app.update(cx, |this, cx| {
+            let mut body = div().flex().flex_col().gap_3();
+            body = body.child(
                 div()
-                    .id("appearance-backdrop")
-                    .absolute()
-                    .top_0()
-                    .left_0()
-                    .right_0()
-                    .bottom_0()
-                    .bg(rgba(0x000000e6))
-                    .on_click(cx.listener(|this, _, _, cx| {
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(
+                        "Theme, accent, wallpaper, text size and chat style. \
+                         Changes apply immediately and are saved on this device.",
+                    ),
+            );
+            body = body.child(this.appearance_theme_section(cx));
+            body = body.child(this.appearance_auto_night_section(cx));
+            body = body.child(this.appearance_accent_section(cx));
+            body = body.child(this.appearance_wallpaper_section(cx));
+            body = body.child(this.appearance_font_section(cx));
+            body = body.child(this.appearance_bubble_section(cx));
+            let footer = div().flex().justify_end().child(
+                Button::new("close-appearance")
+                    .label("Close")
+                    .ghost()
+                    .on_click(cx.listener(|this, _, window, cx| {
                         this.appearance_open = false;
                         cx.notify();
+                        this.close_kit_dialog_if_done(DialogKind::Appearance, window, cx);
                     })),
-            )
-            .child(
-                div()
-                    .id("appearance-dialog")
-                    .flex()
-                    .flex_col()
-                    .gap_3()
-                    .px_4()
-                    .py_3()
-                    .rounded_lg()
-                    .bg(theme.sidebar)
-                    .border_1()
-                    .border_color(theme.border)
-                    .min_w(px(460.))
-                    .max_w(px(600.))
-                    .max_h(px(720.))
-                    .overflow_y_scroll()
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .justify_between()
-                            .child(div().font_semibold().child("Appearance"))
-                            .child(
-                                Button::new("close-appearance")
-                                    .label("Close")
-                                    .ghost()
-                                    .on_click(cx.listener(|this, _, _, cx| {
-                                        this.appearance_open = false;
-                                        cx.notify();
-                                    })),
-                            ),
-                    )
-                    .child(div().text_xs().text_color(theme.muted_foreground).child(
-                        "Theme, accent, wallpaper, text size and chat style. \
-                                 Changes apply immediately and are saved on this device.",
-                    ))
-                    .child(self.appearance_theme_section(cx))
-                    .child(self.appearance_auto_night_section(cx))
-                    .child(self.appearance_accent_section(cx))
-                    .child(self.appearance_wallpaper_section(cx))
-                    .child(self.appearance_font_section(cx))
-                    .child(self.appearance_bubble_section(cx)),
-            )
-            .into_any_element()
+            );
+            dialog
+                .overlay(true)
+                .title("Appearance")
+                .content({
+                    // `content` needs an `Fn` closure, but the body is built once
+                    // per dialog render — hand it over through a one-shot cell.
+                    let body = Rc::new(RefCell::new(Some(body.into_any_element())));
+                    move |content, _, _| {
+                        let body = body
+                            .borrow_mut()
+                            .take()
+                            .unwrap_or_else(|| div().into_any_element());
+                        content.child(body)
+                    }
+                })
+                .footer(footer)
+                .on_close(on_close)
+        })
     }
 
     /// A labeled section: title + control row + hint line.
@@ -356,52 +354,51 @@ impl QuillApp {
     }
 
     fn appearance_theme_section(&self, cx: &mut Context<Self>) -> AnyElement {
-        let current = self.appearance.theme;
-        let chips = div()
-            .flex()
-            .gap_2()
-            .child(self.appearance_chip(
-                "appearance-theme-light",
-                "☀️ Light",
-                current == ThemeChoice::Light,
-                cx,
-                |this, cx| this.set_appearance(cx, |a| a.theme = ThemeChoice::Light),
-            ))
-            .child(self.appearance_chip(
-                "appearance-theme-dark",
-                "🌙 Dark",
-                current == ThemeChoice::Dark,
-                cx,
-                |this, cx| this.set_appearance(cx, |a| a.theme = ThemeChoice::Dark),
-            ));
+        let selected = Some(if self.appearance.theme == ThemeChoice::Light {
+            0
+        } else {
+            1
+        });
+        // kit Phase 6 style: a kit RadioGroup (was: hand-rolled chips).
+        let control = RadioGroup::horizontal("appearance-theme")
+            .selected_index(selected)
+            .children([
+                Radio::new("appearance-theme-light").label("☀️ Light"),
+                Radio::new("appearance-theme-dark").label("🌙 Dark"),
+            ])
+            .on_click(cx.listener(|this, &ix, _, cx| {
+                this.set_appearance(cx, |a| {
+                    a.theme = if ix == 0 {
+                        ThemeChoice::Light
+                    } else {
+                        ThemeChoice::Dark
+                    }
+                });
+            }));
         let hint = if self.appearance.auto_night == AutoNight::Off {
             "Applies to the whole app immediately."
         } else {
             "Auto-night is on — this applies while night mode is inactive."
         };
-        self.appearance_section(cx, "Theme", hint, chips.into_any_element())
+        self.appearance_section(cx, "Theme", hint, control.into_any_element())
     }
 
     fn appearance_auto_night_section(&self, cx: &mut Context<Self>) -> AnyElement {
+        const MODES: [AutoNight; 3] = [AutoNight::Off, AutoNight::System, AutoNight::Scheduled];
+        const LABELS: [&str; 3] = ["Off", "System", "Scheduled"];
         let current = self.appearance.auto_night;
-        let mut chips = div().flex().gap_2();
-        for &(mode, id, label) in &[
-            (AutoNight::Off, "appearance-night-off", "Off"),
-            (AutoNight::System, "appearance-night-system", "System"),
-            (
-                AutoNight::Scheduled,
-                "appearance-night-scheduled",
-                "Scheduled",
-            ),
-        ] {
-            chips = chips.child(self.appearance_chip(
-                id,
-                label,
-                current == mode,
-                cx,
-                move |this, cx| this.set_appearance(cx, |a| a.auto_night = mode),
-            ));
-        }
+        // kit Phase 6 style: one kit RadioGroup (was: hand-rolled chips).
+        let control = RadioGroup::horizontal("appearance-night")
+            .selected_index(MODES.iter().position(|m| *m == current))
+            .children(
+                LABELS
+                    .iter()
+                    .map(|label| Radio::new(format!("appearance-night-{label}")).label(*label)),
+            )
+            .on_click(cx.listener(|this, &ix, _, cx| {
+                let mode = MODES[ix];
+                this.set_appearance(cx, |a| a.auto_night = mode);
+            }));
         let mut body = div()
             .flex()
             .flex_col()
@@ -410,7 +407,7 @@ impl QuillApp {
                 cx,
                 "Auto-night",
                 "Automatically switch to the dark theme at night.",
-                chips.into_any_element(),
+                control.into_any_element(),
             ));
         if current == AutoNight::Scheduled {
             body = body.child(
@@ -542,23 +539,16 @@ impl QuillApp {
 
     fn appearance_bubble_section(&self, cx: &mut Context<Self>) -> AnyElement {
         let bubbles = self.appearance.bubbles;
-        let control = div()
-            .flex()
-            .gap_2()
-            .child(self.appearance_chip(
-                "appearance-style-bubbles",
-                "💬 Bubbles",
-                bubbles,
-                cx,
-                |this, cx| this.set_appearance(cx, |a| a.bubbles = true),
-            ))
-            .child(self.appearance_chip(
-                "appearance-style-plain",
-                "📄 Plain",
-                !bubbles,
-                cx,
-                |this, cx| this.set_appearance(cx, |a| a.bubbles = false),
-            ));
+        // kit Phase 6 style: a kit RadioGroup (was: hand-rolled chips).
+        let control = RadioGroup::horizontal("appearance-style")
+            .selected_index(Some(if bubbles { 0 } else { 1 }))
+            .children([
+                Radio::new("appearance-style-bubbles").label("💬 Bubbles"),
+                Radio::new("appearance-style-plain").label("📄 Plain"),
+            ])
+            .on_click(cx.listener(|this, &ix, _, cx| {
+                this.set_appearance(cx, |a| a.bubbles = ix == 0);
+            }));
         self.appearance_section(
             cx,
             "Chat style",

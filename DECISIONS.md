@@ -5382,6 +5382,7 @@ ntgcalls v3.0.0 prebuilt lib, bindings verified against
   - Screenshot demo: `quill --screenshot-demo ready-appearance` (in-memory non-defaults — dark theme, blue accent, dark wallpaper, 16px — applied live; nothing persisted) → `docs/screenshots/ready-appearance.png`.
   - Tests: `appearance_prefs_roundtrip_and_defaults`, `appearance_prefs_corrupt_file_falls_back`, `night_active_cases` (wrap/boundaries/empty), `font_size_clamps_to_range`. The libc local-time call stays untested behind the pure predicate (environment-dependent tests are a smell).
 - **Key decisions (ponytail):**
+  - Fresh installs boot Light (`AppearancePrefs::default().theme = ThemeChoice::Light`) — the deliberate default; dark was the old implicit look, not a regression.
   - Font size threads as an explicit `Pixels` param instead of hijacking the global `theme().font_size` (which semantically sizes all app chrome).
   - Accent/wallpaper swatches use `on_click` closures writing into `set_appearance`, the same pattern as the storage-usage overlay's radio rows — no new dialog framework.
   - The System mode's Linux reality (no desktop portal → `window_appearance` reports Light) is documented in DECISIONS rather than papered over in the dialog.

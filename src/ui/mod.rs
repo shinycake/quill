@@ -16394,7 +16394,12 @@ impl QuillApp {
     /// first; this closes the kit dialog only when the flag is actually
     /// cleared — validation failures and non-closing actions keep the
     /// dialog open.
-    fn close_kit_dialog_if_done(&self, kind: DialogKind, window: &mut Window, cx: &mut App) {
+    pub(crate) fn close_kit_dialog_if_done(
+        &self,
+        kind: DialogKind,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
         if !QuillShell::dialog_is_open(self, kind) {
             window.close_dialog(cx);
         }
@@ -36939,17 +36944,17 @@ impl Render for QuillApp {
                 let _ = this;
                 window.toggle_fullscreen();
             }))
-            .on_action(cx.listener(|this, _: &ToggleTheme, window, cx| {
-                let _ = this;
-                // kit Phase 8: one call flips the kit theme and the Quill
-                // token palette together; `Theme::change` refreshes the
-                // window so every surface repaints in the new mode.
-                let next = if theme_mode().is_dark() {
-                    gpui_kit::component::ThemeMode::Light
+            .on_action(cx.listener(|this, _: &ToggleTheme, _, cx| {
+                // Write through the appearance funnel (persist + re-apply)
+                // so the 60s auto-night tick can't silently revert the
+                // flip. Auto-night, when enabled, still overrides the
+                // manual choice while active — same as the dialog.
+                let next = if this.appearance.theme == ThemeChoice::Dark {
+                    ThemeChoice::Light
                 } else {
-                    gpui_kit::component::ThemeMode::Dark
+                    ThemeChoice::Dark
                 };
-                set_theme_mode(next, Some(window), cx);
+                this.set_appearance(cx, |a| a.theme = next);
             }))
             .on_action(cx.listener(|this, _: &OpenHelp, _, cx| {
                 let _ = this;
@@ -37119,11 +37124,8 @@ impl Render for QuillApp {
             // the shell sync — render wiring deleted.
             // kit Phase 2 (redo): archive settings now hosted in a kit
             // Dialog via the shell sync — render wiring deleted.
-            // Settings → Appearance slice: theme / accent / wallpaper /
-            // font / bubble dialog.
-            .when(self.appearance_open, |this| {
-                this.child(self.appearance_overlay(cx))
-            })
+            // kit Phase 2 (redo): appearance now hosted in a kit Dialog via
+            // the shell sync — render wiring deleted.
             // Phase C1: call overlay above everything else.
             .when_some(self.call_overlay(cx), |this, overlay| this.child(overlay))
             // Phase C3a: group-call (voice chat) overlay above the call
@@ -48077,6 +48079,7 @@ pub enum DialogKind {
     ForumManage,
     CommentThread,
     Welcome,
+    Appearance,
 }
 
 /// Builder for one dialog kind: `(app, shell, dialog, cx) -> dialog`.
@@ -48138,6 +48141,7 @@ impl QuillShell {
             DialogKind::ForumManage => app.forum_manage_dialog.is_some(),
             DialogKind::CommentThread => app.comment_thread_dialog.is_some(),
             DialogKind::Welcome => app.welcome_dialog.is_some(),
+            DialogKind::Appearance => app.appearance_open,
         }
     }
 
@@ -48173,12 +48177,13 @@ impl QuillShell {
             DialogKind::ForumManage => QuillApp::build_forum_manage_dialog,
             DialogKind::CommentThread => QuillApp::build_comment_thread_dialog,
             DialogKind::Welcome => QuillApp::build_welcome_dialog,
+            DialogKind::Appearance => QuillApp::build_appearance_dialog,
         }
     }
 
     /// All dialog kinds in a fixed order (matches the old overlay
     /// priority: first open flag wins when several are set).
-    const KINDS: [DialogKind; 30] = [
+    const KINDS: [DialogKind; 31] = [
         DialogKind::Scheduled,
         DialogKind::GroupCallStart,
         DialogKind::ArchiveSettings,
@@ -48209,6 +48214,7 @@ impl QuillShell {
         DialogKind::ImportContacts,
         DialogKind::EditProfile,
         DialogKind::AddContact,
+        DialogKind::Appearance,
     ];
 
     /// Keep the single kit dialog in sync with the app-side open flags.
@@ -48258,7 +48264,7 @@ impl QuillShell {
     /// already closed the dialog (Esc / backdrop / ✕), so this clears
     /// the app-side open flag and drops the tracked kind — it must NOT
     /// call `close_dialog` again.
-    fn on_close_kind(
+    pub(crate) fn on_close_kind(
         app: &Entity<QuillApp>,
         shell: &Entity<QuillShell>,
         kind: DialogKind,

@@ -306,12 +306,20 @@ fn message_bubble_with_quote(
     // `look.text` overrides the text color; plain mode renders the kit
     // `Ghost` variant (no surface, padding, or border).
     let bubble_content = component::bubble::BubbleContent::new()
-        .bg(if row.outgoing {
-            accent_strong()
-        } else {
-            bg_bubble_incoming()
+        .when(!look.plain, |this| {
+            this.bg(if row.outgoing {
+                accent_strong()
+            } else {
+                bg_bubble_incoming()
+            })
         })
-        .text_color(look.text)
+        .text_color(if look.plain {
+            look.text
+        } else if row.outgoing {
+            Hsla::from(text_on_fill())
+        } else {
+            Hsla::from(text_bright())
+        })
         .when(rtl, |this| this.text_right())
         .when_some(quote, |this, quote| this.child(quote))
         .when_some(body_el, |this, body_el| this.child(body_el))
