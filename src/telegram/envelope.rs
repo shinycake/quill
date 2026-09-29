@@ -1265,6 +1265,13 @@ pub enum ErrorClass {
     Unauthorized,
     Flood,
     Invalid,
+    /// S14: `canPostStory` failed with `CHAT_ADMIN_REQUIRED` — stories
+    /// are disabled for non-admins in the target chat. Classified from
+    /// the raw error message in `parse_error` (the only place it is
+    /// still available); the message text itself is dropped.
+    StoryChatDisabled,
+    /// S14: `canPostStory` failed with `USER_RESTRICTED`.
+    StoryUserRestricted,
     Other,
 }
 
@@ -11975,12 +11982,22 @@ pub(crate) fn parse_file(value: Option<&Value>) -> Result<ParsedFile, ParseError
 }
 
 fn parse_error(value: Option<&Value>) -> TdError {
-    TdError::from_code(
-        value
-            .and_then(|v| v.get("code"))
-            .and_then(Value::as_i64)
-            .unwrap_or(0) as i32,
-    )
+    let code = value
+        .and_then(|v| v.get("code"))
+        .and_then(Value::as_i64)
+        .unwrap_or(0) as i32;
+    // S14: story-posting restriction errors are classified here — the
+    // only place the raw message is still available (`TdError` drops it
+    // for secret-scrubbing). Anything unrecognized falls back to the
+    // code-based class, so every other flow is unchanged.
+    if let Some(class) = value
+        .and_then(|v| v.get("message"))
+        .and_then(Value::as_str)
+        .and_then(crate::story_restriction::classify_server_message)
+    {
+        return TdError { code, class };
+    }
+    TdError::from_code(code)
 }
 
 pub(crate) fn int53(value: Option<&Value>) -> Result<i64, ParseError> {

@@ -1305,6 +1305,12 @@ fn sessions_error_line(action: &str, err: &TdError) -> String {
         ErrorClass::Unauthorized => "session is no longer authorized",
         ErrorClass::Invalid => "Telegram refused the request",
         ErrorClass::NotFound => "no longer exists",
+        // S14: mirror the Invalid / Other arms — the code-based class
+        // these errors had before classification.
+        ErrorClass::StoryChatDisabled => "Telegram refused the request",
+        ErrorClass::StoryUserRestricted => {
+            return format!("Could not {action} (error {})", err.code);
+        }
         ErrorClass::Other => return format!("Could not {action} (error {})", err.code),
     };
     format!("Could not {action}: {detail}")
@@ -1319,6 +1325,11 @@ fn error_reason(err: &TdError) -> String {
         ErrorClass::Unauthorized => "not authorized".to_string(),
         ErrorClass::Flood => "too many requests — try again later".to_string(),
         ErrorClass::Invalid => "invalid request".to_string(),
+        // S14: classified story-restriction errors keep the exact text
+        // the code-based class produced before (400 → Invalid,
+        // 403 → Other), so non-story flows render byte-identical text.
+        ErrorClass::StoryChatDisabled => "invalid request".to_string(),
+        ErrorClass::StoryUserRestricted => format!("error {}", err.code),
         ErrorClass::Other => format!("error {}", err.code),
     }
 }
@@ -8890,8 +8901,16 @@ impl Session {
                         ));
                     }
                     Some(RequestPurpose::CheckCanPostStory) => {
-                        self.story_post.check_error =
-                            Some(format!("Eligibility check failed: {}", error_reason(&err)));
+                        // S14: a chat-level story restriction surfaces the
+                        // TGX-verbatim notice; anything else keeps the
+                        // generic eligibility failure.
+                        self.story_post.check_error = Some(
+                            crate::story_restriction::notice_for_error_class(err.class)
+                                .map(str::to_string)
+                                .unwrap_or_else(|| {
+                                    format!("Eligibility check failed: {}", error_reason(&err))
+                                }),
+                        );
                     }
                     // Phase 9.5: a `getStoryInteractions` / `reportStory` /
                     // `activateStoryStealthMode` error — the viewer panel /

@@ -329,7 +329,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Pinned stories on chat page (getChatPostedToChatPageStories + setChatPinnedStories full-list semantics) <!-- parity:stories-pinned -->
 - [x] Clickable story areas (location, venue, suggested reaction, message, link, weather, gift) — parsed from `story.areas` (telegram/envelope.rs), rendered as clickable chips on the viewer, taps perform each area's action (ui/mod.rs Phase 9.8) <!-- parity:stories-areas-view -->
 - [ ] Story notification settings (mute stories per chat, story sound, show story poster) — parsed into fields only (telegram/envelope.rs:1859-1860) <!-- parity:stories-notify-settings -->
-- [ ] "Only admins can send stories in this group" and story-restriction notices (TGX strings ChatDisabledStory / ChatRestrictedStory / ChatRestrictedStoryUntil; no Quill handling) <!-- parity:stories-restriction-notice -->
+- [x] "Only admins can send stories in this group" and story-restriction notices (TGX strings ChatDisabledStory / ChatRestrictedStory / ChatRestrictedStoryUntil; no Quill handling) <!-- parity:stories-restriction-notice -->
 
 #### Post stories
 - [x] Story composer: photo picker (path entry — native file picker deferred; `postStory` via td_api.tl:13715) <!-- parity:stories-post-photo-composer -->
