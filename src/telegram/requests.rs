@@ -3657,7 +3657,7 @@ pub fn message_send_options(options: &SendOptions) -> Value {
         "protect_content": false,
         "allow_paid_broadcast": false,
         "paid_message_star_count": 0,
-        "update_order_of_installed_sticker_sets": false,
+        "update_order_of_installed_sticker_sets": options.update_order_of_installed_sticker_sets,
         "scheduling_state": scheduling_state,
         "effect_id": 0,
         "sending_id": 0,
@@ -4135,7 +4135,14 @@ pub fn send_sticker(extra: RequestId, chat_id: ChatId, sticker: StickerSend<'_>)
         "chat_id": chat_id.0,
         "topic_id": message_topic_value(sticker.topic_id),
         "reply_to": send_reply_value(sticker.reply_to.as_ref()),
-        "options": Value::Null,
+        // S15: the sticker was explicitly picked from the panel — ask TDLib
+        // to move its set to the front of the installed order (schema
+        // 1.8.67:5934). TDLib persists the order and broadcasts
+        // `updateInstalledStickerSets`.
+        "options": message_send_options(&SendOptions {
+            update_order_of_installed_sticker_sets: true,
+            ..SendOptions::default()
+        }),
         "reply_markup": Value::Null,
         "input_message_content": {
             "@type": "inputMessageSticker",

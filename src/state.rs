@@ -8087,6 +8087,17 @@ impl Session {
                     self.accept_found_emoji_sets(sets);
                 }
             }
+            // Slice S15: `updateInstalledStickerSets` — TDLib's authoritative
+            // new order after a usage-driven (sticker send with
+            // `update_order_of_installed_sticker_sets`) or manual reorder.
+            // Applied in place so an open panel reshuffles live; an empty
+            // cache is a no-op and the next fetch arrives ordered.
+            EnvelopePayload::UpdateInstalledStickerSets {
+                sticker_set_ids,
+                is_regular,
+            } => {
+                self.apply_installed_sticker_set_order(&sticker_set_ids, is_regular);
+            }
             // Slice S8: `getTrendingStickerSets` answers with
             // `trendingStickerSets`.
             EnvelopePayload::TrendingStickerSets {
@@ -10880,6 +10891,27 @@ impl Session {
         self.stickers.selected_set_id = None;
         self.stickers.loaded_set_id = None;
         self.stickers.stickers.clear();
+    }
+
+    /// Slice S15: apply TDLib's `updateInstalledStickerSets` order to the
+    /// cached installed sets. Stable: sets missing from the update keep
+    /// their relative order at the end. Regular sets reorder the sticker
+    /// panel; other types reorder the emoji panel's installed sets. This
+    /// never fights the manual reorder (`parity:stickers-reorder`) — both
+    /// flows converge on TDLib's authoritative order.
+    pub fn apply_installed_sticker_set_order(&mut self, ids: &[i64], is_regular: bool) {
+        let sets = if is_regular {
+            &mut self.stickers.sets
+        } else {
+            // Non-regular types (custom emoji; mask sets are never fetched)
+            // route to the emoji panel's installed sets.
+            &mut self.emoji.installed_sets
+        };
+        if sets.is_empty() || ids.is_empty() {
+            return;
+        }
+        let rank: HashMap<i64, usize> = ids.iter().enumerate().map(|(i, &id)| (id, i)).collect();
+        sets.sort_by_key(|set| rank.get(&set.id).copied().unwrap_or(usize::MAX));
     }
 
     pub fn select_sticker_set(&mut self, set_id: i64) {

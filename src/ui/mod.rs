@@ -5517,6 +5517,7 @@ impl QuillApp {
             link_preview_media: self.composer_preview_media,
             // The driver overrides this for secret chats at send time.
             is_secret: false,
+            ..SendOptions::default()
         }
     }
 
