@@ -3,12 +3,16 @@
 //! The icon is drawn programmatically as 64x64 RGBA (no asset files): a blue
 //! rounded square with a white paper-plane glyph, plus a red pill badge with
 //! the unread count (capped at "99+") whenever any chat is unread. The badge
-//! sums every chat's `unread_count` except effectively muted chats (a chat's
-//! own mute, or the scope default's when the chat keeps `use_default_mute_for`
-//! — via `Session::effective_muted`, the same gate the notification toast
-//! uses). Excluding muted is Telegram Desktop's default (its Notifications
-//! setting "Include muted chats in unread count" is opt-in); archived chats
-//! are included. The sum saturates instead of overflowing.
+//! sums every chat's `unread_count` except archived chats. Muted chats ARE
+//! included — that is Telegram Desktop's actual default: its Notifications
+//! toggle "Include muted chats" (`lng_settings_include_muted`) is ON by
+//! default (`_includeMutedCounter = true`, tdesktop
+//! `Telegram/SourceFiles/core/core_settings.h`), i.e. excluding muted is the
+//! opt-out, not the opt-in. (Telegram X's launcher badge excludes muted by
+//! default, but this is a desktop tray icon — Telegram Desktop is the
+//! platform-appropriate reference.) Archived chats are excluded, matching
+//! both clients (TD badges the main chats list; TGX's `BADGE_FLAG_ARCHIVED`
+//! is off by default). The sum saturates instead of overflowing.
 //!
 //! The OS tray itself is managed behind `#[cfg(feature = "ui")]` with the
 //! `tray-icon` crate. [`sync_tray`] is called from a 1s timer in `main.rs`;
@@ -21,14 +25,14 @@ use crate::state::Session;
 /// Icon edge length in pixels.
 pub const ICON_SIZE: u32 = 64;
 
-/// Total unread messages across all chats. Negative per-chat counts (shouldn't
-/// happen) are ignored; effectively muted chats are excluded (Telegram
-/// Desktop's default badge semantics); the sum saturates.
+/// Total unread messages across non-archived chats. Negative per-chat counts
+/// (shouldn't happen) are ignored; muted chats are included (Telegram
+/// Desktop's default — `_includeMutedCounter = true`); the sum saturates.
 pub fn total_unread(session: &Session) -> u32 {
     session
         .chats
         .values()
-        .filter(|chat| !session.effective_muted(chat))
+        .filter(|chat| !chat.in_archive)
         .map(|chat| chat.unread_count.max(0) as u32)
         .fold(0u32, u32::saturating_add)
 }
@@ -306,6 +310,12 @@ mod tests {
         c
     }
 
+    fn archived_chat(id: i64, unread_count: i32) -> ChatSummary {
+        let mut c = chat(id, unread_count);
+        c.in_archive = true;
+        c
+    }
+
     #[test]
     fn total_unread_sums_and_ignores_negative() {
         let session = session_with(&[3, 0, 7, -5]);
@@ -313,14 +323,28 @@ mod tests {
     }
 
     #[test]
-    fn total_unread_excludes_muted_chats() {
-        // Muted chats don't count (Telegram Desktop's default badge semantics).
+    fn total_unread_includes_muted_chats() {
+        // Muted chats count: Telegram Desktop's badge includes them by
+        // default (`_includeMutedCounter = true`).
         let mut session = Session::new(
             AccountKey("tray-test-muted".into()),
             Arc::new(MemorySink::new()),
         );
         session.chats.insert(0, chat(0, 5));
         session.chats.insert(1, muted_chat(1, 9));
+        assert_eq!(total_unread(&session), 14);
+    }
+
+    #[test]
+    fn total_unread_excludes_archived_chats() {
+        // Archived chats never count (both official clients exclude them
+        // from the badge by default).
+        let mut session = Session::new(
+            AccountKey("tray-test-archived".into()),
+            Arc::new(MemorySink::new()),
+        );
+        session.chats.insert(0, chat(0, 5));
+        session.chats.insert(1, archived_chat(1, 9));
         assert_eq!(total_unread(&session), 5);
     }
 
