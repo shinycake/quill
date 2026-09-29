@@ -469,7 +469,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Game buttons launch via getCallbackQueryAnswer with callbackQueryPayloadGame (messageGame short name); answer URL opens in browser <!-- parity:bots-inline-game -->
 - [x] Buy buttons open the payment checkout dialog (getPaymentForm → paymentForm) (ui/mod.rs) <!-- parity:bots-inline-buy -->
 - [x] User buttons open the private chat with the user (ui/mod.rs) <!-- parity:bots-inline-user -->
-- [ ] Per-button disabled flag on inline buttons (Bot API 10.3 `disabled` field; blocked: not exposed in TDLib 1.8.67 `inlineKeyboardButton` — the `inlineKeyboardButtonTypeDisabled` type is exposed and Quill already renders it disabled) <!-- parity:bots-inline-disabled-buttons -->
+- [x] Per-button disabled flag on inline buttons (verified: TDLib 1.8.67 exposes `inlineKeyboardButtonTypeDisabled`; `envelope.rs:8791` parses it to `InlineKeyboardButtonType::Disabled`; `inline_keyboard_button` (src/ui/mod.rs:44503) renders it non-interactive via the `element.disabled(true)` fallthrough (44599) — no click handler attached — with tooltip "This button is disabled" (44616)) <!-- parity:bots-inline-disabled-buttons -->
 - [x] Custom reply keyboards rendered above the composer; text sends, one-time hides on tap, contact/location/poll honestly disabled <!-- parity:bots-custom-keyboard -->
 - [x] Force-reply markup focuses the composer with the reply target set <!-- parity:bots-force-reply -->
 - [ ] Force-reply keyboards render the reply-keyboard bar (the official clients show the custom-keyboard UI for forceReply markup; Quill covers only composer focus) <!-- parity:bots-force-reply-keyboard -->
@@ -492,7 +492,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Poll duration setting: auto-close after N hours (1–24 UI ceiling, `open_period`; true max is server `getOption("poll_open_period_max")`) (ui/mod.rs, poll.rs) <!-- parity:bots-poll-duration -->
 - [x] Revoting toggle in creation dialog (`allows_revoting`; forced off in quiz mode) (ui/mod.rs, requests.rs) <!-- parity:bots-poll-revoting -->
 - [x] Shuffle options toggle (`shuffle_options`) (ui/mod.rs, requests.rs) <!-- parity:bots-poll-shuffle -->
-- [ ] Show voters toggle (no such creation field on `inputMessagePoll` — TGX implements it as the inverse of `is_anonymous`, which the dialog already has; voter-list display is `getPollVoters` below) <!-- parity:bots-poll-show-voters -->
+- [x] Show voters toggle (verified: TGX implements it as the inverse of `is_anonymous`; the poll dialog's "Anonymous voting" checkbox (src/ui/mod.rs:33786) drives `PollDialog.is_anonymous` (325, default true at 360), frozen into `PollDraft` (392), sent via `connect.rs:10777` as `"is_anonymous": poll.is_anonymous` in the `inputMessagePoll` payload (`requests.rs:4184`); voter-list display is the already-checked `bots-poll-voters` box) <!-- parity:bots-poll-show-voters -->
 - [x] Country restriction setting: comma-separated ISO codes (`country_codes`; count cap is server-enforced `poll_country_count_max`, channel-only) (ui/mod.rs, poll.rs, requests.rs) <!-- parity:bots-poll-countries -->
 - [x] Poll discard-confirmation prompt when closing the dialog with unsent input (ui/mod.rs) <!-- parity:bots-poll-discard -->
 - [x] Voting: single, multiple, retract-when-revoting, quiz answering, closed-poll blocked, optimistic UI with rollback on failure (poll.rs:51, connect.rs:5287) <!-- parity:bots-poll-vote -->
