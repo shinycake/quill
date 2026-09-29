@@ -531,7 +531,7 @@ pub enum EnvelopePayload {
         setting: String,
         rules: Vec<PrivacyRule>,
     },
-    /// Slice S3: `readDatePrivacySettings` (schema 1.8.67, :9022) —
+    /// Slice S3: `readDatePrivacySettings` (schema 1.8.67, :9026) —
     /// the `getReadDatePrivacySettings` answer.
     ReadDatePrivacySettings {
         show_read_date: bool,
@@ -7751,7 +7751,7 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
                 rules: rules.iter().map(PrivacyRule::parse).collect(),
             })
         }
-        // Slice S3: `readDatePrivacySettings` (schema 1.8.67, :9022) —
+        // Slice S3: `readDatePrivacySettings` (schema 1.8.67, :9026) —
         // the `getReadDatePrivacySettings` answer.
         "readDatePrivacySettings" => Ok(EnvelopePayload::ReadDatePrivacySettings {
             show_read_date: value

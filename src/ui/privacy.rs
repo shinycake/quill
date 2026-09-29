@@ -631,19 +631,12 @@ impl QuillApp {
                 let live = self.live.as_mut().expect("live checked above");
                 match target {
                     PrivacyEditorTarget::Rule(key) => {
-                        let detail = live
-                            .driver
-                            .session
-                            .privacy
-                            .get(&key)
-                            .and_then(|st| match st {
-                                PrivacyKeyState::Ready(d) => Some(d.with_base(who)),
-                                _ => None,
-                            })
-                            .unwrap_or_else(|| PrivacyRuleDetail {
-                                who: Some(who),
-                                ..Default::default()
-                            });
+                        // Not Ready (Loading/Failed): ignore the click — sending
+                        // a base-only detail here would wipe the server exceptions.
+                        let detail = match live.driver.session.privacy.get(&key) {
+                            Some(PrivacyKeyState::Ready(d)) => d.with_base(who),
+                            _ => return,
+                        };
                         live.driver.set_privacy_rules(key, detail)
                     }
                     PrivacyEditorTarget::CallAllow => live
@@ -660,17 +653,12 @@ impl QuillApp {
         } else if let Some(demo) = self.demo_session.as_mut() {
             match target {
                 PrivacyEditorTarget::Rule(key) => {
-                    let detail = demo
-                        .privacy
-                        .get(&key)
-                        .and_then(|st| match st {
-                            PrivacyKeyState::Ready(d) => Some(d.with_base(who)),
-                            _ => None,
-                        })
-                        .unwrap_or_else(|| PrivacyRuleDetail {
-                            who: Some(who),
-                            ..Default::default()
-                        });
+                    // Not Ready (Loading/Failed): ignore the click — inserting
+                    // a base-only detail here would wipe the server exceptions.
+                    let detail = match demo.privacy.get(&key) {
+                        Some(PrivacyKeyState::Ready(d)) => d.with_base(who),
+                        _ => return,
+                    };
                     demo.privacy.insert(key, PrivacyKeyState::Ready(detail));
                 }
                 PrivacyEditorTarget::CallAllow => demo.call_privacy_allow_calls = Some(who),
@@ -927,7 +915,11 @@ impl QuillApp {
                 _ => None,
             })
         });
-        let mut detail = current.unwrap_or_default();
+        // Not Ready (Loading/Failed): ignore — an empty detail would
+        // recompose into a base-less rule list (first-match => deny-all).
+        let Some(mut detail) = current else {
+            return;
+        };
         let (mine, other) = match kind {
             PrivacyExceptionKind::Always => (&mut detail.always, &mut detail.never),
             PrivacyExceptionKind::Never => (&mut detail.never, &mut detail.always),

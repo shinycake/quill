@@ -19111,9 +19111,6 @@ mod tests {
         assert_eq!(session.call_privacy_p2p, Some(PrivacyWho::Everybody));
     }
 
-    /// Slice S3: fetched `userPrivacySettingRules` parses into
-    /// `PrivacyRuleDetail` — base choice, always/never user ids, and
-    /// unknown extras preserved for a lossless `recompose`.
     #[test]
     fn g2_update_supergroup_caches_sign_flags_and_rights() {
         // Slice G2: `updateSupergroup` carries `sign_messages` /
