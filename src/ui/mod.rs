@@ -1189,6 +1189,12 @@ pub enum ScreenshotDemo {
     /// All tab, so member rows, custom titles, and per-tab actions
     /// render directly.
     ReadyGroupManage,
+    /// Slice G8: group info-edit demo (injected, no live Telegram):
+    /// the `ReadyGroupManage` demo supergroup (id 61, viewer an admin
+    /// with `can_change_info`) with the info panel open, so the new
+    /// Edit title / Edit description / Change photo rows render
+    /// directly.
+    ReadyGroupInfoEdit,
     /// Bot chat demo (injected, no live Telegram): private chat with a
     /// `userTypeBot` user (id 21), opened with history plus a cached
     /// `botInfo` (description + commands), so the bot panel renders under
@@ -2305,6 +2311,15 @@ impl QuillApp {
                     ConnectUiStatus::DemoReadyChats,
                     None,
                     "screenshot demo — group management".into(),
+                    AuthorizationState::Ready,
+                )
+            }
+            Some(ScreenshotDemo::ReadyGroupInfoEdit) => {
+                demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
+                (
+                    ConnectUiStatus::DemoReadyChats,
+                    None,
+                    "screenshot demo — group info edit".into(),
                     AuthorizationState::Ready,
                 )
             }
@@ -4343,6 +4358,19 @@ impl QuillApp {
             }
             app.member_dialog = Some(MemberDialog::new(window, cx, ChatId(61), false));
             app.status_note = "screenshot demo — group management".into();
+            cx.notify();
+        }
+        // Slice G8: same group-management fixture (viewer 777 is an
+        // admin with `can_change_info`), but open the info panel
+        // instead of the member dialog so the Edit title / Edit
+        // description / Change photo rows render directly.
+        if matches!(demo, Some(ScreenshotDemo::ReadyGroupInfoEdit)) {
+            if let Some(session) = app.demo_session.as_mut() {
+                app.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_group_manage(session, &app.demo_sink, &app.demo_seq);
+            }
+            app.open_info_panel_target(InfoPanelTarget::Supergroup(61), window, cx);
+            app.status_note = "screenshot demo — group info edit".into();
             cx.notify();
         }
         if matches!(demo, Some(ScreenshotDemo::ReadyBotChat)) {
@@ -14470,6 +14498,86 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// Slice G8: group/channel title edit prompt (`setChatTitle`,
+    /// schema 1.8.67, line 13430 — 1–128 chars). Prefilled with the
+    /// current title.
+    fn open_group_title_dialog(
+        &mut self,
+        chat_id: ChatId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let current = self
+            .session()
+            .and_then(|s| s.chats.get(&chat_id.0))
+            .map(|chat| chat.title.clone())
+            .unwrap_or_default();
+        self.username_dialog = Some(UsernameDialog::new(
+            window,
+            cx,
+            chat_id,
+            TextPromptKind::GroupTitle,
+            &current,
+            "Group title (1–128 characters)",
+        ));
+        cx.notify();
+    }
+
+    /// Slice G8: group/channel description edit prompt
+    /// (`setChatDescription`, schema 1.8.67, line 13533 — 0–255 chars,
+    /// empty clears). Prefilled from the supergroup full info; basic
+    /// groups keep no description in state, so the field starts empty
+    /// there.
+    fn open_group_description_dialog(
+        &mut self,
+        chat_id: ChatId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let current = self
+            .session()
+            .and_then(|s| {
+                s.chats.get(&chat_id.0).and_then(|chat| match chat.kind {
+                    ChatKind::Supergroup { supergroup_id, .. } => s
+                        .supergroup_full_infos
+                        .get(&supergroup_id)
+                        .map(|info| info.description.clone()),
+                    _ => None,
+                })
+            })
+            .unwrap_or_default();
+        self.username_dialog = Some(UsernameDialog::new(
+            window,
+            cx,
+            chat_id,
+            TextPromptKind::GroupDescription,
+            &current,
+            "Description (0–255 characters, empty = clear)",
+        ));
+        cx.notify();
+    }
+
+    /// Slice G8: group/channel photo edit prompt (`setChatPhoto`,
+    /// schema 1.8.67, line 13435) — a local file path; empty removes
+    /// the current photo. No native file picker exists in the app, so
+    /// the path is typed like every other text prompt.
+    fn open_group_photo_dialog(
+        &mut self,
+        chat_id: ChatId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.username_dialog = Some(UsernameDialog::new(
+            window,
+            cx,
+            chat_id,
+            TextPromptKind::GroupPhoto,
+            "",
+            "Photo file path (empty = remove current photo)",
+        ));
+        cx.notify();
+    }
+
     /// Slice G1: admin custom-title prompt (`setChatMemberTag`, schema
     /// 1.8.67, line 13598 — the setter Telegram X's `EditRightsController`
     /// drives for "Custom title"). Basic groups and supergroups only.
@@ -14555,6 +14663,108 @@ impl QuillApp {
                     None => {
                         self.username_dialog = Some(dialog);
                         "custom titles need a live connection (demo)".into()
+                    }
+                }
+            }
+            TextPromptKind::GroupTitle => {
+                // 1–128 chars per the schema (line 13430); the driver
+                // re-validates before sending.
+                if value.is_empty() || value.chars().count() > 128 {
+                    self.username_dialog = Some(dialog);
+                    self.status_note = "title must be 1–128 characters".into();
+                    cx.notify();
+                    return;
+                }
+                match self.live.as_mut() {
+                    Some(live) => match live.driver.set_group_title(chat_id, &value) {
+                        Ok(Some(_)) => "title updated".into(),
+                        Ok(None) => {
+                            self.username_dialog = Some(dialog);
+                            "you can't change this group's info".into()
+                        }
+                        Err(_) => {
+                            self.username_dialog = Some(dialog);
+                            "could not update title".into()
+                        }
+                    },
+                    None => {
+                        self.username_dialog = Some(dialog);
+                        "titles need a live connection (demo)".into()
+                    }
+                }
+            }
+            TextPromptKind::GroupDescription => {
+                // 0–255 chars per the schema (line 13533); empty clears.
+                if value.chars().count() > 255 {
+                    self.username_dialog = Some(dialog);
+                    self.status_note = "description must be at most 255 characters".into();
+                    cx.notify();
+                    return;
+                }
+                match self.live.as_mut() {
+                    Some(live) => match live.driver.set_group_description(chat_id, &value) {
+                        Ok(Some(_)) => {
+                            if value.is_empty() {
+                                "description cleared".into()
+                            } else {
+                                "description updated".into()
+                            }
+                        }
+                        Ok(None) => {
+                            self.username_dialog = Some(dialog);
+                            "you can't change this group's info".into()
+                        }
+                        Err(_) => {
+                            self.username_dialog = Some(dialog);
+                            "could not update description".into()
+                        }
+                    },
+                    None => {
+                        self.username_dialog = Some(dialog);
+                        "descriptions need a live connection (demo)".into()
+                    }
+                }
+            }
+            TextPromptKind::GroupPhoto => {
+                // Empty removes the photo; otherwise the path must be
+                // a real file — TDLib would reject a missing one anyway.
+                // `~` expands to the home dir.
+                let value = if let Some(rest) = value.strip_prefix('~') {
+                    format!("{}{}", std::env::var("HOME").unwrap_or_default(), rest)
+                } else {
+                    value
+                };
+                let photo = if value.is_empty() {
+                    None
+                } else if std::path::Path::new(&value).is_file() {
+                    Some(value.as_str())
+                } else {
+                    self.username_dialog = Some(dialog);
+                    self.status_note = format!("file not found: {value}").into();
+                    cx.notify();
+                    return;
+                };
+                match self.live.as_mut() {
+                    Some(live) => match live.driver.set_group_photo(chat_id, photo) {
+                        Ok(Some(_)) => {
+                            if value.is_empty() {
+                                "photo removed".into()
+                            } else {
+                                "photo updated".into()
+                            }
+                        }
+                        Ok(None) => {
+                            self.username_dialog = Some(dialog);
+                            "you can't change this group's info".into()
+                        }
+                        Err(_) => {
+                            self.username_dialog = Some(dialog);
+                            "could not update photo".into()
+                        }
+                    },
+                    None => {
+                        self.username_dialog = Some(dialog);
+                        "photos need a live connection (demo)".into()
                     }
                 }
             }
@@ -18745,6 +18955,17 @@ impl QuillApp {
                     "Custom title",
                     "Admin title shown instead of \"admin\" — empty removes it",
                 ),
+                // Slice G8: group/channel info editing reuses the text
+                // prompt — each kind gets its own title and hint.
+                TextPromptKind::GroupTitle => ("Group title", "1–128 characters"),
+                TextPromptKind::GroupDescription => (
+                    "Group description",
+                    "Up to 255 characters — empty clears it",
+                ),
+                TextPromptKind::GroupPhoto => (
+                    "Group photo",
+                    "Path to an image file — empty removes the photo",
+                ),
             };
             let body = div()
                 .flex()
@@ -22008,6 +22229,37 @@ impl QuillApp {
                         .on_click(cx.listener(move |$this, _, $window, $cx| $action)),
                 );
             };
+        }
+        // Slice G8: title / description / photo editing — same gate as
+        // the driver's `group_info_edit_allowed`: basic groups are
+        // democratic (every member may edit), supergroups and channels
+        // need `can_change_info`. These are the primary info actions,
+        // so they lead the section.
+        let can_edit_info = session
+            .as_ref()
+            .and_then(|s| s.chats.get(&chat_id.0))
+            .is_some_and(|chat| match chat.kind {
+                ChatKind::BasicGroup { .. } => true,
+                ChatKind::Supergroup { .. } => {
+                    session.is_some_and(|s| s.chat_can_change_info(chat_id))
+                        || chat.permissions.as_ref().is_some_and(|p| p.can_change_info)
+                }
+                _ => false,
+            });
+        if can_edit_info {
+            row!("g8-edit-title", "Edit title", |this, window, cx| {
+                this.open_group_title_dialog(chat_id, window, cx);
+            });
+            row!(
+                "g8-edit-description",
+                "Edit description",
+                |this, window, cx| {
+                    this.open_group_description_dialog(chat_id, window, cx);
+                }
+            );
+            row!("g8-edit-photo", "Change photo", |this, window, cx| {
+                this.open_group_photo_dialog(chat_id, window, cx);
+            });
         }
         // Members / subscribers — everyone who can see the panel and
         // add or restrict may manage; plain members get a read-only

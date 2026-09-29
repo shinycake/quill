@@ -6252,3 +6252,18 @@ ntgcalls v3.0.0 prebuilt lib, bindings verified against
   the `parity:calls-screen-share` box is checked with the live-peer
   caveat, matching the `calls-start-video` precedent ("verified in
   code + screenshot; real camera/peer still unverified").
+
+## Slice G8 — GROUP/CHANNEL TITLE + DESCRIPTION + PHOTO EDITING, UI (2026-09-29)
+
+- **Task:** check the three `parity:groups-set-title/description/photo` boxes — the backend slice (above) landed builders + drivers and deferred the edit UI past kit Phase 9; #142 merged, so unblocked.
+- **Built (UI only; drivers unchanged):**
+  - `src/ui/dialogs/username.rs`: `TextPromptKind::{GroupTitle, GroupDescription, GroupPhoto}` — the existing `UsernameDialog` text prompt is reused, no new dialog component (ponytail: already in this codebase).
+  - `src/ui/mod.rs` `open_group_title_dialog` / `open_group_description_dialog` / `open_group_photo_dialog`: prefilled from chat title / supergroup full-info description (basic groups keep no description in state — field starts empty); photo prompt takes a local file path since the app has no native file picker (empty = remove current photo).
+  - `submit_username_dialog`: three new arms. Client-side validation mirrors the schema (title 1–128, description ≤255, photo path must be a real file — TDLib would reject a missing one anyway); validation failures keep the dialog open with a note. `Ok(None)` driver refusals surface honestly ("you can't change this group's info") instead of a fake success; demo mode keeps the dialog open with the "needs a live connection" note, matching the existing arms.
+  - `group_management_section`: "Edit title" / "Edit description" / "Change photo" ghost-button rows (the existing `row!` macro), gated on the driver's `group_info_edit_allowed` logic mirrored UI-side (basic groups democratic — every member; supergroups/channels need `can_change_info` incl. the `chat.permissions` path). Renders in both the supergroup and basic-group info panels.
+  - Screenshot demo `ready-group-info-edit` (enum + seed arm + fixture + main.rs CLI/marker): the G1 manage fixture with the info panel open instead of the member dialog, so the three rows render directly → `docs/screenshots/ready-group-info-edit.png`.
+- **Key decisions:**
+  - No description refetch on success — the backend note left it undecided; the driver deliberately does not refetch (no `updateChatDescription` broadcast exists), and the next full-info pull converges. No optimistic state either: the server's `updateChatTitle` / `updateChatPhoto` are the authority.
+  - Photo via typed path, not a new `rfd` dependency — the app has no native file-picker infra anywhere; a dependency for one prompt is bloat.
+  - README: the three boxes checked (375/525 = 71.4%).
+- **Not verifiable without live Telegram:** real `setChatTitle`/`setChatDescription`/`setChatPhoto` round-trips, real `updateChatTitle`/`updateChatPhoto` convergence, real rights-gate refusals from the server. Tested instead: driver gates/shapes (backend slice tests), client-side validation paths (code), and the screenshot demo (visual).
