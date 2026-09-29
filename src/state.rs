@@ -609,6 +609,16 @@ pub enum RequestPurpose {
     /// line 13435). Response is `ok`; `updateChatPhoto` carries the new
     /// photo. No optimistic state: the update arrives from the server.
     SetChatPhoto,
+    /// Slice S11: `setSupergroupStickerSet` (schema 1.8.67, line 15154).
+    /// Response is `ok`; `updateSupergroupFullInfo` carries the new
+    /// `sticker_set_id`. No optimistic state: the update arrives from
+    /// the server. Driver validates the id client-side (negative is
+    /// refused); 0 removes the group sticker set per the schema.
+    SetSupergroupStickerSet,
+    /// Slice S11: `setSupergroupCustomEmojiStickerSet` (schema 1.8.67,
+    /// line 15159). Response is `ok`; `updateSupergroupFullInfo` carries
+    /// the new `custom_emoji_sticker_set_id`. No optimistic state.
+    SetSupergroupCustomEmojiStickerSet,
     /// Slice G1: `setChatMemberTag` (schema 1.8.67, line 13598) — the
     /// admin custom-title setter (Telegram X `EditRightsController`
     /// drives the "Custom title" field through it). Response is `ok`;
@@ -4792,6 +4802,17 @@ pub struct SupergroupFullInfoData {
     /// line 2792). Gates the channel statistics entry point in the info
     /// panel; `getChatStatistics` errors when false.
     pub can_get_statistics: bool,
+    /// Slice S11: `supergroupFullInfo.can_set_sticker_set` (schema 1.8.67,
+    /// line 2765) — true when the supergroup sticker set can be changed;
+    /// gates the group sticker-set affordance.
+    pub can_set_sticker_set: bool,
+    /// Slice S11: `supergroupFullInfo.sticker_set_id` (schema 1.8.67,
+    /// line 2792) — the installed group sticker set; 0 when none.
+    pub sticker_set_id: i64,
+    /// Slice S11: `supergroupFullInfo.custom_emoji_sticker_set_id`
+    /// (schema 1.8.67, line 2792) — the group's custom-emoji set; 0
+    /// when none.
+    pub custom_emoji_sticker_set_id: i64,
 }
 
 impl Default for SupergroupFullInfoData {
@@ -4806,6 +4827,9 @@ impl Default for SupergroupFullInfoData {
             unrestrict_boost_count: 0,
             fetched_at_ms: 0,
             can_get_statistics: false,
+            can_set_sticker_set: false,
+            sticker_set_id: 0,
+            custom_emoji_sticker_set_id: 0,
         }
     }
 }
@@ -5585,6 +5609,17 @@ impl Session {
         })
     }
 
+    /// Slice S11: group sticker-set gate for a chat —
+    /// `supergroupFullInfo.can_set_sticker_set` (schema 1.8.67, line 2765).
+    /// False while the full info hasn't been fetched (fail closed).
+    pub fn chat_can_set_sticker_set(&self, chat_id: ChatId) -> bool {
+        self.chat_supergroup(chat_id).is_some_and(|id| {
+            self.supergroup_full_infos
+                .get(&id)
+                .is_some_and(|info| info.can_set_sticker_set)
+        })
+    }
+
     /// Slice G2: cached `chat.has_welcome_messages` (schema 1.8.67, line
     /// 3627).
     pub fn chat_has_welcome_messages_flag(&self, chat_id: ChatId) -> bool {
@@ -6112,6 +6147,9 @@ impl Session {
                 can_get_statistics,
                 has_aggressive_anti_spam_enabled,
                 can_toggle_aggressive_anti_spam,
+                can_set_sticker_set,
+                sticker_set_id,
+                custom_emoji_sticker_set_id,
             } => {
                 // Phase 6: `getSupergroupFullInfo` answer — the response
                 // carries no id, so it is correlated via the pending
@@ -6136,6 +6174,9 @@ impl Session {
                             // decays it locally against this stamp.
                             fetched_at_ms: unix_ms_now(),
                             can_get_statistics,
+                            can_set_sticker_set,
+                            sticker_set_id,
+                            custom_emoji_sticker_set_id,
                         },
                     );
                     // Slice G2: anti-spam state for the manage-dialog
@@ -6161,6 +6202,9 @@ impl Session {
                 can_get_statistics,
                 has_aggressive_anti_spam_enabled,
                 can_toggle_aggressive_anti_spam,
+                can_set_sticker_set,
+                sticker_set_id,
+                custom_emoji_sticker_set_id,
             } => {
                 self.supergroup_full_infos.insert(
                     supergroup_id,
@@ -6174,6 +6218,9 @@ impl Session {
                         unrestrict_boost_count,
                         fetched_at_ms: unix_ms_now(),
                         can_get_statistics,
+                        can_set_sticker_set,
+                        sticker_set_id,
+                        custom_emoji_sticker_set_id,
                     },
                 );
                 // Slice G2: anti-spam state for the manage-dialog toggle.
@@ -18868,6 +18915,46 @@ mod tests {
         );
         assert!(session.chat_anti_spam_enabled(ChatId(13)));
         assert!(session.chat_can_toggle_anti_spam(ChatId(13)));
+    }
+
+    #[test]
+    fn s11_supergroup_sticker_set_fields_apply_and_gate() {
+        // Slice S11: `supergroupFullInfo` / `updateSupergroupFullInfo`
+        // carry the group sticker-set fields; the gate is fail-closed
+        // while the full info is unfetched.
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateNewChat","chat":{"id":13,"title":"g","type":{"@type":"chatTypeSupergroup","supergroup_id":25,"is_channel":false},"unread_count":0}}"#,
+        );
+        assert!(!session.chat_can_set_sticker_set(ChatId(13)));
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateSupergroupFullInfo","supergroup_id":25,"supergroup_full_info":{"@type":"supergroupFullInfo","can_set_sticker_set":true,"sticker_set_id":"1234567890123","custom_emoji_sticker_set_id":"9876543210987"}}"#,
+        );
+        let info = session.supergroup_full_info(25).expect("cached");
+        assert!(info.can_set_sticker_set);
+        assert_eq!(info.sticker_set_id, 1234567890123);
+        assert_eq!(info.custom_emoji_sticker_set_id, 9876543210987);
+        assert!(session.chat_can_set_sticker_set(ChatId(13)));
+        // A later update replaces the whole pack.
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateSupergroupFullInfo","supergroup_id":25,"supergroup_full_info":{"@type":"supergroupFullInfo","can_set_sticker_set":false,"sticker_set_id":"0","custom_emoji_sticker_set_id":"0"}}"#,
+        );
+        let info = session.supergroup_full_info(25).expect("cached");
+        assert!(!info.can_set_sticker_set);
+        assert_eq!(info.sticker_set_id, 0);
+        assert!(!session.chat_can_set_sticker_set(ChatId(13)));
+        // Unknown chat → gate stays closed.
+        assert!(!session.chat_can_set_sticker_set(ChatId(404)));
     }
 
     #[test]

@@ -6106,6 +6106,30 @@ ntgcalls v3.0.0 prebuilt lib, bindings verified against
   - `updateChatEmojiStatus` handling — chat-level update owned by the chat loop.
   - `updateTrendingStickerSets` live-update handling — consistent with S8 (no existing handling to extend; refetch-on-open covers it).
 - **ponytail notes:** `GetAnimatedEmoji` is a unit purpose with no query identity (same caveat as S9's GIF search) — the UI slice must serialize suggestions so a stale answer can't clobber a newer emoji. No recent-emoji storage was added (no TDLib API exists). No emoji-pack detail builder was added (`get_sticker_set` already covers pack contents by set id when the UI slice needs it).
+
+## Slice S11 — GROUP STICKER-SET MANAGEMENT, BACKEND ONLY (2026-09-29)
+
+- **Rationale:** `parity:stickers-group-set` had zero TDLib wiring. Kit Phase 9 owns all UI surfaces, so this slice ships the complete backend (request builders, response parsing, state + reducers, purpose-gated dispatch, drivers) with zero UI touches; the group-settings UI consumes it the moment Phase 9 merges.
+- **Schema (1.8.67, verified verbatim in `schema/td_api.tl` — no invented constructors/fields):**
+  - `setSupergroupStickerSet supergroup_id:int53 sticker_set_id:int64 = Ok;` (line 15154) — "Use 0 to remove the supergroup sticker set"; requires can_change_info administrator right.
+  - `setSupergroupCustomEmojiStickerSet supergroup_id:int53 custom_emoji_sticker_set_id:int64 = Ok;` (line 15159) — "Use 0 to remove the custom emoji sticker set in the supergroup"; requires can_change_info administrator right.
+  - `supergroupFullInfo.can_set_sticker_set` (line 2765) — "True, if the supergroup sticker set can be changed"; `sticker_set_id:int64` / `custom_emoji_sticker_set_id:int64` (line 2792) — 0 when none.
+  - `updateSupergroupFullInfo` (line 10750) — "Some data in supergroupFullInfo has been changed"; the sticker-set mutation confirms through this broadcast (same mechanism as G2's anti-spam toggle).
+- **What was built:**
+  - `src/telegram/requests_group_stickers.rs` (new named module — the
+    S10 `requests_emoji.rs` pattern; `requests.rs` itself is untouched):
+    `set_supergroup_sticker_set` / `set_supergroup_custom_emoji_sticker_set`
+    builders (int64 ids as JSON strings, like S8's `change_sticker_set`;
+    supergroup_id as int53 number) + request-shape test.
+  - `src/telegram/envelope.rs`: `SupergroupFullInfo` + `UpdateSupergroupFullInfo` payloads gain `can_set_sticker_set`, `sticker_set_id`, `custom_emoji_sticker_set_id` (scalar fields only — the `int64` helper accepts string or number; the "Dropped" doc note updated).
+  - `src/state.rs`: `RequestPurpose::SetSupergroupStickerSet` / `SetSupergroupCustomEmojiStickerSet` (unit variants — dedup rides on `PendingRequest` per chat, the G2 pattern); `SupergroupFullInfoData` gains the three fields (both reducers + `Default`); `Session::chat_can_set_sticker_set` gate (fail closed while full info is unfetched). No optimistic state and no refetch: the `ok` response is absorbed by the generic pending path and `updateSupergroupFullInfo` carries the confirmed ids (the setChatTitle/setChatPhoto pattern).
+  - `src/connect.rs`: `set_supergroup_sticker_set` / `set_supergroup_custom_emoji_sticker_set` drivers — `chats_path_active` gate, negative ids → `Err(InvalidRequest)`, unknown/wrong-kind chat → `Ok(None)`, capability gate → `Ok(None)`, in-flight dedup per chat, send-error takes the pending entry (the set_group_title pattern).
+  - Tests: request-shape test (both builders, schema line refs, int64-as-string encoding, 0 = remove), state test (fields cached from the update, replace-on-later-update, gate fail-closed then open, unknown-chat gate), driver test (all gates, shapes, remove encoding, dedup, negative-id refusal).
+  - README: `parity:stickers-group-set` partial annotation (box stays unchecked — UI pending).
+- **Out of this slice:**
+  - All group sticker-set UI (group-settings affordance, set picker, remove confirm) — kit Phase 9 owns UI surfaces; the UI slice reads `Session::supergroup_full_info` (ids) and `chat_can_set_sticker_set` (gate) and calls the drivers.
+  - `connect.rs` `updateSupergroupFullInfo` live-update handling — already exists; the new fields ride the existing reducer.
+
 ## Slice A7 — ACCOUNT LIFECYCLE: DELETE ACCOUNT + SELF-DESTRUCT TTL, BACKEND ONLY (2026-09-29)
 
 - **Schema (pinned TDLib 1.8.67, `schema/td_api.tl`, verified verbatim):**

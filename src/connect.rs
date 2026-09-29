@@ -132,6 +132,9 @@ use crate::telegram::requests::{
     unpin_all_chat_messages, unpin_chat_message,
     validate_order_info as validate_order_info_request, view_messages, view_sponsored_chat,
 };
+use crate::telegram::requests_group_stickers::{
+    set_supergroup_custom_emoji_sticker_set, set_supergroup_sticker_set,
+};
 use crate::telegram::requests_story::{
     add_story_album_stories, create_story_album, delete_story_album, get_chat_archived_stories,
     get_chat_posted_to_chat_page_stories, get_chat_story_albums, get_story_album_stories,
@@ -6576,6 +6579,100 @@ impl<S: JsonSender> ConnectDriver<S> {
                 supergroup_id,
                 previous,
             });
+        }
+        Ok(Some(extra))
+    }
+
+    /// Slice S11: `setSupergroupStickerSet` (schema 1.8.67, line 15154).
+    /// Gated on `supergroupFullInfo.can_set_sticker_set` (fail closed while
+    /// the full info is unfetched). `sticker_set_id` 0 removes the group
+    /// sticker set per the schema; negative ids are refused client-side.
+    /// Not optimistic — `updateSupergroupFullInfo` carries the confirmed
+    /// `sticker_set_id` back. In-flight dedup per chat.
+    pub fn set_supergroup_sticker_set(
+        &mut self,
+        chat_id: ChatId,
+        sticker_set_id: i64,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if sticker_set_id < 0 {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let Some(supergroup_id) =
+            self.session
+                .chats
+                .get(&chat_id.0)
+                .and_then(|chat| match chat.kind {
+                    ChatKind::Supergroup { supergroup_id, .. } => Some(supergroup_id),
+                    _ => None,
+                })
+        else {
+            return Ok(None);
+        };
+        if !self.session.chat_can_set_sticker_set(chat_id) {
+            return Ok(None);
+        }
+        let purpose = RequestPurpose::SetSupergroupStickerSet;
+        if self.session.requests.has_purpose_for_chat(purpose, chat_id) {
+            return Ok(None);
+        }
+        let extra = self.session.request(purpose, Some(chat_id));
+        if let Err(err) = self.sender.send_json(&set_supergroup_sticker_set(
+            extra,
+            supergroup_id,
+            sticker_set_id,
+        )) {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(Some(extra))
+    }
+
+    /// Slice S11: `setSupergroupCustomEmojiStickerSet` (schema 1.8.67,
+    /// line 15159). Same gating as the regular group sticker set;
+    /// `custom_emoji_sticker_set_id` 0 removes it per the schema.
+    pub fn set_supergroup_custom_emoji_sticker_set(
+        &mut self,
+        chat_id: ChatId,
+        custom_emoji_sticker_set_id: i64,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if custom_emoji_sticker_set_id < 0 {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let Some(supergroup_id) =
+            self.session
+                .chats
+                .get(&chat_id.0)
+                .and_then(|chat| match chat.kind {
+                    ChatKind::Supergroup { supergroup_id, .. } => Some(supergroup_id),
+                    _ => None,
+                })
+        else {
+            return Ok(None);
+        };
+        if !self.session.chat_can_set_sticker_set(chat_id) {
+            return Ok(None);
+        }
+        let purpose = RequestPurpose::SetSupergroupCustomEmojiStickerSet;
+        if self.session.requests.has_purpose_for_chat(purpose, chat_id) {
+            return Ok(None);
+        }
+        let extra = self.session.request(purpose, Some(chat_id));
+        if let Err(err) = self
+            .sender
+            .send_json(&set_supergroup_custom_emoji_sticker_set(
+                extra,
+                supergroup_id,
+                custom_emoji_sticker_set_id,
+            ))
+        {
+            self.session.requests.take(extra);
+            return Err(err);
         }
         Ok(Some(extra))
     }
@@ -13192,7 +13289,7 @@ mod tests {
     };
     use crate::diagnostics::MemorySink;
     use crate::platform::MemorySecretStore;
-    use crate::state::{ActiveCall, ActiveGroupCall};
+    use crate::state::{ActiveCall, ActiveGroupCall, SupergroupFullInfoData};
     use crate::telegram::client::copy_and_parse;
     use crate::telegram::envelope::ChannelMemberStatus;
     use crate::telegram::envelope::ParsedSession;
@@ -18841,6 +18938,129 @@ mod tests {
         assert_eq!(v["@type"], "setChatPhoto");
         assert_eq!(v["@extra"], extra.0.to_string());
         assert!(v["photo"].is_null());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn driver_group_sticker_set_gates_and_shape() {
+        // Slice S11: `setSupergroupStickerSet` /
+        // `setSupergroupCustomEmojiStickerSet` (schema 1.8.67, lines
+        // 15154/15159). Gated on `supergroupFullInfo.can_set_sticker_set`
+        // (fail closed while unfetched); unknown chats and non-supergroup
+        // chats refused without sending; negative ids refused
+        // client-side; 0 removes per the schema; in-flight dedup per chat.
+        // Not optimistic — the server confirms via
+        // `updateSupergroupFullInfo`.
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = Arc::new(RecordingSender::new());
+        let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+        let mut driver =
+            ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+        let seq = AtomicU64::new(0);
+        seed_ready_alice(&mut driver, &seq, &dyn_sink);
+        driver
+            .ingest(
+                copy_and_parse(
+                    r#"{"@type":"updateNewChat","chat":{"id":10,"title":"Supergroup","type":{"@type":"chatTypeSupergroup","supergroup_id":10,"is_channel":false},"unread_count":0}}"#,
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        // Unknown chat → refused without sending.
+        let sent_before = recorder.snapshot().len();
+        assert!(
+            driver
+                .set_supergroup_sticker_set(ChatId(404), 5)
+                .unwrap()
+                .is_none()
+        );
+        // Private chat (wrong kind) → refused.
+        assert!(
+            driver
+                .set_supergroup_sticker_set(ChatId(7), 5)
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(recorder.snapshot().len(), sent_before);
+        // Full info unfetched → capability gate fails closed.
+        assert!(
+            driver
+                .set_supergroup_sticker_set(ChatId(10), 5)
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(recorder.snapshot().len(), sent_before);
+        // Negative id → invalid request.
+        assert!(driver.set_supergroup_sticker_set(ChatId(10), -1).is_err());
+        // Seed the capability, then sends.
+        driver.session.supergroup_full_infos.insert(
+            10,
+            SupergroupFullInfoData {
+                can_set_sticker_set: true,
+                ..Default::default()
+            },
+        );
+        let extra = driver
+            .set_supergroup_sticker_set(ChatId(10), 1234567890123)
+            .unwrap()
+            .expect("request sent");
+        let sent = recorder.snapshot().last().cloned().expect("request");
+        let v: Value = serde_json::from_str(&sent).unwrap();
+        assert_eq!(v["@type"], "setSupergroupStickerSet");
+        assert_eq!(v["@extra"], extra.0.to_string());
+        assert_eq!(v["supergroup_id"], 10);
+        assert_eq!(v["sticker_set_id"], "1234567890123");
+        // In-flight dedup: second call while one is pending → no-op.
+        assert!(
+            driver
+                .set_supergroup_sticker_set(ChatId(10), 6)
+                .unwrap()
+                .is_none()
+        );
+        driver
+            .session
+            .requests
+            .take_purpose(RequestPurpose::SetSupergroupStickerSet);
+        // 0 removes the group sticker set per the schema.
+        let extra = driver
+            .set_supergroup_sticker_set(ChatId(10), 0)
+            .unwrap()
+            .expect("request sent");
+        let sent = recorder.snapshot().last().cloned().expect("request");
+        let v: Value = serde_json::from_str(&sent).unwrap();
+        assert_eq!(v["sticker_set_id"], "0");
+        assert_eq!(v["@extra"], extra.0.to_string());
+        driver
+            .session
+            .requests
+            .take_purpose(RequestPurpose::SetSupergroupStickerSet);
+        // Custom-emoji variant: same gating, shape, and remove encoding.
+        assert!(
+            driver
+                .set_supergroup_custom_emoji_sticker_set(ChatId(7), 5)
+                .unwrap()
+                .is_none()
+        );
+        let extra = driver
+            .set_supergroup_custom_emoji_sticker_set(ChatId(10), 9876543210987)
+            .unwrap()
+            .expect("request sent");
+        let sent = recorder.snapshot().last().cloned().expect("request");
+        let v: Value = serde_json::from_str(&sent).unwrap();
+        assert_eq!(v["@type"], "setSupergroupCustomEmojiStickerSet");
+        assert_eq!(v["@extra"], extra.0.to_string());
+        assert_eq!(v["supergroup_id"], 10);
+        assert_eq!(v["custom_emoji_sticker_set_id"], "9876543210987");
+        assert!(
+            driver
+                .set_supergroup_custom_emoji_sticker_set(ChatId(10), -1)
+                .is_err()
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
