@@ -5,8 +5,11 @@
 //! arrive as `CanPostStoryResult` variants (mapped by TDLib itself —
 //! `StoryManager::get_can_post_story_result_object`), while chat-level
 //! restrictions arrive as raw `error` payloads. The notices below are
-//! TGX's verbatim strings (`ChatDisabledStory` / `ChatRestrictedStory`
-//! / `ChatRestrictedStoryUntil`, TGX-Android `strings.xml`).
+//! TGX's verbatim strings (`ChatDisabledStory` / `ChatRestrictedStory`,
+//! TGX-Android `strings.xml`). TGX's third string,
+//! `ChatRestrictedStoryUntil`, is not surfaced: the `canPostStory`
+//! error channel carries no until-date, so it is not kept as
+//! scaffolding either.
 //!
 //! The raw error message is classified at parse time in
 //! `telegram::envelope::parse_error` — `TdError` deliberately drops the
@@ -24,30 +27,33 @@ pub const CHAT_DISABLED_STORY: &str = "Only admins can send stories in this grou
 pub const CHAT_RESTRICTED_STORY: &str =
     "The admins of this group have restricted your ability to send stories.";
 
-/// TGX `ChatRestrictedStoryUntil`, verbatim (`%1$s` = the restriction
-/// end, formatted by the caller). The `canPostStory` error channel
-/// carries no until-date, so the composer uses the plain restricted
-/// notice there; this stays available for dated restriction signals
-/// (e.g. `chatMemberStatusRestricted.restricted_until_date`).
-pub fn chat_restricted_story_until(until: &str) -> String {
-    format!("Admins have restricted you from sending stories in this group until {until}")
-}
-
 /// Classify a raw TDLib `error.message` into a scrub-safe `ErrorClass`.
 /// Only story-posting restriction server strings are recognized —
 /// anything else returns `None` and the caller falls back to the
 /// code-based class, so every other flow is unchanged:
 ///
+/// - `"Not enough rights to post stories in the chat"`: the headline
+///   case. TDLib's `StoryManager::can_send_story` (pinned 1.8.67) runs a
+///   CLIENT-SIDE `can_post_stories()` gate before any server query; when
+///   the user lacks the right, the `canPostStory` error channel
+///   delivers 400 with this exact message. If TDLib ever rewords it,
+///   classification degrades gracefully to the generic eligibility
+///   failure text.
 /// - `CHAT_ADMIN_REQUIRED`: documented 400 error for
 ///   `stories.canSendStory` / `stories.sendStory`
 ///   (core.telegram.org: "You must be an admin in this chat to do
 ///   this.") — stories are disabled for non-admins in the target chat.
+///   On the `canPostStory` error channel this arm can only fire in a
+///   stale-cache race.
 /// - `USER_RESTRICTED`: documented 403 error for users restricted in
 ///   supergroups/channels.
 ///
 /// The message itself is never stored.
 pub fn classify_server_message(message: &str) -> Option<ErrorClass> {
     match message {
+        // Do NOT map the sibling synthesized error "Chat not found" —
+        // it stays Invalid.
+        "Not enough rights to post stories in the chat" => Some(ErrorClass::StoryChatDisabled),
         "CHAT_ADMIN_REQUIRED" => Some(ErrorClass::StoryChatDisabled),
         "USER_RESTRICTED" => Some(ErrorClass::StoryUserRestricted),
         _ => None,
@@ -76,6 +82,15 @@ mod tests {
         for (message, code, class, notice) in [
             (
                 "CHAT_ADMIN_REQUIRED",
+                400,
+                ErrorClass::StoryChatDisabled,
+                CHAT_DISABLED_STORY,
+            ),
+            // Headline case: TDLib's `StoryManager::can_send_story`
+            // client-side gate (pinned 1.8.67) delivers this 400 message
+            // on the `canPostStory` error channel.
+            (
+                "Not enough rights to post stories in the chat",
                 400,
                 ErrorClass::StoryChatDisabled,
                 CHAT_DISABLED_STORY,
@@ -115,14 +130,5 @@ mod tests {
             assert_eq!(err.class, class, "{message}");
             assert_eq!(notice_for_error_class(err.class), None);
         }
-    }
-
-    #[test]
-    fn until_notice_matches_tgx_format() {
-        // TGX `ChatRestrictedStoryUntil`: "… until %1$s".
-        assert_eq!(
-            chat_restricted_story_until("Oct 3, 2026"),
-            "Admins have restricted you from sending stories in this group until Oct 3, 2026"
-        );
     }
 }
