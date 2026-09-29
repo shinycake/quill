@@ -14680,7 +14680,7 @@ impl QuillApp {
                         Ok(Some(_)) => "title updated".into(),
                         Ok(None) => {
                             self.username_dialog = Some(dialog);
-                            "request already in flight".into()
+                            "you can't change this group's info".into()
                         }
                         Err(_) => {
                             self.username_dialog = Some(dialog);
@@ -14712,7 +14712,7 @@ impl QuillApp {
                         }
                         Ok(None) => {
                             self.username_dialog = Some(dialog);
-                            "request already in flight".into()
+                            "you can't change this group's info".into()
                         }
                         Err(_) => {
                             self.username_dialog = Some(dialog);
@@ -14755,7 +14755,7 @@ impl QuillApp {
                         }
                         Ok(None) => {
                             self.username_dialog = Some(dialog);
-                            "request already in flight".into()
+                            "you can't change this group's info".into()
                         }
                         Err(_) => {
                             self.username_dialog = Some(dialog);
