@@ -10,6 +10,7 @@ pub mod connect;
 pub mod connect_smoke;
 pub mod credentials;
 pub mod diagnostics;
+pub mod emoji;
 pub mod folders;
 pub mod ids;
 pub mod key_fingerprint;

@@ -1,3 +1,4 @@
+use super::envelope_emoji::{EmojiCategory, EmojiKeyword, EmojiStatusItem};
 use crate::ids::{ChatId, FileId, MessageId, RequestId, UserId};
 use crate::rich::{RichBlock, parse_rich_message};
 use crate::telegram::requests::ArchiveChatListSettings;
@@ -680,21 +681,15 @@ pub enum EnvelopePayload {
         stickers: Vec<StickerItem>,
         files: Vec<ParsedFile>,
     },
-    /// Slice S10: `emojiStatuses` — `getRecentEmojiStatuses` /
-    /// `getUpgradedGiftEmojiStatuses`. `statuses` keep the custom emoji id
-    /// (0 for the upgraded-gift type — its gift fields are render detail
-    /// the UI slice owns) plus the timed-status `expiration_date`.
+    /// Slice S10: `emojiStatuses` — `getRecentEmojiStatuses` / `getUpgradedGiftEmojiStatuses`.
     EmojiStatuses {
         statuses: Vec<EmojiStatusItem>,
     },
-    /// Slice S10: `emojiStatusCustomEmojis` — `getThemedEmojiStatuses` /
-    /// `getDefaultEmojiStatuses` (bare custom-emoji-id lists).
+    /// Slice S10: `emojiStatusCustomEmojis` — `getThemedEmojiStatuses` / `getDefaultEmojiStatuses`.
     EmojiStatusCustomEmojis {
         custom_emoji_ids: Vec<i64>,
     },
-    /// Slice S10: `animatedEmoji` — `getAnimatedEmoji`. The sticker parse is
-    /// the existing `parse_sticker_value`; the `sound` file lands in
-    /// `files`.
+    /// Slice S10: `animatedEmoji` — `getAnimatedEmoji` (sticker + `sound` file).
     AnimatedEmoji {
         sticker: Option<StickerItem>,
         files: Vec<ParsedFile>,
@@ -703,8 +698,7 @@ pub enum EnvelopePayload {
     EmojiKeywords {
         keywords: Vec<EmojiKeyword>,
     },
-    /// Slice S10: `emojiCategories` — `getEmojiCategories` answers for the
-    /// picker. Icons land as `StickerItem`s; their files are in `files`.
+    /// Slice S10: `emojiCategories` — `getEmojiCategories` answers for the picker.
     EmojiCategories {
         categories: Vec<EmojiCategory>,
         files: Vec<ParsedFile>,
@@ -6469,34 +6463,6 @@ pub struct StickerSetInfo {
     pub is_official: bool,
 }
 
-/// Slice S10: one `emojiStatus` row (schema 1.8.67, line 2358) from an
-/// `emojiStatuses` list. Only the custom-emoji id is kept — the
-/// upgraded-gift type carries render detail the UI slice owns, and the
-/// `expiration_date` drives the timed-status presets (1h/2h/8h/2d/custom).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct EmojiStatusItem {
-    pub custom_emoji_id: i64,
-    pub expiration_date: i32,
-}
-
-/// Slice S10: one `emojiKeyword` row (schema 1.8.67, line 6426) from
-/// `searchEmojis`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct EmojiKeyword {
-    pub emoji: String,
-    pub keyword: String,
-}
-
-/// Slice S10: one `emojiCategory` row (schema 1.8.67, line 6496) from
-/// `getEmojiCategories`. The `source` (search/premium) is UI affordance
-/// detail the picker slice owns; the icon sticker renders the row.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct EmojiCategory {
-    pub name: String,
-    pub icon: Option<StickerItem>,
-    pub is_greeting: bool,
-}
-
 /// `animation` inside `messageAnimation` or `getSavedAnimations` (TDLib 1.8.67).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AnimationContent {
@@ -7778,12 +7744,14 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
         "stickerSet" => Ok(parse_sticker_set(&value)),
         "trendingStickerSets" => Ok(parse_trending_sticker_sets(&value)),
         "stickers" => Ok(parse_stickers(&value)),
-        // Slice S10: emoji backend payloads.
-        "emojiStatuses" => Ok(parse_emoji_statuses(&value)),
-        "emojiStatusCustomEmojis" => Ok(parse_emoji_status_custom_emojis(&value)),
-        "animatedEmoji" => Ok(parse_animated_emoji(&value)),
-        "emojiKeywords" => Ok(parse_emoji_keywords(&value)),
-        "emojiCategories" => Ok(parse_emoji_categories(&value)),
+        // Slice S10: emoji backend payloads (parsers live in envelope_emoji).
+        "emojiStatuses" => Ok(super::envelope_emoji::parse_emoji_statuses(&value)),
+        "emojiStatusCustomEmojis" => Ok(super::envelope_emoji::parse_emoji_status_custom_emojis(
+            &value,
+        )),
+        "animatedEmoji" => Ok(super::envelope_emoji::parse_animated_emoji(&value)),
+        "emojiKeywords" => Ok(super::envelope_emoji::parse_emoji_keywords(&value)),
+        "emojiCategories" => Ok(super::envelope_emoji::parse_emoji_categories(&value)),
         "animations" => Ok(parse_animations(&value)),
         "sponsoredMessages" => Ok(parse_sponsored_messages(&value)?),
         "reportSponsoredResultOk" => Ok(EnvelopePayload::ReportSponsoredResult(
@@ -10878,7 +10846,7 @@ fn parse_link_preview_photo(preview_type: &Value) -> (Option<PhotoContent>, Vec<
     (None, Vec::new())
 }
 
-fn json_field_str(value: &Value, key: &str) -> String {
+pub(crate) fn json_field_str(value: &Value, key: &str) -> String {
     value
         .get(key)
         .and_then(Value::as_str)
@@ -11578,7 +11546,7 @@ fn parse_sticker_format(value: Option<&Value>) -> StickerFormat {
     }
 }
 
-fn parse_sticker_value(value: Option<&Value>) -> (Option<StickerItem>, Vec<ParsedFile>) {
+pub(crate) fn parse_sticker_value(value: Option<&Value>) -> (Option<StickerItem>, Vec<ParsedFile>) {
     let Some(value) = value else {
         return (None, Vec::new());
     };
@@ -11741,98 +11709,6 @@ fn parse_stickers(value: &Value) -> EnvelopePayload {
     EnvelopePayload::Stickers { stickers, files }
 }
 
-/// Slice S10: `emojiStatuses` — `getRecentEmojiStatuses` /
-/// `getUpgradedGiftEmojiStatuses` (schema 1.8.67, lines 2361, 13957, 13960).
-/// Only the custom-emoji id is kept per row (0 for the upgraded-gift type).
-fn parse_emoji_statuses(value: &Value) -> EnvelopePayload {
-    let statuses = value
-        .get("emoji_statuses")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(|entry| {
-            let type_ = entry.get("type")?;
-            let custom_emoji_id = match type_.get("@type")?.as_str()? {
-                "emojiStatusTypeCustomEmoji" => int53(type_.get("custom_emoji_id")).ok()?,
-                _ => 0,
-            };
-            Some(EmojiStatusItem {
-                custom_emoji_id,
-                expiration_date: entry
-                    .get("expiration_date")
-                    .and_then(Value::as_i64)
-                    .unwrap_or(0) as i32,
-            })
-        })
-        .collect();
-    EnvelopePayload::EmojiStatuses { statuses }
-}
-
-/// Slice S10: `emojiStatusCustomEmojis` — `getThemedEmojiStatuses` /
-/// `getDefaultEmojiStatuses` (schema 1.8.67, line 2364): a bare
-/// `vector<int64>` of custom emoji ids.
-fn parse_emoji_status_custom_emojis(value: &Value) -> EnvelopePayload {
-    let custom_emoji_ids = value
-        .get("custom_emoji_ids")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(|id| int53(Some(id)).ok())
-        .collect();
-    EnvelopePayload::EmojiStatusCustomEmojis { custom_emoji_ids }
-}
-
-/// Slice S10: `animatedEmoji` — `getAnimatedEmoji` (schema 1.8.67, line
-/// 632): the animated `sticker` (existing parse) plus its `sound` file.
-fn parse_animated_emoji(value: &Value) -> EnvelopePayload {
-    let (sticker, mut files) = parse_sticker_value(value.get("sticker"));
-    if let Some(sound) = value.get("sound")
-        && let Ok(file) = parse_file(Some(sound))
-    {
-        files.push(file);
-    }
-    EnvelopePayload::AnimatedEmoji { sticker, files }
-}
-
-/// Slice S10: `emojiKeywords` — `searchEmojis` (schema 1.8.67, line 6429).
-fn parse_emoji_keywords(value: &Value) -> EnvelopePayload {
-    let keywords = value
-        .get("emoji_keywords")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(|entry| {
-            Some(EmojiKeyword {
-                emoji: entry.get("emoji")?.as_str()?.to_string(),
-                keyword: entry.get("keyword")?.as_str()?.to_string(),
-            })
-        })
-        .collect();
-    EnvelopePayload::EmojiKeywords { keywords }
-}
-
-/// Slice S10: `emojiCategories` — `getEmojiCategories` (schema 1.8.67, line
-/// 6499). Icons parse with the existing sticker value parse.
-fn parse_emoji_categories(value: &Value) -> EnvelopePayload {
-    let mut categories = Vec::new();
-    let mut files = Vec::new();
-    if let Some(entries) = value.get("categories").and_then(Value::as_array) {
-        for entry in entries {
-            let (icon, icon_files) = parse_sticker_value(entry.get("icon"));
-            files.extend(icon_files);
-            categories.push(EmojiCategory {
-                name: json_field_str(entry, "name"),
-                icon,
-                is_greeting: entry
-                    .get("is_greeting")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(false),
-            });
-        }
-    }
-    EnvelopePayload::EmojiCategories { categories, files }
-}
-
 /// Phase 6: preferred profile-photo file from a `userFullInfo` (or the
 /// nested `user_full_info` of an `updateUserFullInfo`) object's
 /// `photo:chatPhoto` (schema 1.8.67, lines 1030 and 2468). Reuses
@@ -11891,7 +11767,7 @@ fn parse_photo_sizes(photo: &Value) -> (Vec<PhotoSizeView>, Vec<ParsedFile>) {
     (sizes, files)
 }
 
-fn parse_file(value: Option<&Value>) -> Result<ParsedFile, ParseError> {
+pub(crate) fn parse_file(value: Option<&Value>) -> Result<ParsedFile, ParseError> {
     let value = value.ok_or(ParseError::MissingField)?;
     let id = i32::try_from(int53(value.get("id"))?).map_err(|_| ParseError::BadInt)?;
     let local = value.get("local");
@@ -11931,7 +11807,7 @@ fn parse_error(value: Option<&Value>) -> TdError {
     )
 }
 
-fn int53(value: Option<&Value>) -> Result<i64, ParseError> {
+pub(crate) fn int53(value: Option<&Value>) -> Result<i64, ParseError> {
     match value {
         Some(Value::Number(n)) => n.as_i64().ok_or(ParseError::BadInt),
         Some(Value::String(s)) => s.parse().map_err(|_| ParseError::BadInt),
@@ -13746,90 +13622,6 @@ mod tests {
                 assert_eq!(stickers.len(), 1);
                 assert_eq!(stickers[0].file_id, FileId(41));
                 assert_eq!(stickers[0].emoji, "😀");
-                assert_eq!(files.len(), 1);
-            }
-            other => panic!("{other:?}"),
-        }
-    }
-
-    /// Slice S10: emoji-backend payloads against the pinned schema
-    /// (1.8.67): `emojiStatuses` (line 2361), `emojiStatusCustomEmojis`
-    /// (line 2364), `animatedEmoji` (line 632), `emojiKeywords` (line
-    /// 6429), `emojiCategories` (line 6499).
-    #[test]
-    fn s10_emoji_payloads_parse_1_8_67() {
-        // `emojiStatuses`: custom-emoji rows keep the id + expiration; the
-        // upgraded-gift type keeps 0 (render detail lives in the UI slice).
-        let recent = parse_envelope(
-            r#"{"@type":"emojiStatuses","emoji_statuses":[{"@type":"emojiStatus","type":{"@type":"emojiStatusTypeCustomEmoji","custom_emoji_id":"12345"},"expiration_date":3600},{"@type":"emojiStatus","type":{"@type":"emojiStatusTypeUpgradedGift","upgraded_gift_id":"9","gift_title":"t","gift_name":"n","model_custom_emoji_id":"1","symbol_custom_emoji_id":"2","backdrop_colors":{"@type":"upgradedGiftBackdropColors","colors":[]}},"expiration_date":0}]}"#,
-        )
-        .unwrap();
-        match recent.payload {
-            EnvelopePayload::EmojiStatuses { statuses } => {
-                assert_eq!(statuses.len(), 2);
-                assert_eq!(statuses[0].custom_emoji_id, 12345);
-                assert_eq!(statuses[0].expiration_date, 3600);
-                assert_eq!(statuses[1].custom_emoji_id, 0);
-            }
-            other => panic!("{other:?}"),
-        }
-
-        // `emojiStatusCustomEmojis`: bare custom-emoji-id list.
-        let themed =
-            parse_envelope(r#"{"@type":"emojiStatusCustomEmojis","custom_emoji_ids":["11","22"]}"#)
-                .unwrap();
-        match themed.payload {
-            EnvelopePayload::EmojiStatusCustomEmojis { custom_emoji_ids } => {
-                assert_eq!(custom_emoji_ids, vec![11, 22]);
-            }
-            other => panic!("{other:?}"),
-        }
-
-        // `animatedEmoji`: the sticker via the existing sticker parse, the
-        // `sound` file collected alongside.
-        let file = local_file_json(41, "/tmp/s.webp", true, true);
-        let animated = parse_envelope(&format!(
-            r#"{{"@type":"animatedEmoji","sticker":{{"@type":"sticker","id":"9001","set_id":"77","width":512,"height":512,"emoji":"🔥","format":{{"@type":"stickerFormatTgs"}},"full_type":{{"@type":"stickerFullTypeRegular","premium_animation":null}},"thumbnail":null,"sticker":{file}}},"sticker_width":512,"sticker_height":512,"fitzpatrick_type":0,"sound":{{"@type":"file","id":42,"size":7,"local":{{"path":"/tmp/s.ogg","is_downloading_completed":true}},"remote":{{}}}}}}"#
-        ))
-        .unwrap();
-        match animated.payload {
-            EnvelopePayload::AnimatedEmoji { sticker, files } => {
-                let sticker = sticker.expect("sticker");
-                assert_eq!(sticker.file_id, FileId(41));
-                assert_eq!(sticker.emoji, "🔥");
-                assert_eq!(files.len(), 2);
-            }
-            other => panic!("{other:?}"),
-        }
-
-        // `emojiKeywords`: emoji/keyword pairs.
-        let keywords = parse_envelope(
-            r#"{"@type":"emojiKeywords","emoji_keywords":[{"@type":"emojiKeyword","emoji":"🔥","keyword":"fire"},{"@type":"emojiKeyword","emoji":"❤️","keyword":"love"}]}"#,
-        )
-        .unwrap();
-        match keywords.payload {
-            EnvelopePayload::EmojiKeywords { keywords } => {
-                assert_eq!(keywords.len(), 2);
-                assert_eq!(keywords[0].emoji, "🔥");
-                assert_eq!(keywords[0].keyword, "fire");
-            }
-            other => panic!("{other:?}"),
-        }
-
-        // `emojiCategories`: name + icon sticker + greeting flag.
-        let categories = parse_envelope(&format!(
-            r#"{{"@type":"emojiCategories","categories":[{{"@type":"emojiCategory","name":"Smileys","icon":{{"@type":"sticker","id":"9002","set_id":"77","width":100,"height":100,"emoji":"😀","format":{{"@type":"stickerFormatWebp"}},"full_type":{{"@type":"stickerFullTypeRegular","premium_animation":null}},"thumbnail":null,"sticker":{file}}},"source":{{"@type":"emojiCategorySourcePremium"}},"is_greeting":false}}]}}"#
-        ))
-        .unwrap();
-        match categories.payload {
-            EnvelopePayload::EmojiCategories { categories, files } => {
-                assert_eq!(categories.len(), 1);
-                assert_eq!(categories[0].name, "Smileys");
-                assert!(!categories[0].is_greeting);
-                assert_eq!(
-                    categories[0].icon.as_ref().expect("icon").file_id,
-                    FileId(41)
-                );
                 assert_eq!(files.len(), 1);
             }
             other => panic!("{other:?}"),
