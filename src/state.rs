@@ -281,6 +281,35 @@ pub enum RequestPurpose {
     GetInstalledStickerSets,
     /// `getStickerSet`. Response is `stickerSet`.
     GetStickerSet,
+    /// Slice S8: `getTrendingStickerSets` (regular). Response is
+    /// `trendingStickerSets`.
+    GetTrendingStickerSets,
+    /// Slice S8: `viewTrendingStickerSets`. Response is `ok`.
+    ViewTrendingStickerSets,
+    /// Slice S8: `searchStickerSets` (regular). Response is `stickerSets`.
+    SearchStickerSets,
+    /// Slice S8: `searchStickers` (regular). Response is `stickers`.
+    SearchStickers,
+    /// Slice S8: `getFavoriteStickers`. Response is `stickers`.
+    GetFavoriteStickers,
+    /// Slice S8: `addFavoriteSticker`. Response is `ok`; the favorites
+    /// cache is cleared so it refetches.
+    AddFavoriteSticker,
+    /// Slice S8: `removeFavoriteSticker`. Response is `ok`; same
+    /// invalidation as add.
+    RemoveFavoriteSticker,
+    /// Slice S8: `getRecentStickers`. Response is `stickers`.
+    GetRecentStickers,
+    /// Slice S8: `clearRecentStickers`. Response is `ok`; the recent
+    /// cache is cleared.
+    ClearRecentStickers,
+    /// Slice S8: `changeStickerSet` (install / archive / remove).
+    /// Response is `ok`; the installed-sets cache is cleared so the
+    /// panel refetches the authoritative list.
+    ChangeStickerSet,
+    /// Slice S8: `reorderInstalledStickerSets`. Response is `ok`; same
+    /// installed-sets invalidation as change.
+    ReorderInstalledStickerSets,
     /// `getSavedAnimations`. Response is `animations`.
     GetSavedAnimations,
     /// `setChatDraftMessage`. Response is `ok`; the draft also arrives as
@@ -3314,6 +3343,16 @@ pub struct StickerPanel {
     pub loading_sets: bool,
     pub loading_set: bool,
     pub failed: bool,
+    /// Slice S8: trending sets (`getTrendingStickerSets`) + premium-row flag.
+    pub trending: Vec<StickerSetInfo>,
+    pub trending_is_premium: bool,
+    /// Slice S8: favorite stickers (`getFavoriteStickers`).
+    pub favorites: Vec<StickerItem>,
+    /// Slice S8: recent stickers (`getRecentStickers`).
+    pub recent: Vec<StickerItem>,
+    /// Slice S8: `searchStickerSets` / `searchStickers` results.
+    pub found_sets: Vec<StickerSetInfo>,
+    pub found_stickers: Vec<StickerItem>,
 }
 
 /// Saved GIFs (`getSavedAnimations`). tdesktop Gifs tab / Unigram animation drawer.
@@ -7346,6 +7385,31 @@ impl Session {
             EnvelopePayload::StickerSets { sets, .. } => {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetInstalledStickerSets) {
                     self.accept_installed_sticker_sets(sets);
+                } else if pending.map(|p| p.purpose) == Some(RequestPurpose::SearchStickerSets) {
+                    // Slice S8: `searchStickerSets` answers with `stickerSets`.
+                    self.accept_found_sticker_sets(sets);
+                }
+            }
+            // Slice S8: `getTrendingStickerSets` answers with
+            // `trendingStickerSets`.
+            EnvelopePayload::TrendingStickerSets {
+                sets, is_premium, ..
+            } => {
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetTrendingStickerSets) {
+                    self.accept_trending_sticker_sets(sets, is_premium);
+                }
+            }
+            // Slice S8: `searchStickers` / `getFavoriteStickers` /
+            // `getRecentStickers` answer with bare `stickers`.
+            EnvelopePayload::Stickers { stickers, files } => {
+                self.remember_files(&files);
+                let purpose = pending.map(|p| p.purpose);
+                if purpose == Some(RequestPurpose::SearchStickers) {
+                    self.accept_found_stickers(stickers);
+                } else if purpose == Some(RequestPurpose::GetFavoriteStickers) {
+                    self.accept_favorite_stickers(stickers);
+                } else if purpose == Some(RequestPurpose::GetRecentStickers) {
+                    self.accept_recent_stickers(stickers);
                 }
             }
             EnvelopePayload::StickerSet {
@@ -7828,6 +7892,32 @@ impl Session {
                     self.websites_stale = true;
                     self.websites_mutating = false;
                     self.websites_error = None;
+                }
+                // Slice S8: a sticker-set mutation succeeded — invalidate
+                // the affected cache so the next fetch shows the
+                // server-confirmed list instead of a stale one.
+                if matches!(
+                    pending.map(|p| p.purpose),
+                    Some(
+                        RequestPurpose::AddFavoriteSticker | RequestPurpose::RemoveFavoriteSticker
+                    )
+                ) {
+                    self.stickers.favorites.clear();
+                }
+                if matches!(
+                    pending.map(|p| p.purpose),
+                    Some(RequestPurpose::ClearRecentStickers)
+                ) {
+                    self.stickers.recent.clear();
+                }
+                if matches!(
+                    pending.map(|p| p.purpose),
+                    Some(
+                        RequestPurpose::ChangeStickerSet
+                            | RequestPurpose::ReorderInstalledStickerSets
+                    )
+                ) {
+                    self.invalidate_installed_sticker_sets();
                 }
                 // Phase C3a: a successful `leaveGroupCall` /
                 // `endGroupCall` drops the tracked call (the `ok`
@@ -9604,6 +9694,45 @@ impl Session {
             self.stickers.loaded_set_id = None;
             self.stickers.stickers.clear();
         }
+    }
+
+    /// Slice S8: store a `trendingStickerSets` page. Single-page replace
+    /// semantics: a paged second call overwrites page one. Append-before-
+    /// needed is speculative — the tab UI will own paging when it lands.
+    pub fn accept_trending_sticker_sets(&mut self, sets: Vec<StickerSetInfo>, is_premium: bool) {
+        self.stickers.trending = sets;
+        self.stickers.trending_is_premium = is_premium;
+    }
+
+    /// Slice S8: store a `getFavoriteStickers` answer.
+    pub fn accept_favorite_stickers(&mut self, stickers: Vec<StickerItem>) {
+        self.stickers.favorites = stickers;
+    }
+
+    /// Slice S8: store a `getRecentStickers` answer.
+    pub fn accept_recent_stickers(&mut self, stickers: Vec<StickerItem>) {
+        self.stickers.recent = stickers;
+    }
+
+    /// Slice S8: store a `searchStickerSets` answer.
+    pub fn accept_found_sticker_sets(&mut self, sets: Vec<StickerSetInfo>) {
+        self.stickers.found_sets = sets;
+    }
+
+    /// Slice S8: store a `searchStickers` answer.
+    pub fn accept_found_stickers(&mut self, stickers: Vec<StickerItem>) {
+        self.stickers.found_stickers = stickers;
+    }
+
+    /// Slice S8: a sticker-set mutation (`changeStickerSet` /
+    /// `reorderInstalledStickerSets`) succeeded — drop the installed-sets
+    /// cache so the panel refetches the authoritative list instead of
+    /// showing a stale order.
+    pub fn invalidate_installed_sticker_sets(&mut self) {
+        self.stickers.sets.clear();
+        self.stickers.selected_set_id = None;
+        self.stickers.loaded_set_id = None;
+        self.stickers.stickers.clear();
     }
 
     pub fn select_sticker_set(&mut self, set_id: i64) {
@@ -12839,6 +12968,94 @@ mod tests {
             r#"{"@type":"storageStatistics","size":1,"count":1,"by_chat":[]}"#,
         );
         assert!(without_purpose.storage_stats.is_none());
+    }
+
+    /// Slice S8: sticker-backend answers are stored only under a matching
+    /// request purpose (stray answers ignored), and mutation `ok`s
+    /// invalidate the affected caches.
+    #[test]
+    fn s8_sticker_backend_purpose_gated_dispatch() {
+        let (mut with_purpose, sink) = session();
+        let seq = AtomicU64::new(0);
+
+        // Trending sets land under GetTrendingStickerSets.
+        let extra = with_purpose.request(RequestPurpose::GetTrendingStickerSets, None);
+        apply_json(
+            &mut with_purpose,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"trendingStickerSets","total_count":1,"is_premium":true,"sets":[{{"@type":"stickerSetInfo","id":"77","title":"Demo","name":"DemoStickers","thumbnail":null,"thumbnail_outline":null,"is_owned":false,"is_installed":false,"is_archived":false,"is_official":true,"sticker_type":{{"@type":"stickerTypeRegular"}},"needs_repainting":false,"is_allowed_as_chat_emoji_status":false,"is_viewed":false,"size":2,"covers":[]}}],"@extra":"{}"}}"#,
+                extra.0
+            ),
+        );
+        assert_eq!(with_purpose.stickers.trending.len(), 1);
+        assert_eq!(with_purpose.stickers.trending[0].id, 77);
+        assert!(with_purpose.stickers.trending_is_premium);
+
+        // A stray trendingStickerSets (no matching purpose) is ignored.
+        let (mut without_purpose, sink2) = session();
+        let seq2 = AtomicU64::new(0);
+        apply_json(
+            &mut without_purpose,
+            &seq2,
+            &sink2,
+            r#"{"@type":"trendingStickerSets","total_count":1,"is_premium":false,"sets":[]}"#,
+        );
+        assert!(without_purpose.stickers.trending.is_empty());
+
+        // Favorites arrive as the bare `stickers` type under
+        // GetFavoriteStickers.
+        let extra = with_purpose.request(RequestPurpose::GetFavoriteStickers, None);
+        apply_json(
+            &mut with_purpose,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"stickers","stickers":[{{"@type":"sticker","id":"9001","set_id":"77","width":512,"height":512,"emoji":"😀","format":{{"@type":"stickerFormatWebp"}},"full_type":{{"@type":"stickerFullTypeRegular","premium_animation":null}},"thumbnail":null,"sticker":null}}],"@extra":"{}"}}"#,
+                extra.0
+            ),
+        );
+        assert_eq!(with_purpose.stickers.favorites.len(), 1);
+        assert_eq!(with_purpose.stickers.favorites[0].emoji, "😀");
+
+        // searchStickerSets answers with `stickerSets` under
+        // SearchStickerSets (not the installed-sets slot).
+        let extra = with_purpose.request(RequestPurpose::SearchStickerSets, None);
+        apply_json(
+            &mut with_purpose,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"stickerSets","total_count":1,"sets":[{{"@type":"stickerSetInfo","id":"78","title":"Cats","name":"CatsStickers","thumbnail":null,"thumbnail_outline":null,"is_owned":false,"is_installed":false,"is_archived":false,"is_official":false,"sticker_type":{{"@type":"stickerTypeRegular"}},"needs_repainting":false,"is_allowed_as_chat_emoji_status":false,"is_viewed":true,"size":5,"covers":[]}}],"@extra":"{}"}}"#,
+                extra.0
+            ),
+        );
+        assert_eq!(with_purpose.stickers.found_sets.len(), 1);
+        assert_eq!(with_purpose.stickers.found_sets[0].id, 78);
+        assert!(with_purpose.stickers.sets.is_empty());
+
+        // A removeFavoriteSticker `ok` clears the favorites cache.
+        let extra = with_purpose.request(RequestPurpose::RemoveFavoriteSticker, None);
+        apply_json(
+            &mut with_purpose,
+            &seq,
+            &sink,
+            &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
+        );
+        assert!(with_purpose.stickers.favorites.is_empty());
+
+        // A changeStickerSet `ok` drops the installed-sets cache so the
+        // panel refetches the authoritative list.
+        with_purpose.stickers.sets = vec![with_purpose.stickers.trending[0].clone()];
+        let extra = with_purpose.request(RequestPurpose::ChangeStickerSet, None);
+        apply_json(
+            &mut with_purpose,
+            &seq,
+            &sink,
+            &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
+        );
+        assert!(with_purpose.stickers.sets.is_empty());
     }
 
     /// Phase S2: a TDLib `error` answer to `getStorageStatistics`

@@ -417,18 +417,18 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] GIF picker refreshes when updateSavedAnimations arrives (state.rs:4397-4398) <!-- parity:gifs-saved-refresh -->
 - [x] Emoji reactions picker (emoji-only) + reaction chips on messages (ui/mod.rs:631, state.rs:1298-1308) <!-- parity:emoji-reactions -->
 - [x] Sticker thumbnails shown in picker and history (state.rs:5215, ui/mod.rs:14067) <!-- parity:stickers-thumbnails -->
-- [ ] Trending sticker sets tab (partial: picker opens only; no getTrendingStickerSets/viewTrendingStickerSets) <!-- parity:stickers-trending -->
-- [ ] Search sticker sets / stickers (searchStickerSets/searchStickers) <!-- parity:stickers-search -->
-- [ ] Favorites sticker tab (getFavoriteStickers/addFavoriteSticker/removeFavoriteSticker) <!-- parity:stickers-favorites -->
-- [ ] Recent stickers tab + clear recent stickers (getRecentStickers/clearRecentStickers) <!-- parity:stickers-recent -->
-- [ ] Install sticker set (changeStickerSet install) <!-- parity:stickers-install -->
-- [ ] Remove sticker set with confirm dialog <!-- parity:stickers-remove -->
-- [ ] Archive sticker set + Archived view in settings (restore path) <!-- parity:stickers-archive -->
-- [ ] Reorder installed sticker sets <!-- parity:stickers-reorder -->
+- [ ] Trending sticker sets tab (partial: backend wired — getTrendingStickerSets/viewTrendingStickerSets + state; tab UI pending) <!-- parity:stickers-trending -->
+- [ ] Search sticker sets / stickers (searchStickerSets/searchStickers) <!-- parity:stickers-search --> (partial: backend wired — searchStickerSets/searchStickers + state; picker UI pending)
+- [ ] Favorites sticker tab (getFavoriteStickers/addFavoriteSticker/removeFavoriteSticker) <!-- parity:stickers-favorites --> (partial: backend wired — get/add/removeFavoriteSticker + state; tab UI pending)
+- [ ] Recent stickers tab + clear recent stickers (getRecentStickers/clearRecentStickers) <!-- parity:stickers-recent --> (partial: backend wired — getRecentStickers/clearRecentStickers + state; tab UI pending)
+- [ ] Install sticker set (changeStickerSet install) <!-- parity:stickers-install --> (partial: backend wired — changeStickerSet install + cache invalidation; UI affordance pending)
+- [ ] Remove sticker set with confirm dialog (partial: backend wired — changeStickerSet remove + cache invalidation; UI confirm dialog pending) <!-- parity:stickers-remove -->
+- [ ] Archive sticker set + Archived view in settings (restore path) <!-- parity:stickers-archive --> (partial: backend wired — changeStickerSet archive; Archived view UI pending)
+- [ ] Reorder installed sticker sets (partial: backend wired — reorderInstalledStickerSets + cache invalidation; drag-reorder UI pending) <!-- parity:stickers-reorder -->
 - [ ] Dynamic set order (auto-place recently used sets above others) <!-- parity:stickers-dynamic-order -->
 - [ ] Open sticker set preview screen (title, stickers grid, install/remove from preview) <!-- parity:stickers-set-preview -->
 - [ ] "No sticker sets installed" empty state <!-- parity:stickers-empty-state -->
-- [ ] "X sets installed" counts and batch install/remove feedback <!-- parity:stickers-install-counts -->
+- [ ] "X sets installed" counts and batch install/remove feedback <!-- parity:stickers-install-counts --> (partial: backend wired — changeStickerSet install + cache invalidation; UI affordance pending)
 - [ ] Sticker suggestions by emoji in composer (Installed + recommended / Only installed / None) <!-- parity:stickers-suggest-by-emoji -->
 - [ ] Animated sticker (TGS) playback in picker and history (partial: format parsed, only thumbnails rendered) <!-- parity:stickers-animated-playback -->
 - [ ] Video sticker (WebM) playback (partial: format parsed, static thumb only) <!-- parity:stickers-video-playback -->

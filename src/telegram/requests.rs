@@ -3729,6 +3729,148 @@ pub fn get_sticker_set(extra: RequestId, set_id: i64) -> String {
     .to_string()
 }
 
+/// Slice S8: `getTrendingStickerSets` for regular stickers (Unigram trending
+/// tab). `offset`/`limit` page the server list.
+pub fn get_trending_sticker_sets(extra: RequestId, offset: i32, limit: i32) -> String {
+    json!({
+        "@type": "getTrendingStickerSets",
+        "@extra": extra.as_extra(),
+        "sticker_type": { "@type": "stickerTypeRegular" },
+        "offset": offset,
+        "limit": limit,
+    })
+    .to_string()
+}
+
+/// Slice S8: `viewTrendingStickerSets` — marks trending sets viewed so the
+/// "new" badge clears. Response is `ok`.
+pub fn view_trending_sticker_sets(extra: RequestId, set_ids: &[i64]) -> String {
+    json!({
+        "@type": "viewTrendingStickerSets",
+        "@extra": extra.as_extra(),
+        "sticker_set_ids": set_ids,
+    })
+    .to_string()
+}
+
+/// Slice S8: `searchStickerSets` — installed + discoverable regular sets
+/// matching `query`. Response is `stickerSets`.
+pub fn search_sticker_sets(extra: RequestId, query: &str) -> String {
+    json!({
+        "@type": "searchStickerSets",
+        "@extra": extra.as_extra(),
+        "sticker_type": { "@type": "stickerTypeRegular" },
+        "query": query,
+    })
+    .to_string()
+}
+
+/// Slice S8: `searchStickers` — regular stickers matching emoji text and/or
+/// query. `input_language_codes` is empty (server default); response is
+/// `stickers`.
+pub fn search_stickers(
+    extra: RequestId,
+    emojis: &str,
+    query: &str,
+    offset: i32,
+    limit: i32,
+) -> String {
+    json!({
+        "@type": "searchStickers",
+        "@extra": extra.as_extra(),
+        "sticker_type": { "@type": "stickerTypeRegular" },
+        "emojis": emojis,
+        "query": query,
+        "input_language_codes": [],
+        "offset": offset,
+        "limit": limit,
+    })
+    .to_string()
+}
+
+/// Slice S8: `getFavoriteStickers`. Response is `stickers`.
+pub fn get_favorite_stickers(extra: RequestId) -> String {
+    json!({
+        "@type": "getFavoriteStickers",
+        "@extra": extra.as_extra(),
+    })
+    .to_string()
+}
+
+/// Slice S8: `addFavoriteSticker` — `sticker:InputFile` (TDLib 1.8.67, line
+/// 14721); passed as `inputFileId id:int32` (schema line 317). Response is
+/// `ok`.
+pub fn add_favorite_sticker(extra: RequestId, file_id: FileId) -> String {
+    json!({
+        "@type": "addFavoriteSticker",
+        "@extra": extra.as_extra(),
+        "sticker": { "@type": "inputFileId", "id": file_id.0 },
+    })
+    .to_string()
+}
+
+/// Slice S8: `removeFavoriteSticker` — same `inputFileId` shape. Response is
+/// `ok`.
+pub fn remove_favorite_sticker(extra: RequestId, file_id: FileId) -> String {
+    json!({
+        "@type": "removeFavoriteSticker",
+        "@extra": extra.as_extra(),
+        "sticker": { "@type": "inputFileId", "id": file_id.0 },
+    })
+    .to_string()
+}
+
+/// Slice S8: `getRecentStickers`. Response is `stickers`.
+pub fn get_recent_stickers(extra: RequestId, is_attached: bool) -> String {
+    json!({
+        "@type": "getRecentStickers",
+        "@extra": extra.as_extra(),
+        "is_attached": is_attached,
+    })
+    .to_string()
+}
+
+/// Slice S8: `clearRecentStickers`. Response is `ok`.
+pub fn clear_recent_stickers(extra: RequestId, is_attached: bool) -> String {
+    json!({
+        "@type": "clearRecentStickers",
+        "@extra": extra.as_extra(),
+        "is_attached": is_attached,
+    })
+    .to_string()
+}
+
+/// Slice S8: `changeStickerSet` — install (`is_installed`), archive
+/// (`is_archived`), or remove (both false). Response is `ok`; the installed
+/// cache is invalidated on success so the panel refetches.
+pub fn change_sticker_set(
+    extra: RequestId,
+    set_id: i64,
+    is_installed: bool,
+    is_archived: bool,
+) -> String {
+    json!({
+        "@type": "changeStickerSet",
+        "@extra": extra.as_extra(),
+        "set_id": set_id.to_string(),
+        "is_installed": is_installed,
+        "is_archived": is_archived,
+    })
+    .to_string()
+}
+
+/// Slice S8: `reorderInstalledStickerSets` — `sticker_set_ids` is the full
+/// new order of regular installed sets. Response is `ok`.
+pub fn reorder_installed_sticker_sets(extra: RequestId, set_ids: &[i64]) -> String {
+    json!({
+        "@type": "reorderInstalledStickerSets",
+        "@extra": extra.as_extra(),
+        "sticker_type": { "@type": "stickerTypeRegular" },
+        "sticker_set_ids": set_ids,
+    })
+    .to_string()
+}
+
 /// Fields for `inputMessageSticker` (TDLib 1.8.67). Thumbnail matches Unigram `Thumbnail.ToInput`.
 pub struct StickerSend<'a> {
     pub file_id: FileId,
@@ -6544,6 +6686,81 @@ mod tests {
             bare["input_message_content"]["sticker"]["thumbnail"],
             Value::Null
         );
+    }
+
+    /// Slice S8: the eleven sticker-set backend request shapes against the
+    /// pinned schema (1.8.67): `getTrendingStickerSets` (:14669),
+    /// `viewTrendingStickerSets` (:14695), `searchStickerSets` (:14689),
+    /// `searchStickers` (:14648), `getFavoriteStickers` (:14716),
+    /// `addFavoriteSticker` (:14721), `removeFavoriteSticker` (:14724),
+    /// `getRecentStickers` (:14701), `clearRecentStickers` (:14713),
+    /// `changeStickerSet` (:14692), `reorderInstalledStickerSets` (:14698).
+    #[test]
+    fn s8_sticker_backend_request_shapes_match_1_8_67() {
+        let v: serde_json::Value =
+            serde_json::from_str(&get_trending_sticker_sets(RequestId(21), 0, 100)).unwrap();
+        assert_eq!(v["@type"], "getTrendingStickerSets");
+        assert_eq!(v["sticker_type"]["@type"], "stickerTypeRegular");
+        assert_eq!(v["offset"], 0);
+        assert_eq!(v["limit"], 100);
+
+        let v: serde_json::Value =
+            serde_json::from_str(&view_trending_sticker_sets(RequestId(22), &[77, 78])).unwrap();
+        assert_eq!(v["@type"], "viewTrendingStickerSets");
+        assert_eq!(v["sticker_set_ids"], serde_json::json!([77, 78]));
+
+        let v: serde_json::Value =
+            serde_json::from_str(&search_sticker_sets(RequestId(23), "cats")).unwrap();
+        assert_eq!(v["@type"], "searchStickerSets");
+        assert_eq!(v["sticker_type"]["@type"], "stickerTypeRegular");
+        assert_eq!(v["query"], "cats");
+
+        let v: serde_json::Value =
+            serde_json::from_str(&search_stickers(RequestId(24), "😀", "grin", 0, 50)).unwrap();
+        assert_eq!(v["@type"], "searchStickers");
+        assert_eq!(v["emojis"], "😀");
+        assert_eq!(v["query"], "grin");
+        assert_eq!(v["input_language_codes"], serde_json::json!([]));
+        assert_eq!(v["limit"], 50);
+
+        let v: serde_json::Value =
+            serde_json::from_str(&get_favorite_stickers(RequestId(25))).unwrap();
+        assert_eq!(v["@type"], "getFavoriteStickers");
+
+        let v: serde_json::Value =
+            serde_json::from_str(&add_favorite_sticker(RequestId(26), FileId(41))).unwrap();
+        assert_eq!(v["@type"], "addFavoriteSticker");
+        assert_eq!(v["sticker"]["@type"], "inputFileId");
+        assert_eq!(v["sticker"]["id"], 41);
+
+        let v: serde_json::Value =
+            serde_json::from_str(&remove_favorite_sticker(RequestId(27), FileId(41))).unwrap();
+        assert_eq!(v["@type"], "removeFavoriteSticker");
+        assert_eq!(v["sticker"]["id"], 41);
+
+        let v: serde_json::Value =
+            serde_json::from_str(&get_recent_stickers(RequestId(28), false)).unwrap();
+        assert_eq!(v["@type"], "getRecentStickers");
+        assert_eq!(v["is_attached"], false);
+
+        let v: serde_json::Value =
+            serde_json::from_str(&clear_recent_stickers(RequestId(29), true)).unwrap();
+        assert_eq!(v["@type"], "clearRecentStickers");
+        assert_eq!(v["is_attached"], true);
+
+        let v: serde_json::Value =
+            serde_json::from_str(&change_sticker_set(RequestId(30), 77, true, false)).unwrap();
+        assert_eq!(v["@type"], "changeStickerSet");
+        assert_eq!(v["set_id"], "77");
+        assert_eq!(v["is_installed"], true);
+        assert_eq!(v["is_archived"], false);
+
+        let v: serde_json::Value =
+            serde_json::from_str(&reorder_installed_sticker_sets(RequestId(31), &[78, 77]))
+                .unwrap();
+        assert_eq!(v["@type"], "reorderInstalledStickerSets");
+        assert_eq!(v["sticker_type"]["@type"], "stickerTypeRegular");
+        assert_eq!(v["sticker_set_ids"], serde_json::json!([78, 77]));
     }
 
     #[test]
