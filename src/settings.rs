@@ -426,7 +426,14 @@ mod tests {
         let ignore =
             fs::read(format!("{}/.gitignore", env!("CARGO_MANIFEST_DIR"))).expect(".gitignore");
         let ignore = String::from_utf8(ignore).expect("utf8");
-        for entry in ["quill-data/", "db-encryption.key", "td.binlog", "db.sqlite"] {
+        for entry in [
+            "quill-data/",
+            "db-encryption.key",
+            "td.binlog",
+            "db.sqlite",
+            "db.sqlite-wal",
+            "db.sqlite-shm",
+        ] {
             assert!(
                 ignore.lines().any(|line| line.trim() == entry),
                 ".gitignore must contain exact entry: {entry}"
