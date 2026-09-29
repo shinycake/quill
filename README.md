@@ -263,13 +263,13 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Welcome messages: joiner-side rendering — welcome content reaches a new joiner as regular `updateNewMessage` messages (server pushes `updateNewEphemeralMessage` with `welcome_template=false`; TDLib converts it to a normal message) and renders through the existing message pipeline; `updateChatWelcomeMessages` is pack sync for admins only (requires `can_send_welcome_messages`; TGX leaves it unhandled) and is never delivered to plain joiners — mechanism verified against TDLib 1.8.67 source, see DECISIONS.md <!-- parity:groups-welcome-view -->
 - [x] Welcome messages: add/edit/delete via addChatWelcomeMessage, editChatWelcomeMessage, deleteChatWelcomeMessage, loadChatWelcomeMessages (gated on `can_send_welcome_messages`; pack refetched after each confirmed mutation) (src/ui/mod.rs, src/connect.rs) <!-- parity:groups-welcome-manage -->
 - [x] Welcome message setup: Welcome-message row in the group/channel info panel opens the pack editor dialog (src/ui/mod.rs) <!-- parity:groups-welcome-setup -->
-- [ ] Communities: create a community (createCommunity exists in TDLib 1.8.67; no Quill UI) <!-- parity:communities-create -->
-- [ ] Communities: browse and manage owned communities (partial: TDLib 1.8.67 exposes createCommunity/loadCommunityFullInfo/setCommunityName; no Quill UI) <!-- parity:communities-hub -->
+- [ ] Communities: create a community (createCommunity exists in TDLib 1.8.67; Quill backend landed — builder + driver + state sync; no Quill UI) <!-- parity:communities-create -->
+- [ ] Communities: browse and manage owned communities (partial: Quill backend landed — builders + drivers + state sync for create/loadFullInfo/setName; no Quill UI) <!-- parity:communities-hub -->
 - [ ] Communities: toggle community chat visibility (blocked: no TDLib 1.8.67 method to toggle hidden state) <!-- parity:communities-chat-visibility -->
 - [ ] Communities: community chat-list mode (view a community's chats as a filtered chat list) <!-- parity:communities-chatlist-mode -->
 - [ ] Communities: add a chat to a community (blocked: no TDLib 1.8.67 method) <!-- parity:communities-add-chat -->
 - [ ] Communities: admin-rights management (blocked: no TDLib 1.8.67 method) <!-- parity:communities-admin-rights -->
-- [ ] Communities: info panel (partial: loadCommunityFullInfo/setCommunityName exist in TDLib 1.8.67; no Quill UI) <!-- parity:communities-info -->
+- [ ] Communities: info panel (partial: Quill backend landed — loadFullInfo/setName builders + drivers + state sync; no Quill UI) <!-- parity:communities-info -->
 - [ ] Communities: "chat added to community" service message <!-- parity:groups-added-to-community -->
 - [ ] Communities: "chat removed from community" service message <!-- parity:groups-removed-from-community -->
 - [ ] Communities: community search filter (searchMessagesChatTypeFilterCommunity) <!-- parity:communities-search-filter -->
