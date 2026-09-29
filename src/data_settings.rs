@@ -167,9 +167,17 @@ pub struct StorageChatStats {
     pub count: i32,
 }
 
+/// Slice S4: "No limit" sentinel for the size-cap pickers. `i32::MAX`:
+/// fits both schema bounds (`max_photo_file_size:int32`,
+/// `max_video_file_size:int53`), so `setAutoDownloadSettings` can never
+/// fail TDLib's wire round-trip check. (`i64::MAX` would deterministically
+/// 400 — TDLib's `from_json(int32&)` rejects out-of-range values.)
+pub const NO_LIMIT_SIZE_CAP: i64 = i32::MAX as i64;
+
 /// Slice S4: TGX's size-cap steps for the photo/video/file pickers
 /// (TGX `canAutomaticallyDownload` download-limit steps 1/5/15/50/100/500
-/// MiB; MED3 documents the same steps). `0` = Off, `i64::MAX` = No limit.
+/// MiB; MED3 documents the same steps). `0` = Off,
+/// `NO_LIMIT_SIZE_CAP` = No limit.
 pub const SIZE_CAP_STEPS: [i64; 8] = [
     0,
     1024 * 1024,
@@ -178,14 +186,14 @@ pub const SIZE_CAP_STEPS: [i64; 8] = [
     50 * 1024 * 1024,
     100 * 1024 * 1024,
     500 * 1024 * 1024,
-    i64::MAX,
+    NO_LIMIT_SIZE_CAP,
 ];
 
 /// Slice S4: label for one size-cap step.
 pub fn size_cap_label(bytes: i64) -> String {
     if bytes <= 0 {
         "Off".to_string()
-    } else if bytes == i64::MAX {
+    } else if bytes == NO_LIMIT_SIZE_CAP {
         "No limit".to_string()
     } else if bytes < 1024 * 1024 {
         format!("{} KB", bytes / 1024)
@@ -396,11 +404,11 @@ mod tests {
     #[test]
     fn size_cap_cycle_wraps() {
         assert_eq!(next_size_cap(0), 1024 * 1024);
-        assert_eq!(next_size_cap(i64::MAX), 0);
+        assert_eq!(next_size_cap(NO_LIMIT_SIZE_CAP), 0);
         // Unknown values snap to the 50 MB step's successor.
         assert_eq!(next_size_cap(12345), 100 * 1024 * 1024);
         assert_eq!(size_cap_label(0), "Off");
-        assert_eq!(size_cap_label(i64::MAX), "No limit");
+        assert_eq!(size_cap_label(NO_LIMIT_SIZE_CAP), "No limit");
         assert_eq!(size_cap_label(15 * 1024 * 1024), "15 MB");
     }
 
