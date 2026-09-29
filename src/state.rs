@@ -2803,6 +2803,18 @@ impl HistoryState {
         }
     }
 
+    /// `parity:msg-ephemeral-updates`: `updateMessageEphemeralContent`
+    /// refreshes the ephemeral content in place (schema 1.8.67 line 10424,
+    /// secret-chat lane).
+    fn update_ephemeral(&mut self, id: MessageId, ephemeral: EphemeralMessageContent) -> bool {
+        if let Some(message) = self.messages.get_mut(&id.0) {
+            message.ephemeral = Some(ephemeral);
+            true
+        } else {
+            false
+        }
+    }
+
     /// Phase 3.2: `updateMessageEdited` replaces the message's inline
     /// keyboard (or removes it when `None`).
     fn update_reply_markup(&mut self, id: MessageId, reply_markup: Option<ReplyMarkup>) -> bool {
@@ -7612,6 +7624,41 @@ impl Session {
                         == Some(message_id.0);
                     if is_last && let Some(chat) = self.chats.get_mut(&chat_id.0) {
                         chat.last_preview = preview;
+                    }
+                }
+            }
+            EnvelopePayload::UpdateMessageEphemeralContent {
+                chat_id,
+                message_id,
+                ephemeral,
+            } => {
+                // `parity:msg-ephemeral-updates` (schema 1.8.67 line 10424,
+                // secret-chat lane): replace the stored ephemeral content in
+                // place; the row re-renders via `effective_content` (ephemeral
+                // wins) and the chat-list preview refreshes when it's the
+                // last message.
+                let updated = self
+                    .histories
+                    .get_mut(&chat_id.0)
+                    .is_some_and(|history| history.update_ephemeral(message_id, ephemeral));
+                if updated {
+                    let is_last = self
+                        .histories
+                        .get(&chat_id.0)
+                        .and_then(|history| history.messages.keys().next_back().copied())
+                        == Some(message_id.0);
+                    if is_last && let Some(chat) = self.chats.get_mut(&chat_id.0) {
+                        let preview = self
+                            .histories
+                            .get(&chat_id.0)
+                            .and_then(|history| history.messages.get(&message_id.0))
+                            .map(|message| {
+                                effective_content(&message.content, message.ephemeral.as_ref())
+                                    .preview()
+                            });
+                        if let Some(preview) = preview {
+                            chat.last_preview = preview;
+                        }
                     }
                 }
             }
@@ -12820,6 +12867,59 @@ mod tests {
             effective_preview(&history_message(parsed, false)),
             "secret flow"
         );
+    }
+
+    #[test]
+    fn update_message_ephemeral_content_refreshes_stored_content_and_preview() {
+        // `parity:msg-ephemeral-updates`: what the reducer is ultimately
+        // validating — a synthetic `updateMessageEphemeralContent`
+        // replaces the stored ephemeral content in place and the
+        // chat-list preview shows the refreshed ephemeral text (the row
+        // re-renders via `effective_content`, ephemeral wins).
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateNewChat","chat":{"id":7,"title":"c","type":{"@type":"chatTypePrivate","user_id":7},"unread_count":0}}"#,
+        );
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateNewMessage","message":{"id":44,"chat_id":7,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"public","entities":[]}}}}"#,
+        );
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateChatLastMessage","chat_id":7,"last_message":{"id":44,"chat_id":7,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"public","entities":[]}}},"positions":[{"@type":"chatPosition","list":{"@type":"chatListMain"},"order":"8","is_pinned":false}]}"#,
+        );
+        assert_eq!(session.chats.get(&7).unwrap().last_preview, "public");
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateMessageEphemeralContent","chat_id":7,"message_id":44,"ephemeral_content":{"@type":"ephemeralMessageContent","content":{"@type":"messageText","text":{"@type":"formattedText","text":"secret v2","entities":[]}},"reply_markup":null}}"#,
+        );
+        let message = session
+            .histories
+            .get(&7)
+            .unwrap()
+            .messages
+            .get(&44)
+            .unwrap();
+        assert_eq!(
+            message
+                .ephemeral
+                .as_ref()
+                .expect("ephemeral set")
+                .content
+                .as_ref(),
+            &MessageContent::Text("secret v2".into())
+        );
+        assert_eq!(session.chats.get(&7).unwrap().last_preview, "secret v2");
     }
 
     #[test]

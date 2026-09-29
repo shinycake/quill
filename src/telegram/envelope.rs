@@ -124,6 +124,15 @@ pub enum EnvelopePayload {
         content: MessageContent,
         files: Vec<ParsedFile>,
     },
+    /// `updateMessageEphemeralContent` (TDLib 1.8.67,
+    /// `schema/td_api.tl:10424`) — the secret-chat ephemeral content of a
+    /// message refreshed over time; replaces `message.ephemeral_content`
+    /// in place (secret-chat lane, `parity:msg-ephemeral-updates`).
+    UpdateMessageEphemeralContent {
+        chat_id: ChatId,
+        message_id: MessageId,
+        ephemeral: EphemeralMessageContent,
+    },
     /// `updateMessageContentOpened` — voice note listened (`is_listened`) or
     /// video note viewed (`is_viewed`).
     UpdateMessageContentOpened {
@@ -7045,6 +7054,12 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
                 files,
             })
         }
+        "updateMessageEphemeralContent" => Ok(EnvelopePayload::UpdateMessageEphemeralContent {
+            chat_id: ChatId(int53(value.get("chat_id"))?),
+            message_id: MessageId(int53(value.get("message_id"))?),
+            ephemeral: parse_ephemeral_message_content(value.get("ephemeral_content"))
+                .ok_or(ParseError::MissingField)?,
+        }),
         "updateMessageContentOpened" => Ok(EnvelopePayload::UpdateMessageContentOpened {
             chat_id: ChatId(int53(value.get("chat_id"))?),
             message_id: MessageId(int53(value.get("message_id"))?),
@@ -14311,6 +14326,40 @@ mod tests {
         assert!(schema.lines().any(|l| l.starts_with("editMessageText ")));
         assert!(schema.lines().any(|l| l.starts_with("editMessageCaption ")));
         assert!(schema.lines().any(|l| l.starts_with("deleteMessages ")));
+    }
+
+    #[test]
+    fn update_message_ephemeral_content_is_typed() {
+        // `parity:msg-ephemeral-updates`: what the parser is ultimately
+        // validating — the synthetic `updateMessageEphemeralContent`
+        // lands on the typed payload with chat/message ids and the new
+        // `ephemeralMessageContent` (schema 1.8.67, `td_api.tl:10424`).
+        let env = parse_envelope(
+            r#"{"@type":"updateMessageEphemeralContent","chat_id":11,"message_id":102,"ephemeral_content":{"@type":"ephemeralMessageContent","content":{"@type":"messageText","text":{"@type":"formattedText","text":"CANARY_EPHEMERAL","entities":[]}},"reply_markup":null}}"#,
+        )
+        .unwrap();
+        match env.payload {
+            EnvelopePayload::UpdateMessageEphemeralContent {
+                chat_id,
+                message_id,
+                ephemeral,
+            } => {
+                assert_eq!(chat_id.0, 11);
+                assert_eq!(message_id.0, 102);
+                assert_eq!(
+                    ephemeral.content.as_ref(),
+                    &MessageContent::Text("CANARY_EPHEMERAL".into())
+                );
+                assert!(ephemeral.reply_markup.is_none());
+            }
+            other => panic!("{other:?}"),
+        }
+        let schema = include_str!("../../schema/td_api.tl");
+        assert!(
+            schema
+                .lines()
+                .any(|l| l.starts_with("updateMessageEphemeralContent "))
+        );
     }
 
     #[test]
