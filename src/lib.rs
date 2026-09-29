@@ -26,6 +26,7 @@ pub mod poll;
 pub mod rich;
 pub mod settings;
 pub mod state;
+pub mod sticker_suggest;
 pub mod story_composer;
 pub mod story_page;
 pub mod story_viewer;

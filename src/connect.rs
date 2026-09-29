@@ -32,6 +32,7 @@ use crate::state::{
     PollVotersFetch, RequestPurpose, RequestRollback, SearchStatus, Session, SharedMediaTab,
     ShutdownPhase, SupergroupMembersFetch, WelcomeMessagesFetch,
 };
+use crate::sticker_suggest::{SUGGEST_LIMIT, StickerSuggestMode, suggest_emoji_for};
 use crate::story_composer::{StoryMediaKind, StoryPrivacy};
 use crate::story_page::{StoryPageOp, StoryPageOpState, story_page_op_label};
 use crate::telegram::client::{LiveTdJson, OwnedEnvelope, ReceiveBridge};
@@ -100,7 +101,8 @@ use crate::telegram::requests::{
     resend_authentication_code, resend_messages, resend_phone_number_code,
     resend_recovery_email_address_code, revoke_chat_invite_link, revoke_group_call_invite_link,
     search_call_messages, search_chat_messages, search_chats, search_messages,
-    search_messages_filter_json, search_public_chats, search_recently_found_chats, send_animation,
+    search_messages_filter_json, search_public_chats, search_recently_found_chats, search_stickers,
+    send_animation,
     send_bot_start_message as send_bot_start_message_request, send_call_debug_information,
     send_call_log, send_call_rating_detail, send_call_signaling_data, send_chat_action,
     send_chat_action_kind, send_document, send_group_call_message, send_message_album,
@@ -8364,6 +8366,54 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     pub fn close_sticker_panel(&mut self) {
         self.session.stickers.close();
+    }
+
+    /// Slice S12: refresh the composer sticker suggestions for the
+    /// current composer text. `None` mode or no trailing emoji clears
+    /// the row; an unchanged emoji is not re-requested; a stale
+    /// in-flight suggest is dropped before the new one goes out, so a
+    /// late answer can never land under a newer emoji. Returns the
+    /// issued `RequestId` when a `searchStickers` went out. The UI
+    /// calls this on composer text change; rendering the suggestion
+    /// row is the post-Phase-9 UI slice.
+    pub fn update_sticker_suggestions(
+        &mut self,
+        text: &str,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let emoji = match self.session.media_prefs.sticker_suggest_mode {
+            StickerSuggestMode::None => None,
+            _ => suggest_emoji_for(text),
+        };
+        let Some(emoji) = emoji else {
+            self.session.clear_sticker_suggestions();
+            return Ok(None);
+        };
+        if self.session.stickers.suggest_for.as_deref() == Some(emoji)
+            && !self.session.stickers.suggestions.is_empty()
+        {
+            return Ok(None);
+        }
+        drop(
+            self.session
+                .requests
+                .take_purpose(RequestPurpose::SuggestStickers),
+        );
+        self.session.stickers.suggest_for = Some(emoji.to_string());
+        let extra = self.session.request(RequestPurpose::SuggestStickers, None);
+        match self
+            .sender
+            .send_json(&search_stickers(extra, emoji, "", 0, SUGGEST_LIMIT))
+        {
+            Ok(()) => Ok(Some(extra)),
+            Err(err) => {
+                self.session.requests.take(extra);
+                self.session.stickers.suggest_for = None;
+                Err(err)
+            }
+        }
     }
 
     pub fn select_sticker_set(

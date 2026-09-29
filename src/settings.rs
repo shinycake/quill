@@ -1,6 +1,7 @@
 //! Small non-message preferences. Message history lives in TDLib.
 
 use crate::ids::AccountKey;
+use crate::sticker_suggest::StickerSuggestMode;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -137,6 +138,11 @@ pub struct MediaPrefs {
     /// with `instant_view_version > 0`.
     #[serde(default)]
     pub instant_view_mode: InstantViewMode,
+    /// Slice S12: sticker-suggestion mode for the composer
+    /// (`sticker_suggest::StickerSuggestMode`; client-side, no TDLib
+    /// setting exists). Default: installed + recommended.
+    #[serde(default)]
+    pub sticker_suggest_mode: StickerSuggestMode,
 }
 
 /// MED4: Instant View preference (TGX values 0/1/2).
@@ -169,6 +175,7 @@ impl Default for MediaPrefs {
             auto_download_groups: AUTO_DOWNLOAD_DEFAULT,
             auto_download_channels: AUTO_DOWNLOAD_DEFAULT,
             instant_view_mode: InstantViewMode::default(),
+            sticker_suggest_mode: StickerSuggestMode::default(),
         }
     }
 }

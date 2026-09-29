@@ -12,6 +12,7 @@ use crate::settings::{
     AUTO_DOWNLOAD_PHOTO, AUTO_DOWNLOAD_VIDEO, AUTO_DOWNLOAD_VIDEO_NOTE, AUTO_DOWNLOAD_VOICE,
     CallPrefs, ContactPrefs, MediaPrefs,
 };
+use crate::sticker_suggest::StickerSuggestMode;
 use crate::story_page::{
     ArchivedStories, ChatPageStories, StoryPageOp, StoryPageOpState, story_page_op_label,
 };
@@ -296,6 +297,11 @@ pub enum RequestPurpose {
     SearchStickerSets,
     /// Slice S8: `searchStickers` (regular). Response is `stickers`.
     SearchStickers,
+    /// Slice S12: `searchStickers` for the composer trailing-emoji
+    /// suggestions. Response is `stickers`, stored in
+    /// `StickerPanel::suggestions` — never the search UI's
+    /// `found_stickers` slot.
+    SuggestStickers,
     /// Slice S8: `getFavoriteStickers`. Response is `stickers`.
     GetFavoriteStickers,
     /// Slice S8: `addFavoriteSticker`. Response is `ok`; the favorites
@@ -3558,6 +3564,11 @@ pub struct StickerPanel {
     /// Slice S8: `searchStickerSets` / `searchStickers` results.
     pub found_sets: Vec<StickerSetInfo>,
     pub found_stickers: Vec<StickerItem>,
+    /// Slice S12: sticker suggestions for the composer's trailing emoji
+    /// (`searchStickers` answers under `SuggestStickers`). `suggest_for`
+    /// is the emoji they were requested for.
+    pub suggestions: Vec<StickerItem>,
+    pub suggest_for: Option<String>,
 }
 
 /// Saved GIFs (`getSavedAnimations`). tdesktop Gifs tab / Unigram animation drawer.
@@ -7899,6 +7910,10 @@ impl Session {
                 let purpose = pending.map(|p| p.purpose);
                 if purpose == Some(RequestPurpose::SearchStickers) {
                     self.accept_found_stickers(stickers);
+                } else if purpose == Some(RequestPurpose::SuggestStickers) {
+                    // Slice S12: composer suggestions land in their own
+                    // slot — never the search UI's `found_stickers`.
+                    self.accept_sticker_suggestions(stickers);
                 } else if purpose == Some(RequestPurpose::GetFavoriteStickers) {
                     self.accept_favorite_stickers(stickers);
                 } else if purpose == Some(RequestPurpose::GetRecentStickers) {
@@ -10516,6 +10531,34 @@ impl Session {
     /// Slice S8: store a `searchStickers` answer.
     pub fn accept_found_stickers(&mut self, stickers: Vec<StickerItem>) {
         self.stickers.found_stickers = stickers;
+    }
+
+    /// Slice S12: drop the composer sticker suggestions.
+    pub fn clear_sticker_suggestions(&mut self) {
+        self.stickers.suggestions.clear();
+        self.stickers.suggest_for = None;
+    }
+
+    /// Slice S12: store a `searchStickers` answer issued for the
+    /// composer's trailing emoji. `InstalledOnly` keeps results from
+    /// installed sets; `None` drops the answer (the mode changed
+    /// mid-flight).
+    pub fn accept_sticker_suggestions(&mut self, stickers: Vec<StickerItem>) {
+        match self.media_prefs.sticker_suggest_mode {
+            StickerSuggestMode::None => {
+                self.clear_sticker_suggestions();
+            }
+            StickerSuggestMode::InstalledOnly => {
+                let installed: HashSet<i64> = self.stickers.sets.iter().map(|set| set.id).collect();
+                self.stickers.suggestions = stickers
+                    .into_iter()
+                    .filter(|sticker| installed.contains(&sticker.set_id))
+                    .collect();
+            }
+            StickerSuggestMode::InstalledAndRecommended => {
+                self.stickers.suggestions = stickers;
+            }
+        }
     }
 
     /// Slice S8: a sticker-set mutation (`changeStickerSet` /
@@ -13914,6 +13957,67 @@ mod tests {
             &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
         );
         assert!(with_purpose.stickers.sets.is_empty());
+    }
+
+    /// Slice S12: composer sticker suggestions are stored only under a
+    /// matching `SuggestStickers` purpose (stray answers ignored), in
+    /// their own slot (never the search UI's `found_stickers`), and
+    /// filtered by the suggestion mode.
+    #[test]
+    fn s12_sticker_suggest_purpose_gated_dispatch() {
+        let (mut with_purpose, sink) = session();
+        let seq = AtomicU64::new(0);
+        // Two installed sets; the suggest answers below reference set 77
+        // (installed) and set 99 (not installed).
+        with_purpose.stickers.sets = vec![
+            StickerSetInfo {
+                id: 77,
+                title: "Demo".into(),
+                name: "DemoStickers".into(),
+                size: 2,
+                is_installed: true,
+                is_official: true,
+            },
+            StickerSetInfo {
+                id: 78,
+                title: "Other".into(),
+                name: "OtherStickers".into(),
+                size: 1,
+                is_installed: true,
+                is_official: false,
+            },
+        ];
+        let answer = |extra: u64| {
+            format!(
+                r#"{{"@type":"stickers","stickers":[{{"@type":"sticker","id":"9001","set_id":"77","width":512,"height":512,"emoji":"😀","format":{{"@type":"stickerFormatWebp"}},"full_type":{{"@type":"stickerFullTypeRegular","premium_animation":null}},"thumbnail":null,"sticker":null}},{{"@type":"sticker","id":"9002","set_id":"99","width":512,"height":512,"emoji":"😀","format":{{"@type":"stickerFormatWebp"}},"full_type":{{"@type":"stickerFullTypeRegular","premium_animation":null}},"thumbnail":null,"sticker":null}}],"@extra":"{extra}"}}"#,
+            )
+        };
+
+        // Default mode (InstalledAndRecommended): both stickers stored in
+        // the suggestions slot; the search slot is untouched.
+        let extra = with_purpose.request(RequestPurpose::SuggestStickers, None);
+        apply_json(&mut with_purpose, &seq, &sink, &answer(extra.0));
+        assert_eq!(with_purpose.stickers.suggestions.len(), 2);
+        assert!(with_purpose.stickers.found_stickers.is_empty());
+
+        // InstalledOnly: the set-99 sticker is filtered out.
+        with_purpose.media_prefs.sticker_suggest_mode = StickerSuggestMode::InstalledOnly;
+        let extra = with_purpose.request(RequestPurpose::SuggestStickers, None);
+        apply_json(&mut with_purpose, &seq, &sink, &answer(extra.0));
+        assert_eq!(with_purpose.stickers.suggestions.len(), 1);
+        assert_eq!(with_purpose.stickers.suggestions[0].set_id, 77);
+
+        // None: the answer is dropped and the slot cleared.
+        with_purpose.media_prefs.sticker_suggest_mode = StickerSuggestMode::None;
+        let extra = with_purpose.request(RequestPurpose::SuggestStickers, None);
+        apply_json(&mut with_purpose, &seq, &sink, &answer(extra.0));
+        assert!(with_purpose.stickers.suggestions.is_empty());
+
+        // A stray `stickers` answer (no matching purpose) is ignored.
+        let (mut without_purpose, sink2) = session();
+        let seq2 = AtomicU64::new(0);
+        apply_json(&mut without_purpose, &seq2, &sink2, &answer(0));
+        assert!(without_purpose.stickers.suggestions.is_empty());
     }
 
     /// Slice S9: GIF-backend answers are stored only under a matching
