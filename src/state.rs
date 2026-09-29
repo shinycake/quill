@@ -17,13 +17,14 @@ use crate::telegram::envelope::{
     CanPostStoryResult, ChannelMemberStatus, ChatAction, ChatActiveStoriesView, ChatAdminRights,
     ChatAdministratorEntry, ChatDraft, ChatFolderInfo, ChatFolderSpec, ChatJoinResult, ChatKind,
     ChatList, ChatNotificationSettings, ChatPermissions, ChatPositionUpdate, ChatStatistics,
-    ConnectionState, EnvelopePayload, EphemeralMessageContent, ErrorClass, ForumTopic,
-    InlineQueryResultSummary, InlineQueryResultsButton, InviteGroupCallParticipantResult,
-    LinkPreview, LoginUrlInfo, MessageAutoDelete, MessageContent, MessageForwardInfo,
-    MessageInteractionInfo, MessageOrigin, MessageReaction, MessageReplyTo, MessageSelfDestruct,
-    MessageSender, NotificationSettingsScope, NotificationSound, OptionValue, ParsedCall,
-    ParsedChatEvent, ParsedChatInviteLink, ParsedChatJoinRequest, ParsedChatMember,
-    ParsedCommunity, ParsedCommunityFullInfo, ParsedFile, ParsedGroupCall, ParsedGroupCallMessage,
+    ConnectionState, EmojiCategory, EmojiKeyword, EmojiStatusItem, EnvelopePayload,
+    EphemeralMessageContent, ErrorClass, ForumTopic, InlineQueryResultSummary,
+    InlineQueryResultsButton, InviteGroupCallParticipantResult, LinkPreview, LoginUrlInfo,
+    MessageAutoDelete, MessageContent, MessageForwardInfo, MessageInteractionInfo, MessageOrigin,
+    MessageReaction, MessageReplyTo, MessageSelfDestruct, MessageSender, NotificationSettingsScope,
+    NotificationSound, OptionValue, ParsedCall, ParsedChatEvent, ParsedChatInviteLink,
+    ParsedChatJoinRequest, ParsedChatMember, ParsedCommunity, ParsedCommunityFullInfo,
+    ParsedFile, ParsedGroupCall, ParsedGroupCallMessage,
     ParsedGroupCallParticipant, ParsedMessage, ParsedSecretChat, ParsedSession, ParsedStory,
     ParsedUser, ParsedVideoChat, ParsedWebsite, ParsedWelcomeMessage, PasswordState,
     PaymentFormData, PaymentReceiptData, Poll, ReplyKeyboard, ReplyMarkup, ReportChatOutcome,
@@ -311,6 +312,60 @@ pub enum RequestPurpose {
     /// Slice S8: `reorderInstalledStickerSets`. Response is `ok`; same
     /// installed-sets invalidation as change.
     ReorderInstalledStickerSets,
+    /// Slice S10: `setEmojiStatus` (schema 1.8.67, line 14850). Response
+    /// is `ok`; the recent-statuses cache is cleared so it refetches.
+    SetEmojiStatus,
+    /// Slice S10: `getRecentEmojiStatuses` (schema 1.8.67, line 13957).
+    /// Response is `emojiStatuses`.
+    GetRecentEmojiStatuses,
+    /// Slice S10: `getThemedEmojiStatuses` (schema 1.8.67, line 13954) —
+    /// the picker's "trending" statuses row. Response is
+    /// `emojiStatusCustomEmojis`.
+    GetThemedEmojiStatuses,
+    /// Slice S10: `getDefaultEmojiStatuses` (schema 1.8.67, line 13963).
+    /// Response is `emojiStatusCustomEmojis`.
+    GetDefaultEmojiStatuses,
+    /// Slice S10: `getUpgradedGiftEmojiStatuses` (schema 1.8.67, line
+    /// 13960). Response is `emojiStatuses`.
+    GetUpgradedGiftEmojiStatuses,
+    /// Slice S10: `clearRecentEmojiStatuses` (schema 1.8.67, line 13966).
+    /// Response is `ok`; the recent-statuses cache is cleared.
+    ClearRecentEmojiStatuses,
+    /// Slice S10: `getAnimatedEmoji` (schema 1.8.67, line 14743) for the
+    /// composer's "suggest animated emoji". Response is `animatedEmoji`.
+    /// ponytail: no query identity — the UI slice must serialize
+    /// suggestions so a stale answer can't clobber a newer emoji.
+    GetAnimatedEmoji,
+    /// Slice S10: `getCustomEmojiStickers` (schema 1.8.67, line 14751).
+    /// Response is `stickers`.
+    GetCustomEmojiStickers,
+    /// Slice S10: `searchEmojis` (schema 1.8.67, line 14732) for the
+    /// picker's keyword search. Response is `emojiKeywords`.
+    SearchEmojis,
+    /// Slice S10: `getEmojiCategories` (schema 1.8.67, line 14738) for the
+    /// picker's category rows. Response is `emojiCategories`.
+    GetEmojiCategories,
+    /// Slice S10: `getInstalledStickerSets` with `stickerTypeEmoji` — the
+    /// "Emoji Sets" installed list. Response is `stickerSets`.
+    GetInstalledEmojiSets,
+    /// Slice S10: `getArchivedStickerSets` with `stickerTypeEmoji`.
+    /// Response is `stickerSets`; first page replaces, later pages append.
+    GetArchivedEmojiSets {
+        first_page: bool,
+    },
+    /// Slice S10: `getTrendingStickerSets` with `stickerTypeEmoji` — the
+    /// emoji discover section. Response is `trendingStickerSets`.
+    GetTrendingEmojiSets,
+    /// Slice S10: `searchStickerSets` with `stickerTypeEmoji`. Response is
+    /// `stickerSets`.
+    SearchEmojiSets,
+    /// Slice S10: `changeStickerSet` issued for an emoji set (the builder
+    /// is type-agnostic, so the existing `change_sticker_set` is reused).
+    /// Response is `ok`; the installed-emoji-sets cache is cleared.
+    ChangeEmojiSet,
+    /// Slice S10: `reorderInstalledStickerSets` with `stickerTypeEmoji`.
+    /// Response is `ok`; same invalidation as change.
+    ReorderInstalledEmojiSets,
     /// `getSavedAnimations`. Response is `animations`.
     GetSavedAnimations,
     /// Slice S9: `getInlineQueryResults` against the animation search
@@ -3459,6 +3514,50 @@ impl StickerPanel {
     }
 }
 
+/// Slice S10: custom-emoji backend (packs + statuses + picker search).
+/// Mirrors `StickerPanel`'s shape but stays separate — emoji sets, statuses
+/// and picker answers are a different domain from regular stickers, and the
+/// two panels must never share a slot.
+#[derive(Debug, Clone, Default)]
+pub struct EmojiPanel {
+    pub open: bool,
+    /// Slice S10: installed emoji sets (`getInstalledStickerSets` with
+    /// `stickerTypeEmoji`) — the "Emoji Sets" settings list.
+    pub installed_sets: Vec<StickerSetInfo>,
+    /// Slice S10: archived emoji sets (`getArchivedStickerSets`, paged).
+    pub archived_sets: Vec<StickerSetInfo>,
+    /// Slice S10: trending/discover emoji sets + premium-row flag.
+    pub trending_sets: Vec<StickerSetInfo>,
+    pub trending_is_premium: bool,
+    /// Slice S10: `searchStickerSets` results (emoji type).
+    pub found_sets: Vec<StickerSetInfo>,
+    /// Slice S10: recent emoji statuses (`getRecentEmojiStatuses`).
+    pub recent_statuses: Vec<EmojiStatusItem>,
+    /// Slice S10: picker's "trending" statuses (`getThemedEmojiStatuses`).
+    pub themed_status_ids: Vec<i64>,
+    /// Slice S10: default statuses (`getDefaultEmojiStatuses`).
+    pub default_status_ids: Vec<i64>,
+    /// Slice S10: upgraded-gift statuses (`getUpgradedGiftEmojiStatuses`).
+    pub upgraded_gift_statuses: Vec<EmojiStatusItem>,
+    /// Slice S10: last `getAnimatedEmoji` answer for the composer's
+    /// "suggest animated emoji".
+    pub animated_emoji: Option<StickerItem>,
+    /// Slice S10: last `getCustomEmojiStickers` answer.
+    pub custom_emoji_stickers: Vec<StickerItem>,
+    /// Slice S10: `searchEmojis` results for the picker.
+    pub keyword_results: Vec<EmojiKeyword>,
+    /// Slice S10: `getEmojiCategories` rows for the picker.
+    pub categories: Vec<EmojiCategory>,
+    pub loading_sets: bool,
+    pub failed: bool,
+}
+
+impl EmojiPanel {
+    pub fn close(&mut self) {
+        self.open = false;
+    }
+}
+
 /// Phase C1: the tracked live call (signaling only — no media
 /// transport; real audio/video is the C2 libtgvoip spike). States
 /// follow TDLib's `CallState` (schema 1.8.67, lines 7054–7086):
@@ -4156,6 +4255,8 @@ pub struct Session {
     pub shared_media: SharedMediaState,
     /// Installed regular sticker sets + the loaded `stickerSet` for the picker.
     pub stickers: StickerPanel,
+    /// Slice S10: custom-emoji backend (packs, statuses, picker search).
+    pub emoji: EmojiPanel,
     /// Saved animations (`getSavedAnimations`) for the GIF picker.
     pub gifs: GifPanel,
     /// `userTypeBot` ids from `updateUser`. Private chats with these users skip drafts.
@@ -5005,6 +5106,7 @@ impl Session {
             chat_search: ChatSearchState::default(),
             shared_media: SharedMediaState::default(),
             stickers: StickerPanel::default(),
+            emoji: EmojiPanel::default(),
             gifs: GifPanel::default(),
             bot_user_ids: HashSet::new(),
             bot_info: HashMap::new(),
@@ -7500,6 +7602,17 @@ impl Session {
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::SearchStickerSets) {
                     // Slice S8: `searchStickerSets` answers with `stickerSets`.
                     self.accept_found_sticker_sets(sets);
+                } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetInstalledEmojiSets)
+                {
+                    // Slice S10: `getInstalledStickerSets` with
+                    // `stickerTypeEmoji` lands in the emoji panel.
+                    self.accept_installed_emoji_sets(sets);
+                } else if let Some(RequestPurpose::GetArchivedEmojiSets { first_page }) =
+                    pending.map(|p| p.purpose)
+                {
+                    self.accept_archived_emoji_sets(sets, first_page);
+                } else if pending.map(|p| p.purpose) == Some(RequestPurpose::SearchEmojiSets) {
+                    self.accept_found_emoji_sets(sets);
                 }
             }
             // Slice S8: `getTrendingStickerSets` answers with
@@ -7509,6 +7622,10 @@ impl Session {
             } => {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetTrendingStickerSets) {
                     self.accept_trending_sticker_sets(sets, is_premium);
+                } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetTrendingEmojiSets) {
+                    // Slice S10: `getTrendingStickerSets` with
+                    // `stickerTypeEmoji` lands in the emoji panel.
+                    self.accept_trending_emoji_sets(sets, is_premium);
                 }
             }
             // Slice S8: `searchStickers` / `getFavoriteStickers` /
@@ -7522,6 +7639,51 @@ impl Session {
                     self.accept_favorite_stickers(stickers);
                 } else if purpose == Some(RequestPurpose::GetRecentStickers) {
                     self.accept_recent_stickers(stickers);
+                } else if purpose == Some(RequestPurpose::GetCustomEmojiStickers) {
+                    // Slice S10: `getCustomEmojiStickers` answers with bare
+                    // `stickers`, landing in the emoji panel.
+                    self.emoji.custom_emoji_stickers = stickers;
+                }
+            }
+            // Slice S10: `getRecentEmojiStatuses` /
+            // `getUpgradedGiftEmojiStatuses` answer with `emojiStatuses`.
+            EnvelopePayload::EmojiStatuses { statuses } => {
+                let purpose = pending.map(|p| p.purpose);
+                if purpose == Some(RequestPurpose::GetRecentEmojiStatuses) {
+                    self.emoji.recent_statuses = statuses;
+                } else if purpose == Some(RequestPurpose::GetUpgradedGiftEmojiStatuses) {
+                    self.emoji.upgraded_gift_statuses = statuses;
+                }
+            }
+            // Slice S10: `getThemedEmojiStatuses` / `getDefaultEmojiStatuses`
+            // answer with `emojiStatusCustomEmojis`.
+            EnvelopePayload::EmojiStatusCustomEmojis { custom_emoji_ids } => {
+                let purpose = pending.map(|p| p.purpose);
+                if purpose == Some(RequestPurpose::GetThemedEmojiStatuses) {
+                    self.emoji.themed_status_ids = custom_emoji_ids;
+                } else if purpose == Some(RequestPurpose::GetDefaultEmojiStatuses) {
+                    self.emoji.default_status_ids = custom_emoji_ids;
+                }
+            }
+            // Slice S10: `getAnimatedEmoji` answers with `animatedEmoji`.
+            EnvelopePayload::AnimatedEmoji { sticker, files } => {
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetAnimatedEmoji) {
+                    self.remember_files(&files);
+                    self.emoji.animated_emoji = sticker;
+                }
+            }
+            // Slice S10: `searchEmojis` answers with `emojiKeywords`.
+            EnvelopePayload::EmojiKeywords { keywords } => {
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::SearchEmojis) {
+                    self.emoji.keyword_results = keywords;
+                }
+            }
+            // Slice S10: `getEmojiCategories` answers with
+            // `emojiCategories`.
+            EnvelopePayload::EmojiCategories { categories, files } => {
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetEmojiCategories) {
+                    self.remember_files(&files);
+                    self.emoji.categories = categories;
                 }
             }
             EnvelopePayload::StickerSet {
@@ -8037,6 +8199,26 @@ impl Session {
                     )
                 ) {
                     self.invalidate_installed_sticker_sets();
+                }
+                // Slice S10: an emoji-status or emoji-set mutation
+                // succeeded — drop the affected cache so the next fetch
+                // shows the server-confirmed state. (`setEmojiStatus` /
+                // `clearRecentEmojiStatuses` both refresh the recent
+                // statuses server-side; `changeStickerSet` / reorder on an
+                // emoji set drop the installed emoji sets.)
+                if matches!(
+                    pending.map(|p| p.purpose),
+                    Some(RequestPurpose::SetEmojiStatus | RequestPurpose::ClearRecentEmojiStatuses)
+                ) {
+                    self.emoji.recent_statuses.clear();
+                }
+                if matches!(
+                    pending.map(|p| p.purpose),
+                    Some(
+                        RequestPurpose::ChangeEmojiSet | RequestPurpose::ReorderInstalledEmojiSets
+                    )
+                ) {
+                    self.invalidate_installed_emoji_sets();
                 }
                 // Slice S9: a saved-GIF mutation (`addSavedAnimation` /
                 // `removeSavedAnimation`) succeeded — drop the saved list so
@@ -9882,6 +10064,42 @@ impl Session {
         self.stickers.selected_set_id = None;
         self.stickers.loaded_set_id = None;
         self.stickers.stickers.clear();
+    }
+
+    /// Slice S10: store the installed emoji sets.
+    pub fn accept_installed_emoji_sets(&mut self, sets: Vec<StickerSetInfo>) {
+        self.emoji.loading_sets = false;
+        self.emoji.failed = false;
+        self.emoji.installed_sets = sets;
+    }
+
+    /// Slice S10: store an archived-emoji-sets page. First page replaces,
+    /// later pages append (the purpose carries `first_page`).
+    pub fn accept_archived_emoji_sets(&mut self, sets: Vec<StickerSetInfo>, first_page: bool) {
+        if first_page {
+            self.emoji.archived_sets = sets;
+        } else {
+            self.emoji.archived_sets.extend(sets);
+        }
+    }
+
+    /// Slice S10: store the trending emoji sets (single-page replace, like S8).
+    pub fn accept_trending_emoji_sets(&mut self, sets: Vec<StickerSetInfo>, is_premium: bool) {
+        self.emoji.trending_sets = sets;
+        self.emoji.trending_is_premium = is_premium;
+    }
+
+    /// Slice S10: store a `searchStickerSets` answer (emoji type).
+    pub fn accept_found_emoji_sets(&mut self, sets: Vec<StickerSetInfo>) {
+        self.emoji.found_sets = sets;
+    }
+
+    /// Slice S10: an emoji-set mutation (`changeStickerSet` /
+    /// `reorderInstalledStickerSets` with `stickerTypeEmoji`) succeeded —
+    /// drop the installed-emoji-sets cache so the settings screen
+    /// refetches the authoritative list.
+    pub fn invalidate_installed_emoji_sets(&mut self) {
+        self.emoji.installed_sets.clear();
     }
 
     pub fn select_sticker_set(&mut self, set_id: i64) {
@@ -13248,6 +13466,258 @@ mod tests {
             &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
         );
         assert!(with_purpose.stickers.sets.is_empty());
+    }
+
+    /// Slice S10: emoji-backend answers are stored only under a matching
+    /// request purpose (stray answers ignored, never landing in the regular
+    /// sticker panel), and mutation `ok`s invalidate the affected caches.
+    #[test]
+    fn s10_emoji_backend_purpose_gated_dispatch() {
+        let (mut with_purpose, sink) = session();
+        let seq = AtomicU64::new(0);
+
+        // Recent statuses land in the emoji panel under
+        // GetRecentEmojiStatuses.
+        let extra = with_purpose.request(RequestPurpose::GetRecentEmojiStatuses, None);
+        apply_json(
+            &mut with_purpose,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"emojiStatuses","emoji_statuses":[{{"@type":"emojiStatus","type":{{"@type":"emojiStatusTypeCustomEmoji","custom_emoji_id":"12345"}},"expiration_date":3600}}],"@extra":"{}"}}"#,
+                extra.0
+            ),
+        );
+        assert_eq!(with_purpose.emoji.recent_statuses.len(), 1);
+        assert_eq!(with_purpose.emoji.recent_statuses[0].custom_emoji_id, 12345);
+        assert_eq!(with_purpose.emoji.recent_statuses[0].expiration_date, 3600);
+
+        // A stray emojiStatuses (no matching purpose) is ignored.
+        let (mut without_purpose, sink2) = session();
+        let seq2 = AtomicU64::new(0);
+        apply_json(
+            &mut without_purpose,
+            &seq2,
+            &sink2,
+            r#"{"@type":"emojiStatuses","emoji_statuses":[]}"#,
+        );
+        assert!(without_purpose.emoji.recent_statuses.is_empty());
+
+        // Themed/default ids land in their own slots.
+        let extra = with_purpose.request(RequestPurpose::GetThemedEmojiStatuses, None);
+        apply_json(
+            &mut with_purpose,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"emojiStatusCustomEmojis","custom_emoji_ids":["11","22"],"@extra":"{}"}}"#,
+                extra.0
+            ),
+        );
+        assert_eq!(with_purpose.emoji.themed_status_ids, vec![11, 22]);
+        let extra = with_purpose.request(RequestPurpose::GetDefaultEmojiStatuses, None);
+        apply_json(
+            &mut with_purpose,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"emojiStatusCustomEmojis","custom_emoji_ids":["33"],"@extra":"{}"}}"#,
+                extra.0
+            ),
+        );
+        assert_eq!(with_purpose.emoji.default_status_ids, vec![33]);
+
+        // getAnimatedEmoji's animatedEmoji lands under GetAnimatedEmoji.
+        let extra = with_purpose.request(RequestPurpose::GetAnimatedEmoji, None);
+        apply_json(
+            &mut with_purpose,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"animatedEmoji","sticker":{{"@type":"sticker","id":"9001","set_id":"77","width":512,"height":512,"emoji":"🔥","format":{{"@type":"stickerFormatTgs"}},"full_type":{{"@type":"stickerFullTypeRegular","premium_animation":null}},"thumbnail":null,"sticker":null}},"sticker_width":512,"sticker_height":512,"fitzpatrick_type":0,"sound":null,"@extra":"{}"}}"#,
+                extra.0
+            ),
+        );
+        assert_eq!(
+            with_purpose
+                .emoji
+                .animated_emoji
+                .as_ref()
+                .expect("animated")
+                .emoji,
+            "🔥"
+        );
+
+        // getCustomEmojiStickers answers with bare `stickers` under
+        // GetCustomEmojiStickers — the emoji panel's slot, never the
+        // regular sticker panel's favorites.
+        let extra = with_purpose.request(RequestPurpose::GetCustomEmojiStickers, None);
+        apply_json(
+            &mut with_purpose,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"stickers","stickers":[{{"@type":"sticker","id":"9002","set_id":"78","width":512,"height":512,"emoji":"😀","format":{{"@type":"stickerFormatWebp"}},"full_type":{{"@type":"stickerFullTypeRegular","premium_animation":null}},"thumbnail":null,"sticker":null}}],"@extra":"{}"}}"#,
+                extra.0
+            ),
+        );
+        assert_eq!(with_purpose.emoji.custom_emoji_stickers.len(), 1);
+        assert!(with_purpose.stickers.favorites.is_empty());
+
+        // searchEmojis answers land under SearchEmojis.
+        let extra = with_purpose.request(RequestPurpose::SearchEmojis, None);
+        apply_json(
+            &mut with_purpose,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"emojiKeywords","emoji_keywords":[{{"@type":"emojiKeyword","emoji":"🔥","keyword":"fire"}}],"@extra":"{}"}}"#,
+                extra.0
+            ),
+        );
+        assert_eq!(with_purpose.emoji.keyword_results.len(), 1);
+        assert_eq!(with_purpose.emoji.keyword_results[0].keyword, "fire");
+
+        // getEmojiCategories answers land under GetEmojiCategories.
+        let extra = with_purpose.request(RequestPurpose::GetEmojiCategories, None);
+        apply_json(
+            &mut with_purpose,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"emojiCategories","categories":[{{"@type":"emojiCategory","name":"Smileys","icon":null,"source":{{"@type":"emojiCategorySourcePremium"}},"is_greeting":false}}],"@extra":"{}"}}"#,
+                extra.0
+            ),
+        );
+        assert_eq!(with_purpose.emoji.categories.len(), 1);
+        assert_eq!(with_purpose.emoji.categories[0].name, "Smileys");
+
+        // Emoji-pack sets: installed / search / archived (first page
+        // replaces, second appends) / trending — none touches the regular
+        // sticker panel's slots.
+        let set_json = |id: i64, title: &str| {
+            format!(
+                r#"{{"@type":"stickerSetInfo","id":"{id}","title":"{title}","name":"{title}Sets","thumbnail":null,"thumbnail_outline":null,"is_owned":false,"is_installed":true,"is_archived":false,"is_official":true,"sticker_type":{{"@type":"stickerTypeEmoji"}},"needs_repainting":false,"is_allowed_as_chat_emoji_status":false,"is_viewed":false,"size":3,"covers":[]}}"#
+            )
+        };
+        let extra = with_purpose.request(RequestPurpose::GetInstalledEmojiSets, None);
+        apply_json(
+            &mut with_purpose,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"stickerSets","total_count":1,"sets":[{}],"@extra":"{}"}}"#,
+                set_json(77, "Blob"),
+                extra.0
+            ),
+        );
+        assert_eq!(with_purpose.emoji.installed_sets.len(), 1);
+        assert_eq!(with_purpose.emoji.installed_sets[0].id, 77);
+        assert!(with_purpose.stickers.sets.is_empty());
+
+        let extra = with_purpose.request(RequestPurpose::SearchEmojiSets, None);
+        apply_json(
+            &mut with_purpose,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"stickerSets","total_count":1,"sets":[{}],"@extra":"{}"}}"#,
+                set_json(78, "Found"),
+                extra.0
+            ),
+        );
+        assert_eq!(with_purpose.emoji.found_sets.len(), 1);
+        assert!(with_purpose.stickers.found_sets.is_empty());
+
+        let extra = with_purpose.request(
+            RequestPurpose::GetArchivedEmojiSets { first_page: true },
+            None,
+        );
+        apply_json(
+            &mut with_purpose,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"stickerSets","total_count":2,"sets":[{}],"@extra":"{}"}}"#,
+                set_json(79, "Old"),
+                extra.0
+            ),
+        );
+        let extra = with_purpose.request(
+            RequestPurpose::GetArchivedEmojiSets { first_page: false },
+            None,
+        );
+        apply_json(
+            &mut with_purpose,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"stickerSets","total_count":2,"sets":[{}],"@extra":"{}"}}"#,
+                set_json(80, "Older"),
+                extra.0
+            ),
+        );
+        assert_eq!(with_purpose.emoji.archived_sets.len(), 2);
+
+        let extra = with_purpose.request(RequestPurpose::GetTrendingEmojiSets, None);
+        apply_json(
+            &mut with_purpose,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"trendingStickerSets","total_count":1,"is_premium":true,"sets":[{}],"@extra":"{}"}}"#,
+                set_json(81, "Trending"),
+                extra.0
+            ),
+        );
+        assert_eq!(with_purpose.emoji.trending_sets.len(), 1);
+        assert!(with_purpose.emoji.trending_is_premium);
+        assert!(with_purpose.stickers.trending.is_empty());
+
+        // A clearRecentEmojiStatuses `ok` drops the recent statuses.
+        let extra = with_purpose.request(RequestPurpose::ClearRecentEmojiStatuses, None);
+        apply_json(
+            &mut with_purpose,
+            &seq,
+            &sink,
+            &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
+        );
+        assert!(with_purpose.emoji.recent_statuses.is_empty());
+
+        // A setEmojiStatus `ok` likewise invalidates recent statuses.
+        with_purpose.emoji.recent_statuses = vec![EmojiStatusItem {
+            custom_emoji_id: 1,
+            expiration_date: 0,
+        }];
+        let extra = with_purpose.request(RequestPurpose::SetEmojiStatus, None);
+        apply_json(
+            &mut with_purpose,
+            &seq,
+            &sink,
+            &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
+        );
+        assert!(with_purpose.emoji.recent_statuses.is_empty());
+
+        // A changeStickerSet (emoji) `ok` drops the installed emoji sets.
+        let extra = with_purpose.request(RequestPurpose::ChangeEmojiSet, None);
+        apply_json(
+            &mut with_purpose,
+            &seq,
+            &sink,
+            &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
+        );
+        assert!(with_purpose.emoji.installed_sets.is_empty());
+
+        // A reorderInstalledStickerSets (emoji) `ok` does the same.
+        with_purpose.emoji.installed_sets = vec![with_purpose.emoji.found_sets[0].clone()];
+        let extra = with_purpose.request(RequestPurpose::ReorderInstalledEmojiSets, None);
+        apply_json(
+            &mut with_purpose,
+            &seq,
+            &sink,
+            &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
+        );
+        assert!(with_purpose.emoji.installed_sets.is_empty());
     }
 
     /// Slice S9: GIF-backend answers are stored only under a matching
