@@ -6054,4 +6054,5 @@ ntgcalls v3.0.0 prebuilt lib, bindings verified against
 - **Out of this slice (left unchecked with evidence):**
   - `auth-change-number` (no schema constructor; needs concept-level research on the re-auth flow — next Loop 4 slice candidate).
   - `auth-multi-account` (requires the `accounts/primary` DB layout change in `settings.rs:39` — a slice of its own).
+  - `auth-delete-preauth` (deleteAccount from authorizationStateWaitPassword — a real schema-supported flow, e.g. forgot-2FA-password from the login screen; needs auth-screen UI + a relaxed guard; the A7 driver guard deliberately covers the authorized settings flow only).
   - `auth-qr-authorize-other`, `auth-password-recovery` (backend pieces are small but each needs its own UI surface; queued behind the A7 UI half).
