@@ -1,7 +1,9 @@
 name: quill-ui-build
 # Remote UI compile gate for the Quill build loop.
-# Triggered via workflow_dispatch by the merge coordinator with the branch/SHA to build.
-# Runs on a self-hosted Apple Silicon Mac runner (label quill-ui-build).
+# SECURITY: this repo is public and the runner below is a personal Mac.
+# This workflow is workflow_dispatch ONLY (triggering requires write access) —
+# there are intentionally no pull_request / pull_request_target triggers,
+# so fork PRs can never execute code on the self-hosted runner.
 on:
   workflow_dispatch:
     inputs:
@@ -9,12 +11,14 @@ on:
         description: 'Branch or commit SHA to UI-build'
         required: true
         type: string
+permissions:
+  contents: read
 jobs:
   ui-build:
     runs-on: [self-hosted, quill-ui-build]
     timeout-minutes: 120
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4, SHA-pinned
         with:
           ref: ${{ inputs.ref }}
       - name: UI build (compile gate)
