@@ -80,6 +80,9 @@ fn ui_main(args: &[String]) {
         .with_assets(QuillAssets)
         .run(move |cx| {
             gpui_kit::init(cx);
+            // kit Phase 8: the kit defaults to its light theme on init;
+            // Quill boots dark (kit dialogs match the app from here on).
+            ui::set_theme_mode(startup_theme_mode(), None, cx);
             ui::bind_keys(cx);
             // kit Phase 7: File / Edit / View / Window / Help — native on
             // macOS, kit `AppMenuBar` data on Linux/Windows.
@@ -257,6 +260,17 @@ fn parse_screenshot_demo(args: &[String]) -> Option<(ui::ScreenshotDemo, std::pa
     None
 }
 
+/// kit Phase 8: the app boots dark; screenshot demos can opt into the light
+/// theme with `QUILL_DEMO_THEME=light` so both themes get captured.
+#[cfg(feature = "ui")]
+fn startup_theme_mode() -> gpui_kit::component::ThemeMode {
+    if std::env::var("QUILL_DEMO_THEME").as_deref() == Ok("light") {
+        gpui_kit::component::ThemeMode::Light
+    } else {
+        gpui_kit::component::ThemeMode::Dark
+    }
+}
+
 /// Open a real GPUI window in the requested demo state, linger so an external
 /// capture (ffmpeg x11grab) can snap docs/screenshots/*.png, then quit.
 #[cfg(feature = "ui")]
@@ -397,6 +411,9 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
         .with_assets(QuillAssets)
         .run(move |cx| {
             gpui_kit::init(cx);
+            // kit Phase 8: the kit defaults to its light theme on init;
+            // Quill boots dark (kit dialogs match the app from here on).
+            ui::set_theme_mode(startup_theme_mode(), None, cx);
             ui::bind_keys(cx);
             ui::setup_app_menus(cx);
             cx.spawn(async move |cx| {
