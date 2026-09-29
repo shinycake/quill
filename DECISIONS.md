@@ -6480,3 +6480,27 @@ ntgcalls v3.0.0 prebuilt lib, bindings verified against
 - **Not verifiable without a desktop session:** real OS tray registration (headless CI/xvfb has no system tray — construction no-ops by design); icon rendering and unread summation are covered by unit tests (`cargo test --no-default-features`).
 - **Out of this slice (left unchecked):** `parity:platform-tray-menu`, `parity:platform-minimize-to-tray`, `parity:platform-start-minimized`, `parity:platform-app-icon-badge`, and the updater boxes (queued per standing directive — never started).
  (platform-tray-icon: system tray icon with unread count)
+## Slice bots-force-reply-keyboard (2026-09-29)
+
+**Scope:** `parity:bots-force-reply-keyboard` — a bot message carrying
+`replyMarkupForceReply` renders the reply-keyboard bar above the composer
+(previously: composer reply-to + focus only).
+
+- **Schema (pinned TDLib 1.8.67, `schema/td_api.tl`, verified verbatim):**
+  - `replyMarkupForceReply is_personal:Bool input_field_placeholder:string = ReplyMarkup;` (:3840) — carries no buttons; the only client-visible payload is the placeholder.
+- **Telegram X evidence (`~/workspace/telegram-x`, `BotHelper.java`):**
+  - `processForceReply` (:390): private chat → `showReply(message, …)` (composer reply-to) + `showKeyboard()` — which is the *system* keyboard (`MessagesController.showKeyboard()` :7468 is `Keyboard.show(inputView)`), i.e. input focus; `setCustomBotPlaceholder(forceReply.inputFieldPlaceholder)` (:357) surfaces the placeholder in the input.
+  - On force-reply arrival TGX sends `DeleteChatReplyMarkup(chatId, message.id)` — the chat's custom keyboard is dismissed.
+- **Built:**
+  - `quill::force_reply::active_force_reply` (new lib module `src/force_reply.rs`): the latest standalone `replyMarkupForceReply` message unless dismissed; returns the placeholder for the bar label. Unit-tested (newest wins, dismissed stays hidden, other markups never produce a target).
+  - UI (`src/ui/force_reply.rs`, new named module): `force_reply_panel` renders the bar above the composer in the custom-keyboard slot — kit `Button` (ghost) labeled `↩ {placeholder}` (fallback `↩ Reply requested`); tap focuses the composer. The bar shows exactly while the forced reply is still the composer's reply-to — sending or cancelling the reply clears it (the one-time-keyboard "hides on tap" analog; no new send-path hook, no new dismissed-set — `dismissed_keyboards` is reused).
+  - `drain_force_reply` (called from `flush_notifications` at the top of `render`) keeps the B1 reply-to + focus behavior and dismisses the chat's custom keyboard for a standalone force-reply (TGX parity); a `replyMarkupShowKeyboard` carrying the `force_reply` flag keeps its keyboard.
+  - `src/ui/mod.rs` +4 lines (exact waiver bump 49086→49090): the `mod force_reply;` declaration + one render-chain link mounting the panel. All other logic lives in the new named modules.
+  - Demo fixture: the force-reply message now carries `input_field_placeholder: "Type your name…"`; the fresh `docs/screenshots/ready-bot-keyboards.png` shows the force-reply bar (the one-time custom keyboard is dismissed on force-reply arrival per TGX).
+  - README box `parity:bots-force-reply-keyboard` checked.
+- **Key decisions (ponytail):**
+  - No new send-path hook: the bar's lifetime falls out of the existing `pending_reply` — send/cancel already clears it.
+  - The placeholder goes on the bar label, not into the composer input (TGX puts it in the input; the box's deliverable is the bar).
+- **Not verifiable without live Telegram:** real `deleteChatReplyMarkup` acceptance after a force-reply; real placeholder strings from live bots.
+- **Out of this slice (left unchecked with evidence):**
+  - `is_personal` on `replyMarkupForceReply` (schema `td_api.tl`:3840): Quill drops it at parse (`envelope.rs`) and arms unconditionally, while TGX only auto-shows the reply UI when `personal` (private chat: `showReply` without focus; group non-personal: no reply UI, still sends `DeleteChatReplyMarkup`). Needs an envelope/state-layer slice; the bar renders for non-personal force-replies in groups until then.
