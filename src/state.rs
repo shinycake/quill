@@ -312,6 +312,23 @@ pub enum RequestPurpose {
     ReorderInstalledStickerSets,
     /// `getSavedAnimations`. Response is `animations`.
     GetSavedAnimations,
+    /// Slice S9: `getInlineQueryResults` against the animation search
+    /// bot for the GIF panel search. The bot is resolved via
+    /// `getOption("animation_search_bot_username")` + `searchPublicChat`
+    /// (schema 1.8.67, lines 6483, 11063); `getInlineQueryResults` takes
+    /// `bot_user_id:int53` (:13019), so the search ships with an
+    /// already-resolved bot id. Response is `inlineQueryResults`; stored
+    /// in `GifPanel` (never the composer's `inline_query` slot).
+    GetGifSearchResults {
+        bot_user_id: i64,
+        first_page: bool,
+    },
+    /// Slice S9: `addSavedAnimation` (schema 1.8.67, line 14769).
+    /// Response is `ok`; the saved-GIF cache is cleared so it refetches.
+    AddSavedAnimation,
+    /// Slice S9: `removeSavedAnimation` (schema 1.8.67, line 14772).
+    /// Response is `ok`; same invalidation as add.
+    RemoveSavedAnimation,
     /// `setChatDraftMessage`. Response is `ok`; the draft also arrives as
     /// `updateChatDraftMessage`.
     SetChatDraftMessage,
@@ -3364,6 +3381,17 @@ pub struct GifPanel {
     pub failed: bool,
     /// `updateSavedAnimations` arrived while the panel was open.
     pub stale: bool,
+    /// Slice S9: GIF search via the animation search bot
+    /// (`getInlineQueryResults`; schema 1.8.67, lines 6483, 13019).
+    /// First page replaces; later pages append, deduped by file id.
+    pub search_results: Vec<AnimationItem>,
+    /// Slice S9: `next_offset` of the last search page ("" = exhausted).
+    pub search_next_offset: String,
+    /// Slice S9: `updateAnimationSearchParameters` (schema 1.8.67, line
+    /// 11064) — the upstream animation-search provider name and its
+    /// suggested search emojis.
+    pub search_provider: String,
+    pub provider_emojis: Vec<String>,
 }
 
 impl GifPanel {
@@ -6195,6 +6223,16 @@ impl Session {
                             slot.fetch = fetch;
                         }
                     }
+                } else if let Some(RequestPurpose::GetGifSearchResults { first_page, .. }) =
+                    pending.map(|p| p.purpose)
+                {
+                    // Slice S9: GIF-panel search — the
+                    // `inlineQueryResultAnimation` entries land in `GifPanel`,
+                    // never the composer's `inline_query` slot. First page
+                    // replaces; later pages append (deduped); `next_offset`
+                    // pages the bot's result list.
+                    self.remember_files(&page.files);
+                    self.accept_gif_search_results(page.animations, page.next_offset, first_page);
                 }
             }
             // Slice G1: `createNewBasicGroupChat` answer
@@ -7669,6 +7707,13 @@ impl Session {
                     self.gifs.stale = true;
                 }
             }
+            // Slice S9: `updateAnimationSearchParameters` (schema 1.8.67,
+            // line 11064) — server-pushed; store the provider name and the
+            // new suggested search emojis for the GIF search surface.
+            EnvelopePayload::UpdateAnimationSearchParameters { provider, emojis } => {
+                self.gifs.search_provider = provider;
+                self.gifs.provider_emojis = emojis;
+            }
             EnvelopePayload::NotificationSounds { sounds } => {
                 // Parity slice: `getSavedNotificationSounds` answer.
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetSavedNotificationSounds) {
@@ -7918,6 +7963,16 @@ impl Session {
                     )
                 ) {
                     self.invalidate_installed_sticker_sets();
+                }
+                // Slice S9: a saved-GIF mutation (`addSavedAnimation` /
+                // `removeSavedAnimation`) succeeded — drop the saved list so
+                // the panel refetches the server-confirmed list instead of
+                // a stale one.
+                if matches!(
+                    pending.map(|p| p.purpose),
+                    Some(RequestPurpose::AddSavedAnimation | RequestPurpose::RemoveSavedAnimation)
+                ) {
+                    self.gifs.animations.clear();
                 }
                 // Phase C3a: a successful `leaveGroupCall` /
                 // `endGroupCall` drops the tracked call (the `ok`
@@ -9756,6 +9811,34 @@ impl Session {
         self.gifs.failed = false;
         self.gifs.stale = false;
         self.gifs.animations = animations;
+    }
+
+    /// Slice S9: store a GIF-search `inlineQueryResults` page. A first page
+    /// replaces; a later page appends, deduped by animation file id, and
+    /// keeps the page's `next_offset` — mirrors the composer's inline-query
+    /// paging (Loop 3) without its slot machinery, since the purpose carries
+    /// `first_page`.
+    pub fn accept_gif_search_results(
+        &mut self,
+        animations: Vec<AnimationItem>,
+        next_offset: String,
+        first_page: bool,
+    ) {
+        if first_page {
+            self.gifs.search_results = animations;
+        } else {
+            for item in animations {
+                if !self
+                    .gifs
+                    .search_results
+                    .iter()
+                    .any(|r| r.file_id == item.file_id)
+                {
+                    self.gifs.search_results.push(item);
+                }
+            }
+        }
+        self.gifs.search_next_offset = next_offset;
     }
 
     pub fn accept_sticker_set(&mut self, id: i64, stickers: Vec<StickerItem>) {
@@ -13056,6 +13139,108 @@ mod tests {
             &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
         );
         assert!(with_purpose.stickers.sets.is_empty());
+    }
+
+    /// Slice S9: GIF-backend answers are stored only under a matching
+    /// request purpose (stray answers ignored), search pages replace /
+    /// append with `next_offset` paging, mutation `ok`s invalidate the
+    /// saved list, and `updateAnimationSearchParameters` stores
+    /// provider + emojis.
+    #[test]
+    fn s9_gif_backend_purpose_gated_dispatch() {
+        let (mut with_purpose, sink) = session();
+        let seq = AtomicU64::new(0);
+
+        // First search page lands in `GifPanel` under GetGifSearchResults
+        // (not the composer's inline_query slot).
+        let extra = with_purpose.request(
+            RequestPurpose::GetGifSearchResults {
+                bot_user_id: 42,
+                first_page: true,
+            },
+            None,
+        );
+        apply_json(
+            &mut with_purpose,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"inlineQueryResults","inline_query_id":7,"button":null,"results":[{{"@type":"inlineQueryResultAnimation","id":"g1","title":"cat","animation":{{"@type":"animation","duration":2,"width":240,"height":140,"file_name":"c.gif","mime_type":"image/gif","animation":{{"@type":"file","id":101,"size":12,"expected_size":12,"local":{{"@type":"localFile","path":"","can_be_downloaded":true,"can_be_deleted":false,"is_downloading_active":false,"is_downloading_completed":false,"download_offset":0,"downloaded_prefix_size":0,"downloaded_size":0}},"remote":{{"@type":"remoteFile","id":"r","unique_id":"u","is_uploading_active":false,"is_uploading_completed":false,"uploaded_size":0}}}},"thumbnail":null,"has_stickers":false}}}}],"next_offset":"50","@extra":"{}"}}"#,
+                extra.0
+            ),
+        );
+        assert_eq!(with_purpose.gifs.search_results.len(), 1);
+        assert_eq!(with_purpose.gifs.search_results[0].file_id.0, 101);
+        assert_eq!(with_purpose.gifs.search_next_offset, "50");
+        assert!(with_purpose.inline_query.is_none());
+
+        // Second page appends new entries (deduped by file id) and
+        // refreshes the offset.
+        let extra = with_purpose.request(
+            RequestPurpose::GetGifSearchResults {
+                bot_user_id: 42,
+                first_page: false,
+            },
+            None,
+        );
+        apply_json(
+            &mut with_purpose,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"inlineQueryResults","inline_query_id":7,"button":null,"results":[{{"@type":"inlineQueryResultAnimation","id":"g1","title":"cat","animation":{{"@type":"animation","duration":2,"width":240,"height":140,"file_name":"c.gif","mime_type":"image/gif","animation":{{"@type":"file","id":101}},"thumbnail":null,"has_stickers":false}}}},{{"@type":"inlineQueryResultAnimation","id":"g2","title":"dog","animation":{{"@type":"animation","duration":3,"width":200,"height":200,"file_name":"d.gif","mime_type":"image/gif","animation":{{"@type":"file","id":102}},"thumbnail":null,"has_stickers":false}}}}],"next_offset":"","@extra":"{}"}}"#,
+                extra.0
+            ),
+        );
+        // g1 (file 101) was already on page one — deduped; g2 (file 102)
+        // appends; the offset advances to "" (exhausted).
+        assert_eq!(with_purpose.gifs.search_results.len(), 2);
+        assert_eq!(with_purpose.gifs.search_results[1].file_id.0, 102);
+        assert_eq!(with_purpose.gifs.search_next_offset, "");
+
+        // A stray inlineQueryResults (no matching purpose) is ignored.
+        let (mut without_purpose, sink2) = session();
+        let seq2 = AtomicU64::new(0);
+        apply_json(
+            &mut without_purpose,
+            &seq2,
+            &sink2,
+            r#"{"@type":"inlineQueryResults","inline_query_id":7,"button":null,"results":[],"next_offset":"9"}"#,
+        );
+        assert!(without_purpose.gifs.search_results.is_empty());
+
+        // An addSavedAnimation `ok` clears the saved-GIF cache so it
+        // refetches the server-confirmed list.
+        with_purpose.gifs.animations = with_purpose.gifs.search_results.clone();
+        let extra = with_purpose.request(RequestPurpose::AddSavedAnimation, None);
+        apply_json(
+            &mut with_purpose,
+            &seq,
+            &sink,
+            &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
+        );
+        assert!(with_purpose.gifs.animations.is_empty());
+
+        // A removeSavedAnimation `ok` invalidates the same way.
+        with_purpose.gifs.animations = with_purpose.gifs.search_results.clone();
+        let extra = with_purpose.request(RequestPurpose::RemoveSavedAnimation, None);
+        apply_json(
+            &mut with_purpose,
+            &seq,
+            &sink,
+            &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
+        );
+        assert!(with_purpose.gifs.animations.is_empty());
+
+        // updateAnimationSearchParameters stores provider + emojis.
+        apply_json(
+            &mut with_purpose,
+            &seq,
+            &sink,
+            r#"{"@type":"updateAnimationSearchParameters","provider":"Tenor","emojis":["😀","🎉"]}"#,
+        );
+        assert_eq!(with_purpose.gifs.search_provider, "Tenor");
+        assert_eq!(with_purpose.gifs.provider_emojis, vec!["😀", "🎉"]);
     }
 
     /// Phase S2: a TDLib `error` answer to `getStorageStatistics`

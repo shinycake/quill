@@ -3940,6 +3940,31 @@ pub fn get_saved_animations(extra: RequestId) -> String {
     .to_string()
 }
 
+/// Slice S9: `addSavedAnimation animation:InputFile = Ok;` (TDLib 1.8.67,
+/// line 14769); `animation` passed as `inputFileId id:int32` (schema line
+/// 317), like S8's `addFavoriteSticker`. Response is `ok`; the saved-GIF
+/// cache is invalidated on success so the panel refetches.
+pub fn add_saved_animation(extra: RequestId, file_id: FileId) -> String {
+    json!({
+        "@type": "addSavedAnimation",
+        "@extra": extra.as_extra(),
+        "animation": { "@type": "inputFileId", "id": file_id.0 },
+    })
+    .to_string()
+}
+
+/// Slice S9: `removeSavedAnimation animation:InputFile = Ok;` (TDLib
+/// 1.8.67, line 14772) — same `inputFileId` shape as add. Response is
+/// `ok`; same cache invalidation as add.
+pub fn remove_saved_animation(extra: RequestId, file_id: FileId) -> String {
+    json!({
+        "@type": "removeSavedAnimation",
+        "@extra": extra.as_extra(),
+        "animation": { "@type": "inputFileId", "id": file_id.0 },
+    })
+    .to_string()
+}
+
 /// `sendMessage` + `inputMessageAnimation` / `inputAnimation` / `inputFileId` (1.8.67).
 pub fn send_animation(extra: RequestId, chat_id: ChatId, animation: AnimationSend) -> String {
     json!({
@@ -6799,6 +6824,28 @@ mod tests {
         assert_eq!(saved["@type"], "getSavedAnimations");
         assert_eq!(saved["@extra"], "22");
         assert!(saved.get("query").is_none());
+    }
+
+    /// Slice S9: `addSavedAnimation` / `removeSavedAnimation` request
+    /// shapes against the pinned schema (1.8.67): `addSavedAnimation
+    /// animation:InputFile = Ok;` (:14769), `removeSavedAnimation
+    /// animation:InputFile = Ok;` (:14772) — `animation` as
+    /// `inputFileId id:int32` (:317), like S8's `addFavoriteSticker`.
+    #[test]
+    fn s9_saved_animation_request_shapes_match_1_8_67() {
+        let v: serde_json::Value =
+            serde_json::from_str(&add_saved_animation(RequestId(31), FileId(41))).unwrap();
+        assert_eq!(v["@type"], "addSavedAnimation");
+        assert_eq!(v["@extra"], "31");
+        assert_eq!(v["animation"]["@type"], "inputFileId");
+        assert_eq!(v["animation"]["id"], 41);
+
+        let v: serde_json::Value =
+            serde_json::from_str(&remove_saved_animation(RequestId(32), FileId(42))).unwrap();
+        assert_eq!(v["@type"], "removeSavedAnimation");
+        assert_eq!(v["@extra"], "32");
+        assert_eq!(v["animation"]["@type"], "inputFileId");
+        assert_eq!(v["animation"]["id"], 42);
     }
 
     #[test]

@@ -47,6 +47,14 @@ pub struct InlineQueryResultsPage {
     pub inline_query_id: i64,
     pub button: Option<InlineQueryResultsButton>,
     pub results: Vec<InlineQueryResultSummary>,
+    /// Slice S9: the nested `animation` objects of `inlineQueryResultAnimation`
+    /// entries (schema 1.8.67, line 7658), parsed to `AnimationItem`s for the
+    /// GIF panel search. The per-result summaries above deliberately drop
+    /// them; collecting here keeps Loop 3's summary contract untouched.
+    pub animations: Vec<AnimationItem>,
+    /// Slice S9: files referenced by `animations` (same `remember_files`
+    /// shape as S8's `Stickers` payload).
+    pub files: Vec<ParsedFile>,
     pub next_offset: String,
 }
 
@@ -703,6 +711,14 @@ pub enum EnvelopePayload {
     /// `updateSavedAnimations` — file ids of saved GIFs, newest first.
     UpdateSavedAnimations {
         animation_ids: Vec<i32>,
+    },
+    /// Slice S9: `updateAnimationSearchParameters` (schema 1.8.67, line
+    /// 11064) — the server-pushed animation-search provider parameters:
+    /// the upstream provider name (e.g. GIPHY/Tenor) and the suggested
+    /// search emojis.
+    UpdateAnimationSearchParameters {
+        provider: String,
+        emojis: Vec<String>,
     },
     /// `notificationSounds` — `getSavedNotificationSounds` response.
     NotificationSounds {
@@ -7185,28 +7201,49 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
         // Bots slice: `inlineQueryResults` — the `getInlineQueryResults`
         // answer (schema 1.8.67, line 7716). Missing fields degrade to
         // empty strings; thumbnails are dropped (no URL on the wire).
-        "inlineQueryResults" => Ok(EnvelopePayload::InlineQueryResults(
-            InlineQueryResultsPage {
-                inline_query_id: value
-                    .get("inline_query_id")
-                    .and_then(Value::as_i64)
-                    .unwrap_or(0),
-                button: value
-                    .get("button")
-                    .filter(|button| !button.is_null())
-                    .map(parse_inline_query_results_button),
-                results: value
-                    .get("results")
-                    .and_then(Value::as_array)
-                    .map(|results| results.iter().map(parse_inline_query_result).collect())
-                    .unwrap_or_default(),
-                next_offset: value
-                    .get("next_offset")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default()
-                    .to_string(),
-            },
-        )),
+        // Slice S9: `inlineQueryResultAnimation` entries (schema line
+        // 7658) additionally yield parsed `AnimationItem`s (+ files) for
+        // the GIF panel search; Loop 3's summaries are untouched.
+        "inlineQueryResults" => {
+            let mut results = Vec::new();
+            let mut animations = Vec::new();
+            let mut files: Vec<ParsedFile> = Vec::new();
+            if let Some(entries) = value.get("results").and_then(Value::as_array) {
+                for entry in entries {
+                    results.push(parse_inline_query_result(entry));
+                    if entry.get("@type").and_then(Value::as_str)
+                        == Some("inlineQueryResultAnimation")
+                    {
+                        let (item, item_files) = parse_animation_value(entry.get("animation"));
+                        files.extend(item_files);
+                        if let Some(item) = item {
+                            animations.push(item);
+                        }
+                    }
+                }
+            }
+            files.retain(|file| file.id.0 != 0);
+            Ok(EnvelopePayload::InlineQueryResults(
+                InlineQueryResultsPage {
+                    inline_query_id: value
+                        .get("inline_query_id")
+                        .and_then(Value::as_i64)
+                        .unwrap_or(0),
+                    button: value
+                        .get("button")
+                        .filter(|button| !button.is_null())
+                        .map(parse_inline_query_results_button),
+                    results,
+                    animations,
+                    files,
+                    next_offset: value
+                        .get("next_offset")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .to_string(),
+                },
+            ))
+        }
         // Phase C3a: `text` (schema 1.8.67, line 10071) — the
         // `joinVideoChat` / `joinGroupCall` answer ("join response
         // payload for tgcalls"). Quill stores it, never consumes it
@@ -7607,6 +7644,27 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
                         .filter_map(|id| id.as_i64())
                         .map(|id| id as i32)
                         .filter(|id| *id != 0)
+                        .collect()
+                })
+                .unwrap_or_default(),
+        }),
+        // Slice S9: `updateAnimationSearchParameters` (schema 1.8.67,
+        // line 11064) — server-pushed; provider is the upstream search
+        // provider name, emojis the new suggested search emojis.
+        "updateAnimationSearchParameters" => Ok(EnvelopePayload::UpdateAnimationSearchParameters {
+            provider: value
+                .get("provider")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string(),
+            emojis: value
+                .get("emojis")
+                .and_then(Value::as_array)
+                .map(|emojis| {
+                    emojis
+                        .iter()
+                        .filter_map(Value::as_str)
+                        .map(str::to_string)
                         .collect()
                 })
                 .unwrap_or_default(),
@@ -13358,6 +13416,62 @@ mod tests {
                 assert_eq!(files.len(), 1);
             }
             other => panic!("{other:?}"),
+        }
+    }
+    /// Slice S9: `inlineQueryResults` carrying `inlineQueryResultAnimation`
+    /// entries (schema 1.8.67, line 7658) — the summaries keep the
+    /// `animation` kind mapping (Loop 3's filter), and the page additionally
+    /// exposes parsed `AnimationItem`s + files for the GIF panel search,
+    /// with `next_offset` paging intact. Also `updateAnimationSearchParameters`
+    /// (schema line 11064) parses provider + emojis.
+    #[test]
+    fn s9_gif_search_page_parses_animation_items_1_8_67() {
+        let file = local_file_json(41, "/tmp/g.gif", true, true);
+        let thumb = local_file_json(42, "", false, true);
+        let env = parse_envelope(&format!(
+            r#"{{
+                "@type": "inlineQueryResults",
+                "inline_query_id": 9003,
+                "button": null,
+                "results": [
+                    {{"@type": "inlineQueryResultAnimation", "id": "g1", "title": "cat gif",
+                      "animation": {{"@type": "animation", "duration": 2, "width": 240, "height": 140,
+                        "file_name": "cat.gif", "mime_type": "image/gif",
+                        "animation": {file},
+                        "thumbnail": {{"@type": "thumbnail", "width": 120, "height": 70, "file": {thumb}}},
+                        "has_stickers": false}}}},
+                    {{"@type": "inlineQueryResultArticle", "id": "a1", "title": "not a gif", "description": ""}}
+                ],
+                "next_offset": "50"
+            }}"#
+        ))
+        .unwrap();
+        let page = match env.payload {
+            EnvelopePayload::InlineQueryResults(page) => page,
+            other => panic!("unexpected {other:?}"),
+        };
+        assert_eq!(page.next_offset, "50");
+        assert_eq!(page.results.len(), 2);
+        assert_eq!(page.results[0].kind, "animation");
+        assert_eq!(page.results[0].title, "cat gif");
+        // Only the animation entry yields an AnimationItem (Loop 3's
+        // summary shape is untouched).
+        assert_eq!(page.animations.len(), 1);
+        assert_eq!(page.animations[0].file_id, FileId(41));
+        assert_eq!(page.animations[0].thumb_file_id, Some(FileId(42)));
+        assert_eq!(page.animations[0].mime_type, "image/gif");
+        assert_eq!(page.files.len(), 2);
+
+        let env = parse_envelope(
+            r#"{"@type":"updateAnimationSearchParameters","provider":"GIPHY","emojis":["😀","🐱"]}"#,
+        )
+        .unwrap();
+        match env.payload {
+            EnvelopePayload::UpdateAnimationSearchParameters { provider, emojis } => {
+                assert_eq!(provider, "GIPHY");
+                assert_eq!(emojis, vec!["😀".to_string(), "🐱".to_string()]);
+            }
+            other => panic!("unexpected {other:?}"),
         }
     }
 
