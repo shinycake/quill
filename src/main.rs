@@ -83,6 +83,8 @@ fn ui_main(args: &[String]) {
             // kit Phase 8: the kit defaults to its light theme on init;
             // Quill boots dark (kit dialogs match the app from here on).
             ui::set_theme_mode(startup_theme_mode(), None, cx);
+            // kit Phase 9: honor the OS reduce-motion preference.
+            cx.set_reduce_motion(os_prefers_reduced_motion());
             ui::bind_keys(cx);
             // kit Phase 7: File / Edit / View / Window / Help — native on
             // macOS, kit `AppMenuBar` data on Linux/Windows.
@@ -271,6 +273,37 @@ fn startup_theme_mode() -> gpui_kit::component::ThemeMode {
     }
 }
 
+/// kit Phase 9: respect the OS "reduce motion" accessibility preference.
+/// GPUI's animation/spring machinery settles instantly when
+/// `App::set_reduce_motion(true)` is called, so kit `Skeleton` shimmer,
+/// switch springs and spinners all go static with this one call.
+/// `QUILL_REDUCED_MOTION=1` overrides for testing.
+#[cfg(feature = "ui")]
+fn os_prefers_reduced_motion() -> bool {
+    if let Ok(v) = std::env::var("QUILL_REDUCED_MOTION") {
+        return v == "1" || v.eq_ignore_ascii_case("true");
+    }
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("defaults")
+            .args(["read", "com.apple.universalaccess", "reduceMotion"])
+            .output()
+            .is_ok_and(|o| String::from_utf8_lossy(&o.stdout).trim() == "1")
+    }
+    #[cfg(target_os = "linux")]
+    {
+        // GNOME exposes the preference as interface animations off.
+        std::process::Command::new("gsettings")
+            .args(["get", "org.gnome.desktop.interface", "enable-animations"])
+            .output()
+            .is_ok_and(|o| String::from_utf8_lossy(&o.stdout).trim() == "false")
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    {
+        false
+    }
+}
+
 /// Open a real GPUI window in the requested demo state, linger so an external
 /// capture (ffmpeg x11grab) can snap docs/screenshots/*.png, then quit.
 #[cfg(feature = "ui")]
@@ -414,6 +447,8 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
             // kit Phase 8: the kit defaults to its light theme on init;
             // Quill boots dark (kit dialogs match the app from here on).
             ui::set_theme_mode(startup_theme_mode(), None, cx);
+            // kit Phase 9: honor the OS reduce-motion preference.
+            cx.set_reduce_motion(os_prefers_reduced_motion());
             ui::bind_keys(cx);
             ui::setup_app_menus(cx);
             cx.spawn(async move |cx| {

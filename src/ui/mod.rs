@@ -14,7 +14,9 @@ use gpui_kit::component::menu::AppMenuBar;
 use gpui_kit::component::message_scroller::{MessageScroller, MessageScrollerState};
 use gpui_kit::component::notification::Notification;
 use gpui_kit::component::radio::{Radio, RadioGroup};
+use gpui_kit::component::skeleton::Skeleton;
 use gpui_kit::component::slider::{Slider, SliderEvent, SliderState, SliderValue};
+use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::switch::Switch;
 use gpui_kit::component::tab::{Tab, TabBar};
 use gpui_kit::component::table::{Table, TableBody, TableCell, TableRow};
@@ -186,6 +188,21 @@ enum SoundChoice {
     Disabled,
     /// A saved notification sound id.
     Custom(i64),
+}
+
+/// kit Phase 9: hover/pressed feedback for hand-rolled clickable surfaces.
+/// Kit buttons carry state styles by default; this gives the remaining
+/// custom `cursor_pointer` divs the same affordance — a theme-driven hover
+/// tint plus a slightly stronger pressed state.
+trait PressableDiv {
+    fn pressable(self, theme: &Theme) -> Self;
+}
+
+impl PressableDiv for gpui_kit::Stateful<Div> {
+    fn pressable(self, theme: &Theme) -> Self {
+        self.hover(|s| s.bg(theme.accent.opacity(0.10)))
+            .active(|s| s.bg(theme.accent.opacity(0.22)))
+    }
 }
 
 pub fn bind_keys(cx: &mut App) {
@@ -6730,6 +6747,7 @@ impl QuillApp {
                 Button::new("fmt-clear")
                     .label("✕")
                     .ghost()
+                    .tooltip("Clear formatting")
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.clear_composer_format(window, cx);
                     })),
@@ -7415,9 +7433,17 @@ impl QuillApp {
         } else if in_flight {
             body = body.child(
                 div()
-                    .text_sm()
-                    .text_color(cx.theme().muted_foreground)
-                    .child("Loading…"),
+                    .flex()
+                    .flex_col()
+                    .gap_2()
+                    .child(Skeleton::new().w(px(180.)).h(px(12.)).rounded_sm())
+                    .child(
+                        Skeleton::new()
+                            .w(px(140.))
+                            .h(px(10.))
+                            .rounded_sm()
+                            .secondary(),
+                    ),
             );
         } else {
             body = body.child(
@@ -8572,8 +8598,8 @@ impl QuillApp {
                     .py_2()
                     .rounded_md()
                     .cursor_pointer()
+                    .pressable(cx.theme())
                     .when(highlighted, |this| this.bg(cx.theme().selection))
-                    .hover(|style| style.bg(cx.theme().accent.opacity(0.12)))
                     .on_click(cx.listener(move |this, _, window, cx| {
                         this.pick_command_menu_index(index, window, cx);
                     }))
@@ -14282,8 +14308,12 @@ impl QuillApp {
             ),
             Some(PollVotersFetch::Loading) => body.child(
                 div()
+                    .flex()
+                    .items_center()
+                    .gap_2()
                     .text_xs()
                     .text_color(text_muted())
+                    .child(Spinner::new().small())
                     .child("Loading voters…"),
             ),
             Some(PollVotersFetch::Failed(reason)) => body
@@ -16689,6 +16719,7 @@ impl QuillApp {
                 div()
                     .id("story-tray-add")
                     .cursor_pointer()
+                    .pressable(cx.theme())
                     .flex()
                     .flex_col()
                     .items_center()
@@ -16736,6 +16767,7 @@ impl QuillApp {
                 div()
                     .id(("story-tray-item", chat_id as u64))
                     .cursor_pointer()
+                    .pressable(cx.theme())
                     .flex()
                     .flex_col()
                     .items_center()
@@ -20456,6 +20488,7 @@ impl QuillApp {
             .py_2()
             .rounded_md()
             .cursor_pointer()
+            .pressable(cx.theme())
             .bg(if selected {
                 cx.theme().accent.opacity(0.15)
             } else {
@@ -21193,6 +21226,7 @@ impl QuillApp {
                     .py_2()
                     .rounded_md()
                     .cursor_pointer()
+                    .pressable(cx.theme())
                     .bg(cx.theme().sidebar)
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.new_secret_picker_open = false;
@@ -21427,14 +21461,10 @@ impl QuillApp {
                         .border_color(cx.theme().border)
                         .child(div().font_semibold().child(title))
                         .child(
-                            div()
-                                .id("info-panel-close")
-                                .cursor_pointer()
-                                .px_2()
-                                .py_1()
-                                .rounded_md()
-                                .text_color(cx.theme().muted_foreground)
-                                .child("✕")
+                            Button::new("info-panel-close")
+                                .icon(IconName::X)
+                                .ghost()
+                                .tooltip("Close panel")
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.close_info_panel(cx);
                                 })),
@@ -21490,14 +21520,10 @@ impl QuillApp {
                     .border_color(cx.theme().border)
                     .child(div().font_semibold().child("Downloads"))
                     .child(
-                        div()
-                            .id("downloads-panel-close")
-                            .cursor_pointer()
-                            .px_2()
-                            .py_1()
-                            .rounded_md()
-                            .text_color(cx.theme().muted_foreground)
-                            .child("✕")
+                        Button::new("downloads-panel-close")
+                            .icon(IconName::X)
+                            .ghost()
+                            .tooltip("Close downloads")
                             .on_click(cx.listener(|this, _, _, cx| {
                                 if let Some(live) = this.live.as_mut() {
                                     live.driver.session.downloads_panel_open = false;
@@ -21625,6 +21651,7 @@ impl QuillApp {
                 div()
                     .id(("download-cancel", file_id as u64))
                     .cursor_pointer()
+                    .pressable(cx.theme())
                     .text_xs()
                     .text_color(accent())
                     .child("Cancel")
@@ -21637,6 +21664,7 @@ impl QuillApp {
                 div()
                     .id(("download-retry", file_id as u64))
                     .cursor_pointer()
+                    .pressable(cx.theme())
                     .text_xs()
                     .text_color(accent())
                     .child("Retry")
@@ -21652,6 +21680,7 @@ impl QuillApp {
                     div()
                         .id(("download-open", file_id as u64))
                         .cursor_pointer()
+                        .pressable(cx.theme())
                         .text_xs()
                         .text_color(accent())
                         .child("Open")
@@ -21663,6 +21692,7 @@ impl QuillApp {
                     div()
                         .id(("download-reveal", file_id as u64))
                         .cursor_pointer()
+                        .pressable(cx.theme())
                         .text_xs()
                         .text_color(accent())
                         .child("Show in folder")
@@ -21813,6 +21843,7 @@ impl QuillApp {
                     div()
                         .id("shared-media-retry")
                         .cursor_pointer()
+                        .pressable(cx.theme())
                         .px_3()
                         .py_1()
                         .rounded_md()
@@ -21844,7 +21875,7 @@ impl QuillApp {
                             .px_3()
                             .py_2()
                             .cursor_pointer()
-                            .hover(|this| this.bg(cx.theme().accent.opacity(0.12)))
+                            .pressable(cx.theme())
                             .child(div().text_lg().child(item.glyph))
                             .child(
                                 div()
@@ -28921,6 +28952,7 @@ impl QuillApp {
                     .gap_2()
                     .min_w_0()
                     .cursor_pointer()
+                    .pressable(cx.theme())
                     .on_click(cx.listener(move |this, _, window, cx| {
                         this.open_supergroup_panel(supergroup_id, window, cx);
                     }))
@@ -28988,6 +29020,7 @@ impl QuillApp {
                         .id("conversation-title")
                         .font_semibold()
                         .cursor_pointer()
+                        .pressable(cx.theme())
                         .on_click(cx.listener(move |this, _, window, cx| {
                             this.open_user_panel(user_id, window, cx);
                         }))
@@ -31519,6 +31552,7 @@ impl QuillApp {
                     .min_w_0()
                     .flex_1()
                     .cursor_pointer()
+                    .pressable(cx.theme())
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.jump_to_pinned_message(message_id, cx);
                     }))
@@ -31690,6 +31724,7 @@ impl QuillApp {
                     .items_center()
                     .justify_center()
                     .cursor_pointer()
+                    .pressable(cx.theme())
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.send_gif_pick(file_id, duration, width, height, cx);
                     }))
@@ -31839,6 +31874,7 @@ impl QuillApp {
                     .items_center()
                     .justify_center()
                     .cursor_pointer()
+                    .pressable(cx.theme())
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.send_sticker_pick(file_id, emoji.clone(), width, height, thumb, cx);
                     }))
@@ -33650,6 +33686,7 @@ impl QuillApp {
                     Button::new(format!("poll-remove-option-{index}"))
                         .label("✕")
                         .ghost()
+                        .tooltip("Remove option")
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.remove_poll_option_row(index, cx);
                         })),
@@ -34463,6 +34500,7 @@ impl QuillApp {
                                         div()
                                             .id("media-viewer-close")
                                             .cursor_pointer()
+                                            .pressable(cx.theme())
                                             .px_2()
                                             .py_1()
                                             .rounded_md()
@@ -34592,6 +34630,7 @@ impl QuillApp {
                 div()
                     .id(("story-reaction-option", index))
                     .cursor_pointer()
+                    .pressable(cx.theme())
                     .text_2xl()
                     .p_1()
                     .child(emoji.clone())
@@ -35476,6 +35515,7 @@ impl QuillApp {
                                 div()
                                     .id("story-viewer-close")
                                     .cursor_pointer()
+                                    .pressable(cx.theme())
                                     .px_2()
                                     .py_1()
                                     .rounded_md()
@@ -35820,6 +35860,7 @@ impl QuillApp {
                                 div()
                                     .id("story-composer-close")
                                     .cursor_pointer()
+                                    .pressable(cx.theme())
                                     .px_2()
                                     .py_1()
                                     .rounded_md()
@@ -36789,7 +36830,7 @@ fn search_result_row(
         .py_2()
         .rounded_md()
         .cursor_pointer()
-        .hover(|style| style.bg(cx.theme().accent.opacity(0.12)))
+        .pressable(cx.theme())
         .on_click(cx.listener(move |this, _, window, cx| on_pick(this, window, cx)))
         .child(div().font_medium().child(title))
         .child(
@@ -38308,7 +38349,14 @@ impl QuillApp {
                 let is_secret = chat
                     .as_ref()
                     .is_some_and(|c| matches!(c.kind, ChatKind::Secret { .. }));
-                if is_secret {
+                // kit Phase 9: no history entry yet means the first
+                // getChatHistory batch is still in flight — show skeleton
+                // message rows instead of the empty placeholder.
+                let history_loading = open
+                    .is_some_and(|id| session.is_some_and(|s| !s.histories.contains_key(&id.0)));
+                if history_loading {
+                    history_skeleton().into_any_element()
+                } else if is_secret {
                     self.secret_empty_explainer(cx).into_any_element()
                 } else {
                     pane_placeholder(
@@ -38892,6 +38940,7 @@ impl QuillApp {
                     .py_2()
                     .rounded_md()
                     .cursor_pointer()
+                    .pressable(cx.theme())
                     .bg(cx.theme().sidebar)
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.select_topic_ui(topic_id, cx);
@@ -39539,6 +39588,7 @@ impl QuillApp {
                                                 Button::new("select-cancel")
                                                     .label("✕")
                                                     .ghost()
+                                                    .tooltip("Exit selection")
                                                     .on_click(cx.listener(|this, _, _, cx| {
                                                         this.exit_select_mode(cx);
                                                     })),
@@ -39548,20 +39598,28 @@ impl QuillApp {
                         }
                         if show_main_list && chats.is_empty() {
                             let loading = self.session().is_some_and(|s| !s.chats_exhausted);
-                            list = list.child(
-                                div()
-                                    .text_xs()
-                                    .text_color(cx.theme().muted_foreground)
-                                    .child(if loading && folder.is_none() {
-                                        "Loading chats…"
-                                    } else if filter == ChatListFilter::Unread {
-                                        "No unread chats."
-                                    } else if folder.is_some() {
-                                        "No chats in this folder yet."
-                                    } else {
-                                        "No chats in the main list."
-                                    }),
-                            );
+                            list = if loading && folder.is_none() {
+                                // kit Phase 9: skeleton rows while the first
+                                // chat batch is still loading.
+                                let mut loading_list = list;
+                                for i in 0..4 {
+                                    loading_list = loading_list.child(chat_list_skeleton_row(i));
+                                }
+                                loading_list
+                            } else {
+                                let (glyph, title, hint) = if filter == ChatListFilter::Unread {
+                                    ("🔕", "No unread chats", "You are all caught up.")
+                                } else if folder.is_some() {
+                                    (
+                                        "📁",
+                                        "No chats in this folder yet",
+                                        "Add chats to the folder from its settings.",
+                                    )
+                                } else {
+                                    ("💬", "No chats yet", "Start a conversation to see it here.")
+                                };
+                                list.child(chat_list_empty_state(glyph, title, hint, cx))
+                            };
                         }
                         // kit Phase 3: the chat rows (main list + archive
                         // section) render through a kit `VirtualList` — only
@@ -43102,6 +43160,104 @@ fn pane_placeholder(
         )
 }
 
+/// kit Phase 9: a loading placeholder row for the chat list — a kit
+/// `Skeleton` avatar circle plus two skeleton text lines, matching the
+/// shape of a chat row.
+fn chat_list_skeleton_row(index: usize) -> impl IntoElement {
+    div()
+        .id(("chat-list-skeleton", index))
+        .flex()
+        .items_center()
+        .gap_3()
+        .px_3()
+        .py_2()
+        .child(Skeleton::new().w(px(40.)).h(px(40.)).rounded_full())
+        .child(
+            div()
+                .flex()
+                .flex_col()
+                .gap_1p5()
+                .flex_1()
+                .child(Skeleton::new().w(px(110.)).h(px(12.)).rounded_sm())
+                .child(
+                    Skeleton::new()
+                        .w(px(190.))
+                        .h(px(10.))
+                        .rounded_sm()
+                        .secondary(),
+                ),
+        )
+}
+
+/// kit Phase 9: centered empty state for the chat list (no chats / empty
+/// folder / no unread), composed from kit `Skeleton`-free primitives with
+/// theme tokens — glyph, title, hint.
+fn chat_list_empty_state(
+    glyph: &'static str,
+    title: &'static str,
+    hint: &'static str,
+    cx: &mut Context<QuillApp>,
+) -> impl IntoElement {
+    div()
+        .id("chat-list-empty")
+        .flex()
+        .flex_col()
+        .items_center()
+        .justify_center()
+        .gap_2()
+        .px_6()
+        .py_10()
+        .child(div().text_3xl().child(glyph))
+        .child(
+            div()
+                .font_semibold()
+                .text_color(cx.theme().foreground)
+                .child(title),
+        )
+        .child(
+            div()
+                .text_sm()
+                .text_center()
+                .text_color(cx.theme().muted_foreground)
+                .child(hint),
+        )
+}
+
+/// kit Phase 9: loading placeholders for the message history — a few
+/// alternating kit `Skeleton` bubbles while the first history batch is
+/// in flight.
+fn history_skeleton() -> impl IntoElement {
+    div()
+        .id("history-skeleton")
+        .flex()
+        .flex_col()
+        .gap_3()
+        .p_4()
+        .child(Skeleton::new().w(px(220.)).h(px(52.)).rounded_lg())
+        .child(
+            div()
+                .flex()
+                .justify_end()
+                .child(Skeleton::new().w(px(180.)).h(px(40.)).rounded_lg()),
+        )
+        .child(
+            Skeleton::new()
+                .w(px(260.))
+                .h(px(52.))
+                .rounded_lg()
+                .secondary(),
+        )
+        .child(
+            div().flex().justify_end().child(
+                Skeleton::new()
+                    .w(px(140.))
+                    .h(px(36.))
+                    .rounded_lg()
+                    .secondary(),
+            ),
+        )
+}
+
 fn chat_list_caption(
     mode: PaneMode,
     session: Option<&Session>,
@@ -43447,6 +43603,7 @@ impl QuillApp {
                 div()
                     .id("archive-section-toggle")
                     .cursor_pointer()
+                    .pressable(cx.theme())
                     .text_xs()
                     .font_semibold()
                     .text_color(cx.theme().muted_foreground)
@@ -43553,6 +43710,7 @@ fn session_chat_row(
         .justify_center()
         .rounded_md()
         .cursor_pointer()
+        .pressable(cx.theme())
         .bg(if selected {
             cx.theme().accent.opacity(0.15)
         } else {
@@ -44885,6 +45043,7 @@ fn poll_option_row(
     if votable {
         row = row
             .cursor_pointer()
+            .pressable(cx.theme())
             .on_click(cx.listener(move |this, _, _, cx| {
                 this.vote_on_poll(chat_id, message_id, index, cx);
             }));
@@ -45285,6 +45444,7 @@ fn session_history_row(
                     .rounded_md()
                     .text_xs()
                     .cursor_pointer()
+                    .pressable(cx.theme())
                     .when(chosen, |this| {
                         this.bg(accent_strong())
                             .text_color(text_on_fill())
@@ -45638,6 +45798,7 @@ fn rich_text_line(
                     .px_1()
                     .text_color(fill_muted())
                     .cursor_pointer()
+                    .pressable(cx.theme())
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.spoiler_revealed.insert(key);
                         cx.notify();
@@ -45887,6 +46048,7 @@ fn link_preview_card(
         .border_color(accent())
         .bg(bg_canvas())
         .cursor_pointer()
+        .pressable(cx.theme())
         .on_click(cx.listener(move |this, _, _, cx| {
             // MED4: `instant_view_version > 0` (schema:4570) opens the IV
             // reader (mode-gated); otherwise the browser. Embedded
@@ -46215,6 +46377,7 @@ fn forward_dest_row(id: ChatId, title: String, cx: &mut Context<QuillApp>) -> im
         .py_2()
         .rounded_md()
         .cursor_pointer()
+        .pressable(cx.theme())
         .bg(cx.theme().sidebar)
         .on_click(cx.listener(move |this, _, _, cx| {
             this.submit_forward_to(id, cx);
@@ -46289,6 +46452,7 @@ fn reply_quote_strip(
         .border_color(accent())
         .bg(bg_canvas())
         .cursor_pointer()
+        .pressable(cx.theme())
         .on_click(cx.listener(move |this, _, _, cx| {
             this.jump_to_replied_message(target_id, cx);
         }))
@@ -46454,6 +46618,7 @@ fn photo_attachment(
         // click-to-download placeholder, secret photos stay inert.
         .when_some(viewer_open, |this, (chat_id, message_id)| {
             this.cursor_pointer()
+                .pressable(cx.theme())
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.open_media_viewer(chat_id, message_id, cx);
                 }))
@@ -46462,6 +46627,7 @@ fn photo_attachment(
             !has_viewer_open && photo.click_requests_download(),
             |this| {
                 this.cursor_pointer()
+                    .pressable(cx.theme())
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.request_media_download(open_id, sponsored, cx);
                     }))
@@ -46678,6 +46844,7 @@ fn video_attachment(
                 .relative()
                 .when_some(viewer_open, |this, (chat_id, message_id)| {
                     this.cursor_pointer()
+                        .pressable(cx.theme())
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.open_media_viewer(chat_id, message_id, cx);
                         }))
@@ -47021,6 +47188,7 @@ fn sticker_attachment(
         .justify_center()
         .when(display_id.0 != 0, |this| {
             this.cursor_pointer()
+                .pressable(cx.theme())
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.request_media_download(display_id, None, cx);
                 }))
@@ -47449,6 +47617,7 @@ fn document_chip(
             div()
                 .id(("doc-chip-name", row_id))
                 .cursor_pointer()
+                .pressable(cx.theme())
                 .child(div().text_sm().font_medium().child(name))
                 .on_click(cx.listener(move |this, _, _, cx| {
                     if ready {
@@ -47484,6 +47653,7 @@ fn document_chip(
                 div()
                     .id(("doc-action", row_id))
                     .cursor_pointer()
+                    .pressable(cx.theme())
                     .mt_1()
                     .text_xs()
                     .text_color(accent())
@@ -47784,6 +47954,7 @@ fn location_row(
             .text_sm()
             .text_color(accent())
             .cursor_pointer()
+            .pressable(cx.theme())
             .on_click(cx.listener(move |this, _, _, cx| {
                 this.open_message_url(&url, cx);
             }))
@@ -47840,6 +48011,7 @@ fn venue_row(
                 .text_sm()
                 .text_color(accent())
                 .cursor_pointer()
+                .pressable(cx.theme())
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.open_message_url(&url, cx);
                 }))
