@@ -39,6 +39,41 @@ pub enum OptionValue {
     Empty,
 }
 
+/// Bots slice: one `inlineQueryResults` page (TDLib 1.8.67,
+/// `schema/td_api.tl:7716`) — the `getInlineQueryResults` answer (schema
+/// line 13019).
+#[derive(Debug, Clone, PartialEq)]
+pub struct InlineQueryResultsPage {
+    pub inline_query_id: i64,
+    pub button: Option<InlineQueryResultsButton>,
+    pub results: Vec<InlineQueryResultSummary>,
+    pub next_offset: String,
+}
+
+/// Bots slice: one inline query result, reduced to the fields the picker
+/// needs. Thumbnails are deliberately NOT parsed (no URL on the wire;
+/// file-download wiring is out of slice).
+#[derive(Debug, Clone, PartialEq)]
+pub struct InlineQueryResultSummary {
+    pub id: String,
+    pub kind: String,
+    pub title: String,
+    pub description: String,
+}
+
+/// Bots slice: `inlineQueryResultsButton` (TDLib 1.8.67,
+/// `schema/td_api.tl:7708`) — the button shown above the results.
+#[derive(Debug, Clone, PartialEq)]
+pub struct InlineQueryResultsButton {
+    pub text: String,
+    pub kind: String,
+    /// StartBot parameter, empty unless `kind == "start_bot"`
+    /// (schema `td_api.tl:7701`).
+    pub parameter: String,
+    /// WebApp url, empty unless `kind == "web_app"` (schema `td_api.tl:7704`).
+    pub url: String,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum EnvelopePayload {
     UpdateAuthorizationState(AuthorizationState),
@@ -454,6 +489,11 @@ pub enum EnvelopePayload {
         total_count: i32,
         voters: Vec<MessageSender>,
     },
+    /// Bots slice: `inlineQueryResults` (TDLib 1.8.67,
+    /// `schema/td_api.tl:7716`) — the `getInlineQueryResults` answer
+    /// (schema line 13019). One page of result summaries; the reducer
+    /// appends pages into `Session::inline_query`.
+    InlineQueryResults(InlineQueryResultsPage),
     /// `chats` — `searchChats` / `searchRecentlyFoundChats` / similar.
     Chats {
         total_count: i32,
@@ -7128,6 +7168,31 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
                 })
                 .unwrap_or_default(),
         }),
+        // Bots slice: `inlineQueryResults` — the `getInlineQueryResults`
+        // answer (schema 1.8.67, line 7716). Missing fields degrade to
+        // empty strings; thumbnails are dropped (no URL on the wire).
+        "inlineQueryResults" => Ok(EnvelopePayload::InlineQueryResults(
+            InlineQueryResultsPage {
+                inline_query_id: value
+                    .get("inline_query_id")
+                    .and_then(Value::as_i64)
+                    .unwrap_or(0),
+                button: value
+                    .get("button")
+                    .filter(|button| !button.is_null())
+                    .map(parse_inline_query_results_button),
+                results: value
+                    .get("results")
+                    .and_then(Value::as_array)
+                    .map(|results| results.iter().map(parse_inline_query_result).collect())
+                    .unwrap_or_default(),
+                next_offset: value
+                    .get("next_offset")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string(),
+            },
+        )),
         // Phase C3a: `text` (schema 1.8.67, line 10071) — the
         // `joinVideoChat` / `joinGroupCall` answer ("join response
         // payload for tgcalls"). Quill stores it, never consumes it
@@ -8218,6 +8283,81 @@ fn json_i64_field(value: Option<&Value>, default: i64) -> i64 {
                 .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
         })
         .unwrap_or(default)
+}
+
+/// Bots slice: one `InlineQueryResult` (schema 1.8.67, lines 7628–7695),
+/// reduced to id/kind/title/description. Variants without a title or
+/// description field (contact, venue, game, audio, sticker) get empty
+/// strings; an unknown future variant degrades to `kind: "unknown"`.
+fn parse_inline_query_result(value: &Value) -> InlineQueryResultSummary {
+    let type_name = value
+        .get("@type")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let kind = match type_name {
+        "inlineQueryResultArticle" => "article",
+        "inlineQueryResultContact" => "contact",
+        "inlineQueryResultLocation" => "location",
+        "inlineQueryResultVenue" => "venue",
+        "inlineQueryResultGame" => "game",
+        "inlineQueryResultAnimation" => "animation",
+        "inlineQueryResultAudio" => "audio",
+        "inlineQueryResultDocument" => "document",
+        "inlineQueryResultPhoto" => "photo",
+        "inlineQueryResultSticker" => "sticker",
+        "inlineQueryResultVideo" => "video",
+        "inlineQueryResultVoiceNote" => "voice_note",
+        _ => "unknown",
+    };
+    InlineQueryResultSummary {
+        id: value
+            .get("id")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string(),
+        kind: kind.to_string(),
+        title: value
+            .get("title")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string(),
+        description: value
+            .get("description")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string(),
+    }
+}
+
+/// Bots slice: `inlineQueryResultsButton` (schema 1.8.67, line 7708).
+fn parse_inline_query_results_button(value: &Value) -> InlineQueryResultsButton {
+    let button_type = value.get("type");
+    let kind = match button_type
+        .and_then(|type_value| type_value.get("@type"))
+        .and_then(Value::as_str)
+    {
+        Some("inlineQueryResultsButtonTypeStartBot") => "start_bot",
+        Some("inlineQueryResultsButtonTypeWebApp") => "web_app",
+        _ => "unknown",
+    };
+    InlineQueryResultsButton {
+        text: value
+            .get("text")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string(),
+        kind: kind.to_string(),
+        parameter: button_type
+            .and_then(|type_value| type_value.get("parameter"))
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string(),
+        url: button_type
+            .and_then(|type_value| type_value.get("url"))
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string(),
+    }
 }
 
 fn parse_message_sender(value: Option<&Value>) -> Result<MessageSender, ParseError> {
@@ -17328,5 +17468,76 @@ mod notification_sound_tests {
                 cooldown_until_date: 1700007200,
             }
         ));
+    }
+
+    /// Bots slice: `inlineQueryResults` (schema 1.8.67, line 7716) —
+    /// article + photo + sticker variants, next_offset, and both button
+    /// shapes (null → None, present → parsed).
+    #[test]
+    fn inline_query_results_parses() {
+        let env = parse_envelope(
+            r#"{
+                "@type": "inlineQueryResults",
+                "inline_query_id": 9001,
+                "button": null,
+                "results": [
+                    {"@type": "inlineQueryResultArticle", "id": "a1", "url": "https://x.test",
+                     "title": "An article", "description": "A description"},
+                    {"@type": "inlineQueryResultPhoto", "id": "p1",
+                     "title": "A photo", "description": ""},
+                    {"@type": "inlineQueryResultSticker", "id": "s1"}
+                ],
+                "next_offset": "25"
+            }"#,
+        )
+        .unwrap();
+        let page = match env.payload {
+            EnvelopePayload::InlineQueryResults(page) => page,
+            other => panic!("unexpected {other:?}"),
+        };
+        assert_eq!(page.inline_query_id, 9001);
+        assert_eq!(page.button, None);
+        assert_eq!(page.next_offset, "25");
+        assert_eq!(page.results.len(), 3);
+        assert_eq!(page.results[0].id, "a1");
+        assert_eq!(page.results[0].kind, "article");
+        assert_eq!(page.results[0].title, "An article");
+        assert_eq!(page.results[0].description, "A description");
+        assert_eq!(page.results[1].kind, "photo");
+        assert_eq!(page.results[1].title, "A photo");
+        // Sticker has no title/description fields — lenient empty strings.
+        assert_eq!(page.results[2].id, "s1");
+        assert_eq!(page.results[2].kind, "sticker");
+        assert_eq!(page.results[2].title, "");
+        assert_eq!(page.results[2].description, "");
+
+        let env = parse_envelope(
+            r#"{
+                "@type": "inlineQueryResults",
+                "inline_query_id": 9002,
+                "button": {"@type": "inlineQueryResultsButton", "text": "More",
+                           "type": {"@type": "inlineQueryResultsButtonTypeWebApp", "url": "https://x.test"}},
+                "results": [],
+                "next_offset": ""
+            }"#,
+        )
+        .unwrap();
+        match env.payload {
+            EnvelopePayload::InlineQueryResults(page) => {
+                assert_eq!(page.inline_query_id, 9002);
+                assert_eq!(
+                    page.button,
+                    Some(InlineQueryResultsButton {
+                        text: "More".to_string(),
+                        kind: "web_app".to_string(),
+                        parameter: String::new(),
+                        url: "https://x.test".to_string(),
+                    })
+                );
+                assert!(page.results.is_empty());
+                assert_eq!(page.next_offset, "");
+            }
+            other => panic!("unexpected {other:?}"),
+        }
     }
 }

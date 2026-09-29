@@ -27,10 +27,10 @@ use crate::settings::{
 use crate::state::{
     AdminListFetch, AdminRightsFetch, CHAT_EVENT_LOG_PAGE_SIZE, ChatEventLogFetch,
     ChatSearchJumpNeed, ChatStatisticsFetch, ComposerLinkPreview, ForwardFlight, InfoPanelTarget,
-    InstantViewPage, InviteLinkFetch, JoinRequestFetch, LoginUrlRequest, MemberListFilter,
-    MemberStatusChange, PasswordOp, PaymentRequest, PollVotersFetch, RequestPurpose,
-    RequestRollback, SearchStatus, Session, SharedMediaTab, ShutdownPhase, SupergroupMembersFetch,
-    WelcomeMessagesFetch,
+    InlineQueryFetch, InlineQuerySlot, InstantViewPage, InviteLinkFetch, JoinRequestFetch,
+    LoginUrlRequest, MemberListFilter, MemberStatusChange, PasswordOp, PaymentRequest,
+    PollVotersFetch, RequestPurpose, RequestRollback, SearchStatus, Session, SharedMediaTab,
+    ShutdownPhase, SupergroupMembersFetch, WelcomeMessagesFetch,
 };
 use crate::story_composer::{StoryMediaKind, StoryPrivacy};
 use crate::telegram::client::{LiveTdJson, OwnedEnvelope, ReceiveBridge};
@@ -77,11 +77,12 @@ use crate::telegram::requests::{
     get_chat_sponsored_messages, get_chat_statistics,
     get_chats_to_post_stories as get_chats_to_post_stories_request, get_commands,
     get_connected_websites, get_contacts, get_forum_topics, get_full_rich_message, get_group_call,
-    get_installed_sticker_sets, get_link_preview, get_login_url, get_login_url_info, get_me,
-    get_message_link, get_message_properties, get_message_thread_history, get_password_state,
-    get_payment_form, get_payment_receipt, get_poll_voters, get_saved_animations,
-    get_saved_notification_sounds, get_scope_notification_settings, get_secret_chat,
-    get_sticker_set, get_storage_statistics, get_story, get_story_available_reactions,
+    get_inline_query_results, get_installed_sticker_sets, get_link_preview, get_login_url,
+    get_login_url_info, get_me, get_message_link, get_message_properties,
+    get_message_thread_history, get_password_state, get_payment_form, get_payment_receipt,
+    get_poll_voters, get_saved_animations, get_saved_notification_sounds,
+    get_scope_notification_settings, get_secret_chat, get_sticker_set, get_storage_statistics,
+    get_story, get_story_available_reactions,
     get_story_interactions as get_story_interactions_request, get_supergroup,
     get_supergroup_full_info, get_supergroup_members, get_user_full_info,
     get_user_privacy_setting_rules, get_video_chat_invite_link, get_video_chat_rtmp_url,
@@ -10667,6 +10668,58 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
     }
 
+    /// Bots slice: `getInlineQueryResults` (TDLib 1.8.67, line 13019).
+    /// `offset` is "" for the first chunk, the loaded page's
+    /// `next_offset` for the next. No-op while a request is in flight for
+    /// the (chat, bot) pair. A first page marks the single slot `Loading`
+    /// (a re-query replaces it); pagination leaves the loaded page.
+    pub fn inline_query(
+        &mut self,
+        bot_user_id: i64,
+        chat_id: ChatId,
+        query: &str,
+        offset: &str,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if self
+            .session
+            .requests
+            .has_inline_query_in_flight(chat_id, bot_user_id)
+        {
+            return Ok(None);
+        }
+        let first_page = offset.is_empty();
+        if first_page {
+            self.session.inline_query = Some(InlineQuerySlot {
+                chat_id,
+                bot_user_id,
+                query: query.to_string(),
+                fetch: InlineQueryFetch::Loading,
+            });
+        }
+        let extra = self.session.request(
+            RequestPurpose::GetInlineQueryResults {
+                chat_id,
+                bot_user_id,
+                first_page,
+            },
+            Some(chat_id),
+        );
+        let json = get_inline_query_results(extra, bot_user_id, chat_id, query, offset);
+        match self.sender.send_json(&json) {
+            Ok(()) => Ok(Some(extra)),
+            Err(err) => {
+                self.session.requests.take(extra);
+                if first_page {
+                    self.session.inline_query = None;
+                }
+                Err(err)
+            }
+        }
+    }
+
     /// B4: stop a poll / quiz via `stopPoll` (schema 1.8.67, line 12953).
     /// Guards: chats path active, supported chat, the message is a live
     /// open poll. The UI confirms before calling; `can_be_edited`
@@ -12379,6 +12432,117 @@ mod tests {
         assert!(debug.contains("<redacted>"));
         assert!(!debug.contains("unit-test-hash"));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Bots slice: `ConnectDriver::inline_query` — a first page sets the
+    /// slot to `Loading` and sends one `getInlineQueryResults`, a second
+    /// call while in flight is a no-op that leaves the slot alone, and a
+    /// first-page send failure rolls the slot back to `None`.
+    #[test]
+    fn driver_inline_query_first_page_sends_dedupes_and_rolls_back() {
+        type InlineQueryDriverHarness = (
+            std::path::PathBuf,
+            ConnectDriver<Arc<RecordingSender>>,
+            Arc<RecordingSender>,
+        );
+
+        fn inline_query_driver() -> InlineQueryDriverHarness {
+            let store = MemorySecretStore::new();
+            let (dir, prepared) = prepared_tmp(&store);
+            let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+            let sender = Arc::new(RecordingSender::new());
+            let session = Session::new(AccountKey::primary(), sink.clone());
+            let mut driver =
+                ConnectDriver::new(session, sender.clone(), test_credentials(), prepared);
+            let seq = AtomicU64::new(0);
+            driver
+                .ingest(
+                    copy_and_parse(
+                        r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+                        &seq,
+                        &sink,
+                    )
+                    .unwrap(),
+                )
+                .unwrap();
+            (dir, driver, sender)
+        }
+
+        fn failing_inline_query_driver() -> (
+            std::path::PathBuf,
+            ConnectDriver<Arc<FailFirstInlineQuerySender>>,
+        ) {
+            let store = MemorySecretStore::new();
+            let (dir, prepared) = prepared_tmp(&store);
+            let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+            let sender = Arc::new(FailFirstInlineQuerySender::new());
+            let session = Session::new(AccountKey::primary(), sink.clone());
+            let mut driver = ConnectDriver::new(session, sender, test_credentials(), prepared);
+            let seq = AtomicU64::new(0);
+            driver
+                .ingest(
+                    copy_and_parse(
+                        r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+                        &seq,
+                        &sink,
+                    )
+                    .unwrap(),
+                )
+                .unwrap();
+            (dir, driver)
+        }
+
+        let (dir, mut driver, sender) = inline_query_driver();
+
+        // (a) first page: slot → Loading, one getInlineQueryResults sent.
+        let extra = driver
+            .inline_query(77, ChatId(1), "@gif cats", "")
+            .expect("first page")
+            .expect("request id");
+        match &driver.session.inline_query {
+            Some(slot) => {
+                assert_eq!(slot.chat_id, ChatId(1));
+                assert_eq!(slot.bot_user_id, 77);
+                assert_eq!(slot.query, "@gif cats");
+                assert!(matches!(slot.fetch, InlineQueryFetch::Loading));
+            }
+            None => panic!("inline query slot missing"),
+        }
+        let inline_query_sends = || {
+            sender
+                .snapshot()
+                .into_iter()
+                .filter(|json| json.contains("getInlineQueryResults"))
+                .map(|json| serde_json::from_str::<Value>(&json).unwrap())
+                .collect::<Vec<_>>()
+        };
+        let first_page = inline_query_sends();
+        assert_eq!(first_page.len(), 1);
+        assert_eq!(first_page[0]["@type"], "getInlineQueryResults");
+        assert_eq!(first_page[0]["@extra"], extra.0.to_string());
+        assert_eq!(first_page[0]["bot_user_id"], 77);
+        assert_eq!(first_page[0]["chat_id"], 1);
+        assert_eq!(first_page[0]["query"], "@gif cats");
+        assert_eq!(first_page[0]["offset"], "");
+
+        // (b) in flight: the second call no-ops and the slot is untouched.
+        assert_eq!(
+            driver.inline_query(77, ChatId(1), "@gif cats", ""),
+            Ok(None)
+        );
+        assert!(matches!(
+            driver.session.inline_query.as_ref().map(|slot| &slot.fetch),
+            Some(InlineQueryFetch::Loading)
+        ));
+        assert_eq!(inline_query_sends().len(), 1);
+        let _ = std::fs::remove_dir_all(&dir);
+
+        // (c) a first-page send failure rolls the slot back to None.
+        let (dir2, mut driver2) = failing_inline_query_driver();
+        let failed = driver2.inline_query(77, ChatId(1), "@gif cats", "");
+        assert!(matches!(failed, Err(ConnectSendError::Native)));
+        assert!(driver2.session.inline_query.is_none());
+        let _ = std::fs::remove_dir_all(&dir2);
     }
 
     /// Phase B1: the three secret-chat request shapes
@@ -19978,6 +20142,37 @@ mod tests {
     impl JsonSender for Arc<FailFirstCallSender> {
         fn send_json(&self, request: &str) -> Result<(), ConnectSendError> {
             if request.contains("sendCallSignalingData")
+                && *self.fail_next.lock().expect("failing sender")
+            {
+                *self.fail_next.lock().expect("failing sender") = false;
+                return Err(ConnectSendError::Native);
+            }
+            self.sent
+                .lock()
+                .expect("failing sender")
+                .push(request.to_string());
+            Ok(())
+        }
+    }
+
+    /// Bots slice: fails the first `getInlineQueryResults` send.
+    struct FailFirstInlineQuerySender {
+        sent: Mutex<Vec<String>>,
+        fail_next: Mutex<bool>,
+    }
+
+    impl FailFirstInlineQuerySender {
+        fn new() -> Self {
+            Self {
+                sent: Mutex::new(Vec::new()),
+                fail_next: Mutex::new(true),
+            }
+        }
+    }
+
+    impl JsonSender for Arc<FailFirstInlineQuerySender> {
+        fn send_json(&self, request: &str) -> Result<(), ConnectSendError> {
+            if request.contains("getInlineQueryResults")
                 && *self.fail_next.lock().expect("failing sender")
             {
                 *self.fail_next.lock().expect("failing sender") = false;
