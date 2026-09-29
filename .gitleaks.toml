@@ -1,0 +1,26 @@
+# Quill secret scanning. Extends the gitleaks default ruleset with a custom
+# rule for Telegram API hashes, and allowlists the two reviewed synthetic
+# secret-chat key-fingerprint fixtures (exact secret values only — never
+# whole files).
+
+title = "Quill gitleaks config"
+
+[extend]
+useDefault = true
+
+[[rules]]
+description = "Telegram API hash: 32 hex chars assigned to an api-hash credential name"
+id = "telegram-api-hash"
+regex = '''(?i)(?:api[_-]?hash|telegram[_-]?api[_-]?hash)["']?\s*[:=]\s*["']?[0-9a-f]{32}["']?'''
+tags = ["telegram", "api"]
+
+# Exact allowlists for the two reviewed synthetic fixtures. Each entry is the
+# literal secret value — a match anywhere else with a different value still
+# fails the scan.
+[[allowlists]]
+description = "synthetic secret-chat key_hash test fixture: base64 of bytes 0x00..0x1f (src/telegram/envelope.rs test)"
+regexes = ['''AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8gISIj''']
+
+[[allowlists]]
+description = "synthetic secret-chat key fingerprint demo fixture: deterministic xorshift output, commented NOT a real key (src/ui/mod.rs screenshot demo and the same fixture in a src/state.rs test)"
+regexes = ['''GUYMUT5VLuA6j7l7taiDAR9tM\+Y30on50Cklur/t\+/w57sWo''']
