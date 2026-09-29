@@ -6565,3 +6565,37 @@ is applied to the stored message in place.
   - `auth-qr-authorize-other` — separate slice, stays unchecked.
   - Profile background custom emoji picker — same constructor's second field; deferred until an emoji-picker exists.
   - Accent colors on other users' profiles / chat accent rendering — receive-side display is a separate UI slice.
+
+## Slice communities-search-filter — community chat-type filter for message search (2026-09-29)
+
+**Scope:** `parity:communities-search-filter` — the typed-search panel gains
+"All chats" + per-community filter chips fed by `SessionState.communities`
+(`updateCommunity`; have_access only — TDLib has no list-communities method).
+Chip click stores `SearchState::community_filter` and re-runs the query; the
+driver sends `searchMessagesChatTypeFilterCommunity { community_id }` in the
+`chat_type_filter` slot. No selection (or "All chats") keeps the historical
+null filter.
+
+- **Schema (pinned TDLib 1.8.67, `schema/td_api.tl`, verified):**
+  - `searchMessagesChatTypeFilterCommunity` (:6344) — chat-type filter
+    constructor carrying `community_id`.
+- **Built (review fixup applied — the free builder function was dropped):**
+  - `requests.rs` +14: `search_messages` takes `community_filter: Option<i64>`
+    and builds the constructor inline (edit to the existing function only).
+  - `connect.rs` +27: `set_search_community_filter` driver method on the
+    existing `Connect` type + import + call-site wiring (passes
+    `self.session.search.community_filter` straight through).
+  - `state.rs` +9: `SearchState::community_filter` field + Default init +
+    resets (per-search-session state the driver must read).
+  - `ui/mod.rs` +75: `search_community_filter_chips` render fn +
+    `set_search_community_filter` handler methods on the existing app type +
+    chips-row hook in `search_results`.
+  - Tests in the new named file `tests/community_search_filter.rs`
+    (integration tests drive `search_messages` directly with `Some(42)`/`None`).
+  - README box `parity:communities-search-filter` checked.
+- **Key decisions (ponytail):** inline the constructor in `search_messages`
+  rather than a new free function; no new state shape, no new modules.
+- **Not verifiable without live Telegram:** real community-filtered search
+  results from the server.
+- **Out of this slice:** other `searchMessagesChatTypeFilter*` variants
+  (separate boxes).

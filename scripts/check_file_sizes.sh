@@ -16,7 +16,7 @@ HARD_CAP=2000
 # elsewhere.
 WAIVERS=(
   "src/ui/mod.rs:49279"
-  "src/connect.rs:24950"
+  "src/connect.rs:24949"
   "src/state.rs:21863"
   "src/telegram/envelope.rs:18722"
   "src/telegram/requests.rs:10531"
@@ -88,8 +88,8 @@ WAIVERS=(
   # post-#180): type-coherent extensions only — requests.rs +14
   # (10517 → 10531: `community_filter: Option<i64>` param + inline
   # chat_type_filter constructor in `search_messages` — an edit to the
-  # existing function only, no new functions); connect.rs +28
-  # (24922 → 24950: `set_search_community_filter` method on the existing
+  # existing function only, no new functions); connect.rs +27
+  # (24922 → 24949: `set_search_community_filter` method on the existing
   # `Connect` type + import + call-site wiring); state.rs +9
   # (21854 → 21863: `SearchState::community_filter` field + Default init +
   # resets); ui/mod.rs +75 (49204 → 49279: `search_community_filter_chips`
