@@ -15,10 +15,10 @@ HARD_CAP=2000
 # types); the bump is exact and the PR body says why the code can't live
 # elsewhere.
 WAIVERS=(
-  "src/ui/mod.rs:48751"
-  "src/connect.rs:24449"
-  "src/state.rs:21350"
-  "src/telegram/envelope.rs:18363"
+  "src/ui/mod.rs:48818"
+  "src/connect.rs:24643"
+  "src/state.rs:21516"
+  "src/telegram/envelope.rs:18426"
   "src/telegram/requests.rs:10434"
   # Slice A10 (2026-09-29): type-coherent extensions only — ui/mod.rs +3
   # (`mod auth_recovery` decl, `QuillApp` recovery fields + ctor init,
@@ -34,6 +34,13 @@ WAIVERS=(
   # Slice S14 (2026-09-29): type-coherent extensions only — state.rs +19
   # (story-restriction `RequestPurpose` variant + reducer match arms +
   # `user_message` arms), envelope.rs +17 (restriction-notice payload
+  # parsing arms on the existing `EnvelopePayload` match).
+  # Slice S3 (2026-09-29, rebased): type-coherent extensions only —
+  # ui/mod.rs +67 (privacy overlay + per-rule editor + exception-picker
+  # render arms on the existing settings-surface match); connect.rs +193
+  # (get/set privacy-rule + blocked-sender driver methods on the existing
+  # `Connect` type); state.rs +166 (`PrivacyRuleDetail`/`PrivacyKeyState`
+  # types + reducer match arms); envelope.rs +63 (privacy-rule payload
   # parsing arms on the existing `EnvelopePayload` match).
   "src/calls/engine.rs:3212"
   "tests/replay.rs:3505"
