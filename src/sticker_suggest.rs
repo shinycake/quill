@@ -12,6 +12,10 @@
 use serde::{Deserialize, Serialize};
 
 /// How many stickers one suggestion query asks TDLib for.
+/// ponytail: arbitrary page size — small enough to keep the composer
+/// suggestion row to a single scroll-free strip, big enough that
+/// `searchStickers` rarely needs a second page. Neither Telegram Desktop
+/// nor TGX publishes this number.
 pub const SUGGEST_LIMIT: i32 = 12;
 
 /// Sticker-suggestion mode (client-side; Telegram Desktop's

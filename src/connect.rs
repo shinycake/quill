@@ -8388,6 +8388,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             _ => suggest_emoji_for(text),
         };
         let Some(emoji) = emoji else {
+            drop(
+                self.session
+                    .requests
+                    .take_purpose(RequestPurpose::SuggestStickers),
+            );
             self.session.clear_sticker_suggestions();
             return Ok(None);
         };
@@ -24398,6 +24403,75 @@ mod tests {
         assert!(snapshot[sent].contains("\"@type\":\"getConnectedWebsites\""));
         assert_eq!(driver.session.connected_websites.as_ref().unwrap().len(), 1);
         assert!(driver.session.websites_stale);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Slice S12 regression: the clear path (composer text with no
+    /// trailing emoji) must drop the pending `SuggestStickers` request,
+    /// not just the cached suggestions — a late answer for the taken
+    /// request is then ignored instead of landing in `suggestions`
+    /// while `suggest_for` is `None`.
+    #[test]
+    fn s12_clear_path_drops_pending_suggest_so_late_answer_is_ignored() {
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+        let sender = Arc::new(RecordingSender::new());
+        let session = Session::new(AccountKey::primary(), sink.clone());
+        let mut driver = ConnectDriver::new(session, sender, test_credentials(), prepared);
+        let seq = AtomicU64::new(0);
+        driver
+            .ingest(
+                copy_and_parse(
+                    r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+                    &seq,
+                    &sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+
+        // Issue a suggestion request for the trailing emoji.
+        let extra = driver
+            .update_sticker_suggestions("hello 😀")
+            .expect("issue")
+            .expect("request id");
+        assert!(
+            driver
+                .session
+                .requests
+                .has_purpose(RequestPurpose::SuggestStickers)
+        );
+        assert_eq!(driver.session.stickers.suggest_for.as_deref(), Some("😀"));
+
+        // Clear path: no trailing emoji — the pending request must go
+        // with the cached suggestions.
+        assert_eq!(driver.update_sticker_suggestions("no emoji here"), Ok(None));
+        assert!(
+            !driver
+                .session
+                .requests
+                .has_purpose(RequestPurpose::SuggestStickers)
+        );
+        assert!(driver.session.stickers.suggest_for.is_none());
+        assert!(driver.session.stickers.suggestions.is_empty());
+
+        // A late answer for the taken request has no pending entry left,
+        // so it dispatches as a stray and the slot stays empty.
+        driver
+            .ingest(
+                copy_and_parse(
+                    &format!(
+                        r#"{{"@type":"stickers","stickers":[{{"@type":"sticker","id":"9001","set_id":"77","width":512,"height":512,"emoji":"😀","format":{{"@type":"stickerFormatWebp"}},"full_type":{{"@type":"stickerFullTypeRegular","premium_animation":null}},"thumbnail":null,"sticker":null}}],"@extra":"{}"}}"#,
+                        extra.0
+                    ),
+                    &seq,
+                    &sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        assert!(driver.session.stickers.suggestions.is_empty());
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
