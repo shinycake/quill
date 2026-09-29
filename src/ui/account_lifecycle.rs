@@ -1,0 +1,434 @@
+use super::*;
+
+/// Slice A9: account lifecycle UI — the A7 UI half. One "Account" dialog
+/// with the self-destruct TTL picker and the delete-account danger zone.
+/// TGX-verbatim copy (`SettingsPrivacyController`,
+/// `TdlibUi::permanentlyDeleteAccount`); the backend (`delete_account`,
+/// `get_account_ttl`, `set_account_ttl`) shipped in slice A7.
+///
+/// TGX TTL options (months → `setAccountTtl` days), verbatim from
+/// `SettingsPrivacyController.onApplySettings`.
+pub(crate) const ACCOUNT_TTL_OPTIONS: [(u8, i32); 6] =
+    [(1, 31), (3, 91), (6, 181), (12, 366), (18, 546), (24, 730)];
+
+/// TGX `buildAccountTtl` display rule, verbatim: under 30 days → days,
+/// otherwise whole months, whole years when they divide evenly.
+pub(crate) fn format_account_ttl(days: i32) -> String {
+    if days < 30 {
+        return if days == 1 {
+            "1 day".to_string()
+        } else {
+            format!("{days} days")
+        };
+    }
+    let months = days / 30;
+    if months % 12 == 0 {
+        let years = months / 12;
+        if years == 1 {
+            "1 year".to_string()
+        } else {
+            format!("{years} years")
+        }
+    } else if months == 1 {
+        "1 month".to_string()
+    } else {
+        format!("{months} months")
+    }
+}
+
+/// TGX option labels (`xMonths` plural): "1 month", "3 months", ….
+fn ttl_option_label(months: u8) -> String {
+    if months == 1 {
+        "1 month".to_string()
+    } else {
+        format!("{months} months")
+    }
+}
+
+/// Slice A9: working state for the Account dialog. Lives on `QuillApp`;
+/// the inputs are cleared on submit/close — passwords never linger (the
+/// A2 rule: auth secrets ride the request JSON only).
+pub(crate) struct AccountLifecycleState {
+    pub(crate) open: bool,
+    pub(crate) confirm_delete: bool,
+    pub(crate) reason: Entity<TextareaState>,
+    pub(crate) password: Entity<TextareaState>,
+}
+
+impl AccountLifecycleState {
+    pub(crate) fn new(window: &mut Window, cx: &mut Context<QuillApp>) -> Self {
+        let reason = cx.new(|cx| {
+            TextareaState::new(window, cx)
+                .placeholder("Reason (optional)")
+                .auto_grow(1, 1)
+                .submit_on_enter(false)
+        });
+        let password = cx.new(|cx| {
+            TextareaState::new(window, cx)
+                .placeholder("Two-step verification password")
+                .auto_grow(1, 1)
+                .submit_on_enter(false)
+        });
+        Self {
+            open: false,
+            confirm_delete: false,
+            reason,
+            password,
+        }
+    }
+}
+
+impl QuillApp {
+    /// Slice A9: open the Account dialog. Live: guarded fetches of the
+    /// authoritative `accountTtl` and `passwordState` (cached values
+    /// reused, in-flight fetches deduped by the drivers). Demo: the
+    /// fixtures are already injected.
+    pub(crate) fn open_account_lifecycle(&mut self, cx: &mut Context<Self>) {
+        self.account_lifecycle.open = true;
+        self.account_lifecycle.confirm_delete = false;
+        if let Some(live) = self.live.as_mut() {
+            let _ = live.driver.get_account_ttl();
+            let _ = live.driver.fetch_password_state();
+        }
+        cx.notify();
+    }
+
+    /// Slice A9: close the dialog and clear its inputs — the password
+    /// must not linger after the dialog is gone (the A2 rule).
+    pub(crate) fn close_account_lifecycle(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.account_lifecycle.open = false;
+        self.account_lifecycle.confirm_delete = false;
+        for input in [
+            &self.account_lifecycle.reason,
+            &self.account_lifecycle.password,
+        ] {
+            input.update(cx, |input, cx| input.set_value("", window, cx));
+        }
+    }
+
+    /// Slice A9: one `setAccountTtl` round-trip. The confirmed days land
+    /// from the authoritative `ok` (never an optimistic write); the
+    /// driver gates one mutation at a time and surfaces `account_error`.
+    pub(crate) fn submit_account_ttl(&mut self, days: i32, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            let _ = live.driver.set_account_ttl(days);
+        }
+        cx.notify();
+    }
+
+    /// Slice A9: one `deleteAccount` round-trip. The password rides the
+    /// request JSON only — it is zeroized and both inputs cleared before
+    /// this returns (the A2 rule).
+    pub(crate) fn submit_delete_account(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let reason = self
+            .account_lifecycle
+            .reason
+            .read(cx)
+            .value()
+            .trim()
+            .to_string();
+        let mut password = self.account_lifecycle.password.read(cx).value().to_string();
+        for input in [
+            &self.account_lifecycle.reason,
+            &self.account_lifecycle.password,
+        ] {
+            input.update(cx, |input, cx| input.set_value("", window, cx));
+        }
+        self.account_lifecycle.confirm_delete = false;
+        if let Some(live) = self.live.as_mut() {
+            let _ = live.driver.delete_account(&reason, &password);
+        }
+        password.zeroize();
+        cx.notify();
+    }
+
+    /// Slice A9: the Account dialog, hosted in a kit `Dialog` via
+    /// `window.open_dialog` (the kit Phase 2 redo pattern). Esc /
+    /// backdrop / ✕ clear state via `on_close`.
+    pub(crate) fn build_account_lifecycle_dialog(
+        app: &Entity<QuillApp>,
+        shell: &Entity<QuillShell>,
+        dialog: Dialog,
+        cx: &mut App,
+    ) -> Dialog {
+        let on_close = QuillShell::on_close_kind(
+            app,
+            shell,
+            DialogKind::AccountLifecycle,
+            |this, window, cx| {
+                this.close_account_lifecycle(window, cx);
+            },
+        );
+        app.update(cx, |this, cx| {
+            let session = this.session();
+            let ttl_days = session.as_ref().and_then(|s| s.account_ttl_days);
+            let ttl_loading = session.is_some_and(|s| s.account_ttl_loading);
+            let mutating = session.is_some_and(|s| s.account_mutating);
+            let error = session.as_ref().and_then(|s| s.account_error.clone());
+            let has_password = session
+                .as_ref()
+                .and_then(|s| s.password_state.as_ref())
+                .is_some_and(|p| p.has_password);
+            let pw_loading = session.is_some_and(|s| s.password_state_loading);
+
+            let mut body = div().flex().flex_col().gap_3();
+            if let Some(line) = error {
+                body = body.child(
+                    div()
+                        .text_xs()
+                        .text_color(danger())
+                        .child(format!("Error: {line}")),
+                );
+            }
+            body = this.account_ttl_body(cx, body, ttl_days, ttl_loading, mutating);
+            body = this.account_delete_body(cx, body, has_password, pw_loading, mutating);
+
+            let footer = div().flex().justify_end().child(
+                Button::new("close-account-lifecycle")
+                    .label("Close")
+                    .ghost()
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.close_account_lifecycle(window, cx);
+                        this.close_kit_dialog_if_done(DialogKind::AccountLifecycle, window, cx);
+                    })),
+            );
+            dialog
+                .overlay(true)
+                .title("Account")
+                .content({
+                    // `content` needs an `Fn` closure, but the body is built once
+                    // per dialog render — hand it over through a one-shot cell.
+                    let body = Rc::new(RefCell::new(Some(body.into_any_element())));
+                    move |content, _, _| {
+                        let body = body
+                            .borrow_mut()
+                            .take()
+                            .unwrap_or_else(|| div().into_any_element());
+                        content.child(body)
+                    }
+                })
+                .footer(footer)
+                .on_close(on_close)
+        })
+    }
+
+    /// Slice A9: the self-destruct TTL section — TGX
+    /// `DeleteAccountIfAwayFor2` + `DeleteAccountHelp`, verbatim, with
+    /// the TGX option set as a kit `RadioGroup` (the chat-TTL picker
+    /// pattern).
+    fn account_ttl_body(
+        &self,
+        cx: &mut Context<Self>,
+        mut body: Div,
+        ttl_days: Option<i32>,
+        ttl_loading: bool,
+        mutating: bool,
+    ) -> Div {
+        body = body
+            .child(
+                div()
+                    .font_semibold()
+                    .text_sm()
+                    .child("Delete my account if away for"),
+            )
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("If you do not come online at least once within this period, your account will be deleted along with all messages and contacts."),
+            )
+            .child(div().text_sm().child(match ttl_days {
+                Some(days) => format!("Currently: {}", format_account_ttl(days)),
+                None => {
+                    if ttl_loading {
+                        "Loading…".to_string()
+                    } else {
+                        "No data yet.".to_string()
+                    }
+                }
+            }));
+        let months_now = ttl_days.map(|days| (days / 30) as u8);
+        let active_ix = months_now.and_then(|months| {
+            ACCOUNT_TTL_OPTIONS
+                .iter()
+                .position(|(option_months, _)| *option_months == months)
+        });
+        body = body.child(
+            RadioGroup::horizontal("account-ttl-options")
+                .selected_index(active_ix)
+                .children(ACCOUNT_TTL_OPTIONS.iter().map(|(months, _)| {
+                    Radio::new(format!("account-ttl-{months}m")).label(ttl_option_label(*months))
+                }))
+                .on_click(cx.listener(move |this, &ix: &usize, _, cx| {
+                    this.submit_account_ttl(ACCOUNT_TTL_OPTIONS[ix].1, cx);
+                })),
+        );
+        if mutating {
+            body = body.child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("Working…"),
+            );
+        }
+        body
+    }
+
+    /// Slice A9: the delete-account danger zone — TGX `DeleteMyAccount`
+    /// / `DeleteMyAccountInfo` / `DeleteAccountInfo` / `DeleteAccountReason`
+    /// / `DeleteAccountHelpHint`, verbatim. The password field appears
+    /// only when the authoritative `passwordState` says the account has
+    /// one (TGX `permanentlyDeleteAccount`).
+    fn account_delete_body(
+        &self,
+        cx: &mut Context<Self>,
+        mut body: Div,
+        has_password: bool,
+        pw_loading: bool,
+        mutating: bool,
+    ) -> Div {
+        body = body
+            .child(
+                div()
+                    .font_semibold()
+                    .text_sm()
+                    .text_color(danger())
+                    .child("Delete my account now"),
+            )
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("Permanently delete the account, and all associated information from Telegram servers."),
+            )
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("Access to your chats will be lost forever. All existing chats will see you as Deleted Account. Using the same phone number will create a new account."),
+            )
+            .child(div().mt_1().font_semibold().text_sm().child("Reason"))
+            .child(Textarea::new(&self.account_lifecycle.reason).h(px(40.)))
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("Tell us about any issues; after you delete the account, we won't be able to restore any data you lose in the process."),
+            );
+        if has_password {
+            body = body
+                .child(
+                    div()
+                        .mt_1()
+                        .font_semibold()
+                        .text_sm()
+                        .child("Two-step verification password"),
+                )
+                .child(Textarea::new(&self.account_lifecycle.password).h(px(40.)))
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child("Sent to TDLib only — never logged"),
+                );
+        } else if pw_loading {
+            body = body.child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("Checking two-step verification status…"),
+            );
+        }
+        if self.account_lifecycle.confirm_delete {
+            body = body.child(self.account_delete_confirm_banner(mutating, cx));
+        } else {
+            body = body.child(
+                Button::new("account-delete")
+                    .label("Permanently delete account")
+                    .danger()
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.account_lifecycle.confirm_delete = true;
+                        cx.notify();
+                    })),
+            );
+        }
+        body
+    }
+
+    /// Slice A9: the final delete confirmation — TGX
+    /// `DeleteAccountConfirmFinal` / `DeleteAccountConfirmFinalBtn`,
+    /// verbatim (markdown markers stripped: the dialog renders plain
+    /// text). The sessions terminate-confirm pattern.
+    fn account_delete_confirm_banner(
+        &self,
+        mutating: bool,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        div()
+            .id("account-delete-confirm")
+            .flex()
+            .flex_col()
+            .gap_2()
+            .px_3()
+            .py_2()
+            .rounded_md()
+            .border_1()
+            .border_color(danger())
+            .bg(danger_bg())
+            .child(
+                div().text_sm().text_color(danger()).child(
+                    "Danger: this is the last confirmation prompt. Once you press the button below, all data will be erased from Telegram servers. Using the same phone number will create a new empty account.",
+                ),
+            )
+            .child(
+                div()
+                    .flex()
+                    .gap_2()
+                    .justify_end()
+                    .child(
+                        Button::new("account-delete-cancel")
+                            .label("Cancel")
+                            .ghost()
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.account_lifecycle.confirm_delete = false;
+                                cx.notify();
+                            })),
+                    )
+                    .child(
+                        Button::new("account-delete-final")
+                            .label(if mutating {
+                                "Working…"
+                            } else {
+                                "Alright, delete account."
+                            })
+                            .danger()
+                            .disabled(mutating)
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.submit_delete_account(window, cx);
+                            })),
+                    ),
+            )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn ttl_options_match_tgx_days() {
+        assert_eq!(
+            super::ACCOUNT_TTL_OPTIONS.map(|(_, days)| days),
+            [31, 91, 181, 366, 546, 730]
+        );
+    }
+
+    #[test]
+    fn format_account_ttl_matches_tgx() {
+        assert_eq!(super::format_account_ttl(1), "1 day");
+        assert_eq!(super::format_account_ttl(29), "29 days");
+        assert_eq!(super::format_account_ttl(31), "1 month");
+        assert_eq!(super::format_account_ttl(91), "3 months");
+        assert_eq!(super::format_account_ttl(180), "6 months");
+        assert_eq!(super::format_account_ttl(366), "1 year");
+        assert_eq!(super::format_account_ttl(730), "2 years");
+    }
+}
