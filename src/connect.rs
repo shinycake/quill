@@ -44,8 +44,8 @@ use crate::telegram::envelope::{
     AuthorizationState, CallState, ChatAdminRights, ChatDraft, ChatFolderSpec, ChatKind,
     ChatNotificationSettings, ChatPermissions, EnvelopePayload, GroupCallVideoInfo, MUTE_FOREVER,
     MessageContent, MessageSender, NotificationSettingsScope, OrderInfoData,
-    ParsedGroupCallParticipant, ReadyParams, RichMessageContent, ScopeNotificationSettings,
-    StoryContentView, UsernameCheckResult,
+    ParsedGroupCallParticipant, ReactionNotificationSettings, ReadyParams, RichMessageContent,
+    ScopeNotificationSettings, StoryContentView, UsernameCheckResult,
 };
 use crate::telegram::ffi::{LibraryOrigin, TdJsonError, resolve_tdjson_path};
 use crate::telegram::requests::{
@@ -118,8 +118,8 @@ use crate::telegram::requests::{
     set_chat_notification_settings, set_chat_permissions, set_chat_photo, set_chat_slow_mode_delay,
     set_chat_title, set_community_name, set_group_call_participant_volume_level,
     set_message_sender_block_list, set_name, set_password, set_pinned_chats, set_poll_answer,
-    set_profile_accent_color, set_profile_photo, set_recovery_email_address,
-    set_scope_notification_settings,
+    set_profile_accent_color, set_profile_photo, set_reaction_notification_settings,
+    set_recovery_email_address, set_scope_notification_settings,
     set_story_custom_emoji_reaction as set_story_custom_emoji_reaction_request,
     set_story_privacy_settings as set_story_privacy_settings_request, set_story_reaction,
     set_supergroup_username, set_user_privacy_setting_rules, set_username, set_video_chat_title,
@@ -12784,6 +12784,31 @@ impl<S: JsonSender> ConnectDriver<S> {
         match self
             .sender
             .send_json(&set_scope_notification_settings(extra, scope, settings))
+        {
+            Ok(()) => Ok(extra),
+            Err(err) => {
+                self.session.requests.take(extra);
+                Err(err)
+            }
+        }
+    }
+
+    /// Parity slice: `setReactionNotificationSettings` (full object; callers
+    /// copy the current settings and change one field). No getter exists —
+    /// the new values arrive as `updateReactionNotificationSettings`.
+    pub fn send_reaction_notification_settings(
+        &mut self,
+        settings: &ReactionNotificationSettings,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::SetReactionNotificationSettings, None);
+        match self
+            .sender
+            .send_json(&set_reaction_notification_settings(extra, settings))
         {
             Ok(()) => Ok(extra),
             Err(err) => {

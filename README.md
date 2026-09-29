@@ -530,7 +530,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Default message preview per scope, live (src/ui/mod.rs:13318 `apply_scope_preview`) <!-- parity:settings-scope-preview -->
 - [x] Default notification sound per scope, live (src/ui/mod.rs:13229 `apply_scope_sound`) <!-- parity:settings-scope-sound -->
 - [ ] Mentions/replies and pinned-message notification overrides <!-- parity:settings-mentions-pinned -->
-- [ ] Reaction and story notification settings <!-- parity:settings-reaction-notif -->
+- [x] Reaction and story notification settings, live "Notification defaults" dialog: reaction source presets (message/story/poll votes) + sound + preview via `setReactionNotificationSettings` (src/ui/mod.rs:31429 `reaction_settings_section`, 30101 `apply_reaction_source`; connect.rs:12799 `send_reaction_notification_settings`; envelope.rs:891 `UpdateReactionNotificationSettings`); per-scope "Mute story notifications" + "Show story poster" switches (src/ui/mod.rs:30013 `apply_scope_story_mute`, 30057 `apply_scope_story_poster`) <!-- parity:settings-reaction-notif -->
 - [ ] List of chats with custom notification exceptions (partial: per-chat settings can be set, but no exceptions list view) <!-- parity:settings-notif-exceptions -->
 - [ ] Reset all notification settings <!-- parity:settings-reset-notif -->
 - [ ] In-app notification sounds toggle <!-- parity:settings-inapp-sound -->
