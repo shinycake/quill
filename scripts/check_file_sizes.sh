@@ -17,7 +17,6 @@ WAIVERS=(
   "src/telegram/requests.rs:10322"
   "src/calls/engine.rs:3212"
   "tests/replay.rs:3505"
-)
 
 waiver_for() {
   local f="$1" w
