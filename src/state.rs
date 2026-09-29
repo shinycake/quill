@@ -108,6 +108,12 @@ pub enum RequestPurpose {
     CheckAuthenticationPassword,
     /// Slice A1: `resendAuthenticationCode` from the code-entry screen.
     ResendAuthenticationCode,
+    /// Slice A10: `requestAuthenticationPasswordRecovery` from the
+    /// password screen ("Forgot password?"). Resend re-issues this call —
+    /// TDLib enforces the server-side cooldown, no local countdown.
+    RequestAuthenticationPasswordRecovery,
+    /// Slice A10: `recoverAuthenticationPassword` with the emailed code.
+    RecoverAuthenticationPassword,
     /// Slice A1: `requestQrCodeAuthentication` from the phone screen.
     RequestQrCodeAuthentication,
     LoadChats,
@@ -1241,13 +1247,15 @@ pub enum RequestRollback {
     },
 }
 
-fn is_auth_submit(purpose: RequestPurpose) -> bool {
+pub fn is_auth_submit(purpose: RequestPurpose) -> bool {
     matches!(
         purpose,
         RequestPurpose::SetPhoneNumber
             | RequestPurpose::CheckAuthenticationCode
             | RequestPurpose::CheckAuthenticationPassword
             | RequestPurpose::ResendAuthenticationCode
+            | RequestPurpose::RequestAuthenticationPasswordRecovery
+            | RequestPurpose::RecoverAuthenticationPassword
             | RequestPurpose::RequestQrCodeAuthentication
     )
 }
@@ -1347,6 +1355,18 @@ impl AuthRequestError {
             // server-side (429), and this is the honest surface for it.
             (RequestPurpose::ResendAuthenticationCode, ErrorClass::Flood) => {
                 "too many resends — wait and try again"
+            }
+            (RequestPurpose::RequestAuthenticationPasswordRecovery, ErrorClass::Invalid) => {
+                "couldn't send the recovery code"
+            }
+            (RequestPurpose::RequestAuthenticationPasswordRecovery, ErrorClass::Flood) => {
+                "too many recovery requests — wait and try again"
+            }
+            (RequestPurpose::RecoverAuthenticationPassword, ErrorClass::Invalid) => {
+                "recovery code not accepted"
+            }
+            (RequestPurpose::RecoverAuthenticationPassword, ErrorClass::Flood) => {
+                "too many recovery attempts — wait and try again"
             }
             (_, ErrorClass::Unauthorized) => "session is no longer authorized",
             _ => "Telegram rejected the request",

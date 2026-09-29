@@ -195,6 +195,33 @@ pub fn resend_authentication_code(extra: RequestId) -> String {
     .to_string()
 }
 
+/// Slice A10: `requestAuthenticationPasswordRecovery` — asks Telegram to
+/// email a 2FA recovery code. Works only in `authorizationStateWaitPassword`
+/// (schema 1.8.67, `schema/td_api.tl:11381`).
+pub fn request_authentication_password_recovery(extra: RequestId) -> String {
+    json!({
+        "@type": "requestAuthenticationPasswordRecovery",
+        "@extra": extra.as_extra(),
+    })
+    .to_string()
+}
+
+/// Slice A10: `recoverAuthenticationPassword`. `code` is the emailed
+/// recovery code; new password and hint are empty — recovery removes 2FA
+/// and the user re-enables it from Settings (slice A2). `checkAuthenticationPasswordRecoveryCode`
+/// is skipped: this call validates the code itself, so the extra
+/// round-trip adds nothing. Callers must not log `code`.
+pub fn recover_authentication_password(extra: RequestId, code: &str) -> String {
+    json!({
+        "@type": "recoverAuthenticationPassword",
+        "@extra": extra.as_extra(),
+        "recovery_code": code,
+        "new_password": "",
+        "new_hint": "",
+    })
+    .to_string()
+}
+
 /// `requestQrCodeAuthentication`. `other_user_ids` is empty: this client has
 /// no other logged-in user to hint at.
 pub fn request_qr_code_authentication(extra: RequestId) -> String {
