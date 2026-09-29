@@ -5626,7 +5626,7 @@ dependencies = [
  "gpui-kit",
  "image",
  "libc",
- "libloading",
+ "libloading 0.8.9",
  "ntgcalls-sys",
  "pretty_assertions",
  "qrcode",
