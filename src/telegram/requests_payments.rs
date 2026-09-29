@@ -1,5 +1,5 @@
 //! Payment request builders: saved order info and saved credentials
-//! clearing (TDLib 1.8.67). Split out of `requests.rs` per the file-size
+//! clearing (TDLib 1.8.67). New code lives here per the file-size
 //! directive — `requests.rs` keeps only the irreducible core.
 
 use crate::ids::RequestId;
