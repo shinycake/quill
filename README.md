@@ -422,7 +422,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [ ] Favorites sticker tab (getFavoriteStickers/addFavoriteSticker/removeFavoriteSticker) <!-- parity:stickers-favorites --> (partial: backend wired — get/add/removeFavoriteSticker + state; tab UI pending)
 - [ ] Recent stickers tab + clear recent stickers (getRecentStickers/clearRecentStickers) <!-- parity:stickers-recent --> (partial: backend wired — getRecentStickers/clearRecentStickers + state; tab UI pending)
 - [ ] Install sticker set (changeStickerSet install) <!-- parity:stickers-install --> (partial: backend wired — changeStickerSet install + cache invalidation; UI affordance pending)
-- [ ] Remove sticker set with confirm dialog <!-- parity:stickers-remove -->
+- [ ] Remove sticker set with confirm dialog (partial: backend wired — changeStickerSet remove + cache invalidation; UI confirm dialog pending) <!-- parity:stickers-remove -->
 - [ ] Archive sticker set + Archived view in settings (restore path) <!-- parity:stickers-archive --> (partial: backend wired — changeStickerSet archive; Archived view UI pending)
 - [ ] Reorder installed sticker sets (partial: backend wired — reorderInstalledStickerSets + cache invalidation; drag-reorder UI pending) <!-- parity:stickers-reorder -->
 - [ ] Dynamic set order (auto-place recently used sets above others) <!-- parity:stickers-dynamic-order -->

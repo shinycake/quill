@@ -3797,8 +3797,9 @@ pub fn get_favorite_stickers(extra: RequestId) -> String {
     .to_string()
 }
 
-/// Slice S8: `addFavoriteSticker` — `sticker` is `inputFileId` (TDLib 1.8.67,
-/// line 14721). Response is `ok`.
+/// Slice S8: `addFavoriteSticker` — `sticker:InputFile` (TDLib 1.8.67, line
+/// 14721); passed as `inputFileId id:int32` (schema line 317). Response is
+/// `ok`.
 pub fn add_favorite_sticker(extra: RequestId, file_id: FileId) -> String {
     json!({
         "@type": "addFavoriteSticker",

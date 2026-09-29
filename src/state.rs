@@ -7402,15 +7402,13 @@ impl Session {
             // Slice S8: `searchStickers` / `getFavoriteStickers` /
             // `getRecentStickers` answer with bare `stickers`.
             EnvelopePayload::Stickers { stickers, files } => {
+                self.remember_files(&files);
                 let purpose = pending.map(|p| p.purpose);
                 if purpose == Some(RequestPurpose::SearchStickers) {
-                    self.remember_files(&files);
                     self.accept_found_stickers(stickers);
                 } else if purpose == Some(RequestPurpose::GetFavoriteStickers) {
-                    self.remember_files(&files);
                     self.accept_favorite_stickers(stickers);
                 } else if purpose == Some(RequestPurpose::GetRecentStickers) {
-                    self.remember_files(&files);
                     self.accept_recent_stickers(stickers);
                 }
             }
@@ -9698,7 +9696,9 @@ impl Session {
         }
     }
 
-    /// Slice S8: store a `trendingStickerSets` page.
+    /// Slice S8: store a `trendingStickerSets` page. Single-page replace
+    /// semantics: a paged second call overwrites page one. Append-before-
+    /// needed is speculative — the tab UI will own paging when it lands.
     pub fn accept_trending_sticker_sets(&mut self, sets: Vec<StickerSetInfo>, is_premium: bool) {
         self.stickers.trending = sets;
         self.stickers.trending_is_premium = is_premium;
