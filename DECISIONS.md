@@ -6308,3 +6308,25 @@ ntgcalls v3.0.0 prebuilt lib, bindings verified against
 - **Out of this slice (left unchecked with evidence):**
   - `parity:auth-delete-preauth` — `deleteAccount` from `authorizationStateWaitPassword` (A7-documented; needs auth-screen UI + relaxed driver guard).
   - `parity:auth-multi-account`, `parity:auth-qr-authorize-other`, `parity:auth-password-recovery`, `parity:auth-registration`, `parity:auth-email-login`, `parity:auth-premium-login`, `parity:auth-logout-warning`, `parity:auth-profile-accent` — untouched.
+
+## Slice A10 — AUTH: 2FA PASSWORD RECOVERY VIA EMAIL CODE, BACKEND + UI (2026-09-29)
+
+- **Schema (pinned TDLib 1.8.67, `schema/td_api.tl`, verified verbatim):**
+  - `requestAuthenticationPasswordRecovery = Ok;` (:11381) — "Requests to send a 2-step verification password recovery code to an email address that was previously set up. Works only when the current authorization state is authorizationStateWaitPassword".
+  - `checkAuthenticationPasswordRecoveryCode recovery_code:string = Ok;` (:11384) — "Checks whether a 2-step verification password recovery code sent to an email address is valid".
+  - `recoverAuthenticationPassword recovery_code:string new_password:string new_hint:string = Ok;` (:11390) — "Recovers the 2-step verification password with a password recovery code sent to an email address that was previously set up. Works only when the current authorization state is authorizationStateWaitPassword".
+- **Built:**
+  - Requests (`telegram/requests.rs`): `request_authentication_password_recovery(extra)`, `recover_authentication_password(extra, code)` (new password/hint empty — recovery removes 2FA; the user re-enables it from Settings, slice A2). JSON-shape unit tests.
+  - State (`state.rs`): `RequestPurpose::{RequestAuthenticationPasswordRecovery, RecoverAuthenticationPassword}`; both in `is_auth_submit` so errors classify into the shared `last_auth_error` path; `AuthRequestError::user_message` arms ("couldn't send the recovery code", "too many recovery requests — wait and try again", "recovery code not accepted", "too many recovery attempts — wait and try again") + a classification unit test.
+  - Driver (`connect.rs`): `request_password_recovery` (guarded on `WaitPassword { has_recovery_email: true }`; resend re-issues the same call — TDLib enforces the server-side cooldown, no invented local countdown), `submit_recovery_code` (guarded on `WaitPassword`, rejects empty; the code rides the request JSON only — never stored on session or diagnostics, the A2 rule; the caller zeroizes its copy).
+  - UI (`src/ui/mod.rs`, kit-first): the password screen gains a "Forgot password?" ghost button when the server advertised a recovery email; it switches to recovery-code entry (input + "Submit recovery code" + "Resend code" + "Back"). `recovery_mode` is pure UI state, reset when auth leaves WaitPassword. `auth.rs` WaitPassword copy updated (no more "available in the official client").
+- **Key decisions (ponytail):**
+  - `checkAuthenticationPasswordRecoveryCode` is NOT called — `recoverAuthenticationPassword` validates the code itself, so the extra round-trip adds nothing.
+  - No new password is set during recovery (empty new_password/new_hint) — offering inline password re-entry would add two inputs + validation for a flow the existing Settings → Two-Step Verification UI (A2) already covers; the status note says so.
+  - Post-recovery auth continuation is TDLib's authority: `recoverAuthenticationPassword` → `ok` just resolves the pending request; the next `updateAuthorizationState` drives the UI (the generic `poll_live` path, no recovery-specific state machine).
+  - `recovery_mode` lives on the UI struct, not `Session` — it is a view sub-state of `WaitPassword`, not TDLib state; nothing is persisted or sent.
+- **Not verifiable without live Telegram:** real `requestAuthenticationPasswordRecovery` → email delivery, real `recoverAuthenticationPassword` → post-recovery `updateAuthorizationState` sequencing, real 429 on too-early resend.
+- **Out of this slice (left unchecked with evidence):**
+  - `auth-qr-authorize-other` ("Link desktop device" QR — next Loop 4 slice candidate).
+  - `auth-multi-account` (requires the `accounts/primary` DB layout change in `settings.rs:39` — a slice of its own).
+  - `auth-registration`, `auth-email-login`, `auth-premium-login` (explicit UnsupportedHalt states — deliberate product decisions, not gaps to fill silently).

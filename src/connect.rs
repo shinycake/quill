@@ -94,10 +94,11 @@ use crate::telegram::requests::{
     leave_group_call, load_active_stories, load_chat_welcome_messages, load_chats, load_chats_list,
     load_community_full_info, load_group_call_participants, open_chat, open_message_content,
     open_story, pin_chat_message, post_story as post_story_request, process_chat_join_request,
-    read_chat_list, recognize_speech, remove_contacts, remove_message_reaction,
-    reorder_active_usernames, reorder_chat_folders, replace_primary_chat_invite_link,
-    replace_video_chat_rtmp_url, report_chat, report_chat_sponsored_message,
-    report_story as report_story_request, request_qr_code_authentication,
+    read_chat_list, recognize_speech, recover_authentication_password, remove_contacts,
+    remove_message_reaction, reorder_active_usernames, reorder_chat_folders,
+    replace_primary_chat_invite_link, replace_video_chat_rtmp_url, report_chat,
+    report_chat_sponsored_message, report_story as report_story_request,
+    request_authentication_password_recovery, request_qr_code_authentication,
     resend_authentication_code, resend_messages, resend_phone_number_code,
     resend_recovery_email_address_code, revoke_chat_invite_link, revoke_group_call_invite_link,
     search_call_messages, search_chat_messages, search_chats, search_messages,
@@ -12657,6 +12658,49 @@ impl<S: JsonSender> ConnectDriver<S> {
             .request(RequestPurpose::CheckAuthenticationPassword, None);
         self.sender
             .send_json(&check_authentication_password(extra, password))?;
+        Ok(extra)
+    }
+
+    /// Slice A10: send `requestAuthenticationPasswordRecovery` when auth
+    /// is WaitPassword and the server advertised a recovery email. The
+    /// resend path re-issues this same call — TDLib enforces the
+    /// server-side cooldown (429 surfaces via `last_auth_error`), so no
+    /// local countdown is invented.
+    pub fn request_password_recovery(&mut self) -> Result<RequestId, ConnectSendError> {
+        if !matches!(
+            self.session.auth,
+            AuthorizationState::WaitPassword {
+                has_recovery_email: true
+            }
+        ) {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        self.session.last_auth_error = None;
+        let extra = self
+            .session
+            .request(RequestPurpose::RequestAuthenticationPasswordRecovery, None);
+        self.sender
+            .send_json(&request_authentication_password_recovery(extra))?;
+        Ok(extra)
+    }
+
+    /// Slice A10: send `recoverAuthenticationPassword` with the emailed
+    /// recovery code. The code rides the request JSON only — it is never
+    /// stored on the session or diagnostics (the A2 rule); the caller
+    /// zeroizes its copy after the send.
+    pub fn submit_recovery_code(&mut self, code: &str) -> Result<RequestId, ConnectSendError> {
+        if !matches!(self.session.auth, AuthorizationState::WaitPassword { .. }) {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if code.is_empty() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        self.session.last_auth_error = None;
+        let extra = self
+            .session
+            .request(RequestPurpose::RecoverAuthenticationPassword, None);
+        self.sender
+            .send_json(&recover_authentication_password(extra, code))?;
         Ok(extra)
     }
 

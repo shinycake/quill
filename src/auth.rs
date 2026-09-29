@@ -50,7 +50,10 @@ pub fn view_for(state: &AuthorizationState) -> AuthView {
         AuthorizationState::WaitPassword { has_recovery_email } => AuthView {
             title: "Two-step password",
             body: if *has_recovery_email {
-                "Enter your two-step verification password. Recovery email is available in the official client.".into()
+                // Slice A10: recovery runs inside Quill now — "Forgot
+                // password?" emails a recovery code via
+                // requestAuthenticationPasswordRecovery.
+                "Enter your two-step verification password, or choose \"Forgot password?\" to get a recovery code by email.".into()
             } else {
                 "Enter your two-step verification password.".into()
             },
@@ -134,6 +137,12 @@ pub fn credentials_ready(api_id: Option<i32>, api_hash: Option<&str>) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ids::RequestId;
+    use crate::state::{AuthRequestError, RequestPurpose, is_auth_submit};
+    use crate::telegram::envelope::ErrorClass;
+    use crate::telegram::requests::{
+        recover_authentication_password, request_authentication_password_recovery,
+    };
 
     #[test]
     fn premium_and_email_do_not_auto_act() {
@@ -164,5 +173,52 @@ mod tests {
         assert_eq!(view.action, AuthAction::WaitOtherDevice);
         assert!(view.blocking);
         assert!(view.title.contains("Confirm"));
+    }
+    // Slice A10 (moved from waived src/state.rs / src/telegram/requests.rs:
+    // tests must not grow waived files).
+    #[test]
+    fn recovery_request_and_recover_errors_are_classified() {
+        // Both recovery purposes classify through the shared auth-error path;
+        // messages stay honest and secret-free.
+        for (purpose, class, message) in [
+            (
+                RequestPurpose::RequestAuthenticationPasswordRecovery,
+                ErrorClass::Invalid,
+                "couldn't send the recovery code",
+            ),
+            (
+                RequestPurpose::RequestAuthenticationPasswordRecovery,
+                ErrorClass::Flood,
+                "too many recovery requests — wait and try again",
+            ),
+            (
+                RequestPurpose::RecoverAuthenticationPassword,
+                ErrorClass::Invalid,
+                "recovery code not accepted",
+            ),
+            (
+                RequestPurpose::RecoverAuthenticationPassword,
+                ErrorClass::Flood,
+                "too many recovery attempts — wait and try again",
+            ),
+        ] {
+            let err = AuthRequestError { purpose, class };
+            assert_eq!(err.user_message(), message);
+            assert!(is_auth_submit(purpose));
+        }
+    }
+
+    #[test]
+    fn request_authentication_password_recovery_shape() {
+        let json = request_authentication_password_recovery(RequestId(7));
+        assert!(json.contains("\"@type\":\"requestAuthenticationPasswordRecovery\""));
+    }
+
+    #[test]
+    fn recover_authentication_password_shape() {
+        let json = recover_authentication_password(RequestId(8), "unit-test-code");
+        assert!(json.contains("\"@type\":\"recoverAuthenticationPassword\""));
+        assert!(json.contains("\"recovery_code\":\"unit-test-code\""));
+        assert!(json.contains("\"new_password\":\"\""));
     }
 }

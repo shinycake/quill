@@ -1,5 +1,6 @@
 mod account_lifecycle;
 mod appearance;
+mod auth_recovery;
 mod chat_theme;
 mod story_areas;
 mod synthetic;
@@ -532,6 +533,14 @@ pub struct QuillApp {
     phone_input: Entity<TextareaState>,
     code_input: Entity<TextareaState>,
     password_input: Entity<TextareaState>,
+    /// Slice A10: recovery-code entry for 2FA password recovery. The code
+    /// is never stored beyond the input widget — it is zeroized after
+    /// submit (the A2 rule).
+    recovery_code_input: Entity<TextareaState>,
+    /// Slice A10: the password screen is showing recovery-code entry
+    /// instead of password entry. Pure UI state, reset when auth leaves
+    /// WaitPassword.
+    recovery_mode: bool,
     search_input: Entity<TextareaState>,
     chat_search_input: Entity<TextareaState>,
     forward_search_input: Entity<TextareaState>,
@@ -1617,6 +1626,12 @@ impl QuillApp {
                 .auto_grow(1, 1)
                 .submit_on_enter(true)
         });
+        let recovery_code_input = cx.new(|cx| {
+            TextareaState::new(window, cx)
+                .placeholder("Recovery code from email")
+                .auto_grow(1, 1)
+                .submit_on_enter(true)
+        });
         // Slice A2: two-step verification overlay inputs. Passwords live
         // here only and are cleared on submit/close — never on the
         // session.
@@ -1816,6 +1831,7 @@ impl QuillApp {
             },
         )
         .detach();
+        auth_recovery::subscribe_recovery_input(&recovery_code_input, window, cx);
         cx.subscribe_in(
             &search_input,
             window,
@@ -2958,6 +2974,8 @@ impl QuillApp {
             phone_input,
             code_input,
             password_input,
+            recovery_code_input,
+            recovery_mode: false,
             twofa_open: false,
             twofa_view: TwofaView::Status,
             twofa_current_password,
@@ -4588,6 +4606,10 @@ impl QuillApp {
         }
         let err = live.driver.session.last_auth_error;
         let new_auth = live.driver.session.auth.clone();
+        // Slice A10: recovery-code entry only makes sense in WaitPassword.
+        if !matches!(new_auth, AuthorizationState::WaitPassword { .. }) {
+            self.recovery_mode = false;
+        }
         let chat_count = live.driver.session.ordered_chats().len();
         let chats_exhausted = live.driver.session.chats_exhausted;
         if send_failed {
@@ -37460,7 +37482,21 @@ impl Render for QuillApp {
                     .flex()
                     .flex_1()
                     .min_h_0()
-                    .child(self.sidebar(&auth, show_phone, show_code, show_password, show_qr, cx))
+                    .child(self.sidebar(
+                        &auth,
+                        show_phone,
+                        show_code,
+                        show_password,
+                        show_qr,
+                        self.recovery_mode,
+                        matches!(
+                            self.current_auth(),
+                            AuthorizationState::WaitPassword {
+                                has_recovery_email: true
+                            }
+                        ),
+                        cx,
+                    ))
                     .child(self.conversation(cx))
                     // Phase 6: user / group info panel beside the conversation.
                     .when_some(self.info_panel(cx), |this, panel| this.child(panel))
@@ -39523,6 +39559,8 @@ impl QuillApp {
         show_code: bool,
         show_password: bool,
         show_qr: bool,
+        recovery_mode: bool,
+        has_recovery_email: bool,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let mode = self.pane_mode();
@@ -40064,28 +40102,9 @@ impl QuillApp {
                 )
         })
         .when(show_password, |this| {
-            this.child(
-                div()
-                    .mt_2()
-                    .font_semibold()
-                    .text_sm()
-                    .child("Two-step password"),
-            )
-            .child(Textarea::new(&self.password_input).h(px(40.)))
-            .child(
-                div()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .child("Sent to TDLib only — never logged"),
-            )
-            .child(
-                Button::new("submit-password")
-                    .label("Submit password")
-                    .ghost()
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.submit_password(window, cx);
-                    })),
-            )
+            // Slice A10: password / recovery-code entry lives in
+            // `ui/auth_recovery.rs` (kit-first, named module).
+            this.child(self.auth_password_section(recovery_mode, has_recovery_email, cx))
         })
         .when(show_qr, |this| {
             // Slice A1: the QR payload rides on the auth state (envelope.rs

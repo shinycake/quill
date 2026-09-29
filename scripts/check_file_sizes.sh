@@ -15,17 +15,20 @@ HARD_CAP=2000
 # types); the bump is exact and the PR body says why the code can't live
 # elsewhere.
 WAIVERS=(
-  "src/ui/mod.rs:48748"
-  "src/connect.rs:24405"
-  "src/state.rs:21311"
+  "src/ui/mod.rs:48767"
+  "src/connect.rs:24449"
+  "src/state.rs:21331"
   "src/telegram/envelope.rs:18346"
-  "src/telegram/requests.rs:10407"
-  # Slice A9 (2026-09-29): +54 type-coherent lines — `mod
-  # account_lifecycle` decl/re-export (2), `QuillApp.account_lifecycle`
-  # field + doc + ctor init (5), `DialogKind::AccountLifecycle` variant (2),
-  # `dialog_is_open` / `dialog_builder` arms (2), `KINDS` entry + size (2),
-  # sidebar entry (15), `ScreenshotDemo::ReadyAccountLifecycle` variant +
-  # dispatch arm + fixture block (26). No new structs/impls/functions here.
+  "src/telegram/requests.rs:10434"
+  # Slice A10 (2026-09-29): type-coherent extensions only — ui/mod.rs +19
+  # (`mod auth_recovery` decl, `QuillApp` recovery fields + ctor init,
+  # `recovery_mode` reset + wait-password screen arms); connect.rs +44
+  # (`request_password_recovery` / `submit_recovery_code` driver methods on
+  # the existing `Connect` type + 2 import lines); state.rs +20
+  # (`RequestPurpose` variants, `is_auth_submit` arms incl. making it `pub`
+  # for the moved test, `AuthRequestError::user_message` arms);
+  # requests.rs +27 (two builder fns on existing patterns). A10's three
+  # tests live in `src/auth.rs`, not in waived files.
   "src/calls/engine.rs:3212"
   "tests/replay.rs:3505"
 )
